@@ -515,3 +515,21 @@ describe("evidence", () => {
     ]);
   });
 });
+
+describe("safety.users.lookup (the evidence's usernames)", () => {
+  test("safety staff get usernames for ids; unknown ids are left out; members are refused", async () => {
+    const [staff, member, named] = await Promise.all([
+      signUpAndSignIn(api),
+      signUpAndSignIn(api),
+      signUpAndSignIn(api),
+    ]);
+    await db().update(schema.users).set({ role: "moderator" }).where(eq(schema.users.id, staff.userId));
+    const lookup = (who: typeof staff, ids: string[]) =>
+      who.client.call<{ id: string; username: string }[]>("POST", "/api/admin/users/lookup", { ids });
+    const r = await lookup(staff, [named.userId, uuidv7(), named.userId]);
+    expect(r.status).toBe(200);
+    expect(r.body).toEqual([{ id: named.userId, username: named.username }]);
+    expect((await lookup(member, [named.userId])).status).toBe(403);
+    expect((await lookup(staff, [])).status).toBe(400);
+  });
+});

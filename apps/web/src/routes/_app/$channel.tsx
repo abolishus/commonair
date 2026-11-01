@@ -9,6 +9,7 @@ import { createFileRoute, notFound } from "@tanstack/react-router";
 import * as React from "react";
 import { ChatPanel } from "../../chat/chat-panel.tsx";
 import { FollowButton, FollowerCount, useFollow } from "../../components/channel-follow.tsx";
+import { FollowGrantToggle } from "../../components/portability/grants.tsx";
 import { MovedNotice } from "../../components/portability/moved-notice.tsx";
 import { SupportButton } from "../../components/support/support-dialog.tsx";
 import { isMatureGate, maturityClient } from "../../components/safety/client.ts";
@@ -132,6 +133,15 @@ function ChannelView({ initial }: { initial: ChannelSummary }): React.JSX.Elemen
                 )
               }
             />
+            {!own && follow.state.following === true && typeof channel.portabilityGrant === "boolean" ? (
+              // Remounted when the polled grant changes, so the switch never shows a stale value.
+              <FollowGrantToggle
+                key={`${channel.slug}:${String(channel.portabilityGrant)}`}
+                channel={channel.slug}
+                displayName={channel.displayName}
+                initial={channel.portabilityGrant}
+              />
+            ) : null}
           </div>
         }
         aside={

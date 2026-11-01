@@ -7,6 +7,7 @@ import { magicLink, passwordReset, verifyEmail } from "./templates/account.tsx";
 import { councilReviewRequested, governanceResultPublished, governanceVoteOpened } from "./templates/governance.tsx";
 import { goLiveDigest } from "./templates/notify.tsx";
 import { chargebackNotice, payoutSent } from "./templates/payments.tsx";
+import { channelMoved } from "./templates/portability.tsx";
 import { accountDeletionCompleted, accountDeletionScheduled, dataExportReady } from "./templates/privacy.tsx";
 import { newSignIn, streamKeyRevoked, twoFactorDisabled, twoFactorEnabled } from "./templates/security.tsx";
 import {
@@ -36,6 +37,7 @@ export const templates = {
   governanceResultPublished,
   councilReviewRequested,
   goLiveDigest,
+  channelMoved,
   dmcaNoticeReceived,
   dmcaNoticeDecided,
   dmcaCounterNoticeForwarded,

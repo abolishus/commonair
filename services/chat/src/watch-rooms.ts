@@ -58,13 +58,8 @@ const REFUSALS: Record<Exclude<MemberCheck, "ok"> | "blocked", Rejection> = {
   blocked: { code: "room_blocked", text: "You cannot join this watch room." },
 };
 
-/**
- * Optional fields a deployment may add to `WatchRoomDeps` (not yet in `core.ts`): the internal
- * secret, so the room token's signature and audience are checked too. Without it the database
- * membership (which the token only mirrors) is the gate.
- */
+/** Test-only knobs on top of `WatchRoomDeps`. */
 interface ExtraDeps {
-  internalSecret?: string;
   /** Tests: a faster sync tick. */
   syncTickMs?: number;
   /** Tests: a shorter empty-room wait than `ROOM_LIMITS.emptyEndMinutes`. */
@@ -282,11 +277,9 @@ export class WatchRooms implements WatchRoomHandler {
 
   // ── internals ──────────────────────────────────────────────────────────────
 
-  /** The token's signature, owner and audience, when this instance knows the secret. */
+  /** The token's signature, owner and audience. */
   private async tokenOk(token: string, userId: string, roomId: string): Promise<boolean> {
-    const secret = this.extra.internalSecret;
-    if (!secret) return true;
-    const claims = await verifyChatToken(secret, token);
+    const claims = await verifyChatToken(this.d.internalSecret, token);
     return claims !== null && claims.uid === userId && claims.scopes.includes(`room:${roomId}`);
   }
 

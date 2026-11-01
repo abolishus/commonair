@@ -245,6 +245,10 @@ export function applyPredictionFrame(current: PredictionViewDto | null, f: Predi
     endedAt: f.endedAt,
     winningOutcomeId: f.winningOutcomeId,
     myBet: same?.myBet ?? null,
+    // Frames carry none of these (W3-fair-predictions): keep what `current` returned.
+    lockMediaTs: same?.lockMediaTs ?? null,
+    resolvedBy: same?.resolvedBy ?? null,
+    result: same?.result ?? null,
   };
 }
 

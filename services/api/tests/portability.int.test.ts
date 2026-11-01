@@ -13,6 +13,8 @@ import { MOVE_LINK_RULES } from "@commonair/contracts/enums";
 import { schema, uuidv7 } from "@commonair/db";
 import { setPortabilityQueue, type PortabilityQueue } from "../src/portability/queue.ts";
 import { setExportQueue } from "../src/privacy/export-queue.ts";
+import { applyUnsubscribe } from "../src/notifications/unsubscribe/apply.ts";
+import { signUnsubscribeToken } from "@commonair/tokens";
 import { signUpAndSignIn, startApi, type TestApi } from "./harness.ts";
 
 let api: TestApi;
@@ -223,11 +225,39 @@ describe("grants", () => {
     expect(mine.body.map((g) => g.channel.slug)).toEqual([streamer.username]);
     const theirs = await streamer.client.call<unknown[]>("GET", "/api/me/portability-grants");
     expect(theirs.body).toEqual([]);
+    // The follow menu reads it from `channels.get` (orchestrator, batch 7 wave 1).
+    const viewerOf = async () =>
+      (await u.client.call<{ viewer: unknown }>("GET", `/api/channels/${streamer.username}`)).body.viewer;
+    expect(await viewerOf()).toEqual({ following: true, portabilityGrant: true });
     expect((await set(false)).body).toEqual({ enabled: false });
+    expect(await viewerOf()).toEqual({ following: true, portabilityGrant: false });
     expect((await u.client.call<unknown[]>("GET", "/api/me/portability-grants")).body).toEqual([]);
     expect(
       (await u.client.call("PUT", "/api/channels/nobody_here_x/portability-grant", { enabled: true })).status,
     ).toBe(404);
+  });
+});
+
+describe("the moved unsubscribe list", () => {
+  test("unsubscribing from `moved` withdraws every remaining grant; other lists keep them", async () => {
+    const [s1, s2, u] = await Promise.all([signUpAndSignIn(api), signUpAndSignIn(api), signUpAndSignIn(api)]);
+    for (const s of [s1, s2]) {
+      await follow(u, s.username);
+      await u.client.call("PUT", `/api/channels/${s.username}/portability-grant`, { enabled: true });
+    }
+    const grants = async () =>
+      (
+        await db()
+          .select()
+          .from(schema.followPortabilityGrants)
+          .where(eq(schema.followPortabilityGrants.userId, u.userId))
+      ).length;
+    expect(await grants()).toBe(2);
+    const secret = api.deps.env.AUTH_SECRET;
+    await applyUnsubscribe(api.db.db, secret, "go_live", await signUnsubscribeToken(secret, u.userId, "go_live"));
+    expect(await grants()).toBe(2);
+    await applyUnsubscribe(api.db.db, secret, "moved", await signUnsubscribeToken(secret, u.userId, "moved"));
+    expect(await grants()).toBe(0);
   });
 });
 

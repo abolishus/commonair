@@ -97,7 +97,12 @@ function interactReducer(state: InteractState, action: InteractAction): Interact
     case "predictionLoaded": {
       const cur = state.prediction;
       const p = action.prediction;
-      return { ...state, prediction: cur && p && cur.id === p.id ? { ...cur, myBet: p.myBet } : (cur ?? p) };
+      // A frame may have landed first: keep its status, take what only `current` knows.
+      const merged =
+        cur && p && cur.id === p.id
+          ? { ...cur, myBet: p.myBet, result: p.result, resolvedBy: p.resolvedBy, lockMediaTs: p.lockMediaTs }
+          : (cur ?? p);
+      return { ...state, prediction: merged };
     }
     case "poll":
       return { ...state, poll: action.poll };

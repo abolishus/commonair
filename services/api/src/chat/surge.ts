@@ -8,6 +8,7 @@
  * last statement, and the `surge` frame is published after the commit.
  */
 import { eq } from "drizzle-orm";
+import { surgeRaidOf } from "@commonair/interact";
 import { KEYS, SurgeOverride } from "@commonair/contracts/internal";
 import { ChannelChatSettings } from "@commonair/contracts/shapes";
 import { schema } from "@commonair/db";
@@ -34,12 +35,12 @@ type SurgeStateDto = {
   until: string | null;
   by: { id: string; username: string } | null;
   unavailable: boolean;
+  raid?: { fromChannel: string; verifiedCount: number } | null;
 };
 
 const OFF: SurgeStateDto = { state: "off", since: null, until: null, by: null, unavailable: false };
 
-async function readOverride(deps: Deps, channelId: string): Promise<SurgeOverride | null> {
-  const raw = await deps.valkey.get(KEYS.surgeOverride(channelId));
+function parseOverride(raw: string | null): SurgeOverride | null {
   if (raw === null) return null;
   try {
     const parsed = SurgeOverride.safeParse(JSON.parse(raw));
@@ -47,6 +48,10 @@ async function readOverride(deps: Deps, channelId: string): Promise<SurgeOverrid
   } catch {
     return null;
   }
+}
+
+async function readOverride(deps: Deps, channelId: string): Promise<SurgeOverride | null> {
+  return parseOverride(await deps.valkey.get(KEYS.surgeOverride(channelId)));
 }
 
 async function dto(deps: Deps, o: SurgeOverride | null): Promise<SurgeStateDto> {
@@ -65,15 +70,17 @@ async function dto(deps: Deps, o: SurgeOverride | null): Promise<SurgeStateDto> 
 export const chatSurge = {
   state: os.chat.surge.state.handler(async ({ context }) => {
     const c = requireChannel(context);
-    let o: SurgeOverride | null;
+    let raw: string | null;
     try {
-      o = await readOverride(context.deps, c.id);
+      raw = await context.deps.valkey.get(KEYS.surgeOverride(c.id));
     } catch (err) {
       // The gate fails open while Valkey is unreadable; the mod banner says so (decision 1).
       context.deps.logger.warn("surge state unavailable", { channelId: c.id, err });
       return { ...OFF, unavailable: true };
     }
-    return dto(context.deps, o);
+    const o = parseOverride(raw);
+    // Batch 7 decision (w): the raid holding chat (the worker stores it beside the override).
+    return { ...(await dto(context.deps, o)), raid: o?.state === "on" ? surgeRaidOf(raw) : null };
   }),
 
   override: os.chat.surge.override.handler(async ({ context, input }) => {

@@ -20,8 +20,10 @@ import { closeOpsTickRunner } from "./ops/hooks.ts";
 import { closeAnalyticsTickRunner } from "./ops/analytics-hooks.ts";
 import { closeB7TickRunner } from "./ops/b7-hooks.ts";
 import { closeInteractTickRunner } from "./interact/hooks.ts";
+import { closeGiveawayCloseQueue } from "./interact/giveaways/queue.ts";
 import { closeOverlayHub } from "./overlay/stream.ts";
 import { closeExportQueue } from "./privacy/export-queue.ts";
+import { closePortabilityQueue } from "./portability/queue.ts";
 import { closeClipQueue } from "./media/clip-queue.ts";
 import { closeVodPlacementQueue } from "./media/vod-placement-queue.ts";
 import { closeModeration } from "./moderation/runtime.ts";
@@ -124,8 +126,10 @@ export async function buildDeps(
         ["analytics queue", closeAnalyticsTickRunner],
         ["b7 queues", closeB7TickRunner],
         ["interact queue", closeInteractTickRunner],
+        ["giveaway close queue", closeGiveawayCloseQueue],
         ["overlay hub", closeOverlayHub],
         ["export queue", closeExportQueue],
+        ["portability queue", closePortabilityQueue],
         ["webhook queue", closeWebhookQueue],
         ["notify queue", closeNotifyQueue],
         ["eventsub", closeEventSub],

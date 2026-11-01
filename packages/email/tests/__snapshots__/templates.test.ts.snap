@@ -83,6 +83,39 @@ Questions? Write to hello@air.example.test.
 Example Air runs on free software. Get the source code https://forge.example.test/air/commonair/tree/0123abcd."
 `;
 
+exports[`channelMoved > renders accessible HTML and a plain-text alternative 1`] = `
+"ada_plays has moved
+
+Example Air https://air.example.test
+
+
+ada_plays has moved
+
+ada_plays says you can now find them on this site:
+
+198.51.100.20
+
+The streamer chose this site, not Example Air. The channel page here shows the full address; check it before you visit.
+
+See the notice on Example Air https://air.example.test/ada_plays
+
+If you subscribe to ada_plays, your subscription continues until the streamer ends it.
+
+You asked Example Air to email you once if ada_plays moved. This is that email, and we have deleted your request.
+
+Manage your privacy settings https://air.example.test/settings/privacy
+
+----------------------------------------
+
+You are receiving this email because of your account on Example Air.
+
+Questions? Write to hello@air.example.test.
+
+Example Air runs on free software. Get the source code https://forge.example.test/air/commonair/tree/0123abcd.
+
+Unsubscribe from these emails https://air.example.test/api/email/unsubscribe?list=moved&token=sample"
+`;
+
 exports[`chargebackNotice > renders accessible HTML and a plain-text alternative 1`] = `
 "A payment was charged back: €4.99
 

@@ -82,9 +82,26 @@ describe("chat.surge", () => {
   test("state is off with no override; viewers are refused", async () => {
     const r = await state(mod);
     expect(r.status).toBe(200);
-    expect(r.body).toEqual({ state: "off", since: null, until: null, by: null, unavailable: false });
+    expect(r.body).toEqual({ state: "off", since: null, until: null, by: null, unavailable: false, raid: null });
     expect((await state(viewer)).status).toBe(403);
     expect((await override(viewer, "start")).status).toBe(403);
+  });
+
+  test("a raid surge names the raid (decision (w)); a suppressed one does not", async () => {
+    const until = new Date(Date.now() + 600_000).toISOString();
+    const raw = (state: "on" | "suppressed") =>
+      JSON.stringify({
+        state,
+        since: new Date().toISOString(),
+        until,
+        by: null,
+        raid: { fromChannel: viewer.username, verifiedCount: 3 },
+      });
+    await api.deps.valkey.set(KEYS.surgeOverride(channelId), raw("on"), "EX", 600);
+    const on = await state(mod);
+    expect(on.body).toMatchObject({ state: "on", raid: { fromChannel: viewer.username, verifiedCount: 3 } });
+    await api.deps.valkey.set(KEYS.surgeOverride(channelId), raw("suppressed"), "EX", 600);
+    expect((await state(mod)).body).toMatchObject({ state: "suppressed", raid: null });
   });
 
   test("refused with the instance flag off, or with the channel's guard disabled", async () => {

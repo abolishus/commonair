@@ -15,6 +15,7 @@
   "dependencies": {
     "@commonair/contracts": "workspace:*",
     "@commonair/db": "workspace:*",
+    "@commonair/draw": "workspace:*",
     "@commonair/integrity": "workspace:*",
     "@commonair/ledger": "workspace:*",
     "drizzle-orm": "catalog:",

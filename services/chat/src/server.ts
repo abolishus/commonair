@@ -199,6 +199,7 @@ export async function startChatService(opts: ChatServiceOptions): Promise<ChatSe
     latency,
     watchGate,
     valkey,
+    internalSecret: opts.internalSecret,
     ...(opts.watchRooms ? { watchRooms: opts.watchRooms } : {}),
   });
   core = chat;

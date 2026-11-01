@@ -32,6 +32,8 @@ export interface ChannelSummary {
   followerCount: number;
   /** The caller's follow state; null when anonymous (or the API did not say). */
   following: boolean | null;
+  /** The caller asked to be told if the channel moves (decision (l)); null when anonymous or unknown. */
+  portabilityGrant?: boolean | null;
   /** `Channel.movedTo` (ADR 0037): where the channel moved and when; null when it has not moved. */
   movedTo: { url: string; at: string } | null;
   /** When the browser poll that produced this started (ms); absent for the SSR snapshot. */
@@ -60,6 +62,7 @@ export function summarize(c: ChannelDto): ChannelSummary {
       : null,
     followerCount: c.followerCount,
     following: c.viewer?.following ?? null,
+    portabilityGrant: c.viewer ? (c.viewer.portabilityGrant ?? false) : null,
     movedTo: c.movedTo ?? null,
   };
 }

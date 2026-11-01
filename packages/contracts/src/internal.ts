@@ -276,9 +276,9 @@ export const KEYS = {
    *
    * Batch 7 decision (w), the raid carry: when a raid executes, the worker writes this key for the
    * **target** channel and each raider who was a verified watcher of the source in the last
-   * `RAID_RULES.carryMinutes`, with `b` = the target's live broadcast, `s` = the target's gate
-   * threshold, `f` = the source value's `f`, and `EX RAID_RULES.surgeMinutes * 60`. No separate
-   * carry key exists.
+   * `RAID_RULES.carryMinutes`, with `b` = the target's live broadcast, `s` and `f` = the source
+   * value's, and a TTL of the surge's remaining time + 60 s (`raidCarryTtlSeconds`), through
+   * `VERIFIED_WATCH_MERGE`. No separate carry key exists.
    *
    * Every writer (the scoring pass and the raid carry) uses the merge-write
    * `VERIFIED_WATCH_MERGE` (`services/worker/src/integrity/verified-watch.ts`), never a plain
@@ -339,6 +339,8 @@ export const KEYS = {
   /**
    * Decision (r): HASH member user id → JSON `RoomSyncReport` (the member's latest playhead). The
    * instance that owns the room's sync tick reads it every 2 s and publishes `room.sync {target}`.
+   * The reserved field `_edge` (never a user id) holds chat's shared live-edge estimate, JSON
+   * `{edge, at}` in epoch ms, so the 5 s cap is measured from the live edge, not the fastest member.
    */
   roomSync: (roomId: string) => `room:sync:${roomId}`,
   /** Decision (x) test hook: STRING seconds the purge feed holds an empty long poll (absent = `RELAY_PURGE_RULES.holdSeconds`). */

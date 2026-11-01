@@ -59,12 +59,8 @@ describe("unit route files are mounted (stubs answer 501)", () => {
   test("one procedure of each group reaches its stub", async () => {
     const c = alice.client;
     const calls: [string, string, unknown?][] = [
-      ["GET", "/api/me/watch-rooms"],
-      ["GET", `/api/channels/${alice.username}/move-links`],
-      ["GET", "/api/jury/status"],
       ["GET", `/api/channels/${alice.username}/twitch-import`],
       ["GET", `/api/channels/${alice.username}/federation`],
-      ["GET", `/api/channels/${alice.username}/giveaways/current`],
     ];
     for (const [method, path, body] of calls) {
       const r = await c.call(method, path, body);

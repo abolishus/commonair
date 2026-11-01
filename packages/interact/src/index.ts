@@ -7,3 +7,4 @@ export * from "./predictions.ts";
 export * from "./raids.ts";
 export * from "./goals.ts";
 export * from "./accrual.ts";
+export * from "./giveaways.ts";

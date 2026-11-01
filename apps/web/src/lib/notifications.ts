@@ -150,6 +150,15 @@ export function describeNotification(n: Pick<NotificationDto, "type" | "payload"
         return { kind: "generic", label: "notifications.kind.discordWebhookRemoved", target: { kind: "dashboard" } };
       if (kind === "stream_key_leaked")
         return { kind: "generic", label: "notifications.kind.streamKeyLeaked", target: { kind: "dashboard" } };
+      if (kind === "giveaway_won") {
+        // W3-giveaways: `{kind, giveawayId, channel, rank}`; the claim goes through the streamer.
+        const slug = str(payload.channel);
+        return {
+          kind: "generic",
+          label: "notifications.kind.giveawayWon",
+          target: slug && SLUG.test(slug) ? { kind: "channel", slug } : null,
+        };
+      }
       return { kind: "generic", label: TYPE_LABEL.system, target: null };
     case "raid":
     case "payout":

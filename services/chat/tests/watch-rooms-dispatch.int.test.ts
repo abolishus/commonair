@@ -5,7 +5,7 @@
  * Batch 7 contract step §5.4: `server.ts` dispatches the `room.*` frames to the watch-room handler
  * (a non-null answer comes back as a notice with the frame's nonce), `BUS.roomControl` messages
  * reach `onControl`, and a closing socket leaves its rooms. The handler's behaviour is
- * W3-watch-rooms'; the shipped stub refuses joins and sends with `room_closed`.
+ * W3-watch-rooms'; for an unknown room it refuses joins and sends with `room_closed`.
  */
 import { afterAll, beforeAll, describe, expect, test, vi } from "vite-plus/test";
 import { BUS, type ClientFrame, type RoomControlMessage } from "@commonair/contracts";
@@ -135,7 +135,7 @@ describe("room frame dispatch", () => {
   });
 });
 
-describe("the shipped stub", () => {
+describe("the shipped handler refuses an unknown room with room_closed", () => {
   test("refuses joins and sends with room_closed", async () => {
     const svc = await startInstance(t.db, isolation());
     try {

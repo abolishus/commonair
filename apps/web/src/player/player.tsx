@@ -32,6 +32,7 @@ import { DataModePanel } from "./data-mode.tsx";
 import { DvrControls, DvrScrubber } from "./dvr-controls.tsx";
 import { pageLifecycle } from "./lifecycle.ts";
 import { registerMediaClock, type PlaybackMode } from "./media-clock.ts";
+import { registerRoomPlayer } from "./room-sync-registry.ts";
 import { P2PDialog, P2PIndicator, P2PNotice } from "./p2p/p2p-ui.tsx";
 import { deviceSignals, noticeDue, p2pAllowed, type DeviceSignals } from "./p2p/policy.ts";
 import { markP2PNoticeSeen, readP2PPrefs, setP2PPreference } from "./p2p/preference.ts";
@@ -213,6 +214,18 @@ export function Player({
     setController(controller);
     // The chat panel reads this channel's playhead at send time (`chat/connection.ts`).
     const unregisterClock = registerMediaClock(channel, controller);
+    // Watch rooms steer this player's hold-back (decision (r)); native HLS corrects by seek only.
+    const unregisterRoom = registerRoomPlayer(
+      channel,
+      {
+        setTargetLatency: (seconds) => controller.setTargetLatency(seconds),
+        seekToWallclock: (t) => controller.seekToWallclock(t),
+        playheadWallclock: () => controller.playheadWallclock(),
+        playbackMode: () => controller.playbackMode(),
+        latencySeconds: () => controller.hlsLatencySeconds(),
+      },
+      env?.native ?? false,
+    );
     setPlaybackMode(controller.playbackMode());
     const unsubscribeMode = controller.onPlaybackMode(setPlaybackMode);
     // `start` reports `loading` first, so a retry after an error shows loading again.
@@ -229,6 +242,7 @@ export function Player({
       window.removeEventListener("pageshow", lifecycle.pageshow);
       unsubscribeMode();
       unregisterClock();
+      unregisterRoom();
       if (controllerRef.current === controller) controllerRef.current = null;
       setController((current) => (current === controller ? null : current));
       void controller.stop();
@@ -237,7 +251,7 @@ export function Player({
       setP2P(P2P_STATUS_OFF);
       setAppliedCeiling(null);
     };
-  }, [channel, live, embed, attempt, gateOpen]);
+  }, [channel, live, embed, attempt, gateOpen, env]);
 
   // The meter and the levels the estimate is judged against, while playing in data mode.
   React.useEffect(() => {

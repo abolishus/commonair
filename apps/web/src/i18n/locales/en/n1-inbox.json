@@ -24,6 +24,7 @@
   "notifications.kind.statement": "There is a statement of reasons about a decision on your account or content",
   "notifications.kind.discordWebhookRemoved": "Your Discord webhook stopped working and was removed",
   "notifications.kind.streamKeyLeaked": "One of your stream keys may have leaked: rotate it",
+  "notifications.kind.giveawayWon": "You won a giveaway",
   "notifySettings.title": "Notifications",
   "notifySettings.intro": "Choose how you hear about channels you follow going live.",
   "notifySettings.loading": "Loading your notification settings",

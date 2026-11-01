@@ -76,6 +76,8 @@ export interface CoreDeps {
   watchGate: WatchGate;
   /** Application Valkey (key prefix applied): watch-room presence and sync (`KEYS.roomPresence`, `KEYS.roomSync`). */
   valkey: ValkeyClient;
+  /** Verifies watch-room tokens (`signChatToken` with a `room:<id>` scope). */
+  internalSecret: string;
   /** Builds the watch-room handler (default `WatchRooms`); tests inject a recording one. */
   watchRooms?: WatchRoomFactory;
 }
@@ -114,6 +116,8 @@ export interface WatchRoomDeps {
   frameWriter: Writer;
   metrics: Metrics;
   logger: Logger;
+  /** Checks the room token's signature, owner and audience. */
+  internalSecret: string;
 }
 
 export type WatchRoomFactory = (deps: WatchRoomDeps) => WatchRoomHandler;
@@ -136,6 +140,7 @@ export class ChatCore {
       frameWriter: d.frameWriter,
       metrics: d.metrics,
       logger: d.logger,
+      internalSecret: d.internalSecret,
     });
   }
 

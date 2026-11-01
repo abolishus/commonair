@@ -104,6 +104,14 @@ export function sampleData(publicUrl: string, v: SampleValues = ENGLISH_SAMPLE_V
       settingsUrl: url("/settings/notifications"),
       unsubscribeUrl: url("/api/email/unsubscribe?list=go_live&token=sample"),
     },
+    channelMoved: {
+      channelName: v.channelName,
+      // Digits only, so the pseudo-locale test sees no untranslated letters in sample data.
+      movedToHost: "198.51.100.20",
+      channelUrl: url(`/${encodeURIComponent(v.channelName)}`),
+      settingsUrl: url("/settings/privacy"),
+      unsubscribeUrl: url("/api/email/unsubscribe?list=moved&token=sample"),
+    },
     dmcaNoticeReceived: {
       contentTitle: v.contentTitle,
       noticeRef: "DMCA-2026-0091",

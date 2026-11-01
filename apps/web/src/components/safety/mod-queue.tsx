@@ -155,6 +155,7 @@ export function ModQueue({ canReports, client: clientProp }: ModQueueProps): Rea
         <ReportDetail
           key={report.id}
           report={report}
+          lookup={client.userNames}
           onResolve={async (status, resolution) => {
             await client.resolveReport({ id: report.id, status, resolution });
             setSelected(null);
@@ -648,9 +649,12 @@ export function ReportList({
 export function ReportDetail({
   report,
   onResolve,
+  lookup,
 }: {
   report: ReportDto;
   onResolve: (status: "actioned" | "dismissed", resolution: string) => Promise<void>;
+  /** Usernames for evidence user ids (stable across renders: the evidence effect depends on it). */
+  lookup?: ModerationClient["userNames"];
 }): React.JSX.Element {
   const [status, setStatus] = React.useState<"actioned" | "dismissed" | "">("");
   const [note, setNote] = React.useState("");
@@ -687,7 +691,7 @@ export function ReportDetail({
         />
         {report.details ? <p className="text-sm whitespace-pre-wrap">{report.details}</p> : null}
         {report.subjectType === "watch_room" ? (
-          <WatchRoomEvidence reportId={report.id} evidence={report.evidence} />
+          <WatchRoomEvidence reportId={report.id} evidence={report.evidence} lookup={lookup} />
         ) : null}
         <ChoiceToggle
           label={t("safety.modq.resolveAs")}

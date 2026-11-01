@@ -350,6 +350,17 @@ export class PlayerController {
   }
 
   /**
+   * hls.js's own live latency (seconds from the playhead to the live edge, from the playlist, so
+   * the viewer's clock plays no part). Null on native HLS, in DVR, or while unknown. Watch rooms
+   * steer from it (decision (r)).
+   */
+  hlsLatencySeconds(): number | null {
+    const latency = this.hls?.latency;
+    if (this.mode === "dvr" || latency === undefined || !Number.isFinite(latency) || latency <= 0) return null;
+    return latency;
+  }
+
+  /**
    * Text tracks appearing, disappearing or changing on the video (captions, W2). Fires with the
    * element's `TextTrackList`; W1 adds no tracks, so only what the playlist brings shows up.
    * Returns the unsubscribe function.

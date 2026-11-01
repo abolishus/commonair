@@ -21,6 +21,7 @@ import {
   type StudioRole,
 } from "../../lib/interact-studio.ts";
 import { useLoad } from "../money/use-load.ts";
+import { GiveawayPanel } from "./giveaway-panel.tsx";
 import { GoalPanel } from "./goal-panel.tsx";
 import { PollPanel } from "./poll-panel.tsx";
 import { PredictionPanel } from "./prediction-panel.tsx";
@@ -120,6 +121,8 @@ function InteractSections({
       {abilities.raids && data.raids ? (
         <RaidPanel channel={channel} initial={data.raids} client={client} refreshMs={refreshMs} />
       ) : null}
+      {/* Batch 7 decision (a): renders nothing while GIVEAWAYS_ENABLED is off. */}
+      {abilities.raids ? <GiveawayPanel channel={channel} refreshMs={refreshMs} /> : null}
       <GoalPanel
         channel={channel}
         initial={data.goals}

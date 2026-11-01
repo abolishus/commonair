@@ -96,9 +96,19 @@ async function member(r: Room, birthDate = ADULT) {
   return u;
 }
 
+/** A room token as the API mints it (`watchRooms.join`); chat checks its signature and audience. */
+const roomToken = (userId: string, roomId: string) =>
+  signChatToken(SECRET, {
+    v: 1,
+    uid: userId,
+    app: null,
+    scopes: [`room:${roomId}`],
+    exp: Math.floor(Date.now() / 1000) + 300,
+  });
+
 async function joined(svc: ChatService, userId: string, roomId: string): Promise<Client> {
   const c = await Client.connect(svc, { token: await chatToken(userId) });
-  c.send({ op: "room.join", roomId, token: "room-token", nonce: "j" });
+  c.send({ op: "room.join", roomId, token: await roomToken(userId, roomId), nonce: "j" });
   await c.waitFor((f) => f.op === "room.state" && f.roomId === roomId);
   return c;
 }
@@ -111,7 +121,7 @@ describe("membership", () => {
     const r = await room();
     const stranger = await createUser(t.db, { birthDate: ADULT });
     const c = await Client.connect(a, { token: await chatToken(stranger.id) });
-    c.send({ op: "room.join", roomId: r.id, token: "x", nonce: "n1" });
+    c.send({ op: "room.join", roomId: r.id, token: await roomToken(stranger.id, r.id), nonce: "n1" });
     expect(await notice(c, "n1")).toMatchObject({ code: "room_closed" });
     c.send({ op: "room.join", roomId: uuidv7(), token: "x", nonce: "n2" });
     expect(await notice(c, "n2")).toMatchObject({ code: "room_closed" });
@@ -139,7 +149,7 @@ describe("membership", () => {
     // A data fix: the birth date now makes them a minor.
     await t.db.update(schema.users).set({ birthDate: MINOR }).where(eq(schema.users.id, m.id));
     const c = await Client.connect(a, { token: await chatToken(m.id) });
-    c.send({ op: "room.join", roomId: r.id, token: "x", nonce: "j" });
+    c.send({ op: "room.join", roomId: r.id, token: await roomToken(m.id, r.id), nonce: "j" });
     expect(await notice(c, "j")).toMatchObject({ code: "room_age_band" });
     const open = await t.db
       .select()
@@ -172,12 +182,12 @@ describe("membership", () => {
     const banned = await member(r);
     await t.db.insert(schema.chatBans).values({ channelId: r.channelId, userId: banned.id });
     const d = await Client.connect(a, { token: await chatToken(banned.id) });
-    d.send({ op: "room.join", roomId: r.id, token: "x", nonce: "j" });
+    d.send({ op: "room.join", roomId: r.id, token: await roomToken(banned.id, r.id), nonce: "j" });
     expect(await notice(d, "j")).toMatchObject({ code: "room_banned" });
     d.close();
   });
 
-  test("with the internal secret, the room token's owner and audience are checked", async () => {
+  test("the room token's signature, owner and audience are checked", async () => {
     const r = await room();
     const iso2 = isolation();
     const svc = await startInstance(t.db, iso2, {

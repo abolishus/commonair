@@ -157,12 +157,19 @@ Predictions stay points-only (ADR 0026 decision 3). Three rules make them fair:
   with the guard off, and a cancelled or refused raid, open nothing. Begin and end write
   `chat.surge.begin` / `chat.surge.end` with an `audit_log` row, as the guard does today.
 - **Carry-over.** Raiders who were verified watchers of the source carry that standing to the
-  target for the surge. For each user with a current source `KEYS.verifiedWatch` value for the
-  source's live broadcast (the key's 600 s TTL is `RAID_RULES.carryMinutes`, 10, so its existence
-  means "verified in the last 10 minutes"), the worker writes the target's
+  target for the surge. A raider carries when they are a verified watcher of the source's live
+  broadcast within `RAID_RULES.carryMinutes` (10): a current source `KEYS.verifiedWatch` value
+  (its 600 s TTL means "verified in the last 10 minutes") while seen on the source in that window,
+  or the scoring pass's own rule worked out at execute (gate-eligible sessions under the
+  per-address cap, with a gate-eligible session in the window), so a source without the gate or
+  the guard still carries its real audience. The source's owner, verified bots, moderators and
+  VIPs are left out, as in the scoring pass. The worker writes the target's
   `KEYS.verifiedWatch(target, user)` with `b` set to the target's live broadcast and `s` and `f`
-  copied from the source value, with a TTL equal to the surge's remaining time, and never lowers
-  an existing target value. Unverified raiders get nothing.
+  copied from the source value (the raider's standing, never more), with a TTL of the surge's
+  remaining time plus the override's 60 s grace, through the merge-write, so it never lowers an
+  existing target value. Unverified raiders get nothing. A later guard extension does not lengthen
+  the carry. The override value also holds `raid: {fromChannel, verifiedCount}` for the banner; a
+  raid surge's end is recorded with reason `expired`.
 - **Chat is unchanged.** Chat already reads `KEYS.verifiedWatch` and applies the surge threshold;
   the carry is only a key write, so a friend's real raid chats at once and a botted raid stays quiet.
 - **The mod banner** names the source channel and its verified count

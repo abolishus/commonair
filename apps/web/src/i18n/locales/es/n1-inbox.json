@@ -24,6 +24,7 @@
   "notifications.kind.statement": "Hay una declaración de motivos sobre una decisión acerca de tu cuenta o tu contenido",
   "notifications.kind.discordWebhookRemoved": "Tu webhook de Discord dejó de funcionar y se eliminó",
   "notifications.kind.streamKeyLeaked": "Es posible que una de tus claves de transmisión se haya filtrado: renuévala",
+  "notifications.kind.giveawayWon": "Has ganado un sorteo",
   "notifySettings.title": "Notificaciones",
   "notifySettings.intro": "Elige cómo te enteras cuando los canales que sigues empiezan a transmitir en vivo.",
   "notifySettings.loading": "Cargando tu configuración de notificaciones",

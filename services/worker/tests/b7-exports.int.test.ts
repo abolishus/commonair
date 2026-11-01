@@ -31,10 +31,10 @@ async function bundleExport(userId: string) {
 const status = async (id: string) =>
   (await env.t.db.select().from(schema.dataExports).where(eq(schema.dataExports.id, id)))[0];
 
-test("a bundle export reaches buildBundle; the shared pipeline retries, then fails it", async () => {
+test("a bundle export reaches buildBundle (which needs the instance site); the shared pipeline retries, then fails it", async () => {
   const { user } = await makeUser(env.t.db);
   const id = await bundleExport(user.id);
-  await expect(buildExport(ctx, id, { lastAttempt: false })).rejects.toThrow(/bundle export is not implemented/);
+  await expect(buildExport(ctx, id, { lastAttempt: false })).rejects.toThrow(/needs the instance site/);
   expect(await status(id)).toMatchObject({ status: "queued" });
   expect(await buildExport(ctx, id, { lastAttempt: true })).toEqual({ failed: 1 });
   expect(await status(id)).toMatchObject({ status: "failed", error: "build_failed", storageKey: null });

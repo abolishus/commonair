@@ -8,6 +8,7 @@ import { toast } from "@commonair/ui/toast";
 import type { ChannelChatSettings } from "@commonair/contracts/shapes";
 import * as React from "react";
 import { type ChatGateClient, useChatGateFeatures } from "../components/chat-gate/features.ts";
+import { SurgeRaidLine } from "../components/chat-gate/surge-raid.tsx";
 import { t } from "../i18n/index.ts";
 import { toastActionError } from "../lib/action-error.ts";
 import { api } from "../lib/api.ts";
@@ -131,10 +132,14 @@ function ModBanner({
       tone={on ? "warning" : "info"}
       title={on ? t("surge.onTitle") : t("surge.suppressedTitle")}
       description={
-        <p>
-          {on ? t("surge.onBody") : t("surge.suppressedBody")}
-          {state.by ? <> {t("surge.onBy", { name: state.by })}</> : null} {until}
-        </p>
+        <>
+          <p>
+            {on ? t("surge.onBody") : t("surge.suppressedBody")}
+            {state.by ? <> {t("surge.onBy", { name: state.by })}</> : null} {until}
+          </p>
+          {/* Batch 7 decision (w): a raid surge names the source and its verified count. */}
+          {on ? <SurgeRaidLine channel={channel} surge={surge} client={client} /> : null}
+        </>
       }
       action={
         on ? (

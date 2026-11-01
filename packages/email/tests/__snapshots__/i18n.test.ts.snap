@@ -83,6 +83,39 @@ Recibes este correo por tu cuenta en Example Air.
 Example Air funciona con software libre. Obtén el código fuente https://forge.example.test/air/commonair/tree/0123abcd."
 `;
 
+exports[`channelMoved in Spanish > renders with lang and dir, and differs from English in subject and body 1`] = `
+"ada_plays se ha mudado
+
+Example Air https://air.example.test
+
+
+ada_plays se ha mudado
+
+ada_plays dice que ahora puedes encontrar su canal en este sitio:
+
+198.51.100.20
+
+Este sitio lo eligió quien transmite, no Example Air. La página del canal aquí muestra la dirección completa; revísala antes de visitarla.
+
+Ver el aviso en Example Air https://air.example.test/ada_plays
+
+Si tienes una suscripción a ada_plays, sigue activa hasta que quien transmite la termine.
+
+Pediste a Example Air que te enviara un correo una sola vez si ada_plays se mudaba. Este es ese correo, y hemos borrado tu solicitud.
+
+Gestiona tu configuración de privacidad https://air.example.test/settings/privacy
+
+----------------------------------------
+
+Recibes este correo por tu cuenta en Example Air.
+
+¿Tienes preguntas? Escribe a hello@air.example.test.
+
+Example Air funciona con software libre. Obtén el código fuente https://forge.example.test/air/commonair/tree/0123abcd.
+
+Darte de baja de estos correos https://air.example.test/api/email/unsubscribe?list=moved&token=sample"
+`;
+
 exports[`chargebackNotice in Spanish > renders with lang and dir, and differs from English in subject and body 1`] = `
 "Se revirtió un pago por contracargo: 4,99 €
 

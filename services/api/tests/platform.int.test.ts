@@ -103,14 +103,14 @@ describe("follows", () => {
   });
 
   test("channels.get reports the caller's follow state (null when anonymous)", async () => {
-    type Ch = { viewer?: { following: boolean } | null };
+    type Ch = { viewer?: { following: boolean; portabilityGrant?: boolean } | null };
     const get = (c: ReturnType<typeof client>) => c.call<Ch>("GET", `/api/channels/${alice.username}`);
     expect((await get(client(api))).body.viewer).toBeNull();
-    expect((await get(bob.client)).body.viewer).toEqual({ following: false });
+    expect((await get(bob.client)).body.viewer).toEqual({ following: false, portabilityGrant: false });
     await bob.client.call("PUT", `/api/channels/${alice.username}/follow`, {});
-    expect((await get(bob.client)).body.viewer).toEqual({ following: true });
+    expect((await get(bob.client)).body.viewer).toEqual({ following: true, portabilityGrant: false });
     await bob.client.call("DELETE", `/api/channels/${alice.username}/follow`);
-    expect((await get(bob.client)).body.viewer).toEqual({ following: false });
+    expect((await get(bob.client)).body.viewer).toEqual({ following: false, portabilityGrant: false });
   });
 
   test("cannot follow yourself; anonymous cannot follow", async () => {

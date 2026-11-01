@@ -2343,6 +2343,13 @@ export const contract = {
           }),
         )
         .output(D.PredictionView),
+      /**
+       * Refusals (batch 7 decision (v), W3-fair-predictions): FORBIDDEN `reason: staff` (the
+       * channel's owner, moderators and editors); PRECONDITION_FAILED `requirement` `not_live`
+       * (a DVR session), `behind` (over 30 s behind the live edge) or `unverified` (no
+       * verified-watch standing); CONFLICT when the bet is too late, and CONFLICT
+       * `reason: already_bet` for a second bet; overdraw stays `insufficient_points`.
+       */
       bet: user
         .meta({ access: "user", rateLimit: "write" })
         .route({
@@ -3542,6 +3549,21 @@ export const contract = {
           }),
       )
       .output(Ok),
+    users: {
+      /**
+       * Batch 7 (W3-watch-rooms): usernames for the user ids a report's evidence holds (a watch-room
+       * transcript stores ids only). Ids in, never a search; unknown ids are left out.
+       */
+      lookup: safetyStaff
+        .route({
+          method: "POST",
+          path: "/admin/users/lookup",
+          summary: "Usernames for user ids in report evidence",
+          ...tag("Safety"),
+        })
+        .input(z.object({ ids: z.array(Id).min(1).max(64) }))
+        .output(z.array(z.object({ id: Id, username: z.string() }))),
+    },
   },
 
   legal: {

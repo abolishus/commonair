@@ -135,8 +135,22 @@ export interface ModerationClient {
   resolveReport(input: { id: string; status: "actioned" | "dismissed"; resolution: string }): Promise<ReportDto>;
   ncii(cursor?: string): Promise<Page<NciiRequestDto>>;
   decideNcii(input: { id: string; decision: NciiDecision; note: string }): Promise<NciiRequestDto>;
+  /** Usernames for the user ids in report evidence (watch-room transcripts); unknown ids are absent. */
+  userNames?: (ids: readonly string[]) => Promise<ReadonlyMap<string, string>>;
 }
 const PAGE = 50;
+const LOOKUP_MAX = 64;
+
+async function userNames(ids: readonly string[]): Promise<ReadonlyMap<string, string>> {
+  const unique = [...new Set(ids)];
+  const names = new Map<string, string>();
+  for (let i = 0; i < unique.length; i += LOOKUP_MAX) {
+    const rows = await api().safety.users.lookup({ ids: unique.slice(i, i + LOOKUP_MAX) });
+    for (const r of rows) names.set(r.id, r.username);
+  }
+  return names;
+}
+
 export const moderationClient = (): ModerationClient => ({
   cases: (input) => api().moderation.queue({ ...input, limit: PAGE }),
   case: (id) => api().moderation.case({ id }),
@@ -146,6 +160,7 @@ export const moderationClient = (): ModerationClient => ({
   resolveReport: (input) => api().safety.resolve({ ...input, action: "none" }),
   ncii: (cursor) => api().ncii.queue({ limit: PAGE, cursor }),
   decideNcii: (input) => api().ncii.decide(input),
+  userNames,
 });
 
 export interface AppealQueueClient {

@@ -20,7 +20,7 @@ import { restrictedIds, withRestriction } from "../moderation/restriction.ts";
 import { changeRoleInTx } from "../channels/roles.ts";
 import { mediaSettingsOf, updateMediaSettings } from "../channels/media-settings.ts";
 
-const { channels, channelPanels, categories, follows, users, channelRoles } = schema;
+const { channels, channelPanels, categories, follows, users, channelRoles, followPortabilityGrants } = schema;
 
 /** Revoke any active stream key found in `text`, and store the text with keys redacted. */
 async function scrubKeys(deps: Deps, text: string, source: LeakSource): Promise<string> {
@@ -39,11 +39,18 @@ export const channelsRoutes = {
     const dto = { ...raw, live: raw.live ? withRestriction(raw.live, restricted) : null };
     if (!caller) return { ...dto, viewer: null };
     // A follow the integrity system excluded still reads as followed to its owner.
-    const [f] = await deps.db
-      .select({ followerId: follows.followerId })
-      .from(follows)
-      .where(and(eq(follows.followerId, caller.user.id), eq(follows.channelId, c.id)));
-    return { ...dto, viewer: { following: f !== undefined } };
+    const [[f], [g]] = await Promise.all([
+      deps.db
+        .select({ followerId: follows.followerId })
+        .from(follows)
+        .where(and(eq(follows.followerId, caller.user.id), eq(follows.channelId, c.id))),
+      // Batch 7 decision (l): "tell me if they move", shown in the follow menu.
+      deps.db
+        .select({ userId: followPortabilityGrants.userId })
+        .from(followPortabilityGrants)
+        .where(and(eq(followPortabilityGrants.userId, caller.user.id), eq(followPortabilityGrants.channelId, c.id))),
+    ]);
+    return { ...dto, viewer: { following: f !== undefined, portabilityGrant: g !== undefined } };
   }),
 
   update: os.channels.update.handler(async ({ context, input }) => {
@@ -184,7 +191,12 @@ export const channelsRoutes = {
         return { following: true as const, followerCount: row?.n ?? c.followerCount };
       }
       // A new follow only: a link's attribution never rewrites an existing follow (decision (k)).
-      await attributeFollow(tx, { followerId: caller.user.id, channelId: c.id, moveLink: input.moveLink ?? null });
+      await attributeFollow(tx, {
+        followerId: caller.user.id,
+        channelId: c.id,
+        moveLink: input.moveLink ?? null,
+        now: deps.now(),
+      });
       // The follows trigger keeps the count (decision (aa), migration 0046).
       const [row] = await tx.select({ n: channels.followerCount }).from(channels).where(eq(channels.id, c.id));
       const [u] = await tx

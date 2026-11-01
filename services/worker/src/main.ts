@@ -14,6 +14,7 @@ import { ClassifierHolder } from "./integrity/classifier.ts";
 import { buildModerationOptions } from "./moderation/startup.ts";
 import { mailableStorageOrigin } from "./exports/build.ts";
 import { opsTestHooks } from "./ops/startup.ts";
+import { ensurePortabilityKeyPublished } from "./portability/standing.ts";
 import { interactTestHooks } from "./interact/startup.ts";
 import { webPushSettings } from "./notify/settings.ts";
 import { defaultWebhookSettings } from "./webhooks/settings.ts";
@@ -89,6 +90,11 @@ if (env.EVENTSUB_ALLOW_INSECURE_CALLBACKS)
 
 const SHUTDOWN_DEADLINE_MS = 25_000;
 await worker.start();
+// ADR 0037: publish the standing-statement key at start, so `/.well-known/commonair-portability`
+// serves it before the first bundle is signed. A failure only delays it to that first signing.
+await ensurePortabilityKeyPublished(db.db, new Date()).catch((err: unknown) =>
+  logger.error("portability key publish failed", { err: (err as Error).name }),
+);
 runService({
   name: "worker",
   port: env.WORKER_PORT,

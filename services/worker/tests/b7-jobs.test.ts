@@ -15,6 +15,7 @@ import {
 import { schema, uuidv7, type Executor } from "@commonair/db";
 import { describe, expect, test } from "vite-plus/test";
 import { b7JobsFor, b7OutboxFlags } from "../src/b7/outbox-jobs.ts";
+import { stubHandler } from "../src/b7/stub.ts";
 import { JOBS } from "../src/jobs/index.ts";
 import { buildRegistry, scheduledJobs } from "../src/runtime/registry.ts";
 
@@ -74,10 +75,11 @@ describe("batch 7 jobs", () => {
   });
 
   test("a stub handler completes with a count and touches nothing", async () => {
-    const def = reg.get(QUEUES.watchRooms)?.get(WATCH_ROOM_JOBS.retention);
+    // Tested directly: every W3 job is real now, and the stub stays for the wave 2 units.
+    const handler = stubHandler("x");
     const logs: unknown[] = [];
     const ctx = { logger: { debug: (...a: unknown[]) => logs.push(a) } } as never;
-    expect(await def?.handler({}, ctx, { id: undefined, attemptsMade: 0 })).toEqual({ stub: 1 });
+    expect(await handler({}, ctx)).toEqual({ stub: 1 });
     expect(logs).toHaveLength(1);
   });
 });

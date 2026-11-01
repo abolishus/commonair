@@ -553,6 +553,17 @@ export const safety = {
     ),
   },
 
+  users: {
+    // Report evidence (watch-room transcripts) stores user ids only; staff see the usernames here.
+    lookup: os.safety.users.lookup.handler(async ({ context, input }) => {
+      requireCaller(context);
+      return context.deps.db
+        .select({ id: users.id, username: users.username })
+        .from(users)
+        .where(inArray(users.id, [...new Set(input.ids)]));
+    }),
+  },
+
   suspend: os.safety.suspend.handler(async ({ context, input }) => {
     const { deps } = context;
     const caller = requireCaller(context);

@@ -79,6 +79,9 @@ export async function applyUnsubscribe(
           eq(np.enabled, true),
         ),
       );
+    // Batch 7 decision (l): leaving the `moved` list withdraws every remaining "tell me if they move".
+    if (list === "moved")
+      await tx.delete(schema.followPortabilityGrants).where(eq(schema.followPortabilityGrants.userId, userId));
     return userId;
   });
 }
