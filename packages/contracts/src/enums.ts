@@ -129,7 +129,21 @@ export const APPEAL_SUBJECTS = [
 export const APPEAL_STATUSES = ["open", "upheld", "overturned"] as const;
 export const ACTOR_TYPES = ["user", "moderator", "admin", "system", "bot", "app"] as const;
 
-export const REPORT_SUBJECTS = ["user", "channel", "chat_message", "vod", "clip", "broadcast", "message_set"] as const;
+/**
+ * `watch_room` (batch 7, ADR 0017): a report about a watch room. Like `message_set`, its
+ * `reports.channel_id` is null and it goes to the platform queue only; the transcript and member
+ * list are copied into `reports.evidence` at report time.
+ */
+export const REPORT_SUBJECTS = [
+  "user",
+  "channel",
+  "chat_message",
+  "vod",
+  "clip",
+  "broadcast",
+  "message_set",
+  "watch_room",
+] as const;
 export const REPORT_REASONS = [
   "spam",
   "harassment",
@@ -205,7 +219,8 @@ export const LEGAL_DOCUMENT_KINDS = [
   "dmca_policy",
   "enforcement_notice",
 ] as const;
-export const EXPORT_KINDS = ["account", "channel"] as const;
+/** `bundle` (batch 7, decision (j)): a channel's `PortabilityBundle` archive (`portability.bundle.create`). */
+export const EXPORT_KINDS = ["account", "channel", "bundle"] as const;
 export const JOB_STATUSES = ["queued", "running", "ready", "failed", "expired"] as const;
 export const DELETION_STATUSES = ["scheduled", "canceled", "completed"] as const;
 
@@ -259,7 +274,20 @@ export const RAID_CANCEL_REASONS = [
  * runs from `start` to `executeAt`; a channel can start another raid `cooldownSeconds` after its
  * last raid completed or was canceled.
  */
-export const RAID_RULES = { countdownSeconds: 30, cooldownSeconds: 600 } as const;
+export const RAID_RULES = {
+  countdownSeconds: 30,
+  cooldownSeconds: 600,
+  /**
+   * Batch 7 decision (w): a raid into a channel with the surge guard on and `surgeGuard.onRaid`
+   * opens a surge (`trigger: "raid"`) for this long.
+   */
+  surgeMinutes: 10,
+  /**
+   * Decision (w): raiders who were verified watchers of the source in this window carry that
+   * standing to the target for the surge (a TTL'd `KEYS.verifiedWatch` write).
+   */
+  carryMinutes: 10,
+} as const;
 /** Poll limits beyond the router's per-call input bounds. */
 export const POLL_RULES = { maxExtraVotesPerUser: 100 } as const;
 /** Command names the bot engine answers itself; `bot.commands.upsert` refuses them and their use as aliases. */
@@ -282,8 +310,12 @@ export const NOTIFY_MEDIA = ["in_app", "email", "push"] as const;
 export type NotifyMedium = (typeof NOTIFY_MEDIA)[number];
 /** Types a member sets preferences for through the API (N1: go-live only; other types keep their in-app behaviour). */
 export const PREFERENCE_TYPES = ["go_live"] as const;
-/** One-click unsubscribe lists (RFC 8058). `governance` stores email-off rows for `proposal` and `vote_open`. */
-export const UNSUBSCRIBE_LISTS = ["go_live", "governance"] as const;
+/**
+ * One-click unsubscribe lists (RFC 8058). `governance` stores email-off rows for `proposal` and
+ * `vote_open`. `moved` (batch 7, decision (l)): the one "this channel moved" email a portability
+ * grant asks for.
+ */
+export const UNSUBSCRIBE_LISTS = ["go_live", "governance", "moved"] as const;
 /** Why the last Discord post failed; shown in the studio (never the URL). */
 export const DISCORD_WEBHOOK_ERRORS = ["unauthorized", "not_found", "rate_limited", "rejected", "network"] as const;
 export const INCIDENT_STATUSES = ["investigating", "identified", "monitoring", "resolved"] as const;
@@ -371,6 +403,11 @@ export const ENFORCEMENT_SOURCE_ACTIONS = [
   "ncii.decide",
   "ncii.auto_hide",
   "moderation.t0.match",
+  // Batch 7 (B7-followups builds the statements): a report resolved with an action, and the
+  // platform suspensions of a user or a channel.
+  "report.resolve",
+  "user.suspend",
+  "channel.suspend",
 ] as const;
 
 // Feature wins, wave 1 (W1; docs/testing/w1-selectors.md) ----------------------------------
@@ -553,3 +590,110 @@ export const ENFORCEMENT_REPORT_RULES = { k: 10, rollingDays: 30, months: 12 } a
 export const DVR_TOKEN_TTL_SECONDS = 120;
 /** `channels.dvr_window_seconds` bounds; the instance cap `DVR_MAX_WINDOW_SECONDS` clamps it further. */
 export const DVR_RULES = { defaultWindowSeconds: 1800, minWindowSeconds: 60, maxWindowSeconds: 86_400 } as const;
+
+// Batch 7: W3, N3, N4 (.claude/briefs/w3/contract-step.md §2.1) -----------------------------
+
+/** Watch-room age bands (ADR 0017 decision 3): a room's band is its host's on the day; members must match. */
+export const ROOM_AGE_BANDS = ["minor", "adult"] as const;
+export type RoomAgeBand = (typeof ROOM_AGE_BANDS)[number];
+/**
+ * Watch-room limits (decision (q)): members at once (the database refuses a 9th active member),
+ * minutes a room may stay empty before it ends, days a room's data is kept after it ends, and how far
+ * behind the live edge the sync target may sit.
+ */
+export const ROOM_LIMITS = { maxMembers: 8, emptyEndMinutes: 10, retentionDays: 30, edgeCapSeconds: 5 } as const;
+/** Why a watch room ended (`watch_rooms.end_reason`). */
+export const ROOM_END_REASONS = [
+  "host_closed",
+  "host_left",
+  "empty",
+  "broadcast_ended",
+  "mature",
+  "moderation",
+  "host_deleted",
+] as const;
+export type RoomEndReason = (typeof ROOM_END_REASONS)[number];
+
+/** How a follow was made (`follows.source`, decision (k)). */
+export const FOLLOW_SOURCES = ["direct", "move_link", "import"] as const;
+export type FollowSource = (typeof FOLLOW_SOURCES)[number];
+/** Move links (decision (k)): unrevoked links per channel (database-enforced) and links created per day (rate limit). */
+export const MOVE_LINK_RULES = { maxActive: 10, perDay: 20 } as const;
+/** Where a portability bundle came from (decision (j)). */
+export const PORTABILITY_SOURCES = ["commonair", "twitch"] as const;
+export type PortabilitySource = (typeof PORTABILITY_SOURCES)[number];
+/** `portability_imports.status`. */
+export const IMPORT_STATUSES = ["previewed", "queued", "running", "done", "failed"] as const;
+export type ImportStatus = (typeof IMPORT_STATUSES)[number];
+/** What one line of an import's preview and result is about. */
+export const IMPORT_ITEM_KINDS = ["channel", "panel", "emote", "schedule"] as const;
+export type ImportItemKind = (typeof IMPORT_ITEM_KINDS)[number];
+/** What happened to one item of an import. `skipped` includes "carried, not applied" (the schedule). */
+export const IMPORT_ITEM_OUTCOMES = ["imported", "skipped", "rejected"] as const;
+export type ImportItemOutcome = (typeof IMPORT_ITEM_OUTCOMES)[number];
+
+/** `giveaways.status` (decision (t)): open → closed → drawn, or cancelled from open or closed. */
+export const GIVEAWAY_STATUSES = ["open", "closed", "drawn", "cancelled"] as const;
+export type GiveawayStatus = (typeof GIVEAWAY_STATUSES)[number];
+/** Giveaway limits (decision (t)); one open per channel is a partial unique index. */
+export const GIVEAWAY_RULES = { maxWinners: 10, maxOpenPerChannel: 1, maxDurationMinutes: 1440 } as const;
+
+/** A juror's vote on one case (decision (u)); no free text. */
+export const JURY_VOTES = ["agree", "disagree", "unsure"] as const;
+export type JuryVote = (typeof JURY_VOTES)[number];
+/** Why a juror voted as they did: a fixed list, because votes are append-only and free text is personal data. */
+export const JURY_REASON_CODES = [
+  "clause_fits",
+  "clause_does_not_fit",
+  "action_too_severe",
+  "action_too_lenient",
+  "context_missing",
+  "evidence_unclear",
+  "other",
+] as const;
+export type JuryReasonCode = (typeof JURY_REASON_CODES)[number];
+/** What a jury case samples (`jury_cases.subject_kind`). */
+export const JURY_SUBJECT_KINDS = ["moderation_case", "report"] as const;
+/** Jury defaults (decision (u)); `panelSize` and `casesPerPanel` are also governance settings. Results suppress cells under `k` votes. */
+export const JURY_RULES = { panelSize: 7, casesPerPanel: 20, sampleDays: 30, k: 10 } as const;
+
+/**
+ * Federation limits (ADR 0030): largest inbox body, accepted `Date` skew, days a failing inbox is
+ * retried before it is dropped, and days between actor key rotations.
+ */
+export const FEDERATION_RULES = {
+  inboxMaxBytes: 262_144,
+  dateSkewSeconds: 43_200,
+  dropAfterDays: 7,
+  keyRotateDays: 365,
+} as const;
+/** `federation_objects.kind`: a go-live note or a VOD or clip video. */
+export const FEDERATION_OBJECT_KINDS = ["note", "video"] as const;
+/** What a federation object is about. */
+export const FEDERATION_SUBJECT_KINDS = ["broadcast", "vod", "clip"] as const;
+/** `federation_inbox_items.outcome`, set when the item is processed. */
+export const FEDERATION_INBOX_OUTCOMES = ["accepted", "ignored", "rejected", "blocked"] as const;
+/** `federation_deliveries.status`. */
+export const FEDERATION_DELIVERY_STATUSES = ["ok", "failing", "dropped"] as const;
+
+/**
+ * Why a media-state event was written (decision (z)): the path that made a VOD or clip public or
+ * stopped it being public.
+ */
+export const MEDIA_STATE_REASONS = [
+  "ready",
+  "visibility",
+  "moderation",
+  "dmca",
+  "ncii",
+  "t0",
+  "restored",
+  "expired",
+  "deleted",
+] as const;
+export type MediaStateReason = (typeof MEDIA_STATE_REASONS)[number];
+/** Why a relay purge row was written (decision (x)). */
+export const RELAY_PURGE_REASONS = ["vod_hidden", "clip_hidden", "restricted", "suspended", "recording_ended"] as const;
+export type RelayPurgeReason = (typeof RELAY_PURGE_REASONS)[number];
+/** The relay purge feed (decision (x)): a long poll is held up to this long; rows are kept this many days. */
+export const RELAY_PURGE_RULES = { holdSeconds: 25, retentionDays: 7, maxItems: 500 } as const;

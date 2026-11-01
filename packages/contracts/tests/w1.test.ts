@@ -62,7 +62,7 @@ describe("chat settings (ADR 0015)", () => {
     const s = ChannelChatSettings.parse({});
     expect(s.minVerifiedWatchSeconds).toBe(0);
     expect(s.verifiedWatchExemptSubscribers).toBe(true);
-    expect(s.surgeGuard).toEqual({ enabled: false, triggerUnverifiedRatio: 0.5, cooldownMinutes: 10 });
+    expect(s.surgeGuard).toEqual({ enabled: false, triggerUnverifiedRatio: 0.5, cooldownMinutes: 10, onRaid: true });
   });
 
   test.each([

@@ -18,6 +18,7 @@ import { decodeCursor, encodeCursor, isKeyCursor, pageOf } from "../lib/cursor.t
 import { apiError, badRequest, conflict, forbidden, isUniqueViolation, notFound, precondition } from "../lib/errors.ts";
 import { resolveOutbound } from "../lib/outbound.ts";
 import { os, requireCaller } from "../lib/orpc.ts";
+import { relayPurges } from "./b7-stubs.ts";
 import type { RelayEntry } from "../playback/delivery.ts";
 
 const { relayNodes, relayReceipts } = schema;
@@ -471,4 +472,6 @@ export const relays = {
     const refreshed = await publishRelay(deps, await refreshHealth(deps, row), 0);
     return toRelayDto(refreshed, (await relayStats(deps, [refreshed.id])).get(refreshed.id));
   }),
+  // Batch 7 decision (x): the signed purge feed (W3-dvr-relay).
+  purges: relayPurges,
 };

@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vite-plus/test";
-import { ALL_ENV_SCHEMAS, attestationEnv, infraEnv, loadEnv } from "../../packages/config/src/env.ts";
+import { ALL_ENV_SCHEMAS, attestationEnv, infraEnv, loadEnv, portabilityEnv } from "../../packages/config/src/env.ts";
 import { z } from "zod";
 import { loadApiEnv } from "../../services/api/src/env.ts";
 import { workerEnv } from "../../services/worker/src/env.ts";
@@ -206,5 +206,24 @@ describe("attestation signing key (ADR 0014 decision 1)", () => {
     expect(added.PLAYBACK_SIGNING_KEY).toBe(first.PLAYBACK_SIGNING_KEY);
     expect(added.INTEGRITY_SIGNING_KEY).not.toBe(first.PLAYBACK_SIGNING_KEY);
     expect(() => loadEnv(attestationEnv, added)).not.toThrow();
+  });
+});
+
+describe("portability signing key (batch 7 decision (n))", () => {
+  test("a fresh env gets its own Ed25519 key, distinct from the other signing keys, and a merge adds it", () => {
+    const env = initEnv();
+    expect(env.PORTABILITY_SIGNING_KEY).toBeTruthy();
+    expect(new Set([env.PORTABILITY_SIGNING_KEY, env.INTEGRITY_SIGNING_KEY, env.PLAYBACK_SIGNING_KEY]).size).toBe(3);
+    expect(() => loadEnv(portabilityEnv, env)).not.toThrow();
+    // An .env from before batch 7: the other keys stay, the portability key is generated.
+    const added = initEnv(
+      `PLAYBACK_SIGNING_KEY=${env.PLAYBACK_SIGNING_KEY}\nINTEGRITY_SIGNING_KEY=${env.INTEGRITY_SIGNING_KEY}\n`,
+    );
+    expect(added.INTEGRITY_SIGNING_KEY).toBe(env.INTEGRITY_SIGNING_KEY);
+    expect(added.PORTABILITY_SIGNING_KEY).not.toBe(env.PORTABILITY_SIGNING_KEY);
+    expect(() => loadEnv(portabilityEnv, added)).not.toThrow();
+    expect(initEnv(`PORTABILITY_SIGNING_KEY=${env.PORTABILITY_SIGNING_KEY}\n`).PORTABILITY_SIGNING_KEY).toBe(
+      env.PORTABILITY_SIGNING_KEY,
+    );
   });
 });

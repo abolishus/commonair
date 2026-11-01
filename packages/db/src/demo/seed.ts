@@ -9,7 +9,7 @@
  * `events` outbox rows: demo data must not fan out to webhooks or EventSub subscribers.
  */
 import { createHash, randomBytes } from "node:crypto";
-import { count, eq, inArray } from "drizzle-orm";
+import { count, inArray } from "drizzle-orm";
 import type { Database, Executor } from "../client.ts";
 import { uuidv7 } from "../ids.ts";
 import { accounts, users } from "../schema/auth.ts";
@@ -229,7 +229,7 @@ export async function seedDemoRows(tx: Executor, opts: { password: string; now: 
     return id;
   };
 
-  // Follows, and the follower counts the API maintains alongside them.
+  // Follows; the follows trigger keeps the follower counts (0046).
   const followRows = Object.entries(DEMO_FOLLOWS).flatMap(([follower, targets]) =>
     targets.map((t, i) => ({
       followerId: idOf(follower),
@@ -238,10 +238,6 @@ export async function seedDemoRows(tx: Executor, opts: { password: string; now: 
     })),
   );
   await tx.insert(follows).values(followRows);
-  for (const cid of channelId.values()) {
-    const n = followRows.filter((f) => f.channelId === cid).length;
-    await tx.update(channels).set({ followerCount: n }).where(eq(channels.id, cid));
-  }
 
   // Moderators, as `channels.roles.add` records them.
   for (const m of DEMO_MODERATORS) {

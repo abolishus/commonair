@@ -14,7 +14,9 @@ import {
   ChannelCaptionsSettingsPatch,
   ChannelChatSettingsPatch,
   ChannelDvrSettingsPatch,
+  ChannelFederationSettingsPatch,
   ChannelTheme,
+  GiveawayEligibility,
   GovernanceChange,
   MAX_UPLOAD_BYTES,
   UPLOAD_CONTENT_TYPES,
@@ -43,6 +45,7 @@ import {
 } from "./common.ts";
 import { DISCORD_WEBHOOK_URL, PushSubscriptionKeys } from "../notify.ts";
 import * as D from "./entities.ts";
+import { PORTABILITY_LIMITS } from "../portability.ts";
 
 const tag = (t: string) => ({ tags: [t] });
 const user = base.meta({ access: "user" });
@@ -253,7 +256,8 @@ export const contract = {
           summary: "Start a data export (account or channel)",
           ...tag("Compliance"),
         })
-        .input(z.object({ kind: z.enum(E.EXPORT_KINDS) }))
+        // A `bundle` export starts from `portability.bundle.create`, never here.
+        .input(z.object({ kind: z.enum(["account", "channel"]) }))
         .output(D.ExportJob),
       list: user
         .route({
@@ -566,7 +570,13 @@ export const contract = {
         summary: "Follow a channel",
         ...tag("Follows"),
       })
-      .input(ChannelRef.extend({ notify: z.boolean().default(true) }))
+      .input(
+        ChannelRef.extend({
+          notify: z.boolean().default(true),
+          /** Batch 7 decision (k): a new follow through a live move link records `source = move_link`. */
+          moveLink: z.object({ nonce: z.string().min(16).max(64) }).optional(),
+        }),
+      )
       .output(z.object({ following: z.literal(true), followerCount: z.number().int() })),
     unfollow: user
       .meta({ access: "user", scopes: ["user:manage:follows"] })
@@ -2341,7 +2351,20 @@ export const contract = {
           summary: "Bet channel points on an outcome",
           ...tag("Predictions"),
         })
-        .input(z.object({ id: Id, outcomeId: z.string(), points: z.number().int().min(1).max(250_000) }))
+        .input(
+          z.object({
+            id: Id,
+            outcomeId: z.string(),
+            points: z.number().int().min(1).max(250_000),
+            /**
+             * Batch 7 decision (v): the bettor's playhead (`playheadWallclock()`); a bet at or after
+             * `lockMediaTs`, or more than 30 s behind the live edge, is refused. Null = unknown.
+             */
+            mediaTs: Timestamp.nullable().default(null),
+            /** A `dvr` (catching-up) session cannot bet. Absent = `live`. */
+            playbackMode: z.enum(E.PLAYBACK_MODES).default("live"),
+          }),
+        )
         .output(D.PredictionView),
       lock: mod
         .meta({ access: "moderator", scopes: ["channel:manage:predictions"] })
@@ -2373,6 +2396,94 @@ export const contract = {
         })
         .input(z.object({ id: Id }))
         .output(D.PredictionView),
+    },
+    /**
+     * Giveaways (batch 7 decision (t), ADR 0039). Every procedure answers FORBIDDEN while
+     * GIVEAWAYS_ENABLED is false. Entry is free; no payment, subscription or points entry exists.
+     */
+    giveaways: {
+      current: base
+        .route({
+          method: "GET",
+          path: "/channels/{channel}/giveaways/current",
+          summary: "The open or most recent giveaway",
+          ...tag("Giveaways"),
+        })
+        .input(ChannelRef)
+        .output(D.Giveaway.nullable()),
+      open: owner
+        .meta({ access: "owner", rateLimit: "write" })
+        .route({
+          method: "POST",
+          path: "/channels/{channel}/giveaways",
+          summary: "Open a giveaway (publishes the seed commitment)",
+          ...tag("Giveaways"),
+        })
+        .input(
+          ChannelRef.extend({
+            title: z.string().min(1).max(60),
+            prize: z.string().min(1).max(200),
+            winnerCount: z.number().int().min(1).max(E.GIVEAWAY_RULES.maxWinners),
+            keyword: z
+              .string()
+              .regex(/^!?[A-Za-z0-9]{2,20}$/)
+              .nullable()
+              .default(null),
+            durationMinutes: z.number().int().min(1).max(E.GIVEAWAY_RULES.maxDurationMinutes).nullable().default(null),
+            eligibility: GiveawayEligibility.default({
+              minAccountAgeDays: 0,
+              minFollowDays: null,
+              minVerifiedWatchSeconds: 0,
+            }),
+          }),
+        )
+        .output(D.Giveaway),
+      enter: user
+        .meta({ access: "user", rateLimit: "write" })
+        .route({
+          method: "POST",
+          path: "/giveaways/{id}/entries",
+          summary: "Enter a giveaway (one entry per account)",
+          ...tag("Giveaways"),
+        })
+        .input(z.object({ id: Id }))
+        .output(D.Giveaway),
+      close: owner
+        .route({
+          method: "POST",
+          path: "/channels/{channel}/giveaways/{id}/close",
+          summary: "Close entries",
+          ...tag("Giveaways"),
+        })
+        .input(ChannelRef.extend({ id: Id }))
+        .output(D.Giveaway),
+      draw: owner
+        .route({
+          method: "POST",
+          path: "/channels/{channel}/giveaways/{id}/draw",
+          summary: "Draw the winners and reveal the seed",
+          ...tag("Giveaways"),
+        })
+        .input(ChannelRef.extend({ id: Id }))
+        .output(D.Giveaway),
+      cancel: owner
+        .route({
+          method: "POST",
+          path: "/channels/{channel}/giveaways/{id}/cancel",
+          summary: "Cancel a giveaway",
+          ...tag("Giveaways"),
+        })
+        .input(ChannelRef.extend({ id: Id }))
+        .output(D.Giveaway),
+      verify: base
+        .route({
+          method: "GET",
+          path: "/channels/{channel}/giveaways/{id}/verify",
+          summary: "Everything needed to re-run the draw",
+          ...tag("Giveaways"),
+        })
+        .input(ChannelRef.extend({ id: Id }))
+        .output(D.GiveawayVerification),
     },
     raids: {
       start: owner
@@ -3563,6 +3674,21 @@ export const contract = {
         }),
       )
       .output(z.object({ receiptId: Id, status: z.enum(E.RECEIPT_STATUSES) })),
+    /**
+     * Batch 7 decision (x): the signed purge feed. A long poll: answers at once when rows after
+     * `after` exist, otherwise holds up to `RELAY_PURGE_RULES.holdSeconds` and answers what arrived
+     * (possibly nothing, with `seq` = `after`).
+     */
+    purges: base
+      .meta({ access: "relay" })
+      .route({
+        method: "GET",
+        path: "/relay/purges",
+        summary: "Signed purge rows after a sequence number (long poll)",
+        ...tag("Relay protocol"),
+      })
+      .input(z.object({ after: z.coerce.number().int().nonnegative() }))
+      .output(D.RelayPurgeFeed),
     adminList: admin
       .route({ method: "GET", path: "/admin/relays", summary: "All relays", ...tag("Relays") })
       .input(PageInput.extend({ status: z.enum(E.RELAY_STATUSES).optional() }))
@@ -3928,6 +4054,408 @@ export const contract = {
         })
         .input(ChannelRef)
         .output(D.DiscordWebhookStatus),
+    },
+  },
+
+  // Batch 7: W3, N3, N4 (.claude/briefs/w3/contract-step.md §2.4) ---------------------------
+
+  /** Watch rooms (ADR 0017, decisions (q), (r)). Invite-only in v1; no room directory. */
+  watchRooms: {
+    create: user
+      .meta({ access: "user", rateLimit: "write" })
+      .route({
+        method: "POST",
+        path: "/channels/{channel}/watch-rooms",
+        summary: "Open a watch room on the channel's live broadcast (the band is the host's)",
+        ...tag("Watch rooms"),
+      })
+      .input(ChannelRef)
+      .output(D.WatchRoom.extend({ invite: D.WatchRoomInvite })),
+    get: user
+      .route({ method: "GET", path: "/watch-rooms/{id}", summary: "A room you belong to", ...tag("Watch rooms") })
+      .input(z.object({ id: Id }))
+      .output(D.WatchRoom),
+    invite: user
+      .meta({ access: "user", rateLimit: "write" })
+      .route({
+        method: "POST",
+        path: "/watch-rooms/{id}/invite",
+        summary: "A new invite link (host only; replaces the previous one)",
+        ...tag("Watch rooms"),
+      })
+      .input(z.object({ id: Id }))
+      .output(D.WatchRoomInvite),
+    join: user
+      .meta({ access: "user", rateLimit: "write" })
+      .route({
+        method: "POST",
+        path: "/watch-rooms/{id}/join",
+        summary: "Join with an invite: band, mature, ban, block and capacity checks",
+        ...tag("Watch rooms"),
+      })
+      .input(z.object({ id: Id, nonce: z.string().min(16).max(64) }))
+      .output(D.WatchRoomJoined),
+    leave: user
+      .route({
+        method: "POST",
+        path: "/watch-rooms/{id}/leave",
+        summary: "Leave a room (the host leaving ends it)",
+        ...tag("Watch rooms"),
+      })
+      .input(z.object({ id: Id }))
+      .output(Ok),
+    close: user
+      .route({ method: "POST", path: "/watch-rooms/{id}/close", summary: "End the room (host)", ...tag("Watch rooms") })
+      .input(z.object({ id: Id }))
+      .output(Ok),
+    mine: user
+      .route({
+        method: "GET",
+        path: "/me/watch-rooms",
+        summary: "Open rooms you host or belong to",
+        ...tag("Watch rooms"),
+      })
+      .output(z.array(D.WatchRoom)),
+  },
+
+  /** Portability (ADR 0037, decisions (j)–(p)). */
+  portability: {
+    links: {
+      list: owner
+        .meta({ access: "owner", scopes: ["channel:manage"] })
+        .route({
+          method: "GET",
+          path: "/channels/{channel}/move-links",
+          summary: "Move links and their conversions",
+          ...tag("Portability"),
+        })
+        .input(ChannelRef)
+        .output(z.array(D.MoveLink)),
+      create: owner
+        .meta({ access: "owner", scopes: ["channel:manage"], rateLimit: "write" })
+        .route({
+          method: "POST",
+          path: "/channels/{channel}/move-links",
+          summary: "Create a move link (the nonce is shown once)",
+          ...tag("Portability"),
+        })
+        .input(ChannelRef.extend({ expiresAt: Timestamp.nullable().default(null) }))
+        .output(D.MoveLinkCreated),
+      revoke: owner
+        .meta({ access: "owner", scopes: ["channel:manage"] })
+        .route({
+          method: "DELETE",
+          path: "/channels/{channel}/move-links/{id}",
+          summary: "Revoke a move link",
+          ...tag("Portability"),
+        })
+        .input(ChannelRef.extend({ id: Id }))
+        .output(D.MoveLink),
+      resolve: base
+        .route({
+          method: "GET",
+          path: "/move-links/{channel}/{nonce}",
+          summary: "The landing page of a move link",
+          ...tag("Portability"),
+        })
+        .input(ChannelRef.extend({ nonce: z.string().min(16).max(64) }))
+        .output(D.MoveLinkResolution),
+    },
+    grants: {
+      set: user
+        .meta({ access: "user", rateLimit: "write" })
+        .route({
+          method: "PUT",
+          path: "/channels/{channel}/portability-grant",
+          summary: "Ask (or stop asking) to be emailed once if the channel moves",
+          ...tag("Portability"),
+        })
+        .input(ChannelRef.extend({ enabled: z.boolean() }))
+        .output(z.object({ enabled: z.boolean() })),
+      mine: user
+        .route({
+          method: "GET",
+          path: "/me/portability-grants",
+          summary: "Channels you asked to hear from if they move",
+          ...tag("Portability"),
+        })
+        .output(z.array(D.PortabilityGrant)),
+    },
+    move: {
+      set: owner
+        .route({
+          method: "PUT",
+          path: "/channels/{channel}/moved-to",
+          summary: "Say where the channel moved (emails grant holders once)",
+          ...tag("Portability"),
+        })
+        .input(
+          ChannelRef.extend({
+            movedTo: z
+              .url({ protocol: /^https$/ })
+              .max(500)
+              .refine((u) => {
+                const p = URL.parse(u);
+                return p !== null && p.username === "" && p.password === "";
+              }, "an https URL without credentials"),
+          }),
+        )
+        .output(D.ChannelMove),
+      clear: owner
+        .route({
+          method: "DELETE",
+          path: "/channels/{channel}/moved-to",
+          summary: "Clear the moved-to notice",
+          ...tag("Portability"),
+        })
+        .input(ChannelRef)
+        .output(D.ChannelMove),
+    },
+    bundle: {
+      create: owner
+        .meta({ access: "owner", rateLimit: "expensive" })
+        .route({
+          method: "POST",
+          path: "/channels/{channel}/bundle",
+          summary: "Export the channel as a portability bundle (an export of kind bundle)",
+          ...tag("Portability"),
+        })
+        .input(ChannelRef)
+        .output(D.ExportJob),
+    },
+    imports: {
+      upload: owner
+        .meta({ access: "owner", rateLimit: "expensive" })
+        .route({
+          method: "POST",
+          path: "/channels/{channel}/imports/upload",
+          summary: "Presigned upload for a bundle archive",
+          ...tag("Portability"),
+        })
+        .input(ChannelRef.extend({ sizeBytes: z.number().int().positive().max(PORTABILITY_LIMITS.maxArchiveBytes) }))
+        .output(D.PresignedUpload),
+      preview: owner
+        .meta({ access: "owner", rateLimit: "expensive" })
+        .route({
+          method: "POST",
+          path: "/channels/{channel}/imports",
+          summary: "Parse an uploaded bundle, verify its standing statement and preview it",
+          ...tag("Portability"),
+        })
+        .input(ChannelRef.extend({ key: z.string().min(1).max(300) }))
+        .output(D.PortabilityImport),
+      start: owner
+        .meta({ access: "owner", rateLimit: "write" })
+        .route({
+          method: "POST",
+          path: "/channels/{channel}/imports/{id}/start",
+          summary: "Apply a previewed import with the chosen items",
+          ...tag("Portability"),
+        })
+        .input(
+          ChannelRef.extend({
+            id: Id,
+            choices: D.ImportChoices,
+            /** Required when emotes are chosen: the streamer asserts the right to re-host the art (ADR 0031). */
+            assertEmoteRights: z.boolean().default(false),
+          }),
+        )
+        .output(D.PortabilityImport),
+      get: owner
+        .route({
+          method: "GET",
+          path: "/channels/{channel}/imports/{id}",
+          summary: "One import and its result",
+          ...tag("Portability"),
+        })
+        .input(ChannelRef.extend({ id: Id }))
+        .output(D.PortabilityImport),
+      list: owner
+        .route({
+          method: "GET",
+          path: "/channels/{channel}/imports",
+          summary: "The channel's imports",
+          ...tag("Portability"),
+        })
+        .input(ChannelRef)
+        .output(z.array(D.PortabilityImport)),
+    },
+  },
+
+  /** The advisory jury (ADR 0038, decision (u)). It never changes an outcome. */
+  jury: {
+    optIn: user
+      .meta({ access: "user", rateLimit: "write" })
+      .route({ method: "PUT", path: "/jury/opt-in", summary: "Opt in to jury service", ...tag("Jury") })
+      .output(D.JuryStatus),
+    optOut: user
+      .route({
+        method: "DELETE",
+        path: "/jury/opt-in",
+        summary: "Opt out (from the next panel)",
+        ...tag("Jury"),
+      })
+      .output(D.JuryStatus),
+    status: user
+      .route({ method: "GET", path: "/jury/status", summary: "Your jury standing", ...tag("Jury") })
+      .output(D.JuryStatus),
+    panel: user
+      .route({ method: "GET", path: "/jury/panel", summary: "The panel you sit on now", ...tag("Jury") })
+      .output(D.JuryPanel.nullable()),
+    cases: user
+      .route({ method: "GET", path: "/jury/cases", summary: "Your panel's cases", ...tag("Jury") })
+      .output(z.array(D.JuryCase)),
+    vote: user
+      .meta({ access: "user", rateLimit: "write" })
+      .route({ method: "POST", path: "/jury/cases/{id}/vote", summary: "Vote on a case (final)", ...tag("Jury") })
+      .input(z.object({ id: Id, vote: z.enum(E.JURY_VOTES), reasonCode: z.enum(E.JURY_REASON_CODES) }))
+      .output(D.JuryCase),
+    results: base
+      .route({
+        method: "GET",
+        path: "/transparency/jury",
+        summary: "Jury agreement per clause (cells under k suppressed)",
+        ...tag("Jury"),
+      })
+      .input(z.object({ period: z.string().regex(/^\d{4}-\d{2}$/) }))
+      .output(D.JuryResults),
+    flags: {
+      list: safetyStaff
+        .route({
+          method: "GET",
+          path: "/admin/jury/flags",
+          summary: "Cases a jury majority disagreed with (for staff re-review)",
+          ...tag("Jury"),
+        })
+        .input(PageInput.extend({ open: z.boolean().default(true) }))
+        .output(page(D.JuryFlag)),
+    },
+  },
+
+  /** Twitch import (N3, ADR 0031, decision (b)). No OAuth scopes are requested. */
+  twitchImport: {
+    status: owner
+      .route({
+        method: "GET",
+        path: "/channels/{channel}/twitch-import",
+        summary: "Whether the import is available, and the latest import",
+        ...tag("Portability"),
+      })
+      .input(ChannelRef)
+      .output(D.TwitchImportStatus),
+    connect: owner
+      .meta({ access: "owner", rateLimit: "auth" })
+      .route({
+        method: "POST",
+        path: "/channels/{channel}/twitch-import/connect",
+        summary: "The Twitch authorize URL (identity only)",
+        ...tag("Portability"),
+      })
+      .input(ChannelRef)
+      .output(z.object({ authorizeUrl: z.string() })),
+    preview: owner
+      .meta({ access: "owner", rateLimit: "expensive" })
+      .route({
+        method: "POST",
+        path: "/channels/{channel}/twitch-import/preview",
+        summary: "Fetch the linked Twitch channel and preview the import",
+        ...tag("Portability"),
+      })
+      .input(ChannelRef)
+      .output(D.PortabilityImport),
+    start: owner
+      .meta({ access: "owner", rateLimit: "write" })
+      .route({
+        method: "POST",
+        path: "/channels/{channel}/twitch-import/{id}/start",
+        summary: "Apply a previewed Twitch import",
+        ...tag("Portability"),
+      })
+      .input(ChannelRef.extend({ id: Id, choices: D.ImportChoices, assertEmoteRights: z.boolean().default(false) }))
+      .output(D.PortabilityImport),
+  },
+
+  /** ActivityPub federation (N4, ADR 0030, decision (c)). */
+  federation: {
+    settings: {
+      get: owner
+        .route({
+          method: "GET",
+          path: "/channels/{channel}/federation",
+          summary: "The channel's federation settings",
+          ...tag("Federation"),
+        })
+        .input(ChannelRef)
+        .output(D.FederationSettings),
+      update: owner
+        .meta({ access: "owner", rateLimit: "write" })
+        .route({
+          method: "PATCH",
+          path: "/channels/{channel}/federation",
+          summary: "Turn federation on or off for the channel",
+          ...tag("Federation"),
+        })
+        .input(ChannelRef.extend(ChannelFederationSettingsPatch.shape))
+        .output(D.FederationSettings),
+    },
+    followers: {
+      list: owner
+        .route({
+          method: "GET",
+          path: "/channels/{channel}/federation/followers",
+          summary: "Remote followers",
+          ...tag("Federation"),
+        })
+        .input(ChannelRef.extend(PageInput.shape))
+        .output(page(D.FederationFollower)),
+      remove: owner
+        .route({
+          method: "DELETE",
+          path: "/channels/{channel}/federation/followers/{id}",
+          summary: "Remove a remote follower",
+          ...tag("Federation"),
+        })
+        .input(ChannelRef.extend({ id: Id }))
+        .output(Ok),
+    },
+    admin: {
+      blocks: {
+        list: admin
+          .route({ method: "GET", path: "/admin/federation/blocks", summary: "Blocked domains", ...tag("Federation") })
+          .output(z.array(D.FederationDomainBlock)),
+        add: admin
+          .route({ method: "POST", path: "/admin/federation/blocks", summary: "Block a domain", ...tag("Federation") })
+          .input(
+            z.object({
+              domain: z
+                .string()
+                .min(3)
+                .max(253)
+                .regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/),
+            }),
+          )
+          .output(D.FederationDomainBlock),
+        remove: admin
+          .route({
+            method: "DELETE",
+            path: "/admin/federation/blocks/{domain}",
+            summary: "Unblock a domain",
+            ...tag("Federation"),
+          })
+          .input(z.object({ domain: z.string().min(3).max(253) }))
+          .output(Ok),
+      },
+      keys: {
+        rotate: admin
+          .route({
+            method: "POST",
+            path: "/admin/federation/keys/rotate",
+            summary: "Rotate actor keys (one channel, or all)",
+            ...tag("Federation"),
+          })
+          .input(z.object({ channel: Slug.optional() }))
+          .output(z.object({ rotated: z.number().int().nonnegative() })),
+      },
     },
   },
 };

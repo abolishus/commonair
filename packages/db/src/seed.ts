@@ -172,6 +172,26 @@ export const DEFAULT_GOVERNANCE_SETTINGS = [
       "Open captions (ADR 0011): whether channels that have not chosen get live captions. A channel's own choice wins; off until the instance has capacity.",
     value: { enabled: false },
   },
+  // Batch 7 decision (u): the advisory jury ships off; the co-op votes it on.
+  {
+    key: "jury.enabled",
+    protected: false,
+    description:
+      "Advisory jury (ADR 0038): whether monthly panels of opted-in members review a sample of closed moderation cases. The jury never changes an outcome.",
+    value: { enabled: false },
+  },
+  {
+    key: "jury.panelSize",
+    protected: false,
+    description: "Advisory jury: jurors drawn for each monthly panel.",
+    value: { panelSize: 7 },
+  },
+  {
+    key: "jury.casesPerPanel",
+    protected: false,
+    description: "Advisory jury: closed cases sampled for each panel.",
+    value: { casesPerPanel: 20 },
+  },
 ] as const;
 
 export type GovernanceOverrides = Record<string, Record<string, unknown>>;

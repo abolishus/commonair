@@ -174,6 +174,8 @@ export type Key =
   | "privacy.export.kind.accountHint"
   | "privacy.export.kind.channel"
   | "privacy.export.kind.channelHint"
+  | "privacy.export.kind.bundle"
+  | "privacy.export.kind.bundleHint"
   | "privacy.export.status.queued"
   | "privacy.export.status.running"
   | "privacy.export.status.ready"

@@ -526,6 +526,40 @@ export const attestationEnv = z.object({
   }, "must be a base64 Ed25519 PKCS#8 private key (bun scripts/init-env.ts --merge)"),
 });
 
+/**
+ * Batch 7 feature flags (W3, N3, N4). Each ships off; turning one on is the operator's call
+ * (decisions (a), (b), (c)). Read through `loadEnv` by the services named on each.
+ */
+export const giveawaysEnv = z.object({
+  /** Giveaways (api, worker, chat): off, every giveaway procedure answers FORBIDDEN and the web hides them. */
+  GIVEAWAYS_ENABLED: bool.default(false),
+});
+export const twitchImportEnv = z.object({
+  /** Import from Twitch (api, worker); needs OAUTH_TWITCH_CLIENT_ID and OAUTH_TWITCH_CLIENT_SECRET too. */
+  TWITCH_IMPORT_ENABLED: bool.default(false),
+  /** Twitch Helix API base (no trailing slash); the harness points it at its mock. */
+  TWITCH_API_BASE_URL: z.url().default("https://api.twitch.tv/helix"),
+  /** Twitch OAuth base (authorize and token endpoints live under it). */
+  TWITCH_AUTH_BASE_URL: z.url().default("https://id.twitch.tv/oauth2"),
+  /** Hosts the import may fetch emote and panel images from (comma-separated host names). */
+  TWITCH_IMAGE_HOSTS: csv.default(["static-cdn.jtvnw.net"]),
+});
+export const federationEnv = z.object({
+  /** ActivityPub federation (api, worker); off, every federation route answers 404 (ADR 0030). */
+  FEDERATION_ENABLED: bool.default(false),
+});
+/**
+ * Portability standing statements (batch 7 decision (n)). **Worker only**, as with attestations:
+ * the API and the web never load this schema, so they can never sign.
+ */
+export const portabilityEnv = z.object({
+  /** Standing-statement signing key (Ed25519 PKCS#8 DER, base64). Rotate by replacing it and restarting the worker. */
+  PORTABILITY_SIGNING_KEY: z.string().refine((v) => {
+    const b = base64Bytes(v);
+    return b?.length === 48 && hexOf(b.subarray(0, 16)) === ED25519_PKCS8_PREFIX;
+  }, "must be a base64 Ed25519 PKCS#8 private key (bun scripts/init-env.ts --merge)"),
+});
+
 export const developerEnv = z.object({
   /** Allow http:// and private-network EventSub webhook callbacks. Development and harness only. */
   EVENTSUB_ALLOW_INSECURE_CALLBACKS: bool.default(false),
@@ -789,6 +823,10 @@ export const ALL_ENV_SCHEMAS = {
   dvrEnv,
   costModelEnv,
   attestationEnv,
+  giveawaysEnv,
+  twitchImportEnv,
+  federationEnv,
+  portabilityEnv,
   developerEnv,
   webPushEnv: webPushShape,
   workerEnv,

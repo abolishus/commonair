@@ -56,8 +56,12 @@ describe("expectedStatement follows the selectors table", () => {
   });
 
   test("every allowlisted action is covered", () => {
-    for (const a of ENFORCEMENT_SOURCE_ACTIONS)
-      expect(expectedStatement(row(a, { decision: "removed", listCategory: "ncii" })), a).not.toBeNull();
+    // Batch 7 contract step: allowlisted, built by B7-followups (which removes this exception).
+    const pendingB7 = ["report.resolve", "user.suspend", "channel.suspend"];
+    for (const a of ENFORCEMENT_SOURCE_ACTIONS) {
+      const e = expectedStatement(row(a, { decision: "removed", listCategory: "ncii" }));
+      expect(e === null, a).toBe(pendingB7.includes(a));
+    }
   });
 });
 

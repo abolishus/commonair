@@ -26,6 +26,13 @@ const TABLES = [
   "patronage_periods",
   "patronage_inputs",
   "patronage_allocations",
+  // Batch 7: the advisory jury.
+  "jury_optins",
+  "jury_panels",
+  "jury_seats",
+  "jury_cases",
+  "jury_votes",
+  "jury_flags",
 ] as const;
 
 export const unit: SeedUnit = {

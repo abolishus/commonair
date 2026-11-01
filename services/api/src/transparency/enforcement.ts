@@ -183,6 +183,10 @@ const TIER_OF: Readonly<Record<SourceAction, ModerationTier | null>> = {
   "moderation.t0.match": "t0",
   "ncii.decide": null,
   "ncii.auto_hide": null,
+  // Batch 7 (B7-followups builds their statements): platform actions outside the tiers.
+  "report.resolve": null,
+  "user.suspend": null,
+  "channel.suspend": null,
 };
 
 export const tierOfSource = (action: string): ModerationTier | null =>

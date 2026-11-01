@@ -182,7 +182,7 @@ describe("writeVerifiedWatch", () => {
     const gated = await liveChannel({ minVerifiedWatchSeconds: 60 });
     const guarded = await liveChannel({
       minVerifiedWatchSeconds: 0,
-      surgeGuard: { enabled: true, triggerUnverifiedRatio: 0.5, cooldownMinutes: 10 },
+      surgeGuard: { enabled: true, triggerUnverifiedRatio: 0.5, cooldownMinutes: 10, onRaid: true },
     });
     const neither = await liveChannel({ minVerifiedWatchSeconds: 0 });
     const [a, b, c] = [await user(), await user(), await user()];

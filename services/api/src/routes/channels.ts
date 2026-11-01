@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { and, desc, eq, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, lt, or } from "drizzle-orm";
 import { schema, uuidv7 } from "@commonair/db";
 import type { Deps } from "../deps.ts";
 import { broadcasterFields, emit, userFields } from "../events/outbox.ts";
@@ -182,11 +182,8 @@ export const channelsRoutes = {
         const [row] = await tx.select({ n: channels.followerCount }).from(channels).where(eq(channels.id, c.id));
         return { following: true as const, followerCount: row?.n ?? c.followerCount };
       }
-      const [row] = await tx
-        .update(channels)
-        .set({ followerCount: sql`${channels.followerCount} + 1` })
-        .where(eq(channels.id, c.id))
-        .returning({ n: channels.followerCount });
+      // The follows trigger keeps the count (decision (aa), migration 0046).
+      const [row] = await tx.select({ n: channels.followerCount }).from(channels).where(eq(channels.id, c.id));
       const [u] = await tx
         .select({ id: users.id, username: users.username, name: users.name })
         .from(users)
@@ -210,19 +207,8 @@ export const channelsRoutes = {
     const c = await channelBySlug(deps, input.channel);
     if (!c) throw notFound("Channel not found");
     const result = await deps.db.transaction(async (tx) => {
-      const [deleted] = await tx
-        .delete(follows)
-        .where(and(eq(follows.followerId, caller.user.id), eq(follows.channelId, c.id)))
-        .returning();
-      // Excluded follows were never counted, so removing one changes nothing.
-      if (deleted && deleted.excludedAt === null) {
-        const [row] = await tx
-          .update(channels)
-          .set({ followerCount: sql`greatest(${channels.followerCount} - 1, 0)` })
-          .where(eq(channels.id, c.id))
-          .returning({ n: channels.followerCount });
-        return { following: false as const, followerCount: row?.n ?? 0 };
-      }
+      // The follows trigger lowers the count for a counted (non-excluded) follow (decision (aa)).
+      await tx.delete(follows).where(and(eq(follows.followerId, caller.user.id), eq(follows.channelId, c.id)));
       const [row] = await tx.select({ n: channels.followerCount }).from(channels).where(eq(channels.id, c.id));
       return { following: false as const, followerCount: row?.n ?? 0 };
     });

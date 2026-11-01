@@ -15,9 +15,24 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
-import { ChannelCaptionsSettings, ChannelChatSettings, type ChannelTheme } from "@commonair/contracts/shapes";
+import {
+  ChannelCaptionsSettings,
+  ChannelChatSettings,
+  ChannelFederationSettings,
+  type ChannelTheme,
+} from "@commonair/contracts/shapes";
 import { users } from "./auth.ts";
-import { cents, channelRole, createdAt, id, notificationType, raidPolicy, ts, updatedAt } from "./_shared.ts";
+import {
+  cents,
+  channelRole,
+  createdAt,
+  followSource,
+  id,
+  notificationType,
+  raidPolicy,
+  ts,
+  updatedAt,
+} from "./_shared.ts";
 
 export const categories = pgTable("categories", {
   id: id(),
@@ -64,16 +79,35 @@ export const channels = pgTable(
     dvrWindowSeconds: integer().notNull().default(1800),
     /** ADR 0026 decision 4; checked at raid start and again at execute. */
     raidPolicy: raidPolicy().notNull().default("anyone"),
+    /**
+     * Batch 7 (ADR 0030, decision (c)): `{enabled}` (jsonb, parsed with `ChannelFederationSettings`,
+     * the chat and captions settings pattern). Off until the streamer turns it on.
+     */
+    federationSettings: jsonb()
+      .$type<ChannelFederationSettings>()
+      .notNull()
+      .default(ChannelFederationSettings.parse({})),
     /** Set while a broadcast is live; maintained by the ingest lifecycle hooks. */
     liveBroadcastId: uuid(),
+    /**
+     * Non-excluded follows. Maintained only by the follows trigger (migration 0046, decision (aa));
+     * a direct write is refused.
+     */
     followerCount: integer().notNull().default(0),
     suspendedAt: ts(),
     suspendedReason: text(),
+    /** Batch 7 decision (l): where the channel says it moved (an https URL) and when. */
+    movedTo: text(),
+    movedAt: ts(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
     uniqueIndex("channels_slug_uq").on(t.slug),
+    check(
+      "channels_moved_to_https",
+      sql`(${t.movedTo} is null) = (${t.movedAt} is null) and (${t.movedTo} is null or (${t.movedTo} ~ '^https://' and length(${t.movedTo}) <= 500))`,
+    ),
     index("channels_live_idx")
       .on(t.liveBroadcastId)
       .where(sql`${t.liveBroadcastId} is not null`),
@@ -153,10 +187,17 @@ export const follows = pgTable(
     notify: boolean().notNull().default(true),
     /** Set by the integrity system; excluded follows are kept but not counted. */
     excludedAt: ts(),
+    /** Batch 7 decision (k): how the follow was made; `move_link` names the link. */
+    source: followSource().notNull().default("direct"),
+    moveLinkId: uuid().references(() => moveLinks.id, { onDelete: "set null" }),
     createdAt: createdAt(),
   },
   (t) => [
     primaryKey({ columns: [t.followerId, t.channelId] }),
+    index("follows_move_link_idx")
+      .on(t.moveLinkId)
+      .where(sql`${t.moveLinkId} is not null`),
+    check("follows_move_link_source", sql`${t.moveLinkId} is null or ${t.source} = 'move_link'`),
     index("follows_channel_idx").on(t.channelId, t.createdAt),
     // The go-live fan-out pages a channel's notifying followers by follower id.
     index("follows_channel_notify_idx")
@@ -208,5 +249,52 @@ export const notifications = pgTable(
     index("notifications_go_live_channel_idx")
       .on(sql`(${t.payload}->>'channelId')`)
       .where(sql`${t.type} = 'go_live'`),
+  ],
+);
+
+/**
+ * Batch 7 move links (decision (k)): `/m/<slug>/<nonce>`, the nonce (128 random bits) stored as its
+ * SHA-256 and checked by lookup. At most `MOVE_LINK_RULES.maxActive` unrevoked links per channel
+ * (migration 0046).
+ */
+export const moveLinks = pgTable(
+  "move_links",
+  {
+    id: id(),
+    channelId: uuid()
+      .notNull()
+      .references(() => channels.id, { onDelete: "cascade" }),
+    /** Hex SHA-256 of the nonce. */
+    nonceHash: text().notNull(),
+    createdById: uuid().references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    revokedAt: ts(),
+    expiresAt: ts(),
+  },
+  (t) => [
+    uniqueIndex("move_links_nonce_hash_uq").on(t.nonceHash),
+    index("move_links_channel_idx").on(t.channelId, t.createdAt),
+    check("move_links_nonce_hash", sql`${t.nonceHash} ~ '^[0-9a-f]{64}$'`),
+  ],
+);
+
+/**
+ * Batch 7 decision (l): "tell me if they move". The worker sends one `channelMoved` email per row
+ * when the channel sets `moved_to`, then deletes the rows. The streamer never sees them.
+ */
+export const followPortabilityGrants = pgTable(
+  "follow_portability_grants",
+  {
+    userId: uuid()
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    channelId: uuid()
+      .notNull()
+      .references(() => channels.id, { onDelete: "cascade" }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.channelId] }),
+    index("follow_portability_grants_channel_idx").on(t.channelId),
   ],
 );

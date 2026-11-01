@@ -22,6 +22,10 @@ const TABLES = [
   "alert_configs",
   "goals",
   "overlay_tokens",
+  // Batch 7: giveaways.
+  "giveaways",
+  "giveaway_entries",
+  "giveaway_winners",
 ] as const;
 
 export const unit: SeedUnit = {

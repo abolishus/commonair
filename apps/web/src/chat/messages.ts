@@ -38,6 +38,11 @@ const NOTICES: Record<NoticeCode, MessageKey> = {
   subs_off: "chat.notice.subsOff",
   emote_only_on: "chat.notice.emoteOnlyOn",
   emote_only_off: "chat.notice.emoteOnlyOff",
+  room_age_band: "chat.notice.roomAgeBand",
+  room_blocked: "chat.notice.roomBlocked",
+  room_banned: "chat.notice.roomBanned",
+  room_full: "chat.notice.roomFull",
+  room_closed: "chat.notice.roomClosed",
 };
 
 /** Error frame codes services/chat sends; anything else gets the generic message. */

@@ -36,7 +36,7 @@ let svc: ChatService;
 let valkey: ValkeyClient;
 const iso = isolation();
 const clients: Client[] = [];
-const GUARD = { enabled: true, triggerUnverifiedRatio: 0.5, cooldownMinutes: 10 };
+const GUARD = { enabled: true, triggerUnverifiedRatio: 0.5, cooldownMinutes: 10, onRaid: true };
 
 beforeAll(async () => {
   t = await createTestDatabase();

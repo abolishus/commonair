@@ -10,6 +10,8 @@ import {
   dvrEnv,
   evidenceOpenEnv,
   evidenceSealEnv,
+  federationEnv,
+  giveawaysEnv,
   internalEnv,
   loadEnv,
   mailEnv,
@@ -24,6 +26,7 @@ import {
   servicePorts,
   storageEnv,
   turnEnv,
+  twitchImportEnv,
   valkeyEnv,
   webPushPublicEnv,
   workerEnv,
@@ -65,6 +68,11 @@ const SCHEMAS = [
   // `attestationEnv`: the API cannot sign attestations (decision (l)).
   dvrEnv,
   costModelEnv,
+  // Batch 7: the feature flags (decisions (a)–(c)) and the Twitch endpoints. Never
+  // `portabilityEnv`: only the worker signs standing statements (decision (n)).
+  giveawaysEnv,
+  twitchImportEnv,
+  federationEnv,
 ] as const;
 
 export type ApiEnv = z.output<typeof coreEnv> &
@@ -90,7 +98,10 @@ export type ApiEnv = z.output<typeof coreEnv> &
   z.output<typeof chatEnv> &
   z.output<typeof webPushPublicEnv> &
   z.output<typeof dvrEnv> &
-  z.output<typeof costModelEnv>;
+  z.output<typeof costModelEnv> &
+  z.output<typeof giveawaysEnv> &
+  z.output<typeof twitchImportEnv> &
+  z.output<typeof federationEnv>;
 
 /** Validate the API's whole environment; throws EnvError listing every problem across schemas. */
 export function loadApiEnv(source: Record<string, string | undefined> = process.env): ApiEnv {

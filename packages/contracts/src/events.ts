@@ -34,6 +34,7 @@ import {
   ATTESTATION_KINDS,
   SPLIT_BASES,
   SPLIT_STATUSES,
+  MEDIA_STATE_REASONS,
 } from "./enums.ts";
 
 const id = z.string();
@@ -472,6 +473,42 @@ export const EVENTS = {
       reason: z.enum(LOYALTY_REASONS),
     },
   }),
+  // Batch 7 (decision (t)): giveaways, for overlays and apps. Entrants are never listed here; the
+  // public verify page carries the pseudonyms.
+  "channel.giveaway.begin": def({
+    version: "1",
+    condition: ["broadcaster_user_id"],
+    scopes: [],
+    description: "A giveaway opened (entry is free; the seed commitment is published at open)",
+    payload: {
+      ...broadcaster,
+      id,
+      title: z.string(),
+      winner_count: z.number().int(),
+      keyword: z.string().nullable(),
+      seed_commitment: z.string(),
+      started_at: ts,
+      closes_at: ts.nullable(),
+    },
+  }),
+  "channel.giveaway.end": def({
+    version: "1",
+    condition: ["broadcaster_user_id"],
+    scopes: [],
+    description: "A giveaway was drawn or cancelled (the revealed seed lets anyone re-run the draw)",
+    payload: {
+      ...broadcaster,
+      id,
+      title: z.string(),
+      status: z.enum(["drawn", "cancelled"]),
+      entries: z.number().int(),
+      winners: z.number().int(),
+      /** Null when cancelled before the draw. */
+      seed: z.string().nullable(),
+      started_at: ts,
+      ended_at: ts,
+    },
+  }),
   "coop.proposal.update": def({
     version: "1",
     condition: [],
@@ -571,7 +608,8 @@ export const EVENTS = {
     internal: true,
     description: "Internal: surge mode started on a channel (the job or a moderator)",
     payload: {
-      trigger: z.enum(["new_sessions", "follow_burst", "moderator"]),
+      /** `raid` (batch 7 decision (w)): a raid executed into the channel with `surgeGuard.onRaid`. */
+      trigger: z.enum(["new_sessions", "follow_burst", "moderator", "raid"]),
       until: ts,
       by_user_id: id.nullable(),
     },
@@ -837,6 +875,66 @@ export const EVENTS = {
       reason: z.enum(["disarmed", "publisher_ended", "cap", "safety", "expired"]),
     },
   }),
+  // Internal (batch 7, decision (z)). Ids, enums and booleans only. The outbox hands them to
+  // `b7JobsFor` (federation fan-out, relay purges, the moved email, the inbox).
+  "media.vod.state": def({
+    version: "1",
+    condition: [],
+    scopes: [],
+    internal: true,
+    description: "Internal: a VOD became public or stopped being public (every path writes it in its transaction)",
+    payload: { vod_id: id, channel_id: id, public: z.boolean(), reason: z.enum(MEDIA_STATE_REASONS) },
+  }),
+  "media.clip.state": def({
+    version: "1",
+    condition: [],
+    scopes: [],
+    internal: true,
+    description: "Internal: a clip became public or stopped being public",
+    payload: { clip_id: id, channel_id: id, public: z.boolean(), reason: z.enum(MEDIA_STATE_REASONS) },
+  }),
+  "channel.suspension": def({
+    version: "1",
+    condition: [],
+    scopes: [],
+    internal: true,
+    description: "Internal: a channel was suspended or unsuspended (every suspension path writes it)",
+    payload: { channel_id: id, suspended: z.boolean() },
+  }),
+  "channel.moved": def({
+    version: "1",
+    condition: [],
+    scopes: [],
+    internal: true,
+    description:
+      "Internal: a channel set where it moved to (decision (l)); the worker sends the grant holders one email",
+    /** The https address the streamer published on the channel page; never a person's data. */
+    payload: { channel_id: id, moved_to: z.string() },
+  }),
+  "portability.import.finished": def({
+    version: "1",
+    condition: [],
+    scopes: [],
+    internal: true,
+    description: "Internal: a portability or Twitch import finished (done or failed)",
+    payload: { import_id: id },
+  }),
+  "jury.panel.drawn": def({
+    version: "1",
+    condition: [],
+    scopes: [],
+    internal: true,
+    description: "Internal: a jury panel's seats and cases were drawn (audit only)",
+    payload: { panel_id: id },
+  }),
+  "federation.inbox.received": def({
+    version: "1",
+    condition: [],
+    scopes: [],
+    internal: true,
+    description: "Internal: an ActivityPub inbox item passed the cheap checks and waits for the worker",
+    payload: { item_id: id },
+  }),
 } as const;
 
 export type EventType = keyof typeof EVENTS;
@@ -963,6 +1061,10 @@ export const BUS = {
    * reloads its subscriptions when another instance created or deleted one over HTTP.
    */
   eventsubControl: "bus:eventsub-control",
+  /** Batch 7 watch rooms: per-room fan-out of `room.*` server frames across chat instances. */
+  room: (roomId: string) => `room:${roomId}`,
+  /** Batch 7 watch rooms: `RoomControlMessage` (`room.close`, `room.kick`), from the API and the worker. */
+  roomControl: "bus:room-control",
 } as const;
 
 /**

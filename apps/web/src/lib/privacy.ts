@@ -21,10 +21,12 @@ export const EXPORTS_POLL_MS = 5_000;
 const KIND_KEYS: Record<ExportKind, MessageKey> = {
   account: "privacy.export.kind.account",
   channel: "privacy.export.kind.channel",
+  bundle: "privacy.export.kind.bundle",
 };
 const KIND_HINT_KEYS: Record<ExportKind, MessageKey> = {
   account: "privacy.export.kind.accountHint",
   channel: "privacy.export.kind.channelHint",
+  bundle: "privacy.export.kind.bundleHint",
 };
 const JOB_STATUS_KEYS: Record<(typeof JOB_STATUSES)[number], MessageKey> = {
   queued: "privacy.export.status.queued",
@@ -40,8 +42,14 @@ const DELETION_STATUS_KEYS: Record<(typeof DELETION_STATUSES)[number], MessageKe
 };
 
 /** `channel` only for someone who owns a channel (the API answers PRECONDITION_FAILED otherwise). */
-export function exportKinds(hasChannel: boolean): ExportKind[] {
-  return EXPORT_KINDS.filter((kind) => kind === "account" || hasChannel);
+/** What `me.exports.create` takes. */
+export type RequestableExportKind = Exclude<ExportKind, "bundle">;
+
+export function exportKinds(hasChannel: boolean): RequestableExportKind[] {
+  // A `bundle` starts from the studio (`portability.bundle.create`), never from this list.
+  return EXPORT_KINDS.filter(
+    (kind): kind is RequestableExportKind => kind === "account" || (kind === "channel" && hasChannel),
+  );
 }
 
 export function exportKindOptions(

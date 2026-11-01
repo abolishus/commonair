@@ -42,6 +42,8 @@ function row(over: Partial<PredictionRow> = {}): PredictionRow {
     startedAt: at,
     locksAt: new Date(at.getTime() + 60_000),
     lockedAt: null,
+    lockMediaTs: null,
+    resolvedById: null,
     resolvedAt: null,
     changedAt: null,
     progressAt: null,

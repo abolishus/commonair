@@ -275,6 +275,8 @@ describe("compose.yaml: configuration and secrets", () => {
       expect(env.EVIDENCE_PRIVATE_KEY, name).toBe(name === "api" ? "${EVIDENCE_PRIVATE_KEY:-}" : "");
       // Batch 6 decision (l): only the worker signs attestations.
       expect(env.INTEGRITY_SIGNING_KEY, name).toBe(name === "worker" ? "${INTEGRITY_SIGNING_KEY:-}" : "");
+      // Batch 7 decision (n): only the worker signs standing statements.
+      expect(env.PORTABILITY_SIGNING_KEY, name).toBe(name === "worker" ? "${PORTABILITY_SIGNING_KEY:-}" : "");
       expect(env.ONNXRUNTIME_NODE_INSTALL, name).toBe("skip");
       const quadlet = read(`infra/quadlet/commonair-${name}.container`);
       expect(quadlet.includes("Environment=S3_EVIDENCE_ACCESS_KEY_ID=\n"), name).toBe(name !== "worker");
@@ -599,7 +601,13 @@ describe("Quadlet mirror", () => {
           continue;
         // Per-service evidence scoping is checked by its own test above.
         // The quadlets scope these through their `.keys` lists instead.
-        if (k.startsWith("S3_EVIDENCE_") || k === "EVIDENCE_PRIVATE_KEY" || k === "INTEGRITY_SIGNING_KEY") continue;
+        if (
+          k.startsWith("S3_EVIDENCE_") ||
+          k === "EVIDENCE_PRIVATE_KEY" ||
+          k === "INTEGRITY_SIGNING_KEY" ||
+          k === "PORTABILITY_SIGNING_KEY"
+        )
+          continue;
         // Browser-facing and deployment-specific: the units read it from the operator's env file.
         if (k === "S3_PUBLIC_ENDPOINT" || k === "MEDIA_PUBLIC_URL") continue;
         // The object store: selfhost.sh writes Garage's or an external store's to the env file

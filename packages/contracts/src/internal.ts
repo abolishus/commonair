@@ -114,6 +114,22 @@ export const INTERNAL_ROUTES = {
    * state and answers a `ChatDryRunResult`, never broadcasting or saving the message.
    */
   chatDryRun: "/internal/chat/dry-run",
+  /**
+   * Batch 7 decision (p): the worker hands a fetched image to the API's upload pipeline. `POST` an
+   * `UploadCommitBody` (the image already written under `incoming/`); the API runs the same
+   * `commitUpload` a user upload runs (hash lists, T0, classifier) and answers an
+   * `UploadCommitResult`. Internal secret only.
+   */
+  uploadCommit: "/internal/uploads/commit",
+  /**
+   * Batch 7 test hooks (served only while `OPS_TEST_HOOKS=true`, otherwise 404; harness only).
+   * `POST` a `B7TickBody`: the API enqueues that job now, waits (60 s) and returns its result.
+   */
+  b7Tick: "/internal/b7/tick",
+  /** Same gate: `POST` a `WatchRoomAgeBody`: backdate a room (and end it) so retention sees it as old. */
+  watchRoomAge: "/internal/watch-rooms/age",
+  /** Same gate: `PUT` a `RelayPurgeHoldBody`: how long the purge feed holds an empty long poll (1 s in the harness). */
+  relayPurgeHold: "/internal/relay/purge-hold",
 } as const;
 
 /**
@@ -254,7 +270,15 @@ export const KEYS = {
   botCooldown: (channelId: string, command: string) => `bot:cooldown:${channelId}:${command}`,
   /**
    * ADR 0015 decision 1: STRING JSON `VerifiedWatchValue`, `SET … EX 600` by the integrity worker
-   * after each scoring pass, for channels with the gate on or the surge guard enabled.
+   * after each scoring pass, for channels with the gate on or the surge guard enabled. The key is
+   * per (channel, user); `b` in the value is the broadcast the seconds were earned on, and the gate
+   * reads it only while `b` is the channel's live broadcast.
+   *
+   * Batch 7 decision (w), the raid carry: when a raid executes, the worker writes this key for the
+   * **target** channel and each raider who was a verified watcher of the source in the last
+   * `RAID_RULES.carryMinutes`, with `b` = the target's live broadcast, `s` = the target's gate
+   * threshold, `f` = the source value's `f`, and `EX RAID_RULES.surgeMinutes * 60`. A later scoring
+   * pass may overwrite it with the raider's own standing. No separate carry key exists.
    */
   verifiedWatch: (channelId: string, userId: string) => `verified-watch:${channelId}:${userId}`,
   /** ADR 0015 decision 6: STRING JSON `SurgeOverride`, TTL `until − now + 60 s`. */
@@ -295,7 +319,38 @@ export const KEYS = {
   analyticsDisplayBypass: (channelId: string) => `analytics:display-bypass:${channelId}`,
   /** W2-dvr (ADR 0016 decision 6): cached catching-up (DVR mode) viewer count, beside `viewerCount`. */
   catchingUpCount: (channelId: string) => `catching-up-count:${channelId}`,
+  /**
+   * Batch 7 follow-up: STRING counter, `INCR` by media's frame scan for each sampled frame of a
+   * rehearsal broadcast (never a live one), `EXPIRE REHEARSAL_REPORT_TTL_SECONDS`; the rehearsal
+   * driver reads it into `RehearsalReport.moderation.samples`.
+   */
+  rehearsalModerationSamples: (broadcastId: string) => `rehearsal:moderation-samples:${broadcastId}`,
+  /**
+   * Batch 7 watch rooms (decision (q)): HASH member user id → JSON `RoomPresence` of the members
+   * connected now, across chat instances. Each instance refreshes its members' fields; the key
+   * expires `ROOM_PRESENCE_TTL_SECONDS` after the last refresh.
+   */
+  roomPresence: (roomId: string) => `room:presence:${roomId}`,
+  /**
+   * Decision (r): HASH member user id → JSON `RoomSyncReport` (the member's latest playhead). The
+   * instance that owns the room's sync tick reads it every 2 s and publishes `room.sync {target}`.
+   */
+  roomSync: (roomId: string) => `room:sync:${roomId}`,
+  /** Decision (x) test hook: STRING seconds the purge feed holds an empty long poll (absent = `RELAY_PURGE_RULES.holdSeconds`). */
+  relayPurgeHold: "relay-purge:hold",
 } as const;
+
+/** `KEYS.roomPresence` field value. Ids and times only. */
+export const RoomPresence = z.object({ instance: z.string().max(64), since: z.iso.datetime({ offset: true }) });
+export type RoomPresence = z.infer<typeof RoomPresence>;
+export const ROOM_PRESENCE_TTL_SECONDS = 60;
+/** `KEYS.roomSync` field value: the member's playhead as a wall-clock instant, its mode, and when it was reported. */
+export const RoomSyncReport = z.object({
+  playheadWallclock: z.iso.datetime({ offset: true }),
+  mode: z.enum(PLAYBACK_MODES),
+  at: z.number().int(),
+});
+export type RoomSyncReport = z.infer<typeof RoomSyncReport>;
 
 /** `KEYS.rehearsalArmed` value. Ids and times only. */
 export const RehearsalArm = z.object({
@@ -421,6 +476,16 @@ export const QUEUES = {
   analytics: "analytics",
   /** W2-rehearsal: one driver job per armed rehearsal (`REHEARSAL_JOBS`). */
   rehearsal: "rehearsal",
+  /** Batch 7: watch-room retention (`WATCH_ROOM_JOBS`). */
+  watchRooms: "watch-rooms",
+  /** Batch 7: the moved email, bundle builds and imports, Twitch imports (`PORTABILITY_JOBS`, `TWITCH_JOBS`). */
+  portability: "portability",
+  /** Batch 7: the advisory jury's draw and close (`JURY_JOBS`). */
+  jury: "jury",
+  /** Batch 7: ActivityPub inbox, delivery, fan-out, key rotation and sweeps (`FEDERATION_JOBS`). */
+  federation: "federation",
+  /** Batch 7: relay purge rows from the media-state events (`RELAY_PURGE_JOBS`). */
+  relayPurge: "relay-purge",
 } as const;
 
 // Trust & safety (ADR 0006, docs/testing/e4c-selectors.md) ---------------------------------
@@ -813,3 +878,119 @@ export const ChatDryRunResult = z.object({
   code: z.string().max(64).nullable(),
 });
 export type ChatDryRunResult = z.infer<typeof ChatDryRunResult>;
+
+// Batch 7: W3, N3, N4 (.claude/briefs/w3/contract-step.md §2.6) -----------------------------
+
+/** Jobs on `QUEUES.watchRooms`. `retention` runs daily (and on the test hook). */
+export const WATCH_ROOM_JOBS = { retention: "watch-room-retention" } as const;
+export const WatchRoomRetentionJob = z.object({});
+
+/**
+ * Jobs on `QUEUES.portability`. `moved`: on `channel.moved`, one email per grant holder, then the
+ * grants go (decision (l); `jobId = portabilityJobId("moved", eventId)`). `build`: a `bundle`
+ * export. `import`: `applyBundle` for one import.
+ */
+export const PORTABILITY_JOBS = {
+  moved: "portability-moved",
+  build: "portability-build",
+  import: "portability-import",
+} as const;
+export const PortabilityMovedJob = z.object({ channelId: z.uuid(), eventId: z.uuid() });
+export type PortabilityMovedJob = z.infer<typeof PortabilityMovedJob>;
+export const PortabilityBuildJob = z.object({ exportId: z.uuid() });
+export type PortabilityBuildJob = z.infer<typeof PortabilityBuildJob>;
+export const PortabilityImportJob = z.object({ importId: z.uuid() });
+export type PortabilityImportJob = z.infer<typeof PortabilityImportJob>;
+/** Twitch import (N3) on `QUEUES.portability`: fetch from Helix, build a `twitch` bundle, `applyBundle`. */
+export const TWITCH_JOBS = { import: "import-twitch" } as const;
+export const TwitchImportJob = z.object({ importId: z.uuid() });
+export type TwitchImportJob = z.infer<typeof TwitchImportJob>;
+/** Stable BullMQ ids (no colon: BullMQ refuses a two-part id with one). */
+export const portabilityJobId = (name: string, id: string) => `${name}-${id}`;
+
+/** Giveaways (decision (t)) on `QUEUES.interact`: the timed close, delayed to `closes_at`. */
+export const GIVEAWAY_JOBS = { close: "giveaway-close" } as const;
+export const GiveawayCloseJob = z.object({ giveawayId: z.uuid() });
+export type GiveawayCloseJob = z.infer<typeof GiveawayCloseJob>;
+
+/** Jobs on `QUEUES.jury` (decision (u)): `draw` monthly (and on the test hook), `close` 14 days after a draw. */
+export const JURY_JOBS = { draw: "jury-draw", close: "jury-close" } as const;
+export const JuryDrawJob = z.object({});
+export const JuryCloseJob = z.object({ panelId: z.uuid().optional() });
+export type JuryCloseJob = z.infer<typeof JuryCloseJob>;
+
+/**
+ * Jobs on `QUEUES.federation` (ADR 0030). `inbox`: process one inbox item (`federation.inbox.received`).
+ * `deliver`: POST one activity to one inbox. `fanout`: turn one outbox event into deliveries for a
+ * channel's followers. `rotate`: rotate actor keys older than `FEDERATION_RULES.keyRotateDays`.
+ * `sweep`: drop inbox items and failing inboxes past `FEDERATION_RULES.dropAfterDays`.
+ */
+export const FEDERATION_JOBS = {
+  inbox: "federation-inbox",
+  deliver: "federation-deliver",
+  fanout: "federation-fanout",
+  rotate: "federation-rotate",
+  sweep: "federation-sweep",
+} as const;
+export const FederationInboxJob = z.object({ itemId: z.uuid() });
+export type FederationInboxJob = z.infer<typeof FederationInboxJob>;
+export const FederationFanoutJob = z.object({ eventId: z.uuid() });
+export type FederationFanoutJob = z.infer<typeof FederationFanoutJob>;
+export const FederationDeliverJob = z.object({
+  channelId: z.uuid(),
+  /** The remote inbox (or shared inbox) URL. */
+  inbox: z.url(),
+  /** The `federation_objects` id the activity is about, or null for an `Accept` or `Reject`. */
+  objectId: z.uuid().nullable(),
+  /** The activity JSON to sign and send. */
+  activity: z.record(z.string(), z.unknown()),
+  attempt: z.number().int().min(1).default(1),
+});
+export type FederationDeliverJob = z.infer<typeof FederationDeliverJob>;
+export const FederationRotateJob = z.object({ channelId: z.uuid().optional() });
+export const FederationSweepJob = z.object({});
+export const federationJobId = (name: string, id: string) => `${name}-${id}`;
+
+/** Relay purges (decision (x)) on `QUEUES.relayPurge`: write `relay_purges` rows for one outbox event. */
+export const RELAY_PURGE_JOBS = { emit: "relay-purge" } as const;
+export const RelayPurgeEmitJob = z.object({ eventId: z.uuid() });
+export type RelayPurgeEmitJob = z.infer<typeof RelayPurgeEmitJob>;
+
+/** Body of `INTERNAL_ROUTES.uploadCommit` (decision (p)). `key` is the `incoming/` key the worker wrote. */
+export const UploadCommitBody = z.object({
+  channelId: z.uuid(),
+  userId: z.uuid(),
+  key: z.string().min(1).max(300),
+  purpose: z.enum(["panel", "emote"]),
+});
+export type UploadCommitBody = z.infer<typeof UploadCommitBody>;
+/** The published key and URL, or the same opaque refusal a user upload gets. */
+export const UploadCommitResult = z.discriminatedUnion("ok", [
+  z.object({ ok: z.literal(true), key: z.string(), url: z.string() }),
+  z.object({ ok: z.literal(false), code: z.literal("upload_rejected") }),
+]);
+export type UploadCommitResult = z.infer<typeof UploadCommitResult>;
+
+/** Jobs `INTERNAL_ROUTES.b7Tick` runs now (test hooks only). */
+export const B7_TICK_JOBS = [
+  WATCH_ROOM_JOBS.retention,
+  JURY_JOBS.draw,
+  JURY_JOBS.close,
+  GIVEAWAY_JOBS.close,
+  FEDERATION_JOBS.rotate,
+  FEDERATION_JOBS.sweep,
+] as const;
+export const B7TickBody = z.object({
+  job: z.enum(B7_TICK_JOBS),
+  /** The job's payload (validated by the job's own schema). */
+  data: z.record(z.string(), z.unknown()).default({}),
+});
+export type B7TickBody = z.infer<typeof B7TickBody>;
+export const B7JobResult = z.record(z.string(), z.number().int());
+export type B7JobResult = z.infer<typeof B7JobResult>;
+/** Body of `INTERNAL_ROUTES.watchRoomAge`: end the room (if open) and move its times this many days back. */
+export const WatchRoomAgeBody = z.object({ roomId: z.uuid(), days: z.number().int().min(1).max(365) });
+export type WatchRoomAgeBody = z.infer<typeof WatchRoomAgeBody>;
+/** Body of `INTERNAL_ROUTES.relayPurgeHold`; null restores the default. */
+export const RelayPurgeHoldBody = z.object({ seconds: z.number().int().min(1).max(25).nullable() });
+export type RelayPurgeHoldBody = z.infer<typeof RelayPurgeHoldBody>;

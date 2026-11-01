@@ -153,7 +153,7 @@ describe("internal", () => {
     expect(InteractTickBody.safeParse({ job: "membership-sync" }).success).toBe(false);
     expect(INTERNAL_ROUTES.interactTick).toBe("/internal/interact/tick");
     expect(KEYS.botCooldown("c", "hello")).toBe("bot:cooldown:c:hello");
-    expect(RAID_RULES).toEqual({ countdownSeconds: 30, cooldownSeconds: 600 });
+    expect(RAID_RULES).toEqual({ countdownSeconds: 30, cooldownSeconds: 600, surgeMinutes: 10, carryMinutes: 10 });
     expect(RAID_CANCEL_REASONS).toContain("target_refused");
   });
 });

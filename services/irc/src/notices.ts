@@ -41,6 +41,12 @@ export const NOTICE_MSG_IDS: Readonly<Record<NoticeCode, string>> = {
   subs_off: "subs_off",
   emote_only_on: "emote_only_on",
   emote_only_off: "emote_only_off",
+  // Watch rooms never reach IRC (rooms are not channels); kept by name for completeness.
+  room_age_band: "room_age_band",
+  room_blocked: "room_blocked",
+  room_banned: "room_banned",
+  room_full: "room_full",
+  room_closed: "room_closed",
 };
 
 /**

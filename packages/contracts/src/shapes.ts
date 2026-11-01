@@ -63,6 +63,11 @@ const surgeGuardFields = {
   /** Share of new sessions older than 60 s that are not gate-eligible which trips the guard. */
   triggerUnverifiedRatio: z.number().min(0.1).max(1),
   cooldownMinutes: z.number().int().min(1).max(120),
+  /**
+   * Batch 7 decision (w): a raid into this channel opens a surge (`trigger: "raid"`) for
+   * `RAID_RULES.surgeMinutes` while the guard is on. Migration 0046 backfills `true` into stored settings.
+   */
+  onRaid: z.boolean(),
 };
 const f = chatSettingFields;
 
@@ -82,8 +87,9 @@ export const ChannelChatSettings = z.object({
       enabled: surgeGuardFields.enabled.default(false),
       triggerUnverifiedRatio: surgeGuardFields.triggerUnverifiedRatio.default(0.5),
       cooldownMinutes: surgeGuardFields.cooldownMinutes.default(10),
+      onRaid: surgeGuardFields.onRaid.default(true),
     })
-    .default({ enabled: false, triggerUnverifiedRatio: 0.5, cooldownMinutes: 10 }),
+    .default({ enabled: false, triggerUnverifiedRatio: 0.5, cooldownMinutes: 10, onRaid: true }),
 });
 export type ChannelChatSettings = z.infer<typeof ChannelChatSettings>;
 
@@ -375,3 +381,45 @@ export const UPLOAD_TYPES: Record<UploadPurpose, readonly UploadContentType[]> =
 };
 /** Largest presigned upload (`sizeBytes`), for every purpose. */
 export const MAX_UPLOAD_BYTES = 10_000_000;
+
+// Batch 7: W3, N3, N4 (.claude/briefs/w3/contract-step.md §2.2) -----------------------------
+
+/**
+ * Channel federation settings (ADR 0030, decision (c)): `channels.federation_settings` (jsonb, the
+ * chat and captions settings pattern), off until the streamer turns it on. `FEDERATION_ENABLED` must
+ * also be on for the instance. Full shape with defaults; the patch shape has none.
+ */
+const federationSettingFields = {
+  enabled: z.boolean(),
+};
+export const ChannelFederationSettings = z.object({
+  enabled: federationSettingFields.enabled.default(false),
+});
+export type ChannelFederationSettings = z.infer<typeof ChannelFederationSettings>;
+export const ChannelFederationSettingsPatch = z.object(federationSettingFields).partial();
+export type ChannelFederationSettingsPatch = z.infer<typeof ChannelFederationSettingsPatch>;
+
+/**
+ * The advisory jury's governance settings (decision (u), ordinary decisions, seeded so the co-op
+ * votes the jury on). Range-checked by the database (migration 0046).
+ */
+export const JuryEnabledSetting = z.object({ enabled: z.boolean() });
+export type JuryEnabledSetting = z.infer<typeof JuryEnabledSetting>;
+export const JuryPanelSizeSetting = z.object({ panelSize: z.number().int().min(3).max(25) });
+export type JuryPanelSizeSetting = z.infer<typeof JuryPanelSizeSetting>;
+export const JuryCasesPerPanelSetting = z.object({ casesPerPanel: z.number().int().min(1).max(100) });
+export type JuryCasesPerPanelSetting = z.infer<typeof JuryCasesPerPanelSetting>;
+
+/**
+ * Giveaway eligibility (decision (t)): only account age, follow age and verified-watch seconds
+ * (ADR 0015). Strict, so a subscription, points or payment criterion cannot be expressed.
+ */
+export const GiveawayEligibility = z.strictObject({
+  /** Minimum days since signup; 0 = any. */
+  minAccountAgeDays: z.number().int().min(0).max(3650).default(0),
+  /** Minimum days following the channel; null = following not required. */
+  minFollowDays: z.number().int().min(0).max(3650).nullable().default(null),
+  /** Verified-watch seconds on this broadcast (ADR 0015); 0 = not required. */
+  minVerifiedWatchSeconds: z.number().int().min(0).max(14_400).default(0),
+});
+export type GiveawayEligibility = z.infer<typeof GiveawayEligibility>;

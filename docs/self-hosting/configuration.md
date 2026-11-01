@@ -434,6 +434,33 @@ the tables by hand. Columns:
 | ----------------------- | -------- | ------- | --------- | ------------------------------------------------------------------------------------------------------- |
 | `INTEGRITY_SIGNING_KEY` | yes      | —       | generated | Attestation signing key (Ed25519 PKCS#8 DER, base64). Rotate by replacing it and restarting the worker. |
 
+### `giveawaysEnv`
+
+| Variable            | Required | Default | Self-host | Description                                                                                            |
+| ------------------- | -------- | ------- | --------- | ------------------------------------------------------------------------------------------------------ |
+| `GIVEAWAYS_ENABLED` | no       | `false` | —         | Giveaways (api, worker, chat): off, every giveaway procedure answers FORBIDDEN and the web hides them. |
+
+### `twitchImportEnv`
+
+| Variable                | Required | Default                       | Self-host | Description                                                                                        |
+| ----------------------- | -------- | ----------------------------- | --------- | -------------------------------------------------------------------------------------------------- |
+| `TWITCH_IMPORT_ENABLED` | no       | `false`                       | —         | Import from Twitch (api, worker); needs OAUTH_TWITCH_CLIENT_ID and OAUTH_TWITCH_CLIENT_SECRET too. |
+| `TWITCH_API_BASE_URL`   | no       | `https://api.twitch.tv/helix` | —         | Twitch Helix API base (no trailing slash); the harness points it at its mock.                      |
+| `TWITCH_AUTH_BASE_URL`  | no       | `https://id.twitch.tv/oauth2` | —         | Twitch OAuth base (authorize and token endpoints live under it).                                   |
+| `TWITCH_IMAGE_HOSTS`    | no       | `static-cdn.jtvnw.net`        | —         | Hosts the import may fetch emote and panel images from (comma-separated host names).               |
+
+### `federationEnv`
+
+| Variable             | Required | Default | Self-host | Description                                                                               |
+| -------------------- | -------- | ------- | --------- | ----------------------------------------------------------------------------------------- |
+| `FEDERATION_ENABLED` | no       | `false` | —         | ActivityPub federation (api, worker); off, every federation route answers 404 (ADR 0030). |
+
+### `portabilityEnv`
+
+| Variable                  | Required | Default | Self-host | Description                                                                                                    |
+| ------------------------- | -------- | ------- | --------- | -------------------------------------------------------------------------------------------------------------- |
+| `PORTABILITY_SIGNING_KEY` | yes      | —       | generated | Standing-statement signing key (Ed25519 PKCS#8 DER, base64). Rotate by replacing it and restarting the worker. |
+
 ### `developerEnv`
 
 | Variable                               | Required | Default | Self-host | Description                                                                                                                                                                              |

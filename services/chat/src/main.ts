@@ -2,12 +2,24 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /** Chat service entry point. */
-import { chatEnv, coreEnv, databaseEnv, internalEnv, loadEnv, servicePorts, valkeyEnv } from "@commonair/config";
+import {
+  chatEnv,
+  coreEnv,
+  databaseEnv,
+  giveawaysEnv,
+  internalEnv,
+  loadEnv,
+  servicePorts,
+  valkeyEnv,
+} from "@commonair/config";
 import { createDb } from "@commonair/db";
 import { createLogger, initTelemetry } from "@commonair/observability";
 import { startChatService } from "./server.ts";
 
-const env = loadEnv(coreEnv.and(databaseEnv).and(valkeyEnv).and(internalEnv).and(servicePorts).and(chatEnv));
+// Batch 7: GIVEAWAYS_ENABLED gates the giveaway chat plugin (decision (a)).
+const env = loadEnv(
+  coreEnv.and(databaseEnv).and(valkeyEnv).and(internalEnv).and(servicePorts).and(chatEnv).and(giveawaysEnv),
+);
 const telemetry = await initTelemetry({ serviceName: env.OTEL_SERVICE_NAME ?? "chat" });
 const logger = createLogger({ service: "chat", level: env.LOG_LEVEL });
 const db = createDb({

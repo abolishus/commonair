@@ -25,6 +25,8 @@ const TABLES = [
   "broadcast_audience_totals",
   "broadcast_costs",
   "analytics_share_links",
+  // Batch 7: relay purge rows.
+  "relay_purges",
 ] as const;
 
 export const unit: SeedUnit = {
