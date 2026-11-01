@@ -50,7 +50,7 @@ export const WR = {
   report: "watch-room-report",
 } as const;
 
-/** Decision (r) targets; the step reads the median spread over the last 8 s of reports. */
+/** Decision (r) targets; the step reads the p90 spread over the last 8 s of reports. */
 export const CHROMIUM_DELTA_MS = 500;
 export const WEBKIT_DELTA_MS = 1_000;
 /** How long the members play together before the sync is measured. */
@@ -276,10 +276,10 @@ async function stepChromiumSync(run: WatchRoomRun): Promise<void> {
     Date.now(),
   );
   ctx.data("watchRoomChromiumDelta", summary);
-  ctx.metric("watch_room_chromium_delta_ms", summary.medianMs, "ms");
+  ctx.metric("watch_room_chromium_delta_ms", summary.p90Ms, "ms");
   ctx.assert(
-    t(`the members' playheads are within ${CHROMIUM_DELTA_MS} ms`),
-    summary.medianMs !== null && summary.medianMs < CHROMIUM_DELTA_MS,
+    t(`the members' playheads are within ${CHROMIUM_DELTA_MS} ms (p90 over the last 8 s)`),
+    summary.p90Ms !== null && summary.p90Ms < CHROMIUM_DELTA_MS,
     summary,
   );
   run.sync = { roomId: room.roomId, members, samples };
@@ -307,13 +307,15 @@ async function stepWebkitSync(run: WatchRoomRun): Promise<void> {
   await ctx.step(t(`play together for ${SYNC_SETTLE_MS / 1000} s`), () => sleep(SYNC_SETTLE_MS, ctx.signal));
   // WebKit against the room: the spread between it and the Chromium members.
   const worst = sync.members.map((m) => summarizeDelta(sync.samples, [m.label, "webkit"], Date.now()));
-  const medians = worst.map((s) => s.medianMs);
+  const p90s = worst.map((s) => s.p90Ms);
   ctx.data("watchRoomWebkitDelta", worst);
-  const max = medians.every((m) => m !== null) ? Math.max(...(medians as number[])) : null;
+  const max = p90s.every((m) => m !== null) ? Math.max(...(p90s as number[])) : null;
   ctx.metric("watch_room_webkit_delta_ms", max, "ms");
-  ctx.assert(t(`WebKit is within ${WEBKIT_DELTA_MS} ms of every member`), max !== null && max < WEBKIT_DELTA_MS, {
-    medians,
-  });
+  ctx.assert(
+    t(`WebKit is within ${WEBKIT_DELTA_MS} ms of every member (p90 over the last 8 s)`),
+    max !== null && max < WEBKIT_DELTA_MS,
+    { p90s },
+  );
 }
 
 /** A host with a room on the plain channel, made through the API (the refusal steps' setup). */

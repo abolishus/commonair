@@ -320,17 +320,40 @@ describe("WatchRoomDrawer", () => {
     expect(id("watch-room-input").tagName).toBe("INPUT");
     expect(id("watch-room-send").tagName).toBe("BUTTON");
     expect(id("watch-room-invite-copy").getAttribute("aria-label")).toBe(t("watchRooms.invite.copy"));
-    expect(id("watch-room-report").getAttribute("aria-label")).toBe(t("watchRooms.report"));
     fireEvent.keyDown(id("watch-room-drawer"), { key: "Escape" });
     await waitFor(() => expect(screen.queryByTestId("watch-room-drawer")).toBeNull());
   });
 
-  it("the report action opens a watch_room report on the room", async () => {
+  it("each room message offers a report action that opens a watch_room report on the room", async () => {
     const { client } = fakeClient();
-    show({ client });
+    const sockets = show({ client });
     fireEvent.click(id("watch-room-open"));
     fireEvent.click(await waitFor(() => id("watch-room-create")));
-    fireEvent.click(await waitFor(() => id("watch-room-report")));
+    await waitFor(() => id("watch-room-input"));
+    expect(screen.queryByTestId("watch-room-report")).toBeNull();
+    const s = await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+      return sockets[0]!;
+    });
+    act(() => s.emit({ op: "welcome", sessionId: "s", user: null, heartbeatMs: 30_000 }));
+    const MSG = "01890000-0000-7000-8000-00000000f002";
+    act(() =>
+      s.emit({
+        op: "room.message",
+        roomId: ROOM,
+        message: {
+          id: MSG,
+          user: { id: GUEST, username: "guest", displayName: "Guest" },
+          body: "rude",
+          createdAt: "2026-11-01T10:01:00.000Z",
+        },
+      }),
+    );
+    const action = await waitFor(() => id("watch-room-report"));
+    expect(action.dataset.messageId).toBe(MSG);
+    expect(action.getAttribute("aria-label")).toBe(t("watchRooms.report"));
+    expect(id("watch-room-message").contains(action)).toBe(true);
+    fireEvent.click(action);
     const dialog = await waitFor(() => id("report-dialog"));
     expect(dialog.dataset.subjectType).toBe("watch_room");
     expect(dialog.dataset.subjectId).toBe(ROOM);

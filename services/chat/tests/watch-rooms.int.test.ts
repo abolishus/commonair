@@ -7,7 +7,7 @@
  * persisted; the sync target is computed and capped; joins re-check the band and standing; the
  * watcher ends rooms and removes members from bus events.
  */
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vite-plus/test";
 import { BUS, type ServerFrame } from "@commonair/contracts";
 import { createTestDatabase, type TestDatabase } from "@commonair/db/testing";
@@ -155,15 +155,19 @@ describe("membership", () => {
     c.close();
   });
 
-  test("a member blocked by another member, or channel-banned, is refused at join", async () => {
+  test("a block between members does not remove either at reconnect; a channel ban does", async () => {
+    // Blocks are checked at first join only (API, ADR 0017): the host who blocks a member and
+    // refreshes keeps the room, and a member cannot end it by blocking the host.
     const r = await room();
     const m = await member(r);
-    const other = await member(r);
-    await t.db.insert(schema.userBlocks).values({ userId: other.id, blockedUserId: m.id });
-    const c = await Client.connect(a, { token: await chatToken(m.id) });
-    c.send({ op: "room.join", roomId: r.id, token: "x", nonce: "j" });
-    expect(await notice(c, "j")).toMatchObject({ code: "room_blocked" });
-    c.close();
+    await t.db.insert(schema.userBlocks).values({ userId: r.host.id, blockedUserId: m.id });
+    await t.db.insert(schema.userBlocks).values({ userId: m.id, blockedUserId: r.host.id });
+    const h = await joined(a, r.host.id, r.id);
+    const g = await joined(b, m.id, r.id);
+    const [row] = await t.db.select().from(schema.watchRooms).where(eq(schema.watchRooms.id, r.id));
+    expect(row!.endedAt).toBeNull();
+    h.close();
+    g.close();
 
     const banned = await member(r);
     await t.db.insert(schema.chatBans).values({ channelId: r.channelId, userId: banned.id });
@@ -251,6 +255,18 @@ describe("room chat", () => {
     h.close();
   });
 
+  test("the host channel's link rule applies to room messages", async () => {
+    const r = await room();
+    await t.db.execute(
+      sql`update channels set chat_settings = chat_settings || '{"linksAllowed": false}'::jsonb where id = ${r.channelId}::uuid`,
+    );
+    const m = await member(r);
+    const g = await joined(a, m.id, r.id);
+    g.send({ op: "room.send", roomId: r.id, body: "see https://example.test/x", nonce: "l" });
+    expect(await notice(g, "l")).toMatchObject({ code: "msg_links_blocked" });
+    g.close();
+  });
+
   test("a platform-banned member cannot send", async () => {
     const r = await room();
     const m = await member(r);
@@ -313,6 +329,36 @@ describe("sync", () => {
   });
 });
 
+describe("empty rooms", () => {
+  test("a room nobody is connected to ends after the wait; a member returning cancels it", async () => {
+    const iso2 = isolation();
+    const svc = await startInstance(t.db, iso2, {
+      watchRooms: (deps) => new WatchRooms({ ...deps, emptyEndMs: 400 } as WatchRoomDeps),
+    });
+    try {
+      const r = await room();
+      const c = await joined(svc, r.host.id, r.id);
+      c.close();
+      const ended = await eventually(async () => {
+        const [row] = await t.db.select().from(schema.watchRooms).where(eq(schema.watchRooms.id, r.id));
+        return row?.endedAt ? row.endReason : null;
+      }, 5000);
+      expect(ended).toBe("empty");
+
+      const back = await room();
+      const first = await joined(svc, back.host.id, back.id);
+      first.close();
+      const again = await joined(svc, back.host.id, back.id);
+      await Bun.sleep(900);
+      const [row] = await t.db.select().from(schema.watchRooms).where(eq(schema.watchRooms.id, back.id));
+      expect(row!.endedAt).toBeNull();
+      again.close();
+    } finally {
+      await svc.stop();
+    }
+  });
+});
+
 describe("watcher", () => {
   const event = (type: string, channelId: string, payload: Record<string, unknown> = {}) =>
     pub.publish(
@@ -336,6 +382,7 @@ describe("watcher", () => {
     const ch = await liveChannel();
     const minor = await room("minor", ch);
     const adult = await room("adult", ch);
+    await t.db.update(schema.users).set({ matureConfirmedAt: new Date() }).where(eq(schema.users.id, adult.host.id));
     const c = await joined(a, minor.host.id, minor.id);
     await t.db.update(schema.channels).set({ mature: true }).where(eq(schema.channels.id, ch.id));
     await event("channel.update", ch.id, { mature: true });
@@ -344,6 +391,59 @@ describe("watcher", () => {
     const [still] = await t.db.select().from(schema.watchRooms).where(eq(schema.watchRooms.id, adult.id));
     expect(still!.endedAt).toBeNull();
     c.close();
+  });
+
+  test("the channel turning mature removes unconfirmed members of adult rooms; an unconfirmed host ends it", async () => {
+    const ch = await liveChannel();
+    const r = await room("adult", ch);
+    await t.db.update(schema.users).set({ matureConfirmedAt: new Date() }).where(eq(schema.users.id, r.host.id));
+    const ok = await member(r);
+    await t.db.update(schema.users).set({ matureConfirmedAt: new Date() }).where(eq(schema.users.id, ok.id));
+    const unconfirmed = await member(r);
+    const h = await joined(a, r.host.id, r.id);
+    const g = await joined(b, unconfirmed.id, r.id);
+    const unconfirmedHost = await room("adult", ch);
+    const u = await joined(a, unconfirmedHost.host.id, unconfirmedHost.id);
+
+    await t.db.update(schema.channels).set({ mature: true }).where(eq(schema.channels.id, ch.id));
+    await event("channel.update", ch.id, { mature: true });
+    await g.waitFor((f) => f.op === "room.closed" && f.roomId === r.id);
+    expect(g.frames.some((f) => f.op === "notice" && f.code === "room_age_band")).toBe(true);
+    const closed = await u.waitFor<"room.closed">((f) => f.op === "room.closed" && f.roomId === unconfirmedHost.id);
+    expect(closed.reason).toBe("mature");
+
+    const rows = await t.db
+      .select({ userId: schema.watchRoomMembers.userId })
+      .from(schema.watchRoomMembers)
+      .where(and(eq(schema.watchRoomMembers.roomId, r.id), isNull(schema.watchRoomMembers.leftAt)));
+    expect(rows.map((x) => x.userId).sort()).toEqual([r.host.id, ok.id].sort());
+    const [kept] = await t.db.select().from(schema.watchRooms).where(eq(schema.watchRooms.id, r.id));
+    expect(kept!.endedAt).toBeNull();
+    h.close();
+    g.close();
+    u.close();
+  });
+
+  test("a host's account deletion is announced to the room's members", async () => {
+    const r = await room();
+    const m = await member(r);
+    const g = await joined(b, m.id, r.id);
+    // What the deletion transaction does: end the room and drop the host's membership.
+    await t.db
+      .update(schema.watchRooms)
+      .set({ endedAt: new Date(), endReason: "host_deleted", inviteHash: null })
+      .where(eq(schema.watchRooms.id, r.id));
+    await t.db
+      .delete(schema.watchRoomMembers)
+      .where(and(eq(schema.watchRoomMembers.roomId, r.id), eq(schema.watchRoomMembers.userId, r.host.id)));
+    await t.db.update(schema.users).set({ deletedAt: new Date() }).where(eq(schema.users.id, r.host.id));
+    await pub.publish(
+      iso.busPrefix + BUS.userControl,
+      JSON.stringify({ op: "disconnect", userId: r.host.id, reason: "deleted" }),
+    );
+    const closed = await g.waitFor<"room.closed">((f) => f.op === "room.closed" && f.roomId === r.id);
+    expect(closed.reason).toBe("host_deleted");
+    g.close();
   });
 
   test("a channel ban during the room kicks the member; banning the host ends the room", async () => {

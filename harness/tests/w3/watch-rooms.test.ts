@@ -71,8 +71,16 @@ describe("playheads and deltas", () => {
     const sum = summarizeDelta(steady, ["a", "b"], T0 + 19_000);
     expect(sum.medianMs).toBe(100);
     expect(sum.maxMs).toBe(1500);
+    // Nearest-rank p90 of 8 instants is the largest: a single sawtooth peak fails the step.
+    expect(sum.p90Ms).toBe(1500);
     expect(sum.measured).toBe(8);
-    expect(summarizeDelta({}, ["a"], T0)).toEqual({ medianMs: null, maxMs: null, measured: 0, missing: 8 });
+    expect(summarizeDelta({}, ["a"], T0)).toEqual({
+      medianMs: null,
+      p90Ms: null,
+      maxMs: null,
+      measured: 0,
+      missing: 8,
+    });
   });
 });
 

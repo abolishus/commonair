@@ -28,7 +28,7 @@
   "watchRooms.chat.rateLimited": "You're sending messages too quickly.",
   "watchRooms.chat.filtered": "Your message was not sent because it matched a channel filter.",
   "watchRooms.status.connecting": "Connecting to the room…",
-  "watchRooms.report": "Report this room",
+  "watchRooms.report": "Report this message",
   "watchRooms.reportDescription": "Platform moderators review room reports with a copy of the room's messages and members. The channel's moderators never see them.",
   "watchRooms.leave": "Leave room",
   "watchRooms.leaveTitle": "Leave this room?",

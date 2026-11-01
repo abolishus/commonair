@@ -10,6 +10,7 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { BUS, RoomControlMessage } from "@commonair/contracts";
+import { KEYS } from "@commonair/contracts/internal";
 import { schema, uuidv7, type Database } from "@commonair/db";
 import { createValkey } from "@commonair/service";
 import type { WorkerContext } from "../src/context.ts";
@@ -114,33 +115,52 @@ describe("retention", () => {
     expect(kept!.evidence).toMatchObject({ roomId: old.id, messages: [{ body: "old words" }] });
   });
 
-  test("an open room empty for 10 minutes is ended; a fresh empty one is not", async () => {
-    const stale = await room();
-    await db().insert(schema.watchRoomMembers).values({ roomId: stale.id, userId: stale.host.id });
-    await db()
-      .update(schema.watchRoomMembers)
-      .set({ leftAt: new Date(Date.now() - 11 * 60_000) })
-      .where(eq(schema.watchRoomMembers.roomId, stale.id));
-    await db()
-      .update(schema.watchRooms)
-      .set({ createdAt: new Date(Date.now() - 20 * 60_000) })
-      .where(eq(schema.watchRooms.id, stale.id));
-    const fresh = await room();
-    await db().insert(schema.watchRoomMembers).values({ roomId: fresh.id, userId: fresh.host.id });
-    await db()
-      .update(schema.watchRoomMembers)
-      .set({ leftAt: new Date() })
-      .where(eq(schema.watchRoomMembers.roomId, fresh.id));
-    const busy = await room();
-    await db().insert(schema.watchRoomMembers).values({ roomId: busy.id, userId: busy.host.id });
+  test("an open room nobody has been connected to for 10 minutes is ended; a present or fresh one is not", async () => {
+    const ago = (min: number) => new Date(Date.now() - min * 60_000);
+    /** A room created 20 min ago whose host joined then (and left `leftMin` ago, if given). */
+    const quiet = async (leftMin?: number, messageMin?: number) => {
+      const r = await room();
+      await db()
+        .insert(schema.watchRoomMembers)
+        .values({ roomId: r.id, userId: r.host.id, joinedAt: ago(20) });
+      if (messageMin !== undefined)
+        await db()
+          .insert(schema.watchRoomMessages)
+          .values({ id: uuidv7(), roomId: r.id, authorId: r.host.id, body: "hi", createdAt: ago(messageMin) });
+      if (leftMin !== undefined)
+        await db()
+          .update(schema.watchRoomMembers)
+          .set({ leftAt: ago(leftMin) })
+          .where(eq(schema.watchRoomMembers.roomId, r.id));
+      await db()
+        .update(schema.watchRooms)
+        .set({ createdAt: ago(20) })
+        .where(eq(schema.watchRooms.id, r.id));
+      return r;
+    };
+    // Everyone left 11 minutes ago.
+    const stale = await quiet(11);
+    // A closed tab: still a member (left_at null), but no chat presence.
+    const closedTab = await quiet();
+    // Still connected: chat presence is there.
+    const present = await quiet();
+    await ctx.valkey.hset(
+      KEYS.roomPresence(present.id),
+      present.host.id,
+      JSON.stringify({ instance: "i", since: new Date().toISOString() }),
+    );
+    // Left a minute ago: not yet.
+    const fresh = await quiet(1);
+    // A message 2 minutes ago keeps a room going too.
+    const talking = await quiet(11, 2);
 
     await runRetention(ctx);
-    const [s] = await db().select().from(schema.watchRooms).where(eq(schema.watchRooms.id, stale.id));
-    expect(s).toMatchObject({ endReason: "empty", inviteHash: null });
-    const [f] = await db().select().from(schema.watchRooms).where(eq(schema.watchRooms.id, fresh.id));
-    expect(f!.endedAt).toBeNull();
-    const [b] = await db().select().from(schema.watchRooms).where(eq(schema.watchRooms.id, busy.id));
-    expect(b!.endedAt).toBeNull();
+    const row = async (id: string) =>
+      (await db().select().from(schema.watchRooms).where(eq(schema.watchRooms.id, id)))[0]!;
+    expect(await row(stale.id)).toMatchObject({ endReason: "empty", inviteHash: null });
+    expect(await row(closedTab.id)).toMatchObject({ endReason: "empty" });
+    for (const r of [present, fresh, talking]) expect((await row(r.id)).endedAt).toBeNull();
+    await ctx.valkey.del(KEYS.roomPresence(present.id));
     await expect
       .poll(() => control.some((m) => m.op === "room.close" && m.roomId === stale.id && m.reason === "empty"))
       .toBe(true);

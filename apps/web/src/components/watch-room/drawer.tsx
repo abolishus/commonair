@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { CHAT_LIMITS } from "@commonair/contracts/chat";
 import type { RoomEndReason } from "@commonair/contracts/enums";
 import { ChannelAvatar, ConfirmDialog, EmptyState, IconButton, RelativeTime, StatusBadge } from "@commonair/ui";
 import { ChatComposer, ChatMessage } from "@commonair/ui/blocks/media";
@@ -483,12 +484,9 @@ function RoomBody({
       </section>
 
       <section aria-labelledby="watch-room-chat-title" className="flex min-h-0 flex-1 flex-col gap-2">
-        <div className="flex items-center justify-between gap-2">
-          <h3 id="watch-room-chat-title" className="text-xs font-medium">
-            {t("watchRooms.chat.label")}
-          </h3>
-          <RoomReport roomId={room.id} client={client} />
-        </div>
+        <h3 id="watch-room-chat-title" className="text-xs font-medium">
+          {t("watchRooms.chat.label")}
+        </h3>
         <ol
           data-testid="watch-room-chat"
           aria-live="polite"
@@ -505,6 +503,7 @@ function RoomBody({
                   body={m.body}
                   colorIndex={nameColorIndex(m.user.username)}
                   timestamp={<RelativeTime date={m.createdAt} />}
+                  actions={<RoomReport roomId={room.id} messageId={m.id} client={client} />}
                 />
               </li>
             ))
@@ -514,7 +513,7 @@ function RoomBody({
           value={draft}
           onValueChange={setDraft}
           onSubmit={onSend}
-          maxLength={500}
+          maxLength={CHAT_LIMITS.room.maxBodyLength}
           placeholder={t("watchRooms.chat.placeholder")}
           sendLabel={t("watchRooms.chat.send")}
           disabled={!connected}
@@ -566,8 +565,20 @@ function RoomBody({
   );
 }
 
-/** The room's report action: a `watch_room` report to the platform queue (ADR 0017 decision 2). */
-export function RoomReport({ roomId, client }: { roomId: string; client: WatchRoomClient }): React.JSX.Element {
+/**
+ * A room message's report action: a `watch_room` report on the room to the platform queue (ADR 0017
+ * decision 2). The report is on the room because the evidence copies the whole transcript; the
+ * message id rides along on the trigger for the harness and tests.
+ */
+export function RoomReport({
+  roomId,
+  messageId,
+  client,
+}: {
+  roomId: string;
+  messageId?: string;
+  client: WatchRoomClient;
+}): React.JSX.Element {
   const [open, setOpen] = React.useState(false);
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -576,6 +587,7 @@ export function RoomReport({ roomId, client }: { roomId: string; client: WatchRo
           <IconButton
             data-testid="watch-room-report"
             data-room-id={roomId}
+            data-message-id={messageId}
             label={t("watchRooms.report")}
             icon={Flag01Icon}
             size="icon-xs"

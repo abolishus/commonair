@@ -162,6 +162,20 @@ describe("RoomSyncDriver", () => {
     expect(sim.calls).toHaveLength(2);
   });
 
+  it("with the player's own latency, the first step lands on the target despite clock skew", () => {
+    const sim = simulatedPlayer({ offsetS: 1.5, holdBackS: 4 });
+    let holdBack = 4;
+    const player: RoomPlayer = {
+      ...sim.player,
+      setTargetLatency: (sec) => (holdBack = sim.player.setTargetLatency!(sec)),
+      latencySeconds: () => holdBack,
+    };
+    const driver = new RoomSyncDriver({ player: () => player, reducedMotion: () => false, now: sim.now });
+    expect(driver.onTarget(new Date(sim.now() - 7000).toISOString()).kind).toBe("latency");
+    expect(Math.abs(player.playheadWallclock()!.getTime() - (sim.now() - 7000))).toBeLessThanOrEqual(1);
+    expect(sim.calls).toEqual(["latency 5.50"]);
+  });
+
   it("a member joining slower moves the target, and the driver follows; leaving moves it back", () => {
     const sim = simulatedPlayer({ offsetS: 1, holdBackS: 5 });
     const driver = new RoomSyncDriver({ player: () => sim.player, reducedMotion: () => false, now: sim.now });

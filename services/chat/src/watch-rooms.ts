@@ -9,8 +9,8 @@
  *
  * - **Join.** `watchRooms.join` (API) admits a member and returns a chat token whose only scope is
  *   the room's audience. Chat then re-checks against Postgres at every (re)connect: an open room,
- *   an active membership, the band from the birth date on the database's day, mature content, the
- *   platform and channel bans, and blocks with the other members. A member who fails is removed
+ *   an active membership, the band from the birth date on the database's day, mature content, and
+ *   the platform and channel bans (blocks are checked once, at first join). A member who fails is removed
  *   (`left_at`, `room.kick`) and told why.
  * - **Send.** The member's platform standing, then the host channel's word filters (read only; a
  *   `hold` is a refusal, since nobody moderates a room), then `CHAT_LIMITS.room`. The message is
@@ -21,6 +21,7 @@
  *   events: the broadcast ends, the channel turns mature, a channel or platform ban.
  */
 import { and, eq, isNull } from "drizzle-orm";
+import { ROOM_LIMITS } from "@commonair/contracts/enums";
 import {
   CHAT_LIMITS,
   type ClientFrame,
@@ -34,10 +35,12 @@ import { verifyChatToken } from "@commonair/tokens";
 import { sql } from "drizzle-orm";
 import type { WatchRoomDeps, WatchRoomHandler } from "./core.ts";
 import { errorFields } from "./errors.ts";
+import { containsLink } from "./content.ts";
+import { isPrivileged } from "./rules.ts";
 import { type ChatSocket, sendFrame, sendNotice } from "./socket.ts";
 import type { Rejection } from "./types.ts";
-import { checkMember, removeMember, type MemberCheck } from "./watch-rooms/db.ts";
-import { parseSyncHash, SYNC_TICK_MS, syncTarget } from "./watch-rooms/sync.ts";
+import { checkMember, endRoom, removeMember, type MemberCheck } from "./watch-rooms/db.ts";
+import { EDGE_FIELD, parseEdge, parseSyncHash, SYNC_TICK_MS, syncState } from "./watch-rooms/sync.ts";
 import { RoomWatcher } from "./watch-rooms/watcher.ts";
 
 type RoomFrame<Op extends ClientFrame["op"]> = Extract<ClientFrame, { op: Op }>;
@@ -48,7 +51,7 @@ const { watchRoomMembers: wm } = schema;
 export const ROOM_BACKLOG = 50;
 
 const CLOSED: Rejection = { code: "room_closed", text: "This watch room is not available." };
-const REFUSALS: Record<Exclude<MemberCheck, "ok">, Rejection> = {
+const REFUSALS: Record<Exclude<MemberCheck, "ok"> | "blocked", Rejection> = {
   closed: CLOSED,
   age_band: { code: "room_age_band", text: "This watch room is for another age group." },
   banned: { code: "room_banned", text: "You cannot join this watch room." },
@@ -64,6 +67,8 @@ interface ExtraDeps {
   internalSecret?: string;
   /** Tests: a faster sync tick. */
   syncTickMs?: number;
+  /** Tests: a shorter empty-room wait than `ROOM_LIMITS.emptyEndMinutes`. */
+  emptyEndMs?: number;
 }
 
 interface LocalRoom {
@@ -85,6 +90,8 @@ export class WatchRooms implements WatchRoomHandler {
   private readonly tick: ReturnType<typeof setInterval>;
   private readonly watcher: RoomWatcher;
   private readonly extra: ExtraDeps;
+  /** Rooms this instance last saw empty, waiting `emptyEndMinutes` before ending them. */
+  private readonly emptyTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(private readonly d: WatchRoomDeps) {
     this.extra = d as WatchRoomDeps & ExtraDeps;
@@ -111,7 +118,7 @@ export class WatchRooms implements WatchRoomHandler {
             op: "room.kick",
             roomId: frame.roomId,
             userId,
-            reason: check.result === "banned" ? "banned" : check.result === "blocked" ? "blocked" : "age_band",
+            reason: check.result === "banned" ? "banned" : "age_band",
           });
       }
       this.d.logger.info("watch room join refused", { roomId: frame.roomId, userId, code: check.result });
@@ -130,6 +137,7 @@ export class WatchRooms implements WatchRoomHandler {
       this.local.set(frame.roomId, entry);
       await this.d.bus.acquire(this.d.bus.names.room(frame.roomId), (raw) => this.onRoomFrame(frame.roomId, raw));
     }
+    this.clearEmptyTimer(frame.roomId);
     entry.sockets.add(ws);
     ws.data.watchRooms.add(frame.roomId);
     await this.markPresent(frame.roomId, [userId]);
@@ -165,6 +173,13 @@ export class WatchRooms implements WatchRoomHandler {
       !(await this.d.limiter.hit(`room:${frame.roomId}`, userId, CHAT_LIMITS.room.perWindow, CHAT_LIMITS.windowMs, now))
     )
       return { code: "msg_ratelimit", text: "You are sending messages too quickly." };
+    // The channel's link rule applies, as in channel chat (its broadcaster and moderators may post
+    // links). The rest of the
+    // channel pipeline (`pipeline.ts`) deliberately does not: its middleware (the channel bot,
+    // giveaway entries) acts for the channel's audience. No stream-key-leak scanner is registered
+    // (`plugins/index.ts`); if one is added, run it here too.
+    if (!loaded.state.settings.linksAllowed && !isPrivileged(standing) && containsLink(frame.body))
+      return { code: "msg_links_blocked", text: "Links are not allowed in this channel." };
     const outcome = await this.d.filterRunner.run(frame.body, loaded.filters);
     // Nobody moderates a room, so a held message is refused like a blocked one.
     if (outcome.action !== "pass") {
@@ -244,7 +259,10 @@ export class WatchRooms implements WatchRoomHandler {
     void (async () => {
       await this.d.valkey.hdel(KEYS.roomPresence(msg.roomId), msg.userId);
       await this.d.valkey.hdel(KEYS.roomSync(msg.roomId), msg.userId);
-      if (entry.sockets.size === 0) await this.dropLocal(msg.roomId);
+      if (entry.sockets.size === 0) {
+        await this.dropLocal(msg.roomId);
+        this.scheduleEmptyCheck(msg.roomId);
+      }
       await this.publishState(msg.roomId);
     })().catch((err: unknown) => this.d.logger.warn("room kick cleanup failed", errorFields(err)));
   }
@@ -256,6 +274,8 @@ export class WatchRooms implements WatchRoomHandler {
 
   async close(): Promise<void> {
     clearInterval(this.tick);
+    for (const timer of this.emptyTimers.values()) clearTimeout(timer);
+    this.emptyTimers.clear();
     await this.watcher.stop();
     for (const roomId of Array.from(this.local.keys())) await this.dropLocal(roomId);
   }
@@ -280,8 +300,47 @@ export class WatchRooms implements WatchRoomHandler {
       await this.d.valkey.hdel(KEYS.roomPresence(roomId), userId);
       await this.d.valkey.hdel(KEYS.roomSync(roomId), userId);
     }
-    if (entry.sockets.size === 0) await this.dropLocal(roomId);
+    if (entry.sockets.size === 0) {
+      await this.dropLocal(roomId);
+      this.scheduleEmptyCheck(roomId);
+    }
     await this.publishState(roomId);
+  }
+
+  /**
+   * ADR 0017: a room nobody is connected to ends after `ROOM_LIMITS.emptyEndMinutes`. A closed tab
+   * never sets `left_at`, so "empty" is the shared presence hash, not membership. The instance that
+   * dropped the room's last local socket waits, then ends it if no instance has a member present.
+   * Several instances racing are fine: `endRoom` is conditional. A restart loses the timer; the
+   * retention job is the backstop.
+   */
+  private scheduleEmptyCheck(roomId: string): void {
+    this.clearEmptyTimer(roomId);
+    const wait = this.extra.emptyEndMs ?? ROOM_LIMITS.emptyEndMinutes * 60_000;
+    const timer = setTimeout(() => {
+      this.emptyTimers.delete(roomId);
+      void this.endIfEmpty(roomId).catch((err: unknown) =>
+        this.d.logger.warn("room empty check failed", { ...errorFields(err), roomId }),
+      );
+    }, wait);
+    timer.unref?.();
+    this.emptyTimers.set(roomId, timer);
+  }
+
+  private clearEmptyTimer(roomId: string): void {
+    const timer = this.emptyTimers.get(roomId);
+    if (timer === undefined) return;
+    clearTimeout(timer);
+    this.emptyTimers.delete(roomId);
+  }
+
+  private async endIfEmpty(roomId: string): Promise<void> {
+    if (this.local.has(roomId)) return;
+    if ((await this.d.valkey.hlen(KEYS.roomPresence(roomId))) > 0) return;
+    if (await endRoom(this.d.db, roomId, "empty")) {
+      this.d.logger.info("watch room ended", { roomId, reason: "empty" });
+      await this.publishControl({ op: "room.close", roomId, reason: "empty" });
+    }
   }
 
   private async dropLocal(roomId: string): Promise<void> {
@@ -388,10 +447,20 @@ export class WatchRooms implements WatchRoomHandler {
       try {
         const users = [...new Set([...entry.sockets].map((s) => s.data.identity.userId).filter((u) => u !== null))];
         await this.markPresent(roomId, users);
-        const hash = await this.d.valkey.hgetall(KEYS.roomSync(roomId));
-        const target = syncTarget({ reports: parseSyncHash(hash, parseReport), now });
-        if (target === null) continue;
-        const frame: ServerFrame = { op: "room.sync", roomId, target: new Date(target).toISOString() };
+        const key = KEYS.roomSync(roomId);
+        const hash = await this.d.valkey.hgetall(key);
+        const state = syncState({
+          reports: parseSyncHash(hash, parseReport),
+          now,
+          prevEdge: parseEdge(hash[EDGE_FIELD]),
+        });
+        if (state === null) continue;
+        await this.d.valkey
+          .multi()
+          .hset(key, EDGE_FIELD, JSON.stringify(state.edge))
+          .expire(key, ROOM_PRESENCE_TTL_SECONDS)
+          .exec();
+        const frame: ServerFrame = { op: "room.sync", roomId, target: new Date(state.target).toISOString() };
         for (const ws of entry.sockets) sendFrame(ws, frame, this.d.frameWriter);
       } catch (err) {
         this.d.logger.warn("room sync tick failed", { ...errorFields(err), roomId });

@@ -28,7 +28,7 @@
   "watchRooms.chat.rateLimited": "Estás enviando mensajes demasiado rápido.",
   "watchRooms.chat.filtered": "Tu mensaje no se envió porque coincidió con un filtro del canal.",
   "watchRooms.status.connecting": "Conectando con la sala…",
-  "watchRooms.report": "Denunciar esta sala",
+  "watchRooms.report": "Denunciar este mensaje",
   "watchRooms.reportDescription": "La moderación de la plataforma revisa las denuncias de salas con una copia de sus mensajes y miembros. La moderación del canal nunca las ve.",
   "watchRooms.leave": "Salir de la sala",
   "watchRooms.leaveTitle": "¿Salir de esta sala?",

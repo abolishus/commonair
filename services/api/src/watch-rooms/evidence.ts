@@ -11,7 +11,7 @@
  * expires 30 days after it ends. People appear by id only: the mod queue resolves usernames through
  * the existing user lookup, and account deletion can pseudonymize without rewriting the report.
  */
-import { asc, eq } from "drizzle-orm";
+import { asc, desc, eq } from "drizzle-orm";
 import { ROOM_LIMITS } from "@commonair/contracts/enums";
 import { schema, type Executor } from "@commonair/db";
 
@@ -73,10 +73,13 @@ export async function watchRoomEvidence(tx: Executor, roomId: string): Promise<W
       .select({ id: msgs.id, userId: msgs.authorId, body: msgs.body, at: msgs.createdAt })
       .from(msgs)
       .where(eq(msgs.roomId, roomId))
-      .orderBy(asc(msgs.createdAt), asc(msgs.id)),
+      // Newest first and one past the cap, so a long room is never read whole inside the report
+      // transaction; the extra row only says the transcript was truncated.
+      .orderBy(desc(msgs.createdAt), desc(msgs.id))
+      .limit(EVIDENCE_MAX_MESSAGES + 1),
   ]);
   const truncated = newest.length > EVIDENCE_MAX_MESSAGES;
-  const kept = truncated ? newest.slice(newest.length - EVIDENCE_MAX_MESSAGES) : newest;
+  const kept = newest.slice(0, EVIDENCE_MAX_MESSAGES).reverse();
   const body: WatchRoomEvidenceBody = {
     v: 1,
     roomId: room.id,

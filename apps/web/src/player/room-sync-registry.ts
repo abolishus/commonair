@@ -20,6 +20,8 @@ export interface RoomPlayerSource {
   seekToWallclock(t: Date): boolean;
   playheadWallclock(): Date | null;
   playbackMode(): "live" | "dvr";
+  /** Optional: the player's live latency in seconds (hls.js `latency`), null when unknown. */
+  latencySeconds?(): number | null;
 }
 
 const registry = new Map<string, { source: RoomPlayerSource; native: boolean }[]>();
@@ -75,6 +77,7 @@ export function roomPlayer(channel: string, doc: Document | null = globalThis.do
       playbackMode: () => s.playbackMode(),
       seekToWallclock: (t) => s.seekToWallclock(t),
       ...(top.native ? {} : { setTargetLatency: (sec: number) => s.setTargetLatency(sec) }),
+      ...(s.latencySeconds ? { latencySeconds: () => s.latencySeconds?.() ?? null } : {}),
       native: top.native,
     };
   }

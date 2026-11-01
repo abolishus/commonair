@@ -11,7 +11,7 @@ import { sql } from "drizzle-orm";
 import type { RoomEndReason } from "@commonair/contracts/enums";
 import type { Database } from "@commonair/db";
 
-export type MemberCheck = "ok" | "closed" | "age_band" | "banned" | "blocked";
+export type MemberCheck = "ok" | "closed" | "age_band" | "banned";
 
 export interface RoomInfo {
   hostId: string;
@@ -36,10 +36,14 @@ interface CheckRow extends Record<string, unknown> {
   mature_confirmed: boolean;
   platform_banned: boolean;
   channel_banned: boolean;
-  blocked: boolean;
 }
 
-/** Re-check a member at (re)connect, against the database's day. */
+/**
+ * Re-check a member at (re)connect, against the database's day. Blocks are not re-checked: they
+ * are checked once, at first join (API, under the room lock; ADR 0017). Re-checking them here
+ * would remove whichever party reconnects first, so a host who blocks a disruptive member and
+ * refreshes would lose the room, and a member could end it by blocking the host.
+ */
 export async function checkMember(db: Database, roomId: string, userId: string): Promise<CheckResult> {
   const rows = await db.execute<CheckRow>(sql`
     select r.host_id, r.channel_id, r.age_band, r.ended_at is not null as ended, c.slug,
@@ -51,11 +55,7 @@ export async function checkMember(db: Database, roomId: string, userId: string):
            (u.deleted_at is not null or (u.banned and (u.ban_expires is null or u.ban_expires > now()))) as platform_banned,
            exists (select 1 from chat_bans b
                     where b.channel_id = r.channel_id and b.user_id = u.id and b.lifted_at is null
-                      and (b.expires_at is null or b.expires_at > now())) as channel_banned,
-           exists (select 1 from watch_room_members o
-                     join user_blocks k on (k.user_id = u.id and k.blocked_user_id = o.user_id)
-                                        or (k.user_id = o.user_id and k.blocked_user_id = u.id)
-                    where o.room_id = r.id and o.left_at is null and o.user_id <> u.id) as blocked
+                      and (b.expires_at is null or b.expires_at > now())) as channel_banned
       from watch_rooms r
       join channels c on c.id = r.channel_id
       join users u on u.id = ${userId}::uuid
@@ -66,7 +66,6 @@ export async function checkMember(db: Database, roomId: string, userId: string):
   if (row.platform_banned || row.channel_banned) return { result: "banned", member };
   if (row.band === null || row.band !== row.age_band) return { result: "age_band", member };
   if (row.mature && (row.band !== "adult" || !row.mature_confirmed)) return { result: "age_band", member };
-  if (row.blocked) return { result: "blocked", member };
   return {
     result: "ok",
     member,
@@ -123,6 +122,35 @@ export async function openRoomsOnChannel(
              and age_band = 'minor' and public.commonair_room_mature(broadcast_id)`
       : sql`select id from watch_rooms where channel_id = ${channelId}::uuid and ended_at is null`,
   );
+  return rows.map((r) => r.id);
+}
+
+/**
+ * Members of the channel's open adult rooms who may no longer watch now that the broadcast is
+ * mature: anyone who has not confirmed mature viewing (the band itself is checked at join). The
+ * host comes first in each room, so the caller ends the room rather than kicking around it.
+ */
+export async function unconfirmedOnMature(
+  db: Database,
+  channelId: string,
+): Promise<{ roomId: string; userId: string; isHost: boolean }[]> {
+  const rows = await db.execute<{ room_id: string; user_id: string; is_host: boolean }>(sql`
+    select r.id as room_id, m.user_id, m.user_id = r.host_id as is_host
+      from watch_rooms r
+      join watch_room_members m on m.room_id = r.id and m.left_at is null
+      join users u on u.id = m.user_id
+     where r.channel_id = ${channelId}::uuid and r.ended_at is null and r.age_band = 'adult'
+       and public.commonair_room_mature(r.broadcast_id)
+       and u.mature_confirmed_at is null
+     order by r.id, (m.user_id = r.host_id) desc`);
+  return rows.map((r) => ({ roomId: r.room_id, userId: r.user_id, isHost: r.is_host }));
+}
+
+/** Rooms the user hosted that account deletion ended in the last hour (`host_deleted`). */
+export async function roomsEndedByHostDeletion(db: Database, userId: string): Promise<string[]> {
+  const rows = await db.execute<{ id: string }>(sql`
+    select id from watch_rooms
+     where host_id = ${userId}::uuid and end_reason = 'host_deleted' and ended_at > now() - interval '1 hour'`);
   return rows.map((r) => r.id);
 }
 

@@ -69,6 +69,11 @@ export function deltaAt(
 export interface DeltaSummary {
   /** Median spread over the instants with every member known, null when none. */
   medianMs: number | null;
+  /**
+   * 90th percentile (nearest rank) of the spread: what steps 1 and 2 assert, so a seek-only
+   * sawtooth's peaks count. With the default 8 instants it is the largest one.
+   */
+  p90Ms: number | null;
   maxMs: number | null;
   /** Instants measured and instants with a member missing. */
   measured: number;
@@ -91,11 +96,18 @@ export function summarizeDelta(
     if (d === null) missing++;
     else deltas.push(d);
   }
-  if (deltas.length === 0) return { medianMs: null, maxMs: null, measured: 0, missing };
+  if (deltas.length === 0) return { medianMs: null, p90Ms: null, maxMs: null, measured: 0, missing };
   const sorted = [...deltas].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
   const median = sorted.length % 2 === 1 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
-  return { medianMs: Math.round(median), maxMs: Math.round(sorted.at(-1)!), measured: deltas.length, missing };
+  const p90 = sorted[Math.min(sorted.length, Math.ceil(sorted.length * 0.9)) - 1]!;
+  return {
+    medianMs: Math.round(median),
+    p90Ms: Math.round(p90),
+    maxMs: Math.round(sorted.at(-1)!),
+    measured: deltas.length,
+    missing,
+  };
 }
 
 /** The `requirement` of a refused `watchRooms.*` call (an oRPC error), or null. */

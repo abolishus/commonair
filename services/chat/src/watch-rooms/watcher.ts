@@ -5,11 +5,15 @@
  * Keeps rooms consistent with the platform from bus events, not polling (ADR 0017 decisions 2–3):
  *
  * - `stream.offline` → the channel's open rooms end (`broadcast_ended`);
- * - `channel.update` → the channel's `minor` rooms whose broadcast is now mature end (`mature`);
+ * - `channel.update` → the channel's `minor` rooms whose broadcast is now mature end (`mature`); in
+ *   its adult rooms, members who never confirmed mature viewing leave (`room.kick` `age_band`), and
+ *   a room whose host never confirmed ends (`mature`);
  * - `channel.ban` (a ban or timeout) → the user leaves the channel's open rooms (`room.kick`
  *   `banned`; the host's room ends with `moderation`);
  * - `BUS.userControl` `suspended` / `deleted` → when the user is banned or deleted now, they leave
- *   every open room (`suspended`).
+ *   every open room (`suspended`). On `deleted`, the rooms account deletion already ended for the
+ *   host (`host_deleted`) are announced too: deletion runs in a transaction that cannot publish,
+ *   and it removed the host's memberships, so the member lookup would find nothing.
  *
  * Every chat instance runs it on its own subscriber connection (the shared bus gives one handler
  * per channel, and `BUS.events` already has the core's). The database updates are conditional, so
@@ -19,7 +23,16 @@ import { BUS, BusEvent, UserControlMessage, type RoomControlMessage } from "@com
 import type { ValkeyClient } from "@commonair/service";
 import type { WatchRoomDeps } from "../core.ts";
 import { errorFields } from "../errors.ts";
-import { endRoom, openRoomsOfMember, openRoomsOnChannel, platformBanned, removeMember } from "./db.ts";
+import {
+  endRoom,
+  kickMember,
+  openRoomsOfMember,
+  openRoomsOnChannel,
+  platformBanned,
+  removeMember,
+  roomsEndedByHostDeletion,
+  unconfirmedOnMature,
+} from "./db.ts";
 
 type Publish = (msg: RoomControlMessage) => Promise<void>;
 
@@ -71,6 +84,10 @@ export class RoomWatcher {
       const msg = UserControlMessage.safeParse(json);
       if (!msg.success || !msg.data.userId) return;
       if (msg.data.reason !== "suspended" && msg.data.reason !== "deleted") return;
+      if (msg.data.reason === "deleted")
+        // Closing in chat is idempotent, so every instance announcing it is harmless.
+        for (const roomId of await roomsEndedByHostDeletion(this.d.db, msg.data.userId))
+          await this.publish({ op: "room.close", roomId, reason: "host_deleted" });
       if (!(await platformBanned(this.d.db, msg.data.userId))) return;
       await this.removeEverywhere(msg.data.userId, null, "suspended");
       return;
@@ -83,10 +100,22 @@ export class RoomWatcher {
       case "stream.offline":
         for (const id of await openRoomsOnChannel(this.d.db, channelId)) await this.end(id, "broadcast_ended");
         return;
-      case "channel.update":
+      case "channel.update": {
         for (const id of await openRoomsOnChannel(this.d.db, channelId, { minorOnMature: true }))
           await this.end(id, "mature");
+        const ended = new Set<string>();
+        for (const { roomId, userId, isHost } of await unconfirmedOnMature(this.d.db, channelId)) {
+          if (ended.has(roomId)) continue;
+          if (isHost) {
+            ended.add(roomId);
+            await this.end(roomId, "mature");
+          } else if (await kickMember(this.d.db, roomId, userId)) {
+            this.d.logger.info("watch room member removed", { roomId, userId, reason: "age_band" });
+            await this.publish({ op: "room.kick", roomId, userId, reason: "age_band" });
+          }
+        }
         return;
+      }
       case "channel.ban": {
         const userId = ev.data.payload["user_id"];
         if (typeof userId === "string") await this.removeEverywhere(userId, channelId, "banned");

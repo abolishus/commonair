@@ -4,11 +4,16 @@
 /**
  * Watch-room retention (ADR 0017 decision 1): rooms ended more than `ROOM_LIMITS.retentionDays` ago
  * are deleted (members and messages cascade; a report keeps its own copy in `reports.evidence`).
- * Open rooms that have had no active member for `ROOM_LIMITS.emptyEndMinutes`, and open rooms whose
- * broadcast is no longer live (a missed bus event), are ended, and the chat instances are told over
- * `BUS.roomControl`. Deletion is batched so one run never holds a long lock.
+ * Open rooms whose broadcast is no longer live (a missed bus event) are ended, and so are open rooms
+ * nobody is connected to and nothing has happened in for `ROOM_LIMITS.emptyEndMinutes`; the chat
+ * instances are told over `BUS.roomControl`. Deletion is batched so one run never holds a long lock.
+ *
+ * "Nobody connected" is the chat presence hash (`KEYS.roomPresence`), not membership: a closed tab
+ * never sets `left_at`. Chat ends an empty room itself, `emptyEndMinutes` after its last socket
+ * leaves; this job is the backstop for a chat instance that restarted while waiting.
  */
 import { BUS, RoomControlMessage } from "@commonair/contracts";
+import { KEYS } from "@commonair/contracts/internal";
 import { ROOM_LIMITS, type RoomEndReason } from "@commonair/contracts/enums";
 import { sql } from "drizzle-orm";
 import type { WorkerContext } from "../context.ts";
@@ -53,13 +58,18 @@ async function endRooms(
 export async function runRetention(
   ctx: Pick<WorkerContext, "db" | "valkey" | "busChannel" | "logger">,
 ): Promise<Record<string, number>> {
-  const empty = await ctx.db.execute<{ id: string }>(sql`
+  // Quiet rooms: no join, leave or message for `emptyEndMinutes`. Then the presence check.
+  const quiet = await ctx.db.execute<{ id: string }>(sql`
     select r.id from watch_rooms r
      where r.ended_at is null
-       and not exists (select 1 from watch_room_members m where m.room_id = r.id and m.left_at is null)
        and greatest(r.created_at,
-                    coalesce((select max(m.left_at) from watch_room_members m where m.room_id = r.id), r.created_at))
+                    coalesce((select max(greatest(m.joined_at, coalesce(m.left_at, m.joined_at)))
+                                from watch_room_members m where m.room_id = r.id), r.created_at),
+                    coalesce((select max(x.created_at) from watch_room_messages x where x.room_id = r.id),
+                             r.created_at))
            < now() - make_interval(mins => ${ROOM_LIMITS.emptyEndMinutes})`);
+  const empty: { id: string }[] = [];
+  for (const r of quiet) if ((await ctx.valkey.exists(KEYS.roomPresence(r.id))) === 0) empty.push(r);
   const notLive = await ctx.db.execute<{ id: string }>(sql`
     select r.id from watch_rooms r
       join broadcasts b on b.id = r.broadcast_id

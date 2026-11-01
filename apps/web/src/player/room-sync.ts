@@ -50,7 +50,7 @@ export interface DriftInput {
   reducedMotion: boolean;
   /** The hold-back this driver last applied (seconds), null before its first step. */
   appliedLatency: number | null;
-  /** `now - playhead` in seconds: the base for the first step. */
+  /** The player's latency in seconds (else `now - playhead`): the base for the first step. */
   measuredLatency: number | null;
   /** Milliseconds since the last correction, null if none yet. */
   sinceLastMs: number | null;
@@ -94,8 +94,21 @@ export interface RoomPlayer {
   playbackMode(): PlaybackMode;
   /** hls.js hold-back; absent on players that cannot steer (the fallback, native). */
   setTargetLatency?(seconds: number): number;
+  /**
+   * The player's own live latency in seconds (hls.js `latency`), when it knows it. The first
+   * hold-back step uses it as its base; without it the base is `now - PDT`, which mixes the
+   * viewer's clock with the encoder's and can overshoot into a seek.
+   */
+  latencySeconds?(): number | null;
   seekToWallclock(t: Date): boolean;
   native: boolean;
+}
+
+/** The player's own latency when it reports a usable one, else the wall-clock estimate. */
+function measuredLatency(p: RoomPlayer, head: number | null, now: number): number | null {
+  const own = p.latencySeconds?.() ?? null;
+  if (own !== null && Number.isFinite(own) && own > 0) return own;
+  return head === null ? null : (now - head) / 1000;
 }
 
 export interface RoomSyncDriverDeps {
@@ -146,7 +159,7 @@ export class RoomSyncDriver {
       steer: p.setTargetLatency !== undefined,
       reducedMotion: this.deps.reducedMotion(),
       appliedLatency: this.applied,
-      measuredLatency: head === null ? null : (now - head) / 1000,
+      measuredLatency: measuredLatency(p, head, now),
       sinceLastMs: this.lastAt === null ? null : now - this.lastAt,
     });
     this.lastDriftMs = c.driftMs;
