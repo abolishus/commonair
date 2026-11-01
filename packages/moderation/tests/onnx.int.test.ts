@@ -26,5 +26,6 @@ describe("default ONNX classifier", () => {
     } finally {
       await Bun.file(wrong).delete();
     }
-  });
+    // Hashing the pinned model and starting the ONNX session takes over 5 s on a loaded CI runner.
+  }, 30_000);
 });
