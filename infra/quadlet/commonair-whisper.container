@@ -1,0 +1,48 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# Live captions' speech sidecar (ADR 0011): whisper.cpp's server in our own image
+# (infra/containers/whisper.Containerfile), two threads, the weights mounted read-only.
+#
+# Optional: selfhost.sh installs this unit only with --captions (off by default; kept in
+# commonair.env as WHISPER_URL=http://whisper:8080, which media reads). It fetches the weights
+# with the tools image's fetch-model, which checks their pinned sha256, and on amd64 it refuses
+# a CPU without AVX2, FMA and F16C: this build has no fallback and would die with SIGILL at start
+# (docs/self-hosting/captions.md). Nothing publishes its port; only media calls it.
+[Unit]
+Description=CommonAir whisper
+# Never give up on a crash loop: RestartSteps below throttles it instead (ADR 0023 §10).
+StartLimitIntervalSec=0
+
+[Container]
+Image=localhost/commonair/whisper:latest
+ContainerName=commonair-whisper
+# catatonit as PID 1 reaps orphans and forwards signals (ADR 0023 §10).
+RunInit=true
+Network=commonair.network
+NetworkAlias=whisper
+Volume=%h/.local/share/commonair/models/whisper-ggml-base-q5_1.bin:/models/ggml-base-q5_1.bin:ro,Z
+HealthCmd=CMD /usr/local/bin/whisper-health
+HealthInterval=10s
+HealthTimeout=3s
+HealthRetries=10
+HealthStartPeriod=30s
+# An unhealthy container is killed, and Restart= below starts a fresh one.
+HealthOnFailure=kill
+# Dependents start only once this container reports healthy.
+Notify=healthy
+
+[Service]
+# Leaves the cgroup as the next start needs it: RestartMode=direct skips systemd's own cleanup
+# (scripts/selfhost/cgroup-reset.sh says why).
+ExecStopPost=-/bin/sh %h/commonair/scripts/selfhost/cgroup-reset.sh
+Restart=always
+RestartMode=direct
+RestartSec=5
+# Back off 5 s → 5 min over ten consecutive restarts, so a crash loop is throttled.
+RestartSteps=10
+RestartMaxDelaySec=5min
+TimeoutStartSec=300
+
+[Install]
+WantedBy=default.target

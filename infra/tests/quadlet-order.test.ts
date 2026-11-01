@@ -150,8 +150,8 @@ describe("splitUnits: the e2e's batched `systemctl cat`", () => {
 describe("directUnits", () => {
   test("every long-running unit, and the one-shots that retry (migrate, storage-init)", () => {
     const units = directUnits();
-    // 19 long-running (quadlet.test.ts) + migrate + storage-init; irc-cert is timer-driven.
-    expect(units).toHaveLength(21);
+    // 20 long-running (quadlet.test.ts) + migrate + storage-init; irc-cert is timer-driven.
+    expect(units).toHaveLength(22);
     for (const u of ["commonair-worker", "commonair-postgres", "commonair-migrate", "commonair-storage-init"])
       expect(units).toContain(u);
     expect(units).not.toContain("commonair-irc-cert");

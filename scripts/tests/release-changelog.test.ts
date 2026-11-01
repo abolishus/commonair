@@ -3,6 +3,7 @@
 
 import { describe, expect, test } from "vite-plus/test";
 import { type Commit, GIT_LOG_FORMAT, parseCommit, parseGitLog, releaseNotes } from "../release/changelog.ts";
+import { cpuRequirementLines, cpuRequirements } from "../release/manifest.ts";
 
 let n = 0;
 const c = (subject: string, body = ""): Commit => ({ sha: (++n).toString(16).padStart(40, "0"), subject, body });
@@ -97,6 +98,43 @@ describe("releaseNotes", () => {
     expect(headings(md)).toEqual([]);
     expect(md).toContain("No changes.");
     expect(md).toContain("since v0.1.0");
+  });
+
+  test("platform requirements come last, also in an empty range; none means no section", () => {
+    const requirements = cpuRequirementLines(cpuRequirements(["linux/amd64", "linux/arm64"]));
+    const md = releaseNotes([c("feat: x")], { version: "0.2.0", previousTag: "v0.1.0", requirements });
+    expect(headings(md)).toEqual(["### Features", "### Platform requirements"]);
+    expect(md.slice(md.indexOf("### Platform requirements"))).toContain(
+      "- `whisper` on linux/amd64 needs a CPU with AVX, AVX2, FMA, F16C; selfhost.sh checks the host before it runs that image.",
+    );
+    const empty = releaseNotes([], { version: "0.2.0", previousTag: "v0.1.0", requirements });
+    expect(headings(empty)).toEqual(["### Platform requirements"]);
+    expect(headings(releaseNotes([c("feat: x")], { version: "0.2.0", previousTag: null, requirements: [] }))).toEqual([
+      "### Features",
+    ]);
+  });
+
+  test("the CLI adds the section for --platforms", () => {
+    const run = (platforms: string) =>
+      Bun.spawnSync(
+        [
+          process.execPath,
+          "release/changelog.ts",
+          "--version",
+          "0.2.0",
+          "--from",
+          "HEAD~1",
+          "--to",
+          "HEAD",
+          "--platforms",
+          platforms,
+        ],
+        { cwd: new URL("..", import.meta.url).pathname },
+      );
+    const both = run("linux/amd64,linux/arm64");
+    expect(both.exitCode).toBe(0);
+    expect(both.stdout.toString()).toContain("`whisper` on linux/amd64 needs a CPU with AVX, AVX2");
+    expect(run("linux/arm64").stdout.toString()).not.toContain("### Platform requirements");
   });
 
   test("DCO and Co-Authored-By trailers never reach the notes", () => {

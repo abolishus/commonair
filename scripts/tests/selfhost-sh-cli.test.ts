@@ -330,7 +330,10 @@ describe("install", () => {
 
   test("pulls every image of the release by digest", () => {
     const pulls = h.calls().filter((c) => c.startsWith("podman pull"));
-    const units = readdirSync(join(h.home, "commonair/quadlet")).filter((f) => f.endsWith(".container"));
+    // Every unit this install runs: the whisper sidecar only with --captions (selfhost-sh-captions).
+    const units = readdirSync(join(h.home, "commonair/quadlet")).filter(
+      (f) => f.endsWith(".container") && f !== "commonair-whisper.container",
+    );
     const images = new Set(
       units.flatMap((f) =>
         [...readFileSync(join(h.home, "commonair/quadlet", f), "utf8").matchAll(/^Image=(.*)$/gm)].map((m) => m[1]!),
@@ -352,7 +355,9 @@ describe("install", () => {
 
   test("installs the units and timers, reloads, migrates first, then starts the stack", () => {
     expect(readdirSync(join(h.home, ".config/containers/systemd")).sort()).toEqual(
-      readdirSync(join(h.home, "commonair/quadlet")).sort(),
+      readdirSync(join(h.home, "commonair/quadlet"))
+        .filter((f) => f !== "commonair-whisper.container")
+        .sort(),
     );
     expect(readdirSync(join(h.home, ".config/systemd/user")).sort()).toEqual(
       readdirSync(join(ROOT, "infra/systemd")).sort(),

@@ -37,6 +37,14 @@ describe("assembleManifest", () => {
     expect(formatManifest(m).endsWith("}\n")).toBe(true);
   });
 
+  test("whisper is released, and the manifest says what its amd64 image needs of the CPU", () => {
+    expect(assembleManifest(input()).images.whisper).toEqual({ digest: digest(RELEASE_IMAGES.indexOf("whisper") + 1) });
+    expect(assembleManifest(input()).cpu).toEqual({ whisper: { "linux/amd64": ["avx", "avx2", "fma", "f16c"] } });
+    // An arm64-only release has no such requirement to state.
+    expect(assembleManifest(input({ platforms: ["linux/arm64"] })).cpu).toEqual({});
+    expect(() => assembleManifest(input({ digests: { ...allDigests(), whisper: "" } }))).toThrow("whisper");
+  });
+
   test("digest files are read from a directory, whitespace trimmed", () => {
     for (const [name, d] of Object.entries(allDigests())) writeFileSync(join(dir, `${name}.digest`), `${d}\n`);
     writeFileSync(join(dir, "notes.txt"), "ignored");

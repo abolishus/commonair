@@ -288,7 +288,11 @@ const envOf = (h: Host) =>
       .map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1)]),
   );
 const installedUnits = (h: Host) => readdirSync(join(h.home, ".config/containers/systemd")).sort();
-const releaseUnits = (h: Host) => readdirSync(join(h.home, "commonair/quadlet")).sort();
+// Captions are off here, so the release's whisper unit is never installed (selfhost-sh-captions).
+const releaseUnits = (h: Host) =>
+  readdirSync(join(h.home, "commonair/quadlet"))
+    .filter((f) => f !== "commonair-whisper.container")
+    .sort();
 const expectOk = (r: { code: number; out: string; err: string }) => expect(r.code, `${r.out}\n${r.err}`).toBe(0);
 const exampleKeys = readFileSync(join(ROOT, ".env.example"), "utf8")
   .split("\n")

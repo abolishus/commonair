@@ -8,7 +8,7 @@ import { gunzipSync } from "node:zlib";
 import { beforeAll, describe, expect, test } from "vite-plus/test";
 import { SITE } from "../../packages/config/src/site.ts";
 import { DEFAULT_REGISTRY, RELEASE_IMAGES, bundleAssetName, imageRef, parseManifest } from "../release/manifest.ts";
-import { buildBundle } from "../selfhost/bundle.ts";
+import { buildBundle, cpuEnvLines, releaseEnv } from "../selfhost/bundle.ts";
 import { gzipReproducible, tar } from "../selfhost/tar.ts";
 
 const ROOT = new URL("../../", import.meta.url).pathname;
@@ -158,12 +158,15 @@ describe("bundle contents", () => {
         "%h/.local/share/commonair/moderation/csam.pdq",
         "%h/.local/share/commonair/moderation/ncii.pdq",
         "%h/.local/share/commonair/models/adamcodd-vit-base-nsfw-detector-8587de99-int8.onnx",
+        "%h/.local/share/commonair/models/whisper-ggml-base-q5_1.bin",
         "%h/.config/commonair/irc-tls",
       ]),
     );
-    // prepare_mounts: *.pdq → empty file, *.onnx → fetch-model, anything else → directory.
+    // prepare_mounts: *.pdq → empty file, *.onnx and *.bin → fetch-model (moderation, captions),
+    // anything else → directory.
     expect(sh).toMatch(/\*\.pdq\)/);
-    expect(sh).toMatch(/\*\.onnx\) fetch_model/);
+    expect(sh).toMatch(/\*\.onnx\) fetch_model "\$_rel" "\$_path" moderation /);
+    expect(sh).toMatch(/\*\.bin\) fetch_model "\$_rel" "\$_path" captions /);
     expect(sh).toMatch(/\*\) mkdir -p "\$_path"/);
   });
 
@@ -201,6 +204,20 @@ describe("bundle contents", () => {
         "",
       ].join("\n"),
     );
+  });
+
+  test("release.env carries the manifest's CPU requirements for selfhost.sh's captions check", () => {
+    const m = parseManifest(manifestJson({ cpu: { whisper: { "linux/amd64": ["avx", "avx2", "fma", "f16c"] } } }));
+    expect(cpuEnvLines(m)).toEqual(["COMMONAIR_CPU_WHISPER_AMD64=avx,avx2,fma,f16c"]);
+    expect(releaseEnv(m, DEFAULT_REGISTRY)).toMatch(/\nCOMMONAIR_CPU_WHISPER_AMD64=avx,avx2,fma,f16c\n$/);
+    expect(cpuEnvLines(parseManifest(manifestJson()))).toEqual([]);
+    const dashed = parseManifest(manifestJson({ cpu: { "otel-collector": { "linux/arm64": ["sve"] } } }));
+    expect(cpuEnvLines(dashed)).toEqual(["COMMONAIR_CPU_OTEL_COLLECTOR_ARM64=sve"]);
+  });
+
+  test("the whisper unit ships rendered; selfhost.sh installs it only with captions on", () => {
+    const m = parseManifest(manifestJson());
+    expect(text("quadlet/commonair-whisper.container")).toContain(`Image=${imageRef(m, "whisper")}\n`);
   });
 
   test("bundled tools carry the licenses of the npm code inside them", () => {
