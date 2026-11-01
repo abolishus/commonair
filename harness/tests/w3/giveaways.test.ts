@@ -3,7 +3,7 @@
 
 /** The `giveaway` extension's pure helpers: the harness's own re-run of the draw, and refusal reasons. */
 import { describe, expect, it } from "vite-plus/test";
-import { commit, draw, newSeed } from "../../../packages/draw/src/index.ts";
+import { commit, draw, newSeed } from "@commonair/draw";
 import { reasonOf, rerunDraw, type Verification, winnersAreFirstDrawn } from "../../src/w3/giveaways.ts";
 
 const entries = Array.from({ length: 5 }, (_, i) => `${i}`.repeat(64)).sort();

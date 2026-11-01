@@ -21,8 +21,8 @@ describe("n4 web steps", () => {
   test("select by ids the web renders, documented unless they are the shared confirm or a web extra", () => {
     const ids = Object.values(FEDERATION_IDS);
     const ownIds = ids.filter((id) => id !== "confirm-dialog-confirm");
-    // Web extras awaiting their b7-selectors.md rows (contract request).
-    const extras = new Set(["confirm-dialog-confirm", "federation-followers-more", "federation-block-confirm"]);
+    // The shared ConfirmDialog's button: named in the dialog rows, never a row of its own.
+    const extras = new Set(["confirm-dialog-confirm"]);
     const documented = ids.filter((id) => !extras.has(id));
     const rendered = (id: string) =>
       webSource.includes(`data-testid="${id}"`) || webSource.includes(`"data-testid": "${id}"`);

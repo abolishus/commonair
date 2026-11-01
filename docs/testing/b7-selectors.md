@@ -236,41 +236,47 @@ Units build on these and never edit `chat/interact/{state,client,use-chat-intera
 
 ### Twitch import (N3-import)
 
-| Test id                 | Element and attributes                                                         |
-| ----------------------- | ------------------------------------------------------------------------------ |
-| `import-page`           | The `/import` page container                                                   |
-| `import-unavailable`    | The unavailable state (no credentials, or the flag off)                        |
-| `import-connect`        | Connect (`twitchImport.connect`)                                               |
-| `import-preview`        | The preview; `data-import-id`, `data-expires-at`                               |
-| `import-field`          | A channel field and its checkbox; `data-field`, `data-state` `on`/`off`        |
-| `import-emote`          | An emote; `data-code`, `data-tier`, `data-skip-reason` (empty when importable) |
-| `import-schedule`       | The schedule, "carried, not applied"                                           |
-| `import-mature`         | The mature suggestion                                                          |
-| `import-assertion`      | The emote-art assertion checkbox; `data-version`                               |
-| `import-start`          | Starts the import (`twitchImport.start`)                                       |
-| `import-progress`       | Progress while the job runs; `data-status`                                     |
-| `import-result-item`    | A result item; `data-kind`, `data-ref`, `data-outcome`, `data-reason`          |
-| `import-panels-paste`   | The panel paste-in textarea                                                    |
-| `import-panels-preview` | The live preview (`panelPaste`); `data-count`                                  |
-| `import-panels-save`    | Saves through `channels.setPanels`                                             |
+| Test id                 | Element and attributes                                                                         |
+| ----------------------- | ---------------------------------------------------------------------------------------------- |
+| `import-page`           | The `/import` page container                                                                   |
+| `import-unavailable`    | The unavailable state (no credentials, or the flag off)                                        |
+| `import-connect`        | Connect (`twitchImport.connect`)                                                               |
+| `import-preview`        | The preview; `data-import-id`, `data-expires-at`                                               |
+| `import-field`          | A channel field and its checkbox; `data-field` (today one, `channel`), `data-state` `on`/`off` |
+| `import-emote`          | An emote; `data-code`, `data-tier`, `data-skip-reason` (empty when importable)                 |
+| `import-schedule`       | The schedule, "carried, not applied"                                                           |
+| `import-mature`         | The mature suggestion                                                                          |
+| `import-assertion`      | The emote-art assertion checkbox; `data-version`                                               |
+| `import-start`          | Starts the import (`twitchImport.start`)                                                       |
+| `import-progress`       | Progress while the job runs; `data-status`                                                     |
+| `import-result-item`    | A result item; `data-kind`, `data-ref`, `data-outcome`, `data-reason`                          |
+| `import-panels-paste`   | The panel paste-in textarea                                                                    |
+| `import-panels-preview` | The live preview (`panelPaste`); `data-count`                                                  |
+| `import-panels-save`    | Saves through `channels.setPanels`                                                             |
 
 ### Federation (N4-web)
 
-| Test id                      | Element and attributes                                                          |
-| ---------------------------- | ------------------------------------------------------------------------------- |
-| `federation-settings`        | The `/dashboard` section; absent while `features.federation` is false           |
-| `federation-enabled`         | The on/off switch; `data-state` `on`/`off` (off asks through a `ConfirmDialog`) |
-| `federation-handle`          | The `@slug@domain` handle, with its copy `IconButton`; `data-handle`            |
-| `federation-followers`       | The remote follower list (`EmptyState` with none)                               |
-| `federation-follower`        | A follower (handle and server as text); `data-follower-id`                      |
-| `federation-follower-remove` | Removes a follower (with confirmation)                                          |
-| `federation-admin-page`      | The `/admin/federation` page container                                          |
-| `federation-block-domain`    | The domain input                                                                |
-| `federation-block-add`       | Adds a domain block                                                             |
-| `federation-blocks`          | The domain block list                                                           |
-| `federation-block`           | A block; `data-domain`                                                          |
-| `federation-block-remove`    | Removes a block (with confirmation)                                             |
-| `federation-keys-rotate`     | "Rotate all keys" (with confirmation)                                           |
+| Test id                      | Element and attributes                                                                                  |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `federation-settings`        | The `/dashboard` section; absent while `features.federation` is false                                   |
+| `federation-enabled`         | The on/off switch; `data-state` `on`/`off` (off asks through a `ConfirmDialog`)                         |
+| `federation-handle`          | The `@slug@domain` handle, with its copy `IconButton`; `data-handle`                                    |
+| `federation-handle-copy`     | The handle's copy `IconButton`                                                                          |
+| `federation-off-confirm`     | The "turn off" `ConfirmDialog`                                                                          |
+| `federation-followers`       | The remote follower list (`EmptyState` with none)                                                       |
+| `federation-followers-more`  | Loads the next page of followers                                                                        |
+| `federation-follower`        | A follower (handle and server as text); `data-follower-id`, `data-actor` (the remote actor id, as text) |
+| `federation-follower-remove` | Removes a follower (with confirmation)                                                                  |
+| `federation-admin-page`      | The `/admin/federation` page container                                                                  |
+| `federation-admin-off`       | The admin page's "federation is off, here is how to enable it" card                                     |
+| `federation-block-domain`    | The domain input                                                                                        |
+| `federation-block-error`     | The domain input's validation error                                                                     |
+| `federation-block-add`       | Adds a domain block (asks through `federation-block-confirm`)                                           |
+| `federation-block-confirm`   | The "block this domain?" `ConfirmDialog` (confirm with `confirm-dialog-confirm`)                        |
+| `federation-blocks`          | The domain block list                                                                                   |
+| `federation-block`           | A block; `data-domain`                                                                                  |
+| `federation-block-remove`    | Removes a block (with confirmation)                                                                     |
+| `federation-keys-rotate`     | "Rotate all keys" (with confirmation)                                                                   |
 
 ## Scenarios
 

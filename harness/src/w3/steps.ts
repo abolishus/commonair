@@ -78,8 +78,8 @@ export const FEDERATION_STEP_NUMBERS: readonly FederationStep[] = [1, 2, 3, 4, 5
  */
 export const PENDING_WATCH_ROOM_STEPS: readonly WatchRoomStep[] = [];
 export const PENDING_PORTABILITY_STEPS: readonly PortabilityStep[] = [];
-export const PENDING_TWITCH_IMPORT_STEPS: readonly TwitchImportStep[] = [1, 2, 3, 4, 5, 6, 7, 8];
-export const PENDING_FEDERATION_STEPS: readonly FederationStep[] = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+export const PENDING_TWITCH_IMPORT_STEPS: readonly TwitchImportStep[] = [];
+export const PENDING_FEDERATION_STEPS: readonly FederationStep[] = [];
 
 /** The WebKit member joins the room step 1 opened; every refusal sets up its own room. */
 export const WATCH_ROOM_STEP_PREREQUISITES: Readonly<Record<WatchRoomStep, readonly WatchRoomStep[]>> = {
@@ -198,14 +198,7 @@ export const W3_EXTENSION_UNITS: Readonly<Record<W3Extension, { unit: string; fi
  * Steps whose implementing unit has not merged yet: selectable explicitly (`--set w3=giveaway`)
  * but left out of `all`.
  */
-export const PENDING_W3_EXTENSIONS: readonly W3Extension[] = [
-  "dvr-relay",
-  "dvr-purge",
-  "relay-vtt",
-  "sor-resolve",
-  "group-appeal-threshold",
-  "moderation-samples",
-];
+export const PENDING_W3_EXTENSIONS: readonly W3Extension[] = [];
 
 /** The purge check evicts a DVR segment the relay cached for `dvr-relay`'s rewinding viewer. */
 export const W3_EXTENSION_PREREQUISITES: Readonly<Record<W3Extension, readonly W3Extension[]>> = {

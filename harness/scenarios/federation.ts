@@ -48,7 +48,7 @@ export default defineScenario({
     ctx.data("steps", { selected, run: steps, addedPrerequisites: added });
     ctx.data("via", via);
     if (steps.length === 0) {
-      ctx.skipStep("federation", "every step is pending (N4-delivery not merged yet); name one with --set steps=");
+      ctx.skipStep("federation", "no step selected; name one with --set steps=");
       return;
     }
     const run = await newFederationRun(ctx, { via });

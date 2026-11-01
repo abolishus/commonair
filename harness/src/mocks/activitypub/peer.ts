@@ -17,8 +17,6 @@
  *
  * The keys are generated per peer; no fixture keys. Test and harness only.
  */
-// Relative import: the harness has no workspace dependency on packages/federation (as
-// `src/w3/giveaways.ts` reaches packages/draw).
 import {
   ACTIVITY_CONTENT_TYPE,
   type ActorKeyPair,
@@ -31,7 +29,7 @@ import {
   signRequest,
   verifyRequest,
   type VerifyRequestResult,
-} from "../../../../packages/federation/src/index.ts";
+} from "@commonair/federation";
 
 export interface PeerOptions {
   /** The host name in this peer's URLs (how the instance reaches it). */

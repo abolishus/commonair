@@ -488,38 +488,7 @@ describe("w2-selectors.md (batch 6)", () => {
  * list is emptied as the W3, N3 and N4 units merge (the orchestrator lifts each unit's ids at its
  * merge).
  */
-const PENDING_B7_IDS: readonly string[] = [
-  // N3-import
-  "import-page",
-  "import-unavailable",
-  "import-connect",
-  "import-preview",
-  "import-field",
-  "import-emote",
-  "import-schedule",
-  "import-mature",
-  "import-assertion",
-  "import-start",
-  "import-progress",
-  "import-result-item",
-  "import-panels-paste",
-  "import-panels-preview",
-  "import-panels-save",
-  // N4-web
-  "federation-settings",
-  "federation-enabled",
-  "federation-handle",
-  "federation-followers",
-  "federation-follower",
-  "federation-follower-remove",
-  "federation-admin-page",
-  "federation-block-domain",
-  "federation-block-add",
-  "federation-blocks",
-  "federation-block",
-  "federation-block-remove",
-  "federation-keys-rotate",
-];
+const PENDING_B7_IDS: readonly string[] = [];
 
 /** First-column ids (`<x>` templates kept) of every table in the doc's "## Test ids" section. */
 function b7TestIds(): string[] {

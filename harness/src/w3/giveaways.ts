@@ -20,8 +20,7 @@
  * every replica). Every named actor is this step's own.
  */
 import type { Page } from "playwright";
-// The harness does not depend on packages/draw; it reads it by path, as the n2 steps read i18n.
-import { commit, draw, isSortedUnique } from "../../../packages/draw/src/index.ts";
+import { commit, draw, isSortedUnique } from "@commonair/draw";
 import type { ChatClient } from "../chat-client.ts";
 import { codeOf, refusal } from "../e8/raids.ts";
 import { outboxRows } from "../e8/polls.ts";
