@@ -57,15 +57,46 @@ export interface SignedOutEntry {
 }
 
 export interface StudioEntry {
-  id: "streamManager" | "overlays" | "interact" | "bot" | "chat" | "content" | "revenue" | "relays" | "developer";
-  to: "/dashboard" | "/overlays" | "/interact" | "/bot" | "/chat" | "/content" | "/revenue" | "/relays" | "/developer";
+  id:
+    | "streamManager"
+    | "rehearse"
+    | "overlays"
+    | "interact"
+    | "bot"
+    | "chat"
+    | "captions"
+    | "content"
+    | "analytics"
+    | "revenue"
+    | "crew"
+    | "relays"
+    | "developer";
+  to:
+    | "/dashboard"
+    | "/rehearse"
+    | "/overlays"
+    | "/interact"
+    | "/bot"
+    | "/chat"
+    | "/captions"
+    | "/content"
+    | "/analytics"
+    | "/revenue"
+    | "/crew"
+    | "/relays"
+    | "/developer";
   current: boolean;
 }
 
 export interface FooterEntry {
-  id: "transparency" | "takedown" | "dmca";
-  to: "/transparency" | "/takedown" | "/dmca";
+  id: "transparency" | "attestations" | "takedown" | "dmca";
+  to: "/transparency" | "/attestations/verify" | "/takedown" | "/dmca";
 }
+
+/** A VOD's or a clip's public watch page (W2-vod-watch), as a typed router link. */
+export type WatchLink =
+  | { to: "/$channel/vods/$vodId"; params: { channel: string; vodId: string } }
+  | { to: "/$channel/clips/$clipId"; params: { channel: string; clipId: string } };
 
 export interface AccountMenuOptions {
   /** Platform treasurers also get the treasury. */
@@ -165,12 +196,16 @@ export function studioNav(pathname: string, options: StudioNavOptions = {}): Stu
   const path = normalize(pathname);
   return [
     { id: "streamManager", to: "/dashboard", current: path === "/dashboard" },
+    { id: "rehearse", to: "/rehearse", current: path === "/rehearse" },
     { id: "overlays", to: "/overlays", current: path === "/overlays" },
     { id: "interact", to: "/interact", current: path === "/interact" },
     { id: "bot", to: "/bot", current: path === "/bot" },
     ...(options.chatSafety === true ? [{ id: "chat", to: "/chat", current: path === "/chat" } as const] : []),
+    { id: "captions", to: "/captions", current: path === "/captions" },
     { id: "content", to: "/content", current: path === "/content" },
+    { id: "analytics", to: "/analytics", current: path === "/analytics" },
     { id: "revenue", to: "/revenue", current: path === "/revenue" },
+    { id: "crew", to: "/crew", current: path === "/crew" },
     { id: "relays", to: "/relays", current: path === "/relays" },
     { id: "developer", to: "/developer", current: path === "/developer" || path.startsWith("/developer/") },
   ];
@@ -180,9 +215,20 @@ export function studioNav(pathname: string, options: StudioNavOptions = {}): Stu
 export function footerNav(): FooterEntry[] {
   return [
     { id: "transparency", to: "/transparency" },
+    { id: "attestations", to: "/attestations/verify" },
     { id: "takedown", to: "/takedown" },
     { id: "dmca", to: "/dmca" },
   ];
+}
+
+/** The watch page of a channel's VOD. */
+export function vodWatchLink(channel: string, vodId: string): WatchLink {
+  return { to: "/$channel/vods/$vodId", params: { channel, vodId } };
+}
+
+/** The watch page of a channel's clip. */
+export function clipWatchLink(channel: string, clipId: string): WatchLink {
+  return { to: "/$channel/clips/$clipId", params: { channel, clipId } };
 }
 
 /** The platform-tools sidebar: only the pages the role may open. */

@@ -334,7 +334,7 @@ describe("onTextTrack", () => {
 });
 
 describe("heartbeat", () => {
-  it("every beat carries playbackMode and behindLiveSeconds: null; latency comes from the playhead", async () => {
+  it("every beat carries playbackMode; live: behindLiveSeconds null and latency from the playhead; dvr: the reverse", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     vi.setSystemTime(T0 + 5_000);
     const { c, f, hls } = await hlsSession();
@@ -346,6 +346,11 @@ describe("heartbeat", () => {
     // Seconds between the playhead's PDT and the beat (5 s plus the jittered heartbeat delay).
     expect(body.latencySeconds as number).toBeGreaterThan(5);
     c.setPlaybackMode("dvr");
+    await vi.advanceTimersByTimeAsync(700_000);
+    const dvr = f.heartbeat.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+    expect(dvr).toMatchObject({ playbackMode: "dvr", latencySeconds: null });
+    expect(dvr.behindLiveSeconds as number).toBeGreaterThan(5);
+    hls.playingDate = null;
     await vi.advanceTimersByTimeAsync(700_000);
     expect(f.heartbeat.mock.calls.at(-1)?.[0]).toMatchObject({ playbackMode: "dvr", behindLiveSeconds: null });
     await c.stop();

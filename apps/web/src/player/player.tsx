@@ -17,15 +17,19 @@ import {
   type DataModeChoice,
   type LevelInfo,
 } from "./budget.ts";
+import { CaptionsToggle } from "./captions-toggle.tsx";
 import {
+  NO_SESSION_FEATURES,
   P2P_STATUS_OFF,
   PlayerController,
   diagnosticParams,
   prefersNativeHls,
   type P2PStatus,
   type PlayerState,
+  type SessionFeatures,
 } from "./controller.ts";
 import { DataModePanel } from "./data-mode.tsx";
+import { DvrControls, DvrScrubber } from "./dvr-controls.tsx";
 import { pageLifecycle } from "./lifecycle.ts";
 import { registerMediaClock, type PlaybackMode } from "./media-clock.ts";
 import { P2PDialog, P2PIndicator, P2PNotice } from "./p2p/p2p-ui.tsx";
@@ -100,6 +104,9 @@ export function Player({
   const noticeShown = React.useRef(false);
   const [noticeOnScreen, setNoticeOnScreen] = React.useState(false);
   const controllerRef = React.useRef<PlayerController | null>(null);
+  // The same controller as state, for the W2 slots (captions toggle, DVR controls) to render with.
+  const [controller, setController] = React.useState<PlayerController | null>(null);
+  const [features, setFeatures] = React.useState<SessionFeatures>(NO_SESSION_FEATURES);
 
   // Data mode (ADR 0018): the viewer's choice on this device, read once mounted.
   const savedDataMode = React.useMemo(
@@ -200,8 +207,10 @@ export function Player({
       rendition: diag.rendition,
       dataMode: wantedCeilingRef.current,
       onDataMode: setAppliedCeiling,
+      onFeatures: setFeatures,
     });
     controllerRef.current = controller;
+    setController(controller);
     // The chat panel reads this channel's playhead at send time (`chat/connection.ts`).
     const unregisterClock = registerMediaClock(channel, controller);
     setPlaybackMode(controller.playbackMode());
@@ -221,7 +230,9 @@ export function Player({
       unsubscribeMode();
       unregisterClock();
       if (controllerRef.current === controller) controllerRef.current = null;
+      setController((current) => (current === controller ? null : current));
       void controller.stop();
+      setFeatures(NO_SESSION_FEATURES);
       setSource(undefined);
       setP2P(P2P_STATUS_OFF);
       setAppliedCeiling(null);
@@ -257,6 +268,20 @@ export function Player({
     setNoticeOnScreen(true);
   }, []);
 
+  // The W2 slots render while a session plays; each unit's component decides what it shows.
+  const slot =
+    state === "playing" && controller !== null
+      ? {
+          controller,
+          dvr: {
+            controller,
+            grant: features.dvr,
+            dataMode: dataModeOn || appliedCeiling !== null,
+            playbackMode,
+          },
+        }
+      : null;
+
   const stage =
     state === "offline" ? (
       offline
@@ -275,9 +300,12 @@ export function Player({
         data-p2p={p2p.state}
         data-playback-mode={playbackMode}
         data-data-mode={appliedCeiling === null ? "" : String(appliedCeiling)}
+        data-dvr-window={String(features.dvr?.windowSeconds ?? 0)}
+        data-captions={features.captions.state}
         variant={live ? "live" : "offline"}
         liveBadgeProps={{ "data-testid": "live-badge" }}
         stage={stage}
+        scrubber={slot ? <DvrScrubber {...slot.dvr} /> : undefined}
         controls={
           state === "playing" ? (
             <>
@@ -288,6 +316,8 @@ export function Player({
                 onClick={toggleMute}
               />
               {p2p.available && <P2PIndicator status={p2p} onOpen={() => setDialogOpen(true)} />}
+              {slot && <CaptionsToggle controller={slot.controller} captions={features.captions} />}
+              {slot && <DvrControls {...slot.dvr} />}
             </>
           ) : undefined
         }

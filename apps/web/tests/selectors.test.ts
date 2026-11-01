@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * The web ↔ harness contract (docs/testing/e1-, e2-, e3-, e4b-, e4c-, e5-, e7-, e8-, e9-, n2-, w1- and n1-selectors.md): every test id in the
+ * The web ↔ harness contract (docs/testing/e1-, e2-, e3-, e4b-, e4c-, e5-, e7-, e8-, e9-, n2-, w1-, n1- and w2-selectors.md): every test id in the
  * docs' "Test ids" tables must be rendered somewhere in the app (or, for ids the house primitives
  * own, in packages/ui), so renaming one without updating the docs and scenarios fails here.
  */
@@ -421,6 +421,186 @@ describe("n2-selectors.md: language switchers (batch 5)", () => {
   });
 
   it.each(PENDING_N2_SWITCHER_IDS)("%s is still pending (lift it once rendered)", (id) => {
+    expect(rendered(id)).toBe(false);
+  });
+});
+
+/**
+ * Batch 6 (docs/testing/w2-selectors.md): every first-column id of the "Test ids" tables is set in
+ * web or ui source, as for batch 5 (literal ids, `<x>` templates by their literal prefix). Ids whose
+ * unit has not merged wait in PENDING_W2_IDS; a pending id that is already rendered fails, so the
+ * list is emptied as the W2 units merge (the orchestrator lifts each unit's ids at its merge).
+ */
+const PENDING_W2_IDS: readonly string[] = [
+  // W2-splits
+  "crew-page",
+  "crew-propose-form",
+  "crew-recipient",
+  "crew-basis",
+  "crew-basis-<basis>",
+  "crew-bps",
+  "crew-preview",
+  "crew-propose-submit",
+  "crew-split",
+  "crew-share",
+  "crew-accept",
+  "crew-reject",
+  "crew-end",
+  "crew-end-confirm",
+  "crew-payout-note",
+  "transparency-split-writeoff",
+  "transparency-split-suspense",
+  // W2-captions
+  "captions-page",
+  "captions-enabled",
+  "captions-language",
+  "captions-mask-words",
+  "captions-mask-error",
+  "captions-save",
+  "captions-track-state",
+  "captions-vod-editor",
+  "captions-cue",
+  "captions-cue-text",
+  "captions-cue-save",
+  "captions-privacy-note",
+  "player-captions-toggle",
+  "player-captions-queued",
+  // W2-rollup-analytics
+  "analytics-page",
+  "analytics-broadcast-select",
+  "analytics-range",
+  "analytics-pending",
+  "analytics-verified",
+  "analytics-unverified",
+  "analytics-excluded-group",
+  "analytics-small-groups-hidden",
+  "analytics-delivery-source",
+  "analytics-cost",
+  "analytics-chart-table",
+  "analytics-share-create",
+  "analytics-share-link",
+  "analytics-share-revoke",
+  // W2b-group-appeals
+  "group-appeal-open",
+  "group-appeal-dialog",
+  "group-appeal-limit",
+  "group-appeal-submit",
+  "group-appeal-status",
+  // W2b-attestations
+  "attestations-panel",
+  "attestation-entry",
+  "attestation-share-create",
+  "attestation-share-link",
+  "attestation-share-revoke",
+  "attestation-verify-page",
+  "attestation-verify-input",
+  "attestation-verify-submit",
+  "attestation-verify-result",
+  "attestation-verify-origin",
+  // W2-enforcement-report
+  "enforcement-report",
+  "enforcement-report-window",
+  "enforcement-report-window-<window>",
+  "enforcement-report-group",
+  "enforcement-report-row",
+  "enforcement-report-automated",
+  "enforcement-report-overturn",
+  "enforcement-report-suppressed",
+  "enforcement-report-ncii",
+  "enforcement-report-empty",
+  // W2-dvr
+  "player-dvr-scrubber",
+  "player-dvr-live",
+  "player-dvr-behind",
+  "player-dvr-source-note",
+  "dvr-settings",
+  "dvr-enabled",
+  "dvr-window",
+  "dvr-window-<seconds>",
+  "dvr-needs-vods",
+  "dvr-save",
+  // W2-rehearsal
+  "rehearse-page",
+  "rehearsal-status",
+  "rehearsal-arm",
+  "rehearsal-disarm",
+  "rehearsal-disarm-confirm",
+  "rehearsal-key-reminder",
+  "rehearsal-invitee-input",
+  "rehearsal-invitee-add",
+  "rehearsal-invitee",
+  "rehearsal-invitee-remove",
+  "rehearsal-invitee-limit",
+  "rehearsal-checklist",
+  "rehearsal-check",
+  "rehearsal-player",
+  "rehearsal-report",
+  "rehearsal-report-chat",
+  "rehearsal-report-ingest",
+  "rehearsal-report-dip",
+  "rehearsal-watch",
+  // W2-vod-watch
+  "vod-watch-page",
+  "clip-watch-page",
+  "watch-not-found",
+  "watch-not-ready",
+  "watch-title",
+  "watch-channel-link",
+  "vod-player",
+  "vod-captions-toggle",
+  "replay-panel",
+  "replay-row",
+  "replay-row-time",
+  "replay-catching-up",
+  "replay-not-retained",
+  "replay-empty",
+  "replay-loading",
+];
+
+/** First-column ids (`<x>` templates kept) of every table in the doc's "## Test ids" section. */
+function w2TestIds(): string[] {
+  const text = readFileSync(join(ROOT, "docs/testing/w2-selectors.md"), "utf8");
+  const section = text.split(/^## Test ids$/m)[1]?.split(/^## /m)[0] ?? "";
+  return [...section.matchAll(/^\|\s*`([a-z0-9-]+(?:<[a-z]+>)?)`\s*\|/gm)].flatMap((m) => (m[1] ? [m[1]] : []));
+}
+
+describe("w2-selectors.md (batch 6)", () => {
+  const ids = w2TestIds();
+  const text = `${appText}\n${uiText}`;
+  const prefixes = templatePrefixes(text);
+  const rendered = (id: string): boolean => {
+    const template = /<[a-z]+>$/.exec(id);
+    if (template) return prefixes.includes(id.slice(0, template.index));
+    return (
+      onElement(id, text) || text.includes(`"${id}"`) || prefixes.some((p) => id.startsWith(p) && id.length > p.length)
+    );
+  };
+
+  it("lists the W2 test ids once each, templates included, and only listed ones are pending", () => {
+    for (const id of [
+      "studio-crew-link",
+      "footer-attestations-link",
+      "crew-basis-<basis>",
+      "player-captions-toggle",
+      "analytics-excluded-group",
+      "enforcement-report-suppressed",
+      "player-dvr-live",
+      "dvr-window-<seconds>",
+      "rehearsal-arm",
+      "replay-catching-up",
+      "replay-not-retained",
+    ])
+      expect(ids).toContain(id);
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const id of PENDING_W2_IDS) expect(ids).toContain(id);
+    expect(new Set(PENDING_W2_IDS).size).toBe(PENDING_W2_IDS.length);
+  });
+
+  it.each(ids.filter((id) => !PENDING_W2_IDS.includes(id)))("renders %s", (id) => {
+    expect(rendered(id)).toBe(true);
+  });
+
+  it.each(PENDING_W2_IDS)("%s is still pending (lift it once rendered)", (id) => {
     expect(rendered(id)).toBe(false);
   });
 });

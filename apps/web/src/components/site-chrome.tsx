@@ -279,6 +279,11 @@ function footerLink(entry: FooterEntry): { label: string; render: React.ReactEle
         label: t("footer.transparency"),
         render: <Link data-testid="footer-transparency-link" to="/transparency" />,
       };
+    case "attestations":
+      return {
+        label: t("footer.attestations"),
+        render: <Link data-testid="footer-attestations-link" to="/attestations/verify" />,
+      };
     case "takedown":
       return { label: t("footer.takedown"), render: <Link data-testid="footer-takedown-link" to="/takedown" /> };
     case "dmca":

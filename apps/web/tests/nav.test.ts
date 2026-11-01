@@ -6,7 +6,7 @@ import { chatStatusView, nameColorIndex } from "../src/chat/view.ts";
 import { en } from "../src/i18n/en.ts";
 import { healthBadge } from "../src/lib/stream-health.ts";
 import { isTreasurer } from "../src/lib/money.ts";
-import { accountMenu, adminNav, footerNav, siteNav, studioNav } from "../src/lib/nav.ts";
+import { accountMenu, adminNav, clipWatchLink, footerNav, siteNav, studioNav, vodWatchLink } from "../src/lib/nav.ts";
 import { adminPageFor, mayOpenAdminPage } from "../src/components/safety/access.ts";
 
 describe("site nav", () => {
@@ -155,14 +155,18 @@ describe("account menu", () => {
 });
 
 describe("studio nav", () => {
-  it("lists stream manager, overlays, polls and raids, the bot, content, revenue, relays and developer, nothing else", () => {
+  it("lists stream manager, rehearsal, overlays, polls and raids, the bot, captions, content, analytics, revenue, crew, relays and developer, nothing else", () => {
     expect(studioNav("/dashboard").map((i) => [i.id, i.to])).toEqual([
       ["streamManager", "/dashboard"],
+      ["rehearse", "/rehearse"],
       ["overlays", "/overlays"],
       ["interact", "/interact"],
       ["bot", "/bot"],
+      ["captions", "/captions"],
       ["content", "/content"],
+      ["analytics", "/analytics"],
       ["revenue", "/revenue"],
+      ["crew", "/crew"],
       ["relays", "/relays"],
       ["developer", "/developer"],
     ]);
@@ -170,6 +174,13 @@ describe("studio nav", () => {
 
   it.each([
     ["/dashboard", "streamManager"],
+    ["/rehearse", "rehearse"],
+    ["/rehearse/", "rehearse"],
+    ["/captions", "captions"],
+    ["/analytics", "analytics"],
+    ["/analytics/", "analytics"],
+    ["/crew", "crew"],
+    ["/crew/", "crew"],
     ["/overlays", "overlays"],
     ["/overlays/", "overlays"],
     ["/interact", "interact"],
@@ -193,12 +204,16 @@ describe("studio nav", () => {
     expect(studioNav("/dashboard", { chatSafety: false }).some((i) => i.id === "chat")).toBe(false);
     expect(studioNav("/dashboard", { chatSafety: true }).map((i) => [i.id, i.to])).toEqual([
       ["streamManager", "/dashboard"],
+      ["rehearse", "/rehearse"],
       ["overlays", "/overlays"],
       ["interact", "/interact"],
       ["bot", "/bot"],
       ["chat", "/chat"],
+      ["captions", "/captions"],
       ["content", "/content"],
+      ["analytics", "/analytics"],
       ["revenue", "/revenue"],
+      ["crew", "/crew"],
       ["relays", "/relays"],
       ["developer", "/developer"],
     ]);
@@ -223,13 +238,30 @@ describe("studio nav", () => {
     // A channel page is never the studio's bot page.
     expect(studioNav("/bots").some((i) => i.current)).toBe(false);
     expect(studioNav("/developers").some((i) => i.current)).toBe(false);
+    // Channels named like the W2 pages are reserved, but a longer path is still not the page.
+    for (const path of ["/crews", "/captions/x", "/analytics2", "/rehearsed", "/rivertide/vods/v1"])
+      expect(studioNav(path).some((i) => i.current)).toBe(false);
+  });
+});
+
+describe("watch links (W2-vod-watch)", () => {
+  it("build the public VOD and clip watch pages as typed router links", () => {
+    expect(vodWatchLink("rivertide", "v1")).toEqual({
+      to: "/$channel/vods/$vodId",
+      params: { channel: "rivertide", vodId: "v1" },
+    });
+    expect(clipWatchLink("rivertide", "c1")).toEqual({
+      to: "/$channel/clips/$clipId",
+      params: { channel: "rivertide", clipId: "c1" },
+    });
   });
 });
 
 describe("footer nav", () => {
-  it("links public transparency, takedown and DMCA pages", () => {
+  it("links public transparency, the attestation verifier, takedown and DMCA pages", () => {
     expect(footerNav()).toEqual([
       { id: "transparency", to: "/transparency" },
+      { id: "attestations", to: "/attestations/verify" },
       { id: "takedown", to: "/takedown" },
       { id: "dmca", to: "/dmca" },
     ]);

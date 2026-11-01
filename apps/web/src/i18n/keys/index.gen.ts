@@ -30,6 +30,14 @@ import type { Key as W1CalmChat } from "./w1-calm-chat.gen.ts";
 import type { Key as W1DataMode } from "./w1-data-mode.gen.ts";
 import type { Key as W1Fraud } from "./w1-fraud.gen.ts";
 import type { Key as W1WatchGate } from "./w1-watch-gate.gen.ts";
+import type { Key as W2Analytics } from "./w2-analytics.gen.ts";
+import type { Key as W2Attestations } from "./w2-attestations.gen.ts";
+import type { Key as W2Captions } from "./w2-captions.gen.ts";
+import type { Key as W2Dvr } from "./w2-dvr.gen.ts";
+import type { Key as W2Enforcement } from "./w2-enforcement.gen.ts";
+import type { Key as W2Rehearsal } from "./w2-rehearsal.gen.ts";
+import type { Key as W2Replay } from "./w2-replay.gen.ts";
+import type { Key as W2Splits } from "./w2-splits.gen.ts";
 
 /** Every message key, typed from the English catalogs. */
 export type MessageKey =
@@ -59,7 +67,15 @@ export type MessageKey =
   | W1CalmChat
   | W1DataMode
   | W1Fraud
-  | W1WatchGate;
+  | W1WatchGate
+  | W2Analytics
+  | W2Attestations
+  | W2Captions
+  | W2Dvr
+  | W2Enforcement
+  | W2Rehearsal
+  | W2Replay
+  | W2Splits;
 
 export const NAMESPACES = [
   "coop",
@@ -89,4 +105,12 @@ export const NAMESPACES = [
   "w1-data-mode",
   "w1-fraud",
   "w1-watch-gate",
+  "w2-analytics",
+  "w2-attestations",
+  "w2-captions",
+  "w2-dvr",
+  "w2-enforcement",
+  "w2-rehearsal",
+  "w2-replay",
+  "w2-splits",
 ] as const;

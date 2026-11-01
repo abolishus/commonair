@@ -3,14 +3,18 @@
 
 import { StudioShell, type NavItem } from "@commonair/ui/layouts";
 import {
+  Analytics01Icon,
   BotIcon,
   BubbleChatSecureIcon,
   ChartBarLineIcon,
+  ClosedCaptionIcon,
   DashboardSquare01Icon,
   Money03Icon,
   Notification03Icon,
   ServerStack01Icon,
   SourceCodeIcon,
+  TestTube01Icon,
+  UserGroupIcon,
   Video01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -21,7 +25,7 @@ import { t } from "../i18n/index.ts";
 import { useBootstrap } from "../lib/bootstrap.ts";
 import { studioNav, type StudioEntry } from "../lib/nav.ts";
 
-/** Creator tools (stream manager, overlays, polls and raids, channel bot, chat safety, content, revenue, relays, developer) in the studio sidebar. Each page guards its own session. */
+/** Creator tools (stream manager, rehearsal, overlays, polls and raids, channel bot, chat safety, captions, content, analytics, revenue, crew, relays, developer) in the studio sidebar. Each page guards its own session. */
 export const Route = createFileRoute("/_studio")({ component: StudioLayout });
 
 function studioItem(entry: StudioEntry): NavItem {
@@ -33,6 +37,13 @@ function studioItem(entry: StudioEntry): NavItem {
         label: t("studio.streamManager"),
         icon: <HugeiconsIcon icon={DashboardSquare01Icon} strokeWidth={2} aria-hidden />,
         render: <Link to="/dashboard" />,
+      };
+    case "rehearse":
+      return {
+        ...base,
+        label: t("studio.rehearse"),
+        icon: <HugeiconsIcon icon={TestTube01Icon} strokeWidth={2} aria-hidden />,
+        render: <Link data-testid="studio-rehearse-link" to="/rehearse" />,
       };
     case "overlays":
       return {
@@ -62,6 +73,13 @@ function studioItem(entry: StudioEntry): NavItem {
         icon: <HugeiconsIcon icon={BubbleChatSecureIcon} strokeWidth={2} aria-hidden />,
         render: <Link data-testid="studio-chat-link" to="/chat" />,
       };
+    case "captions":
+      return {
+        ...base,
+        label: t("studio.captions"),
+        icon: <HugeiconsIcon icon={ClosedCaptionIcon} strokeWidth={2} aria-hidden />,
+        render: <Link data-testid="studio-captions-link" to="/captions" />,
+      };
     case "content":
       return {
         ...base,
@@ -69,12 +87,26 @@ function studioItem(entry: StudioEntry): NavItem {
         icon: <HugeiconsIcon icon={Video01Icon} strokeWidth={2} aria-hidden />,
         render: <Link data-testid="studio-content-link" to="/content" />,
       };
+    case "analytics":
+      return {
+        ...base,
+        label: t("studio.analytics"),
+        icon: <HugeiconsIcon icon={Analytics01Icon} strokeWidth={2} aria-hidden />,
+        render: <Link data-testid="studio-analytics-link" to="/analytics" />,
+      };
     case "revenue":
       return {
         ...base,
         label: t("studio.revenue"),
         icon: <HugeiconsIcon icon={Money03Icon} strokeWidth={2} aria-hidden />,
         render: <Link data-testid="revenue-link" to="/revenue" />,
+      };
+    case "crew":
+      return {
+        ...base,
+        label: t("studio.crew"),
+        icon: <HugeiconsIcon icon={UserGroupIcon} strokeWidth={2} aria-hidden />,
+        render: <Link data-testid="studio-crew-link" to="/crew" />,
       };
     case "relays":
       return {
