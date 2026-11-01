@@ -23,7 +23,12 @@ import { runSurgeGuard } from "../src/chat-gate/surge.ts";
 import type { WorkerContext } from "../src/context.ts";
 import { quietLogger, VALKEY_URL, waitFor } from "./fixtures.ts";
 
-const ON: ChatGateConfig = { watchGate: true, surgeGuard: true, secret: "surge-guard-test-secret-0123456789abcdef" };
+const ON: ChatGateConfig = {
+  watchGate: true,
+  surgeGuard: true,
+  giveaways: false,
+  secret: "surge-guard-test-secret-0123456789abcdef",
+};
 const valkey = createValkey(VALKEY_URL, { keyPrefix: `test:sg:${crypto.randomUUID()}:`, name: "worker-test-sg" });
 const sub = createValkey(VALKEY_URL, { name: "worker-test-sg-sub" });
 let t: TestDatabase;

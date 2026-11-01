@@ -19,7 +19,8 @@ import { verifiedWatchMergeArgs, writeVerifiedWatch } from "../src/integrity/ver
 import { quietLogger, VALKEY_URL } from "./fixtures.ts";
 
 const SECRET = "verified-watch-test-secret-0123456789abcdef";
-const ON: ChatGateConfig = { watchGate: true, surgeGuard: true, secret: SECRET };
+const ON: ChatGateConfig = { watchGate: true, surgeGuard: true, giveaways: true, secret: SECRET };
+const OFF: ChatGateConfig = { watchGate: false, surgeGuard: false, giveaways: false, secret: SECRET };
 const valkey = createValkey(VALKEY_URL, { keyPrefix: `test:vw:${crypto.randomUUID()}:`, name: "worker-test-vw" });
 let t: TestDatabase;
 let owner: Database;
@@ -190,15 +191,57 @@ describe("writeVerifiedWatch", () => {
     await session(guarded, b, 300);
     await session(neither, c, 300);
 
-    await writeVerifiedWatch(ctx, { ...ON, watchGate: false, surgeGuard: false });
+    await writeVerifiedWatch(ctx, OFF);
     expect(await read(gated.id, a)).toBeNull();
-    await writeVerifiedWatch(ctx, { ...ON, surgeGuard: false });
+    await writeVerifiedWatch(ctx, { ...OFF, watchGate: true });
     expect(await read(gated.id, a)).not.toBeNull();
     expect(await read(guarded.id, b)).toBeNull();
-    await writeVerifiedWatch(ctx, { ...ON, watchGate: false });
+    await writeVerifiedWatch(ctx, { ...OFF, surgeGuard: true });
     expect(await read(guarded.id, b)).not.toBeNull();
     await writeVerifiedWatch(ctx, ON);
     expect(await read(neither.id, c)).toBeNull();
+  });
+
+  test("channels: an open giveaway that asks for verified watching, only while GIVEAWAYS_ENABLED is on", async () => {
+    const hex = (n: number) => "ab".repeat(n);
+    const giveaway = async (channelId: string, minVerifiedWatchSeconds: number) => {
+      const [g] = await owner
+        .insert(s.giveaways)
+        .values({
+          channelId,
+          title: "Test",
+          prize: "A sticker",
+          eligibility: { minAccountAgeDays: 0, minFollowDays: null, minVerifiedWatchSeconds },
+          winnerCount: 1,
+          seedCommitment: hex(32),
+          sealedSeed: "sealed",
+          salt: hex(32),
+        })
+        .returning({ id: s.giveaways.id });
+      if (!g) throw new Error("no giveaway");
+      return g.id;
+    };
+    const plain = { minVerifiedWatchSeconds: 0 };
+    const [asks, noCriterion, closed] = [await liveChannel(plain), await liveChannel(plain), await liveChannel(plain)];
+    await giveaway(asks.id, 20);
+    await giveaway(noCriterion.id, 0);
+    const closedId = await giveaway(closed.id, 20);
+    await owner.update(s.giveaways).set({ status: "closed", closedAt: new Date() }).where(eq(s.giveaways.id, closedId));
+    const [a, b, c] = [await user(), await user(), await user()];
+    await session(asks, a, 300);
+    await session(noCriterion, b, 300);
+    await session(closed, c, 300);
+
+    await writeVerifiedWatch(ctx, { ...OFF, watchGate: true, surgeGuard: true });
+    expect(await read(asks.id, a)).toBeNull();
+    await writeVerifiedWatch(ctx, { ...OFF, giveaways: true });
+    expect(await read(asks.id, a)).toEqual({
+      b: asks.broadcastId,
+      s: 300 - verifiedWatchJitter(SECRET, asks.broadcastId, a),
+      f: 0,
+    });
+    expect(await read(noCriterion.id, b)).toBeNull();
+    expect(await read(closed.id, c)).toBeNull();
   });
 
   test("sessions of an earlier broadcast do not count", async () => {

@@ -107,6 +107,17 @@ jury. Its vectors (`packages/draw/vectors.json`) are normative; the description 
   age, follow age and verified-watch seconds (ADR 0015); the eligibility schema cannot express any
   other criterion. One entry per account (primary key `(giveaway, user)`), by a button or by a chat
   message equal to the keyword.
+
+  _Proposed at the wave 1 CI fix (maintainer to accept):_ a verified-watch criterion is measured
+  wherever it is asked for. While `GIVEAWAYS_ENABLED` is on, the integrity worker writes
+  `KEYS.verifiedWatch` for every live channel with an open giveaway whose
+  `minVerifiedWatchSeconds` is above zero, as it does for a channel minimum under
+  `CHAT_WATCH_GATE` or a guard under `CHAT_SURGE_GUARD`. The streamer chose the criterion, so the
+  giveaway itself makes the channel measured. Without this, nobody could enter such a giveaway on a
+  default instance, where both chat flags are off. Unlike prediction standing (§3), the criterion
+  is never waived where it is unmeasured, because that would let a viewbot in. Chat is unchanged:
+  it reads these keys only where its own gate or guard applies.
+
 - **Limits.** One open giveaway per channel (a partial unique index); at most
   `GIVEAWAY_RULES.maxWinners` (10) winners; an optional timed close at most
   `GIVEAWAY_RULES.maxDurationMinutes` (1,440) after opening. A trigger refuses an entry after
