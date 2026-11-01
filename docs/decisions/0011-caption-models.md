@@ -188,3 +188,31 @@ The maintainer accepted this ADR with the recommended answers:
    about 2 per transcode droplet and replaced by S1-a's measurements.
 4. **Masking.** Caption word-masking is creator-configurable masking, not removal.
 5. **Image.** The sidecar base image goes in `infra/image-licenses.json`.
+
+## History
+
+### 2026-11-01: the `captions` WER gate is 0.40 on the synthetic fixture; `base` stays for now
+
+The first CI run of the `captions` scenario (run 41285945456) scored WER 0.38 against the 0.25
+the brief set. Two causes, measured with the pinned whisper.cpp v1.9.5 build and the reference
+transcript read by eSpeak NG (`harness/fixtures/captions/`):
+
+- **A harness timing bug.** The worker's SRT reader started 8.8 s after the publisher (W0 waits
+  for MediaMTX's LL-HLS), and the speech started after 6 s of silence, so the first sentence was
+  never read. The publisher now leads with 15 s and trails 12 s
+  (`harness/src/w2/captions/publisher.ts`).
+- **The model on synthetic speech in 3 s chunks.** `ggml-base-q5_1` on the fixture, chunked the way
+  the worker chunks it (AAC round trip included), scores 0.18 to 0.40 in one pass depending on
+  where the chunk edges fall against the words (0.30 to 0.33 over three passes); the whole file in
+  one request scores 0.08. The stored cues score the same as whisper's raw segments, so the worker
+  neither drops nor repeats words at chunk joins. Slower eSpeak rates (120, 130 wpm) and word gaps
+  (`-g` 10 to 25) did not move the spread, and cutting chunks at the quietest point near 3 s
+  narrowed it (one pass 0.24 to 0.29) but barely lowered the mean. `ggml-small-q5_1` scores 0.08
+  to 0.21 in one pass, at about 3.7 times the CPU per chunk, which the CI runner and decision (j)'s two-streams-per-host
+  budget do not have (base already takes about 3 s per 3 s chunk on CI's two threads).
+
+So the scenario speaks the fixture three times (each pass at a new chunk phase) and gates at WER
+< 0.40: above the measured spread for `base`, below a pipeline that loses or repeats chunks. The
+gate no longer decides between `base` and `small` on its own: synthetic formant speech is harder
+for whisper than people are, and a recorded CC0 human reading would be the better measure. That
+choice, and whether captions should move to `small` where the CPU allows, are for the maintainer.

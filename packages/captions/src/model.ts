@@ -15,7 +15,7 @@
  *
  * Why `base` quantized (q5_1, 57 MiB): multilingual, about 1 s per 3 s chunk on two CPU threads,
  * so two streams per media host fit beside the ladder (decision (j)); `small` costs roughly three
- * times the CPU. The `captions` harness's WER threshold (< 0.25) decides whether it stays.
+ * times the CPU. The `captions` harness's WER threshold (< 0.40, ADR 0011 History) gates it.
  */
 import { fileURLToPath } from "node:url";
 

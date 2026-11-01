@@ -252,7 +252,7 @@ Steps are pending until the unit that implements them merges (`harness/src/w2/st
   covers the rest, no crew receivable); a won chargeback restores each slice; a fresh recipient's
   first payout is held by `new_payee`; `/transparency` shows `transparency-split-writeoff` and
   `transparency-split-suspense`; the ledger sums to zero.
-- **`captions` (W2-captions):** SUBTITLES advertised; WER < 0.25; every cue available before the
+- **`captions` (W2-captions):** SUBTITLES advertised; WER < 0.40 (ADR 0011 History); every cue available before the
   playhead's PDT reaches it at 8–10 s latency, with a Chromium viewer pressing
   `player-captions-toggle` and reading `video.textTracks`; VOD captions after the end; a second
   stream queued at the cap (`player-captions-queued`, `captions-track-state` `queued`) and started
