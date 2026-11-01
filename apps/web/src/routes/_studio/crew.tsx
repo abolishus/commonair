@@ -66,7 +66,7 @@ function CrewView({ meId, channel, currency }: { meId: string; channel: string; 
       <CrewPayoutNote />
       <CrewProposeForm
         currency={support.data?.currency ?? currency}
-        streamerShare={support.data?.split.streamerShare ?? 0}
+        streamerShare={support.data?.split.streamerShare ?? null}
         onPropose={propose}
       />
       <Section heading={t("splits.mine.title")} description={t("splits.mine.hint")}>

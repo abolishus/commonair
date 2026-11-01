@@ -37,6 +37,9 @@ import {
   tid,
   webEmbedUrl,
 } from "../src/web/selectors.ts";
+// Static: the module pulls in playwright, whose import alone can outlast a 5 s test timeout on a
+// loaded CI runner when done inside the test body.
+import { HYDRATED_SELECTOR, waitForHydration } from "../src/web/session.ts";
 import { browserVerificationUrl, obsPublishUrl, rebaseOrigin } from "../src/web/urls.ts";
 
 const DOC = fileURLToPath(new URL("../../docs/testing/e1-selectors.md", import.meta.url));
@@ -487,7 +490,6 @@ describe("verificationHop (API-path sign-ups)", () => {
 
 describe("hydration wait", () => {
   test("waits for html[data-hydrated] and tolerates a web build without it", async () => {
-    const { HYDRATED_SELECTOR, waitForHydration } = await import("../src/web/session.ts");
     const seen: string[] = [];
     const ok = { waitForSelector: async (s: string) => void seen.push(s) };
     const never = {

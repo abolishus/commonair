@@ -62,3 +62,15 @@ export function warmPool(
     },
   };
 }
+
+/**
+ * How many connections the chat service warms: its whole pool. A join alone reads four
+ * statements side by side (`Directory.standing`), and readiness probes, other sockets and the
+ * watch-room watcher run beside it; any statement beyond the warm count opens a connection on the
+ * request path, and a name lookup stalled there outlasts a client's join budget. The pool is
+ * capped by `DATABASE_POOL_MAX` and opens to it under load anyway, so holding it open costs no
+ * more Postgres connections than the instance already budgets for.
+ */
+export function chatWarmConnections(poolMax: number): number {
+  return poolMax;
+}

@@ -89,25 +89,25 @@ it and never edit `controller.ts` or `player.tsx`.
 
 ### Crew (W2-splits)
 
-| Test id                       | Element and attributes                                                                     |
-| ----------------------------- | ------------------------------------------------------------------------------------------ |
-| `crew-page`                   | The `/crew` page container (channel owners and crew)                                       |
-| `crew-propose-form`           | The propose form (owner only)                                                              |
-| `crew-recipient`              | Recipient username input                                                                   |
-| `crew-basis`                  | Basis `Select` trigger; `data-value`                                                       |
-| `crew-basis-<basis>`          | One item per `SPLIT_BASES` value (`tips`, `subs`, `all`)                                   |
-| `crew-bps`                    | Share input in basis points                                                                |
-| `crew-preview`                | The plain-language preview; `data-example-cents`, `data-recipient-cents`                   |
-| `crew-propose-submit`         | Submits `money.splits.propose`                                                             |
-| `crew-split`                  | A split version row; `data-split-id`, `data-version`, `data-status`, `data-basis`          |
-| `crew-share`                  | A recipient's share in a version; `data-user-id`, `data-bps`, `data-accepted`              |
-| `crew-accept`                 | Accept, for a recipient of a `proposed` version                                            |
-| `crew-reject`                 | Reject, for a recipient of a `proposed` version                                            |
-| `crew-end`                    | End an `accepted` version (owner); opens a `ConfirmDialog`                                 |
-| `crew-end-confirm`            | The end `ConfirmDialog`'s content; its confirm button is `confirm-dialog-confirm`          |
-| `crew-payout-note`            | The note that crew are paid by the treasurer through the manual adapter                    |
-| `transparency-split-writeoff` | `/transparency`: the split-shortfall write-off cost line; `data-cents`                     |
-| `transparency-split-suspense` | `/transparency`: the split-suspense line (`TransparencyMonth.splitSuspense`); `data-cents` |
+| Test id                       | Element and attributes                                                                        |
+| ----------------------------- | --------------------------------------------------------------------------------------------- |
+| `crew-page`                   | The `/crew` page container (channel owners and crew)                                          |
+| `crew-propose-form`           | The propose form (owner only)                                                                 |
+| `crew-recipient`              | Recipient username input                                                                      |
+| `crew-basis`                  | Basis `Select` trigger; `data-value`                                                          |
+| `crew-basis-<basis>`          | One item per `SPLIT_BASES` value (`tips`, `subs`, `all`)                                      |
+| `crew-bps`                    | Share input in basis points                                                                   |
+| `crew-preview`                | The plain-language preview; `data-example-cents`, `data-recipient-cents` (empty until priced) |
+| `crew-propose-submit`         | Submits `money.splits.propose`                                                                |
+| `crew-split`                  | A split version row; `data-split-id`, `data-version`, `data-status`, `data-basis`             |
+| `crew-share`                  | A recipient's share in a version; `data-user-id`, `data-bps`, `data-accepted`                 |
+| `crew-accept`                 | Accept, for a recipient of a `proposed` version                                               |
+| `crew-reject`                 | Reject, for a recipient of a `proposed` version                                               |
+| `crew-end`                    | End an `accepted` version (owner); opens a `ConfirmDialog`                                    |
+| `crew-end-confirm`            | The end `ConfirmDialog`'s content; its confirm button is `confirm-dialog-confirm`             |
+| `crew-payout-note`            | The note that crew are paid by the treasurer through the manual adapter                       |
+| `transparency-split-writeoff` | `/transparency`: the split-shortfall write-off cost line; `data-cents`                        |
+| `transparency-split-suspense` | `/transparency`: the split-suspense line (`TransparencyMonth.splitSuspense`); `data-cents`    |
 
 ### Captions (W2-captions)
 

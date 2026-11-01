@@ -186,7 +186,8 @@ export function CrewProposeForm({
   onPropose,
 }: {
   currency: string;
-  streamerShare: number;
+  /** The creator's share of a payment; null while it loads (the example is not priced on a guess). */
+  streamerShare: number | null;
   onPropose: (input: ProposeInput) => Promise<void>;
 }): React.JSX.Element {
   const { locale } = useLocale();
@@ -201,10 +202,12 @@ export function CrewProposeForm({
   const parsed = rows.map((r) => ({ username: r.username.trim(), bps: parseBps(r.bps) }));
   const complete = parsed.every((r) => r.username !== "" && r.bps !== null);
   const valid = complete ? parsed.map((r) => ({ username: r.username, bps: r.bps ?? 0 })) : [];
-  const preview = complete ? crewPreview(PREVIEW_EXAMPLE_CENTS, streamerShare, valid) : null;
   const crewBps = valid.reduce((s, r) => s + r.bps, 0);
+  // What crewPreview accepts; proposing does not wait for the share (the server prices payments).
+  const splitOk = valid.length > 0 && crewBps < BPS_TOTAL;
+  const preview = splitOk && streamerShare !== null ? crewPreview(PREVIEW_EXAMPLE_CENTS, streamerShare, valid) : null;
   const names = new Set(valid.map((r) => r.username.toLowerCase()));
-  const canSubmit = preview !== null && names.size === valid.length && !pending;
+  const canSubmit = splitOk && names.size === valid.length && !pending;
 
   const update = (k: number, patch: Partial<CrewRow>) =>
     setRows((prev) => prev.map((r, i) => (i === k ? { ...r, ...patch } : r)));
@@ -371,7 +374,11 @@ export function CrewProposeForm({
               </>
             ) : (
               <p className="text-muted-foreground">
-                {crewBps >= BPS_TOTAL ? t("splits.preview.tooMuch") : t("splits.preview.invalid")}
+                {splitOk
+                  ? t("splits.preview.loading")
+                  : crewBps >= BPS_TOTAL
+                    ? t("splits.preview.tooMuch")
+                    : t("splits.preview.invalid")}
               </p>
             )}
           </section>
