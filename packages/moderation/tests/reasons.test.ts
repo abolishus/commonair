@@ -159,8 +159,8 @@ describe("mappings", () => {
   });
 
   test("the allowlist holds platform actions only: no channel-moderation action name", () => {
-    // Batch 7: the platform staff actions B7-followups builds statements for (the report queue's
-    // resolve and the platform suspensions). Their audit names are not channel-moderation actions.
+    // The platform staff actions (the report queue's resolve and the admin suspensions, ADR 0019
+    // answer 3) have their own audit names, which are not channel-moderation actions either.
     const platformStaff = ["report.resolve", "user.suspend", "channel.suspend"];
     for (const a of ENFORCEMENT_SOURCE_ACTIONS) {
       if (platformStaff.includes(a)) continue;

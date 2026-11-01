@@ -53,15 +53,50 @@ describe("expectedStatement follows the selectors table", () => {
     ).toEqual(["service/suspended"]);
     for (const a of ["moderation.t1.flag", "moderation.case.clear", "moderation.case.escalate_legal", "chat.ban"])
       expect(expectedStatement(row(a))).toBeNull();
+    // A report resolve is stated only when its suspension took effect.
+    expect(expectedStatement(row("report.resolve", { action: "none", suspended: false }))).toBeNull();
+    expect(expectedStatement(row("report.resolve", { action: "suspend_user" }))).toBeNull();
   });
 
   test("every allowlisted action is covered", () => {
-    // Batch 7 contract step: allowlisted, built by B7-followups (which removes this exception).
-    const pendingB7 = ["report.resolve", "user.suspend", "channel.suspend"];
     for (const a of ENFORCEMENT_SOURCE_ACTIONS) {
-      const e = expectedStatement(row(a, { decision: "removed", listCategory: "ncii" }));
-      expect(e === null, a).toBe(pendingB7.includes(a));
+      const e = expectedStatement(row(a, { decision: "removed", listCategory: "ncii", suspended: true }));
+      expect(e, a).not.toBeNull();
     }
+  });
+
+  test("staff suspensions (B7): the cited clause, and an appeal for the action's target only", () => {
+    const cite = { userId: "u1", modActionId: "m", clauseId: "conduct.harassment", suspended: true };
+    expect(expectedStatement(row("report.resolve", { ...cite, action: "suspend_user" }))).toEqual({
+      restrictions: ["account/suspended"],
+      clauseIds: ["conduct.harassment"],
+      appealSubjectType: "moderation_action",
+      appealOnlyFor: "u1",
+    });
+    expect(expectedStatement(row("report.resolve", { ...cite, action: "suspend_channel" }))?.restrictions).toEqual([
+      "service/suspended",
+    ]);
+    expect(expectedStatement(row("user.suspend", cite))?.restrictions).toEqual(["account/suspended"]);
+    expect(expectedStatement(row("channel.suspend", cite))?.restrictions).toEqual(["service/suspended"]);
+    const e = expectedStatement(row("channel.suspend", cite))!;
+    const owner: StatementRow = {
+      id: "s",
+      sourceAuditId: "a",
+      sourceAction: "report.resolve",
+      recipientUserId: "u1",
+      restrictionKind: "service",
+      restrictionDetail: "suspended",
+      clauseId: "conduct.harassment",
+      appealSubjectType: "moderation_action",
+    };
+    expect(statementProblems(owner, e, new Set(["u1", "u2"]))).toEqual([]);
+    // A channel suspended over someone else's message: its owner gets the statement, with no appeal.
+    expect(statementProblems({ ...owner, recipientUserId: "u2", appealSubjectType: null }, e, new Set(["u2"]))).toEqual(
+      [],
+    );
+    expect(statementProblems({ ...owner, recipientUserId: "u2" }, e, new Set(["u2"]))).toEqual([
+      "appeal moderation_action",
+    ]);
   });
 });
 

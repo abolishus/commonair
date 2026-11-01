@@ -42,6 +42,12 @@ type StatementRow = typeof st.$inferSelect;
 /** Short references the mail quotes (the tail of the id: UUIDv7 heads are timestamps). */
 const ref = (prefix: string, id: string) => `${prefix}-${id.replace(/-/g, "").slice(-8).toUpperCase()}`;
 export const statementRef = (id: string) => ref("SR", id);
+/**
+ * Staff suspensions have no moderation case: their facts name the `mod_actions` row (B7), so the
+ * mail quotes it as `MA-…`, never as a case reference support could not find. A dedicated facts
+ * variant is the follow-up (B7-followups contract request 6).
+ */
+const STAFF_ACTIONS: ReadonlySet<string> = new Set(["report.resolve", "user.suspend", "channel.suspend"]);
 
 /** `{{placeholders}}` of a legal text, as the API renders them (`services/api/src/lib/legal.ts`). */
 export function renderPlaceholders(text: string, site: InstanceSite): string {
@@ -68,7 +74,11 @@ export function statementMail(
       facts = f;
       break;
     case "moderator_review":
-      facts = { code: f.code, caseRef: ref("MC", f.caseId), decision: f.decision };
+      facts = {
+        code: f.code,
+        caseRef: ref(STAFF_ACTIONS.has(s.sourceAction) ? "MA" : "MC", f.caseId),
+        decision: f.decision,
+      };
       break;
     case "ncii_notice":
       facts = { code: f.code, requestRef: ref("NR", f.requestId), receivedAt: f.receivedAt, deadlineAt: f.deadlineAt };

@@ -777,6 +777,23 @@ describe("the mail of a stored statement", () => {
       facts: { code: "classifier", threshold: 0.93 },
     });
     expect(mail.statementRef).toMatch(/^SR-[0-9A-F]{8}$/);
+    // A case decision is quoted as a case; a staff suspension (no case) as its mod action.
+    const reviewed = {
+      code: "moderator_review" as const,
+      caseId: d.caseId,
+      caseOrigin: "human" as const,
+      decision: "suspend" as const,
+    };
+    const byCase = statementMail(
+      { ...stored, sourceAction: "moderation.case.suspend", facts: reviewed },
+      { body, isDraft: true },
+      site,
+    );
+    expect(byCase.facts).toMatchObject({ caseRef: expect.stringMatching(/^MC-[0-9A-F]{8}$/) });
+    for (const sourceAction of ["report.resolve", "user.suspend", "channel.suspend"]) {
+      const staff = statementMail({ ...stored, sourceAction, facts: reviewed }, { body, isDraft: true }, site);
+      expect(staff.facts).toMatchObject({ caseRef: expect.stringMatching(/^MA-[0-9A-F]{8}$/) });
+    }
   });
 });
 

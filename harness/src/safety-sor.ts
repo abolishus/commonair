@@ -53,6 +53,11 @@ export interface Expected {
   restrictions: readonly string[];
   clauseIds: readonly string[] | "any";
   appealSubjectType: string | null;
+  /**
+   * Staff suspensions: the appeal subject applies only to this recipient (the action's target);
+   * any other recipient (the owner of a channel suspended over someone else's message) has none.
+   */
+  appealOnlyFor?: string;
 }
 
 const CATEGORY_CLAUSES: Record<string, string> = {
@@ -119,11 +124,20 @@ export function expectedStatement(row: AuditRow): Expected | null {
       return d.listCategory === "ncii"
         ? { restrictions: ["account/suspended"], clauseIds: ["illegal.ncii"], appealSubjectType: null }
         : null;
-    // Batch 7 contract step: allowlisted, not built until B7-followups (no statement expected yet).
+    // Batch 7: a staff suspension cites the staff's clause; a report resolve is stated only when
+    // its suspension took effect (`suspended: true`).
     case "report.resolve":
     case "user.suspend":
-    case "channel.suspend":
-      return null;
+    case "channel.suspend": {
+      if (row.action === "report.resolve" && d.suspended !== true) return null;
+      const account = row.action === "user.suspend" || (row.action === "report.resolve" && d.action === "suspend_user");
+      return {
+        restrictions: [account ? "account/suspended" : "service/suspended"],
+        clauseIds: typeof d.clauseId === "string" ? [d.clauseId] : "any",
+        appealSubjectType: "moderation_action",
+        ...(typeof d.userId === "string" ? { appealOnlyFor: d.userId } : {}),
+      };
+    }
   }
 }
 
@@ -133,7 +147,8 @@ export function statementProblems(s: StatementRow, e: Expected, recipients: Read
   const r = `${s.restrictionKind}/${s.restrictionDetail}`;
   if (!e.restrictions.includes(r)) out.push(`restriction ${r}`);
   if (e.clauseIds !== "any" && !e.clauseIds.includes(s.clauseId)) out.push(`clause ${s.clauseId}`);
-  if (s.appealSubjectType !== e.appealSubjectType) out.push(`appeal ${s.appealSubjectType ?? "none"}`);
+  const appeal = e.appealOnlyFor === undefined || s.recipientUserId === e.appealOnlyFor ? e.appealSubjectType : null;
+  if (s.appealSubjectType !== appeal) out.push(`appeal ${s.appealSubjectType ?? "none"}`);
   if (!recipients.has(s.recipientUserId)) out.push("recipient outside the run");
   return out;
 }

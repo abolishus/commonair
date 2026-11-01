@@ -43,7 +43,8 @@ export class BroadcastSession {
     this.audioCompat = new AudioCompat(ctx, info);
     this.recorder = new SegmentRecorder(ctx, info, vodId);
     this.thumbnails = new Thumbnailer(ctx, info);
-    const target = { broadcastId: info.broadcastId, channelId: info.channelId, path: info.path };
+    // The kind spares moderation a per-broadcast read for the rehearsal sample count (B7).
+    const target = { broadcastId: info.broadcastId, channelId: info.channelId, path: info.path, kind: info.kind };
     const { moderation } = ctx;
     this.frames = new LiveSampler({
       capture: liveCapture({
