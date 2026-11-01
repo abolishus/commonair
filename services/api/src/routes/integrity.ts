@@ -3,18 +3,27 @@
 
 /**
  * `integrity.*`. `flags` and `decide` (admins) live in `../admin/integrity.ts` (E7-admin);
- * `channelSummary` is still HTTP 501 until W2-rollup-analytics implements it (wave 1). The
+ * `channelSummary` (W2-rollup-analytics) reads the per-broadcast rollup (`../analytics/queries.ts`),
+ * owner only, under the same display delay and small-group suppression as analytics. The
  * owner-side attestation procedures and `keys.compromise` answer 501 until W2b-attestations
  * (wave 2, which takes this file over); the public verifier and the well-known key history are
  * that unit's `./attestation-verify.ts`.
  */
 import { decideFlag, listFlags } from "../admin/integrity.ts";
+import { channelSummary } from "../analytics/queries.ts";
 import { notImplemented } from "../lib/errors.ts";
 import { os, requireCaller } from "../lib/orpc.ts";
+import { ownChannel, rangeOf } from "./analytics.ts";
 import { attestationKeys, attestationVerify } from "./attestation-verify.ts";
 
 export const integrity = {
-  channelSummary: os.integrity.channelSummary.handler(notImplemented),
+  channelSummary: os.integrity.channelSummary.handler(async ({ context, input }) => {
+    const { channel } = ownChannel(context);
+    return channelSummary(context.deps, {
+      ...(await rangeOf(context.deps, channel.id, input)),
+      channelSlug: channel.slug,
+    });
+  }),
   flags: os.integrity.flags.handler(({ context, input }) => listFlags(context.deps, input)),
   decide: os.integrity.decide.handler(({ context, input }) =>
     decideFlag(context.deps, requireCaller(context).user.id, input),
