@@ -13,13 +13,15 @@
  * hls.js exactly as without P2P.
  *
  * The player seam (docs/testing/w1-selectors.md "Player seam"): `playheadWallclock`,
- * `seekToWallclock`, `setTargetLatency`, `onTextTrack`, `playbackMode`/`onPlaybackMode`, and for
- * data mode (ADR 0018) `setDataMode`/`dataUsage`. Later features (DVR, captions, watch rooms)
- * build on these instead of reaching into hls.js.
+ * `seekToWallclock`, `setTargetLatency`, `onTextTrack`, `playbackMode`/`onPlaybackMode`, for
+ * data mode (ADR 0018) `setDataMode`/`dataUsage`, and for live DVR (ADR 0016; W2 contract step)
+ * `dvrGrant`/`enterDvr`/`exitDvr` plus the session's caption tracks (`onFeatures`). Later features
+ * (DVR, captions, watch rooms) build on these instead of reaching into hls.js.
  */
 import type Hls from "hls.js";
 import type { HlsConfig } from "hls.js";
-import { RENDITIONS } from "@commonair/contracts/enums";
+import type { CaptionTrack } from "@commonair/contracts/dto";
+import { RENDITIONS, type CAPTIONS_STATES } from "@commonair/contracts/enums";
 import type { Api } from "../lib/api.ts";
 import { capIndex, nominalLevels, type LevelInfo } from "./budget.ts";
 import {
@@ -72,6 +74,30 @@ export const P2P_STATUS_OFF: P2PStatus = Object.freeze({
 
 type EngineModule = typeof import("./p2p/engine.ts");
 
+/** The session's live DVR grant (`PlaybackStart.dvrWindowSeconds` / `dvrPlaylistUrl`, ADR 0016). */
+export interface DvrGrant {
+  /** Seconds the viewer may rewind (`min(channel window, DVR_MAX_WINDOW_SECONDS)`), always > 0. */
+  windowSeconds: number;
+  /** The DVR playlist carrying the newest DVR token (heartbeats refresh it). */
+  playlistUrl: string;
+}
+
+/** What `playback.start` granted this session beyond the live stream: captions and DVR. */
+export interface SessionFeatures {
+  captions: { tracks: readonly CaptionTrack[]; state: (typeof CAPTIONS_STATES)[number] };
+  /** Null without DVR (no recording, DVR off, data mode, a rehearsal, or the VOD gate refused). */
+  dvr: DvrGrant | null;
+}
+
+/** Before a session starts and after it ends: nothing granted. */
+export const NO_SESSION_FEATURES: SessionFeatures = Object.freeze({
+  captions: Object.freeze({ tracks: [], state: "off" as const }),
+  dvr: null,
+});
+
+/** How long `enterDvr` waits for the DVR playlist before it gives up and returns to live. */
+export const DVR_LOAD_TIMEOUT_MS = 10_000;
+
 export interface PlayerControllerOptions {
   channel: string;
   video: HTMLVideoElement;
@@ -101,6 +127,8 @@ export interface PlayerControllerOptions {
   dataMode?: number | null;
   /** The ceiling in effect (the token's `dm`): on start and whenever the server applied a change. */
   onDataMode?: (ceiling: number | null) => void;
+  /** Captions and DVR as `playback.start` granted them, once per session (the W2 slots read this). */
+  onFeatures?: (features: SessionFeatures) => void;
 }
 
 /** hls.js levels as the budget controller sees them (audio-only: no video codec, no picture size). */
@@ -232,6 +260,14 @@ export class PlayerController {
   private playlistUrl: string | null = null;
   private renditions: readonly string[] = [];
   private readonly meter = new DataUsageMeter();
+  /** The DVR grant from `playback.start` (its URL as granted), null without one. */
+  private dvr: { windowSeconds: number; playlistUrl: string } | null = null;
+  /** The newest DVR token (heartbeat `dvrToken`), null until one is known. */
+  private dvrToken: string | null = null;
+  /** The DVR playlist being played; null at the live edge. */
+  private dvrUrl: string | null = null;
+  /** Bumped by every `enterDvr`/`exitDvr`, so a superseded DVR load does nothing when it settles. */
+  private dvrGeneration = 0;
 
   constructor(private readonly opts: PlayerControllerOptions) {
     const t = opts.targetLatency;
@@ -346,12 +382,125 @@ export class PlayerController {
     };
   }
 
-  /** W2-dvr's switch between the live edge and DVR; nothing calls it in W1. */
+  /**
+   * Flip the reported mode without loading anything (heartbeats and chat follow it). `live` while
+   * a DVR playlist plays returns to the live playlist (`exitDvr`). To play DVR, use `enterDvr`.
+   */
   setPlaybackMode(mode: PlaybackMode): void {
+    if (mode === "live" && this.dvrUrl !== null) {
+      this.exitDvr();
+      return;
+    }
+    this.notifyMode(mode);
+  }
+
+  private notifyMode(mode: PlaybackMode): void {
     if (this.stopped || this.mode === mode) return;
     this.mode = mode;
     // Deleting from a Set while iterating it is safe, so a listener may unsubscribe itself.
     for (const l of this.modeListeners) l(mode);
+  }
+
+  /** This session's DVR grant with the newest DVR token, or null (no grant, not started, stopped). */
+  dvrGrant(): DvrGrant | null {
+    if (this.stopped || !this.dvr) return null;
+    const token = this.dvrToken;
+    return {
+      windowSeconds: this.dvr.windowSeconds,
+      playlistUrl: token === null ? this.dvr.playlistUrl : withToken(this.dvr.playlistUrl, token),
+    };
+  }
+
+  /**
+   * Play the DVR playlist (`dvrGrant().playlistUrl`) on the same hls.js instance (native HLS: the
+   * same element), so the session, its heartbeats and its played seconds carry on. Resolves true
+   * once the playlist loaded and the mode is `dvr` (seek with `seekToWallclock` then); false, back
+   * on the live playlist, when it does not load within `DVR_LOAD_TIMEOUT_MS`; false with nothing
+   * changed without a grant, in data mode (ADR 0016 decision 7) or once stopped. DVR is
+   * origin-only (decision 5), so a P2P session stops sharing for the rest of the session. A later
+   * `enterDvr` or `exitDvr` supersedes a pending one, which then resolves false.
+   */
+  async enterDvr(playlistUrl: string): Promise<boolean> {
+    if (this.stopped || !this.session || !this.dvr || this.dataModeWanted !== null) return false;
+    const generation = ++this.dvrGeneration;
+    const url = this.dvrToken === null ? playlistUrl : withToken(playlistUrl, this.dvrToken);
+    if (this.p2p) this.disableP2P();
+    this.dvrUrl = url;
+    const ok = await (this.hls ? this.loadDvrHls(this.hls, url) : this.loadDvrNative(url));
+    if (generation !== this.dvrGeneration || this.stopped) return false;
+    if (!ok) {
+      this.leaveDvrPlaylist();
+      return false;
+    }
+    this.notifyMode("dvr");
+    return true;
+  }
+
+  /** Back to the live playlist at the live edge, same session; at the edge already, a no-op. */
+  exitDvr(): void {
+    if (this.stopped) return;
+    this.dvrGeneration += 1;
+    this.leaveDvrPlaylist();
+    this.notifyMode("live");
+  }
+
+  private leaveDvrPlaylist(): void {
+    if (this.dvrUrl === null) return;
+    this.dvrUrl = null;
+    const session = this.session;
+    if (this.playlistUrl && session) this.reload(withToken(this.playlistUrl, session.token));
+  }
+
+  /** hls.js: load the DVR playlist and wait for its level, so `seekToWallclock` has fragments. */
+  private loadDvrHls(hls: Hls, url: string): Promise<boolean> {
+    const ctor = this.hlsCtor;
+    return new Promise<boolean>((resolve) => {
+      let done = false;
+      const finish = (ok: boolean) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        if (ctor) hls.off(ctor.Events.LEVEL_LOADED, onLevel);
+        resolve(ok);
+      };
+      const onLevel = () => finish(true);
+      const timer = setTimeout(() => finish(false), DVR_LOAD_TIMEOUT_MS);
+      if (ctor) hls.on(ctor.Events.LEVEL_LOADED, onLevel);
+      hls.loadSource(url);
+      void this.opts.video.play().catch(() => undefined);
+    });
+  }
+
+  /** Native HLS: point the element at the DVR playlist and wait for its metadata. */
+  private loadDvrNative(url: string): Promise<boolean> {
+    const { video } = this.opts;
+    return new Promise<boolean>((resolve) => {
+      const finish = (ok: boolean) => {
+        clearTimeout(timer);
+        video.removeEventListener("loadedmetadata", onMeta);
+        video.removeEventListener("error", onError);
+        resolve(ok);
+      };
+      const onMeta = () => finish(true);
+      const onError = () => finish(false);
+      const timer = setTimeout(() => finish(false), DVR_LOAD_TIMEOUT_MS);
+      video.addEventListener("loadedmetadata", onMeta);
+      video.addEventListener("error", onError);
+      video.src = url;
+      void video.play().catch(() => undefined);
+    });
+  }
+
+  /** The token a request needs: the DVR token under the DVR playlist's directory, else the live one. */
+  private tokenFor(requestUrl: string): string | undefined {
+    const dir = this.dvrUrl === null ? null : urlDirectory(this.dvrUrl);
+    if (dir !== null && this.dvrToken !== null && requestUrl.startsWith(dir)) return this.dvrToken;
+    return this.session?.token;
+  }
+
+  /** Seconds behind the live edge while in DVR (ADR 0016 decision 6), else null. */
+  private behindLiveSeconds(): number | null {
+    return this.mode === "dvr" ? this.secondsBehindNow() : null;
   }
 
   /**
@@ -364,6 +513,8 @@ export class PlayerController {
   setDataMode(ceiling: number | null): void {
     if (this.stopped) return;
     this.dataModeWanted = ceiling !== null && Number.isFinite(ceiling) ? Math.round(ceiling) : null;
+    // DVR is source-only, so data mode never rewinds (ADR 0016 decision 7).
+    if (this.dataModeWanted !== null && this.mode === "dvr") this.exitDvr();
     // Uploading to peers spends the budget; the server drops the grant with the beat (decision 6).
     if (this.dataModeWanted !== null && this.p2p) this.disableP2P();
     this.applyCapping();
@@ -484,6 +635,15 @@ export class PlayerController {
       this.opts.onDataMode?.(started.dataMode);
       this.p2pAvailable = started.p2p.available;
       this.emitP2P();
+      this.dvr =
+        started.dvrWindowSeconds > 0 && started.dvrPlaylistUrl !== null
+          ? { windowSeconds: started.dvrWindowSeconds, playlistUrl: started.dvrPlaylistUrl }
+          : null;
+      this.dvrToken = this.dvr ? new URL(this.dvr.playlistUrl).searchParams.get("t") : null;
+      this.opts.onFeatures?.({
+        captions: { tracks: started.captions, state: started.captionsState },
+        dvr: this.dvrGrant(),
+      });
       this.opts.onSource?.(playerSource(started.source));
       this.stats = new VideoStats(video, () => this.setState("playing"));
       video.addEventListener("playing", this.onPlaying);
@@ -532,8 +692,8 @@ export class PlayerController {
 
   private attachHls(HlsCtor: typeof Hls, url: string, plan: P2PPlan | null): void {
     const xhrSetup: HlsConfig["xhrSetup"] = (xhr, requestUrl) => {
-      // Heartbeats refresh the playback token; every request uses the current one.
-      const token = this.session?.token;
+      // Heartbeats refresh the playback token and the DVR token; every request uses the current one.
+      const token = this.tokenFor(requestUrl);
       if (token) xhr.open("GET", withToken(requestUrl, token), true);
     };
     let hls: Hls;
@@ -647,9 +807,14 @@ export class PlayerController {
     if (!this.abort.signal.aborted) throw new Error("playlist did not become available");
   }
 
-  private latencySeconds(): number | null {
+  private secondsBehindNow(): number | null {
     const at = this.playheadWallclock();
     return at ? (Date.now() - at.getTime()) / 1000 : null;
+  }
+
+  /** Distance to the live edge as a live viewer has it; null in DVR (that is `behindLiveSeconds`). */
+  private latencySeconds(): number | null {
+    return this.mode === "dvr" ? null : this.secondsBehindNow();
   }
 
   private cumulative(): CumulativeStats {
@@ -702,7 +867,7 @@ export class PlayerController {
             rendition: RENDITION_SOURCE,
             fingerprint: collectFingerprint(this.native),
             ...this.accountant.delta(totals),
-            ...playbackFields(this.playbackMode()),
+            ...playbackFields(this.playbackMode(), this.behindLiveSeconds()),
             ...dataModeField(change),
           },
           { signal: abort.signal },
@@ -716,6 +881,7 @@ export class PlayerController {
       // The tracker accepts this session's socket from now on: start sharing (once).
       if (!this.p2pOff) this.p2p?.enable();
       if (res.token) session.token = res.token;
+      if (res.dvrToken && this.dvr) this.dvrToken = res.dvrToken;
       const move = heartbeatSwitch(res);
       if (move && !this.stopped) this.switchTo(move.url, move.source);
       // Only a token says what the origin applies: a beat answered without one (a concurrent beat
@@ -741,10 +907,14 @@ export class PlayerController {
     this.opts.onSource?.(source);
   }
 
-  /** Load a new multivariant playlist of the same stream (a move, or a new data-mode ceiling). */
+  /**
+   * Load a new multivariant playlist of the same stream (a move, or a new data-mode ceiling).
+   * While DVR plays it is only remembered: `exitDvr` returns to it.
+   */
   private reload(url: string): void {
     const { video } = this.opts;
     this.playlistUrl = url;
+    if (this.dvrUrl !== null) return;
     if (this.hls) this.hls.loadSource(url);
     else video.src = url;
     void video.play().catch(() => undefined);
@@ -758,6 +928,8 @@ export class PlayerController {
   async stop(): Promise<void> {
     if (this.stopped) return;
     this.stopped = true;
+    this.dvrGeneration += 1;
+    this.dvrUrl = null;
     this.abort.abort();
     if (this.timer) clearTimeout(this.timer);
     if (this.iceTimer) clearTimeout(this.iceTimer);
@@ -778,6 +950,12 @@ export class PlayerController {
     this.session = null;
     if (session) await this.endSession(session.id, session.token);
   }
+}
+
+/** A URL's directory with its trailing slash and no query (`…/dvr/<vodId>/`). */
+export function urlDirectory(url: string): string {
+  const u = new URL(url);
+  return `${u.origin}${u.pathname.slice(0, u.pathname.lastIndexOf("/") + 1)}`;
 }
 
 /** Whether `t` lies in one of the ranges (`video.seekable`). */
