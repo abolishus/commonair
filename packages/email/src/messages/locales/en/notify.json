@@ -9,14 +9,5 @@
   "goLiveDigest.itemNoTitle": "{channel}",
   "goLiveDigest.more": "{count, plural, one {# more channel you follow is live} other {# more channels you follow are live}}",
   "goLiveDigest.why": "You turned on go-live emails for channels you follow on {instance}.",
-  "goLiveDigest.settings": "Choose which go-live emails you get",
-  "channelMoved.subject": "{channel} has moved",
-  "channelMoved.preview": "You asked {instance} to tell you if {channel} moved. They have.",
-  "channelMoved.heading": "{channel} has moved",
-  "channelMoved.body": "{channel} says you can now find them on this site:",
-  "channelMoved.caution": "The streamer chose this site, not {instance}. The channel page here shows the full address; check it before you visit.",
-  "channelMoved.openChannel": "See the notice on {instance}",
-  "channelMoved.subscriptions": "If you subscribe to {channel}, your subscription continues until the streamer ends it.",
-  "channelMoved.why": "You asked {instance} to email you once if {channel} moved. This is that email, and we have deleted your request.",
-  "channelMoved.settings": "Manage your privacy settings"
+  "goLiveDigest.settings": "Choose which go-live emails you get"
 }
