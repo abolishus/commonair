@@ -6,6 +6,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./attestation": "./src/attestation.ts",
     "./vectors.json": "./vectors.json"
   },
   "scripts": {
