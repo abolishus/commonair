@@ -66,6 +66,13 @@ describe("judgeBetTiming: before the lock", () => {
     expect(betMediaTime(at(-5_000), at(0))).toEqual(at(-5_000));
   });
 
+  test("a playhead before the broadcast began is taken as its start (the chat clamp's floor)", () => {
+    expect(betMediaTime(at(-5_000), at(0), at(-1_000))).toEqual(at(-1_000));
+    expect(betMediaTime(at(-500), at(0), at(-1_000))).toEqual(at(-500));
+    // Offline (no start) keeps only the upper bound.
+    expect(betMediaTime(at(-5_000), at(0), null)).toEqual(at(-5_000));
+  });
+
   test("a missing or unreadable playhead is the wall clock now, so it is accepted before the lock", () => {
     expect(judgeBetTiming(timing({ mediaTs: null }))).toBeNull();
     expect(betMediaTime(null, at(0))).toEqual(at(0));
@@ -137,6 +144,29 @@ describe("judgeBetTiming: after the lock (stored at T0, edge T0)", () => {
       wall: at(0),
       media: at(0),
     });
+  });
+});
+
+describe("live after locksAt, before the worker locks", () => {
+  // Created offline, locksAt at 0, the broadcast began at 10 s: the worker will store the start.
+  const started = at(10_000);
+  const prediction = { status: "active", locksAt: at(0), lockedAt: null, lockMediaTs: null } as const;
+
+  test("the lock is what the worker would store now, never before the broadcast began", () => {
+    expect(effectiveLock(prediction, at(20_000), started)).toEqual({ wall: at(0), media: started });
+  });
+
+  test("a playhead from before the broadcast is clamped to its start, so it is refused", () => {
+    const judge = (mediaMs: number) =>
+      judgeBetTiming({
+        now: at(20_000),
+        mediaTs: at(mediaMs),
+        playbackMode: "live",
+        liveStartedAt: started,
+        prediction,
+      });
+    expect(judge(5_000)).toBe("closed");
+    expect(judge(10_000)).toBe("closed");
   });
 });
 

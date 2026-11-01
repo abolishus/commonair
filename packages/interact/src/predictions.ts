@@ -508,7 +508,8 @@ export function effectiveLock(
 ): { wall: Date; media: Date | null } | null {
   if (p.lockedAt !== null) return { wall: new Date(Math.min(ms(p.lockedAt), ms(p.locksAt))), media: p.lockMediaTs };
   if (ms(now) < ms(p.locksAt)) return null;
-  return { wall: p.locksAt, media: lockMediaAt(p.locksAt, p.locksAt, liveStartedAt) };
+  // What the worker's auto-lock would store if it ran now (so never before the broadcast began).
+  return { wall: p.locksAt, media: lockMediaAt(now, p.locksAt, liveStartedAt) };
 }
 
 export interface BetTiming {
@@ -522,12 +523,15 @@ export interface BetTiming {
 }
 
 /**
- * The media time a bet is judged and stored at: the client's playhead, never after `now` (as the
- * chat clamp), or `now` when the client sent none or an unreadable one. Pure.
+ * The media time a bet is judged and stored at: the client's playhead, never after `now` nor
+ * (when live) before the broadcast began, as the chat clamp; `now` when the client sent none or
+ * an unreadable one. Pure.
  */
-export function betMediaTime(mediaTs: Date | null, now: Date): Date {
+export function betMediaTime(mediaTs: Date | null, now: Date, liveStartedAt: Date | null = null): Date {
   const at = mediaTs === null ? Number.NaN : ms(mediaTs);
-  return Number.isFinite(at) ? new Date(Math.min(at, ms(now))) : now;
+  if (!Number.isFinite(at)) return now;
+  const floor = liveStartedAt === null ? at : Math.min(ms(now), Math.max(at, ms(liveStartedAt)));
+  return new Date(Math.min(floor, ms(now)));
 }
 
 /**
@@ -543,7 +547,7 @@ export function judgeBetTiming(t: BetTiming): BetRefusal | null {
   const lock = effectiveLock(p, t.now, t.liveStartedAt);
   if (lock !== null && ms(t.now) - ms(lock.wall) > FAIR_BET_RULES.graceMs) return "closed";
   if (t.playbackMode === "dvr") return "not_live";
-  const media = ms(betMediaTime(t.mediaTs, t.now));
+  const media = ms(betMediaTime(t.mediaTs, t.now, t.liveStartedAt));
   if (ms(t.now) - media > FAIR_BET_RULES.edgeWindowMs) return "behind";
   if (lock === null) return null;
   // Locked while the channel was offline: there is no media time to have bet before.

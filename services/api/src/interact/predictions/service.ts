@@ -256,7 +256,8 @@ export async function betPrediction(
     });
     if (refusal) throw betRefusalError(refusal);
     if (!prediction.outcomes.some((o) => o.id === input.outcomeId)) throw badRequest("No such outcome");
-    if (await myBet(tx, prediction.id, userId)) throw conflict("You already bet on this prediction");
+    if (await myBet(tx, prediction.id, userId))
+      throw apiError("CONFLICT", "You already bet on this prediction", { reason: "already_bet" });
     if (!(await channelPointsEnabled(tx, channel.id)))
       throw precondition("points_disabled", "Channel points are off on this channel");
     if (startedAt !== null && !(await hasStanding(ctx, channel, userId, roles))) throw betRefusalError("unverified");
@@ -287,7 +288,7 @@ export async function betPrediction(
       points: input.points,
       placedAt: now,
       // The playhead as judged (never after receipt); null when the client sent none.
-      mediaTs: mediaTs === null ? null : betMediaTime(mediaTs, now),
+      mediaTs: mediaTs === null ? null : betMediaTime(mediaTs, now, startedAt),
     });
     await emitEvent(
       tx,

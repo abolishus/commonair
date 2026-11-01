@@ -6,7 +6,7 @@ import { ViewerPredictionCard } from "@commonair/ui/blocks/interact-viewer";
 import * as React from "react";
 import { type MessageKey, t } from "../../i18n/index.ts";
 import { errorCode } from "../../lib/api.ts";
-import { errorRequirement } from "../../lib/coop.ts";
+import { errorReason, errorRequirement } from "../../lib/coop.ts";
 import { displayPointsName } from "./points-chip.tsx";
 import { type InteractClient, interactErrorKey, isStaffRefusal } from "./client.ts";
 import { MAX_BET_POINTS, betAmount, type LoyaltyBalanceDto, type PredictionViewDto } from "./state.ts";
@@ -34,7 +34,8 @@ export function betRefusalReason(err: unknown): BetRefusalReason {
   if (isStaffRefusal(err)) return "team";
   const requirement = errorRequirement(err);
   if (requirement === "not_live" || requirement === "behind" || requirement === "unverified") return requirement;
-  if (errorCode(err) === "CONFLICT") return "closed";
+  // A second bet on the same prediction is a CONFLICT too, but nothing to do with the lock.
+  if (errorCode(err) === "CONFLICT" && errorReason(err) !== "already_bet") return "closed";
   return "other";
 }
 
@@ -49,7 +50,9 @@ const REFUSAL_KEYS: Readonly<Record<Exclude<BetRefusalReason, "other">, MessageK
 /** The message for a refused bet: the fair-prediction reasons first, then the E8 messages. */
 export function betRefusalMessage(err: unknown): MessageKey {
   const reason = betRefusalReason(err);
-  return reason === "other" ? interactErrorKey(err, "prediction") : REFUSAL_KEYS[reason];
+  if (reason !== "other") return REFUSAL_KEYS[reason];
+  if (errorCode(err) === "CONFLICT") return "fairPrediction.refused.alreadyBet";
+  return interactErrorKey(err, "prediction");
 }
 
 /**

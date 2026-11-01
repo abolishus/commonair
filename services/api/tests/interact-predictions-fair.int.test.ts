@@ -6,7 +6,8 @@
  * the verified-watch gate on: bets judged by media time against `lockMediaTs` (a far viewer's bet
  * just after the wall-clock lock counts, a near viewer's does not), DVR and far-behind refusals,
  * the team refused by the API and by the 0046 trigger, unverified viewers refused, the resolver
- * and the result card recorded with an audit row, and an overdraw still `insufficient_points`.
+ * and the result card recorded with an audit row, an overdraw still `insufficient_points`, and a
+ * second bet a CONFLICT with `reason: already_bet`.
  */
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
@@ -232,6 +233,15 @@ describe("who may bet", () => {
       .from(schema.predictionBets)
       .where(and(eq(schema.predictionBets.predictionId, p.id), eq(schema.predictionBets.userId, v.userId)));
     expect(rows).toHaveLength(0);
+    await cancel(p.id);
+  });
+
+  test("a second bet is a CONFLICT with reason already_bet, not a closed one", async () => {
+    const p = await fresh();
+    const v = viewers[5]!;
+    expect((await bet(v, p.id, p.outcomes[0]!.id, 10, ago(500))).status).toBe(200);
+    const again = await bet(v, p.id, p.outcomes[1]!.id, 10, ago(500));
+    expect([again.status, again.body.code, again.body.data]).toEqual([409, "CONFLICT", { reason: "already_bet" }]);
     await cancel(p.id);
   });
 });

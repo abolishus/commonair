@@ -9,6 +9,7 @@ export type Key =
   | "fairPrediction.refused.behind"
   | "fairPrediction.refused.unverified"
   | "fairPrediction.refused.closed"
+  | "fairPrediction.refused.alreadyBet"
   | "fairPrediction.result.summary"
   | "fairPrediction.result.paid"
   | "fairPrediction.result.refunded"

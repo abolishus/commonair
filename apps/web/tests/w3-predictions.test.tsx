@@ -98,6 +98,8 @@ describe("betRefusalReason", () => {
         "fairPrediction.refused.unverified",
       ],
       [refusal("CONFLICT"), "closed", "fairPrediction.refused.closed"],
+      // A second bet is a CONFLICT that says nothing about the lock.
+      [refusal("CONFLICT", { reason: "already_bet" }), "other", "fairPrediction.refused.alreadyBet"],
       // Anything else keeps the E8 messages.
       [refusal("PRECONDITION_FAILED", { requirement: "insufficient_points" }), "other", "chatPoints.insufficient"],
       [refusal("FORBIDDEN"), "other", "chatPrediction.error.forbidden"],
@@ -125,6 +127,7 @@ describe("the viewer card", () => {
     [{ requirement: "unverified" }, "PRECONDITION_FAILED", "unverified", "fairPrediction.refused.unverified"],
     [{ reason: "staff" }, "FORBIDDEN", "team", "chatPrediction.error.staff"],
     [{}, "CONFLICT", "closed", "fairPrediction.refused.closed"],
+    [{ reason: "already_bet" }, "CONFLICT", "other", "fairPrediction.refused.alreadyBet"],
   ] as const) {
     it(`a refused bet shows why (${reason})`, async () => {
       const bet = vi.fn<InteractClient["bet"]>().mockRejectedValue(refusal(code, data));
