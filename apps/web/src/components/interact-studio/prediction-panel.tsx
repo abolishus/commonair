@@ -4,7 +4,9 @@
 /**
  * Predictions on `/interact` (docs/testing/e8-selectors.md "Predictions"): the form while none is
  * open, the live card (refreshed every 2 s while open), lock, resolve per outcome and cancel (each
- * confirmed), then the payouts per outcome.
+ * confirmed), then the payouts per outcome. Fair predictions (batch 7 decision (v),
+ * docs/testing/b7-selectors.md): a note that the team cannot bet and betting locks at what each
+ * viewer sees (`prediction-team-note`), and who resolved or canceled it (`prediction-resolved-by`).
  */
 import { ConfirmDialog, IconButton, RelativeTime, StatusBadge } from "@commonair/ui";
 import { TallyList } from "@commonair/ui/blocks/interact-studio";
@@ -80,6 +82,9 @@ export function PredictionPanel({
       title={t("interact.prediction.title")}
       description={t("interact.prediction.intro")}
     >
+      <p data-testid="prediction-team-note" className="text-xs text-muted-foreground">
+        {t("fairPrediction.studio.teamNote")}
+      </p>
       {prediction ? <PredictionLive prediction={prediction} onAction={act} /> : null}
       {canStartPrediction(prediction) ? (
         <PredictionForm
@@ -130,6 +135,17 @@ function PredictionLive({
           ? fillNode(t("interact.prediction.locksIn"), "time", <RelativeTime date={p.locksAt} />)
           : t("interact.prediction.pool", { count: predictionPool(p) })}
       </p>
+      {p.resolvedBy ? (
+        <p
+          data-testid="prediction-resolved-by"
+          data-user-id={p.resolvedBy.id}
+          className="text-xs text-muted-foreground"
+        >
+          {t(p.status === "canceled" ? "fairPrediction.studio.canceledBy" : "fairPrediction.studio.resolvedBy", {
+            user: p.resolvedBy.username,
+          })}
+        </p>
+      ) : null}
       <TallyList
         label={t("interact.prediction.results")}
         items={p.outcomes.map((o) => {
