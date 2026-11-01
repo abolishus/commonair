@@ -22,6 +22,68 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
 
 ## In flight
 
+**Batch 7 (W3 + N3 + N4; `.claude/briefs/batch7/README.md`), planned 2026-11-01 at `b37203c4`.**
+
+_User decisions:_
+
+- Giveaways are built in full behind `GIVEAWAYS_ENABLED`, default false.
+- The Twitch import is built against a Helix mock behind `TWITCH_IMPORT_ENABLED`, default false.
+  It requests no scopes, the schedule is carried but not applied, and panels come in by a paste-in
+  helper. ADR 0031 is accepted with these answers.
+- Federation is off per instance and per channel. The `federation` scenario uses a minimal
+  in-harness ActivityPub peer.
+- A new `w3` shard holds `watch-room`, `portability`, `twitch-import` and `federation`.
+  `interact`, `e5-coop` and `e2e-relay` take the extension steps.
+- The contracts files the SDK inlines become dual-licensed now (ADR 0035, confirmed).
+- Captions keep base q5_1 on eSpeak.
+- A group-appeal re-score re-applies the exclude threshold.
+- **There is no counsel.** The maintainer decides every "counsel" gate with the conservative
+  default, and each one is listed under "Post-launch review" in the batch 7 README.
+
+_Gates checked on main:_
+
+- User blocks shipped in W1.
+- The player seam has `setTargetLatency`.
+- E5, E8 and N1 are merged.
+- There is no relay purge (W3-dvr-relay builds it first) and no `watch_room` report subject (the
+  contract step adds it).
+
+_Orchestrator defaults_ are decisions (i)–(ad). They include:
+
+- one `PortabilityBundle` v1 in contracts;
+- move links as stored-hash nonces;
+- a worker-only Ed25519 standing statement;
+- the worker reaching the upload pipeline through an internal API route;
+- invite-only rooms;
+- `packages/draw` (commit-reveal) for giveaways and the advisory jury (`jury.enabled` seeded false);
+- media-time prediction locks;
+- raid surges with verified carry-over;
+- a signed relay purge feed;
+- media-state and suspension internal events;
+- a trigger-maintained `channels.follower_count` (integrity exclusion never decremented it);
+- ADRs 0037–0039.
+
+_Plan:_
+
+- **Contract step:** `w3/contract-step.md`, migrations 0045/0046.
+- **Wave 1:** W3-watch-rooms, W3-portability, W3-giveaways, W3-jury, W3-surge-raids,
+  W3-fair-predictions.
+- **Wave 2:** N3-import, N4-api, N4-delivery, N4-web, W3-dvr-relay, B7-followups.
+- **Side task:** the whisper release image runs beside wave 1.
+
+_Batch 6 follow-ups:_
+
+- Assigned:
+  - relay `.vtt` goes to W3-dvr-relay;
+  - whisper self-host and release is the orchestrator's side task;
+  - the rehearsal sample count, the resolve/suspend statements and the re-score threshold go to
+    B7-followups;
+  - notify shard timing is measured in the contract step.
+- Deferred to batch 8: the replay deep-seek span; p2p bytes in attestations (they are
+  client-reported, so an ADR 0014 amendment comes first).
+
+Handoff: `batch7/HANDOFF.md`.
+
 **Batch 6 (W2; `.claude/briefs/batch6/README.md`), planned 2026-11-01.** User decisions: ledger
 splits ship enabled (counsel on split recipients is not a blocker; live money stays gated by M1);
 DVR defaults to a 30-minute window per channel under the 2 h cap; the `captions` scenario runs in
@@ -139,7 +201,7 @@ Open for the user: the dual licence of the contracts files before the SDK publis
 counsel on split recipients and the draft privacy section; the captions model (base vs small) and
 fixture (eSpeak vs a CC0 human reading); whether a group-appeal re-score should re-apply the
 scorer's exclude threshold (today any remaining signal keeps a session excluded); visual, `es` and
-`en-XA` checks of the W2 pages. Next: plan batch 7 (W3 + N3 + N4).
+`en-XA` checks of the W2 pages. Next: batch 7 (planned, above).
 
 **Batch 5 (rest of N2; `.claude/briefs/batch5/README.md`), planned 2026-10-31.** User decisions:
 Spanish drafted by agents now against a shared glossary and uploaded to Weblate as "needs
