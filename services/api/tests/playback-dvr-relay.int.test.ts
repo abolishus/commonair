@@ -101,8 +101,14 @@ async function startOn(source: Start["source"], viewer: () => Client, slug: stri
   throw new Error(`no session drawn onto ${source} in 60 tries`);
 }
 
-async function beat(viewer: Client, s: Start, token: string): Promise<Beat> {
-  clock += (PLAYBACK_TOKEN_TTL_SECONDS - 60) * 1000;
+/** A DVR heartbeat `advanceSeconds` after the last one (default: at the live token's refresh point). */
+async function beat(
+  viewer: Client,
+  s: Start,
+  token: string,
+  advanceSeconds = PLAYBACK_TOKEN_TTL_SECONDS - 60,
+): Promise<Beat> {
+  clock += advanceSeconds * 1000;
   const res = await viewer.call<Beat>("POST", "/api/playback/heartbeat", {
     sessionId: s.sessionId,
     token,
@@ -240,5 +246,26 @@ describe("heartbeat: the DVR token follows the assignment", () => {
     const originDvr = await claimsOf(moved.dvrToken ?? "");
     expect(originDvr).toMatchObject({ sid: s.sessionId, path: dvrTokenPath(live.vodId), src: "origin" });
     expect(originDvr.rid).toBeUndefined();
+  });
+
+  // A player beating every ~10 s gets its first DVR token at the live token's refresh point, not
+  // before: a 60 s watch can end one beat short of it (CI run 41357496846: 6 beats, no DVR token).
+  test("no DVR token before the live token's refresh point; the first beat at it carries one", async () => {
+    const live = await liveRecording();
+    const viewer = client(api);
+    const s = await startOn("relay", () => viewer, live.owner.username);
+    const refreshAt = PLAYBACK_TOKEN_TTL_SECONDS - 60;
+    for (let at = 10; at < refreshAt; at += 10) {
+      const r = await beat(viewer, s, s.token, 10);
+      expect([at, r.token, r.dvrToken]).toEqual([at, undefined, undefined]);
+    }
+    const r = await beat(viewer, s, s.token, 10);
+    expect(r.token).toBeDefined();
+    expect(await claimsOf(r.dvrToken ?? "")).toMatchObject({
+      sid: s.sessionId,
+      path: dvrTokenPath(live.vodId),
+      src: "relay",
+      rid: relayId,
+    });
   });
 });
