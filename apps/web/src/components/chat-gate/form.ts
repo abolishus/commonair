@@ -21,6 +21,11 @@ export interface ChatGateDraft {
   seconds: string;
   exemptSubs: boolean;
   surgeEnabled: boolean;
+  /**
+   * "Protect raids" (`surgeGuard.onRaid`, batch 7 decision (w)): a raid in opens a surge. Unset
+   * until the switch is touched, and then sent; unset leaves the stored value alone (a patch).
+   */
+  onRaid?: boolean;
   /** The trigger ratio as a whole percentage. */
   ratio: string;
   cooldown: string;
@@ -73,7 +78,12 @@ export function chatGateInput(
     if (ratio === null || ratio < RATIO_MIN_PERCENT || ratio > RATIO_MAX_PERCENT) errors.ratio = true;
     if (cooldown === null || cooldown < COOLDOWN_MIN || cooldown > COOLDOWN_MAX) errors.cooldown = true;
     if (ratio !== null && cooldown !== null && !errors.ratio && !errors.cooldown)
-      input.surgeGuard = { enabled: d.surgeEnabled, triggerUnverifiedRatio: ratio / 100, cooldownMinutes: cooldown };
+      input.surgeGuard = {
+        enabled: d.surgeEnabled,
+        triggerUnverifiedRatio: ratio / 100,
+        cooldownMinutes: cooldown,
+        ...(d.onRaid === undefined ? {} : { onRaid: d.onRaid }),
+      };
   }
   return Object.keys(errors).length > 0 ? { ok: false, errors } : { ok: true, input };
 }

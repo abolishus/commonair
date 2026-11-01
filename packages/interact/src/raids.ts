@@ -173,3 +173,88 @@ export const toRaidView = (
   createdAt: r.createdAt.toISOString(),
   executeAt: r.executeAt.toISOString(),
 });
+
+// ------------------------------------------------------------ surge raids (batch 7 decision (w), ADR 0039 §4)
+
+/** The target's surge-guard settings a raid reads (`ChannelChatSettings.surgeGuard`). */
+export interface RaidSurgeSettings {
+  enabled: boolean;
+  onRaid: boolean;
+}
+
+/**
+ * Does a raid into this target open (or extend) a surge? Only while the instance runs the surge
+ * guard (`CHAT_SURGE_GUARD`) and the target has the guard on with "Protect raids" (`onRaid`).
+ */
+export const raidOpensSurge = (instanceSurgeGuard: boolean, s: RaidSurgeSettings): boolean =>
+  instanceSurgeGuard && s.enabled && s.onRaid;
+
+/** When a raid surge opened at `now` ends (`RAID_RULES.surgeMinutes`). */
+export const raidSurgeUntil = (now: Date): Date => new Date(now.getTime() + RAID_RULES.surgeMinutes * 60_000);
+
+/** The start of the carry window (`RAID_RULES.carryMinutes`): raiders seen on the source at or after it carry. */
+export const carryWindowStart = (now: Date): Date => new Date(now.getTime() - RAID_RULES.carryMinutes * 60_000);
+
+/** Was a raider seen on the source within `RAID_RULES.carryMinutes` of `now` (inclusive)? A later time counts. */
+export const inCarryWindow = (lastSeenAt: Date, now: Date): boolean =>
+  lastSeenAt.getTime() >= carryWindowStart(now).getTime();
+
+/** A `KEYS.verifiedWatch` value (`VerifiedWatchValue`), structurally. */
+export interface CarryValue {
+  b: string;
+  s: number;
+  f: 0 | 1;
+}
+
+/**
+ * The target value one raider carries, or null when they carry nothing: the source value must be
+ * for the source's live broadcast (a value for another broadcast is stale, as chat reads it). The
+ * raider carries their standing, never more (ADR 0039 §4): `s` and `f` are the source value's, so a
+ * raider verified for 20 s on the source passes neither the surge gate (60 s) nor a stricter target
+ * gate, and `f` (the privacy-relay fallback, ADR 0015 decision 5) keeps the account-age rule.
+ */
+export function raidCarryValue(
+  source: CarryValue | null,
+  sourceBroadcastId: string,
+  targetBroadcastId: string,
+): CarryValue | null {
+  if (!source || source.b !== sourceBroadcastId) return null;
+  return { b: targetBroadcastId, s: source.s, f: source.f };
+}
+
+/**
+ * The carry's TTL in seconds: the surge's remaining time plus the override key's 60 s grace, so a
+ * carry never lapses while the surge still holds chat. At least one second.
+ */
+export const raidCarryTtlSeconds = (surgeUntil: Date, now: Date): number =>
+  Math.max(1, Math.ceil((surgeUntil.getTime() - now.getTime()) / 1000) + 60);
+
+/**
+ * The raid a surge holds chat for, as the mod banner shows it (`chat.surge.state.raid`). The worker
+ * keeps it in the `KEYS.surgeOverride` value beside `SurgeOverride`'s own fields, so it lives exactly
+ * as long as the surge and a moderator's override (a fresh value) drops it.
+ */
+export interface SurgeRaidInfo {
+  /** The source channel's slug. */
+  fromChannel: string;
+  /** The raid's verified viewer count (`raidViewerCount`). */
+  verifiedCount: number;
+}
+
+/** The `raid` field of a raw `KEYS.surgeOverride` value, or null (absent, malformed, or no raid). */
+export function surgeRaidOf(raw: string | null): SurgeRaidInfo | null {
+  if (raw === null) return null;
+  let v: unknown;
+  try {
+    v = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (typeof v !== "object" || v === null) return null;
+  const r = (v as { raid?: unknown }).raid;
+  if (typeof r !== "object" || r === null) return null;
+  const { fromChannel, verifiedCount } = r as { fromChannel?: unknown; verifiedCount?: unknown };
+  if (typeof fromChannel !== "string" || fromChannel.length === 0) return null;
+  if (typeof verifiedCount !== "number" || !Number.isSafeInteger(verifiedCount) || verifiedCount < 0) return null;
+  return { fromChannel, verifiedCount };
+}

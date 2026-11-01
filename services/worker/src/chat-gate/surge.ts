@@ -8,6 +8,10 @@
  * its last statement (compare-and-set: a moderator's override in between wins and rolls this back);
  * the `surge` frame is published after the commit. A channel whose guard was turned off with surge
  * state still in Valkey is ended the same way, so the moderator banner never sticks on `on`.
+ *
+ * Raids open surges too (`raid.ts`, batch 7 decision (w)): their override carries the raid, which
+ * an extension here keeps, and their end is recorded with reason `expired` (a raid surge has a fixed
+ * length, `RAID_RULES.surgeMinutes`, not a cooldown).
  */
 import { sql } from "drizzle-orm";
 import { ChatControlMessage } from "@commonair/contracts/chat";
@@ -15,6 +19,7 @@ import { BUS } from "@commonair/contracts/events";
 import { ChannelChatSettings } from "@commonair/contracts/shapes";
 import type { Executor } from "@commonair/db";
 import { GATE_ELIGIBLE } from "@commonair/integrity";
+import { surgeRaidOf } from "@commonair/interact";
 import type { WorkerContext } from "../context.ts";
 import { audit, emit, safeErrorCode } from "../moderation/records.ts";
 import { type ChatGateConfig, chatGateConfig } from "./config.ts";
@@ -28,6 +33,7 @@ import {
   overrideTtlSeconds,
   surgeTrigger,
 } from "./hysteresis.ts";
+import type { RaidSurgeOverride } from "./raid.ts";
 import { casOverride, readOverride, SURGE_OPEN_TTL_SECONDS, surgeOpenKey, type StoredOverride } from "./state.ts";
 
 export interface SurgeGuardResult {
@@ -118,8 +124,17 @@ export async function runSurgeGuard(
         cooldownMinutes: ch.settings.cooldownMinutes,
       });
       let current = stored;
+      const raid = surgeRaidOf(stored.raw);
       for (const a of actions) {
-        const applied = await apply(ctx, ch, a, current, now, counts);
+        // A trigger while a raid surge runs extends it; the banner still names the raid.
+        const applied = await apply(
+          ctx,
+          ch,
+          a.kind === "extend" && raid ? { ...a, next: { ...a.next, raid } } : a,
+          current,
+          now,
+          counts,
+        );
         if (applied === null) break;
         current = applied;
         if (a.kind === "begin") result.begun++;
@@ -197,7 +212,7 @@ async function sweepUnguarded(ctx: WorkerContext, guarded: ReadonlySet<string>, 
 async function apply(
   ctx: WorkerContext,
   ch: GuardedChannel,
-  a: SurgeAction,
+  a: SurgeAction | { kind: "extend"; next: RaidSurgeOverride },
   current: StoredOverride,
   now: Date,
   counts: SurgeCounts | null,
@@ -239,15 +254,17 @@ async function apply(
         await cas(a.next);
         await publish(ctx, ch, { state: "on", until: a.next.until });
         return { raw: JSON.stringify(a.next), value: a.next };
-      case "end":
+      case "end": {
+        // A raid surge ran its fixed length (unless the guard was turned off under it).
+        const reason = surgeRaidOf(current.raw) && !a.cause ? "expired" : "cooldown";
         await ctx.db.transaction(async (tx) => {
-          await emit(tx, "chat.surge.end", ch.id, { reason: "cooldown", by_user_id: null }, now);
+          await emit(tx, "chat.surge.end", ch.id, { reason, by_user_id: null }, now);
           await audit(
             tx,
             surgeAudit(
               ch.id,
               "chat.surge.end",
-              a.cause ? { reason: "cooldown", cause: a.cause } : { reason: "cooldown" },
+              a.cause ? { reason, cause: a.cause } : reason === "expired" ? { reason, trigger: "raid" } : { reason },
             ),
             now,
           );
@@ -256,6 +273,7 @@ async function apply(
         await ctx.valkey.del(surgeOpenKey(ch.id));
         await publish(ctx, ch, { state: "off", until: null });
         return { raw: null, value: null };
+      }
       case "clear":
         await cas(null);
         await publish(ctx, ch, { state: "off", until: null });
@@ -271,9 +289,10 @@ function surgeAudit(channelId: string, action: string, details: Record<string, s
   return { action, subjectType: "channel", subjectId: channelId, channelId, details };
 }
 
-async function publish(
-  ctx: WorkerContext,
-  ch: GuardedChannel,
+/** The `surge` control frame to the channel's room after a commit (the raid path uses it too). */
+export async function publish(
+  ctx: Pick<WorkerContext, "valkey" | "logger">,
+  ch: Pick<GuardedChannel, "id" | "slug">,
   s: { state: "off" | "on" | "suppressed"; until: string | null },
 ): Promise<void> {
   try {

@@ -4,7 +4,8 @@
 /**
  * Raids on `/interact`, owner and editors only (docs/testing/e8-selectors.md "Raids"): the target
  * form (the live check is the API's), the countdown with cancel, the last raid and its cooldown,
- * and who may raid this channel (saved on change).
+ * and who may raid this channel (saved on change). The form notes that the target may protect
+ * raids (batch 7 decision (w)): only the source's verified viewers can chat there at first.
  */
 import { RelativeTime, StatusBadge, ViewerCount } from "@commonair/ui";
 import { SelectField } from "@commonair/ui/blocks/forms";
@@ -133,6 +134,9 @@ function RaidForm({ onStart }: { onStart: (to: string) => Promise<void> }): Reac
         error={fieldError}
         description={t("interact.raid.targetHint")}
       />
+      <p data-testid="raid-protection-note" className="text-sm text-muted-foreground">
+        {t("surgeRaids.panel.note")}
+      </p>
       {refusal ? (
         <p data-testid="raid-error" data-code={refusal} role="alert" className="text-sm text-destructive">
           {raidErrorMessage(refusal)}
