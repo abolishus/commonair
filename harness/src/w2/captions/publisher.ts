@@ -3,9 +3,9 @@
 
 /**
  * A streamer that speaks (ADR 0011): the speech fixture over a test pattern, published over RTMP in
- * real time. The speech starts after `leadSeconds` of silence (the captions worker takes a slot,
- * reads W0 and cuts its first chunk meanwhile) and is followed by `tailSeconds` of silence, so the
- * last words land in a finished chunk before the stream ends. The video carries the timestamp
+ * real time. The speech starts after `leadSeconds` of silence (the captions worker takes a slot and
+ * reads W0 meanwhile, so its reader is on the source before the first word) and is followed by
+ * `tailSeconds` of silence, so the last words are transcribed and listed before the stream ends. The video carries the timestamp
  * strip, so a browser viewer can tell the wall-clock capture time of the frame under its playhead
  * (the cue placement check).
  */
@@ -14,6 +14,21 @@ import { spawnSupervised, type Supervised } from "../../process.ts";
 
 const WIDTH = 640;
 const HEIGHT = 360;
+
+/**
+ * Publisher start to the captions reader's first sample, as measured on CI (run 41285945456:
+ * 8.8 s; W0 waits for MediaMTX's LL-HLS muxer, the recorder anchored at the same time). Audio
+ * before it is never read, so speech there is lost from the transcript.
+ */
+export const CAPTIONS_STARTUP_SECONDS = 9;
+/** Silence before the speech: the start-up plus margin for a slower runner. */
+export const DEFAULT_LEAD_SECONDS = 15;
+/**
+ * Silence after the speech: the last word's chunk (3 s) waits behind up to `MAX_PENDING` (2)
+ * queued chunks and then takes its own whisper run (~3 s each on CI's two threads), all before
+ * the publisher disconnects and the worker stops.
+ */
+export const DEFAULT_TAIL_SECONDS = 12;
 
 export interface SpeechStreamOptions {
   /** Full RTMP publish URL including the key. */
@@ -29,8 +44,8 @@ export interface SpeechStreamOptions {
 
 /** The ffmpeg command line (pure, tested). */
 export function speechStreamArgs(o: SpeechStreamOptions): string[] {
-  const lead = o.leadSeconds ?? 6;
-  const tail = o.tailSeconds ?? 8;
+  const lead = o.leadSeconds ?? DEFAULT_LEAD_SECONDS;
+  const tail = o.tailSeconds ?? DEFAULT_TAIL_SECONDS;
   const loops = Math.max(1, o.loops ?? 1);
   const realtime = ["-readrate", "1"];
   return [

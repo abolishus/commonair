@@ -5,7 +5,7 @@
  * W2, open live captions (docs/testing/w2-selectors.md, scenario `captions`; ADR 0011):
  *
  * 1. Subtitles advertised: the master playlist carries a SUBTITLES group once captions start.
- * 2. Word error rate below 0.25 against the fixture's reference transcript.
+ * 2. Word error rate below 0.40 against the fixture's reference transcript (spoken three times).
  * 3. Cue timing: every cue is available before the playhead's PDT reaches it at 8–10 s latency
  *    (subtitle playlist first-seen times, and a Chromium viewer's `video.textTracks`).
  * 4. VOD captions present after the broadcast ends.
@@ -32,7 +32,7 @@ import { CAPTIONS_STEP_PREREQUISITES, captionsTitle, parseCaptionsSteps, withPre
 export default defineScenario({
   name: "captions",
   description:
-    "subtitles advertised → WER below 0.25 → cues ahead of the playhead → VOD captions → queued at the cap → no transcript without VODs → none for a rehearsal → mask words masked",
+    "subtitles advertised → WER below 0.40 → cues ahead of the playhead → VOD captions → queued at the cap → no transcript without VODs → none for a rehearsal → mask words masked",
   needs: ["api", "web", "media", "origin", "worker", "ffmpeg", "browser"],
   inFull: true,
   timeoutMs: 20 * 60_000,

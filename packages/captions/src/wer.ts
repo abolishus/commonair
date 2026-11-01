@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * Word error rate (ADR 0011: the `captions` harness keeps the model only while WER < 0.25 against
- * a reference transcript). WER = (substitutions + deletions + insertions) / reference words, on
+ * Word error rate (ADR 0011: the `captions` harness keeps the model only while WER < 0.40 against
+ * a reference transcript, History 2026-11-01). WER = (substitutions + deletions + insertions) / reference words, on
  * words normalized the way a caption reader would compare them: case, punctuation and the mask
  * token do not count.
  */

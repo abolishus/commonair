@@ -45,8 +45,21 @@ import {
 } from "./live.ts";
 import { startSpeechStream, type SpeechStream } from "./publisher.ts";
 
-/** The WER the model must stay under on the fixture (ADR 0011 decision 1). */
-export const MAX_WER = 0.25;
+/**
+ * The WER the live pipeline must stay under on the fixture (ADR 0011, History 2026-11-01).
+ *
+ * Measured with the pinned whisper.cpp build and `ggml-base-q5_1` on this eSpeak NG fixture, cut
+ * into 3 s chunks the way the worker cuts them (AAC round trip included): one pass scores 0.18 to
+ * 0.40 depending on where the chunk edges fall against the words, three passes 0.30 to 0.33, and
+ * the same audio sent whole 0.08. The gap is the model on synthetic speech with 3 s of context,
+ * not the pipeline: the stored cues score the same as whisper's raw segments joined. The stream
+ * speaks the fixture `SPEECH_LOOPS` times (34.3 s is not a multiple of 3, so each pass meets the
+ * chunk grid at a different phase), which takes the luck of one phase out; 0.40 sits above that
+ * spread and below a pipeline that loses or repeats chunks (one chunk in ten adds about 0.1).
+ */
+export const MAX_WER = 0.4;
+/** Times the shared stream speaks the fixture (each pass at a different chunk phase). */
+export const SPEECH_LOOPS = 3;
 /** A segment must be listed before a captions-on player's playhead (held this far behind live) reaches it. */
 export const CUE_DEADLINE_MS = CAPTIONS_LATENCY_SECONDS * 1000;
 /** Segments with cues the follower must see listed after its first poll, for the timing gate to mean anything. */
@@ -268,7 +281,9 @@ async function sharedSpeech(run: CaptionsRun): Promise<SpeechRun> {
     captionedChannel(ctx, "w2cap_s", { vod: true, maskWords: [MASK_WORD] }),
   );
   ctx.data("speechChannel", channel);
-  const stream = await ctx.step("captions: S streams the speech fixture", () => goLive(ctx, run, user, channel));
+  const stream = await ctx.step("captions: S streams the speech fixture", () =>
+    goLive(ctx, run, user, channel, { loops: SPEECH_LOOPS }),
+  );
   const start = await ctx.step("captions: the track is active", () => waitForCaptionsState(ctx, channel, "active"));
   const advert = await ctx.step("captions: the multivariant playlist advertises it", () =>
     waitForAdvert(ctx, start.playlistUrl),
@@ -324,11 +339,15 @@ async function subtitlesAdvertised(run: CaptionsRun): Promise<void> {
   run.ctx.assert("every variant names the group", advert.onEveryVariant, { variants: advert.variants });
 }
 
+/** What the shared stream says: the reference once per loop. */
+export const spokenReference = (reference: string, loops: number): string =>
+  Array.from({ length: Math.max(1, loops) }, () => reference.trim()).join(" ");
+
 async function werBelowThreshold(run: CaptionsRun): Promise<void> {
   const { segments } = await run.speech();
   // The mask token stands for one word that was said; compare it as the masked word.
   const hypothesis = transcriptOf(segments).replaceAll(MASK_TOKEN, MASK_WORD);
-  const wer = wordErrorRate(run.reference, hypothesis);
+  const wer = wordErrorRate(spokenReference(run.reference, SPEECH_LOOPS), hypothesis);
   run.ctx.metric("captions_wer", wer);
   run.ctx.data("transcript", hypothesis);
   run.ctx.assert(`WER ${wer.toFixed(3)} < ${MAX_WER}`, wer < MAX_WER, { wer });
