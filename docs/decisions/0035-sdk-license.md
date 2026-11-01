@@ -5,7 +5,8 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # ADR 0035: Apache-2.0 for the SDK
 
-- Status: accepted (2026-10-29)
+- Status: accepted (2026-10-29); the dual licence of the inlined contract files confirmed by the
+  maintainer on 2026-11-01 (see [Confirmation](#confirmation-2026-11-01))
 - Date: 2026-10-29
 
 ## Context
@@ -49,9 +50,10 @@ harness, the other packages and the docs keep their licences (AGENTS.md rule 1).
   (ADR 0027 §5). Those files are AGPL-3.0-or-later today, and a bundle that contains them could
   not be offered under Apache-2.0 alone. The contract files the bundle pulls in (the exact list
   comes from the build's metafile, E9-sdk) are therefore dual-licensed
-  `AGPL-3.0-or-later OR Apache-2.0`. The maintainer confirms that change before the first publish;
-  every contribution to those files so far is the maintainer's, under the DCO, so no other consent
-  is needed today. Any later contributor to a dual-licensed file contributes under both.
+  `AGPL-3.0-or-later OR Apache-2.0`. The maintainer confirms that change before the first publish
+  (confirmed 2026-11-01, see [Confirmation](#confirmation-2026-11-01)); every contribution to those
+  files so far is the maintainer's, under the DCO, so no other consent is needed today. Any later
+  contributor to a dual-licensed file contributes under both.
 - **Publishing.** The package is `"private": false`, but nothing is published until the maintainer
   creates the `@commonair` npm organisation and adds `sdk-publish.yml` as the trusted publisher
   (ADR 0027 §5). Only `packages/sdk/dist` is ever published.
@@ -68,6 +70,17 @@ harness, the other packages and the docs keep their licences (AGENTS.md rule 1).
   fails until it has it.
 - ADR 0027's consequence "The SDK is AGPL-3.0-or-later like every package" is superseded by this
   ADR.
+
+## Confirmation (2026-11-01)
+
+The maintainer confirmed the dual licence on 2026-11-01 (batch 7 decision (e)). The batch 7
+contract step relicenses exactly the `packages/contracts/src` files that
+`packages/sdk/scripts/build.ts` inlines, as the build reports them (not a guessed list), to
+`AGPL-3.0-or-later OR Apache-2.0`, updates any `REUSE.toml` annotation that covers them, and from
+then on the SDK build passes without `--allow-unlicensed-inline`. Every contribution to those files
+up to that commit is the maintainer's, under the DCO. No counsel was retained for this
+confirmation; it is listed for post-launch review with the other maintainer calls (batch 7
+decision (h)).
 
 ## Alternatives considered
 

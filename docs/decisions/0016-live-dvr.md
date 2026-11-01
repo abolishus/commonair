@@ -6,7 +6,9 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR 0016: Live DVR
 
 - Status: accepted (2026-10-27; the maintainer accepted the recommended answers, see
-  [Decisions at acceptance](#decisions-at-acceptance-2026-10-27))
+  [Decisions at acceptance](#decisions-at-acceptance-2026-10-27)).
+  [Amendment 1](#amendment-1-the-signed-relay-purge-relay-dvr-and-relay-captions) (relay purge,
+  relay DVR, relay captions) proposed 2026-11-01, maintainer to accept
 - Date: 2026-10-27 (code checked at `ccf9c17`)
 - Gates: W2-dvr ([W2 plan](../../.claude/briefs/next/W2-feature-wave.md)); its v2 gates
   W3-dvr-relay ([W3 plan](../../.claude/briefs/next/W3-feature-wave.md))
@@ -202,3 +204,121 @@ The maintainer accepted the recommended technical defaults:
 
 Also settled here (no separate question was asked): DVR needs the VOD recording in v1, the creator
 can turn DVR off, and the window cap is an instance setting with a 2 h default.
+
+## Amendment 1: the signed relay purge, relay DVR and relay captions
+
+- Status: proposed (maintainer to accept; see
+  [Amendment 1 decisions at acceptance](#amendment-1-decisions-at-acceptance))
+- Date: 2026-11-01 (code checked at `3bb7af9b`)
+- Gates: W3-dvr-relay ([batch 7 contract step](../../.claude/briefs/w3/contract-step.md) §2.4,
+  §2.7, §3.1, §4.3, §5.2; [brief](../../.claude/briefs/w3/W3-dvr-relay.md)); batch 7 decisions
+  (x) and (y)
+
+**No counsel retained; listed for post-launch review** (batch 7 decision (h)). Nothing in this
+amendment turns on a legal question; the note is recorded for consistency.
+
+Decision 5 kept DVR origin-only until a signed relay purge exists. This amendment defines that
+purge and the rules under which relays may then serve DVR. It also settles relay captions, which
+batch 6 left counted and pinned like segments.
+
+What the code has at `3bb7af9b`: relays poll the API (register, a heartbeat every 15 s, receipts;
+`relay/internal/apiclient/client.go:121-147`), and the heartbeat answer carries `originPublicKey`,
+the public half of `PLAYBACK_SIGNING_KEY` (`:76-79`). The relay cache (`relay/internal/cache/lru.go`)
+has no purge. Relays count every fetched file toward receipts (`Ledger.AddSegment` / `AddBytes`,
+`relay/internal/server/server.go:448-451`), `.vtt` included.
+
+### A1.1 Purges are rows, emitted from the media-state events
+
+- **Events** (contract step, batch 7 decision (z)): `media.vod.state` and `media.clip.state`
+  (`{id, channel_id, public, reason}`, written on every path that makes a VOD or clip public or
+  non-public) and `channel.suspension` (`{channel_id, suspended}`, written on every suspension
+  path). They are internal: never offered to apps.
+- **Emitter.** The outbox hook `b7JobsFor` maps `media.*.state`, `channel.suspension` and
+  `moderation.restriction` (and `stream.offline` for an ended recording) to
+  `RELAY_PURGE_JOBS.emit`. The job inserts `relay_purges` rows (`seq` bigserial, `prefix`,
+  `reason`, `created_at`) in the same transaction as its dedupe marker, idempotent per event id:
+  - `dvr/<vodId>/` when a VOD stops being public or its recording ends;
+  - `live/<slug>/` when a live channel is T1-restricted or suspended;
+  - `live/<slug>/captions/` where only captions must go.
+- **Retention.** A daily cleanup drops rows older than 7 days. The `reason` is a code, never free
+  text (ADR 0004).
+
+### A1.2 The purge feed: a long poll with a signed answer
+
+- **Request.** `GET /api/relay/purges?after=<seq>`, with the relay protocol's bearer auth.
+- **Answer.** The rows after `seq`, at most 500, as a signed envelope
+  `{ payload: { seq, items: [{ seq, prefix, reason }] }, signature }`. `payload.seq` is the highest
+  `seq` the answer covers; the relay sends it as the next `after`.
+- **Hold.** With nothing new, the API holds the request up to **25 s**, woken early by a Valkey
+  pub/sub nudge from the emitter, then answers an empty batch. A harness hook shortens the hold to
+  1 s.
+- **Reset.** A relay whose `after` is older than the retained rows (more than 7 days behind) gets a
+  signed answer telling it to reset; it clears its DVR and live caches and continues from the
+  answer's `seq`. A relay that restarts starts from 0 and receives the retained rows.
+- **Signature** (`packages/tokens`: `signPurgeBatch`, `verifyPurgeBatch`; Go mirror
+  `relay/internal/tokens/purge.go`; vectors under `purge` in `packages/tokens/vectors.json`, tested
+  in TS and Go): Ed25519 with the origin's playback key, which relays already trust as
+  `originPublicKey`. As with receipts, `payload` and `signature` are base64url and the signed bytes
+  are the JSON of the Zod-parsed payload; the relay verifies the bytes before parsing.
+- **A bad signature** refuses the whole batch (logged and counted); the relay keeps its `after`
+  and polls again with backoff.
+- **Why signed, if the channel is authenticated.** The purge is an instruction to the relay's cache
+  from the origin, and the relay already holds the origin's key: a signature makes it the origin's
+  instruction whatever path carried it. A replayed old batch can only purge again, which is safe;
+  a withheld batch is covered by A1.3.
+
+### A1.3 Relay DVR rules
+
+From this amendment on, the token rules (TS refine in `packages/contracts/src/tokens.ts`, Go
+`Binding.Check` in `relay/internal/tokens/playback.go`, and the vectors) allow a `dvr/<vodId>`
+path with `src = relay` and a matching `rid`; a token carrying `dm` is still refused (decision 7). The API mints **no** relay DVR token until W3-dvr-relay lands; origin- and
+CDN-assigned sessions keep origin DVR, so the CDN still never serves DVR.
+
+A relay serving DVR:
+
+- pulls from the origin's `/relay-pull/dvr/<vodId>/…`, with the live pull's relay auth and the same
+  state checks and window cut as `/dvr/` (decision 3);
+- refreshes the playlist when its copy is more than **1 s** old;
+- serves a segment only while its current playlist lists it **and** its last successful playlist
+  fetch is under **5 s** old, else answers 404;
+- evicts the VOD's whole prefix at once on a 404 or 403 from the origin, and on a purge;
+- keeps a prefix tombstone for 60 s after a purge, so an in-flight fill for a purged prefix is
+  dropped instead of cached;
+- caches segments with an expiry of the DVR window, and answers with
+  `cache-control: private, no-store`;
+- counts DVR bytes and segments toward its receipts, so ADR 0016 decision 6's fetch judging uses the
+  relay's evidence for relay-served DVR.
+
+**Removal latency.** Without any purge, removal reaches a relay within about 5 s: the origin's
+shared state cache refuses the playlist within 5 s (decision 3), and a relay re-reads it at most
+1 s later and evicts; a relay that cannot reach the origin stops serving 5 s after its last good
+fetch. A purge evicts as soon as the long poll delivers it.
+
+### A1.4 Relay captions (decision (y))
+
+Caption files under `/captions/` ending in `.vtt` change while a stream is live, and they are not
+media segments. The relay neither counts them (no `AddSegment` / `AddBytes`) nor pins them: they
+are cached for 30 s and served with `max-age=30` (not `immutable`), with a Go test for each rule.
+When W3-dvr-relay merges, the orchestrator sets `captionsReachable` for relay pulls
+(`services/origin/src/handler.ts:157-161`), so relay viewers get the `SUBTITLES` rendition.
+
+### A1.5 Consequences of the amendment
+
+- Relays can carry DVR egress, which was all origin egress in v1.
+- Removal on relays is bounded twice: by the purge (about as fast as the outbox) and by the 5 s
+  stale-playlist rule (even if every purge is lost).
+- Relays stop counting caption polls as delivered segments, so receipts measure media only.
+- The purge feed is one more long-lived request per relay, held at most 25 s.
+
+### Amendment 1 decisions at acceptance
+
+For the maintainer. Each item is the recommended default; accepting the amendment accepts them.
+
+1. **Purge before DVR (x):** relays may serve DVR only with the signed purge in place.
+2. **Feed:** `relay_purges` rows from the media-state events, a 25 s long poll, at most 500 rows,
+   7-day retention, a signed reset for a relay further behind.
+3. **Signature:** Ed25519 with the origin playback key, verified with `originPublicKey`.
+4. **Relay DVR:** 1 s playlist refresh, 5 s stale-playlist rule, immediate eviction on 404/403 or
+   purge, 60 s tombstones, `private, no-store`, counted in receipts; still no CDN DVR.
+5. **Captions (y):** `.vtt` on relays is neither counted nor pinned (30 s cache, `max-age=30`);
+   `captionsReachable` flips for relay pulls at the W3-dvr-relay merge.

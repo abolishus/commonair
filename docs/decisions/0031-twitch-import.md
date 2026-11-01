@@ -5,15 +5,17 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # ADR 0031: Importing a channel from Twitch
 
-- Status: proposed (2026-10-27; drafted with the maintainer's recommended answers; not to be
-  accepted until counsel reviews the Twitch Developer Agreement and trademark terms)
-- Date: 2026-10-27 (code checked at `ccf9c17`)
+- Status: accepted (2026-11-01; the maintainer accepted it with batch 7 decision (b), see
+  [Decisions at acceptance](#decisions-at-acceptance-2026-11-01))
+- Date: 2026-10-27 (code checked at `ccf9c17`); accepted 2026-11-01 (checked at `3bb7af9b`)
 
-**Counsel has not reviewed this ADR.** Whether the Twitch Developer Agreement allows using its API
-to move a streamer's own channel data to another service, and how the import page may name
-Twitch, are open questions listed in [Open before acceptance](#open-before-acceptance). The
-mechanism below is the recommended design; it does not claim to be permitted. Nothing ships
-before counsel answers (N3 gate). This is not legal advice.
+**No counsel retained; listed for post-launch review.** There is no counsel (batch 7 decision
+(h)). The maintainer decided the questions in [Open before acceptance](#open-before-acceptance)
+with the conservative default: the import is built and tested against a Helix mock and **ships
+off** (`TWITCH_IMPORT_ENABLED=false`), so no instance uses the Twitch API for import until its
+operator turns it on. Whether the Twitch Developer Agreement allows the import, and how the page
+may name Twitch, stay listed under "Post-launch review" in the batch 7 README. The mechanism below
+does not claim to be permitted. This is not legal advice.
 
 ## Context
 
@@ -123,6 +125,9 @@ already hands T0 matches to the worker as "the only implementation of the T0 act
 `services/api/src/moderation/uploads.ts:9-10`). Whether that is an internal API call or moving
 the pipeline into `packages/moderation` is settled in the N3 contract step.
 
+_Settled at acceptance:_ an internal API call, `INTERNAL_ROUTES.uploadCommit`, which runs the
+existing `commitUpload` ([ADR 0037](0037-portability.md) decision 6).
+
 ### 6. Panels: re-hosted images, links kept, HTML stripped to the panel markdown subset
 
 A panel's image is re-hosted through the same pipeline as emotes; its link is kept if it is
@@ -130,6 +135,13 @@ http(s); its text is converted to the panel markdown subset with all HTML remove
 the same `setPanels` checks. This decision stands only if Twitch offers panels through a
 documented API: Helix has no panels endpoint that we know of, and the importer must not scrape
 (see Open before acceptance, item 6).
+
+_Replaced at acceptance:_ panels come in through a **paste-in helper**. Helix has no documented
+panels endpoint, so the importer reads no panels from Twitch. The streamer pastes each panel's
+text on the import page; `panelPaste` (`packages/twitch`, pure and browser-safe) strips all
+HTML, keeps http(s) links, splits panels on blank-line-separated headings and enforces the panel
+caps; the web saves the result through `setPanels` with its usual checks. No panel image is
+fetched from Twitch; the streamer adds images as any panel image is added.
 
 ### 7. Schedule: carried in the bundle, not applied
 
@@ -182,3 +194,25 @@ Product question, to settle with the maintainer at acceptance:
 6. **Panels.** If counsel and the current Helix reference confirm there is no documented panels
    endpoint, panels drop out of v1 (decision 6 becomes a paste-in helper that converts text the
    streamer copies by hand), and the N3 plan and harness change to match.
+
+## Decisions at acceptance (2026-11-01)
+
+The maintainer accepted this ADR with batch 7 decision (b) and the departures below. There is no
+counsel; items 1 to 5 of [Open before acceptance](#open-before-acceptance) were decided by the
+maintainer with the conservative default and are listed for post-launch review.
+
+1. **Built against a Helix mock, shipped off.** The harness runs the import against an in-harness
+   Helix mock (`TWITCH_API_BASE_URL`, `TWITCH_AUTH_BASE_URL`, `TWITCH_IMAGE_HOSTS`; defaults are
+   Twitch's own hosts). A real-Helix smoke test is a manual step before anyone turns it on.
+2. **Two switches.** The import page and procedures exist only when `OAUTH_TWITCH_CLIENT_ID` and
+   `OAUTH_TWITCH_CLIENT_SECRET` are set **and** `TWITCH_IMPORT_ENABLED` is true (default false;
+   api and worker). `twitchImport.status` reports which is missing.
+3. **No OAuth scopes** (decision 2), and the token is used once and revoked (decision 4).
+4. **The schedule is carried in the bundle, not applied** (decision 7).
+5. **Panels by paste** (item 6; decision 6 replaced as above).
+6. **One importer.** The Twitch adapter maps Helix data into `PortabilityBundle` v1 with
+   `source: "twitch"` and no standing statement, and calls W3-portability's `applyBundle`
+   ([ADR 0037](0037-portability.md)); every image goes through `uploadCommit`.
+7. **Post-launch review:** the Developer Agreement's purpose and data-handling terms, the app
+   credentials, re-hosting emote art on the streamer's assertion, and trademark naming on the
+   import page (items 1 to 5).
