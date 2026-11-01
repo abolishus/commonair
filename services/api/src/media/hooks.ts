@@ -17,12 +17,15 @@
  * arm lapsing between auth and ready still starts the rehearsal; it is not consumed (it lapses
  * after `REHEARSAL_RULES.armTtlSeconds`, or `stream.rehearsal.disarm` deletes it), so a reconnect
  * inside the TTL starts another rehearsal rather than going live. A started rehearsal also writes
- * `KEYS.rehearsalSession`, which outlives the cap: a reconnect after the arm lapsed still
- * rehearses. Once the rehearsal goes not-ready the marker shrinks to the reconnect grace, so a
- * real go-live a few minutes later is not silently another rehearsal. After a rehearsal is ended by a kick, `KEYS.rehearsalKicked` refuses the encoder's
- * automatic reconnect for a while, so it neither rehearses again nor goes publicly live.
+ * `KEYS.rehearsalSession`, which lasts until the arm's first start plus the cap and the reconnect
+ * grace: a reconnect after the arm lapsed still rehearses, and one past the cap is refused and
+ * kicked. Once the rehearsal goes not-ready the marker shrinks to the reconnect grace, so a real
+ * go-live a few minutes later is not silently another rehearsal. A publish authorized under an arm
+ * that was disarmed before ready is kicked too, never live. After a rehearsal is ended by a kick,
+ * `KEYS.rehearsalKicked` refuses the encoder's automatic reconnect for a while, so it neither
+ * rehearses again nor goes publicly live.
  */
-import { and, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, gte, isNull, sql } from "drizzle-orm";
 import { KEYS, MediaMtxAuthRequest, MediaReadyHook, mediaPath, RehearsalArm } from "@commonair/contracts/internal";
 import { type INGEST_PROTOCOLS, REHEARSAL_RULES } from "@commonair/contracts/enums";
 import { schema } from "@commonair/db";
@@ -32,16 +35,17 @@ import { broadcasterFields, emit } from "../events/outbox.ts";
 import { isSuspended } from "../lib/caller.ts";
 import { publishLive } from "../lib/control.ts";
 import { canonicalIp } from "../lib/netrange.ts";
+import { kickPublisher } from "../moderation/live.ts";
 import { decidePublish, internalCredentialsOk, planMediaAuth } from "./auth.ts";
 
-const { channels, users, streamKeys, broadcasts, playbackSessions, rehearsalInvitees } = schema;
+const { channels, users, streamKeys, broadcasts, playbackSessions, rehearsalInvitees, events } = schema;
 const LIVE_PATH = /^live\/([a-z0-9_]{3,25})$/;
 /** Remembers which key authorized the latest publish, for the broadcast row. */
 const publishKey = (slug: string) => `media:publish-key:${slug}`;
 /** Marks a source that already went not-ready, so a late "ready" for it is ignored. */
 const endedSource = (path: string, sourceId: string) => `media:ended:${path}:${sourceId}`;
 /** The rehearsal arm the latest authorized publish saw (JSON `RehearsalArm`); absent = live. */
-const publishRehearsal = (slug: string) => `media:publish-rehearsal:${slug}`;
+const publishRehearsal = KEYS.rehearsalPublishMarker;
 const MARKER_TTL_SECONDS = 600;
 const SESSION_TTL_SECONDS = REHEARSAL_RULES.maxDurationSeconds + REHEARSAL_RULES.sessionGraceSeconds;
 
@@ -49,6 +53,12 @@ const SESSION_TTL_SECONDS = REHEARSAL_RULES.maxDurationSeconds + REHEARSAL_RULES
 async function currentArm(deps: Deps, channelId: string, ownerId: string): Promise<RehearsalArm | null> {
   const [armed, session] = await deps.valkey.mget(KEYS.rehearsalArmed(channelId), KEYS.rehearsalSession(channelId));
   return parseArm(armed ?? null, ownerId) ?? parseArm(session ?? null, ownerId);
+}
+
+/** The arm ids the channel's arm and session marker hold now (owner-checked). */
+async function currentArmIds(deps: Deps, channelId: string, ownerId: string): Promise<Set<string>> {
+  const raws = await deps.valkey.mget(KEYS.rehearsalArmed(channelId), KEYS.rehearsalSession(channelId));
+  return new Set(raws.flatMap((r) => parseArm(r ?? null, ownerId)?.armId ?? []));
 }
 
 /** A stored rehearsal arm, or null (absent, unreadable, or armed by someone other than the owner). */
@@ -145,7 +155,26 @@ export async function mediaReady(deps: Deps, body: unknown): Promise<number> {
       const [current] = await tx.select().from(broadcasts).where(eq(broadcasts.id, c.liveBroadcastId));
       if (current && !current.endedAt) return null; // duplicate ready: already live
     }
-    const arm = parseArm(authArm, c.ownerId) ?? (await currentArm(deps, c.id, c.ownerId));
+    const authed = parseArm(authArm, c.ownerId);
+    // A disarm between auth and ready deletes both keys and records the arm as disarmed; that
+    // publish must neither rehearse nor fall through to a public go-live, so it is kicked. An arm
+    // that merely lapsed in between still rehearses.
+    if (authed && !(await currentArmIds(deps, c.id, c.ownerId)).has(authed.armId)) {
+      const [disarmed] = await tx
+        .select({ id: events.id })
+        .from(events)
+        .where(
+          and(
+            eq(events.type, "rehearsal.ended"),
+            eq(events.channelId, c.id),
+            sql`${events.payload}->>'arm_id' = ${authed.armId}`,
+            sql`${events.payload}->>'reason' = 'disarmed'`,
+          ),
+        )
+        .limit(1);
+      if (disarmed) return { refused: "disarmed" as const, channel: c };
+    }
+    const arm = authed ?? (await currentArm(deps, c.id, c.ownerId));
     if (arm) {
       // A pointer to an ended live broadcast would make not-ready miss this rehearsal.
       if (c.liveBroadcastId) await tx.update(channels).set({ liveBroadcastId: null }).where(eq(channels.id, c.id));
@@ -155,6 +184,27 @@ export async function mediaReady(deps: Deps, body: unknown): Promise<number> {
         .where(and(eq(broadcasts.channelId, c.id), eq(broadcasts.kind, "rehearsal"), isNull(broadcasts.endedAt)))
         .limit(1);
       if (open) return null; // duplicate ready: already rehearsing
+      // A reconnect keeps the arm's first start as its cap anchor (`capAnchor` in
+      // stream/rehearsal.ts): past the cap it is refused, and the session marker never outlives
+      // the cap plus the reconnect grace.
+      const [first] = await tx
+        .select({ startedAt: broadcasts.startedAt })
+        .from(broadcasts)
+        .where(
+          and(
+            eq(broadcasts.channelId, c.id),
+            eq(broadcasts.kind, "rehearsal"),
+            gte(broadcasts.startedAt, new Date(Date.parse(arm.armedAt) - 1000)),
+          ),
+        )
+        .orderBy(asc(broadcasts.startedAt))
+        .limit(1);
+      const capAt = (first?.startedAt.getTime() ?? now.getTime()) + REHEARSAL_RULES.maxDurationSeconds * 1000;
+      if (now.getTime() >= capAt) return { refused: "capped" as const, channel: c };
+      const sessionTtl = Math.min(
+        SESSION_TTL_SECONDS,
+        Math.ceil((capAt + REHEARSAL_RULES.sessionGraceSeconds * 1000 - now.getTime()) / 1000),
+      );
       const [b] = await tx
         .insert(broadcasts)
         .values({
@@ -183,7 +233,7 @@ export async function mediaReady(deps: Deps, body: unknown): Promise<number> {
           ),
         );
       // No liveBroadcastId and no stream.online: nothing outside the rehearsal sees it.
-      return { channel: c, broadcast: b, arm };
+      return { channel: c, broadcast: b, arm, sessionTtl };
     }
     const [b] = await tx
       .insert(broadcasts)
@@ -208,14 +258,21 @@ export async function mediaReady(deps: Deps, body: unknown): Promise<number> {
       { ...broadcasterFields(c), id: b.id, type: "live", started_at: now.toISOString() },
       now,
     );
-    return { channel: c, broadcast: b, arm: null };
+    return { channel: c, broadcast: b, arm: null, sessionTtl: 0 };
   });
+  if (started && "refused" in started) {
+    // The encoder's automatic reconnect is refused for the cooldown, as after any rehearsal kick.
+    await deps.valkey.set(KEYS.rehearsalKicked(started.channel.id), "1", "EX", REHEARSAL_RULES.kickCooldownSeconds);
+    deps.logger.info("media ready refused", { channelId: started.channel.id, reason: `rehearsal_${started.refused}` });
+    await kickPublisher(deps, hook.path).catch(() => false);
+    return 204;
+  }
   if (started?.arm)
     await deps.valkey.set(
       KEYS.rehearsalSession(started.channel.id),
       JSON.stringify(started.arm),
       "EX",
-      SESSION_TTL_SECONDS,
+      started.sessionTtl,
     );
   if (started)
     await publishLive(deps, {

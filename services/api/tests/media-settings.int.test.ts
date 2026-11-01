@@ -34,6 +34,7 @@ describe("media settings", () => {
     expect(r.body).toEqual({
       captions: { enabled: null, spokenLanguage: null, maskWords: [] },
       captionsInstanceDefault: false,
+      captionsState: "off",
       dvr: { enabled: true, windowSeconds: 1800 },
       dvrMaxWindowSeconds: 7200,
     });

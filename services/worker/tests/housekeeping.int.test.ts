@@ -566,6 +566,7 @@ describe("runtime", () => {
         "close-stale-sessions",
         "follow-bursts",
         "live-counters",
+        "rehearsal-cap-sweep",
         "relays-offline",
         "score-sessions",
         "stream-hours",

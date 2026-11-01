@@ -236,6 +236,7 @@ export type Key =
   | "health.unknown.title"
   | "health.unknown.hint"
   | "channel.offline"
+  | "channel.catchingUp"
   | "channel.notFound"
   | "player.loading"
   | "player.error"

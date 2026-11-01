@@ -175,7 +175,7 @@ export function ffmpegAudioSource(
       const started = Date.now();
       try {
         // W0 from MediaMTX's LL-HLS, fetched fresh for this reader start (ADR 0012 A2).
-        const w0Ms = await ctx.clock.w0(session.broadcastId, session.path, "recorder");
+        const w0Ms = await ctx.clock.w0(session.broadcastId, session.path, "captions");
         const input = internalSrtUrl(ctx.srtBase, session.path, ctx.internalSecret);
         yield* readRun(ctx.ffmpeg, captionsAudioArgs(input), w0Ms, signal, logger, ctx.internalSecret);
       } catch (err) {

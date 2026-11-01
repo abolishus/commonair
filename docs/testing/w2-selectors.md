@@ -104,29 +104,32 @@ it and never edit `controller.ts` or `player.tsx`.
 | `crew-accept`                 | Accept, for a recipient of a `proposed` version                                            |
 | `crew-reject`                 | Reject, for a recipient of a `proposed` version                                            |
 | `crew-end`                    | End an `accepted` version (owner); opens a `ConfirmDialog`                                 |
-| `crew-end-confirm`            | The dialog's confirm button                                                                |
+| `crew-end-confirm`            | The end `ConfirmDialog`'s content; its confirm button is `confirm-dialog-confirm`          |
 | `crew-payout-note`            | The note that crew are paid by the treasurer through the manual adapter                    |
 | `transparency-split-writeoff` | `/transparency`: the split-shortfall write-off cost line; `data-cents`                     |
 | `transparency-split-suspense` | `/transparency`: the split-suspense line (`TransparencyMonth.splitSuspense`); `data-cents` |
 
 ### Captions (W2-captions)
 
-| Test id                  | Element and attributes                                                        |
-| ------------------------ | ----------------------------------------------------------------------------- |
-| `captions-page`          | The `/captions` page container                                                |
-| `captions-enabled`       | Enable switch; `data-state` `on`/`off`, `data-default` (the instance default) |
-| `captions-language`      | Spoken-language `Select` trigger; `data-value`                                |
-| `captions-mask-words`    | Mask list textarea (one pattern per line)                                     |
-| `captions-mask-error`    | Inline error for an invalid pattern; `data-line`                              |
-| `captions-save`          | Saves `channels.updateMediaSettings` (`captions`)                             |
-| `captions-track-state`   | Live track state; `data-state` `off`, `queued` or `active`                    |
-| `captions-vod-editor`    | The per-VOD cue editor; `data-vod-id`                                         |
-| `captions-cue`           | One cue; `data-start-ms`, `data-end-ms`                                       |
-| `captions-cue-text`      | A cue's text input                                                            |
-| `captions-cue-save`      | Saves `vods.captions.update`                                                  |
-| `captions-privacy-note`  | The draft privacy text on transcripts                                         |
-| `player-captions-toggle` | The player's CC `IconButton`; `data-state` `on`/`off` (only with a track)     |
-| `player-captions-queued` | The player's note that captions wait for capacity (`captionsState` `queued`)  |
+| Test id                               | Element and attributes                                                        |
+| ------------------------------------- | ----------------------------------------------------------------------------- |
+| `captions-page`                       | The `/captions` page container                                                |
+| `captions-enabled`                    | Enable switch; `data-state` `on`/`off`, `data-default` (the instance default) |
+| `captions-language`                   | Spoken-language `Select` trigger; `data-value`                                |
+| `captions-mask-words`                 | Mask list textarea (one pattern per line)                                     |
+| `captions-mask-error`                 | Inline error for an invalid pattern; `data-line`                              |
+| `captions-save`                       | Saves `channels.updateMediaSettings` (`captions`)                             |
+| `captions-track-state`                | Live track state; `data-state` `off`, `queued` or `active`                    |
+| `captions-vod-editor`                 | The per-VOD cue editor; `data-vod-id`                                         |
+| `captions-cue`                        | One cue; `data-start-ms`, `data-end-ms`                                       |
+| `captions-cue-text`                   | A cue's text input                                                            |
+| `captions-cue-save`                   | Saves `vods.captions.update`                                                  |
+| `captions-privacy-note`               | The draft privacy text on transcripts                                         |
+| `player-captions-toggle`              | The player's CC `IconButton`; `data-state` `on`/`off` (only with a track)     |
+| `player-captions-queued`              | The player's note that captions wait for capacity (`captionsState` `queued`)  |
+| `player-captions-style`               | The captions style menu trigger (beside the CC toggle)                        |
+| `player-captions-size-<size>`         | One size item (`small`, `medium`, `large`)                                    |
+| `player-captions-contrast-<contrast>` | One contrast item (`standard`, `high`)                                        |
 
 ### Analytics, group appeals and attestations (W2-rollup-analytics, W2b-group-appeals, W2b-attestations)
 
@@ -164,6 +167,8 @@ it and never edit `controller.ts` or `player.tsx`.
 
 ### Enforcement report (W2-enforcement-report)
 
+A hidden (below k = 10) figure's count attribute reads `suppressed` instead of a number.
+
 | Test id                              | Element and attributes                                                              |
 | ------------------------------------ | ----------------------------------------------------------------------------------- |
 | `enforcement-report`                 | The report section on `/transparency`                                               |
@@ -174,23 +179,24 @@ it and never edit `controller.ts` or `player.tsx`.
 | `enforcement-report-automated`       | A row's automated split; `data-fully`, `data-partially`, `data-not` (or suppressed) |
 | `enforcement-report-overturn`        | A row's overturn rate; `data-numerator`, `data-denominator` (or suppressed)         |
 | `enforcement-report-suppressed`      | The "fewer than 10" marker of a suppressed cell (its `Tooltip` trigger)             |
-| `enforcement-report-ncii`            | NCII 48 h compliance line; `data-on-time`, `data-late`, `data-pending`              |
+| `enforcement-report-total`           | The period's total; `data-count` (or `suppressed`)                                  |
+| `enforcement-report-ncii`            | NCII 48 h compliance line; `data-on-time`, `data-late`, `data-pending`, `data-due`  |
 | `enforcement-report-empty`           | `EmptyState` for a window with no actions                                           |
 
 ### Live DVR (W2-dvr)
 
-| Test id                  | Element and attributes                                                                      |
-| ------------------------ | ------------------------------------------------------------------------------------------- |
-| `player-dvr-scrubber`    | The scrubber (`role="slider"`); `data-behind-seconds`, `data-window-seconds`                |
-| `player-dvr-live`        | "Back to live" button (also `L` and `End`); shown in `dvr` mode                             |
-| `player-dvr-behind`      | The behind-live readout; `data-seconds`                                                     |
-| `player-dvr-source-note` | "Source quality only" note while in DVR                                                     |
-| `dvr-settings`           | The DVR section on `/dashboard`                                                             |
-| `dvr-enabled`            | DVR switch; `data-state` `on`/`off`                                                         |
-| `dvr-window`             | Window `Select` trigger; `data-value` (seconds)                                             |
-| `dvr-window-<seconds>`   | One item per window up to the instance cap (`instance.info` `features.dvrMaxWindowSeconds`) |
-| `dvr-needs-vods`         | The note that DVR needs VODs (turning VODs on turns DVR on)                                 |
-| `dvr-save`               | Saves `channels.updateMediaSettings` (`dvr`)                                                |
+| Test id                  | Element and attributes                                                                                                   |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| `player-dvr-scrubber`    | The scrubber (`role="group"`); its `input[type=range]` thumb is the slider; `data-behind-seconds`, `data-window-seconds` |
+| `player-dvr-live`        | "Back to live" button (also `L` and `End`); shown in `dvr` mode                                                          |
+| `player-dvr-behind`      | The behind-live readout; `data-seconds`                                                                                  |
+| `player-dvr-source-note` | "Source quality only" note while in DVR                                                                                  |
+| `dvr-settings`           | The DVR section on `/dashboard`                                                                                          |
+| `dvr-enabled`            | DVR switch; `data-state` `on`/`off`                                                                                      |
+| `dvr-window`             | Window `Select` trigger; `data-value` (seconds)                                                                          |
+| `dvr-window-<seconds>`   | One item per window up to the instance cap (`instance.info` `features.dvrMaxWindowSeconds`)                              |
+| `dvr-needs-vods`         | The note that DVR needs VODs (turning VODs on turns DVR on)                                                              |
+| `dvr-save`               | Saves `channels.updateMediaSettings` (`dvr`)                                                                             |
 
 ### Rehearsal (W2-rehearsal)
 
@@ -253,7 +259,8 @@ Steps are pending until the unit that implements them merges (`harness/src/w2/st
   when the first ends; a VODs-off channel keeps no transcript; a rehearsal gets no track; a mask
   word masked.
 - **`integrity-basic` (W2-rollup-analytics, W2b-attestations, W2b-group-appeals):** after the
-  settle override the swarm is one `datacenter` `analytics-excluded-group`; the signed statement
+  settle override the swarm's excluded groups (`analytics-excluded-group`) match its first-reason
+  categories (a session's category is its highest-scoring reason's); the signed statement
   verifies with the SDK and on `/attestations/verify` (`attestation-verify-result`
   `data-valid="true"`), and a tampered payload or stored row fails; a group appeal
   (`group-appeal-open` → `group-appeal-submit`) succeeds, a second on the broadcast is limited; an

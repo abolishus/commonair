@@ -58,9 +58,9 @@ export const REHEARSAL_STEP_NUMBERS: readonly RehearsalStep[] = [1, 2, 3, 4, 5, 
  * Steps whose implementing unit has not merged yet: selectable explicitly (`--set steps=1`) but
  * left out of `all`, so the full harness on main stays green while they are stubs.
  */
-export const PENDING_CAPTIONS_STEPS: readonly CaptionsStep[] = [1, 2, 3, 4, 5, 6, 7, 8];
-export const PENDING_DVR_STEPS: readonly DvrStep[] = [1, 2, 3, 4, 5, 6, 7];
-export const PENDING_REHEARSAL_STEPS: readonly RehearsalStep[] = [1, 2, 3, 4, 5, 6, 7];
+export const PENDING_CAPTIONS_STEPS: readonly CaptionsStep[] = [];
+export const PENDING_DVR_STEPS: readonly DvrStep[] = [];
+export const PENDING_REHEARSAL_STEPS: readonly RehearsalStep[] = [];
 
 /** Captions and DVR steps each set up their own channel and viewers. */
 export const CAPTIONS_STEP_PREREQUISITES: Readonly<Record<CaptionsStep, readonly CaptionsStep[]>> = {
@@ -148,18 +148,7 @@ export const W2_EXTENSION_UNITS: Readonly<Record<W2Extension, { unit: string; fi
  * Steps whose implementing unit has not merged yet: selectable explicitly (`--set w2=group`) but
  * left out of `all`. Every one is pending until its unit merges.
  */
-export const PENDING_W2_EXTENSIONS: readonly W2Extension[] = [
-  "split-release",
-  "split-clawback",
-  "split-won-chargeback",
-  "split-new-payee",
-  "group",
-  "signed",
-  "tamper",
-  "group-appeal",
-  "enforcement",
-  "replay-panel",
-];
+export const PENDING_W2_EXTENSIONS: readonly W2Extension[] = ["signed", "tamper", "group-appeal", "replay-panel"];
 
 /**
  * Extensions that read what another left: an attestation is signed over the rollup's figures, the

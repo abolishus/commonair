@@ -185,9 +185,11 @@ describe("media block behavior", () => {
       </PlayerChrome>,
     );
     expect(screen.getByRole("button", { name: "Pause" }).getAttribute("aria-pressed")).toBe("true");
-    expect(document.querySelector('[data-slot="slider"][aria-label="Seek"]')?.getAttribute("aria-valuetext")).toBe(
-      "35 seconds",
-    );
+    // The thumb's range input is the slider: it carries the name and the value text.
+    const thumb = document.querySelector('[data-slot="slider"] input[type="range"]');
+    expect(thumb?.getAttribute("aria-label")).toBe("Seek");
+    expect(thumb?.getAttribute("aria-valuetext")).toBe("35 seconds");
+    expect(document.querySelector('[data-slot="slider"][aria-label="Seek"]')).not.toBeNull();
   });
 
   test("chat panel exposes the jump action when scrolled away and composer submits or disables", async () => {

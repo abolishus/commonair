@@ -96,7 +96,7 @@ async function session(
   userId: string | null,
   watchSeconds: number,
   verdict: "verified" | "excluded",
-  opts: { scored?: boolean; reasons?: string[]; broadcastId?: string } = {},
+  opts: { scored?: boolean; reasons?: string[]; broadcastId?: string; dvrSeconds?: number } = {},
 ) {
   await db.insert(s.playbackSessions).values({
     channelId,
@@ -105,6 +105,7 @@ async function session(
     deviceHash: uuidv7(),
     ipHash: uuidv7(),
     watchSeconds,
+    dvrSeconds: opts.dvrSeconds ?? 0,
     verdict,
     verdictReasons: opts.reasons ?? [],
     scoredAt: opts.scored === false ? null : new Date(day2 + 2 * HOUR),
@@ -310,6 +311,14 @@ describe("inputs", () => {
     expect(await viewerHours(db, owner, period)).toEqual({ verified: 0, excluded: 0 });
     await session(ch.channel, ids.v, 3600, "verified", { broadcastId: ch.broadcast });
     expect(await viewerHours(db, owner, period)).toEqual({ verified: 1, excluded: 0 });
+  });
+
+  test("DVR seconds are not viewer-hours (ADR 0016 decision 6)", async () => {
+    const owner = await makeUser();
+    const ch = await makeChannel(owner);
+    await session(ch.channel, ids.v, 3600, "verified", { broadcastId: ch.broadcast, dvrSeconds: 1800 });
+    await session(ch.channel, null, 1800, "excluded", { broadcastId: ch.broadcast, dvrSeconds: 900 });
+    expect(await viewerHours(db, owner, period)).toEqual({ verified: 0.5, excluded: 0.25 });
   });
 
   test("revenue is gross net of refunds, per channel owner", async () => {

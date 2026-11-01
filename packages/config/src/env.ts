@@ -638,6 +638,11 @@ export const infraEnv = z.object({
   COMPOSE_SUBNET: z.string().optional(),
   /** Compose only: path of the env file our own images read; third-party services do not (default `.env`). */
   COMMONAIR_ENV_FILE: z.string().optional(),
+  /**
+   * Compose only (`whisper`, profile `captions`): host path of the captions weights (default
+   * `./.cache/models/whisper-ggml-base-q5_1.bin`, written by `scripts/fetch-model.ts --model captions`).
+   */
+  CAPTIONS_MODEL: z.string().optional(),
   /** coturn's listening port, UDP only (`no-tcp`): STUN always, TURN when the relay is on (default 3478). */
   TURN_PORT: port.optional(),
   /** Lowest UDP port of coturn's relay range; used only when the relay is on (P2P_TURN_URLS set). */

@@ -90,8 +90,9 @@ describe("DvrScrubber", () => {
     expect(el?.dataset.windowSeconds).toBe("1800");
     expect(el?.dataset.behindSeconds).toBe("0");
     expect(el?.getAttribute("aria-label")).toBe(t("dvr.scrubber.label"));
-    expect(el?.getAttribute("aria-valuetext")).toBe(t("dvr.atLive"));
     const slider = thumb();
+    expect(slider.getAttribute("aria-label")).toBe(t("dvr.scrubber.label"));
+    expect(slider.getAttribute("aria-valuetext")).toBe(t("dvr.atLive"));
     expect(slider.getAttribute("aria-valuenow")).toBe("1800");
     expect([slider.min, slider.max, slider.step]).toEqual(["0", "1800", "10"]);
   });

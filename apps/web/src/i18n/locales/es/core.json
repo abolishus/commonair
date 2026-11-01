@@ -231,6 +231,7 @@
   "health.unknown.title": "Aviso de la transmisión",
   "health.unknown.hint": "El servidor informó “{code}”.",
   "channel.offline": "{name} no está en vivo",
+  "channel.catchingUp": "{count, plural, one {# poniéndose al día} other {# poniéndose al día}}",
   "channel.notFound": "Este canal no existe",
   "player.loading": "Cargando transmisión…",
   "player.error": "No se pudo reproducir la transmisión.",

@@ -135,13 +135,15 @@ describe("createOrigin dispatch", () => {
       cdn: { provider: "none" },
     });
     expect(origin.routes.names).toEqual(["dvr", "captions:hls", "captions:relayPull", "captions:cdn"]);
-    for (const path of [
-      `/dvr/${VOD}/index.m3u8`,
-      "/hls/live/alice/captions/en/index.m3u8",
-      "/relay-pull/live/alice/captions/en/1.vtt",
-    ]) {
+    // Each route answers for itself (a bad token, a missing relay credential) before any lookup.
+    const expected: Record<string, number> = {
+      [`/dvr/${VOD}/index.m3u8`]: 404,
+      "/hls/live/alice/captions/en/index.m3u8": 403,
+      "/relay-pull/live/alice/captions/en/1.vtt": 401,
+    };
+    for (const [path, status] of Object.entries(expected)) {
       const res = await origin.fetch(new Request(`http://origin.test${path}?t=x`));
-      expect(res.status, path).toBe(404);
+      expect(res.status, path).toBe(status);
     }
   });
 });

@@ -53,13 +53,6 @@ describe("well-known attestation keys", () => {
 });
 
 describe("W2 route files are mounted", () => {
-  test("public enforcement report and owner procedures answer 501", async () => {
-    expect((await fetch(`${api.url}/api/transparency/enforcement`)).status).toBe(501);
-    const c = u.client;
-    expect((await c.call("GET", `/api/channels/${u.username}/rehearsal`)).status).toBe(501);
-    expect((await c.call("POST", `/api/channels/${u.username}/rehearsal`)).status).toBe(501);
-  });
-
   test("an exclusion_group appeal goes to createGroupAppeal (stub: 501), never the generic check", async () => {
     const r = await u.client.call("POST", "/api/appeals", {
       kind: "integrity",

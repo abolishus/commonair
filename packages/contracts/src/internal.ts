@@ -283,6 +283,12 @@ export const KEYS = {
    * automatic reconnect neither rehearses again nor goes live.
    */
   rehearsalKicked: (channelId: string) => `rehearsal:kicked:${channelId}`,
+  /**
+   * Decision (f): STRING JSON `RehearsalArm`, `EX 600`, the arm the latest authorized publish of
+   * `slug` saw (`mediaAuth` writes, `mediaReady` reads; absent = live). `mediaReady` uses it only
+   * while the arm or the session marker still holds the same `armId`.
+   */
+  rehearsalPublishMarker: (slug: string) => `media:publish-rehearsal:${slug}`,
   /** W2-rehearsal: STRING JSON report (worker writes every 5 s, the API reads), TTL 24 h. */
   rehearsalReport: (broadcastId: string) => `rehearsal:report:${broadcastId}`,
   /** W2 test hook: set while the 24 h analytics display delay is bypassed for the channel. */
@@ -751,6 +757,8 @@ export type InteractJobResult = z.infer<typeof InteractJobResult>;
  */
 export const ANALYTICS_JOBS = {
   broadcastRollup: "broadcast-rollup",
+  /** Daily: purge per-minute audience rows past retention for broadcasts no rollup touches. */
+  broadcastRollupRetention: "broadcast-rollup-retention",
   integrityAttestation: "integrity-attestation",
   /** Daily: re-check broadcasts re-scored or re-rolled after their latest attestation entry. */
   attestationReconcile: "attestation-reconcile",
@@ -787,7 +795,7 @@ export const AnalyticsDisplayBypassBody = z.object({ channelId: z.uuid(), enable
 export type AnalyticsDisplayBypassBody = z.infer<typeof AnalyticsDisplayBypassBody>;
 
 /** Jobs on `QUEUES.rehearsal`: one driver per arm, started on `rehearsal.armed` (`jobId = rehearsal-<armId>`: BullMQ refuses a two-part id with a colon). */
-export const REHEARSAL_JOBS = { driver: "rehearsal-driver" } as const;
+export const REHEARSAL_JOBS = { driver: "rehearsal-driver", capSweep: "rehearsal-cap-sweep" } as const;
 export const RehearsalDriverJob = z.object({ armId: z.uuid(), channelId: z.uuid() });
 export type RehearsalDriverJob = z.infer<typeof RehearsalDriverJob>;
 

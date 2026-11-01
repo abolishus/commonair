@@ -8,6 +8,7 @@ import { FULL_SHARDS } from "../../harness/src/shards.ts";
 import { ALL, shardsFor } from "../ci-changes.ts";
 import {
   FULL_SCENARIO_TIMEOUT_MIN,
+  captionsStack,
   GROUPS,
   SHARD_TIMEOUT_MIN,
   fullScenarioArg,
@@ -62,6 +63,12 @@ describe("steps", () => {
     const up = steps.find((s) => s.name === "platform up");
     expect(up?.group).toBe("harness");
     expect(up?.cmd).toEqual(["bun", "scripts/infra.ts", "stack", "--harness", "--multi"]);
+  });
+
+  test("only the captions shard (or the captions scenario) layers the whisper sidecar", () => {
+    expect(captionsStack("full:captions", [])).toEqual(["--captions"]);
+    expect(captionsStack("full", ["captions"])).toEqual(["--captions"]);
+    for (const shard of ["full", "full:relay", "full:long", "full:rest"]) expect(captionsStack(shard, [])).toEqual([]);
   });
 
   // Review of that fix (HIGH): on a fresh volume, infra up's migrate seeded default governance

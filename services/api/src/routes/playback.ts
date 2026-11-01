@@ -459,6 +459,8 @@ export const playback = {
       bytesHttp: input.bytesHttp,
       bytesP2p: input.bytesP2p,
       ...(input.fingerprint ? { fingerprint: input.fingerprint } : {}),
+      // Relay receipts cover live fetches only, so DVR beats are not live claims (ADR 0016).
+      mode,
     });
     // ADR 0018 decision 3: absent carries the token's ceiling forward, null turns data mode off.
     const dataMode = input.dataMode === undefined ? (claims.dm ?? null) : input.dataMode;

@@ -68,8 +68,8 @@ async function streamer() {
   return { ...s, secret, channelId: c.id, ownerId: c.ownerId };
 }
 
-async function arm(channelId: string, ownerId: string): Promise<RehearsalArm> {
-  const value: RehearsalArm = { armId: uuidv7(), ownerId, armedAt: new Date().toISOString() };
+async function arm(channelId: string, ownerId: string, armedAt = new Date()): Promise<RehearsalArm> {
+  const value: RehearsalArm = { armId: uuidv7(), ownerId, armedAt: armedAt.toISOString() };
   await api.deps.valkey.set(KEYS.rehearsalArmed(channelId), JSON.stringify(value), "EX", 600);
   return value;
 }
@@ -176,6 +176,60 @@ describe("rehearsal gate", () => {
     expect(lb?.kind).toBe("live");
     await hook(INTERNAL_ROUTES.mediaNotReady, st.username, live);
     expect((await streamEvents(st.channelId)).map((e) => e.type).sort()).toEqual(["stream.offline", "stream.online"]);
+  });
+
+  test("a publish authorized under an arm disarmed before ready neither rehearses nor goes live", async () => {
+    const st = await streamer();
+    const armed = await arm(st.channelId, st.ownerId);
+    expect(
+      (await mediaAuth({ action: "publish", path: mediaPath(st.username), query: `key=${st.secret}` })).status,
+    ).toBe(200);
+    // What disarm does: both keys go, and the arm is recorded as disarmed.
+    await api.deps.valkey.del(KEYS.rehearsalArmed(st.channelId), KEYS.rehearsalSession(st.channelId));
+    await db()
+      .insert(schema.events)
+      .values({
+        type: "rehearsal.ended",
+        channelId: st.channelId,
+        payload: { channel_id: st.channelId, arm_id: armed.armId, broadcast_id: null, reason: "disarmed" },
+        publishedAt: new Date(),
+      });
+    expect((await hook(INTERNAL_ROUTES.mediaReady, st.username, crypto.randomUUID())).status).toBe(204);
+    expect(await broadcastsOf(st.channelId)).toEqual([]);
+    expect((await channelOf(st.username)).liveBroadcastId).toBeNull();
+    expect(await streamEvents(st.channelId)).toEqual([]);
+    // The encoder's automatic reconnect is refused for the cooldown.
+    expect(await api.deps.valkey.exists(KEYS.rehearsalKicked(st.channelId))).toBe(1);
+    await api.deps.valkey.del(KEYS.rehearsalKicked(st.channelId));
+  });
+
+  test("a reconnect keeps the first start's cap: the marker never outlives it, and past it the publish is refused", async () => {
+    const st = await streamer();
+    // Armed 40 minutes ago, so the moved-back starts below are still this arm's.
+    await arm(st.channelId, st.ownerId, new Date(Date.now() - 2_400_000));
+    const first = await publish(st);
+    await hook(INTERNAL_ROUTES.mediaNotReady, st.username, first);
+    const [b1] = await broadcastsOf(st.channelId);
+    // The first start was 10 minutes ago: a reconnect's marker lasts only the rest of the cap plus grace.
+    await db()
+      .update(schema.broadcasts)
+      .set({ startedAt: new Date(Date.now() - 600_000) })
+      .where(eq(schema.broadcasts.id, b1!.id));
+    const second = await publish(st);
+    const ttl = await api.deps.valkey.ttl(KEYS.rehearsalSession(st.channelId));
+    expect(ttl).toBeLessThanOrEqual(REHEARSAL_RULES.maxDurationSeconds + REHEARSAL_RULES.sessionGraceSeconds - 600);
+    expect(ttl).toBeGreaterThan(REHEARSAL_RULES.maxDurationSeconds - 600);
+    await hook(INTERNAL_ROUTES.mediaNotReady, st.username, second);
+    // Past the cap: refused and kicked, no third broadcast, never live.
+    await db()
+      .update(schema.broadcasts)
+      .set({ startedAt: new Date(Date.now() - (REHEARSAL_RULES.maxDurationSeconds + 1) * 1000) })
+      .where(eq(schema.broadcasts.id, b1!.id));
+    await publish(st);
+    expect((await broadcastsOf(st.channelId)).map((b) => b.kind)).toEqual(["rehearsal", "rehearsal"]);
+    expect((await channelOf(st.username)).liveBroadcastId).toBeNull();
+    expect(await api.deps.valkey.exists(KEYS.rehearsalKicked(st.channelId))).toBe(1);
+    await api.deps.valkey.del(KEYS.rehearsalKicked(st.channelId), KEYS.rehearsalSession(st.channelId));
   });
 
   test("an arm written for another owner, or unreadable, is ignored (live)", async () => {

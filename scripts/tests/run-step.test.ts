@@ -9,6 +9,7 @@ import {
   crashLooping,
   foreignContainers,
   podmanDesktopRunning,
+  CAPTIONS_OVERRIDE,
   HARNESS_OVERRIDES,
   stackFiles,
   stackProfiles,
@@ -298,6 +299,17 @@ describe("stackFiles", () => {
     expect(stackProfiles(["--harness", "--multi"])).toEqual(["harness", "multi"]);
     expect(() => stackProfiles(["--multi"])).toThrow(/needs --harness/);
     expect(stackFiles(["--harness", "--multi"])).toEqual(stackFiles(["--harness"]));
+    expect(HARNESS_OVERRIDES).not.toContain(CAPTIONS_OVERRIDE);
+  });
+
+  test("--captions layers the captions override last and enables its profile, with --harness only", () => {
+    expect(stackProfiles(["--harness", "--captions"])).toEqual(["harness", "captions"]);
+    expect(stackProfiles(["--harness", "--multi", "--captions"])).toEqual(["harness", "multi", "captions"]);
+    expect(() => stackProfiles(["--captions"])).toThrow(/needs --harness/);
+    const files = stackFiles(["--harness", "--captions"]).filter((a) => a !== "-f");
+    expect(files).toHaveLength(2 + HARNESS_OVERRIDES.length);
+    expect(files.at(-1)?.endsWith(CAPTIONS_OVERRIDE)).toBe(true);
+    expect(stackFiles(["--harness"]).some((f) => f.endsWith(CAPTIONS_OVERRIDE))).toBe(false);
     expect(HARNESS_OVERRIDES).toContain("harness/compose.multi-instance.yaml");
   });
 

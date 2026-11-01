@@ -24,7 +24,7 @@ export interface ClockAnchor {
 export const IDENTITY_CLOCK: ClockAnchor = { offsetMs: () => 0 };
 
 /** Who asked for W0 (a metric attribute). */
-export type W0Consumer = "ladder" | "aac" | "recorder";
+export type W0Consumer = "ladder" | "aac" | "recorder" | "captions";
 
 /**
  * The live media clock (ADR 0012, variant A2): W0 for every ffmpeg start, and the recorder run

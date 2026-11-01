@@ -225,3 +225,12 @@ Decided within these answers (recorded so reviewers can check them):
 - The owner-only reason breakdown is a salted commitment inside the signed statement.
 - Window proofs are bundles of signed entries, not a second signature (decision 6).
 - Supersedes stop when the per-minute rollup is deleted at 90 days.
+- **A hidden group's size is knowable, never its category** (batch 6 wave 1 merge, 2026-11-01).
+  Excluded groups under 5 sessions are not shown, but the excluded total and the per-minute
+  excluded series still include them, so their combined size (excluded total minus the shown
+  groups) and when they watched can be worked out. Accepted: suppression protects the category,
+  which reveals what signal fired, and verified, unverified and excluded seconds keep adding up
+  to all the watching.
+- **The swarm's category follows the score.** A session's category is its highest-scoring
+  signal's (`exclusionCategoryOf`), so a datacenter swarm on one device may group under
+  `concurrency` or `automation`; the precedence is not changed for the harness.

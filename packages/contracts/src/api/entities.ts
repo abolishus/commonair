@@ -1673,6 +1673,8 @@ export const ChannelMediaSettings = z.object({
   captions: ChannelCaptionsSettings,
   /** The instance default (`captions.defaultEnabled`) a null `captions.enabled` follows. */
   captionsInstanceDefault: z.boolean(),
+  /** The live broadcast's caption track (`PlaybackStart.captionsState`); `off` while offline. */
+  captionsState: z.enum(E.CAPTIONS_STATES),
   dvr: ChannelDvrSettings,
   /** `DVR_MAX_WINDOW_SECONDS`; the effective window is `min(dvr.windowSeconds, this)`. */
   dvrMaxWindowSeconds: z.number().int().nonnegative(),
@@ -1734,6 +1736,20 @@ export const SplitWriteOff = z.object({
   approvedAt: Timestamp.nullable(),
 });
 export type SplitWriteOff = z.infer<typeof SplitWriteOff>;
+
+/**
+ * A recipient with withheld split shares (ADR 0013 decision 7). The username is the pseudonym for
+ * a deleted account, so it still works with the `{username}/release` and `/forfeit` paths.
+ */
+export const SplitSuspenseRecipient = z.object({
+  recipient: UserPublic.pick({ id: true, username: true }),
+  withheld: Money,
+  /** Still suspended, terminated, deleted or under a legal hold: a release is refused. */
+  restricted: z.boolean(),
+  /** Deleted or permanently terminated: the shares may be forfeited to the owners. */
+  forfeitable: z.boolean(),
+});
+export type SplitSuspenseRecipient = z.infer<typeof SplitSuspenseRecipient>;
 
 /** Rehearsal mode (decisions (f), (g)). */
 export const RehearsalStatus = z.object({

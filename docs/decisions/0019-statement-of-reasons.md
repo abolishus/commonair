@@ -363,3 +363,10 @@ Also settled at acceptance:
   as W0-sor scope once E7 has merged.
 - The contract step does not compare audit action strings with `MOD_ACTIONS` (decision 3 says why);
   the channel exclusion is proved by the builder's tests and `trust-safety`.
+- **Enforcement report windows (W2).** `30d` is `[today 00:00 UTC − 30 d, today 00:00 UTC)` and the
+  running month is cut at today 00:00 UTC, so two reads the same day agree. Because `30d` overlaps
+  two (or three) published months, a `30d` figure is suppressed when its part in any month, or the
+  rest of that month, is under k. What remains is day-level differencing: today's report against
+  yesterday's gives a day entering the window minus a day leaving it, and appeal outcomes resolved
+  in between. Accepted: a single day's figure is never published, only differences of two days.
+  Harness stacks (`MODERATION_TEST_HOOKS`) read an open `[now − 30 d, now)`, uncached.

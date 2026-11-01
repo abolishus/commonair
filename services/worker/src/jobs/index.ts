@@ -9,7 +9,7 @@
 import { integrityJobs } from "../integrity/jobs.ts";
 import type { JobDefinition } from "../runtime/registry.ts";
 import { job as accountDeletion } from "./account-deletion.ts";
-import { job as broadcastRollup } from "./broadcast-rollup.ts";
+import { job as broadcastRollup, retentionJob as broadcastRollupRetention } from "./broadcast-rollup.ts";
 import { job as chatRetention } from "./chat-retention.ts";
 import { job as chatSurgeGuard } from "./chat-surge-guard.ts";
 import { job as closeStaleSessions } from "./close-stale-sessions.ts";
@@ -49,7 +49,7 @@ import { job as moderationT0 } from "./moderation-t0.ts";
 import { job as pointsAccrue } from "./points-accrue.ts";
 import { job as pruneWebhookDeliveries } from "./prune-webhook-deliveries.ts";
 import { job as raidsExecute } from "./raids-execute.ts";
-import { job as rehearsalDriver } from "./rehearsal-driver.ts";
+import { capSweepJob as rehearsalCapSweep, job as rehearsalDriver } from "./rehearsal-driver.ts";
 import { job as relaysOffline } from "./relays-offline.ts";
 import { job as vodPlacement } from "./vod-placement.ts";
 import { job as vodRetention } from "./vod-retention.ts";
@@ -116,7 +116,9 @@ export const JOBS = [
   notifyPrune,
   // Feature wins, wave 2 (W2).
   broadcastRollup,
+  broadcastRollupRetention,
   integrityAttestation,
   attestationReconcile,
   rehearsalDriver,
+  rehearsalCapSweep,
 ] as readonly JobDefinition[];

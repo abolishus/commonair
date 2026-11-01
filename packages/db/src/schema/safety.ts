@@ -160,6 +160,9 @@ export const enforcementStatements = pgTable(
       t.contentId,
     ),
     index("enforcement_statements_recipient_idx").on(t.recipientUserId, t.createdAt, t.id),
+    // The enforcement report (W2): windows by time, and appeal outcomes joined by subject.
+    index("enforcement_statements_created_idx").on(t.createdAt),
+    index("enforcement_statements_appeal_subject_idx").on(t.appealSubjectType, t.appealSubjectId),
     check("enforcement_statements_territorial_scope_ck", sql`${t.territorialScope} = 'all'`),
     check("enforcement_statements_clause_version_ck", sql`${t.clauseVersion} >= 1`),
     check("enforcement_statements_legal_basis_ck", sql`${t.legalBasis} is null or ${t.groundKind} = 'illegal'`),
@@ -216,6 +219,10 @@ export const modActions = pgTable(
   (t) => [
     index("mod_actions_channel_idx").on(t.channelId, t.createdAt),
     index("mod_actions_target_idx").on(t.targetUserId),
+    // The enforcement report counts platform actions with a rule by window (W2).
+    index("mod_actions_platform_rule_idx")
+      .on(t.createdAt)
+      .where(sql`${t.scope} = 'platform' and ${t.ruleRef} is not null`),
     check("mod_actions_rule_ref_format", sql`${t.ruleRef} is null or ${t.ruleRef} ~ '${sql.raw(RULE_REF_PATTERN)}'`),
     check("mod_actions_rule_ref_platform", sql`${t.ruleRef} is null or ${t.scope} = 'platform'`),
   ],

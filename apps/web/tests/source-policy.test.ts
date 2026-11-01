@@ -73,6 +73,14 @@ const ALLOWLIST: AllowEntry[] = [
       "The live <video> is PlayerChrome's child; hls.js, the heartbeat stats and the harness probe need the element.",
   },
   {
+    file: "src/components/rehearsal/watch-player.tsx",
+    rule: "raw-media-element",
+    match: "<video",
+    count: 1,
+    reason:
+      "The rehearsal player's <video> is PlayerChrome's child; hls.js plays the invitee-gated stream.rehearsal.watch playlist, which playback.start (player.tsx) never resolves.",
+  },
+  {
     file: "src/components/altcha-field.tsx",
     rule: "custom-element",
     match: 'createElement("altcha-widget"',

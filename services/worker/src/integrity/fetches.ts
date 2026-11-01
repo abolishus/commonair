@@ -13,5 +13,11 @@ import type { FetchRecord } from "@commonair/integrity";
 export function fetchEvidence(fetches: readonly SegmentFetch[]): FetchRecord[] {
   return fetches
     .filter((f) => f.src !== "relay" && f.src !== "cdn")
-    .map((f) => (f.obj ? { sid: f.sid, kind: f.kind, object: f.obj } : { sid: f.sid, kind: f.kind }));
+    .map((f) => ({
+      sid: f.sid,
+      kind: f.kind,
+      ...(f.obj ? { object: f.obj } : {}),
+      // ADR 0016 decision 6: `/dvr/` fetches are counted apart (absent = live).
+      ...(f.mode === "dvr" ? { mode: "dvr" as const } : {}),
+    }));
 }

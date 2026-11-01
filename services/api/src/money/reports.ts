@@ -27,6 +27,7 @@ import {
   releaseDueHolds,
   runPayoutBatch,
   splitNet,
+  splitSuspenseMonthly,
   statement,
   storedCode,
 } from "@commonair/ledger";
@@ -240,7 +241,8 @@ async function revenueSummary(
       // A receivable larger than released earnings shows as owed, not as a negative balance.
       available: money(Math.max(0, balances.availableCents), currency),
       held: money(balances.holdCents, currency),
-      owed: money(balances.receivableCents, currency),
+      // A crew shortfall the owner covered is owed like a receivable (ADR 0013).
+      owed: money(balances.receivableCents + balances.splitShortfallCents, currency),
       minimumPayout: money(settings.payoutRules.minimumCents, currency),
       holdDays: settings.payoutRules.holdDays,
     },
@@ -623,7 +625,7 @@ async function transparency(deps: Deps, months: number) {
   const from = addMonths(monthStart(now), -(months - 1));
   const range = { from: from.toISOString(), to: to.toISOString() };
 
-  const [aggregates, egress, decided, members] = await Promise.all([
+  const [aggregates, egress, decided, members, suspense] = await Promise.all([
     monthlyAggregates(db, { from, to, currency }),
     db.execute<{ month: string; source: DeliverySource; bytes: string }>(sql`
       select to_char(date_trunc('month', bucket_start at time zone 'UTC'), 'YYYY-MM') as month, source,
@@ -660,7 +662,9 @@ async function transparency(deps: Deps, months: number) {
        and (ms.exited_at is null or ms.exited_at >= months.month_end)
        and (ms.lapsed_at is null or ms.lapsed_at >= months.month_end)
       group by 1, 2`),
+    splitSuspenseMonthly(db, { from, to, currency }),
   ]);
+  const suspenseBy = new Map(suspense.map((s) => [s.month, s]));
 
   // A month with governance outcomes or members but no ledger postings is still shown.
   const byMonth = new Map(aggregates.map((m) => [m.month, m]));
@@ -712,8 +716,13 @@ async function transparency(deps: Deps, months: number) {
             decidedAt: new Date(d.decided_at).toISOString(),
           })),
         members: memberCounts,
-        // W2-splits fills these from the split-suspense postings (ADR 0013 decisions 6, 7).
-        splitSuspense: { released: 0, forfeited: 0, writeOffs: 0, heldAtMonthEnd: money(0, currency) },
+        // Counts and totals of the split-suspense postings, never who (ADR 0013 decisions 6, 7).
+        splitSuspense: {
+          released: suspenseBy.get(m.month)?.released ?? 0,
+          forfeited: suspenseBy.get(m.month)?.forfeited ?? 0,
+          writeOffs: suspenseBy.get(m.month)?.writeOffs ?? 0,
+          heldAtMonthEnd: money(suspenseBy.get(m.month)?.heldAtMonthEndCents ?? 0, currency),
+        },
       };
     })
     .reverse();

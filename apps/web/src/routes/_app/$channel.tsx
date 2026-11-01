@@ -103,6 +103,13 @@ function ChannelView({ initial }: { initial: ChannelSummary }): React.JSX.Elemen
               live={live}
               title={channel.live?.title || channel.title}
               viewerCount={channel.live?.viewerCount}
+              catchingUp={
+                channel.live?.catchingUpCount ? (
+                  <span data-testid="channel-catching-up" data-count={channel.live.catchingUpCount}>
+                    {t("channel.catchingUp", { count: channel.live.catchingUpCount })}
+                  </span>
+                ) : undefined
+              }
               followers={<FollowerCount count={follow.state.count} />}
               actions={
                 own ? undefined : (

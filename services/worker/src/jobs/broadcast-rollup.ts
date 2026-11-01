@@ -443,10 +443,10 @@ export const job = defineJob({
   },
 });
 
-/** Daily retention pass for broadcasts no rollup run touches any more (registration: contract request). */
+/** Daily retention pass for broadcasts no rollup run touches any more. */
 export const retentionJob = defineJob({
   queue: QUEUES.analytics,
-  name: "broadcast-rollup-retention",
+  name: ANALYTICS_JOBS.broadcastRollupRetention,
   description: "Delete per-minute audience rows past the retention window; per-broadcast totals stay",
   data: z.object({}),
   schedule: { pattern: "23 4 * * *" },

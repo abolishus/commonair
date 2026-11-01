@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { z } from "zod";
-import type { DELIVERY_SOURCES } from "@commonair/contracts/enums";
+import { PLAYBACK_MODES, type DELIVERY_SOURCES } from "@commonair/contracts/enums";
 
 /**
  * Stable reason codes. They are stored in `playback_sessions.verdict_reasons` and
@@ -65,6 +65,8 @@ export interface SessionFacts {
   /** Heartbeat counter kept by the API. */
   heartbeats: number;
   watchSeconds: number;
+  /** Of `watchSeconds`, the seconds credited in `dvr` mode (`playback_sessions.dvr_seconds`; ADR 0016). */
+  dvrSeconds?: number;
   segmentsFetched: number;
   bytesHttp: number;
   bytesP2p: number;
@@ -82,6 +84,8 @@ export const HeartbeatSample = z.object({
   bytesHttp: z.number().int().min(0).default(0),
   bytesP2p: z.number().int().min(0).default(0),
   fingerprint: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
+  /** The beat's playback mode (ADR 0016 decision 6); absent = live. */
+  mode: z.enum(PLAYBACK_MODES).optional(),
 });
 export type HeartbeatSample = z.infer<typeof HeartbeatSample>;
 
@@ -175,6 +179,8 @@ export interface ScoringContext {
   allowance?: Allowance | null;
   /** Server-side P2P evidence; absent or not evidenced = judged as a plain HTTP session. */
   p2p?: P2pEvidence | null;
+  /** The origin's counters of the session's `/dvr/` fetches (ADR 0016 decision 6); absent or null = none. */
+  dvrFetches?: FetchSummary | null;
 }
 
 export type Verdict = "verified" | "excluded" | "pending";

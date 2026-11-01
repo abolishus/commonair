@@ -293,6 +293,8 @@ export const nciiRequests = pgTable(
     index("ncii_requests_open_idx")
       .on(t.deadlineAt)
       .where(sql`${t.decidedAt} is null`),
+    // The enforcement report's NCII 48 h line covers decided requests too (W2).
+    index("ncii_requests_deadline_idx").on(t.deadlineAt),
     check("ncii_requests_good_faith", sql`${t.goodFaith}`),
   ],
 );

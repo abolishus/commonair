@@ -10,7 +10,13 @@
 import { type SQL, and, desc, eq, inArray, isNotNull, ne, or, sql } from "drizzle-orm";
 import type { PaymentBreakdown } from "@commonair/contracts/dto";
 import { schema } from "@commonair/db";
-import { BreakdownError, type BreakdownTransaction, buildBreakdown, loadMoneySettings } from "@commonair/ledger";
+import {
+  BreakdownError,
+  type BreakdownTransaction,
+  buildBreakdown,
+  loadMoneySettings,
+  payerLines,
+} from "@commonair/ledger";
 import type { z } from "zod";
 import type { Deps } from "../deps.ts";
 import { decodeCursor, encodeCursor, pageOf } from "../lib/cursor.ts";
@@ -166,7 +172,8 @@ async function breakdowns(
       payer: role === "payer" ? user : visiblePayer({ kind: r.kind, anonymous: r.anonymous, user }),
       gross: b.gross,
       succeededAt: b.succeededAt,
-      lines: b.lines,
+      // The payer sees one creator total, not how the creator splits it with their crew.
+      lines: role === "payer" ? payerLines(b.lines, r.channelOwnerId) : b.lines,
       holdReleasesAt: b.holdReleasesAt,
       holdReleasedAt: b.holdReleasedAt,
       cutSource: {

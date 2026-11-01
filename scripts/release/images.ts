@@ -54,6 +54,13 @@ function argsRecord(args: Record<string, unknown> | string[] | undefined): Recor
   return Object.fromEntries(Object.entries(args).map(([k, v]) => [k, String(v)]));
 }
 
+/**
+ * Images compose builds that no release ships yet. `whisper` (the captions sidecar, batch 6
+ * decision (j)) joins RELEASE_IMAGES with its self-host unit and selfhost.sh option (a tracked
+ * W2-captions follow-up); until then self-hosted instances run without live captions.
+ */
+export const UNRELEASED_IMAGES: readonly string[] = ["whisper"];
+
 /** Every image compose builds from our Containerfiles, one entry per image name. */
 export function composeBuilds(composeYaml: string): ImageBuild[] {
   const doc = Bun.YAML.parse(composeYaml) as { services?: Record<string, ComposeService> };
@@ -62,6 +69,7 @@ export function composeBuilds(composeYaml: string): ImageBuild[] {
     if (!s.build) continue;
     const name = s.image ? IMAGE_NAME.exec(s.image)?.[1] : undefined;
     if (!name) throw new Error(`compose service ${service} builds an image without a templated name: ${s.image}`);
+    if (UNRELEASED_IMAGES.includes(name)) continue;
     if (!(RELEASE_IMAGES as readonly string[]).includes(name))
       throw new Error(`compose builds ${name} (service ${service}), which is not in RELEASE_IMAGES`);
     const b = typeof s.build === "string" ? { context: s.build } : s.build;

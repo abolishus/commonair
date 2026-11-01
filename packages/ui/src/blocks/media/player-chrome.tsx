@@ -98,5 +98,16 @@ export interface PlayerScrubberProps extends Omit<React.ComponentProps<typeof Sl
 }
 
 export function PlayerScrubber({ value, max, label, valueText, ...props }: PlayerScrubberProps): React.JSX.Element {
-  return <Slider aria-label={label} aria-valuetext={valueText} value={[value]} min={0} max={max} {...props} />;
+  // The root is a group; the thumb's range input is the slider, so it takes the name and value text.
+  return (
+    <Slider
+      aria-label={label}
+      getAriaLabel={() => label}
+      getAriaValueText={() => valueText}
+      value={[value]}
+      min={0}
+      max={max}
+      {...props}
+    />
+  );
 }

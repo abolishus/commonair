@@ -100,7 +100,9 @@ Anything else is a **contract request** with the exact diff.
 - API integration: owner-only access, display delay and test bypass, suppression, share link
   expiry/revoke, `channelSummary` integers.
 - Harness `harness/src/w2/rollup.ts`: the `integrity-basic` "group" step: after the settle
-  override, the swarm appears as one `datacenter` excluded group with the expected session count.
+  override, the swarm's excluded groups match its first-reason categories (a session's category is
+  its highest-scoring signal's, so the swarm may group under `concurrency` or `automation` rather
+  than `datacenter`; orchestrator ruling at the wave 1 merge, precedence unchanged).
 
 ## Done means
 

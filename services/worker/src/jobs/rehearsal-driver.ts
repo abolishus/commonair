@@ -698,9 +698,10 @@ interface RehearsalConfig {
 let cached: RehearsalConfig | undefined;
 
 /**
- * Read once per process. `workerEnv` already requires the internal secret; it does not carry the
- * chat URL or the media credentials yet (contract request), so a worker without the media password
- * ends a capped rehearsal without the kick, and says so in its log.
+ * Read once per process. `workerEnv` declares and validates these keys at boot (the internal
+ * secret required, the media password optional); `WorkerContext` carries no env, so they are read
+ * here. A worker without the media password ends a capped rehearsal without the kick, and says so
+ * in its log.
  */
 export function rehearsalConfig(source?: Record<string, string | undefined>): RehearsalConfig {
   if (!source && cached) return cached;
@@ -753,7 +754,7 @@ export const job = defineJob({
  */
 export const capSweepJob = defineJob({
   queue: QUEUES.integrity,
-  name: "rehearsal-cap-sweep",
+  name: REHEARSAL_JOBS.capSweep,
   description: "End rehearsals past their arm's 30-minute cap, or started after a disarm",
   data: z.object({}),
   schedule: { every: 30_000 },

@@ -425,6 +425,22 @@ describe("treasurer: suspense and write-off", () => {
     await releaseDueHolds(db(), { asOf: new Date(), holdDays: 0, currency: "usd", newRecipientHoldDays: 0 });
     const withheld = -(await rawBalance(db(), accounts.splitSuspense(crewA.userId), "usd"));
     expect(withheld).toBeGreaterThan(0);
+    // The treasurer finds the recipient in the suspense list (a deleted account's name is its pseudonym).
+    type Listed = {
+      recipient: { id: string; username: string };
+      withheld: { cents: number };
+      restricted: boolean;
+      forfeitable: boolean;
+    };
+    const list = await t2.client.call<{ items: Listed[] }>("GET", "/api/treasurer/split-suspense");
+    expect(list.status).toBe(200);
+    expect(list.body.items.find((i) => i.recipient.id === crewA.userId)).toEqual({
+      recipient: { id: crewA.userId, username: crewA.username },
+      withheld: { cents: withheld, currency: "usd" },
+      restricted: true,
+      forfeitable: true,
+    });
+    expect((await crewB.client.call("GET", "/api/treasurer/split-suspense")).status).toBe(403);
     const before = (await creatorBalances(db(), owner.userId, "usd")).liabilityCents;
     const r = await t2.client.call<{ forfeited: { cents: number } }>(
       "POST",
@@ -434,6 +450,8 @@ describe("treasurer: suspense and write-off", () => {
     expect(r.status).toBe(200);
     expect(r.body.forfeited.cents).toBe(withheld);
     expect((await creatorBalances(db(), owner.userId, "usd")).liabilityCents).toBe(before + withheld);
+    const after = await t2.client.call<{ items: Listed[] }>("GET", "/api/treasurer/split-suspense");
+    expect(after.body.items.map((i) => i.recipient.id)).not.toContain(crewA.userId);
     gone = crewA;
   });
 
@@ -513,14 +531,17 @@ describe("treasurer: suspense and write-off", () => {
   });
 
   test("transparency shows the write-off as its own cost line and counts the suspense moves", async () => {
-    const r = await payer.client.call<{ costs: { category: string; amount: { cents: number } }[] }[]>(
-      "GET",
-      "/api/transparency?months=1",
-    );
+    const r = await payer.client.call<
+      {
+        costs: { category: string; amount: { cents: number } }[];
+        splitSuspense: { released: number; forfeited: number; writeOffs: number };
+      }[]
+    >("GET", "/api/transparency?months=1");
     expect(r.status).toBe(200);
     const months = r.body;
     const line = months?.[0]?.costs.find((c) => c.category === "split-shortfall-writeoff");
     expect(line?.amount.cents).toBe(450);
+    expect(months?.[0]?.splitSuspense).toMatchObject({ released: 1, forfeited: 1, writeOffs: 1 });
     expect(gone).toBeDefined();
     await expectLedgerBalanced();
   });

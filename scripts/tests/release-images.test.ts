@@ -13,6 +13,7 @@ import {
   declaredArgs,
   parsePlatforms,
   releaseBuilds,
+  UNRELEASED_IMAGES,
   utcTimestamp,
 } from "../release/images.ts";
 import { RELEASE_IMAGES } from "../release/manifest.ts";
@@ -33,8 +34,17 @@ describe("release builds", () => {
     expect(builds.map((b) => b.image)).toEqual([...RELEASE_IMAGES]);
   });
 
+  test("an unreleased image is built by compose but in no release", () => {
+    for (const n of UNRELEASED_IMAGES) {
+      expect(Object.values(compose.services).some((s) => s.build && s.image?.includes(`/${n}:`))).toBe(true);
+      expect(builds.map((b) => b.image as string)).not.toContain(n);
+    }
+  });
+
   test("build args, context and Containerfile match compose for every built service", () => {
-    const services = Object.entries(compose.services).filter(([, s]) => s.build);
+    const services = Object.entries(compose.services).filter(
+      ([, s]) => s.build && !UNRELEASED_IMAGES.some((n) => s.image?.includes(`/${n}:`)),
+    );
     expect(services.length).toBeGreaterThan(0);
     for (const [name, s] of services) {
       const image = /\/([a-z0-9-]+):\$\{IMAGE_TAG/.exec(s.image ?? "")?.[1];

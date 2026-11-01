@@ -8,6 +8,7 @@
  *   GET /relay-pull/live/<slug>/…  member relays (Bearer relay token), relative URIs, no tokens
  *   GET /cdn/live/<slug>/…         CDN origin-pull (x-cdn-auth), relative URIs, no tokens
  */
+import { languageLabel } from "@commonair/captions";
 import { renditionPath, sourceAacPath } from "@commonair/contracts/internal";
 import type { PlaybackClaims } from "@commonair/contracts/tokens";
 import type { Logger } from "@commonair/observability";
@@ -32,6 +33,7 @@ import {
   rewritePlaylist,
   stripLowLatency,
   synthesizeMultivariant,
+  withSubtitles,
   type UriTarget,
   type VariantSource,
 } from "./playlist.ts";
@@ -53,6 +55,8 @@ export interface HandlerDeps {
   metrics?: OriginMetrics;
   logger?: Logger;
   now?: () => number;
+  /** Live caption tracks (captions.ts `liveSubtitleTracks`); absent = none. */
+  subtitles?: (broadcastId: string) => Promise<{ language: string }[]>;
 }
 
 export type OriginFetch = (req: Request, peerIp?: string) => Promise<Response>;
@@ -150,6 +154,19 @@ export function createHandler(deps: HandlerDeps): OriginFetch {
       const dataMode = dm !== undefined && isMultivariantText(text);
       if (variants.length > 0 || dataMode) text = synthesizeMultivariant([{ rendition: "source", text }, ...variants]);
       if (dataMode) text = filterForDataMode(text, dm);
+      // SUBTITLES only where the `.vtt` route serves them: a viewer's own origin token, never a
+      // rehearsal (`rb`), never a CDN pull. Relay pulls join once the relay neither counts nor
+      // pins `.vtt` (follow-up: relay `serveMedia`).
+      const captionsReachable =
+        p.route === "hls" && p.claims.rb === undefined && !(p.claims.src === "cdn" && deps.cdn.baseUrl);
+      if (deps.subtitles && captionsReachable && isMultivariantText(text))
+        text = withSubtitles(
+          text,
+          (await deps.subtitles(channel.broadcastId)).map((t) => ({
+            language: t.language,
+            name: languageLabel(t.language),
+          })),
+        );
     } else if (p.route === "hls" && p.claims.dm !== undefined) {
       text = stripLowLatency(text);
     }

@@ -120,6 +120,20 @@ describe("fetchEvidence", () => {
     ]);
   });
 
+  test("/dvr/ entries keep their mode; live and absent modes carry none (ADR 0016 decision 6)", () => {
+    expect(
+      fetchEvidence([
+        { ...f("origin", "segment", "dvr/v/r1_000001.m4s"), mode: "dvr" },
+        { ...f("origin", "playlist"), mode: "dvr" },
+        { ...f("origin", "segment", "source/a_seg1.mp4"), mode: "live" },
+      ]),
+    ).toEqual([
+      { sid: SID, kind: "segment", object: "dvr/v/r1_000001.m4s", mode: "dvr" },
+      { sid: SID, kind: "playlist", mode: "dvr" },
+      { sid: SID, kind: "segment", object: "source/a_seg1.mp4" },
+    ]);
+  });
+
   test("empty and all-filtered batches", () => {
     expect(fetchEvidence([])).toEqual([]);
     expect(fetchEvidence([f("relay", "segment"), f("cdn", "segment")])).toEqual([]);

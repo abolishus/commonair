@@ -58,6 +58,7 @@ describe("CaptionsStudio", () => {
       async (input) => ({
         captions: { enabled: true, spokenLanguage: null, maskWords: input.captions?.maskWords ?? [] },
         captionsInstanceDefault: false,
+        captionsState: "off",
         dvr: { enabled: true, windowSeconds: 1800 },
         dvrMaxWindowSeconds: 7200,
       }),

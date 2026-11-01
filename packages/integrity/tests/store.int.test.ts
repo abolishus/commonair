@@ -63,8 +63,35 @@ describe("integrity evidence store", () => {
     await recordFetch(valkey, { sid, kind: "part" });
     const ev = await readEvidence(valkey, [sid, other]);
     expect(ev.get(sid)!.fetches).toEqual({ playlists: 2, segments: 0, parts: 1 });
-    expect(ev.get(other)).toEqual({ heartbeats: [], fetches: null });
+    expect(ev.get(other)).toEqual({ heartbeats: [], fetches: null, dvrFetches: null });
     expect((await readEvidence(valkey, [])).size).toBe(0);
+  });
+
+  test("DVR fetches are counted apart, distinct by object (ADR 0016 decision 6)", async () => {
+    const sid = crypto.randomUUID();
+    await recordFetches(valkey, [
+      { sid, kind: "playlist", mode: "dvr" },
+      { sid, kind: "playlist", mode: "dvr" },
+      ...Array.from({ length: 4 }, () => ({
+        sid,
+        kind: "segment" as const,
+        object: "dvr/v/r1_000001.m4s",
+        mode: "dvr" as const,
+      })),
+      { sid, kind: "segment", object: "dvr/v/r1_000002.m4s", mode: "dvr" },
+      { sid, kind: "part", object: "source/part1.mp4" },
+    ]);
+    const ev = (await readEvidence(valkey, [sid])).get(sid)!;
+    expect(ev.fetches).toEqual({ playlists: 0, segments: 0, parts: 1 });
+    expect(ev.dvrFetches).toEqual({ playlists: 2, segments: 2, parts: 0 });
+    expect(await valkey.ttl(INTEGRITY_KEYS.dvrFetches(sid))).toBeGreaterThan(EVIDENCE_TTL_SECONDS - 10);
+    // Only DVR fetches: no live counters at all.
+    const only = crypto.randomUUID();
+    await recordFetches(valkey, [{ sid: only, kind: "segment", object: "dvr/v/a.m4s", mode: "dvr" }]);
+    expect((await readEvidence(valkey, [only])).get(only)).toMatchObject({
+      fetches: null,
+      dvrFetches: { playlists: 0, segments: 1, parts: 0 },
+    });
   });
 
   test("batch counting matches one-by-one counting, with a TTL", async () => {

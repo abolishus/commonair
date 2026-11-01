@@ -3,7 +3,32 @@
 
 /** The `group` step's pure checks (src/w2/rollup.ts). */
 import { describe, expect, test } from "vite-plus/test";
-import { expectedGroups, groupMismatches, leakedCodes } from "../../src/w2/rollup.ts";
+import {
+  categoriesOf,
+  expectedGroups,
+  firstReasonCategory,
+  groupMismatches,
+  leakedCodes,
+  swarmShortfalls,
+} from "../../src/w2/rollup.ts";
+
+describe("swarm categories", () => {
+  test("a session's category is its first signal reason's; none is other", () => {
+    expect(firstReasonCategory(["device_concurrency", "headless", "datacenter_ip"])).toBe("concurrency");
+    expect(firstReasonCategory(["insufficient_heartbeats", "headless"])).toBe("automation");
+    expect(firstReasonCategory(["insufficient_heartbeats"])).toBe("other");
+    expect(firstReasonCategory(null)).toBe("other");
+    expect(categoriesOf([["datacenter_ip"], ["headless"], ["headless", "datacenter_ip"]])).toEqual({
+      datacenter: 1,
+      automation: 2,
+    });
+  });
+  test("shortfalls name categories the rollup holds fewer of than the swarm", () => {
+    expect(swarmShortfalls({ automation: 3, concurrency: 2 }, { automation: 5, concurrency: 2 })).toEqual([]);
+    expect(swarmShortfalls({ automation: 3 }, { datacenter: 3 })).toEqual(["automation: swarm 3, rollup 0"]);
+    expect(swarmShortfalls({}, {})).toEqual([]);
+  });
+});
 
 describe("expectedGroups", () => {
   test("shows groups of 5 or more in category order and counts the rest", () => {

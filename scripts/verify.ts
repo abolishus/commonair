@@ -105,6 +105,11 @@ export function infraUpCmd(harnessFollows: boolean): string[] {
   return ["bun", "scripts/infra.ts", "test", ...(harnessFollows ? ["--harness"] : [])];
 }
 
+/** `--captions` for the stack when the run is the captions shard or names the captions scenario. */
+export function captionsStack(fullName: string, scenarioNames: readonly string[]): string[] {
+  return fullName === "full:captions" || scenarioNames.includes("captions") ? ["--captions"] : [];
+}
+
 /** One CI harness shard. */
 export const SHARD_TIMEOUT_MIN = 45;
 /** Every scenario in one run, serially: about an hour since clock-skew (13-18 min) joined. */
@@ -183,7 +188,8 @@ export const steps: Step[] = [
     phase: 4,
     timeoutMin: 25,
     // --multi: the second api/chat/worker/origin the `multi-instance` scenario needs (S1-c).
-    cmd: ["bun", "scripts/infra.ts", "stack", "--harness", "--multi"],
+    // --captions: the whisper sidecar, for the captions shard only (batch 6 decision (c)).
+    cmd: ["bun", "scripts/infra.ts", "stack", "--harness", "--multi", ...captionsStack(shard, scenarios)],
     when: () => (full || scenarios.length > 0) && process.env.VERIFY_INFRA !== "external",
   },
   {

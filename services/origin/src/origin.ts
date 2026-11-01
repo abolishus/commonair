@@ -10,7 +10,7 @@ import type { ValkeyClient } from "@commonair/service";
 import { importSigningKey } from "@commonair/tokens";
 import { MINUTE_MS, SegmentLog } from "./accounting.ts";
 import { cdnAuthValue, RelayAuth } from "./auth.ts";
-import { registerCaptionsRoutes } from "./captions.ts";
+import { liveSubtitleTracks, registerCaptionsRoutes } from "./captions.ts";
 import { ChannelDirectory } from "./channels.ts";
 import { parseCidr, type Cidr } from "./clientip.ts";
 import { ContentStore, type ObjectRef, type MediaObject, type TtlPolicy } from "./content.ts";
@@ -135,6 +135,7 @@ export async function createOrigin(opts: OriginOptions): Promise<Origin> {
     metrics,
     logger: opts.logger,
     now,
+    subtitles: liveSubtitleTracks(opts.valkey),
   });
   // One VOD state cache for both VOD routes (5 s per instance, ADR 0009 amendment 1).
   const vodStates = new VodStateCache(dbVodStateLookup(opts.db), { now });

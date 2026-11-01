@@ -21,6 +21,7 @@ import { schema } from "@commonair/db";
 import { unsafeFilterRegexReason } from "@commonair/safe-regex";
 import type { z } from "zod";
 import type { Deps } from "../deps.ts";
+import { captionsStateFor } from "../captions/tracks.ts";
 import { audit } from "../events/audit.ts";
 import { precondition } from "../lib/errors.ts";
 import { readSetting } from "../lib/settings.ts";
@@ -59,9 +60,13 @@ export async function captionsInstanceDefault(deps: Deps): Promise<boolean> {
 
 export async function mediaSettingsOf(deps: Deps, c: ChannelRow): Promise<MediaSettings> {
   const cap = deps.env.DVR_MAX_WINDOW_SECONDS;
+  const [live] = c.liveBroadcastId
+    ? await deps.db.select().from(schema.broadcasts).where(eq(schema.broadcasts.id, c.liveBroadcastId))
+    : [];
   return {
     captions: captionsSettingsOf(c),
     captionsInstanceDefault: await captionsInstanceDefault(deps),
+    captionsState: live ? await captionsStateFor(deps, live) : "off",
     // A cap under the column's floor turns DVR off instance-wide, whatever the channel chose.
     dvr: {
       enabled: c.dvrEnabled && cap >= DVR_MIN_WINDOW_SECONDS,

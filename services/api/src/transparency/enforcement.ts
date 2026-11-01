@@ -31,17 +31,9 @@ import {
 } from "@commonair/contracts/enums";
 import { schema } from "@commonair/db";
 import { resolveCatalog } from "@commonair/email";
-import { findClause } from "@commonair/moderation";
+import { findClause, groupOfClauseId, parseRuleRef, REPORT_GROUP_IDS, type ReportGroup } from "@commonair/moderation";
 import { and, eq, gte, isNotNull, lt, sql, type SQL } from "drizzle-orm";
 import type { PgColumn } from "drizzle-orm/pg-core";
-// The report grouping lives with the catalog (`@commonair/moderation`'s `clauses.ts`); the package
-// index does not export it yet (contract request), so it is imported by path.
-import {
-  groupOfClauseId,
-  parseRuleRef,
-  REPORT_GROUP_IDS,
-  type ReportGroup,
-} from "../../../../packages/moderation/src/clauses.ts";
 import type { Deps } from "../deps.ts";
 
 const { enforcementStatements: st, modActions, appeals, nciiRequests } = schema;

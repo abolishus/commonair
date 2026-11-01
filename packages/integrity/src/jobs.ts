@@ -232,7 +232,7 @@ export async function scoreActiveSessions(
     await db.execute(sql`
       select p.id, p.channel_id, p.user_id, p.device_hash, p.asn, p.datacenter, p.user_agent, p.fingerprint,
              p.assigned_source, p.relay_id, p.started_at, p.last_heartbeat_at, p.ended_at, p.heartbeats,
-             p.watch_seconds, p.segments_fetched, p.bytes_http, p.bytes_p_2p, p.verdict
+             p.watch_seconds, p.dvr_seconds, p.segments_fetched, p.bytes_http, p.bytes_p_2p, p.verdict
         from playback_sessions p
        where (p.ended_at is null or p.verdict = 'pending' or p.scored_at is null)
          and (p.ended_at is null or p.ended_at > ${tsz(finalize)})
@@ -274,6 +274,7 @@ export async function scoreActiveSessions(
         lastHeartbeatAt: dateOrNull(c.last_heartbeat_at),
         heartbeats: num(c.heartbeats),
         watchSeconds: num(c.watch_seconds),
+        dvrSeconds: num(c.dvr_seconds),
         segmentsFetched: num(c.segments_fetched),
         bytesHttp: num(c.bytes_http),
         bytesP2p: num(c.bytes_p_2p),
@@ -317,13 +318,17 @@ export async function scoreActiveSessions(
           until && until > f.startedAt
             ? {
                 relayObjects: relay.objects.get(f.id) ?? 0,
-                claimedSeconds: claimedSecondsUntil(beats, until.getTime(), f),
+                // Receipts cover live fetches only; DVR is origin-only (ADR 0016 decision 5).
+                claimedSeconds: claimedSecondsUntil(beats, until.getTime(), f, { mode: "live" }),
               }
             : null;
       } else if (f.assignedSource === "cdn") {
         fetches = null;
       } else {
-        fetches = ev?.fetches ?? { playlists: null, segments: f.segmentsFetched, parts: null };
+        // With DVR counters the database counter (which includes DVR segments) cannot stand in
+        // for the live part: no live counters are no live fetches.
+        fetches =
+          ev?.fetches ?? (ev?.dvrFetches ? null : { playlists: null, segments: f.segmentsFetched, parts: null });
       }
       const conc = concurrency.get(f.id);
       const allowance = allowances.get(f.id) ?? null;
@@ -340,6 +345,7 @@ export async function scoreActiveSessions(
           partsPerSegment: opts.partsPerSegment ?? 5,
           allowance,
           p2p: p2p.evidence.get(f.id) ?? NOT_EVIDENCED,
+          dvrFetches: ev?.dvrFetches ?? null,
         },
         opts.classifier,
       );

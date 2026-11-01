@@ -65,7 +65,7 @@ const TRACK_STATE_KEYS: Record<TrackState, MessageKey> = {
   active: "captions.studio.track.active",
 };
 
-/** The live track's state, once `ChannelMediaSettings` carries it (contract request); `off` until then. */
+/** The live track's state (`ChannelMediaSettings.captionsState`); `off` when a response lacks it. */
 function trackStateOf(s: MediaSettings): TrackState {
   const v: unknown = (s as Record<string, unknown>).captionsState;
   return v === "queued" || v === "active" ? v : "off";

@@ -149,6 +149,7 @@ describe("compose.yaml: images", () => {
       "infra/postgres/Containerfile",
       "infra/containers/service.Containerfile",
       "infra/containers/probe.Containerfile",
+      "infra/containers/whisper.Containerfile",
     ]) {
       for (const m of read(file).matchAll(/^ARG [A-Z_]+_IMAGE=(\S+)$/gm)) assertPinned(m[1]!, file);
       for (const m of read(file).matchAll(/^FROM (\S+)/gm))
@@ -207,9 +208,10 @@ describe("compose.yaml: lifecycle", () => {
     expect(compose.services["mock-rtmp"]?.profiles).toEqual(["harness"]);
     expect(compose.services["stripe-mock"]?.profiles).toEqual(["stripe"]);
     expect(compose.services.caddy?.profiles).toEqual(["tls"]);
+    expect(compose.services.whisper?.profiles).toEqual(["captions"]);
     expect(compose.services.tracker?.profiles).toBeUndefined();
     const optional = services.filter(([, s]) => s.profiles).map(([n]) => n);
-    expect(optional.sort()).toEqual(["caddy", "mock-rtmp", "stripe-mock"]);
+    expect(optional.sort()).toEqual(["caddy", "mock-rtmp", "stripe-mock", "whisper"]);
   });
 
   test("every platform service is present", () => {
@@ -238,6 +240,7 @@ describe("compose.yaml: lifecycle", () => {
       "grafana",
       "caddy",
       "stripe-mock",
+      "whisper",
     ];
     expect(Object.keys(compose.services).sort()).toEqual(expected.sort());
   });
@@ -392,8 +395,9 @@ describe("Quadlet mirror", () => {
   const keys = (unit: string, key: string) => [...unit.matchAll(new RegExp(`^${key}=(.*)$`, "gm"))].map((m) => m[1]!);
   // Compose's garage-init is the units' storage-init, which also checks an external store.
   const unitOf = (service: string) => (service === "garage-init" ? "storage-init" : service);
-  // Dev/test-only services have no production unit.
-  const DEV_ONLY = new Set(["mailpit", "mock-rtmp", "stripe-mock"]);
+  // Dev/test-only services have no production unit. whisper (captions) has none yet either: the
+  // self-host unit and selfhost.sh option are a tracked follow-up (W2-captions).
+  const DEV_ONLY = new Set(["mailpit", "mock-rtmp", "stripe-mock", "whisper"]);
   // Production-only units with no compose service: the timer-driven IRC certificate sync.
   const QUADLET_ONLY = new Set(["irc-cert"]);
   // A host path bind-mounted by two or more units carries the shared SELinux label `z`: the

@@ -309,6 +309,13 @@
       "when": 1793503423770,
       "tag": "0043_w2_protections",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1793517551130,
+      "tag": "0044_w2_indexes",
+      "breakpoints": true
     }
   ]
 }

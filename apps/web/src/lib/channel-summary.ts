@@ -22,6 +22,8 @@ export interface ChannelSummary {
     id: string;
     title: string;
     viewerCount: number;
+    /** Verified viewers rewound in DVR mode, apart from `viewerCount` (ADR 0016 decision 6); 0 = none. */
+    catchingUpCount: number;
     startedAt: string;
     mature: boolean;
     /** `under_review` while a T1 moderation case restricts the broadcast. */
@@ -48,6 +50,7 @@ export function summarize(c: ChannelDto): ChannelSummary {
           id: c.live.id,
           title: c.live.title,
           viewerCount: c.live.viewerCount,
+          catchingUpCount: c.live.catchingUpCount ?? 0,
           startedAt: c.live.startedAt,
           mature: c.live.mature === true,
           restricted: c.live.restricted ?? null,

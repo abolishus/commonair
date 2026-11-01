@@ -23,6 +23,8 @@ export interface ChannelHeaderProps extends React.ComponentProps<"section"> {
   actions?: React.ReactNode;
   viewerCount?: number;
   followers?: React.ReactNode;
+  /** Shown beside the viewer count: DVR viewers, who are not live viewers (ADR 0016 decision 6). */
+  catchingUp?: React.ReactNode;
   lastLive?: React.ReactNode;
   variant?: "live" | "offline" | "vod" | "compact";
   meta?: React.ReactNode;
@@ -44,6 +46,7 @@ export function ChannelHeader({
   actions,
   viewerCount,
   followers,
+  catchingUp,
   lastLive,
   variant = live ? "live" : "offline",
   meta,
@@ -78,9 +81,10 @@ export function ChannelHeader({
           </div>
         )}
         {meta && <div className="text-xs text-muted-foreground">{meta}</div>}
-        {(viewerCount !== undefined || followers || lastLive) && (
+        {(viewerCount !== undefined || catchingUp || followers || lastLive) && (
           <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
             {viewerCount !== undefined && <ViewerCount count={viewerCount} />}
+            {catchingUp}
             {followers}
             {lastLive}
           </div>

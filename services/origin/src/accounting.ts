@@ -129,6 +129,7 @@ function fields(e: SegmentFetch): string[] {
   if (e.rid) f.push("rid", e.rid);
   f.push("kind", e.kind, "bytes", String(e.bytes), "at", String(e.at));
   if (e.obj) f.push("obj", e.obj);
+  if (e.mode) f.push("mode", e.mode);
   return f;
 }
 

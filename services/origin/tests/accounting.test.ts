@@ -95,6 +95,16 @@ describe("SegmentLog", () => {
     expect(v.calls[0]?.slice(-2)).toEqual(["obj", "720p/abc_seg42.mp4"]);
     expect(v.calls[1]).not.toContain("obj");
   });
+
+  test("carries the playback mode when given (ADR 0016 decision 6), and only then", async () => {
+    const v = fakeValkey();
+    const log = new SegmentLog({ valkey: v as never, stream: "s" });
+    log.record({ ...entry(1), obj: "dvr/v/r1_000001.m4s", mode: "dvr" });
+    log.record(entry(2));
+    await log.flush();
+    expect(v.calls[0]?.slice(-4)).toEqual(["obj", "dvr/v/r1_000001.m4s", "mode", "dvr"]);
+    expect(v.calls[1]).not.toContain("mode");
+  });
 });
 
 describe("fetchObjectId", () => {

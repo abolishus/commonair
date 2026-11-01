@@ -16,11 +16,17 @@ describe("W2 jobs", () => {
     expect([...(reg.get(QUEUES.rehearsal)?.keys() ?? [])]).toEqual([REHEARSAL_JOBS.driver]);
   });
 
-  test("the attestation reconciler runs daily; the per-broadcast jobs are event-driven", () => {
+  test("the retention pass and the attestation reconciler run daily; the per-broadcast jobs are event-driven", () => {
     const scheduled = scheduledJobs(reg).filter((j) => j.queue === QUEUES.analytics || j.queue === QUEUES.rehearsal);
     expect(scheduled.map((j) => [j.name, j.schedule])).toEqual([
+      [ANALYTICS_JOBS.broadcastRollupRetention, { pattern: "23 4 * * *" }],
       [ANALYTICS_JOBS.attestationReconcile, { pattern: "41 4 * * *" }],
     ]);
+  });
+
+  test("the rehearsal cap sweep runs every 30 s on the integrity queue, away from the long driver jobs", () => {
+    const sweep = scheduledJobs(reg).find((j) => j.name === REHEARSAL_JOBS.capSweep);
+    expect(sweep).toMatchObject({ queue: QUEUES.integrity, schedule: { every: 30_000 } });
   });
 
   test("payloads are the contract's", () => {

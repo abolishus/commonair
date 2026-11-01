@@ -10,8 +10,9 @@
  *   excluded sessions (every swarm session among them);
  * - each excluded group of 5 or more sessions is shown with its rollup counts and the smaller ones
  *   are only counted (`hiddenGroups`), with no signal code in the response;
- * - the swarm is one `datacenter` group of the swarm's size (soft: the category is the first
- *   exclusion reason's, so it depends on how the scorer ranks the swarm's signals);
+ * - the swarm's excluded groups match its first-reason categories: a session's category is that of
+ *   its highest-scoring signal (`exclusionCategoryOf`), so the swarm can split over `concurrency`,
+ *   `automation` and `datacenter` depending on how the scorer ranks its signals;
  * - the studio page shows the same group (`analytics-excluded-group` with `data-category` and
  *   `data-sessions`), signed in through the web form.
  */
@@ -42,7 +43,53 @@ const SIGNAL_CODES = [
   "fetch_unjudged",
 ];
 
+/**
+ * Mirror of `SIGNAL_CATEGORIES` in packages/integrity/src/constants.ts (the harness does not depend
+ * on @commonair/integrity; see integrity-viewers.ts).
+ */
+const SIGNAL_CATEGORIES: Readonly<Record<string, ExclusionCategory>> = {
+  datacenter_ip: "datacenter",
+  privacy_relay: "privacy_relay",
+  device_concurrency: "concurrency",
+  account_concurrency: "concurrency",
+  headless: "automation",
+  heartbeat_inconsistent: "playback_pattern",
+  fetch_pattern: "playback_pattern",
+};
+
 export type ByCategory = Partial<Record<ExclusionCategory, number>>;
+
+/** Mirror of `exclusionCategoryOf`: the first signal reason's category (reasons are sorted by score). */
+export function firstReasonCategory(reasons: readonly string[] | null): ExclusionCategory {
+  for (const r of reasons ?? []) {
+    const c = SIGNAL_CATEGORIES[r];
+    if (c) return c;
+  }
+  return "other";
+}
+
+/** Sessions per first-reason category. */
+export function categoriesOf(reasons: readonly (readonly string[] | null)[]): ByCategory {
+  const out: ByCategory = {};
+  for (const r of reasons) {
+    const c = firstReasonCategory(r);
+    out[c] = (out[c] ?? 0) + 1;
+  }
+  return out;
+}
+
+/**
+ * Categories where the rollup holds fewer sessions than the swarm put there (empty when every
+ * swarm session is in the group of its first-reason category).
+ */
+export function swarmShortfalls(swarm: ByCategory, rollup: ByCategory): string[] {
+  const out: string[] = [];
+  for (const category of EXCLUSION_CATEGORIES) {
+    const n = swarm[category] ?? 0;
+    if (n > 0 && (rollup[category] ?? 0) < n) out.push(`${category}: swarm ${n}, rollup ${rollup[category] ?? 0}`);
+  }
+  return out;
+}
 export interface Group {
   category: ExclusionCategory;
   sessions: number;
@@ -132,7 +179,18 @@ async function readRollup(url: string, broadcastId: string, swarm: readonly stri
       excluded: number;
       swarmExcluded: number;
     }[];
-    return { totals: t ?? null, verdicts: v ?? { sessions: 0, excluded: 0, swarmExcluded: 0 } };
+    const reasons = (await sql`
+      select ps.verdict_reasons as reasons
+        from playback_sessions ps join broadcasts b on b.id = ps.broadcast_id
+       where ps.broadcast_id = ${broadcastId}::uuid and ps.verdict = 'excluded'
+         and ps.id = any(${[...swarm]}::uuid[])
+         and least(coalesce(ps.ended_at, b.ended_at), b.ended_at) - greatest(ps.started_at, b.started_at)
+               >= interval '1 second'`) as { reasons: string[] | null }[];
+    return {
+      totals: t ?? null,
+      verdicts: v ?? { sessions: 0, excluded: 0, swarmExcluded: 0 },
+      swarmCategories: categoriesOf(reasons.map((r) => r.reasons)),
+    };
   } finally {
     await sql.close();
   }
@@ -169,6 +227,7 @@ export async function stepGroup(ext: IntegrityW2Extension): Promise<void> {
   ctx.assert("no signal code in the analytics", leakedCodes(view).length === 0, leakedCodes(view));
 
   const swarm = ext.swarmSessionIds.length;
+  let swarmCategories: ByCategory = {};
   if (ext.databaseUrl) {
     const db = await ctx.step("read the rollup and the verdicts", () =>
       readRollup(ext.databaseUrl as string, broadcastId, ext.swarmSessionIds),
@@ -200,14 +259,18 @@ export async function stepGroup(ext: IntegrityW2Extension): Promise<void> {
       api: view.hiddenGroups,
       expected: expected.hidden,
     });
+    swarmCategories = db.swarmCategories;
+    const short = swarmShortfalls(swarmCategories, t.bySessions);
+    ctx.assert("the swarm's excluded groups match its first-reason categories", short.length === 0, {
+      short,
+      swarm: swarmCategories,
+      rollup: t.bySessions,
+    });
   }
-  const datacenter = view.exclusions.find((g) => g.category === "datacenter");
-  ctx.check("the swarm is one datacenter excluded group of the swarm's size", datacenter?.sessions === swarm, {
-    groups: view.exclusions,
-    swarm,
-  });
 
-  const shown = datacenter ?? view.exclusions[0];
+  // The studio check uses the swarm's largest category (any shown group without the database).
+  const [top] = Object.entries(swarmCategories).sort(([, a], [, b]) => (b ?? 0) - (a ?? 0));
+  const shown = view.exclusions.find((g) => g.category === top?.[0]) ?? view.exclusions[0];
   if (!shown) return;
   await ctx.step("the studio analytics page shows the group", async () => {
     const session = await WebSession.open({

@@ -10,7 +10,9 @@
  *                               override files are layered over compose.yaml (e.g.
  *                               harness/compose.trust-safety.yaml for the `trust-safety` scenario);
  *                               --multi (with --harness) also starts the `multi` replicas
- *                               (api-2, chat-2, worker-2, origin-2) for `multi-instance`
+ *                               (api-2, chat-2, worker-2, origin-2) for `multi-instance`;
+ *                               --captions (with --harness) layers harness/compose.w2-captions.yaml
+ *                               and the `captions` profile (whisper), for the captions shard only
  *   bun scripts/infra.ts down   stop everything (volumes kept)
  *   bun scripts/infra.ts reset  stop everything and delete volumes
  */
@@ -447,20 +449,40 @@ export const HARNESS_OVERRIDES = [
   "harness/compose.multi-instance.yaml",
 ] as const;
 
+/**
+ * The captions shard's override (batch 6 decision (c)): media talks to the whisper sidecar. Layered
+ * only with `stack --harness --captions`, which also enables the `captions` profile, and only where
+ * the weights were fetched (`bun scripts/fetch-model.ts --model captions`); never for the other shards.
+ */
+export const CAPTIONS_OVERRIDE = "harness/compose.w2-captions.yaml";
+
 /** The `multi` profile's replicas (harness/compose.multi-instance.yaml, scenario `multi-instance`). */
 export const MULTI_REPLICAS = ["api-2", "chat-2", "worker-2", "origin-2"];
 
-/** Compose profiles `stack` enables: `harness` always, `multi` with `--multi` (needs `--harness`). */
+/**
+ * Compose profiles `stack` enables: `harness` always, `multi` with `--multi` and `captions` with
+ * `--captions` (both need `--harness`).
+ */
 export function stackProfiles(args: readonly string[]): string[] {
-  if (!args.includes("--multi")) return ["harness"];
-  if (!args.includes("--harness")) throw new Error("--multi needs --harness (the replicas are a harness override)");
-  return ["harness", "multi"];
+  const out = ["harness"];
+  if (args.includes("--multi")) {
+    if (!args.includes("--harness")) throw new Error("--multi needs --harness (the replicas are a harness override)");
+    out.push("multi");
+  }
+  if (args.includes("--captions")) {
+    if (!args.includes("--harness")) throw new Error("--captions needs --harness (the sidecar is a harness override)");
+    out.push("captions");
+  }
+  return out;
 }
 
 /** `-f` arguments for `stack`: none for the plain stack, else compose.yaml plus each override. */
 export function stackFiles(args: readonly string[]): string[] {
-  const rest = args.filter((a) => a !== "--harness" && a !== "--multi");
-  const overrides = args.includes("--harness") ? [...HARNESS_OVERRIDES, ...rest] : rest;
+  const rest = args.filter((a) => a !== "--harness" && a !== "--multi" && a !== "--captions");
+  const harness = args.includes("--harness")
+    ? [...HARNESS_OVERRIDES, ...(args.includes("--captions") ? [CAPTIONS_OVERRIDE] : [])]
+    : [];
+  const overrides = [...harness, ...rest];
   if (overrides.length === 0) return [];
   for (const o of overrides) {
     if (o.startsWith("-")) throw new Error(`unknown option ${o}; stack takes override file paths`);

@@ -212,6 +212,7 @@ describe("/dvr/ with real state and storage", () => {
       [sid, r.channel, "origin", "playlist", plBytes, undefined],
       [sid, r.channel, "origin", "segment", "segment-20".length, `dvr/${r.vod}/r1_000020.m4s`],
     ]);
+    expect(entries.every((e) => e.mode === "dvr")).toBe(true);
   });
 
   test("token refusals: a live token, another VOD's DVR token, a relay token, a wrong channel", async () => {

@@ -836,6 +836,51 @@ export const treasurerSplitHandlers = {
     return writeOffDto(deps.db, row);
   }),
 
+  suspense: os.money.treasurer.splits.suspense.handler(async ({ context }) => {
+    requireCaller(context);
+    const { deps } = context;
+    const currency = deps.env.CURRENCY;
+    // Every `liability:split-suspense:<user>` account (`accounts.splitSuspense`) in the currency.
+    const prefix = "liability:split-suspense:%";
+    const rows = await deps.db.execute<{ code: string; total: string }>(sql`
+      select a.code, sum(e.amount_cents)::text as total
+      from ledger_accounts a join ledger_entries e on e.account_id = a.id
+      where a.code like ${prefix} and a.currency = ${currency}
+      group by a.code
+      having sum(e.amount_cents) <> 0
+      order by a.code`);
+    const held = rows.flatMap((r) => {
+      const id = /([0-9a-f-]{36})@[a-z]{3}$/.exec(r.code)?.[1];
+      // A liability holds a credit (negative entries): the withheld amount is its negation.
+      return id ? [{ id, cents: -Number(r.total) }] : [];
+    });
+    if (held.length === 0) return { items: [] };
+    const people = new Map(
+      (
+        await deps.db
+          .select({ id: users.id, username: users.username })
+          .from(users)
+          .where(
+            inArray(
+              users.id,
+              held.map((h) => h.id),
+            ),
+          )
+      ).map((u) => [u.id, u.username]),
+    );
+    const now = deps.now();
+    const items = [];
+    for (const h of held) {
+      items.push({
+        recipient: { id: h.id, username: people.get(h.id) ?? "" },
+        withheld: { cents: h.cents, currency },
+        restricted: await recipientWithheld(deps.db, h.id, now),
+        forfeitable: await permanentlyGone(deps.db, h.id),
+      });
+    }
+    return { items };
+  }),
+
   releaseSuspense: os.money.treasurer.splits.releaseSuspense.handler(async ({ context, input }) => {
     const r = await suspenseAction(context, input.username, "release");
     return { released: r };

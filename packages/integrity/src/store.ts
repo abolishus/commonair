@@ -21,6 +21,9 @@ export const INTEGRITY_KEYS = {
   heartbeats: (sessionId: string) => `integrity:hb:${sessionId}`,
   fetches: (sessionId: string) => `integrity:fetch:${sessionId}`,
   distinct: (sessionId: string, kind: "segment" | "part") => `integrity:fetch:${sessionId}:${kind}:u`,
+  /** ADR 0016 decision 6: `/dvr/` fetches, counted apart from the live ones. */
+  dvrFetches: (sessionId: string) => `integrity:fetch:${sessionId}:dvr`,
+  dvrDistinct: (sessionId: string) => `integrity:fetch:${sessionId}:dvr:segment:u`,
 } as const;
 
 /** Enough history for the periodic-timing check with margin (10 s beats → 20 min). */
@@ -47,6 +50,8 @@ export interface FetchRecord {
   sid: SegmentFetch["sid"];
   kind: SegmentFetch["kind"];
   object?: string;
+  /** Absent = live. */
+  mode?: SegmentFetch["mode"];
 }
 
 /** Single-fetch form of `recordFetches` (request counts only). */
@@ -68,17 +73,18 @@ export async function recordFetches(valkey: ValkeyClient, fetches: readonly Fetc
   const counts = new Map<string, Map<string, number>>();
   const objects = new Map<string, string[]>();
   for (const f of fetches) {
-    const byKind = counts.get(f.sid) ?? new Map<string, number>();
+    const dvr = f.mode === "dvr";
+    const hash = dvr ? INTEGRITY_KEYS.dvrFetches(f.sid) : INTEGRITY_KEYS.fetches(f.sid);
+    const byKind = counts.get(hash) ?? new Map<string, number>();
     byKind.set(f.kind, (byKind.get(f.kind) ?? 0) + 1);
-    counts.set(f.sid, byKind);
+    counts.set(hash, byKind);
     if (f.object && f.kind !== "playlist") {
-      const key = INTEGRITY_KEYS.distinct(f.sid, f.kind);
+      const key = dvr ? INTEGRITY_KEYS.dvrDistinct(f.sid) : INTEGRITY_KEYS.distinct(f.sid, f.kind);
       objects.set(key, [...(objects.get(key) ?? []), f.object]);
     }
   }
   const pipe = valkey.multi();
-  for (const [sid, byKind] of counts) {
-    const key = INTEGRITY_KEYS.fetches(sid);
+  for (const [key, byKind] of counts) {
     for (const [kind, n] of byKind) pipe.hincrby(key, kind, n);
     pipe.expire(key, EVIDENCE_TTL_SECONDS);
   }
@@ -110,6 +116,8 @@ export interface SessionEvidence {
   heartbeats: HeartbeatSample[];
   /** Null when no counters exist for the session (fall back to the database counter). */
   fetches: Pick<FetchSummary, "playlists" | "segments" | "parts"> | null;
+  /** The `/dvr/` counters (full segments, so `parts` is 0), or null when none were recorded. */
+  dvrFetches: FetchSummary | null;
 }
 
 /** Read evidence for many sessions in one round trip. */
@@ -125,14 +133,19 @@ export async function readEvidence(
     pipe.hgetall(INTEGRITY_KEYS.fetches(id));
     pipe.pfcount(INTEGRITY_KEYS.distinct(id, "segment"));
     pipe.pfcount(INTEGRITY_KEYS.distinct(id, "part"));
+    pipe.hgetall(INTEGRITY_KEYS.dvrFetches(id));
+    pipe.pfcount(INTEGRITY_KEYS.dvrDistinct(id));
   }
   const results = (await pipe.exec()) ?? [];
-  const PER = 4;
+  const PER = 6;
   sessionIds.forEach((id, i) => {
     const [hbErr, hb] = results[i * PER] ?? [null, []];
     const [fErr, f] = results[i * PER + 1] ?? [null, {}];
     const [sErr, segDistinct] = results[i * PER + 2] ?? [null, 0];
     const [pErr, partDistinct] = results[i * PER + 3] ?? [null, 0];
+    const [dErr, d] = results[i * PER + 4] ?? [null, {}];
+    const [dsErr, dvrDistinct] = results[i * PER + 5] ?? [null, 0];
+    const dvrCounters = dErr ? {} : ((d as Record<string, string>) ?? {});
     const beats = hbErr ? [] : parseBeats((hb as string[]) ?? []);
     const counters = fErr ? {} : ((f as Record<string, string>) ?? {});
     const hasCounters = Object.keys(counters).length > 0;
@@ -150,6 +163,14 @@ export async function readEvidence(
             parts: pick(toCount(counters.part) ?? 0, partDistinct, pErr),
           }
         : null,
+      dvrFetches:
+        Object.keys(dvrCounters).length > 0
+          ? {
+              playlists: toCount(dvrCounters.playlist) ?? 0,
+              segments: pick(toCount(dvrCounters.segment) ?? 0, dvrDistinct, dsErr),
+              parts: 0,
+            }
+          : null,
     });
   });
   return out;

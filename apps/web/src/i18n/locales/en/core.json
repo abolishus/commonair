@@ -231,6 +231,7 @@
   "health.unknown.title": "Stream warning",
   "health.unknown.hint": "The server reported “{code}”.",
   "channel.offline": "{name} is offline",
+  "channel.catchingUp": "{count, plural, one {# catching up} other {# catching up}}",
   "channel.notFound": "This channel does not exist",
   "player.loading": "Loading stream…",
   "player.error": "The stream could not be played.",

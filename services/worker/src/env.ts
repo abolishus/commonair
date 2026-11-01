@@ -15,6 +15,7 @@ import {
   evidenceSealEnv,
   evidenceStorageEnv,
   mailEnv,
+  mediaEnv,
   opsEnv,
   paymentsEnv,
   servicePorts,
@@ -57,8 +58,13 @@ export const workerEnv = z
     ...seedEnv.shape,
     // W1: chat retention, the verified-watch writer and the surge guard (ADR 0012 amendment 1, ADR 0015).
     ...chatEnv.shape,
-    // W1: verified-watch jitter (ADR 0015 decision 4)
-    ...internalEnv.pick({ INTERNAL_API_SECRET: true }).shape,
+    // W1: verified-watch jitter (ADR 0015 decision 4); W2: the rehearsal driver's dry-run chat.
+    ...internalEnv.pick({ INTERNAL_API_SECRET: true, CHAT_INTERNAL_URL: true }).shape,
+    // W2: the rehearsal driver kicks a capped encoder through MediaMTX. Optional: without the
+    // password a capped rehearsal still ends, but the encoder is not kicked.
+    ...mediaEnv
+      .pick({ MEDIAMTX_API_URL: true, MEDIA_INTERNAL_PASSWORD: true })
+      .partial({ MEDIA_INTERNAL_PASSWORD: true }).shape,
     // N1: web push (ADR 0028 decision 1); the worker signs with the VAPID private key.
     ...webPushShape.shape,
     // W2: the rollup's cost model (decision (k)) and the attestation key, worker only (decision (l)).

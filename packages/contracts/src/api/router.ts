@@ -1727,6 +1727,16 @@ export const contract = {
           .errors(SECOND_APPROVER)
           .input(z.object({ id: Id, approve: z.boolean(), note: z.string().max(500).default("") }))
           .output(D.SplitWriteOff),
+        /** Recipients with withheld shares, so a treasurer can find a pseudonymized (deleted) one. */
+        suspense: finance
+          .route({
+            method: "GET",
+            path: "/treasurer/split-suspense",
+            summary: "Recipients with withheld split shares",
+            ...tag("Treasury"),
+          })
+          .input(z.object({}))
+          .output(z.object({ items: z.array(D.SplitSuspenseRecipient) })),
         /** The recipient's restriction was lifted: move the withheld share to their released earnings. */
         releaseSuspense: finance
           .route({
@@ -3136,7 +3146,7 @@ export const contract = {
       })
       .input(
         z.object({
-          /** `30d` (rolling) or a calendar month `YYYY-MM` (UTC). */
+          /** `30d` (the 30 whole UTC days before today) or a calendar month `YYYY-MM` (UTC). */
           window: z.union([z.literal("30d"), z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/)]).default("30d"),
         }),
       )
