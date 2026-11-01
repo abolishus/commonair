@@ -7,7 +7,7 @@
  * (`rtl-physical: <reason>`), and directional icons ("next", "back", a submenu chevron) flip.
  */
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { act, render, screen } from "@testing-library/react";
 import type * as React from "react";
 import { describe, expect, it } from "vite-plus/test";
@@ -114,22 +114,39 @@ function walk(dir: string): string[] {
   });
 }
 
-/** Every class token written on a source line that carries an `rtl-physical:` comment. */
-const commented = new Set(
-  walk(SRC).flatMap((file) =>
-    readFileSync(file, "utf8")
-      .split("\n")
-      .filter((line) => ALLOW.test(line))
-      .flatMap((line) => [...line.matchAll(/"([^"\n]*)"/g)].flatMap((m) => (m[1] ?? "").split(/\s+/))),
-  ),
+/**
+ * Per source file (relative to `src`), every class token written on a line that carries an
+ * `rtl-physical:` comment. Exemptions are per file so a token commented in one component does not
+ * excuse the same token rendered by another.
+ */
+const commentedByFile = new Map(
+  walk(SRC).map((file) => [
+    relative(SRC, file),
+    new Set(
+      readFileSync(file, "utf8")
+        .split("\n")
+        .filter((line) => ALLOW.test(line))
+        .flatMap((line) => [...line.matchAll(/"([^"\n]*)"/g)].flatMap((m) => (m[1] ?? "").split(/\s+/))),
+    ),
+  ]),
 );
 
-/** Physical classes rendered anywhere in the document that no source comment explains. */
-function uncommentedPhysical(): string[] {
+/** Tokens a file's `rtl-physical:` lines exempt (empty for a file with none). */
+function commentedIn(file: string): Set<string> {
+  return commentedByFile.get(file) ?? new Set();
+}
+
+/**
+ * Physical classes rendered anywhere in the document that no source comment explains. Only the
+ * exemptions of `exemptFrom` (the component files a test renders that carry `rtl-physical:` lines)
+ * apply; by default none do.
+ */
+function uncommentedPhysical(...exemptFrom: string[]): string[] {
+  const exempt = new Set(exemptFrom.flatMap((file) => [...commentedIn(file)]));
   const found = new Set<string>();
   for (const el of document.body.querySelectorAll("[class]")) {
     const tokens = (el.getAttribute("class") ?? "").split(/\s+/);
-    for (const token of tokens) if (token && isPhysical(token) && !commented.has(token)) found.add(token);
+    for (const token of tokens) if (token && isPhysical(token) && !exempt.has(token)) found.add(token);
   }
   return [...found].sort();
 }
@@ -169,9 +186,11 @@ describe("the scanner copy", () => {
 
   it("only exempts tokens written on commented lines", () => {
     // The tooltip arrow and the drawer's swipe edges are the physical exceptions.
-    expect(commented.has("data-[side=left]:-right-1")).toBe(true);
-    expect(commented.has("data-[swipe-direction=left]:left-0")).toBe(true);
-    expect(commented.has("data-[side=left]:start-0")).toBe(false);
+    expect(commentedIn("components/tooltip.tsx").has("data-[side=left]:-right-1")).toBe(true);
+    expect(commentedIn("components/drawer.tsx").has("data-[swipe-direction=left]:left-0")).toBe(true);
+    expect(commentedIn("components/tooltip.tsx").has("data-[side=left]:start-0")).toBe(false);
+    // An exemption does not leak to another file.
+    expect(commentedIn("components/sidebar.tsx").has("data-[side=left]:-right-1")).toBe(false);
   });
 });
 
