@@ -104,6 +104,18 @@ export function expectedSlices(
   return { owner: of(owner), crew: of(crew), creator: creatorCents };
 }
 
+/**
+ * The released fixture's crew slice is earned (released, or reserved by the run's payout) and the
+ * only crew hold left is what live tips still inside the hold put there.
+ */
+export function crewEarnedSlice(
+  crewNow: { liabilityCents: number; reservedCents: number; holdCents: number },
+  releasedCrewCents: number,
+  liveHeldCents: number,
+): boolean {
+  return crewNow.liabilityCents + crewNow.reservedCents === releasedCrewCents && crewNow.holdCents === liveHeldCents;
+}
+
 interface SplitSetup {
   owner: SignedInUser;
   crew: SignedInUser;
@@ -328,7 +340,10 @@ export async function stepSplitRelease(ext: MoneyExtension): Promise<void> {
   const { ctx } = ext;
   const s = await setUp(ext, "w2sr");
 
-  // A live tip through the product's posting site (the manual adapter's confirmation).
+  const expected = expectedSlices(SPLIT_TIP_CENTS, s.cut, s.owner.id, s.crew.id);
+  // A live tip through the product's posting site (the manual adapter's confirmation). It is
+  // inside the hold, so its crew lot stays held after the payout run.
+  let liveHeldCents = 0;
   if (ext.provider === "manual") {
     const tip = await ctx.step("w2sr: payer tips the owner", () =>
       s.payer.api.client.money.tip({
@@ -357,6 +372,8 @@ export async function stepSplitRelease(ext: MoneyExtension): Promise<void> {
       tx?.metadata.splitVersionId === s.versionId && link?.splitId === s.versionId,
       { metadata: tx?.metadata, link },
     );
+    liveHeldCents = await paymentHoldRemaining(s.db, tip.paymentId, s.crew.id, ext.currency);
+    ctx.assert("the live tip's crew slice is held", liveHeldCents === expected.crew, { liveHeldCents, expected });
   } else {
     ctx.skipStep(
       "w2sr: a live tip under the split",
@@ -371,12 +388,12 @@ export async function stepSplitRelease(ext: MoneyExtension): Promise<void> {
   await runPayouts(ext, "w2sr");
   const both = (await released(s, paymentId, s.owner.id)) && (await released(s, paymentId, s.crew.id));
   ctx.assert("the tip's hold is released once per recipient (owner and crew)", both, { paymentId });
-  const expected = expectedSlices(SPLIT_TIP_CENTS, s.cut, s.owner.id, s.crew.id);
   const crewNow = await creatorBalances(s.db, s.crew.id, ext.currency);
   ctx.assert(
     "the crew member earned exactly their slice (released or reserved for a payout)",
-    crewNow.liabilityCents + crewNow.reservedCents === expected.crew && crewNow.holdCents === 0,
-    { crewNow, expected },
+    crewEarnedSlice(crewNow, expected.crew, liveHeldCents) &&
+      (await paymentHoldRemaining(s.db, paymentId, s.crew.id, ext.currency)) === 0,
+    { crewNow, expected, liveHeldCents },
   );
   await ledgerSumsToZero(ext, s, "w2sr");
 }

@@ -220,6 +220,25 @@ describe("per-recipient hold release (ADR 0013 decision 1)", () => {
   });
 });
 
+describe("a payout run's release with a live tip still inside the hold", () => {
+  test("only the due lots release; the fresh tip's crew lot stays held", async () => {
+    // The e4b-money split-release shape: one tip just confirmed, one past hold + extra days.
+    const cur = freshCurrency();
+    const [o, a] = [await makeUser(), await makeUser()];
+    const crew = [{ userId: a, bps: 2000 }];
+    const live = await tip(o, 2000, cur, new Date(), crew);
+    const old = await tip(o, 2000, cur, daysAgo(15), crew);
+    const r = await releaseDueHolds(db, { asOf: new Date(), holdDays: 7, currency: cur, newRecipientHoldDays: 7 });
+    expect(r).toMatchObject({ released: 2, totalCents: 1800 });
+    expect(await releaseKey(old, a)).not.toBeNull();
+    expect(await releaseKey(live, a)).toBeNull();
+    expect(await paymentHoldRemaining(db, old, a, cur)).toBe(0);
+    expect(await paymentHoldRemaining(db, live, a, cur)).toBe(360);
+    expect(await creatorBalances(db, a, cur)).toMatchObject({ liabilityCents: 360, holdCents: 360 });
+    expect(await creatorBalances(db, o, cur)).toMatchObject({ liabilityCents: 1440, holdCents: 1440 });
+  });
+});
+
 describe("clawback (ADR 0013 decision 5)", () => {
   const crewOf = (a: string, b: string) => [
     { userId: a, bps: 2000 },
