@@ -1,9 +1,10 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-/** Sign and POST one activity to one remote inbox. Owned by N4-delivery; a no-op stub until it lands (batch 7 contract step §5.1). */
+/** Sign and POST one activity to one remote inbox, retrying on the webhook backoff (ADR 0030 decision 8). */
 import { FEDERATION_JOBS, FederationDeliverJob, QUEUES } from "@commonair/contracts/internal";
-import { stubHandler } from "../b7/stub.ts";
+import { federationConfig } from "../federation/config.ts";
+import { runDeliver } from "../federation/deliver.ts";
 import { defineJob } from "../runtime/registry.ts";
 
 export const job = defineJob({
@@ -11,5 +12,8 @@ export const job = defineJob({
   name: FEDERATION_JOBS.deliver,
   description: "Sign and POST one activity to one remote inbox",
   data: FederationDeliverJob,
-  handler: stubHandler(FEDERATION_JOBS.deliver),
+  handler: async (data, ctx) => {
+    const r = await runDeliver(data, ctx, federationConfig(ctx));
+    return { [r.outcome]: 1 };
+  },
 });

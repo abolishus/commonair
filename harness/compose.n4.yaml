@@ -13,8 +13,9 @@
 #   bun scripts/infra.ts stack --harness --w3
 #
 # The `multi` replicas get the same values (they share the queues, so a job may run on either);
-# harness/tests/w3/overlays.test.ts keeps them identical. N4-delivery fills in anything else the
-# peer needs.
+# harness/tests/w3/overlays.test.ts keeps them identical. The peer needs nothing else: the worker
+# reaches it at http://<HARNESS_WEBHOOK_HOST>:<port> (resolveCallback allows http and private
+# addresses only with OUTBOUND_ALLOW_PRIVATE_NETWORKS), and the peer reaches the API on its own port.
 
 x-n4-env: &n4-env
   FEDERATION_ENABLED: "true"

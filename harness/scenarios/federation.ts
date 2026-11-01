@@ -12,12 +12,14 @@
  * 5. Publish a VOD: the peer receives `Create{Video}`.
  * 6. `Undo{Follow}`, go live again: nothing is delivered.
  * 7. A blocked domain's `Follow` is refused at the inbox.
- * 8. Suspend the channel: the peer receives `Delete` of the actor.
+ * 8. Suspend a channel: the peer receives `Delete` of the actor (a channel of its own).
+ * 9. The streamer removes the peer as a follower: it is gone from the list and a go-live sends
+ *    it nothing.
  *
  * `--set steps=1,3` picks steps (`all` runs every step not pending; each step adds the ones it
  * reads, `src/w3/steps.ts`); `--set via=api` drives the studio and admin steps through the API.
- * Steps whose unit has not merged are pending and run only when named. N4-delivery fills this
- * file and `src/n4/` (N4-web fills `src/n4/web.ts`).
+ * Steps whose unit has not merged are pending and run only when named. The steps live in
+ * `src/n4/index.ts`, the peer in `src/mocks/activitypub/peer.ts` (N4-web fills `src/n4/web.ts`).
  *
  * Runs in the `w3` shard, on the harness stack with the batch 7 overrides
  * (`bun scripts/infra.ts stack --harness --w3`: harness/compose.n4.yaml turns federation on).
@@ -35,7 +37,7 @@ import {
 export default defineScenario({
   name: "federation",
   description:
-    "federation on for a channel → WebFinger and actor → a peer's Follow accepted → go-live Note and VOD delivered, signed → Undo stops delivery → a blocked domain refused → suspension deletes the actor",
+    "federation on for a channel → WebFinger and actor → a peer's Follow accepted → go-live Note and VOD delivered, signed → Undo stops delivery → a blocked domain refused → suspension deletes the actor → a removed follower gets nothing",
   needs: ["api", "web", "media", "origin", "worker", "ffmpeg", "browser"],
   inFull: true,
   timeoutMs: 20 * 60_000,

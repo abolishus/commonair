@@ -8,15 +8,55 @@
  * (`federation_actor_keys`, append-only) and object ids stay: they hold no personal data.
  * `completeDeletion` merges the returned counts into its own.
  *
- * Owned by N4. Until N4 lands this only removes rows. N4 adds the `Delete` of the actor to every
- * follower inbox: it must capture what that needs (inboxes, and a signature or the key) inside
- * this transaction, before the rows below go, because a channel is pseudonymized, never deleted,
- * so no cascade ever removes them later.
+ * Remote servers are told with `Delete` of the actor. Its deliveries run after the commit, but
+ * the rows below are gone by then (a channel is pseudonymized, never deleted, so no cascade
+ * removes them later), so with `deps` this step captures what they need inside the transaction:
+ * the follower inboxes go into the queued `deliver` jobs, and the still-encrypted key is stashed in
+ * Valkey (`retiredKeyStashKey`, a day's TTL, longer than every retry) for those jobs to sign
+ * with. The stash and the jobs are written before the commit; should the transaction roll back,
+ * the deletion runs again and sends the same `Delete` (stable id). Without `deps` (or with the
+ * instance flag off) only the rows go.
  */
 import { schema as s, type Executor } from "@commonair/db";
+import { actorUrls, deleteActorActivity } from "@commonair/federation";
 import { eq } from "drizzle-orm";
+import type { WorkerContext } from "../context.ts";
+import type { FederationConfig } from "../federation/config.ts";
+import { enqueueDeliveries, RETIRED_KEY_TTL_SECONDS, retiredKeyStashKey } from "../federation/deliver.ts";
+import { followerInboxes } from "../federation/local.ts";
 
-export async function deleteFederationData(tx: Executor, channelId: string): Promise<Record<string, number>> {
+export interface FederationDeletionDeps {
+  ctx: Pick<WorkerContext, "valkey" | "enqueueBulk">;
+  cfg: Pick<FederationConfig, "enabled" | "site">;
+}
+
+export async function deleteFederationData(
+  tx: Executor,
+  channelId: string,
+  deps?: FederationDeletionDeps,
+): Promise<Record<string, number>> {
+  let deliveries = 0;
+  if (deps?.cfg.enabled) {
+    const [actor] = await tx
+      .select({
+        keyId: s.federationActors.keyId,
+        privateKeyEnc: s.federationActors.privateKeyEnc,
+        enabled: s.federationActors.enabled,
+      })
+      .from(s.federationActors)
+      .where(eq(s.federationActors.channelId, channelId));
+    const inboxes = actor ? await followerInboxes(tx, channelId) : [];
+    if (actor && inboxes.length > 0) {
+      await deps.ctx.valkey.set(
+        retiredKeyStashKey(channelId),
+        JSON.stringify({ keyId: actor.keyId, privateKeyEnc: actor.privateKeyEnc }),
+        "EX",
+        RETIRED_KEY_TTL_SECONDS,
+      );
+      const urls = actorUrls(deps.cfg.site.publicUrl, channelId);
+      deliveries = await enqueueDeliveries(deps.ctx, channelId, null, deleteActorActivity(urls), inboxes);
+    }
+  }
   const followers = await tx
     .delete(s.federationFollowers)
     .where(eq(s.federationFollowers.channelId, channelId))
@@ -29,5 +69,9 @@ export async function deleteFederationData(tx: Executor, channelId: string): Pro
     .update(s.channels)
     .set({ federationSettings: { enabled: false } })
     .where(eq(s.channels.id, channelId));
-  return { federation_followers: followers.length, federation_actors: actors.length };
+  return {
+    federation_followers: followers.length,
+    federation_actors: actors.length,
+    ...(deps ? { federation_actor_deletes: deliveries } : {}),
+  };
 }
