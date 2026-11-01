@@ -10,10 +10,23 @@
  * the API report offline. Along the way the streamer asks for a second verification email and
  * uploads an avatar from the dashboard (presigned PUT, scanning commit, theme key, `/media`).
  * Selects only by the test ids in docs/testing/e1-selectors.md.
+ *
+ * `--set locale=<tag>` (batch 5 decision (k)) gives every browser session the
+ * `commonair-locale` cookie. Under `en-XA` every page it visits is scanned for text that is not
+ * pseudo-localized (`src/n2/literals.ts`), and an `es` smoke step checks `Accept-Language`
+ * negotiation and that the cookie wins over it.
  */
 import { join } from "node:path";
 import type { Page } from "playwright";
 import { summarize } from "../src/metrics.ts";
+import {
+  LiteralScanner,
+  PSEUDO_LOCALE,
+  channelUserContent,
+  expectedFooterLicense,
+  localeParam,
+  readPageLanguage,
+} from "../src/n2/pseudo-run.ts";
 import { playerBundles } from "../src/player-server.ts";
 import { testCardPng } from "../src/png.ts";
 import { DEFAULT_REPORT_DIR } from "../src/report.ts";
@@ -21,8 +34,9 @@ import { defineScenario, type ScenarioContext } from "../src/scenario.ts";
 import { Streamer } from "../src/streamer.ts";
 import { findTokenLink } from "../src/mailpit.ts";
 import { waitFor } from "../src/wait.ts";
+import { signInViaUi, waitForAltcha, waitForOneOf } from "../src/web/flows.ts";
 import { ROUTES, TEST_IDS as T, tid } from "../src/web/selectors.ts";
-import { WebSession, byTestId, probeStats, readValue } from "../src/web/session.ts";
+import { type WebSessionOptions, WebSession, byTestId, probeStats, readValue } from "../src/web/session.ts";
 import { browserVerificationUrl, obsPublishUrl, rebaseOrigin } from "../src/web/urls.ts";
 
 /** Generous first thresholds (soft checks); tighten once the stack has a baseline. */
@@ -85,18 +99,45 @@ async function e2eBasic(ctx: ScenarioContext, sessions: WebSession[], check: Sce
   const signal = ctx.signal;
   const webUrl = ctx.env.HARNESS_WEB_URL;
   const { probe } = await playerBundles();
-  const openSession = async (label: string, engine: "chromium" | "webkit") => {
-    const s = await WebSession.open({ fleet: p.fleet, engine, webUrl, probeScript: probe, label, log: ctx.log });
+  const locale = localeParam(ctx);
+  if (locale) ctx.data("locale", locale);
+  const openSession = async (
+    label: string,
+    engine: "chromium" | "webkit",
+    sessionLocale: WebSessionOptions["locale"] = locale,
+  ) => {
+    const s = await WebSession.open({
+      fleet: p.fleet,
+      engine,
+      webUrl,
+      probeScript: probe,
+      label,
+      log: ctx.log,
+      locale: sessionLocale,
+    });
     sessions.push(s);
     return s;
   };
   const ui = { timeout: UI_TIMEOUT_MS };
+  const scanner = new LiteralScanner(ctx, check, locale === PSEUDO_LOCALE);
 
   // 1. Streamer signs up through the web UI.
   const creds = p.users.credentials({ prefix: "e2e_st" });
+  scanner.userContent(creds.email, creds.username);
+  if (scanner.enabled) {
+    const info = await ctx.step("instance info (API)", () => p.api().client.instance.info());
+    scanner.userContent(info.name, info.publicUrl, info.sourceUrl, info.version, info.contacts);
+  }
   const streamer = await openSession("streamer", "chromium");
   const signup = await ctx.step("streamer: fill the sign-up form", async () => {
     const page = await streamer.goto(ROUTES.signup);
+    if (locale) {
+      const lang = await page.evaluate(() => document.documentElement.getAttribute("lang"));
+      // An unsupported region falls back to its language (`es-MX` → `es`); `en-XA` is exact.
+      const base = (tag: string | null) => tag?.split("-")[0];
+      const selected = locale === PSEUDO_LOCALE ? lang === locale : base(lang) === base(locale);
+      ctx.assert(`the locale cookie selects ${locale}`, selected, { lang });
+    }
     await byTestId(page, T.signupEmail).fill(creds.email, ui);
     await byTestId(page, T.signupUsername).fill(creds.username, ui);
     await byTestId(page, T.signupPassword).fill(creds.password, ui);
@@ -104,7 +145,8 @@ async function e2eBasic(ctx: ScenarioContext, sessions: WebSession[], check: Sce
     await byTestId(page, T.signupLegal).check(ui);
     return page;
   });
-  await ctx.step("streamer: ALTCHA verified", () => waitForAltcha(signup, signal));
+  await ctx.step("streamer: ALTCHA verified", () => waitForAltcha(signup, ALTCHA_TIMEOUT_MS, signal));
+  await scanner.scan("streamer", "sign-up", signup);
   await ctx.step("streamer: submit sign-up", async () => {
     await byTestId(signup, T.signupSubmit).click(ui);
     await waitForOneOf(signup, [T.signupCheckEmail], UI_TIMEOUT_MS, signal);
@@ -119,6 +161,7 @@ async function e2eBasic(ctx: ScenarioContext, sessions: WebSession[], check: Sce
       { timeoutMs: 30_000, intervalMs: 500, signal },
     );
   });
+  await scanner.scan("streamer", "sign-up (check your email)", signup);
 
   const link = await ctx.step("streamer: verification email", async () => {
     const message = await p.mailpit.waitForMessage(creds.email, (m) => findTokenLink(m) !== null, 30_000);
@@ -138,7 +181,7 @@ async function e2eBasic(ctx: ScenarioContext, sessions: WebSession[], check: Sce
       { timeoutMs: UI_TIMEOUT_MS, intervalMs: 250, signal },
     );
     ctx.data("verificationLanding", landed);
-    if (landed === "signin") await signInViaUi(page, creds.email, creds.password, signal);
+    if (landed === "signin") await signInViaUi(page, creds, UI_TIMEOUT_MS, signal);
   });
   const main = await streamer.page();
   const navName = await ctx.step("streamer: nav shows the username", async () => {
@@ -193,6 +236,16 @@ async function e2eBasic(ctx: ScenarioContext, sessions: WebSession[], check: Sce
     return { status: res.status(), type: res.headers()["content-type"] ?? "" };
   });
   ctx.assert("the avatar URL serves the PNG", avatar.status === 200 && avatar.type.startsWith("image/png"), avatar);
+  // What the channel shows (title, display name, category, panels…) is channel data, not UI text.
+  const channelContent = async (when: string) => {
+    if (!scanner.enabled) return;
+    const data = await ctx.step(`channel data, ${when} (API)`, () => p.api().client.channels.get({ channel }));
+    scanner.userContent(channelUserContent(data));
+  };
+  scanner.userContent(server, avatarUrl);
+  scanner.secret(key);
+  await channelContent("offline");
+  await scanner.scan("streamer", "dashboard", await streamer.page());
   // `--set ingest=harness` publishes to HARNESS_RTMP_URL when the public ingest host is not
   // reachable from the harness host.
   const shown = obsPublishUrl(server, key);
@@ -205,10 +258,12 @@ async function e2eBasic(ctx: ScenarioContext, sessions: WebSession[], check: Sce
 
   // 3. A signed-in viewer in Chromium and an anonymous viewer in WebKit.
   const fan = await ctx.step("sign up the second user (API)", () => p.signUp({ prefix: "e2e_fan" }));
+  scanner.userContent(fan.email, fan.username);
+  await channelContent("live");
   const fanSession = await openSession("fan", "chromium");
   await ctx.step("fan: sign in through the web UI", async () => {
     const page = await fanSession.goto(ROUTES.signin);
-    await signInViaUi(page, fan.email, fan.password, signal);
+    await signInViaUi(page, fan, UI_TIMEOUT_MS, signal);
     await byTestId(page, T.navUser, { username: fan.username }).waitFor(ui);
   });
   const anon = await openSession("anon", "webkit");
@@ -242,6 +297,7 @@ async function e2eBasic(ctx: ScenarioContext, sessions: WebSession[], check: Sce
   check("anonymous viewer cannot type in chat", !anonCanType);
 
   const text = `hello from ${fan.username} ${ctx.runId}`;
+  scanner.userContent(text);
   await ctx.step("fan: send a chat message", async () => {
     await byTestId(fanWatch.page, T.chat, { state: "open" }).waitFor({ timeout: CHAT_TIMEOUT_MS });
     await byTestId(fanWatch.page, T.chatInput).fill(text, ui);
@@ -259,10 +315,14 @@ async function e2eBasic(ctx: ScenarioContext, sessions: WebSession[], check: Sce
         .waitFor({ timeout: CHAT_TIMEOUT_MS }),
     );
   }
+  await scanner.scan("fan", "the channel page (signed in, live)", fanWatch.page);
+  await scanner.scan("streamer", "the own channel page (live)", ownPage);
+  await scanner.scan("anon", "the channel page (anonymous, live)", anonWatch.page);
 
   // 5. AGPL source link.
   const href = await byTestId(anonWatch.page, T.footerSourceLink).first().getAttribute("href", ui);
   ctx.assert("footer source link has an href", typeof href === "string" && href.trim().length > 0, { href });
+  if (href) scanner.userContent(href);
 
   // 6. Stop the stream: viewers and the API go offline.
   await ctx.step("stop publishing", () => encoder.stop());
@@ -277,6 +337,51 @@ async function e2eBasic(ctx: ScenarioContext, sessions: WebSession[], check: Sce
     p.waitForLive(channel, false, OFFLINE_TIMEOUT_MS),
   );
   ctx.metric("time_to_offline", toOffline, "ms");
+  for (const w of watchers) await scanner.scan(w.who, `the offline state (${w.engine})`, w.page);
+
+  // 7. Under en-XA: the negotiation smoke for a real language, then the scanner's page count.
+  if (locale === PSEUDO_LOCALE) await esSmoke(ctx, openSession);
+  scanner.report();
+}
+
+const SMOKE_LOCALE = "es";
+
+/**
+ * A fresh anonymous visitor whose browser asks for Spanish (no cookie) gets `<html lang="es"
+ * dir="ltr">` and the `es` footer license; one that also has the `en-XA` cookie gets `en-XA`.
+ */
+async function esSmoke(
+  ctx: ScenarioContext,
+  openSession: (
+    label: string,
+    engine: "chromium" | "webkit",
+    locale?: WebSessionOptions["locale"],
+  ) => Promise<WebSession>,
+): Promise<void> {
+  const cases = [
+    { label: "es-header", locale: { acceptLanguage: SMOKE_LOCALE }, want: SMOKE_LOCALE },
+    {
+      label: "es-header-xa-cookie",
+      locale: { acceptLanguage: SMOKE_LOCALE, cookie: PSEUDO_LOCALE },
+      want: PSEUDO_LOCALE,
+    },
+  ] as const;
+  for (const c of cases) {
+    const got = await ctx.step(`${c.label}: open / (Accept-Language: ${SMOKE_LOCALE})`, async () => {
+      const session = await openSession(c.label, "chromium", c.locale);
+      const page = await session.goto(ROUTES.home);
+      return readPageLanguage(page, UI_TIMEOUT_MS);
+    });
+    const license = expectedFooterLicense(c.want);
+    ctx.assert(`${c.label}: <html lang="${c.want}" dir="ltr">`, got.lang === c.want && got.dir === "ltr", {
+      lang: got.lang,
+      dir: got.dir,
+    });
+    ctx.assert(`${c.label}: the footer license is the ${c.want} catalog's`, got.footerTexts.includes(license), {
+      expected: license,
+      footer: got.footerTexts,
+    });
+  }
 }
 
 /** Live badge, playing player, first frame (TTFF) and glass-to-glass samples on one page. */
@@ -321,65 +426,4 @@ async function watchPlayback(ctx: ScenarioContext, check: ScenarioContext["check
     (latency.p50 ?? Infinity) < E2E_MAX_GLASS_TO_GLASS_MS,
     latency,
   );
-}
-
-async function signInViaUi(page: Page, email: string, password: string, signal: AbortSignal): Promise<void> {
-  const ui = { timeout: UI_TIMEOUT_MS };
-  await byTestId(page, T.signinEmail).fill(email, ui);
-  await byTestId(page, T.signinPassword).fill(password, ui);
-  await byTestId(page, T.signinSubmit).click(ui);
-  await waitForOneOf(page, [T.navUser], UI_TIMEOUT_MS, signal);
-}
-
-/**
- * Wait for the ALTCHA wrapper to report `verified`. Widgets configured to solve on load need
- * nothing; otherwise click the widget's checkbox once, like a person would.
- */
-async function waitForAltcha(page: Page, signal: AbortSignal): Promise<void> {
-  const verified = byTestId(page, T.signupAltcha, { state: "verified" });
-  const started = Date.now();
-  const deadline = started + ALTCHA_TIMEOUT_MS;
-  let clicked = false;
-  while (Date.now() < deadline) {
-    if (signal.aborted) throw signal.reason;
-    if (await verified.count()) return;
-    if (await byTestId(page, T.formError).count())
-      throw new Error(`sign-up form error: ${await readValue(byTestId(page, T.formError), 1_000)}`);
-    if (!clicked && Date.now() - started > 3_000) {
-      const box = page.locator(`${tid(T.signupAltcha)} input[type="checkbox"]`);
-      if (await box.count())
-        await box
-          .first()
-          .click({ timeout: 5_000 })
-          .catch(() => undefined);
-      clicked = true;
-    }
-    await page.waitForTimeout(250);
-  }
-  const state = await byTestId(page, T.signupAltcha)
-    .getAttribute("data-state", { timeout: 1_000 })
-    .catch(() => null);
-  throw new Error(`ALTCHA not verified within ${ALTCHA_TIMEOUT_MS} ms (data-state=${state})`);
-}
-
-/** Wait until one of the test ids is visible; returns which. A form error fails immediately. */
-async function waitForOneOf<Id extends (typeof T)[keyof typeof T]>(
-  page: Page,
-  ids: readonly Id[],
-  timeoutMs: number,
-  signal: AbortSignal,
-): Promise<Id> {
-  const formError = byTestId(page, T.formError).first();
-  const seen = await waitFor(
-    `one of ${ids.join(", ")}`,
-    async () => {
-      for (const id of ids) {
-        if (await byTestId(page, id).first().isVisible()) return { id };
-      }
-      return (await formError.isVisible()) ? { id: null } : null;
-    },
-    { timeoutMs, intervalMs: 200, signal },
-  );
-  if (seen.id === null) throw new Error(`form error: ${await readValue(formError, 1_000)}`);
-  return seen.id;
 }
