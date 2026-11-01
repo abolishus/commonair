@@ -90,9 +90,11 @@ export async function releaseDueHolds(
       select p.payment_id, p.recipient, p.memo, p.memo_user, t.id as tx_id, t.occurred_at,
              t.metadata->>'creatorUserId' as owner,
              (t.metadata->>'creatorUserId') is distinct from p.memo_user
-               and not exists (select 1 from ledger_transactions r
-                               where r.kind = 'hold_release' and r.metadata->>'recipientUserId' = p.memo_user
-                                 and r.metadata->>'role' = 'crew') as first_crew
+               and not exists (select 1 from ledger_accounts ha
+                               join ledger_entries he on he.account_id = ha.id
+                               join ledger_transactions r on r.id = he.transaction_id
+                               where ha.owner_user_id = p.recipient and ha.code like 'liability:creator-hold:%'
+                                 and r.kind = 'hold_release' and r.metadata->>'role' = 'crew') as first_crew
       from parsed p join ledger_transactions t on t.idempotency_key = 'payment:' || p.payment_id
       where t.occurred_at <= ${cutoff.toISOString()}::timestamptz
         and not exists (select 1 from ledger_transactions r

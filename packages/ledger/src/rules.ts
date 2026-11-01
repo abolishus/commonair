@@ -318,6 +318,11 @@ export interface PaymentReversalInput {
   shares?: readonly RecipientShare[];
   /** What is still held in each crew recipient's own lot of this payment (by user id). */
   crewLots?: Readonly<Record<string, number>>;
+  /**
+   * Each recipient's net creator cents already reversed (refunds + chargebacks − won), by user id,
+   * from earlier reversals' recorded slices. Needed once a chargeback was won (`reversalSlices`).
+   */
+  reversedByRecipient?: Readonly<Record<string, number>>;
 }
 
 interface Source {
@@ -361,17 +366,38 @@ function merged(entries: readonly PostingEntry[]): PostingEntry[] {
  * Each recipient's slice of a reversal's creator portion: the difference of two cumulative
  * apportionments over the recorded `creatorCents` vector (ADR 0013 decision 3), so any sequence
  * of partial reversals returns exactly each recipient's share and no slice is ever negative.
+ *
+ * A won chargeback gives back its own slices, not the end of that sequence, so after one the
+ * per-recipient net (`reversed`, aligned with `shares`) no longer matches the cumulative
+ * position. Then the slice is apportioned over what each recipient still has unreversed, so no
+ * recipient is reversed beyond its share; a cent the remainders cannot hold (the creator total
+ * is itself apportioned from the net gross) falls to the owner (`ownerIndex`), who covers anyway.
  */
 export function reversalSlices(
   shares: readonly RecipientShare[],
   creatorBeforeCents: number,
   creatorCents: number,
+  opts: { reversed?: readonly number[]; ownerIndex?: number } = {},
 ): number[] {
   const weights = shares.map((s) => s.creatorCents);
-  const after = apportionCumulative(creatorBeforeCents + creatorCents, weights);
-  const before = apportionCumulative(creatorBeforeCents, weights);
-  return after.map((a, k) => a - (before[k] ?? 0));
+  const before = apportionCumulative(Math.min(creatorBeforeCents, sumOf(weights)), weights);
+  const net = opts.reversed;
+  if (!net || before.every((b, k) => b === (net[k] ?? 0))) {
+    const after = apportionCumulative(creatorBeforeCents + creatorCents, weights);
+    return after.map((a, k) => a - (before[k] ?? 0));
+  }
+  const remaining = weights.map((w, k) => Math.max(0, w - Math.max(0, net[k] ?? 0)));
+  const room = sumOf(remaining);
+  const slices = apportionCumulative(Math.min(creatorCents, room), remaining);
+  const excess = creatorCents - Math.min(creatorCents, room);
+  if (excess > 0) {
+    if (opts.ownerIndex === undefined) throw new RangeError("a reversal exceeds what its recipients have left");
+    slices[opts.ownerIndex] = (slices[opts.ownerIndex] ?? 0) + excess;
+  }
+  return slices;
 }
+
+const sumOf = (xs: readonly number[]) => xs.reduce((s, x) => s + x, 0);
 
 function reversal(
   i: PaymentReversalInput,
@@ -396,7 +422,11 @@ function reversal(
     throw new RangeError("a payment has exactly one owner share, the payment's owner");
   }
   const before = splitAt(i.alreadyReversedCents, i.original.grossCents, i.original.taxCents, i.cut).creatorCents;
-  const slices = reversalSlices(shares, before, split.creatorCents);
+  const reversedBy = i.reversedByRecipient;
+  const slices = reversalSlices(shares, before, split.creatorCents, {
+    reversed: reversedBy ? shares.map((s) => reversedBy[s.userId.toLowerCase()] ?? 0) : undefined,
+    ownerIndex: shares.findIndex((s) => s.role === "owner"),
+  });
 
   const entries: PostingEntry[] = [];
   const holdCode = accounts.creatorHold(owner);
@@ -518,6 +548,11 @@ export interface ChargebackSlice {
   role: "owner" | "crew";
   fromOwnLotCents: number;
   ownerCoveredCents: number;
+  /**
+   * A crew recipient withheld at reversal time (ADR 0013 decision 7): its own-lot part goes to its
+   * split suspense, not its released earnings, so it cannot be paid out while restricted.
+   */
+  withheld?: boolean;
 }
 
 export interface ChargebackReversalInput {
@@ -547,7 +582,7 @@ export interface ChargebackReversalInput {
  * A chargeback the co-op won: the money comes back, tax and cut are restored, and each slice goes
  * back to where it came from (ADR 0013 decision 5). What a recipient's own lot gave is credited to
  * that recipient as released earnings (lots are never re-opened, and a decided dispute carries no
- * further hold risk); what the owner covered first cancels the owner's split-shortfall suspense,
+ * further hold risk), or to its split suspense if it is withheld right now (decision 7); what the owner covered first cancels the owner's split-shortfall suspense,
  * then its clawback receivable, then is credited as the owner's released earnings.
  */
 export function chargebackReversal(i: ChargebackReversalInput): Posting {
@@ -576,11 +611,11 @@ export function chargebackReversal(i: ChargebackReversalInput): Posting {
   const covered = slices.reduce((s, x) => s + x.ownerCoveredCents, 0);
   const cancelShortfall = Math.max(0, Math.min(covered, i.splitShortfallCents ?? 0));
   const cancelReceivable = Math.max(0, Math.min(covered - cancelShortfall, i.receivableCents));
-  const restored: PostingEntry[] = slices.map((s) => ({
-    code: accounts.creator(s.userId),
-    amountCents: -s.fromOwnLotCents,
-    memo: "own lot restored",
-  }));
+  const restored: PostingEntry[] = slices.map((s) =>
+    s.withheld && s.role === "crew"
+      ? { code: accounts.splitSuspense(s.userId), amountCents: -s.fromOwnLotCents, memo: suspenseMemo(owner) }
+      : { code: accounts.creator(s.userId), amountCents: -s.fromOwnLotCents, memo: "own lot restored" },
+  );
   return finish({
     kind: "chargeback_reversal",
     description: "Chargeback won",

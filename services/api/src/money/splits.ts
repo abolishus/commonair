@@ -284,8 +284,33 @@ async function record(
  * payments' `succeededAt` and the version's `startsAt` (the app's), never before the start, never
  * after a preset end; 0043 refuses it if the app clock runs more than a minute behind the database.
  */
-const endAt = (now: Date) =>
-  sql`least(${splits.endsAt}, greatest(${now.toISOString()}::timestamptz, ${splits.startsAt}))`;
+/**
+ * When a version ends: never before now (no backdating) or its own start, never after its preset
+ * end, and, when a successor takes over, not before the successor starts, so no payment in between
+ * falls outside every version (ADR 0013 decision 8).
+ */
+const endAt = (now: Date, successorStartsAt: Date = now) =>
+  sql`least(${splits.endsAt}, greatest(${now.toISOString()}::timestamptz, ${successorStartsAt.toISOString()}::timestamptz, ${splits.startsAt}))`;
+
+/** Tell a version's crew it ended (ADR 0013 decision 8); returns who was told. */
+async function notifyEnded(
+  tx: Executor,
+  sp: SplitRow,
+  channelSlug: string,
+  reason: "ended" | "superseded",
+): Promise<string[]> {
+  const crew = await tx.select({ id: shares.recipientUserId }).from(shares).where(eq(shares.splitId, sp.id));
+  if (crew.length > 0) {
+    await tx.insert(schema.notifications).values(
+      crew.map((c) => ({
+        userId: c.id,
+        type: "payout" as const,
+        payload: { kind: "split_ended", reason, splitId: sp.id, channel: channelSlug, version: sp.version },
+      })),
+    );
+  }
+  return crew.map((c) => c.id);
+}
 
 async function lockedSplit(tx: Executor, id: string): Promise<SplitRow> {
   const [row] = await tx.select().from(splits).where(eq(splits.id, id)).for("update");
@@ -456,6 +481,7 @@ export const splitHandlers = {
         }
         // Supersede what this version replaces, then accept it (future revenue only).
         const bases = superseded(sp.basis);
+        const [ch] = await tx.select({ slug: channels.slug }).from(channels).where(eq(channels.id, sp.channelId));
         for (const old of await runningVersions(tx, sp.channelId, sp.basis, now, sp.id)) {
           if (!bases.includes(old.basis)) continue;
           const [ended] = await tx
@@ -463,11 +489,14 @@ export const splitHandlers = {
             .set({
               status: "ended",
               endedAt: now,
-              endsAt: endAt(now),
+              endsAt: endAt(now, sp.startsAt),
             })
             .where(eq(splits.id, old.id))
             .returning();
-          if (ended) await record(tx, ended, "money.split.supersede", caller.user.id, now);
+          if (ended) {
+            const told = await notifyEnded(tx, ended, ch?.slug ?? "", "superseded");
+            await record(tx, ended, "money.split.supersede", caller.user.id, now, told);
+          }
         }
         const [done] = await tx
           .update(splits)
@@ -536,24 +565,8 @@ export const splitHandlers = {
           .where(eq(splits.id, sp.id))
           .returning();
         if (!done) throw notFound("Split not found");
-        const crew = await tx.select({ id: shares.recipientUserId }).from(shares).where(eq(shares.splitId, sp.id));
-        if (crew.length > 0) {
-          await tx.insert(schema.notifications).values(
-            crew.map((c) => ({
-              userId: c.id,
-              type: "payout" as const,
-              payload: { kind: "split_ended", splitId: sp.id, channel: channel.slug, version: sp.version },
-            })),
-          );
-        }
-        await record(
-          tx,
-          done,
-          "money.split.end",
-          caller.user.id,
-          now,
-          crew.map((c) => c.id),
-        );
+        const told = await notifyEnded(tx, sp, channel.slug, "ended");
+        await record(tx, done, "money.split.end", caller.user.id, now, told);
         return done;
       }),
     );
@@ -654,8 +667,15 @@ async function suspenseAction(
     const u = await userByName(tx, username);
     const peek = await splitSuspenseByOwner(tx, u.id, currency);
     // Lock order: every recipient this posting touches, sorted (ADR 0013 decision 4).
-    await lockCreators(tx, kind === "release" ? [u.id] : [u.id, ...peek.map((o) => o.ownerUserId)]);
-    const byOwner = await splitSuspenseByOwner(tx, u.id, currency);
+    const locked = kind === "release" ? [u.id] : [u.id, ...peek.map((o) => o.ownerUserId)];
+    await lockCreators(tx, locked);
+    // A lot withheld between the peek and the lock may name an owner whose lock this never took;
+    // a forfeit credits only owners it holds, and leaves the rest for the next forfeit. (Nothing
+    // can be added once the recipient's own lock is held: every suspense credit takes it.)
+    const lockedOwners = new Set(locked.map((id) => id.toLowerCase()));
+    const byOwner = (await splitSuspenseByOwner(tx, u.id, currency)).filter(
+      (o) => kind === "release" || lockedOwners.has(o.ownerUserId.toLowerCase()),
+    );
     const cents = byOwner.reduce((s, o) => s + o.cents, 0);
     if (cents === 0) throw precondition("split_nothing_withheld", "Nothing of this user's is withheld");
     if (kind === "release" && (await recipientWithheld(tx, u.id, now))) {

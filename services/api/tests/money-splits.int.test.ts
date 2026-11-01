@@ -280,6 +280,18 @@ describe("versions, reject and end", () => {
     const [old] = await db().select().from(schema.revenueSplits).where(eq(schema.revenueSplits.id, v1.id));
     expect(old?.status).toBe("ended");
     expect((await auditOf(v1.id)).map((a) => a.action)).toContain("money.split.supersede");
+    // The superseded version's crew are told, the one dropped from the new version included.
+    for (const p of [crewA, crewB]) {
+      const notes = await db()
+        .select()
+        .from(schema.notifications)
+        .where(and(eq(schema.notifications.userId, p.userId), eq(schema.notifications.type, "payout")));
+      expect(
+        notes.some(
+          (n) => n.payload.kind === "split_ended" && n.payload.splitId === v1.id && n.payload.reason === "superseded",
+        ),
+      ).toBe(true);
+    }
     const tip = await confirmedTip(owner.username, 1000);
     expect((await paymentTx(tip)).metadata).toMatchObject({ splitVersionId: v2.id });
   });
@@ -300,6 +312,32 @@ describe("versions, reject and end", () => {
     const tip = await confirmedTip(owner.username, 1000);
     expect((await paymentTx(tip)).metadata).toMatchObject({ splitVersionId: null });
     expect((await end(owner, v2.id)).status).toBe(409);
+  });
+
+  test("a future-start version takes over only when it starts, leaving no gap", async () => {
+    // crewA's own channel, with crewB as crew, so the owner channel's later tests are unaffected.
+    const cur = await propose(
+      crewA,
+      { basis: "tips", shares: [{ username: crewB.username, bps: 1000 }] },
+      crewA.username,
+    );
+    expect(cur.status).toBe(200);
+    const running = (await accept(crewB, cur.body.id)).body;
+    expect(running.status).toBe("accepted");
+    const startsAt = new Date(Date.now() + 3 * DAY);
+    const next = await propose(
+      crewA,
+      { basis: "tips", shares: [{ username: crewB.username, bps: 2000 }], startsAt: startsAt.toISOString() },
+      crewA.username,
+    );
+    expect(next.status).toBe(200);
+    expect((await accept(crewB, next.body.id)).body.status).toBe("accepted");
+    const [old] = await db().select().from(schema.revenueSplits).where(eq(schema.revenueSplits.id, running.id));
+    expect(old?.status).toBe("ended");
+    expect(old?.endsAt?.getTime()).toBe(startsAt.getTime());
+    const c = await channelOf(crewA.username);
+    expect((await activeSplit(db(), c.id, "tip", new Date(Date.now() + DAY)))?.versionId).toBe(running.id);
+    expect((await activeSplit(db(), c.id, "tip", new Date(Date.now() + 4 * DAY)))?.versionId).toBe(next.body.id);
   });
 });
 

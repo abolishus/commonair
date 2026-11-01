@@ -292,6 +292,21 @@ describe("clawback (ADR 0013 decision 5)", () => {
     ).toMatchObject({ released: 0 });
   });
 
+  test("a won chargeback sends a withheld crew member's own-lot part to split suspense", async () => {
+    const cur = freshCurrency();
+    const [o, a, b] = [await makeUser(), await makeUser(), await makeUser()];
+    const p = await tip(o, 1000, cur, new Date(), crewOf(a, b));
+    const d = dispute("chargeback", p, 1000);
+    await postReversal(db, { ...d, disputeFeeCents: 0 });
+    await owner.update(s.users).set({ banned: true }).where(eq(s.users.id, a));
+    await postChargebackReversal(db, { disputeId: d.disputeId, occurredAt: new Date() });
+    expect((await creatorBalances(db, a, cur)).liabilityCents).toBe(0);
+    expect(await rawBalance(db, accounts.splitSuspense(a), cur)).toBe(-180);
+    expect(await splitSuspenseByOwner(db, a, cur)).toEqual([{ ownerUserId: o, cents: 180 }]);
+    expect((await creatorBalances(db, b, cur)).liabilityCents).toBe(90);
+    expect((await creatorBalances(db, o, cur)).liabilityCents).toBe(630);
+  });
+
   test("partial refunds, sliced any way, reverse each recipient exactly", async () => {
     const cur = freshCurrency();
     const [o, a, b] = [await makeUser(), await makeUser(), await makeUser()];

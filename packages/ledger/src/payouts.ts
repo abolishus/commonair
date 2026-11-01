@@ -315,11 +315,14 @@ export function newPayeeEvidence(
  * someone else owns): decision (i) sends a crew member's first payout through `new_payee`.
  */
 async function isCrewRecipient(tx: Executor, userId: string): Promise<boolean> {
+  // Through the user's own hold accounts (owner and account indexes), never a scan of every payment.
   const rows = await tx.execute<{ crew: boolean }>(sql`
     select exists (
-      select 1 from ledger_transactions t
-      where t.kind = 'payment'
-        and t.metadata->'shares' @> ${JSON.stringify([{ userId: userId.toLowerCase(), role: "crew" }])}::jsonb
+      select 1 from ledger_accounts a
+      join ledger_entries e on e.account_id = a.id
+      join ledger_transactions t on t.id = e.transaction_id
+      where a.owner_user_id = ${userId} and a.code like 'liability:creator-hold:%'
+        and t.kind = 'payment' and lower(t.metadata->>'creatorUserId') <> ${userId.toLowerCase()}
     ) as crew`);
   return rows[0]?.crew === true;
 }

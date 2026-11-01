@@ -286,6 +286,71 @@ describe("reversal slices", () => {
   });
 });
 
+describe("reversal slices after a won chargeback", () => {
+  const owner = { userId: uid(2), role: "owner" as const, creatorCents: 1 };
+  const crewShare = { userId: uid(1), role: "crew" as const, creatorCents: 1 };
+  const two = [crewShare, owner];
+
+  test("chargeback, refund, win, refund: each recipient is reversed exactly its share", () => {
+    const cb = reversalSlices(two, 0, 1); // the crew cent (tie to the earlier item)
+    expect(cb).toEqual([1, 0]);
+    const r1 = reversalSlices(two, 1, 1, { reversed: cb, ownerIndex: 1 });
+    expect(r1).toEqual([0, 1]);
+    // The chargeback is won: its own slice [1, 0] comes back, so the net is [0, 1] at position 1.
+    const r2 = reversalSlices(two, 1, 1, { reversed: [0, 1], ownerIndex: 1 });
+    expect(r2).toEqual([1, 0]);
+  });
+
+  test("property: with won chargebacks interleaved, no slice is negative and crew are never over-reversed", () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 1, max: 50_000 }),
+        fc.array(fc.integer({ min: 1, max: 1600 }), { minLength: 1, maxLength: 5 }),
+        fc.array(fc.tuple(fc.boolean(), fc.integer({ min: 1, max: 1_000_000 })), { minLength: 1, maxLength: 12 }),
+        (gross, bps, ops) => {
+          const crew = bps.map((b, k) => ({ userId: uid(3000 + k), bps: b }));
+          const shares = sharesOf(pay(gross, crew));
+          const ownerIndex = shares.findIndex((x) => x.role === "owner");
+          const net = shares.map(() => 0);
+          const won: { amount: number; slices: number[] }[] = [];
+          let done = 0;
+          const reverse = (amount: number) => {
+            const split = reversalSplit({ grossCents: gross, taxCents: 0 }, DEFAULT_PLATFORM_CUT, done, amount);
+            const before = splitAt(done, gross, 0, DEFAULT_PLATFORM_CUT).creatorCents;
+            const slices = reversalSlices(shares, before, split.creatorCents, { reversed: net, ownerIndex });
+            expect(slices.reduce((x, v) => x + v, 0)).toBe(split.creatorCents);
+            slices.forEach((v, k) => {
+              expect(v).toBeGreaterThanOrEqual(0);
+              net[k] = (net[k] ?? 0) + v;
+            });
+            done += amount;
+            return slices;
+          };
+          for (const [win, c] of ops) {
+            const last = won.pop();
+            if (win && last) {
+              // A won chargeback restores exactly its own recorded slices.
+              last.slices.forEach((v, k) => (net[k] = (net[k] ?? 0) - v));
+              done -= last.amount;
+              continue;
+            }
+            if (last) won.push(last);
+            if (done >= gross) continue;
+            const amount = Math.min(gross - done, 1 + (c % gross));
+            won.push({ amount, slices: reverse(amount) });
+          }
+          if (done < gross) reverse(gross - done);
+          shares.forEach((x, k) => {
+            // The owner may absorb a cent; a crew recipient is never reversed beyond its share.
+            expect(x.role === "owner" || (net[k] ?? 0) <= x.creatorCents).toBe(true);
+            expect(Math.abs((net[k] ?? 0) - x.creatorCents)).toBeLessThanOrEqual(1);
+          });
+        },
+      ),
+    );
+  });
+});
+
 describe("split clawback (ADR 0013 decision 5)", () => {
   const crew = [
     { userId: CREW_A, bps: 2000 },

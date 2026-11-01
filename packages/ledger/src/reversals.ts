@@ -13,6 +13,7 @@ import { type Executor, schema } from "@commonair/db";
 import { lockCreators, lockPayment } from "./locks.ts";
 import { PaymentMetaV2, ReversalMetaV2 } from "./meta.ts";
 import { IdempotencyConflictError, type PostResult, post } from "./poster.ts";
+import { recipientWithheld } from "./holds.ts";
 import { creatorBalances, holdLots, paymentHoldRemaining } from "./queries.ts";
 import { chargeback, chargebackReversal, refund } from "./rules.ts";
 
@@ -52,6 +53,20 @@ async function alreadyReversed(tx: Executor, paymentId: string): Promise<number>
       and kind in ('refund', 'chargeback', 'chargeback_reversal')`);
   const sum = Number(rows[0]?.total ?? 0);
   return sum === 0 ? 0 : -sum;
+}
+
+/** Each recipient's net creator cents already reversed for a payment, from the recorded slices. */
+async function reversedByRecipient(tx: Executor, paymentId: string): Promise<Record<string, number>> {
+  // Reversal slices are recorded negative, a won chargeback's restored slices positive.
+  const rows = await tx.execute<{ user_id: string; total: string }>(sql`
+    select lower(s->>'userId') as user_id, sum((s->>'creatorCents')::bigint)::text as total
+    from ledger_transactions t, jsonb_array_elements(coalesce(t.metadata->'shares', '[]'::jsonb)) s
+    where t.ref_type = 'payment' and t.ref_id = ${paymentId}
+      and t.kind in ('refund', 'chargeback', 'chargeback_reversal')
+    group by 1`);
+  const out: Record<string, number> = {};
+  for (const r of rows) out[r.user_id] = -Number(r.total);
+  return out;
 }
 
 export interface PostReversalInput {
@@ -113,6 +128,7 @@ export async function postReversal(db: Executor, i: PostReversalInput): Promise<
       balances: { liabilityCents: balances.liabilityCents, holdLots: lots },
       shares: meta.shares,
       crewLots,
+      reversedByRecipient: await reversedByRecipient(tx, i.paymentId),
     };
     const posting =
       i.kind === "refund" ? refund(input) : chargeback({ ...input, disputeFeeCents: i.disputeFeeCents ?? 0 });
@@ -151,6 +167,14 @@ export async function postChargebackReversal(
     const currency = await transactionCurrency(tx, cb.id);
     await lockCreators(tx, [meta.creatorUserId, ...meta.shares.map((s) => s.userId)]);
     const balances = await creatorBalances(tx, meta.creatorUserId, currency);
+    // Read under every recipient's lock, as a hold release does, so a restriction applied before
+    // this commits is honoured.
+    const withheld = new Set<string>();
+    for (const s of meta.shares) {
+      if (s.role === "crew" && s.fromOwnLotCents !== 0 && (await recipientWithheld(tx, s.userId, i.occurredAt))) {
+        withheld.add(s.userId);
+      }
+    }
     return post(
       tx,
       chargebackReversal({
@@ -173,6 +197,7 @@ export async function postChargebackReversal(
           role: s.role,
           fromOwnLotCents: s.fromOwnLotCents,
           ownerCoveredCents: s.ownerCoveredCents,
+          withheld: withheld.has(s.userId),
         })),
         receivableCents: balances.receivableCents,
         splitShortfallCents: balances.splitShortfallCents,
