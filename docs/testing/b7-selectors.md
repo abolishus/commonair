@@ -99,6 +99,7 @@ Units build on these and never edit `chat/interact/{state,client,use-chat-intera
 | `watch-room-mature-notice`    | "Mature content: adults only"                                                                 |
 | `watch-room-invite-link`      | The invite URL (shown to the host)                                                            |
 | `watch-room-invite-copy`      | Copies the invite (`IconButton`)                                                              |
+| `watch-room-invite-new`       | Host: makes a new invite (shown when the drawer resumed without one)                          |
 | `watch-room-join`             | Join, on the invite landing (`?room=` on the channel page)                                    |
 | `watch-room-join-refused`     | The refusal message; `data-code` (the `room_*` notice code)                                   |
 | `watch-room-member`           | A member (`ChannelAvatar`); `data-user-id`, `data-host` `true`/`false`                        |
@@ -106,49 +107,50 @@ Units build on these and never edit `chat/interact/{state,client,use-chat-intera
 | `watch-room-input`            | The room chat input                                                                           |
 | `watch-room-send`             | Sends a room message                                                                          |
 | `watch-room-message`          | A room message; `data-message-id`, `data-user-id`                                             |
-| `watch-room-report`           | A room message's report action                                                                |
+| `watch-room-report`           | A room message's report action; `data-message-id`; files a `watch_room` report on the room    |
 | `watch-room-leave`            | Leave (a member); opens a `ConfirmDialog`                                                     |
-| `watch-room-leave-confirm`    | The dialog's confirm button                                                                   |
+| `watch-room-leave-confirm`    | The `ConfirmDialog` content; its confirm button is `confirm-dialog-confirm`                   |
 | `watch-room-close`            | Close the room (the host); opens a `ConfirmDialog`                                            |
-| `watch-room-close-confirm`    | The dialog's confirm button                                                                   |
+| `watch-room-close-confirm`    | The `ConfirmDialog` content; its confirm button is `confirm-dialog-confirm`                   |
 | `watch-room-evidence`         | Mod queue: a `watch_room` report's evidence; `data-report-id`                                 |
 | `watch-room-evidence-message` | One copied message; `data-user-id`, `data-at`                                                 |
 | `watch-room-evidence-member`  | One copied member; `data-user-id`, `data-joined-at`, `data-left-at`                           |
 
 ### Portability (W3-portability)
 
-| Test id                     | Element and attributes                                                                      |
-| --------------------------- | ------------------------------------------------------------------------------------------- |
-| `move-page`                 | The `/move` page container                                                                  |
-| `move-link-create`          | Creates a move link (`portability.links.create`)                                            |
-| `move-link-expiry`          | Optional expiry `Select` trigger; `data-value`                                              |
-| `move-link-new`             | The new link, shown once; `data-url`                                                        |
-| `move-link-copy`            | Copies the new link (`IconButton`)                                                          |
-| `move-link`                 | A link row; `data-link-id`, `data-conversions`, `data-state` `active`, `revoked`, `expired` |
-| `move-link-revoke`          | Revokes a link; opens a `ConfirmDialog`                                                     |
-| `move-link-revoke-confirm`  | The dialog's confirm button                                                                 |
-| `move-to-url`               | The "moved to" https URL input                                                              |
-| `move-to-save`              | Sets "moved to"; opens a `ConfirmDialog`                                                    |
-| `move-to-confirm`           | The dialog's confirm button (`portability.move.set`)                                        |
-| `move-to-current`           | The current "moved to"; `data-url`                                                          |
-| `move-to-clear`             | Clears "moved to" (`portability.move.clear`)                                                |
-| `move-subscriptions-note`   | The note that subscriptions are untouched                                                   |
-| `bundle-export`             | Requests the bundle export (`portability.bundle.create`)                                    |
-| `bundle-import-file`        | The bundle file input (`portability.imports.upload`)                                        |
-| `bundle-import-preview`     | The preview; `data-import-id`                                                               |
-| `bundle-import-standing`    | The standing badge; `data-state` `verified`, `unverified` or `refused`                      |
-| `bundle-import-item`        | A previewed item; `data-kind`, `data-ref`                                                   |
-| `bundle-import-item-toggle` | An item's include checkbox; `data-state` `on`/`off`                                         |
-| `bundle-import-start`       | Starts the import (`portability.imports.start`)                                             |
-| `bundle-import-result`      | The result; `data-status`                                                                   |
-| `bundle-import-result-item` | A result item; `data-kind`, `data-ref`, `data-outcome`, `data-reason`                       |
-| `move-landing`              | The `/m/$channel/$nonce` container; `data-state` `active`, `revoked` or `expired`           |
-| `move-landing-follow`       | Follows through the link (`channels.follow` with `moveLink`)                                |
-| `move-landing-gone`         | `EmptyState` for a revoked or expired link                                                  |
-| `moved-notice`              | The channel page's "moved to" notice; `data-url`                                            |
-| `portability-grants`        | The `/settings/privacy` section                                                             |
-| `portability-grant`         | A followed channel's grant row; `data-channel`, `data-state` `on`/`off`                     |
-| `portability-grant-toggle`  | A row's switch (`portability.grants.set`)                                                   |
+| Test id                     | Element and attributes                                                                                                                  |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `move-page`                 | The `/move` page container                                                                                                              |
+| `move-link-create`          | Creates a move link (`portability.links.create`)                                                                                        |
+| `move-link-expiry`          | Optional expiry `Select` trigger; `data-value`                                                                                          |
+| `move-link-new`             | The new link, shown once; `data-url`                                                                                                    |
+| `move-link-copy`            | Copies the new link (`IconButton`)                                                                                                      |
+| `move-link`                 | A link row; `data-link-id`, `data-conversions`, `data-state` `active`, `revoked`, `expired`                                             |
+| `move-link-revoke`          | Revokes a link; opens a `ConfirmDialog`                                                                                                 |
+| `move-link-revoke-confirm`  | The `ConfirmDialog` content; confirm with `[data-testid=move-link-revoke-confirm] [data-testid=confirm-dialog-confirm]`                 |
+| `move-to-url`               | The "moved to" https URL input                                                                                                          |
+| `move-to-save`              | Sets "moved to"; opens a `ConfirmDialog`                                                                                                |
+| `move-to-confirm`           | The `ConfirmDialog` content (`portability.move.set`); confirm with `[data-testid=move-to-confirm] [data-testid=confirm-dialog-confirm]` |
+| `move-to-current`           | The current "moved to"; `data-url`                                                                                                      |
+| `move-to-clear`             | Clears "moved to" (`portability.move.clear`)                                                                                            |
+| `move-subscriptions-note`   | The note that subscriptions are untouched                                                                                               |
+| `bundle-export`             | Requests the bundle export (`portability.bundle.create`)                                                                                |
+| `bundle-import-file`        | The bundle file input (`portability.imports.upload`)                                                                                    |
+| `bundle-import-preview`     | The preview; `data-import-id`                                                                                                           |
+| `bundle-import-standing`    | The standing badge; `data-state` `verified`, `unverified` or `refused`                                                                  |
+| `bundle-import-item`        | A previewed item; `data-kind`, `data-ref`                                                                                               |
+| `bundle-import-item-toggle` | An item's include checkbox; `data-state` `on`/`off`                                                                                     |
+| `bundle-import-assert`      | The emote-rights assertion checkbox (ADR 0031)                                                                                          |
+| `bundle-import-start`       | Starts the import (`portability.imports.start`)                                                                                         |
+| `bundle-import-result`      | The result; `data-status`                                                                                                               |
+| `bundle-import-result-item` | A result item; `data-kind`, `data-ref`, `data-outcome`, `data-reason`                                                                   |
+| `move-landing`              | The `/m/$channel/$nonce` container; `data-state` `active`, `revoked` or `expired`                                                       |
+| `move-landing-follow`       | Follows through the link (`channels.follow` with `moveLink`)                                                                            |
+| `move-landing-gone`         | `EmptyState` for a revoked or expired link                                                                                              |
+| `moved-notice`              | The channel page's "moved to" notice; `data-url`                                                                                        |
+| `portability-grants`        | The `/settings/privacy` section                                                                                                         |
+| `portability-grant`         | A followed channel's grant row; `data-channel`, `data-state` `on`/`off`                                                                 |
+| `portability-grant-toggle`  | A row's switch (`portability.grants.set`)                                                                                               |
 
 ### Giveaways (W3-giveaways)
 
@@ -170,7 +172,7 @@ Units build on these and never edit `chat/interact/{state,client,use-chat-intera
 | `giveaway-close`             | Closes entries                                                                                                |
 | `giveaway-draw`              | Draws the winners                                                                                             |
 | `giveaway-cancel`            | Cancels; opens a `ConfirmDialog`                                                                              |
-| `giveaway-cancel-confirm`    | The dialog's confirm button                                                                                   |
+| `giveaway-cancel-confirm`    | The cancel `ConfirmDialog` (`contentProps`); its destructive button (the cancel label) confirms               |
 | `chat-giveaway`              | The viewer card; `data-giveaway-id`, `data-status`, `data-entries`                                            |
 | `chat-giveaway-enter`        | Enter (`interact.giveaways.enter`)                                                                            |
 | `chat-giveaway-entered`      | "You're in"                                                                                                   |
@@ -188,30 +190,30 @@ Units build on these and never edit `chat/interact/{state,client,use-chat-intera
 
 ### Advisory jury (W3-jury)
 
-| Test id                   | Element and attributes                                                                                                 |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `jury-page`               | The `/coop/jury` page container                                                                                        |
-| `jury-disabled`           | `EmptyState` while `jury.enabled` is false                                                                             |
-| `jury-optin`              | The opt-in switch; `data-state` `on`/`off`                                                                             |
-| `jury-optin-explainer`    | What jurors see, the blur, how to opt out                                                                              |
-| `jury-ineligible`         | Why the caller cannot opt in (not an active adult member, staff); `data-reason`                                        |
-| `jury-panel`              | The caller's seated panel; `data-panel-id`, `data-closes-at`                                                           |
-| `jury-case`               | A case card; `data-case-id`, `data-kind`, `data-tier`, `data-automated` `true`/`false`                                 |
-| `jury-case-clause`        | The clause title and version; `data-rule-ref`                                                                          |
-| `jury-evidence-text`      | A kept text excerpt                                                                                                    |
-| `jury-evidence-media`     | A kept media item, blurred by default; `data-revealed` `true`/`false`                                                  |
-| `jury-evidence-reveal`    | Reveals one media item (behind its content warning)                                                                    |
-| `jury-vote-<vote>`        | One button per `JURY_VOTES` value (`agree`, `disagree`, `unsure`)                                                      |
-| `jury-reason`             | The reason `Select` trigger; `data-value`                                                                              |
-| `jury-reason-<code>`      | One item per `JURY_REASON_CODES` value                                                                                 |
-| `jury-vote-submit`        | Submits the vote                                                                                                       |
-| `jury-voted`              | The submitted vote; `data-vote`, `data-reason`                                                                         |
-| `jury-flag`               | Staff: a flagged case; `data-case-id`, with a link to the case                                                         |
-| `jury-results`            | The `/transparency` section                                                                                            |
-| `jury-results-row`        | One clause and tier; `data-rule-ref`, `data-tier`, `data-agree`, `data-disagree`, `data-unsure` (or `data-suppressed`) |
-| `jury-results-suppressed` | The "fewer than 10" marker of a suppressed cell (its `Tooltip` trigger)                                                |
-| `jury-results-seed`       | A closed panel's period, panel size and revealed seed; `data-panel-id`                                                 |
-| `jury-results-empty`      | `EmptyState` with no closed panel                                                                                      |
+| Test id                   | Element and attributes                                                                                                                 |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `jury-page`               | The `/coop/jury` page container                                                                                                        |
+| `jury-disabled`           | `EmptyState` while `jury.enabled` is false                                                                                             |
+| `jury-optin`              | The opt-in switch; `data-state` `on`/`off`. Also under `jury-disabled` and beside `jury-ineligible` while still opted in               |
+| `jury-optin-explainer`    | What jurors see, the blur, how to opt out                                                                                              |
+| `jury-ineligible`         | Why the caller cannot opt in (not an active adult member, staff); `data-reason`                                                        |
+| `jury-panel`              | The caller's seated panel; `data-panel-id`, `data-closes-at`                                                                           |
+| `jury-case`               | A case card; `data-case-id`, `data-kind`, `data-tier`, `data-automated` `true`/`false`                                                 |
+| `jury-case-clause`        | The clause title and version; `data-rule-ref`                                                                                          |
+| `jury-evidence-text`      | A kept text excerpt                                                                                                                    |
+| `jury-evidence-media`     | A kept media item, blurred by default; `data-revealed` `true`/`false`                                                                  |
+| `jury-evidence-reveal`    | Reveals one media item (behind its content warning)                                                                                    |
+| `jury-vote-<vote>`        | One button per `JURY_VOTES` value (`agree`, `disagree`, `unsure`)                                                                      |
+| `jury-reason`             | The reason `Select` trigger; `data-value`                                                                                              |
+| `jury-reason-<code>`      | One item per `JURY_REASON_CODES` value                                                                                                 |
+| `jury-vote-submit`        | Submits the vote                                                                                                                       |
+| `jury-voted`              | The submitted vote; `data-vote`, `data-reason`                                                                                         |
+| `jury-flag`               | Staff: a flagged case; `data-case-id`, with a link to the case                                                                         |
+| `jury-results`            | The `/transparency` section                                                                                                            |
+| `jury-results-row`        | One clause and tier; `data-rule-ref` (the clause id), `data-tier`, `data-agree`, `data-disagree`, `data-unsure` (or `data-suppressed`) |
+| `jury-results-suppressed` | The "fewer than 10" marker of a suppressed cell (its `Tooltip` trigger)                                                                |
+| `jury-results-seed`       | A closed panel's period, panel size and revealed seed; `data-period`                                                                   |
+| `jury-results-empty`      | `EmptyState` with no closed panel                                                                                                      |
 
 ### Surge raids (W3-surge-raids)
 
@@ -224,13 +226,13 @@ Units build on these and never edit `chat/interact/{state,client,use-chat-intera
 
 ### Fair predictions (W3-fair-predictions)
 
-| Test id                      | Element and attributes                                                                |
-| ---------------------------- | ------------------------------------------------------------------------------------- |
-| `chat-prediction-locks-note` | "Locks at what you see" on the viewer card                                            |
-| `chat-prediction-refused`    | A refused bet's reason; `data-reason` (`not_live`, `behind`, `team`, `unverified`, …) |
-| `chat-prediction-result`     | The result card; `data-pool`, `data-winners`, `data-payout-sum`                       |
-| `prediction-resolved-by`     | Studio: who resolved; `data-user-id`                                                  |
-| `prediction-team-note`       | Studio: the note that the channel's team cannot bet                                   |
+| Test id                      | Element and attributes                                                                                                                             |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `chat-prediction-locks-note` | "Locks at what you see" on the viewer card                                                                                                         |
+| `chat-prediction-refused`    | A refused bet's reason; `data-reason` (`not_live`, `behind`, `team`, `unverified`, `closed`, `other`; a second bet, API `already_bet`, is `other`) |
+| `chat-prediction-result`     | The result card; `data-pool`, `data-winners`, `data-payout-sum`                                                                                    |
+| `prediction-resolved-by`     | Studio: who resolved; `data-user-id`                                                                                                               |
+| `prediction-team-note`       | Studio: the note that the channel's team cannot bet                                                                                                |
 
 ### Twitch import (N3-import)
 

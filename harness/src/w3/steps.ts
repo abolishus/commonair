@@ -76,8 +76,8 @@ export const FEDERATION_STEP_NUMBERS: readonly FederationStep[] = [1, 2, 3, 4, 5
  * Steps whose implementing unit has not merged yet: selectable explicitly (`--set steps=1`) but
  * left out of `all`, so the full harness on main stays green while they are stubs.
  */
-export const PENDING_WATCH_ROOM_STEPS: readonly WatchRoomStep[] = [1, 2, 3, 4, 5, 6, 7, 8];
-export const PENDING_PORTABILITY_STEPS: readonly PortabilityStep[] = [1, 2, 3, 4, 5];
+export const PENDING_WATCH_ROOM_STEPS: readonly WatchRoomStep[] = [];
+export const PENDING_PORTABILITY_STEPS: readonly PortabilityStep[] = [];
 export const PENDING_TWITCH_IMPORT_STEPS: readonly TwitchImportStep[] = [1, 2, 3, 4, 5, 6, 7, 8];
 export const PENDING_FEDERATION_STEPS: readonly FederationStep[] = [1, 2, 3, 4, 5, 6, 7, 8, 9];
 
@@ -199,10 +199,6 @@ export const W3_EXTENSION_UNITS: Readonly<Record<W3Extension, { unit: string; fi
  * but left out of `all`.
  */
 export const PENDING_W3_EXTENSIONS: readonly W3Extension[] = [
-  "giveaway",
-  "surge-raid",
-  "fair-prediction",
-  "jury",
   "dvr-relay",
   "dvr-purge",
   "relay-vtt",
