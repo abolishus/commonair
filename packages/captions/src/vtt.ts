@@ -10,6 +10,12 @@ import type { Cue } from "./cues.ts";
 
 /** Live subtitle segments are as long as the worker's chunks, so a chunk lands in one segment. */
 export const SEGMENT_MS = 3_000;
+/**
+ * How far behind live a captions-on player holds its playhead (seconds): the web player's
+ * `setTargetLatency` (`apps/web/src/player/captions-state.ts` keeps the same value). A segment
+ * must be listed before then to be on time; the harness gates on it.
+ */
+export const CAPTIONS_LATENCY_SECONDS = 9;
 /** Segments a live subtitle playlist lists (two minutes): what a player at 8–10 s latency needs, and then some. */
 export const LIVE_WINDOW_SEGMENTS = 40;
 /**
@@ -81,6 +87,20 @@ export function completeSegments(track: LiveTrack, window = LIVE_WINDOW_SEGMENTS
   const last = Math.floor((track.throughMs - track.anchorMs) / SEGMENT_MS) - 1;
   if (last < 0) return null;
   return [Math.max(0, last - window + 1), last];
+}
+
+/**
+ * The file name of live segment `n`: unique per track (the anchor is the track's first chunk
+ * start, epoch ms), because relays cache `.vtt` files as immutable media, and segment numbers
+ * restart at 0 on a channel's next broadcast under the same path.
+ */
+export const liveSegmentName = (track: Pick<LiveTrack, "anchorMs">, n: number): string => `${track.anchorMs}-${n}.vtt`;
+
+/** The segment number a live segment file name names for this track; null for another track's or a malformed name. */
+export function parseLiveSegmentName(track: Pick<LiveTrack, "anchorMs">, file: string): number | null {
+  const m = /^(\d{1,16})-(\d{1,9})\.vtt$/.exec(file);
+  if (!m || Number(m[1]) !== track.anchorMs) return null;
+  return Number(m[2]);
 }
 
 /**

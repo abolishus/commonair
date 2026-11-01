@@ -60,6 +60,8 @@ async function vodWithTrack(
       storagePrefix,
       status: "ready",
       durationSeconds: 60,
+      // Objects where the VOD's state puts them (no placement move pending).
+      visibility: placement,
       ...over,
     });
   const key = vodCaptionsKey(storagePrefix, "en");
@@ -252,5 +254,22 @@ describe("VOD tracks", () => {
     expect((await owner.client.call("PATCH", path, { cues: [{ index: 0, text: "x" }] })).status).toBe(412);
     const got = await owner.client.call<Caps>("GET", path);
     expect(got.body).toMatchObject({ status: "failed", cues: [] });
+  });
+
+  test("update refuses while a placement move is pending, so a move never carries the old track over the correction", async () => {
+    // Made public, objects still under the private prefix: the worker is about to copy them.
+    const v = await vodWithTrack({ visibility: "public" }, "private");
+    const before = await (await api.deps.storage.get(BUCKET(), v.key))!.text();
+    const res = await owner.client.call("PATCH", `/api/vods/${v.id}/captions/en`, { cues: [{ index: 0, text: "x" }] });
+    expect(res.status).toBe(412);
+    expect(await (await api.deps.storage.get(BUCKET(), v.key))!.text()).toBe(before);
+    expect(await db().select().from(schema.captionEdits).where(eq(schema.captionEdits.trackId, v.trackId))).toEqual([]);
+    // Once the move switched the prefix (here: it never needed to), the correction goes through.
+    await db().update(schema.vods).set({ visibility: "private" }).where(eq(schema.vods.id, v.id));
+    const ok = await owner.client.call<Caps>("PATCH", `/api/vods/${v.id}/captions/en`, {
+      cues: [{ index: 0, text: "x" }],
+    });
+    expect(ok.status).toBe(200);
+    expect(parseVtt(await (await api.deps.storage.get(BUCKET(), v.key))!.text())?.cues[0]?.text).toBe("x");
   });
 });

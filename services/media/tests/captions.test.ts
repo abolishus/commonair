@@ -17,6 +17,8 @@ import {
   captionsAudioArgs,
   CHUNK_BYTES,
   firstPtsFrom,
+  MAX_HELD_BYTES,
+  OriginTimeoutError,
   PcmChunker,
   wavFile,
   type AudioChunk,
@@ -69,6 +71,17 @@ describe("audio reader", () => {
     // 10 bytes left over from the first push, plus these: a third chunk once complete.
     expect(chunker.push(new Uint8Array(CHUNK_BYTES - 11))).toEqual([]);
     expect(chunker.push(new Uint8Array(1)).map((c) => c.startMs - T0)).toEqual([6000]);
+  });
+
+  test("a run whose first PTS never arrives is given up once 10 s of PCM is held, not grown forever", () => {
+    const chunker = new PcmChunker(T0);
+    expect(chunker.push(new Uint8Array(MAX_HELD_BYTES))).toEqual([]);
+    expect(() => chunker.push(new Uint8Array(1))).toThrow(OriginTimeoutError);
+    // With the PTS in time, the same amount is chunked normally.
+    const ok = new PcmChunker(T0);
+    ok.push(new Uint8Array(MAX_HELD_BYTES));
+    ok.setOrigin(T0);
+    expect(ok.push(new Uint8Array(1)).length).toBe(Math.floor((MAX_HELD_BYTES + 1) / CHUNK_BYTES));
   });
 
   test("WAV header", () => {

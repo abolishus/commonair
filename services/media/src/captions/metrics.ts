@@ -15,6 +15,8 @@ export interface CaptionsMetrics {
   latency(ms: number): void;
   /** A stream that waited for a captions slot. */
   queued(): void;
+  /** An audio reader run killed because its first PTS never arrived (its PCM would pile up). */
+  originTimeout(): void;
 }
 
 export const NOOP_CAPTIONS_METRICS: CaptionsMetrics = {
@@ -22,6 +24,7 @@ export const NOOP_CAPTIONS_METRICS: CaptionsMetrics = {
   dropped: () => {},
   latency: () => {},
   queued: () => {},
+  originTimeout: () => {},
 };
 
 export function createCaptionsMetrics(): CaptionsMetrics {
@@ -37,7 +40,11 @@ export function createCaptionsMetrics(): CaptionsMetrics {
   const queued = m.createCounter("media_captions_streams_queued_total", {
     description: "Streams that waited for a captions slot (CAPTIONS_MAX_STREAMS)",
   });
+  const originTimeouts = m.createCounter("media_captions_reader_origin_timeouts_total", {
+    description: "Captions audio reader runs restarted because no first PTS arrived",
+  });
   return {
+    originTimeout: () => originTimeouts.add(1),
     chunk: () => chunks.add(1),
     dropped: (reason) => dropped.add(1, { reason }),
     latency: (ms) => latency.record(ms),

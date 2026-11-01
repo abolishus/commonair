@@ -10,11 +10,16 @@
  *   v1), re-applies the channel's mask list, rewrites the stored `.vtt` and records who corrected
  *   how many cues in `caption_edits` (user id and a count; never the text) and the audit log.
  *   Unchanged cues are not an edit; a request that changes nothing records nothing.
+ * - A correction never races a placement move (`services/worker/src/vod/placement.ts`): the move
+ *   copies outside any lock and then switches `storage_prefix` under the VOD's row lock, so an
+ *   update holds that lock across its read and write, and refuses while the VOD's objects are not
+ *   where its state puts them (a move is pending or copying). Otherwise the move would carry the
+ *   old track to the new prefix and delete the corrected one.
  */
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { parseVtt, vodVttDocument, type VodTrack } from "@commonair/captions";
 import type { dto } from "@commonair/contracts";
-import { vodCaptionsKey } from "@commonair/contracts/storage";
+import { isVodOwnPrefix, vodCaptionsKey, vodPlacement, vodPrefix } from "@commonair/contracts/storage";
 import { schema } from "@commonair/db";
 import type { z } from "zod";
 import type { Deps } from "../deps.ts";
@@ -52,7 +57,7 @@ async function trackOf(deps: Deps, v: VodRow, language: string): Promise<TrackRo
   return t ?? null;
 }
 
-async function readTrack(deps: Deps, v: VodRow, language: string): Promise<VodTrack> {
+async function readTrack(deps: Deps, v: Pick<VodRow, "storagePrefix">, language: string): Promise<VodTrack> {
   const res = await deps.storage.get(deps.env.S3_BUCKET_MEDIA, vodCaptionsKey(v.storagePrefix, language));
   const parsed = res ? parseVtt(await res.text()) : null;
   if (!parsed) throw precondition("captions_ready", "This VOD's captions are not available");
@@ -135,6 +140,35 @@ export const vodCaptions = {
     }
     const mask = maskWith(captionsSettingsOf(row.channel).maskWords);
     return deps.db.transaction(async (tx) => {
+      // Locked first, in the move's own order (vods, then nothing else of the move's).
+      const [locked] = await tx
+        .select({
+          v: vods,
+          broadcastRestricted: sql<boolean>`${broadcasts.restrictedAt} is not null`,
+          channelSuspended: sql<boolean>`${channels.suspendedAt} is not null`,
+        })
+        .from(vods)
+        .innerJoin(broadcasts, eq(broadcasts.id, vods.broadcastId))
+        .innerJoin(channels, eq(channels.id, vods.channelId))
+        .where(eq(vods.id, row.v.id))
+        .for("update", { of: vods });
+      if (!locked) throw notFound("VOD not found");
+      const v = locked.v;
+      const placement = vodPlacement({
+        status: v.status,
+        visibility: v.visibility,
+        removedReason: v.removedReason,
+        broadcastRestricted: locked.broadcastRestricted,
+        channelSuspended: locked.channelSuspended,
+        // NCII- and DMCA-hidden VODs keep their objects under moderation prefixes: refused just below.
+        nciiHidden: false,
+        dmcaHidden: false,
+      });
+      const settled =
+        v.storagePrefix === row.v.storagePrefix &&
+        isVodOwnPrefix(v.id, v.storagePrefix) &&
+        (placement === "leave" || v.storagePrefix === vodPrefix(v.id, placement));
+      if (!settled) throw precondition("captions_settled", "This VOD is being moved; try again in a moment");
       const [t] = await tx
         .select()
         .from(tracks)
@@ -142,9 +176,9 @@ export const vodCaptions = {
         .for("update")
         .limit(1);
       if (!t) throw notFound("No captions in that language");
-      if (t.status !== "ready" || row.v.status !== "ready")
+      if (t.status !== "ready" || v.status !== "ready")
         throw precondition("captions_ready", "These captions cannot be corrected yet");
-      const track = await readTrack(deps, row.v, input.language);
+      const track = await readTrack(deps, v, input.language);
       let changed = 0;
       for (const edit of input.cues) {
         const cue = track.cues[edit.index];
@@ -155,8 +189,9 @@ export const vodCaptions = {
         cue.text = text;
         changed++;
       }
-      if (changed === 0) return toDto(row.v, input.language, t, track, await lastEditAt(deps, t.id));
-      const key = vodCaptionsKey(row.v.storagePrefix, input.language);
+      if (changed === 0) return toDto(v, input.language, t, track, await lastEditAt(deps, t.id));
+      // Under the row lock: a move cannot switch the prefix until this commits, and none is copying.
+      const key = vodCaptionsKey(v.storagePrefix, input.language);
       await deps.storage.put(deps.env.S3_BUCKET_MEDIA, key, vodVttDocument(track), {
         contentType: "text/vtt; charset=utf-8",
       });
@@ -170,11 +205,11 @@ export const vodCaptions = {
         actorId: caller.user.id,
         action: "vod.captions.update",
         subjectType: "vod",
-        subjectId: row.v.id,
-        channelId: row.v.channelId,
+        subjectId: v.id,
+        channelId: v.channelId,
         details: { language: input.language, cuesChanged: changed },
       });
-      return toDto(row.v, input.language, t, track, edit ? iso(edit.at) : null);
+      return toDto(v, input.language, t, track, edit ? iso(edit.at) : null);
     });
   }),
 };

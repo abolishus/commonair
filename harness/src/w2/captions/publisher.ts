@@ -5,9 +5,15 @@
  * A streamer that speaks (ADR 0011): the speech fixture over a test pattern, published over RTMP in
  * real time. The speech starts after `leadSeconds` of silence (the captions worker takes a slot,
  * reads W0 and cuts its first chunk meanwhile) and is followed by `tailSeconds` of silence, so the
- * last words land in a finished chunk before the stream ends.
+ * last words land in a finished chunk before the stream ends. The video carries the timestamp
+ * strip, so a browser viewer can tell the wall-clock capture time of the frame under its playhead
+ * (the cue placement check).
  */
+import { videoFilter } from "../../ffmpeg.ts";
 import { spawnSupervised, type Supervised } from "../../process.ts";
+
+const WIDTH = 640;
+const HEIGHT = 360;
 
 export interface SpeechStreamOptions {
   /** Full RTMP publish URL including the key. */
@@ -17,6 +23,8 @@ export interface SpeechStreamOptions {
   tailSeconds?: number;
   /** Repeat the speech this many times (default 1). */
   loops?: number;
+  /** Epoch ms the strip encodes at frame time 0 (default: now). */
+  startEpochMs?: number;
 }
 
 /** The ffmpeg command line (pure, tested). */
@@ -34,16 +42,17 @@ export function speechStreamArgs(o: SpeechStreamOptions): string[] {
     "-f",
     "lavfi",
     "-i",
-    "testsrc2=size=640x360:rate=30",
+    `testsrc2=size=${WIDTH}x${HEIGHT}:rate=30`,
     ...realtime,
     "-stream_loop",
     String(loops - 1),
     "-i",
     o.audioPath,
     "-filter_complex",
-    `[1:a]aresample=48000,adelay=${lead * 1000}:all=1,apad=pad_dur=${tail}[a]`,
+    `${videoFilter({ width: WIDTH, height: HEIGHT, startEpochMs: o.startEpochMs ?? Date.now(), timecode: false })};` +
+      `[1:a]aresample=48000,adelay=${lead * 1000}:all=1,apad=pad_dur=${tail}[a]`,
     "-map",
-    "0:v",
+    "[v]",
     "-map",
     "[a]",
     // The video runs as long as the padded audio.

@@ -11,8 +11,16 @@
  * their own actors). The stack runs with `CAPTIONS_MAX_STREAMS=1` (`harness/compose.w2-captions.yaml`).
  */
 import { setTimeout as delay } from "node:timers/promises";
-import { MASK_TOKEN, parseVtt, wordErrorRate } from "@commonair/captions";
+import {
+  CAPTIONS_LATENCY_SECONDS,
+  MASK_TOKEN,
+  parseVtt,
+  SEGMENT_MS,
+  unescapeCueText,
+  wordErrorRate,
+} from "@commonair/captions";
 import { createDb } from "@commonair/db";
+import type { ProbeVideoStats } from "../../../player/probe.ts";
 import { REFERENCE_PATH, generateSpeechFixture } from "./fixture.ts";
 import { resolveUri } from "../../hls.ts";
 import type { Via } from "../../money.ts";
@@ -26,9 +34,12 @@ import type { CaptionsStep } from "../steps.ts";
 import {
   lateSegments,
   listedSegments,
+  misplacedCues,
   segmentCues,
   subtitleAdvert,
+  timedSegments,
   transcriptOf,
+  type PlacementSample,
   type SeenSegment,
   type SubtitleAdvert,
 } from "./live.ts";
@@ -36,8 +47,18 @@ import { startSpeechStream, type SpeechStream } from "./publisher.ts";
 
 /** The WER the model must stay under on the fixture (ADR 0011 decision 1). */
 export const MAX_WER = 0.25;
-/** Captions-on latency is 8–10 s; a segment must be listed before the playhead reaches it at the upper bound. */
-export const CUE_DEADLINE_MS = 10_000;
+/** A segment must be listed before a captions-on player's playhead (held this far behind live) reaches it. */
+export const CUE_DEADLINE_MS = CAPTIONS_LATENCY_SECONDS * 1000;
+/** Segments with cues the follower must see listed after its first poll, for the timing gate to mean anything. */
+export const MIN_TIMED_SEGMENTS = 3;
+/** Browser samples with an active cue the placement check needs. */
+export const MIN_PLACEMENT_SAMPLES = 3;
+/**
+ * Slack on cue placement: the strip is sampled once a second, and the frame's capture clock
+ * (publisher) and the PDT (MediaMTX arrival) differ by the ingest path. A timeline offset bug is
+ * whole seconds (10 s for MediaMTX's), well past this.
+ */
+export const PLACEMENT_TOLERANCE_MS = 2_500;
 /** The word masked in the shared stream (it is in the reference transcript). */
 export const MASK_WORD = "harbor";
 const ACTIVE_TIMEOUT_MS = 90_000;
@@ -51,7 +72,14 @@ export interface SpeechRun {
   /** Segments seen, in order, with first-seen times and cues. */
   segments: SeenSegment[];
   /** What the Chromium viewer's `video.textTracks` showed with CC on. */
-  browser: { showing: boolean; cues: number; activeSeen: boolean; state: string | null };
+  browser: {
+    showing: boolean;
+    cues: number;
+    activeSeen: boolean;
+    state: string | null;
+    /** Active cues against the capture time of the frame under the playhead, once a second. */
+    placements: PlacementSample[];
+  };
 }
 
 export interface CaptionsRun {
@@ -133,6 +161,7 @@ async function waitForAdvert(ctx: ScenarioContext, playlistUrl: string): Promise
 /** Polls the subtitle playlist every second until `until` resolves; records each segment once. */
 async function followSubtitles(ctx: ScenarioContext, url: string, until: Promise<unknown>): Promise<SeenSegment[]> {
   const seen = new Map<number, SeenSegment>();
+  let first = true;
   let done = false;
   void until.finally(() => (done = true));
   while (!done && !ctx.signal.aborted) {
@@ -140,6 +169,8 @@ async function followSubtitles(ctx: ScenarioContext, url: string, until: Promise
       const res = await fetch(url);
       if (res.ok) {
         const now = Date.now();
+        const baseline = first;
+        first = false;
         for (const s of listedSegments(await res.text())) {
           if (seen.has(s.sequence) || s.pdtMs === null) continue;
           const vtt = await fetch(resolveUri(s.uri, url));
@@ -147,6 +178,7 @@ async function followSubtitles(ctx: ScenarioContext, url: string, until: Promise
             sequence: s.sequence,
             pdtMs: s.pdtMs,
             firstSeenAt: now,
+            baseline,
             cues: vtt.ok ? segmentCues(await vtt.text()) : [],
           });
         }
@@ -180,23 +212,39 @@ async function browserViewer(ctx: ScenarioContext, channel: string): Promise<Spe
     page.evaluate(() => {
       const v = document.querySelector<HTMLVideoElement>('[data-testid="player-video"]');
       const tracks = v ? [...v.textTracks].filter((t) => t.mode === "showing") : [];
+      const activeTexts: string[] = [];
+      for (const t of tracks) for (const c of t.activeCues ?? []) if (c instanceof VTTCue) activeTexts.push(c.text);
+      // The probe's newest glass-to-glass sample for this video: now minus it is the capture
+      // time of the frame on screen (both read on the page clock, the strip on the publisher's).
+      const stats = (window.__harnessProbe?.snapshot() ?? []).filter((s: ProbeVideoStats) => s.latencyMs.length > 0);
+      const mine = v ? (stats.find((s) => Math.abs(s.currentTime - v.currentTime) < 1.5) ?? stats[0]) : undefined;
+      const latency = mine?.latencyMs.at(-1);
       return {
         showing: tracks.length > 0,
         cues: tracks.reduce((n, t) => n + (t.cues?.length ?? 0), 0),
-        active: tracks.reduce((n, t) => n + (t.activeCues?.length ?? 0), 0),
+        activeTexts,
+        playheadWallMs: latency === undefined ? null : Date.now() - latency,
       };
     });
   let activeSeen = false;
+  const placements: PlacementSample[] = [];
+  const sample = async () => {
+    const r = await read();
+    activeSeen ||= r.activeTexts.length > 0;
+    if (r.activeTexts.length > 0 && r.playheadWallMs !== null)
+      placements.push({ playheadWallMs: r.playheadWallMs, activeTexts: r.activeTexts.map(unescapeCueText) });
+    return r;
+  };
+  // Keep sampling until enough placements are in (or the time runs out), so one lucky cue does not decide it.
   const last = await waitFor(
-    "cues in the player's text track",
+    "cues in the player's text track, placed against the video",
     async () => {
-      const r = await read();
-      activeSeen ||= r.active > 0;
-      return r.cues > 0 && activeSeen ? r : null;
+      const r = await sample();
+      return r.cues > 0 && placements.length >= MIN_PLACEMENT_SAMPLES ? r : null;
     },
     { timeoutMs: ACTIVE_TIMEOUT_MS, intervalMs: 1_000, signal: ctx.signal },
   ).catch(async () => read());
-  return { showing: last.showing, cues: last.cues, activeSeen, state };
+  return { showing: last.showing, cues: last.cues, activeSeen, state, placements };
 }
 
 export async function newCaptionsRun(ctx: ScenarioContext, opts: { via: Via }): Promise<CaptionsRun> {
@@ -290,9 +338,16 @@ async function cueTiming(run: CaptionsRun): Promise<void> {
   const { segments, browser } = await run.speech();
   const withCues = segments.filter((s) => s.cues.length > 0);
   run.ctx.assert("the follower saw segments with cues", withCues.length > 0, { segments: segments.length });
+  // Segments already listed when the follower started measure the harness's start-up, not the pipeline.
+  const timed = timedSegments(segments);
+  run.ctx.assert(
+    `at least ${MIN_TIMED_SEGMENTS} segments with cues listed while the follower watched`,
+    timed.length >= MIN_TIMED_SEGMENTS,
+    { timed: timed.length, baseline: segments.filter((s) => s.baseline).length },
+  );
   const late = lateSegments(segments, CUE_DEADLINE_MS);
-  const margins = withCues.map((s) => s.pdtMs + CUE_DEADLINE_MS - s.firstSeenAt);
-  run.ctx.metric("captions_cue_margin_min_ms", Math.min(...margins), "ms");
+  const margins = timed.map((s) => s.pdtMs + CUE_DEADLINE_MS - s.firstSeenAt);
+  if (margins.length > 0) run.ctx.metric("captions_cue_margin_min_ms", Math.min(...margins), "ms");
   run.ctx.assert(
     `every cue listed before the playhead reaches it at ${CUE_DEADLINE_MS / 1000} s latency`,
     late.length === 0,
@@ -301,7 +356,14 @@ async function cueTiming(run: CaptionsRun): Promise<void> {
   run.ctx.data("browser", browser);
   run.ctx.assert("the CC toggle turned on (player-captions-toggle data-state=on)", browser.state === "on");
   run.ctx.assert("the Chromium viewer's video.textTracks shows cues", browser.showing && browser.cues > 0, browser);
-  run.ctx.check("a cue was active under the playhead", browser.activeSeen);
+  run.ctx.assert("a cue was active under the playhead (with the frame's capture time)", browser.placements.length > 0, {
+    activeSeen: browser.activeSeen,
+  });
+  const misplaced = misplacedCues(browser.placements, segments, SEGMENT_MS, PLACEMENT_TOLERANCE_MS);
+  run.ctx.metric("captions_placement_samples", browser.placements.length);
+  run.ctx.assert("every active cue sits on the video where its segment's PDT says", misplaced.length === 0, {
+    misplaced: misplaced.slice(0, 5),
+  });
 }
 
 async function vodCaptions(run: CaptionsRun): Promise<void> {

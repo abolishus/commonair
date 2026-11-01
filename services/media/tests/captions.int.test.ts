@@ -237,6 +237,60 @@ describe("captions worker", () => {
     await hooks.end(c, { final: true });
   }, 60_000);
 
+  test("a session that ends while its worker is still starting leaves no stream running", async () => {
+    // Hold the worker's queued -> active update until the session has ended (onEnd sees no stream).
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let reachedActivate!: () => void;
+    const atActivate = new Promise<void>((r) => (reachedActivate = r));
+    const db = new Proxy(tdb.db, {
+      get(target, prop, receiver) {
+        if (prop !== "update") return Reflect.get(target, prop, receiver) as unknown;
+        return (table: typeof schema.broadcastCaptionTracks) => {
+          const builder = target.update(table);
+          return {
+            set: (values: { status?: string }) => {
+              const set = builder.set(values as never);
+              if (values.status !== "active") return set;
+              return {
+                where: (cond: Parameters<typeof set.where>[0]) => {
+                  const q = set.where(cond);
+                  reachedActivate();
+                  // Awaiting the builder runs it; only after the gate opens.
+                  return gate.then(async () => await q);
+                },
+              };
+            },
+          };
+        };
+      },
+    });
+    const ctx = { db, valkey, storage, bucket: BUCKET, logger } as unknown as MediaContext;
+    const own = createCaptions({
+      ctx,
+      env: { CAPTIONS_MAX_STREAMS: 1, WHISPER_URL: `http://127.0.0.1:${whisper.port}` },
+      source,
+      metrics: NOOP_CAPTIONS_METRICS,
+    });
+    const manager = own.manager!;
+    try {
+      const s = await broadcast(channelOn);
+      const ctl = new AbortController();
+      const starting = manager.onStart(s, { signal: ctl.signal });
+      await atActivate;
+      ctl.abort();
+      await manager.onEnd(s, { final: true });
+      release();
+      await starting;
+      expect(manager.status).toEqual({ active: [], queued: [] });
+      expect(own.slots.inUse).toBe(0);
+      expect((await trackOf(s.broadcastId))?.status).toBe("deleted");
+    } finally {
+      release();
+      await manager.stopAll();
+    }
+  }, 60_000);
+
   test("rehearsals and channels with captions off get no track", async () => {
     const r = await broadcast(channelOn, { kind: "rehearsal" });
     const off = await broadcast(channelOff);

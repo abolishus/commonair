@@ -30,7 +30,12 @@ RUN set -eu; \
     git clone --depth 1 --branch "${WHISPER_TAG}" https://github.com/ggml-org/whisper.cpp.git .; \
     test "$(git rev-parse HEAD)" = "${WHISPER_COMMIT}" || { echo "whisper.cpp ${WHISPER_TAG} is not ${WHISPER_COMMIT}" >&2; exit 1; }
 # Portable CPU code (no -march=native: the image runs on hosts other than the builder); on amd64 the
-# AVX2/FMA/F16C paths every current cloud CPU has. No OpenMP: the runtime image stays plain Debian.
+# AVX2/FMA/F16C paths every current cloud CPU has. REQUIREMENT: an amd64 host needs AVX2 (Haswell,
+# 2013, or Zen and later); without it whisper-server dies with SIGILL at start and captions stay
+# off (the worker drops chunks, playback is unaffected). Runtime-selected CPU variants
+# (GGML_CPU_ALL_VARIANTS with GGML_BACKEND_DL) would lift this, at the cost of shipping the ggml
+# backend libraries; the selfhost whisper unit's docs must state the requirement until then.
+# No OpenMP: the runtime image stays plain Debian.
 RUN set -eu; \
     simd=""; \
     if [ "${TARGETARCH:-amd64}" = "amd64" ]; then simd="-DGGML_AVX=ON -DGGML_AVX2=ON -DGGML_FMA=ON -DGGML_F16C=ON"; fi; \

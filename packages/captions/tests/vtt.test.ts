@@ -6,8 +6,10 @@ import {
   completeSegments,
   escapeCueText,
   LIVE_WINDOW_SEGMENTS,
+  liveSegmentName,
   liveSubtitlePlaylist,
   liveVttSegment,
+  parseLiveSegmentName,
   parseVtt,
   parseVttTimestamp,
   SEGMENT_MS,
@@ -72,6 +74,26 @@ describe("live segmenter", () => {
     );
     // Nothing transcribed yet: a valid playlist with no segments.
     expect(liveSubtitlePlaylist(track(ANCHOR), String)).not.toContain("#EXTINF");
+  });
+
+  test("segment names are unique per track, so two broadcasts on one path never share a cached segment", () => {
+    const first = { anchorMs: ANCHOR };
+    const next = { anchorMs: ANCHOR + 3_600_000 };
+    const names = (t: { anchorMs: number }) => Array.from({ length: 50 }, (_, n) => liveSegmentName(t, n));
+    expect(liveSegmentName(first, 7)).toBe(`${ANCHOR}-7.vtt`);
+    const overlap = names(first).filter((n) => names(next).includes(n));
+    expect(overlap).toEqual([]);
+    expect(parseLiveSegmentName(first, liveSegmentName(first, 12))).toBe(12);
+    // Another track's name, a bare number (the old scheme) and junk are refused.
+    expect(parseLiveSegmentName(next, liveSegmentName(first, 12))).toBeNull();
+    for (const bad of [
+      "12.vtt",
+      `${ANCHOR}-x.vtt`,
+      `${ANCHOR}-1.vtt.vtt`,
+      `-${ANCHOR}-1.vtt`,
+      `${ANCHOR}-1234567890.vtt`,
+    ])
+      expect(parseLiveSegmentName(first, bad)).toBeNull();
   });
 
   test("a segment lists overlapping cues timed from W0 on the source clock (X-TIMESTAMP-MAP)", () => {

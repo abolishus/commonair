@@ -59,6 +59,11 @@ export interface SeenSegment {
   pdtMs: number;
   /** When the follower first saw the segment listed (harness clock, epoch ms). */
   firstSeenAt: number;
+  /**
+   * Already listed on the follower's first poll: when it was listed is unknown (the follower
+   * started after it), so it counts for the transcript but not for timing.
+   */
+  baseline: boolean;
   cues: SeenCue[];
 }
 
@@ -87,11 +92,69 @@ export const transcriptOf = (segments: readonly SeenSegment[]) =>
     .map((c) => c.text)
     .join(" ");
 
+/** Segments with cues whose listing time the follower observed (not on its first poll). */
+export const timedSegments = (segments: readonly SeenSegment[]): SeenSegment[] =>
+  segments.filter((s) => !s.baseline && s.cues.length > 0);
+
 /**
  * Segments that came too late for a viewer `latencyMs` behind live: listed after the playhead's
  * PDT reached the segment's start. A cue starts no earlier than its segment, so a segment in time
- * means every cue in it is in time. Silent segments (no cues) do not count.
+ * means every cue in it is in time. Silent segments and the first poll's baseline do not count.
  */
 export function lateSegments(segments: readonly SeenSegment[], latencyMs: number): SeenSegment[] {
-  return segments.filter((s) => s.cues.length > 0 && s.firstSeenAt > s.pdtMs + latencyMs);
+  return timedSegments(segments).filter((s) => s.firstSeenAt > s.pdtMs + latencyMs);
+}
+
+/**
+ * What the browser showed at one instant: the active cues' text and the wall-clock capture time
+ * of the frame under the playhead (decoded from the publisher's timestamp strip).
+ */
+export interface PlacementSample {
+  playheadWallMs: number;
+  activeTexts: string[];
+}
+
+export interface Misplacement {
+  text: string;
+  playheadWallMs: number;
+  /** The PDT window the cue's segments cover, or null when the follower never saw the text. */
+  window: [number, number] | null;
+}
+
+const normalized = (t: string) => t.replace(/\s+/gu, " ").trim();
+
+/**
+ * Active cues that sit at the wrong place on the video: the frame under the playhead was captured
+ * outside the PDT window of every segment that carried the cue's text (widened by one segment,
+ * since a cue may start up to a chunk before a segment it overlaps, plus `toleranceMs`). A cue
+ * shifted by a timeline offset (an `X-TIMESTAMP-MAP` against the wrong `tfdt` origin) lands
+ * seconds away from its segment and fails this.
+ */
+export function misplacedCues(
+  samples: readonly PlacementSample[],
+  segments: readonly SeenSegment[],
+  segmentMs: number,
+  toleranceMs: number,
+): Misplacement[] {
+  const windows = new Map<string, [number, number]>();
+  for (const s of segments)
+    for (const c of s.cues) {
+      const key = normalized(c.text);
+      const w = windows.get(key);
+      windows.set(
+        key,
+        w ? [Math.min(w[0], s.pdtMs), Math.max(w[1], s.pdtMs + segmentMs)] : [s.pdtMs, s.pdtMs + segmentMs],
+      );
+    }
+  const out: Misplacement[] = [];
+  for (const sample of samples)
+    for (const text of sample.activeTexts) {
+      const w = windows.get(normalized(text)) ?? null;
+      const ok =
+        w !== null &&
+        sample.playheadWallMs >= w[0] - segmentMs - toleranceMs &&
+        sample.playheadWallMs <= w[1] + toleranceMs;
+      if (!ok) out.push({ text, playheadWallMs: sample.playheadWallMs, window: w });
+    }
+  return out;
 }

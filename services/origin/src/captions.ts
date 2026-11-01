@@ -15,12 +15,16 @@
  * - The playlist lists complete segments only, each with `EXT-X-PROGRAM-DATE-TIME`; a segment's
  *   cues carry `X-TIMESTAMP-MAP` on the source clock. Short `cache-control` on both.
  * - Captions are not media: nothing here goes to the `SegmentLog` (integrity, egress receipts).
+ * - Segment names carry the track's anchor (`<anchorMs>-<n>.vtt`): a channel's next broadcast
+ *   never reuses a name, so a cache that keeps `.vtt` files (relays do) cannot serve old cues.
  */
 import {
   CAPTIONS_KEYS,
   completeSegments,
   decodeCue,
   decodeLiveTrack,
+  parseLiveSegmentName,
+  liveSegmentName,
   liveSubtitlePlaylist,
   liveVttSegment,
   segmentBounds,
@@ -45,8 +49,6 @@ const CORS: Record<string, string> = {
 /** The playlist changes every segment (3 s); a segment's cues are final once it is listed. */
 export const CACHE_PLAYLIST_SECONDS = 1;
 export const CACHE_SEGMENT_SECONDS = 30;
-
-const SEGMENT_FILE = /^(\d{1,9})\.vtt$/;
 
 type Puller = { route: "hls"; claims: PlaybackClaims; token: string } | { route: "relayPull" };
 
@@ -138,13 +140,13 @@ export function createCaptionsHandler(ctx: OriginRouteContext, relays: Pick<Rela
     if (cr.kind === "subtitles") {
       const query =
         p.route === "hls" ? `?t=${encodeURIComponent(await ctx.refresher.tokenFor(p.claims, p.token))}` : "";
-      body = liveSubtitlePlaylist(track, (n) => `${n}.vtt${query}`);
+      body = liveSubtitlePlaylist(track, (n) => `${liveSegmentName(track, n)}${query}`);
       maxAge = CACHE_PLAYLIST_SECONDS;
     } else {
-      const m = SEGMENT_FILE.exec(cr.file);
+      // Another broadcast's segment name (a stale player or relay) never matches this track's anchor.
+      const n = parseLiveSegmentName(track, cr.file);
       const range = completeSegments(track, Number.MAX_SAFE_INTEGER);
-      const n = m ? Number(m[1]) : -1;
-      if (!range || n < range[0] || n > range[1]) return fail(404, "not_found", cr);
+      if (!range || n === null || n < range[0] || n > range[1]) return fail(404, "not_found", cr);
       try {
         body = liveVttSegment(track, n, await cuesFor(channel.broadcastId, track, n));
       } catch {

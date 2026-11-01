@@ -18,6 +18,7 @@ import { redact } from "../ffmpeg/redact.ts";
 import { backoffDelay } from "../ffmpeg/supervisor.ts";
 import type { MediaContext } from "../context.ts";
 import type { MediaSessionInfo } from "../hooks.ts";
+import type { CaptionsMetrics } from "./metrics.ts";
 
 export const SAMPLE_RATE = 16_000;
 const BYTES_PER_SAMPLE = 2;
@@ -93,9 +94,22 @@ export function wavFile(pcm: Uint8Array, sampleRate = SAMPLE_RATE): Uint8Array<A
   return out;
 }
 
+/** PCM held while waiting for the first PTS before the run is given up (10 s of audio, 320 KB). */
+export const MAX_HELD_BYTES = SAMPLE_RATE * BYTES_PER_SAMPLE * 10;
+
+/** The first PTS never arrived (an `ashowinfo` line ffmpeg did not print or we could not parse). */
+export class OriginTimeoutError extends Error {
+  constructor() {
+    super("no first PTS within 10 s of audio");
+    this.name = "OriginTimeoutError";
+  }
+}
+
 /**
  * Cuts a PCM byte stream into chunks. `startMs` of chunk `i` is `originMs + i · CHUNK_SECONDS`;
- * the origin is set once the first PTS is known (bytes before that are held).
+ * the origin is set once the first PTS is known (bytes before that are held, up to
+ * `MAX_HELD_BYTES`: past that `push` throws `OriginTimeoutError`, so a run that never reports its
+ * PTS is restarted instead of growing without bound).
  */
 export class PcmChunker {
   private buf = new Uint8Array(0);
@@ -114,7 +128,10 @@ export class PcmChunker {
     merged.set(bytes, this.buf.byteLength);
     this.buf = merged;
     const out: AudioChunk[] = [];
-    if (this.origin === null) return out;
+    if (this.origin === null) {
+      if (this.buf.byteLength > MAX_HELD_BYTES) throw new OriginTimeoutError();
+      return out;
+    }
     while (this.buf.byteLength >= CHUNK_BYTES) {
       const pcm = this.buf.slice(0, CHUNK_BYTES);
       this.buf = this.buf.slice(CHUNK_BYTES);
@@ -147,7 +164,11 @@ const pause = (ms: number, signal: AbortSignal) =>
   });
 
 /** The production source: one ffmpeg SRT reader, restarted with backoff when it exits. */
-export function ffmpegAudioSource(ctx: MediaContext, logger: Logger): AudioSource {
+export function ffmpegAudioSource(
+  ctx: MediaContext,
+  logger: Logger,
+  metrics: Pick<CaptionsMetrics, "originTimeout">,
+): AudioSource {
   return async function* (session, signal) {
     let attempt = 0;
     while (!signal.aborted) {
@@ -158,6 +179,7 @@ export function ffmpegAudioSource(ctx: MediaContext, logger: Logger): AudioSourc
         const input = internalSrtUrl(ctx.srtBase, session.path, ctx.internalSecret);
         yield* readRun(ctx.ffmpeg, captionsAudioArgs(input), w0Ms, signal, logger, ctx.internalSecret);
       } catch (err) {
+        if (err instanceof OriginTimeoutError) metrics.originTimeout();
         logger.warn("captions audio reader failed", { error: redact(String(err), [ctx.internalSecret]).slice(0, 200) });
       }
       if (signal.aborted) return;

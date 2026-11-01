@@ -111,7 +111,7 @@ export class CaptionsManager {
         set: { updatedAt: sql`now()` },
       });
     if (start.signal.aborted || this.streams.has(id) || this.waiting.has(id)) return;
-    if (slots.tryAcquire(id)) await this.activate({ session, language: cfg.language });
+    if (slots.tryAcquire(id)) await this.activate({ session, language: cfg.language }, start.signal);
     else {
       this.waiting.set(id, { session, language: cfg.language });
       // A successor host resuming a track that has no slot here shows it as waiting again.
@@ -159,7 +159,7 @@ export class CaptionsManager {
     }
   }
 
-  private async activate({ session, language }: Waiting): Promise<void> {
+  private async activate({ session, language }: Waiting, signal?: AbortSignal): Promise<void> {
     const id = session.broadcastId;
     await this.deps.db
       .update(tracks)
@@ -167,6 +167,13 @@ export class CaptionsManager {
       .where(
         and(eq(tracks.broadcastId, id), eq(tracks.language, language), inArray(tracks.status, ["queued", "active"])),
       );
+    // `onEnd` may have run during the update (it saw no stream, released the slot and finished the
+    // track): a stream started now would never be stopped. Its `onEnd` (or the one to come, when
+    // only the start was aborted) owns the slot and the row.
+    if (signal?.aborted || !this.deps.slots.holds(id) || this.streams.has(id)) {
+      this.deps.logger.info("captions start superseded", { broadcastId: id });
+      return;
+    }
     const stream = new CaptionStream(session, language, {
       source: this.deps.source,
       transcriber: this.deps.transcriber,

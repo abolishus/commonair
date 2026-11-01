@@ -124,30 +124,33 @@ describe("captions route", () => {
     expect(pl.headers.get("access-control-allow-origin")).toBe("*");
     const body = await pl.text();
     expect(body).toContain("#EXT-X-PROGRAM-DATE-TIME:2026-11-01T12:00:00.000Z");
-    expect(body).toContain(`0.vtt?t=${encodeURIComponent(tok)}`);
-    expect(body).toContain("2.vtt");
-    expect(body).not.toContain("3.vtt"); // not transcribed to its end yet
+    expect(body).toContain(`${ANCHOR}-0.vtt?t=${encodeURIComponent(tok)}`);
+    expect(body).toContain(`${ANCHOR}-2.vtt`);
+    expect(body).not.toContain(`${ANCHOR}-3.vtt`); // not transcribed to its end yet
 
-    const seg = await get(`/hls/live/capt/captions/en/0.vtt?t=${tok}`);
+    const seg = await get(`/hls/live/capt/captions/en/${ANCHOR}-0.vtt?t=${tok}`);
     expect(seg.status).toBe(200);
     expect(seg.headers.get("content-type")).toBe("text/vtt; charset=utf-8");
     expect(seg.headers.get("cache-control")).toBe("private, max-age=30");
     expect(await seg.text()).toBe(
       "WEBVTT\nX-TIMESTAMP-MAP=MPEGTS:900000,LOCAL:00:00:00.000\n\n00:00:10.500 --> 00:00:12.000\nhello &lt;there&gt; [***]\n\n",
     );
-    const seg1 = await (await get(`/hls/live/capt/captions/en/1.vtt?t=${tok}`)).text();
+    const seg1 = await (await get(`/hls/live/capt/captions/en/${ANCHOR}-1.vtt?t=${tok}`)).text();
     expect(seg1).toContain("second");
     expect(seg1).not.toContain("hello");
     // HEAD: headers, no body.
-    const head = await get(`/hls/live/capt/captions/en/0.vtt?t=${tok}`, { method: "HEAD" });
+    const head = await get(`/hls/live/capt/captions/en/${ANCHOR}-0.vtt?t=${tok}`, { method: "HEAD" });
     expect(head.status).toBe(200);
     expect(await head.text()).toBe("");
   });
 
   test("segments that are not complete yet, and other languages, are 404", async () => {
     const tok = await token();
-    expect((await get(`/hls/live/capt/captions/en/3.vtt?t=${tok}`)).status).toBe(404);
+    expect((await get(`/hls/live/capt/captions/en/${ANCHOR}-3.vtt?t=${tok}`)).status).toBe(404);
     expect((await get(`/hls/live/capt/captions/en/seg.vtt?t=${tok}`)).status).toBe(404);
+    // The old bare-number scheme, and another broadcast's anchor (a relay or player holding a stale name).
+    expect((await get(`/hls/live/capt/captions/en/0.vtt?t=${tok}`)).status).toBe(404);
+    expect((await get(`/hls/live/capt/captions/en/${ANCHOR - 3_600_000}-0.vtt?t=${tok}`)).status).toBe(404);
     expect((await get(`/hls/live/capt/captions/es/index.m3u8?t=${tok}`)).status).toBe(404);
   });
 
@@ -174,7 +177,7 @@ describe("captions route", () => {
     expect(res.headers.get("cache-control")).toBe("public, max-age=1");
     expect(res.headers.get("access-control-allow-origin")).toBeNull();
     const body = await res.text();
-    expect(body).toContain("\n0.vtt\n");
+    expect(body).toContain(`\n${ANCHOR}-0.vtt\n`);
     expect((await get("/cdn/live/capt/captions/en/index.m3u8")).status).toBe(404);
   });
 
@@ -186,7 +189,7 @@ describe("captions route", () => {
   });
 
   test("captions are not media: nothing reaches the segment log", async () => {
-    await get(`/hls/live/capt/captions/en/0.vtt?t=${await token()}`);
+    await get(`/hls/live/capt/captions/en/${ANCHOR}-0.vtt?t=${await token()}`);
     await Bun.sleep(100);
     const raw = createValkey(VALKEY_URL);
     expect(await raw.exists(stream)).toBe(0);

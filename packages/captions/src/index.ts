@@ -19,11 +19,14 @@ export {
   type WhisperSegment,
 } from "./cues.ts";
 export {
+  CAPTIONS_LATENCY_SECONDS,
   completeSegments,
   escapeCueText,
   LIVE_WINDOW_SEGMENTS,
   type LiveTrack,
+  liveSegmentName,
   liveSubtitlePlaylist,
+  parseLiveSegmentName,
   liveVttSegment,
   MEDIAMTX_TIMELINE_OFFSET_S,
   parseVtt,

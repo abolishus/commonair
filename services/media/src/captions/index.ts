@@ -50,6 +50,7 @@ export function createCaptions(deps: CaptionsDeps): CaptionsRuntime {
   }
   const { ctx } = deps;
   const logger = ctx.logger.child({ worker: "captions" });
+  const metrics = deps.metrics ?? createCaptionsMetrics();
   const manager = new CaptionsManager({
     db: ctx.db,
     valkey: ctx.valkey,
@@ -58,9 +59,9 @@ export function createCaptions(deps: CaptionsDeps): CaptionsRuntime {
     logger,
     slots,
     whisperUrl,
-    source: deps.source ?? ffmpegAudioSource(ctx, logger),
+    source: deps.source ?? ffmpegAudioSource(ctx, logger, metrics),
     transcriber: deps.transcriber ?? whisperClient({ baseUrl: whisperUrl }),
-    metrics: deps.metrics ?? createCaptionsMetrics(),
+    metrics,
   });
   const hook: MediaSessionHook = {
     name: "captions",

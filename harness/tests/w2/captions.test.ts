@@ -9,8 +9,10 @@ import {
   distinctCues,
   lateSegments,
   listedSegments,
+  misplacedCues,
   segmentCues,
   subtitleAdvert,
+  timedSegments,
   transcriptOf,
   type SeenSegment,
 } from "../../src/w2/captions/live.ts";
@@ -79,8 +81,8 @@ describe("subtitle follower", () => {
       "WEBVTT\nX-TIMESTAMP-MAP=MPEGTS:900000,LOCAL:00:00:00.000\n\n00:00:33.500 --> 00:00:34.200\nacross\n\n00:00:35.000 --> 00:00:36.000\nworld\n",
     );
     const segments: SeenSegment[] = [
-      { sequence: 1, pdtMs: 0, firstSeenAt: 0, cues: a },
-      { sequence: 2, pdtMs: 3000, firstSeenAt: 3000, cues: b },
+      { sequence: 1, pdtMs: 0, firstSeenAt: 0, baseline: false, cues: a },
+      { sequence: 2, pdtMs: 3000, firstSeenAt: 3000, baseline: false, cues: b },
     ];
     expect(distinctCues(segments).map((c) => c.text)).toEqual(["hello there", "across", "world"]);
     expect(transcriptOf(segments)).toBe("hello there across world");
@@ -89,21 +91,62 @@ describe("subtitle follower", () => {
   test("a segment is late when listed after the playhead reached it; silent ones never count", () => {
     const cue = { text: "x", localStartMs: 0, localEndMs: 1 };
     const segs: SeenSegment[] = [
-      { sequence: 1, pdtMs: 1_000, firstSeenAt: 1_000 + CUE_DEADLINE_MS, cues: [cue] },
-      { sequence: 2, pdtMs: 4_000, firstSeenAt: 4_000 + CUE_DEADLINE_MS + 1, cues: [cue] },
-      { sequence: 3, pdtMs: 7_000, firstSeenAt: 99_000, cues: [] },
+      { sequence: 1, pdtMs: 1_000, firstSeenAt: 1_000 + CUE_DEADLINE_MS, baseline: false, cues: [cue] },
+      { sequence: 2, pdtMs: 4_000, firstSeenAt: 4_000 + CUE_DEADLINE_MS + 1, baseline: false, cues: [cue] },
+      { sequence: 3, pdtMs: 7_000, firstSeenAt: 99_000, baseline: false, cues: [] },
+      // Listed before the follower's first poll: its first-seen time is the follower's start.
+      { sequence: 0, pdtMs: -2_000, firstSeenAt: 99_000, baseline: true, cues: [cue] },
     ];
     expect(lateSegments(segs, CUE_DEADLINE_MS).map((s) => s.sequence)).toEqual([2]);
+    expect(timedSegments(segs).map((s) => s.sequence)).toEqual([1, 2]);
+  });
+
+  test("cue placement: an active cue must be on screen within its segments' PDT window", () => {
+    const seg = (sequence: number, pdtMs: number, text: string): SeenSegment => ({
+      sequence,
+      pdtMs,
+      firstSeenAt: pdtMs + 5_000,
+      baseline: false,
+      cues: [{ text, localStartMs: 0, localEndMs: 1 }],
+    });
+    const segments = [seg(1, 30_000, "hello there"), seg(2, 33_000, "hello there"), seg(3, 36_000, "world")];
+    const at = (playheadWallMs: number, ...activeTexts: string[]) => ({ playheadWallMs, activeTexts });
+    // Inside [30 s, 36 s), within a segment before (a cue starts up to a chunk early) and the tolerance after.
+    expect(
+      misplacedCues(
+        [at(31_000, "hello  there"), at(27_500, "hello there"), at(38_000, "hello there")],
+        segments,
+        3_000,
+        2_000,
+      ),
+    ).toEqual([]);
+    // Shifted by MediaMTX's 10 s timeline offset; a text the follower never saw.
+    expect(misplacedCues([at(46_000, "hello there"), at(37_000, "nope")], segments, 3_000, 2_000)).toEqual([
+      { text: "hello there", playheadWallMs: 46_000, window: [30_000, 36_000] },
+      { text: "nope", playheadWallMs: 37_000, window: null },
+    ]);
+    expect(misplacedCues([at(24_000, "world")], segments, 3_000, 2_000)).toHaveLength(1);
   });
 });
 
 describe("speech publisher", () => {
   test("speech after a lead of silence, padded, over a test pattern, in real time to RTMP", () => {
-    const args = speechStreamArgs({ url: "rtmp://h/live/k", audioPath: "/f/speech.ogg", loops: 3 });
+    const args = speechStreamArgs({
+      url: "rtmp://h/live/k",
+      audioPath: "/f/speech.ogg",
+      loops: 3,
+      startEpochMs: 1_000,
+    });
     expect(args.slice(-3)).toEqual(["-f", "flv", "rtmp://h/live/k"]);
     expect(args).toContain("testsrc2=size=640x360:rate=30");
     expect(args[args.indexOf("-stream_loop") + 1]).toBe("2");
-    expect(args[args.indexOf("-filter_complex") + 1]).toBe("[1:a]aresample=48000,adelay=6000:all=1,apad=pad_dur=8[a]");
+    const graph = args[args.indexOf("-filter_complex") + 1] ?? "";
+    // The timestamp strip (placement check) on the video, the speech on the audio.
+    expect(graph).toContain("geq=lum='");
+    expect(graph).toContain("st(1,1000+round(T*1000))");
+    expect(graph).toContain("[base][strip]overlay=0:0[v];");
+    expect(graph.endsWith("[1:a]aresample=48000,adelay=6000:all=1,apad=pad_dur=8[a]")).toBe(true);
+    expect(args[args.indexOf("-map") + 1]).toBe("[v]");
     expect(args.filter((a) => a === "-readrate")).toHaveLength(2);
     expect(args).toContain("-shortest");
   });
@@ -113,8 +156,8 @@ describe("scenario wiring", () => {
   test("a runner for every step; thresholds as the brief sets them", () => {
     expect(Object.keys(CAPTIONS_STEP_RUNNERS).map(Number)).toEqual([...CAPTIONS_STEP_NUMBERS]);
     expect(MAX_WER).toBe(0.25);
-    expect(CUE_DEADLINE_MS).toBeGreaterThanOrEqual(8_000);
-    expect(CUE_DEADLINE_MS).toBeLessThanOrEqual(10_000);
+    // The player's captions-on target latency, not the looser upper bound of 8–10 s.
+    expect(CUE_DEADLINE_MS).toBe(9_000);
     expect(MASK_TOKEN).toBe("[***]");
   });
 
