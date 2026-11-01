@@ -70,7 +70,7 @@ function BreadcrumbSeparator({ children, className, ...props }: React.ComponentP
       className={cn("[&>svg]:size-3.5", className)}
       {...props}
     >
-      {children ?? <HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={2} />}
+      {children ?? <HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={2} className="rtl:rotate-180" />}
     </li>
   );
 }

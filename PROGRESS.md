@@ -48,6 +48,25 @@ from `apps/web/src/i18n/index.ts` (36 test importers, harmless; N2-ui withdrew i
 duplicate `dmcaq.counter.suitNote*`; e7-dmca verbatim English keys for N2-weblate to lock:
 `dmca.goodFaith`, `dmca.accuracy`, `copyright.counter.goodFaith`, `copyright.counter.jurisdiction`.
 
+**Batch 5 wave 2 merged 2026-10-31; N2 milestone switched on** (N2-rtl, N2-weblate, N2-pseudo).
+`packages/ui` is logical throughout (upstream shadcn's RTL transform; three `rtl-physical`
+exceptions for Base UI's physical sides), `logical-css.baseline.json` is gone and the check holds
+`apps/web/src` and `packages/ui/src` at zero; RTL render tests and an injected-`ar` direction test.
+Weblate runbook, translator guide and `translation-glossary-es.csv` (now the glossary's source of
+truth). Orchestrator: `packages/ui/DEVIATIONS.md` RTL rows; breadcrumb separator, switch thumb and
+proposal-changes arrow flip in RTL; `REUSE.toml` glossary CSV annotation; `docs/README.md` and
+CONTRIBUTING rows; `REQUIRED_LOCALES = ["es"]`; the `en-XA` run is the scenario `e2e-basic-en-xa`
+(e2e-basic with `locale` defaulting to `en-XA`, in `FULL_REQUIRED`, `rest` shard), because `full`
+runs each name once and `--set` is per run. Its first live run is CI's. Declined/deferred:
+`@commonair/i18n` as a harness dependency (relative import works; package.json churn), a
+`footer-license` test id, `components.json` `rtl: true`. Open: `harness/src/web/flows.ts`
+`RATE_LIMITED_FORM_ERROR` matches English only (rate-limited sign-ins under `es`/`en-XA` are not
+retried); `scripts/release/changelog.ts` should take Weblate merges as one entry
+(`--first-parent`, with a test); LTR visual regression pass over the converted components and a
+Storybook `dir="rtl"` pass (user). **User:** Hosted Weblate libre-plan application and GitHub app
+(runbook section 1–7), allow merge commits for Weblate PRs, visual checks under `es`/`en-XA`, a
+fluent read of the Spanish. **Next:** W2 as batch 6 (`.claude/briefs/next/W2-feature-wave.md`).
+
 **Batch 4 (W1 + N1; `.claude/briefs/batch4/README.md`), started 2026-10-30, done 2026-10-30 (CI
 green on `8065ce3`, every job including all seven harness shards; self-host e2e last ran green on
 the contract steps).** Milestone checks (batch4 README): no `notImplemented` left in the W1 route

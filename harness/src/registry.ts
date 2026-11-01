@@ -67,6 +67,8 @@ export const FULL_REQUIRED = [
   "surge-guard",
   // N1: go-live notifications, push and the PWA (ADR 0028).
   "notifications",
+  // N2: the pseudo-locale run with the untranslated-text scanner (ADR 0029, batch 5 decision (k)).
+  "e2e-basic-en-xa",
 ] as const;
 
 /** `full`'s scenarios that one shard runs, in `full`'s order. Pure. */

@@ -54,3 +54,10 @@ path = ["infra/tofu/**/.terraform.lock.hcl"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 CommonAir contributors"
 SPDX-License-Identifier = "CC0-1.0"
+
+# Weblate glossary files (docs/maintainers/translations.md); CSV cannot carry a header line.
+[[annotations]]
+path = ["docs/maintainers/translation-glossary-*.csv"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 CommonAir contributors"
+SPDX-License-Identifier = "CC-BY-SA-4.0"

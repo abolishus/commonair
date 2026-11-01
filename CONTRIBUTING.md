@@ -103,7 +103,9 @@ flowchart LR
 4. **Test it.** Run `bun run verify`.
 5. **Open the PR** with the template and fill in its checklist.
 6. **Review.** CI must be green. A maintainer reviews, asks questions and may request changes.
-   Once approved, a maintainer squash-merges it.
+   Once approved, a maintainer squash-merges it. Translation pull requests from Hosted Weblate are the
+   exception: merge them with a merge commit (see [docs/maintainers/translations.md](docs/maintainers/translations.md)).
+   Translators start at [docs/translators/](docs/translators/README.md).
 
 [GOVERNANCE.md](GOVERNANCE.md) explains how review and technical decisions work, and how they
 relate to the co-op's member votes.

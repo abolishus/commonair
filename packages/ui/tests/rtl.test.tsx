@@ -283,9 +283,7 @@ describe("components under dir=rtl", () => {
     expect(uncommentedPhysical()).toEqual([]);
   });
 
-  // breadcrumb.tsx is outside N2-rtl's files: its separator chevron gets `rtl:rotate-180` through
-  // a contract request. When it lands this starts passing: drop `.fails`.
-  it.fails("breadcrumb: the separator chevron flips", () => {
+  it("breadcrumb: the separator chevron flips", () => {
     const { container } = inRtl(
       <Breadcrumb>
         <BreadcrumbList>

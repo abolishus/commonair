@@ -126,6 +126,9 @@ for the es units (keys come from English).
 A unit that needs a recurring term not in the table picks one, uses it consistently, and lists it
 in its final message; the orchestrator adds it here and N2-weblate's CSV takes the merged table.
 
+Since wave 2, [`docs/maintainers/translation-glossary-es.csv`](../../../docs/maintainers/translation-glossary-es.csv)
+(the Weblate glossary) is the source of truth; these tables are its origin.
+
 Added after wave 1 (2026-10-31, from the units' reports; conflicts resolved by the orchestrator):
 
 | English                                                   | Spanish                                                                       |

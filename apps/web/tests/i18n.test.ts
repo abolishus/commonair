@@ -25,7 +25,7 @@ const KEYS = join(I18N, "keys");
 const UNUSED_ALLOWED: readonly string[] = [];
 
 /** Released locales: every English key translated (batch 5 decision (j)). Others may lag. */
-const REQUIRED_LOCALES: readonly string[] = [];
+const REQUIRED_LOCALES: readonly string[] = ["es"];
 
 function sources(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {

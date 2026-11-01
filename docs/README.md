@@ -29,6 +29,8 @@ written yet.
 | [governance/decision-process.md](governance/decision-process.md)       | Proposal lifecycle, protected decisions, quorum, tallies              |
 | [api/](api/)                                                           | Public API and SDK reference (coming)                                 |
 | [developers/](developers/README.md)                                    | Building on the platform: OAuth apps, EventSub, the SDK, porting      |
+| [maintainers/translations.md](maintainers/translations.md)             | Hosted Weblate setup, components, checks, DCO, reviewing Weblate PRs  |
+| [translators/](translators/README.md)                                  | Guide for volunteer translators: where, message format, style         |
 
 ## Decisions
 

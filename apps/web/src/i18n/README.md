@@ -10,7 +10,7 @@ catalogs are JSON, English is the source of truth, and the format is a small ICU
 subset formatted by `@commonair/i18n` ([ADR 0029](../../../../docs/decisions/0029-i18n.md)).
 
 **Do not add non-English files by hand.** The `es` catalogs were seeded in batch 5; from here on
-Weblate (N2-weblate) maintains every non-English file. Keys are added in English (plus their `es`
+[Weblate](../../../../docs/maintainers/translations.md) maintains every non-English file. Keys are added in English (plus their `es`
 translation in the same change until Weblate takes over, batch 5 decision (m)); other locales may
 lag and fall back to English per key.
 

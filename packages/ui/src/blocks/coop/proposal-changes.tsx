@@ -276,7 +276,7 @@ export function ProposalChangeSummary({
             </div>
             <div className="flex min-w-0 flex-col gap-1">
               <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                <HugeiconsIcon icon={ArrowRight02Icon} strokeWidth={2} aria-hidden className="size-3" />
+                <HugeiconsIcon icon={ArrowRight02Icon} strokeWidth={2} aria-hidden className="size-3 rtl:rotate-180" />
                 {labels.to}
               </span>
               <SettingValue value={item.to} />
