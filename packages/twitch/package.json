@@ -11,6 +11,10 @@
     "test": "bun --bun vp test run --exclude '**/*.int.test.ts' --passWithNoTests",
     "typecheck": "tsc -p ."
   },
+  "dependencies": {
+    "@commonair/contracts": "workspace:*",
+    "zod": "catalog:"
+  },
   "devDependencies": {
     "@types/bun": "catalog:",
     "typescript": "catalog:",

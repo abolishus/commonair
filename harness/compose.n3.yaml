@@ -14,8 +14,11 @@
 #   bun scripts/infra.ts stack --harness --w3
 #
 # The `multi` replicas get the same values (they share the queues, so a job may run on either);
-# harness/tests/w3/overlays.test.ts keeps them identical. N3-import fills in anything else the
-# mock needs.
+# harness/tests/w3/overlays.test.ts keeps them identical. The browser on this machine cannot
+# resolve host.containers.internal: the scenario's web steps answer the authorize URL from the
+# mock's local address with Playwright's page.route (harness/src/n3/index.ts), so no separate
+# browser-facing authorize base is needed. TWITCH_IMAGE_HOSTS matches the CDN URLs the mock's Helix
+# answers name (http://host.containers.internal:<port>/cdn/...).
 
 x-n3-env: &n3-env
   OAUTH_TWITCH_CLIENT_ID: harness-twitch-client-id

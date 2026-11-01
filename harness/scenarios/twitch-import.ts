@@ -13,11 +13,14 @@
  * 6. The schedule is shown as carried, not applied.
  * 7. Paste panels and see them on the channel page.
  * 8. The mock recorded the token's revocation.
- * 9. With `TWITCH_IMPORT_ENABLED` false, the page shows the unavailable state.
+ *
+ * The flag-off page (`TWITCH_IMPORT_ENABLED` false: the unavailable state) is not a step: the `w3`
+ * stack forces the flag on everywhere, so the API's integration tests and the web unit tests cover it.
  *
  * `--set steps=1,3` picks steps (`all` runs every step not pending; each step adds the ones it
- * reads, `src/w3/steps.ts`); `--set via=api` drives the web setup through the API. Steps whose
- * unit has not merged are pending and run only when named. N3-import fills this file and `src/n3/`.
+ * reads, `src/w3/steps.ts`); `--set via=api` drives the web setup through the API. The steps live
+ * in `src/n3/`, the mock in `src/mocks/twitch/` (on `TWITCH_MOCK_PORT`, reached by the containers
+ * as `host.containers.internal`).
  *
  * Needs `oauth` (the fake `OAUTH_TWITCH_*` of harness/compose.n3.yaml), so `--profile
  * no-proprietary` skips it. Runs in the `w3` shard, on the harness stack with the batch 7
@@ -36,7 +39,7 @@ import {
 export default defineScenario({
   name: "twitch-import",
   description:
-    "connect through the Twitch mock → preview → import title, tags, category, description and emotes → the channel page and chat show them, the T0 emote is refused → schedule carried → panels pasted → token revoked → unavailable when off",
+    "connect through the Twitch mock → preview → import title, tags, category, description and emotes → the channel page and chat show them, the T0 emote is refused → schedule carried → panels pasted → token revoked",
   needs: ["api", "web", "chat", "worker", "oauth", "browser"],
   inFull: true,
   timeoutMs: 20 * 60_000,
@@ -47,7 +50,7 @@ export default defineScenario({
     ctx.data("steps", { selected, run: steps, addedPrerequisites: added });
     ctx.data("via", via);
     if (steps.length === 0) {
-      ctx.skipStep("twitch-import", "every step is pending (N3-import not merged yet); name one with --set steps=");
+      ctx.skipStep("twitch-import", "no step selected; name one with --set steps=");
       return;
     }
     const run = await newTwitchImportRun(ctx, { via });

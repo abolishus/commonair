@@ -419,6 +419,10 @@
     "packages/twitch": {
       "name": "@commonair/twitch",
       "version": "0.0.0",
+      "dependencies": {
+        "@commonair/contracts": "workspace:*",
+        "zod": "catalog:",
+      },
       "devDependencies": {
         "@types/bun": "catalog:",
         "typescript": "catalog:",
