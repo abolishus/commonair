@@ -40,6 +40,8 @@ const chat = await startChatService({
   // W1: off until their GA criteria are met (ADR 0015).
   watchGate: env.CHAT_WATCH_GATE === "on",
   surgeGuard: env.CHAT_SURGE_GUARD === "on",
+  // Batch 7 decision (a): giveaways ship off.
+  giveaways: env.GIVEAWAYS_ENABLED,
   // SIGTERM/SIGINT close sockets and flush chat first; then the pool and telemetry.
   onShutdown: async () => {
     await Promise.allSettled([db.close(), telemetry.shutdown()]);

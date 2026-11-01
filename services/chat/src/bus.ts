@@ -38,6 +38,9 @@ export class Bus {
     control: (channelId: string) => this.prefix + BUS.chatControl(channelId),
     events: () => this.prefix + BUS.events,
     live: () => this.prefix + BUS.live,
+    /** Batch 7 watch rooms: one room's frames across instances, and the close/kick control channel. */
+    room: (roomId: string) => this.prefix + BUS.room(roomId),
+    roomControl: () => this.prefix + BUS.roomControl,
   };
 
   /** Subscribe (or add a reference). The first subscriber's handler is used for the channel. */

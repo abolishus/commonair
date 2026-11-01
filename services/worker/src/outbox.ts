@@ -7,13 +7,14 @@
  * `FOR UPDATE SKIP LOCKED`, so replicas never claim the same row. Delivery is
  * at-least-once: if the commit fails after publishing, the batch is published
  * again (consumers dedupe by event id). Internal (trust & safety) events are validated and
- * marked published without ever reaching the bus or webhook fan-out; the W2 hook
- * (`w2/outbox-jobs.ts`) still starts jobs from them.
+ * marked published without ever reaching the bus or webhook fan-out; the W2 and batch 7 hooks
+ * (`w2/outbox-jobs.ts`, `b7/outbox-jobs.ts`) still start jobs from them.
  */
 import { BusEvent, EVENTS, isInternalEvent, type EventType } from "@commonair/contracts/events";
 import { QUEUES } from "@commonair/contracts/internal";
 import { schema } from "@commonair/db";
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import { b7JobsFor } from "./b7/outbox-jobs.ts";
 import type { WorkerContext } from "./context.ts";
 import { applyGoalProgress } from "./interact/goals/outbox-hook.ts";
 import { WEBHOOK_JOBS } from "./jobs/names.ts";
@@ -162,6 +163,18 @@ export async function relayOutboxBatch(ctx: WorkerContext, batchSize = 200, valk
         ),
         valkeyTimeoutMs,
         "w2 enqueue",
+      );
+    // Batch 7 (decision (z)): federation fan-out and inbox, relay purges, the moved email
+    // (`b7/outbox-jobs.ts`). Same job-id idempotency as above.
+    const b7 = await b7JobsFor(tx, handled, ctx.now());
+    for (const queue of new Set(b7.map((j) => j.queue)))
+      await withTimeout(
+        ctx.enqueueBulk(
+          queue,
+          b7.filter((j) => j.queue === queue),
+        ),
+        valkeyTimeoutMs,
+        "b7 enqueue",
       );
 
     const now = ctx.now();

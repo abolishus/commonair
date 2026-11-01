@@ -3,7 +3,7 @@
 
 /** E8 scaffolding: the interactivity jobs are registered on their queue, and the hook flag warns. */
 import { describe, expect, test, vi } from "vite-plus/test";
-import { INTERACT_JOBS, INTERACT_JOB_NAMES, InteractJob, QUEUES } from "@commonair/contracts/internal";
+import { GIVEAWAY_JOBS, INTERACT_JOBS, INTERACT_JOB_NAMES, InteractJob, QUEUES } from "@commonair/contracts/internal";
 import { interactTestHooks } from "../src/interact/startup.ts";
 import { JOBS } from "../src/jobs/index.ts";
 import { buildRegistry } from "../src/runtime/registry.ts";
@@ -11,7 +11,10 @@ import { buildRegistry } from "../src/runtime/registry.ts";
 describe("interactivity jobs", () => {
   test("all three on QUEUES.interact with their schedules, one attempt each", () => {
     const reg = buildRegistry(JOBS);
-    expect([...(reg.get(QUEUES.interact)?.keys() ?? [])].sort()).toEqual([...INTERACT_JOB_NAMES].sort());
+    // Batch 7's giveaway close (GIVEAWAY_JOBS, event-driven) shares the queue.
+    expect([...(reg.get(QUEUES.interact)?.keys() ?? [])].sort()).toEqual(
+      [...INTERACT_JOB_NAMES, GIVEAWAY_JOBS.close].sort(),
+    );
     const every = (name: string) => {
       const s = reg.get(QUEUES.interact)?.get(name)?.schedule;
       return s && "every" in s ? s.every : undefined;

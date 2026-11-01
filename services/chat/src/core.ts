@@ -7,9 +7,10 @@
  * Valkey. `server.ts` wires it to Bun's WebSocket server.
  */
 import { and, eq, isNull } from "drizzle-orm";
-import { BusEvent, type dto, type ServerFrame } from "@commonair/contracts";
+import { BusEvent, type ClientFrame, type dto, type RoomControlMessage, type ServerFrame } from "@commonair/contracts";
 import { schema, uuidv7, type Database } from "@commonair/db";
 import type { Logger } from "@commonair/observability";
+import type { ValkeyClient } from "@commonair/service";
 import { badgesFor, colorFor } from "./badges.ts";
 import type { ChannelLatency } from "./chat-latency.ts";
 import { clampMediaTs } from "./clamp.ts";
@@ -19,7 +20,7 @@ import { ChatControlMessage, type ChatFanout, parseJson } from "./control.ts";
 import type { Directory } from "./directory.ts";
 import { chatMessageEvent, isInlineEvent } from "./events.ts";
 import type { Limiter } from "./limiter.ts";
-import type { FilterRunner } from "@commonair/chat-filter";
+import { type FilterRunner, inlineFilterRunner } from "@commonair/chat-filter";
 import type { Metrics } from "./metrics.ts";
 import { MODERATE_SCOPE, type Moderation } from "./moderation.ts";
 import { canModerate, rankOf } from "./permissions.ts";
@@ -30,6 +31,7 @@ import type { Audience, Rooms } from "./rooms.ts";
 import { canChatHint } from "./rules.ts";
 import { type ChatSocket, sendFrame, type Writer } from "./socket.ts";
 import type { WatchGate } from "./watch-gate.ts";
+import { WatchRooms } from "./watch-rooms.ts";
 import {
   type ChannelState,
   type Identity,
@@ -72,13 +74,70 @@ export interface CoreDeps {
   filterRunner?: FilterRunner;
   latency: ChannelLatency;
   watchGate: WatchGate;
+  /** Application Valkey (key prefix applied): watch-room presence and sync (`KEYS.roomPresence`, `KEYS.roomSync`). */
+  valkey: ValkeyClient;
+  /** Builds the watch-room handler (default `WatchRooms`); tests inject a recording one. */
+  watchRooms?: WatchRoomFactory;
 }
+
+type RoomFrame<Op extends ClientFrame["op"]> = Extract<ClientFrame, { op: Op }>;
+
+/**
+ * Watch rooms (batch 7, ADR 0017): `server.ts` dispatches the `room.*` frames here and sends a
+ * non-null result back as a notice. Implemented in `watch-rooms.ts` (W3-watch-rooms).
+ */
+export interface WatchRoomHandler {
+  join(ws: ChatSocket, frame: RoomFrame<"room.join">): Promise<Rejection | null>;
+  part(ws: ChatSocket, frame: RoomFrame<"room.part">): Promise<Rejection | null>;
+  send(ws: ChatSocket, frame: RoomFrame<"room.send">): Promise<Rejection | null>;
+  sync(ws: ChatSocket, frame: RoomFrame<"room.sync">): Promise<Rejection | null>;
+  /** A valid `BUS.roomControl` message (`room.close`, `room.kick`). */
+  onControl(msg: RoomControlMessage): void;
+  /** The socket closed: leave every room it joined (`ws.data.watchRooms`). */
+  partAll(ws: ChatSocket): Promise<void>;
+  /** Shutdown. */
+  close?(): Promise<void>;
+}
+
+/**
+ * What a watch room gets from the chat service. Room chat runs the host channel's word filters
+ * (`directory.channel(slug).filters` through `filterRunner`) read only, never the channel send
+ * pipeline or its fan-out; room frames go over `BUS.room(id)` (`bus.names.room`).
+ */
+export interface WatchRoomDeps {
+  db: Database;
+  valkey: ValkeyClient;
+  bus: Bus;
+  directory: Directory;
+  limiter: Limiter;
+  filterRunner: FilterRunner;
+  frameWriter: Writer;
+  metrics: Metrics;
+  logger: Logger;
+}
+
+export type WatchRoomFactory = (deps: WatchRoomDeps) => WatchRoomHandler;
 
 const noChannel: Rejection = { code: "msg_rejected", text: "No such channel." };
 export const REQUIRES_LOGIN: Rejection = { code: "msg_requires_login", text: "You must be logged in to chat." };
 
 export class ChatCore {
-  constructor(private readonly d: CoreDeps) {}
+  /** Batch 7 watch rooms; `server.ts` dispatches the `room.*` frames and `BUS.roomControl` to it. */
+  readonly watchRooms: WatchRoomHandler;
+
+  constructor(private readonly d: CoreDeps) {
+    this.watchRooms = (d.watchRooms ?? ((deps) => new WatchRooms(deps)))({
+      db: d.db,
+      valkey: d.valkey,
+      bus: d.bus,
+      directory: d.directory,
+      limiter: d.limiter,
+      filterRunner: d.filterRunner ?? inlineFilterRunner,
+      frameWriter: d.frameWriter,
+      metrics: d.metrics,
+      logger: d.logger,
+    });
+  }
 
   // ── sending ────────────────────────────────────────────────────────────────
 

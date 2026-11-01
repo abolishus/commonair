@@ -27,6 +27,7 @@ import { moderationMetrics } from "../moderation/metrics.ts";
 import { dmcaHiddenKey } from "../dmca/objects.ts";
 import { thumbnailPrefix } from "../moderation/objects.ts";
 import { vodObjectPrefixes } from "../vod/prefixes.ts";
+import { deleteRoomData } from "./watch-rooms.ts";
 import { audit, endLiveOrRehearsal, safeErrorCode, type EndedBroadcast } from "../moderation/records.ts";
 import { publishLiveEnded } from "../moderation/t0.ts";
 
@@ -326,6 +327,8 @@ export async function completeDeletion(ctx: WorkerContext, deletionId: string): 
         "chat_messages",
         tx.delete(s.chatMessages).where(eq(s.chatMessages.userId, userId)).returning({ id: s.chatMessages.id }),
       );
+      // Batch 7 (ADR 0017): room messages and memberships go, rooms the user hosts end.
+      Object.assign(counts, await deleteRoomData(tx, userId));
       // W1: blocks in both directions (ADR 0012 decision 8); fraud flags stay (money records, ids only).
       await del(
         "user_blocks",

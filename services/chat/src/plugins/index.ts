@@ -7,9 +7,15 @@
  */
 import type { MessageMiddleware } from "../pipeline.ts";
 import { createBotMiddleware } from "./bot/index.ts";
+import { createGiveawayMiddleware } from "./giveaway.ts";
 import { noopMiddleware } from "./noop.ts";
 
+export interface PluginOptions {
+  /** `GIVEAWAYS_ENABLED` (batch 7 decision (a)); the giveaway plugin is a no-op while false. */
+  giveaways?: boolean;
+}
+
 /** A fresh set per chat service, so two services in one process never share a bot engine. */
-export function plugins(): MessageMiddleware[] {
-  return [noopMiddleware, createBotMiddleware()];
+export function plugins(opts: PluginOptions = {}): MessageMiddleware[] {
+  return [noopMiddleware, createBotMiddleware(), createGiveawayMiddleware({ enabled: opts.giveaways ?? false })];
 }

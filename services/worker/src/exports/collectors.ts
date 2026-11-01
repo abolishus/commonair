@@ -14,6 +14,8 @@
 import { schema as s, type Executor } from "@commonair/db";
 import type { EXPORT_KINDS } from "@commonair/contracts/enums";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { PORTABILITY_EXPORT_FILES } from "../portability/export.ts";
+import { WATCH_ROOM_EXPORT_FILES } from "./watch-rooms.ts";
 
 export type ExportKind = (typeof EXPORT_KINDS)[number];
 
@@ -1121,6 +1123,9 @@ export const EXPORT_FILES: readonly ExportFile[] = [
       },
     },
   },
+  // Batch 7: each unit owns its files (watch rooms: W3-watch-rooms; portability: W3-portability).
+  ...WATCH_ROOM_EXPORT_FILES,
+  ...PORTABILITY_EXPORT_FILES,
 ];
 
 export const filesFor = (kind: ExportKind) => EXPORT_FILES.filter((f) => f.kind === kind);
