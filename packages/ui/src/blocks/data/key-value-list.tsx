@@ -19,7 +19,7 @@ export function KeyValueList({ rows, dense = false, className, ...props }: KeyVa
       {rows.map((row, index) => (
         <div key={index} className="flex min-w-0 items-baseline justify-between gap-3">
           <dt className="min-w-0 text-xs text-muted-foreground">{row.term}</dt>
-          <dd className="shrink-0 text-right text-xs tabular-nums">{row.value}</dd>
+          <dd className="shrink-0 text-end text-xs tabular-nums">{row.value}</dd>
         </div>
       ))}
     </dl>

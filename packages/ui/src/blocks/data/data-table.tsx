@@ -129,7 +129,7 @@ export function DataTable<T>({
                   scope="col"
                   className={
                     (header.column.columnDef as DataTableColumn<T>).align === "numeric"
-                      ? "text-right tabular-nums"
+                      ? "text-end tabular-nums"
                       : undefined
                   }
                 >
@@ -187,7 +187,7 @@ export function DataTable<T>({
                         key={cell.id}
                         className={
                           (cell.column.columnDef as DataTableColumn<T>).align === "numeric"
-                            ? "text-right tabular-nums"
+                            ? "text-end tabular-nums"
                             : undefined
                         }
                       >

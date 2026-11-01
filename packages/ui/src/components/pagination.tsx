@@ -57,8 +57,8 @@ function PaginationPrevious({
 }: React.ComponentProps<typeof PaginationLink> & { text?: string }) {
   const messages = useUiMessages();
   return (
-    <PaginationLink aria-label={messages.previousPage} size="default" className={cn("pl-1.5!", className)} {...props}>
-      <HugeiconsIcon icon={ArrowLeft01Icon} strokeWidth={2} data-icon="inline-start" />
+    <PaginationLink aria-label={messages.previousPage} size="default" className={cn("ps-1.5!", className)} {...props}>
+      <HugeiconsIcon icon={ArrowLeft01Icon} strokeWidth={2} data-icon="inline-start" className="rtl:rotate-180" />
       <span className="hidden sm:block">{text ?? messages.previous}</span>
     </PaginationLink>
   );
@@ -71,9 +71,9 @@ function PaginationNext({
 }: React.ComponentProps<typeof PaginationLink> & { text?: string }) {
   const messages = useUiMessages();
   return (
-    <PaginationLink aria-label={messages.nextPage} size="default" className={cn("pr-1.5!", className)} {...props}>
+    <PaginationLink aria-label={messages.nextPage} size="default" className={cn("pe-1.5!", className)} {...props}>
       <span className="hidden sm:block">{text ?? messages.next}</span>
-      <HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={2} data-icon="inline-end" />
+      <HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={2} data-icon="inline-end" className="rtl:rotate-180" />
     </PaginationLink>
   );
 }

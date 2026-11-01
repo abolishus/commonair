@@ -246,7 +246,7 @@ function GuardedActionButton({ action }: { action: GuardedAction }): React.JSX.E
       >
         {action.label}
       </Button>
-      <span id={reasonId} className="max-w-48 text-right text-xs text-muted-foreground">
+      <span id={reasonId} className="max-w-48 text-end text-xs text-muted-foreground">
         {action.disabledReason}
       </span>
     </div>
