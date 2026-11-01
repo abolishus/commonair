@@ -13,6 +13,7 @@
  * as it ends a live broadcast.
  */
 import { and, eq, isNull } from "drizzle-orm";
+import { REHEARSAL_RULES } from "@commonair/contracts/enums";
 import { KEYS, MEDIA_INTERNAL_USER, mediaPath } from "@commonair/contracts/internal";
 import { schema, type Executor } from "@commonair/db";
 import type { Deps } from "../deps.ts";
@@ -26,6 +27,7 @@ export interface EndedBroadcast {
   broadcastId: string;
   slug: string;
   path: string;
+  kind: "live" | "rehearsal";
 }
 
 /** End `broadcastId` (live or rehearsal) if it is still open. Returns null when it was not. */
@@ -49,7 +51,7 @@ export async function endBroadcastInTx(
     .set({ endedAt: now })
     .where(and(eq(playbackSessions.broadcastId, b.id), isNull(playbackSessions.endedAt)));
   if (b.kind !== "rehearsal") await emit(tx, "stream.offline", c.id, broadcasterFields(c), now);
-  return { channelId: c.id, broadcastId: b.id, slug: c.slug, path: b.path };
+  return { channelId: c.id, broadcastId: b.id, slug: c.slug, path: b.path, kind: b.kind };
 }
 
 /** The channel's live broadcast, or else its open rehearsal, ended in the transaction (suspensions). */
@@ -119,6 +121,12 @@ export async function afterBroadcastEnded(deps: Deps, ended: EndedBroadcast | nu
     path: ended.path || mediaPath(ended.slug),
     at: deps.now().toISOString(),
   });
+  // An ended rehearsal's encoder reconnects on its own: refuse it for a while, so it neither
+  // rehearses again nor goes live (decision (f)).
+  if (ended.kind === "rehearsal")
+    await deps.valkey
+      .set(KEYS.rehearsalKicked(ended.channelId), "1", "EX", REHEARSAL_RULES.kickCooldownSeconds)
+      .catch(() => null);
   try {
     await kickPublisher(deps, ended.path || mediaPath(ended.slug));
   } catch (err) {

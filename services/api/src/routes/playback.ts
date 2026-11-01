@@ -67,15 +67,17 @@ export const playlistUrl = (base: string, path: string, token: string) =>
 
 /**
  * `dm` (ADR 0018 decision 1) rides only on origin tokens: callers move a data-mode session to the
- * origin before minting, and the claim schema refuses anything else.
+ * origin before minting, and the claim schema refuses anything else. `rehearsal` (`rb`, batch 6
+ * decision (f)) is carried forward on refresh for an invitee's origin token.
  */
-async function signFor(
+export async function signFor(
   deps: Deps,
   sid: string,
   channelId: string,
   path: string,
   a: Assignment,
   dataMode: number | null,
+  rehearsal?: string,
 ) {
   const iat = Math.floor(deps.now().getTime() / 1000);
   const claims: PlaybackClaims = {
@@ -86,6 +88,7 @@ async function signFor(
     src: a.source,
     ...(a.source === "relay" ? { rid: a.relayId } : {}),
     ...(dataMode !== null ? { dm: dataMode } : {}),
+    ...(rehearsal !== undefined ? { rb: rehearsal } : {}),
     iat,
     exp: iat + PLAYBACK_TOKEN_TTL_SECONDS,
   };
@@ -403,7 +406,7 @@ export const playback = {
     gate ??= await sessionGated(deps, s.broadcastId);
     if (gate && !(await confirmedAdult(deps, s.userId ?? undefined)))
       throw apiError("FORBIDDEN", "Confirm you are 18 or older to watch this stream");
-    const { token } = await signFor(deps, s.id, s.channelId, claims.path, a, dataMode);
+    const { token } = await signFor(deps, s.id, s.channelId, claims.path, a, dataMode, claims.rb);
     return {
       ok: true as const,
       token,

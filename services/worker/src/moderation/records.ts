@@ -187,6 +187,28 @@ export async function endBroadcast(tx: Executor, broadcastId: string, now: Date)
   return { broadcastId: b.id, channelId: channel.id, slug: channel.slug, path: b.path };
 }
 
+/**
+ * The channel's live broadcast, or else its open rehearsal, ended in the transaction: the
+ * worker's mirror of the API's `endLiveInTx`, so a T0 or an account deletion takes a rehearsal
+ * off air for its invitees too (decision (f)).
+ */
+export async function endLiveOrRehearsal(
+  tx: Executor,
+  channel: { id: string; liveBroadcastId: string | null },
+  now: Date,
+): Promise<EndedBroadcast | null> {
+  if (channel.liveBroadcastId) {
+    const ended = await endBroadcast(tx, channel.liveBroadcastId, now);
+    if (ended) return ended;
+  }
+  const [rehearsal] = await tx
+    .select({ id: broadcasts.id })
+    .from(broadcasts)
+    .where(and(eq(broadcasts.channelId, channel.id), eq(broadcasts.kind, "rehearsal"), isNull(broadcasts.endedAt)))
+    .limit(1);
+  return rehearsal ? endBroadcast(tx, rehearsal.id, now) : null;
+}
+
 export interface HiddenContent {
   vodIds: string[];
   clipIds: string[];

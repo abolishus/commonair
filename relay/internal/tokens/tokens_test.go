@@ -130,6 +130,19 @@ func TestVerifyPlaybackDataModeVector(t *testing.T) {
 		"dm too high": mutate(func(m map[string]any) { m["dm"] = 9000000 }),
 		"dm string":   mutate(func(m map[string]any) { m["dm"] = "1" }),
 		"dm fraction": mutate(func(m map[string]any) { m["dm"] = 111111.5 }),
+		// decision (f): a rehearsal invitee's token is origin-only and for a live path.
+		"rb on relay": mutate(func(m map[string]any) {
+			delete(m, "dm")
+			m["src"] = "relay"
+			m["rid"] = "01890000-0000-7000-8000-000000000003"
+			m["rb"] = "01890000-0000-7000-8000-00000000000b"
+		}),
+		"rb on vod": mutate(func(m map[string]any) {
+			delete(m, "dm")
+			m["path"] = "vod/01890000-0000-7000-8000-000000000009"
+			m["rb"] = "01890000-0000-7000-8000-00000000000b"
+		}),
+		"rb not a uuid": mutate(func(m map[string]any) { m["rb"] = "nope" }),
 	}
 	for name, tok := range bad {
 		t.Run(name, func(t *testing.T) {

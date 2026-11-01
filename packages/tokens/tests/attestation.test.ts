@@ -173,12 +173,18 @@ describe("hash helpers", () => {
 
   test("reasonsCommitment binds the salt and every reason", async () => {
     const base = await reasonsCommitment(v.reasons.salt, v.reasons.breakdown);
-    expect(await reasonsCommitment(v.reasons.salt, { ...v.reasons.breakdown, fetch_pattern: 1_201 })).not.toBe(base);
+    expect(await reasonsCommitment(v.reasons.salt, { ...v.reasons.breakdown, playback_pattern: 1_201 })).not.toBe(base);
     expect(await reasonsCommitment(newReasonsSalt(), v.reasons.breakdown)).not.toBe(base);
     const reordered = Object.fromEntries(Object.entries(v.reasons.breakdown).reverse());
     expect(await reasonsCommitment(v.reasons.salt, reordered)).toBe(base);
-    await expect(reasonsCommitment(v.reasons.salt, { a: 1.5 })).rejects.toThrow(/not a non-negative integer/);
-    await expect(reasonsCommitment(v.reasons.salt, { a: -1 })).rejects.toThrow(/not a non-negative integer/);
+    await expect(reasonsCommitment(v.reasons.salt, { other: 1.5 })).rejects.toThrow(/not a non-negative integer/);
+    await expect(reasonsCommitment(v.reasons.salt, { other: -1 })).rejects.toThrow(/not a non-negative integer/);
+    // One spelling per breakdown: categories only, zeros left out.
+    await expect(reasonsCommitment(v.reasons.salt, { datacenter_asn: 5 } as never)).rejects.toThrow(
+      /not an exclusion category/,
+    );
+    await expect(reasonsCommitment(v.reasons.salt, { ...v.reasons.breakdown, other: 0 })).rejects.toThrow(/is 0/);
+    expect(await reasonsCommitment(v.reasons.salt, {})).toMatch(/^[0-9a-f]{64}$/);
     await expect(reasonsCommitment(toB64url(new Uint8Array(8)), {})).rejects.toThrow(/16 bytes/);
     expect(fromB64url(newReasonsSalt())).toHaveLength(32);
   });
@@ -186,7 +192,7 @@ describe("hash helpers", () => {
   test("thresholdsHash changes with the ruleset version and any threshold", async () => {
     const t = v.thresholds;
     expect(await thresholdsHash(t.rulesetVersion + 1, t.thresholds)).not.toBe(t.hash);
-    expect(await thresholdsHash(t.rulesetVersion, { ...t.thresholds, minWatchSeconds: 61 })).not.toBe(t.hash);
+    expect(await thresholdsHash(t.rulesetVersion, { ...t.thresholds, maxSessionsPerDevice: 4 })).not.toBe(t.hash);
   });
 
   test("base64url helpers round-trip and are strict", () => {

@@ -57,7 +57,9 @@ Do not look outside the repository.
    `store.extra.media` with:
    - `vodsByChannel` and `clipsByChannel` (id lists);
    - `recordedWindow` (`{ channelId, start, end }[]`);
-   - `liveWindow`, set while each recording is live, if seed-interact or seed-safety ask for it.
+   - `liveWindow`, set while each recording is live, if seed-interact or seed-safety ask for it;
+   - `vodId` and `clipId`: one ready public VOD and one clip of it (batch 6 §5), which the W2
+     `SEED_ROUTES` rows (`harness/src/seed/routes.ts`, the VOD and clip watch pages) read.
 
 3. **Simulcast.** Give streamer1 `simulcast_targets` that point at a local RTMP sink only, never
    a real platform. Add one `simulcast_sessions` row from a recording run, if the sink can be

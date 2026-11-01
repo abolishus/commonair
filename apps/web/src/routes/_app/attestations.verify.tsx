@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { createFileRoute } from "@tanstack/react-router";
-import { NotFoundState } from "../../components/money/not-found.tsx";
+import { AttestationVerifier } from "../../components/attestations/verifier.tsx";
 
 /**
  * `/attestations/verify`: the public verifier for signed audience attestations (ADR 0014; the
  * API's `integrity.attestations.verify` and `/.well-known/commonair-attestation`). Public, no
- * session. Placeholder: W2b-attestations fills it through `components/attestations/**`.
+ * session. The page is `AttestationVerifier`, which W2b-attestations owns.
  */
 export const Route = createFileRoute("/_app/attestations/verify")({
-  component: () => <NotFoundState />,
+  component: AttestationVerifier,
 });

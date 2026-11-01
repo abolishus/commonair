@@ -70,6 +70,25 @@ describe("MediaSessionHooks", () => {
     expect(written).toBe(true);
   });
 
+  test("onStart gets the session's abort signal; a stuck start settles by timeout", async () => {
+    const hooks = new MediaSessionHooks(logger);
+    let aborted = false;
+    hooks.register({
+      name: "stuck",
+      onStart: (_s, { signal }) =>
+        new Promise<void>(() => {
+          signal.addEventListener("abort", () => void (aborted = true));
+        }),
+      onEnd: async () => {},
+    });
+    const ctl = new AbortController();
+    const started = hooks.start(session, { signal: ctl.signal });
+    ctl.abort();
+    expect(aborted).toBe(true);
+    expect(await MediaSessionHooks.settled(started, 20)).toBe(false);
+    expect(await MediaSessionHooks.settled(Promise.resolve(), 20)).toBe(true);
+  });
+
   test("refuses a second hook with the same name", () => {
     const hooks = new MediaSessionHooks();
     hooks.register({ name: "x", onStart: async () => {}, onEnd: async () => {} });

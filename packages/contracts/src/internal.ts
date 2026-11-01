@@ -269,6 +269,20 @@ export const KEYS = {
    * `mediaReady` starts a `rehearsal` broadcast instead of a live one.
    */
   rehearsalArmed: (channelId: string) => `rehearsal:armed:${channelId}`,
+  /**
+   * Decision (f): STRING JSON `RehearsalArm`, set by `mediaReady` when a rehearsal starts, `EX
+   * REHEARSAL_RULES.maxDurationSeconds + sessionGraceSeconds`. `mediaAuth` treats it like an arm, so
+   * a reconnect after the arm's TTL still rehearses and never goes live. `stream.rehearsal.disarm`
+   * deletes it with the arm (W2-rehearsal); a publish after that is live.
+   */
+  rehearsalSession: (channelId: string) => `rehearsal:session:${channelId}`,
+  /**
+   * Decision (f): STRING `"1"`, `EX REHEARSAL_RULES.kickCooldownSeconds`, set by whoever ends a
+   * rehearsal with a kick (the W2-rehearsal cap and `disarm`, a moderation end: `afterBroadcastEnded`)
+   * before kicking. While it exists `mediaAuth` refuses the channel's publishes, so the encoder's
+   * automatic reconnect neither rehearses again nor goes live.
+   */
+  rehearsalKicked: (channelId: string) => `rehearsal:kicked:${channelId}`,
   /** W2-rehearsal: STRING JSON report (worker writes every 5 s, the API reads), TTL 24 h. */
   rehearsalReport: (broadcastId: string) => `rehearsal:report:${broadcastId}`,
   /** W2 test hook: set while the 24 h analytics display delay is bypassed for the channel. */

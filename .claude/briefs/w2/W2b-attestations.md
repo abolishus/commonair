@@ -53,7 +53,12 @@ pattern). Anything else is a **contract request** with the exact diff.
   entry per broadcast, rehearsals refused).
 - `INTEGRITY_SIGNING_KEY` is on the **worker only** (decision (l)): the API never imports it, signs,
   or loads the env schema that holds it.
-- `integrity.attestations.{list, get, share}`, the public verifier route,
+- `integrity.attestations.{list, get, share, shareLinks.{list, revoke}, bundle}` (`share` returns an
+  `AttestationShareLink` with its `id`; `bundle` is the public window proof: entries with
+  `breakdown`/`salt` null plus the key history), the public verifier route (exactly one of
+  `envelope` or `bundle`), the web stub `components/attestations/verifier.tsx` mounted on
+  `/attestations/verify`, the committed breakdown rule in `@commonair/tokens/attestation`
+  (`EXCLUSION_CATEGORIES` keys, values above 0 only; `reasonsCommitment` refuses anything else),
   `/.well-known/commonair-attestation`, event `integrity.attestation.appended`, the rollup's
   `analytics.rollup.ready` and its tables.
 

@@ -476,6 +476,16 @@ export const REHEARSAL_RULES = {
   maxDurationSeconds: 1800,
   maxInvitees: 5,
   vodKeepSeconds: 86_400,
+  /**
+   * `KEYS.rehearsalSession` outlives the cap by this much, so a reconnect after the arm lapsed (a
+   * network drop past `armTtlSeconds`) still rehearses instead of going publicly live.
+   */
+  sessionGraceSeconds: 300,
+  /**
+   * `KEYS.rehearsalKicked`: after a rehearsal is ended by a kick (the cap, `disarm`, a moderation
+   * end), the encoder's automatic reconnect is refused for this long.
+   */
+  kickCooldownSeconds: 120,
 } as const;
 /** Which revenue a split version covers (ADR 0013 decision 8). `all` covers both. */
 export const SPLIT_BASES = ["tips", "subs", "all"] as const;

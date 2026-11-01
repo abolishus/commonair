@@ -227,6 +227,33 @@ describe("analytics, attestations and the enforcement report", () => {
   test("the well-known key history sits at its fixed path", () => {
     expect(contract.integrity.keys.list["~orpc"].route.path).toBe("/.well-known/commonair-attestation");
   });
+
+  test("verify takes exactly one of an envelope or a bundle", () => {
+    const v = input(contract.integrity.attestations.verify);
+    const env = { payload: "p", signature: "s" };
+    expect(v.safeParse({}).success).toBe(false);
+    expect(v.safeParse({ envelope: env, bundle: [env] }).success).toBe(false);
+    expect(v.safeParse({ envelope: env }).success).toBe(true);
+    expect(v.safeParse({ bundle: [env] }).success).toBe(true);
+  });
+
+  test("a compromised kid is a derived kid, and the window bundle is public", () => {
+    const c = input(contract.integrity.keys.compromise);
+    expect(c.safeParse({ kid: "A".repeat(22), reason: "leak" }).success).toBe(true);
+    expect(c.safeParse({ kid: "short", reason: "leak" }).success).toBe(false);
+    const b = contract.integrity.attestations.bundle["~orpc"];
+    expect(b.meta.access).toBe("public");
+    expect(input(contract.integrity.attestations.bundle).parse({ channel: "abc" })).toEqual({
+      channel: "abc",
+      fromSeq: 1,
+      limit: 100,
+    });
+    for (const p of [
+      contract.integrity.attestations.shareLinks.list,
+      contract.integrity.attestations.shareLinks.revoke,
+    ])
+      expect(p["~orpc"].route.path).toMatch(/^\/channels\/\{channel\}\/attestations\/share-links/);
+  });
 });
 
 describe("internal", () => {

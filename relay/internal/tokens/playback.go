@@ -48,7 +48,10 @@ type PlaybackClaims struct {
 	// RID is empty unless Src is "relay".
 	RID string
 	// DM is the data-mode ceiling in bit/s: 0 when absent; set only on origin live tokens (ADR 0018).
-	DM  int64
+	DM int64
+	// RB is the rehearsal broadcast id of an invitee's token (batch 6 decision (f)): empty when
+	// absent; set only on origin tokens for a live path, so every relay refuses it.
+	RB  string
 	IAT int64
 	EXP int64
 }
@@ -130,6 +133,15 @@ func parseClaims(b []byte) (PlaybackClaims, error) {
 			return c, ErrMalformed
 		}
 		if c.Src != "origin" || strings.HasPrefix(c.Path, "vod/") || strings.HasPrefix(c.Path, "dvr/") {
+			return c, ErrMalformed
+		}
+	}
+	// The contract's third refine (decision (f)): rb only on origin tokens for a live path.
+	if rb, present := raw["rb"]; present {
+		if c.RB, err = jsonString(rb); err != nil || !IsUUID(c.RB) {
+			return c, ErrMalformed
+		}
+		if c.Src != "origin" || !strings.HasPrefix(c.Path, "live/") {
 			return c, ErrMalformed
 		}
 	}

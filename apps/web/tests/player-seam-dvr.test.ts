@@ -196,6 +196,17 @@ describe("enterDvr / exitDvr (hls.js)", () => {
     await c.stop();
   });
 
+  it("turning data mode on cancels a DVR load still pending", async () => {
+    const { c, hls } = await hlsSession();
+    const entering = c.enterDvr(DVR);
+    c.setDataMode(500_000);
+    hls.emit(DvrHls.Events.LEVEL_LOADED, LEVEL);
+    expect(await entering).toBe(false);
+    expect(c.playbackMode()).toBe("live");
+    expect(hls.loadSource).toHaveBeenLastCalledWith(LIVE);
+    await c.stop();
+  });
+
   it("refuses in data mode, and turning data mode on leaves DVR", async () => {
     const { c, hls } = await hlsSession();
     const entering = c.enterDvr(DVR);

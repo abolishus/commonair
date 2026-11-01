@@ -360,6 +360,14 @@ describe("filters and middleware", () => {
     expect(dropped.ok ? null : dropped.rejection).toEqual({ code: "msg_rejected", text: "nope" });
   });
 
+  test("middlewares learn a dry run, so they can skip side effects", async () => {
+    const flags: (boolean | undefined)[] = [];
+    const probe: MessageMiddleware = { name: "probe", process: async (ctx) => (flags.push(ctx.dryRun), "continue") };
+    await runSendPipeline(deps([probe]), input({ body: "a" }));
+    await runSendPipeline(deps([probe]), { ...input({ body: "b" }), dryRun: true });
+    expect(flags).toEqual([undefined, true]);
+  });
+
   test("a throwing middleware is skipped, not fatal", async () => {
     const broken: MessageMiddleware = {
       name: "broken",

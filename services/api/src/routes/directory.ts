@@ -27,7 +27,7 @@ import { decodeCursor, encodeCursor, isOffsetCursor } from "../lib/cursor.ts";
 import { notFound } from "../lib/errors.ts";
 import { os } from "../lib/orpc.ts";
 import { discoveryRanking } from "../lib/settings.ts";
-import { viewerCounts } from "../lib/viewers.ts";
+import { catchingUpCounts, viewerCounts } from "../lib/viewers.ts";
 import { confirmedAdult } from "./me.ts";
 
 const { channels, broadcasts, categories, users, follows } = schema;
@@ -67,8 +67,9 @@ async function loadLive(deps: Deps, filter?: { categorySlug?: string | undefined
   if (rows.length === 0) return [];
   const ids = rows.map((r) => r.c.id);
   const since = new Date(deps.now().getTime() - 86_400_000);
-  const [counts, momentum] = await Promise.all([
+  const [counts, catchingUp, momentum] = await Promise.all([
     viewerCounts(deps, ids),
+    catchingUpCounts(deps, ids),
     deps.db
       .select({ channelId: follows.channelId, n: sql<number>`count(*)::int` })
       .from(follows)
@@ -79,7 +80,7 @@ async function loadLive(deps: Deps, filter?: { categorySlug?: string | undefined
   return rows.map(({ c, b, cat, ownerImage }) => {
     const viewers = counts.get(c.id) ?? 0;
     const mature = b.mature || c.mature || (cat?.mature ?? false);
-    const summary = toBroadcastSummary(deps, { ...b, mature }, cat, viewers);
+    const summary = toBroadcastSummary(deps, { ...b, mature }, cat, viewers, catchingUp.get(c.id) ?? 0);
     return {
       entry: {
         channelId: c.id,
@@ -134,7 +135,8 @@ async function loadOffline(
       mature: broadcasts.mature,
     })
     .from(broadcasts)
-    .where(isNotNull(broadcasts.endedAt))
+    // A rehearsal is private (decision (f)): it never makes a channel look recently live.
+    .where(and(isNotNull(broadcasts.endedAt), eq(broadcasts.kind, "live")))
     .orderBy(broadcasts.channelId, desc(broadcasts.endedAt))
     .as("last");
   const followed = opts.followerId !== undefined;

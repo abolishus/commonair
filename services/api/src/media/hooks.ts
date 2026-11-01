@@ -16,11 +16,14 @@
  * (the `online` / `offline` live events), without simulcast. The arm is captured at auth, so an
  * arm lapsing between auth and ready still starts the rehearsal; it is not consumed (it lapses
  * after `REHEARSAL_RULES.armTtlSeconds`, or `stream.rehearsal.disarm` deletes it), so a reconnect
- * inside the TTL starts another rehearsal rather than going live.
+ * inside the TTL starts another rehearsal rather than going live. A started rehearsal also writes
+ * `KEYS.rehearsalSession`, which outlives the cap: a reconnect after the arm lapsed still
+ * rehearses. After a rehearsal is ended by a kick, `KEYS.rehearsalKicked` refuses the encoder's
+ * automatic reconnect for a while, so it neither rehearses again nor goes publicly live.
  */
 import { and, eq, isNull } from "drizzle-orm";
 import { KEYS, MediaMtxAuthRequest, MediaReadyHook, mediaPath, RehearsalArm } from "@commonair/contracts/internal";
-import type { INGEST_PROTOCOLS } from "@commonair/contracts/enums";
+import { type INGEST_PROTOCOLS, REHEARSAL_RULES } from "@commonair/contracts/enums";
 import { schema } from "@commonair/db";
 import { hmacHex, sha256Hex } from "@commonair/tokens";
 import type { Deps } from "../deps.ts";
@@ -39,6 +42,13 @@ const endedSource = (path: string, sourceId: string) => `media:ended:${path}:${s
 /** The rehearsal arm the latest authorized publish saw (JSON `RehearsalArm`); absent = live. */
 const publishRehearsal = (slug: string) => `media:publish-rehearsal:${slug}`;
 const MARKER_TTL_SECONDS = 600;
+const SESSION_TTL_SECONDS = REHEARSAL_RULES.maxDurationSeconds + REHEARSAL_RULES.sessionGraceSeconds;
+
+/** The arm a publish of this channel rehearses under: the arm itself, else a started rehearsal's session. */
+async function currentArm(deps: Deps, channelId: string, ownerId: string): Promise<RehearsalArm | null> {
+  const [armed, session] = await deps.valkey.mget(KEYS.rehearsalArmed(channelId), KEYS.rehearsalSession(channelId));
+  return parseArm(armed ?? null, ownerId) ?? parseArm(session ?? null, ownerId);
+}
 
 /** A stored rehearsal arm, or null (absent, unreadable, or armed by someone other than the owner). */
 function parseArm(raw: string | null, ownerId: string): RehearsalArm | null {
@@ -77,6 +87,11 @@ export async function mediaAuth(deps: Deps, body: unknown): Promise<number> {
     .where(eq(channels.slug, plan.slug))
     .limit(1);
   if (!row) return 401;
+  // A rehearsal just ended by a kick: refuse the encoder's automatic reconnect (decision (f)).
+  if (await deps.valkey.exists(KEYS.rehearsalKicked(row.channel.id))) {
+    deps.logger.info("media publish refused", { channelId: row.channel.id, reason: "rehearsal_kicked" });
+    return 401;
+  }
   const [key] = await deps.db
     .select({ id: streamKeys.id })
     .from(streamKeys)
@@ -97,7 +112,7 @@ export async function mediaAuth(deps: Deps, body: unknown): Promise<number> {
   if (ok && key) {
     await deps.valkey.set(publishKey(plan.slug), key.id, "EX", MARKER_TTL_SECONDS);
     // Rehearsal gate: the normal key, while armed, publishes a rehearsal (mediaReady reads this).
-    const arm = parseArm(await deps.valkey.get(KEYS.rehearsalArmed(row.channel.id)), row.channel.ownerId);
+    const arm = await currentArm(deps, row.channel.id, row.channel.ownerId);
     if (arm) await deps.valkey.set(publishRehearsal(plan.slug), JSON.stringify(arm), "EX", MARKER_TTL_SECONDS);
     else await deps.valkey.del(publishRehearsal(plan.slug));
     // Same scheme (and canonical address form) as playback_sessions.ip_hash, so integrity can exclude the streamer's own
@@ -129,8 +144,10 @@ export async function mediaReady(deps: Deps, body: unknown): Promise<number> {
       const [current] = await tx.select().from(broadcasts).where(eq(broadcasts.id, c.liveBroadcastId));
       if (current && !current.endedAt) return null; // duplicate ready: already live
     }
-    const arm = parseArm(authArm ?? (await deps.valkey.get(KEYS.rehearsalArmed(c.id))), c.ownerId);
+    const arm = parseArm(authArm, c.ownerId) ?? (await currentArm(deps, c.id, c.ownerId));
     if (arm) {
+      // A pointer to an ended live broadcast would make not-ready miss this rehearsal.
+      if (c.liveBroadcastId) await tx.update(channels).set({ liveBroadcastId: null }).where(eq(channels.id, c.id));
       const [open] = await tx
         .select({ id: broadcasts.id })
         .from(broadcasts)
@@ -165,7 +182,7 @@ export async function mediaReady(deps: Deps, body: unknown): Promise<number> {
           ),
         );
       // No liveBroadcastId and no stream.online: nothing outside the rehearsal sees it.
-      return { channel: c, broadcast: b };
+      return { channel: c, broadcast: b, arm };
     }
     const [b] = await tx
       .insert(broadcasts)
@@ -190,8 +207,15 @@ export async function mediaReady(deps: Deps, body: unknown): Promise<number> {
       { ...broadcasterFields(c), id: b.id, type: "live", started_at: now.toISOString() },
       now,
     );
-    return { channel: c, broadcast: b };
+    return { channel: c, broadcast: b, arm: null };
   });
+  if (started?.arm)
+    await deps.valkey.set(
+      KEYS.rehearsalSession(started.channel.id),
+      JSON.stringify(started.arm),
+      "EX",
+      SESSION_TTL_SECONDS,
+    );
   if (started)
     await publishLive(deps, {
       type: "online",
@@ -216,8 +240,16 @@ export async function mediaNotReady(deps: Deps, body: unknown): Promise<number> 
   const ended = await deps.db.transaction(async (tx) => {
     const [c] = await tx.select().from(channels).where(eq(channels.slug, slug)).for("update");
     if (!c) return null;
-    if (!c.liveBroadcastId) {
-      // A rehearsal ends quietly: no stream.offline (decision (f)).
+    const [b] = c.liveBroadcastId
+      ? await tx
+          .update(broadcasts)
+          .set({ endedAt: now })
+          .where(and(eq(broadcasts.id, c.liveBroadcastId), isNull(broadcasts.endedAt)))
+          .returning()
+      : [];
+    if (c.liveBroadcastId) await tx.update(channels).set({ liveBroadcastId: null }).where(eq(channels.id, c.id));
+    if (!b) {
+      // Nothing live (or only a stale pointer): a rehearsal ends quietly, no stream.offline (decision (f)).
       const [r] = await tx
         .update(broadcasts)
         .set({ endedAt: now })
@@ -230,13 +262,6 @@ export async function mediaNotReady(deps: Deps, body: unknown): Promise<number> 
         .where(and(eq(playbackSessions.broadcastId, r.id), isNull(playbackSessions.endedAt)));
       return { channel: c, broadcast: r };
     }
-    const [b] = await tx
-      .update(broadcasts)
-      .set({ endedAt: now })
-      .where(and(eq(broadcasts.id, c.liveBroadcastId), isNull(broadcasts.endedAt)))
-      .returning();
-    await tx.update(channels).set({ liveBroadcastId: null }).where(eq(channels.id, c.id));
-    if (!b) return null;
     await tx
       .update(playbackSessions)
       .set({ endedAt: now })

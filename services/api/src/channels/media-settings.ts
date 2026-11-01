@@ -62,7 +62,11 @@ export async function mediaSettingsOf(deps: Deps, c: ChannelRow): Promise<MediaS
   return {
     captions: captionsSettingsOf(c),
     captionsInstanceDefault: await captionsInstanceDefault(deps),
-    dvr: { enabled: c.dvrEnabled, windowSeconds: clampDvrWindow(c.dvrWindowSeconds, cap) },
+    // A cap under the column's floor turns DVR off instance-wide, whatever the channel chose.
+    dvr: {
+      enabled: c.dvrEnabled && cap >= DVR_MIN_WINDOW_SECONDS,
+      windowSeconds: clampDvrWindow(c.dvrWindowSeconds, Math.max(cap, DVR_MIN_WINDOW_SECONDS)),
+    },
     dvrMaxWindowSeconds: cap,
   };
 }

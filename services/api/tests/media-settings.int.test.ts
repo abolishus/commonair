@@ -82,6 +82,17 @@ describe("media settings", () => {
     }
   });
 
+  test("a cap under a minute turns DVR off instance-wide", async () => {
+    const before = env().DVR_MAX_WINDOW_SECONDS;
+    env().DVR_MAX_WINDOW_SECONDS = 0;
+    try {
+      const r = await owner.client.call<Settings>("GET", url());
+      expect(r.body).toMatchObject({ dvr: { enabled: false, windowSeconds: 60 }, dvrMaxWindowSeconds: 0 });
+    } finally {
+      env().DVR_MAX_WINDOW_SECONDS = before;
+    }
+  });
+
   test("an unsafe mask pattern is refused and nothing changes", async () => {
     const r = await owner.client.call<{ data?: { requirement?: string } }>("PATCH", url(), {
       captions: { maskWords: ["(a+)+$"] },

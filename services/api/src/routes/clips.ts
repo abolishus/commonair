@@ -96,6 +96,8 @@ async function clipSource(
       .limit(1);
     if (!row || !vodShown(await viewerAudience(deps, caller, channel), row.v, channel, row.b.restrictedAt))
       throw notFound("VOD not found");
+    // A rehearsal is never published, a clip of it included (decisions (f), (g)).
+    if (row.b.kind === "rehearsal") throw precondition("rehearsal", "A rehearsal cannot be clipped");
     if (row.v.status !== "ready") throw precondition("vod_ready", "The VOD is not ready yet");
     const start = input.startOffset ?? 0;
     if (start + input.durationSeconds > row.v.durationSeconds)

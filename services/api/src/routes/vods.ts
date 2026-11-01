@@ -32,7 +32,7 @@ import { signPlaybackToken } from "@commonair/tokens";
 import type { Deps } from "../deps.ts";
 import { decodeCursor, encodeCursor, isKeyCursor, pageOf } from "../lib/cursor.ts";
 import { channelBySlug, iso, isoOrNull, mediaUrl } from "../lib/dto.ts";
-import { badRequest, notFound } from "../lib/errors.ts";
+import { badRequest, notFound, precondition } from "../lib/errors.ts";
 import { channelAuthority, type Caller, type ChannelRole } from "../lib/access.ts";
 import { os, requireCaller } from "../lib/orpc.ts";
 import { audit } from "../events/audit.ts";
@@ -206,6 +206,9 @@ export const vods = {
     if (title === "") throw badRequest("The title cannot be blank");
     const set: Partial<typeof vodsT.$inferInsert> = {};
     if (title !== undefined) set.title = title;
+    // A rehearsal's recording stays private until it expires (decisions (f), (g)).
+    if (input.visibility !== undefined && input.visibility !== "private" && row.kind === "rehearsal")
+      throw precondition("rehearsal", "A rehearsal recording stays private");
     if (input.visibility !== undefined) set.visibility = input.visibility;
     const around = surroundings(row.channel, row.restrictedAt);
     if (Object.keys(set).length === 0) return toVod(deps, row.v, row.channel.slug, false, around);
@@ -288,7 +291,7 @@ const surroundings = (channel: { id: string; suspendedAt: Date | null }, restric
  */
 async function managedVod(deps: Deps, caller: Caller, id: string) {
   const [row] = await deps.db
-    .select({ v: vodsT, channel: channels, restrictedAt: broadcasts.restrictedAt })
+    .select({ v: vodsT, channel: channels, restrictedAt: broadcasts.restrictedAt, kind: broadcasts.kind })
     .from(vodsT)
     .innerJoin(broadcasts, eq(broadcasts.id, vodsT.broadcastId))
     .innerJoin(channels, eq(channels.id, vodsT.channelId))

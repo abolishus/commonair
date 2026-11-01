@@ -30,6 +30,16 @@ export const ATTESTATION_ALGORITHM = "Ed25519";
 /** Mirrors `ATTESTATION_KINDS` in `@commonair/contracts/enums` (batch 6 decision (r)); not imported, see above. */
 export const ATTESTATION_KINDS = ["broadcast", "supersede", "reissue"] as const;
 export type AttestationKind = (typeof ATTESTATION_KINDS)[number];
+/** Mirrors `EXCLUSION_CATEGORIES` in `@commonair/contracts/enums` (decision (k)); the breakdown's only keys. */
+export const EXCLUSION_CATEGORIES = [
+  "datacenter",
+  "privacy_relay",
+  "concurrency",
+  "automation",
+  "playback_pattern",
+  "other",
+] as const;
+export type ExclusionCategory = (typeof EXCLUSION_CATEGORIES)[number];
 
 const HEX64 = /^[0-9a-f]{64}$/;
 const KID = /^[A-Za-z0-9_-]{22}$/;
@@ -107,7 +117,7 @@ export interface AttestationKey {
   algorithm: typeof ATTESTATION_ALGORITHM;
   /** Raw 32-byte Ed25519 public key, base64url. */
   publicKey: string;
-  firstUsedAt: string | null;
+  firstUsedAt: string;
   retiredAt: string | null;
   /** Set: every signature by this kid is rejected, whatever its date (a stolen key can backdate). */
   compromisedAt: string | null;
@@ -216,14 +226,26 @@ export function newReasonsSalt(): string {
 
 /**
  * `reasonsCommitment`: hex SHA-256 over the raw salt bytes followed by the UTF-8 `stableJson` of
- * the per-reason breakdown (reason → excluded viewer-seconds, integers). The salt and breakdown
- * are revealed only to the owner or through a share link, which checks them against this.
+ * the per-category breakdown (`EXCLUSION_CATEGORIES` key → excluded viewer-seconds, integers).
+ * The salt and breakdown are revealed only to the owner or through a share link, which checks them
+ * against this.
+ *
+ * One breakdown has one spelling: only the categories with a value above 0 are present (an empty
+ * object when nothing was excluded), so an unknown key or a zero is refused rather than hashed.
  */
-export async function reasonsCommitment(salt: string, breakdown: Readonly<Record<string, number>>): Promise<string> {
+export async function reasonsCommitment(
+  salt: string,
+  breakdown: Readonly<Partial<Record<ExclusionCategory, number>>>,
+): Promise<string> {
   const saltBytes = fromB64url(salt);
   if (saltBytes.length < 16) throw new Error("reasons salt must be at least 16 bytes");
-  for (const [reason, seconds] of Object.entries(breakdown))
-    if (!figure.safeParse(seconds).success) throw new Error(`breakdown "${reason}" is not a non-negative integer`);
+  for (const [category, seconds] of Object.entries(breakdown)) {
+    if (!(EXCLUSION_CATEGORIES as readonly string[]).includes(category))
+      throw new Error(`breakdown "${category}" is not an exclusion category`);
+    if (seconds === undefined) continue;
+    if (!figure.safeParse(seconds).success) throw new Error(`breakdown "${category}" is not a non-negative integer`);
+    if (seconds === 0) throw new Error(`breakdown "${category}" is 0: leave zero categories out`);
+  }
   const body = enc.encode(stableJson(breakdown));
   const bytes = new Uint8Array(saltBytes.length + body.length);
   bytes.set(saltBytes, 0);

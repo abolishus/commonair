@@ -51,6 +51,21 @@ Anything else is a **contract request** with the exact diff.
 - The gate (decision (f)): `mediaAuth` accepts the normal key while `KEYS.rehearsalArmed(channelId)`
   exists; `mediaReady` inserts `kind = 'rehearsal'`, sets no `liveBroadcastId`, writes no
   `stream.online`; `mediaDone` no `stream.offline`; simulcast skipped. You build on it, never edit it.
+- Reconnects (contract-step review fix): `mediaReady` writes `KEYS.rehearsalSession(channelId)`
+  (the arm, TTL cap + `REHEARSAL_RULES.sessionGraceSeconds`) and `mediaAuth` treats it as an arm,
+  so a reconnect after the arm lapsed still rehearses. **`disarm` must delete it with the arm.**
+  Whoever ends a rehearsal with a kick sets `KEYS.rehearsalKicked(channelId)` (`EX
+  REHEARSAL_RULES.kickCooldownSeconds`) **before** kicking, and `mediaAuth` refuses the channel's
+  publishes while it exists: your cap kick and `disarm` must set it (the API's
+  `afterBroadcastEnded` already does for moderation ends).
+- Invitee tokens (contract-step review fix, closes most of contract request 1): `PlaybackClaims.rb`
+  (the rehearsal broadcast id, origin-only, `live/` path; mirrored in the relay's Go parser). The
+  origin serves `live/<slug>` for an `rb` token from that open rehearsal only
+  (`ChannelDirectory.lookupRehearsal`); every other token, relay and CDN pull sees the channel as
+  offline. `signFor(..., rehearsal)` in `services/api/src/routes/playback.ts` mints one, and the
+  heartbeat re-mints with `rb` carried forward.
+- A rehearsal VOD stays private (`vods.update` refuses another visibility) and is never clipped
+  (`clips.create`): PRECONDITION_FAILED `rehearsal`.
 - `stream.rehearsal.{arm, disarm, status, invite, report}` shapes, events `rehearsal.armed` /
   `rehearsal.ended` (internal, never offered to apps), test ids in `w2-selectors.md`.
 - Limits (decision (g)): arm TTL 10 min, duration cap 30 min, ≤ 5 invitees who follow the

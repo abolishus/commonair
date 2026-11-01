@@ -37,14 +37,23 @@ export async function attestationVectors() {
   const reasons = {
     // 32 fixed bytes (0x00..0x1f), base64url.
     salt: toB64url(Uint8Array.from({ length: 32 }, (_, i) => i)),
-    breakdown: { datacenter_asn: 5_400, fetch_pattern: 1_200, headless_client: 600 },
+    // Exclusion categories (decision (k)), never signal codes; zero categories are left out.
+    breakdown: { datacenter: 5_400, playback_pattern: 1_200, automation: 600 },
     commitment: "",
   };
   reasons.commitment = await reasonsCommitment(reasons.salt, reasons.breakdown);
 
   const thresholds = {
     rulesetVersion: 1,
-    thresholds: { minWatchSeconds: 60, maxSessionsPerAsn: 50, fetchRatioPermille: 800 },
+    // The seeded `integrity.thresholds` value (packages/db/src/seed.ts), the real hash input.
+    thresholds: {
+      sessionExcludeScore: 0.7,
+      followBurstPerMinute: 30,
+      relayOverReportTolerance: 0.1,
+      maxSessionsPerDevice: 3,
+      gateUnlocksPerAddress: 5,
+      gateFallbackAccountAgeDays: 7,
+    },
     hash: "",
   };
   thresholds.hash = await thresholdsHash(thresholds.rulesetVersion, thresholds.thresholds);

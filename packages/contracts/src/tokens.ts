@@ -42,6 +42,13 @@ export const PlaybackClaims = z
      * path; the origin keeps variants with BANDWIDTH ≤ dm plus the audio-only variant. Absent = off.
      */
     dm: z.number().int().min(32_000).max(8_000_000).optional(),
+    /**
+     * Rehearsal broadcast id (batch 6 decision (f)): an invitee's token from
+     * `stream.rehearsal.watch`. The origin serves `live/<slug>` for it from that open rehearsal
+     * (never the channel's live broadcast); only origin tokens for a live path carry it, so relays
+     * and the CDN never serve a rehearsal.
+     */
+    rb: z.uuid().optional(),
     iat: z.number().int(),
     exp: z.number().int(),
   })
@@ -51,6 +58,10 @@ export const PlaybackClaims = z
     // session cannot rewind; `dvr/` paths never carry `dm`.
     (c) => c.dm === undefined || (c.src === "origin" && !c.path.startsWith("vod/") && !c.path.startsWith("dvr/")),
     "dm only on origin tokens for a live path",
+  )
+  .refine(
+    (c) => c.rb === undefined || (c.src === "origin" && c.path.startsWith("live/")),
+    "rb only on origin tokens for a live path",
   );
 export type PlaybackClaims = z.infer<typeof PlaybackClaims>;
 

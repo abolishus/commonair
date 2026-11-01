@@ -9,7 +9,7 @@ import { ChannelTheme } from "@commonair/contracts/shapes";
 import { schema } from "@commonair/db";
 import type { Deps } from "../deps.ts";
 import { instanceMediaBase } from "./media-ref.ts";
-import { viewerCount, viewerCounts } from "./viewers.ts";
+import { catchingUpCounts, viewerCount, viewerCounts } from "./viewers.ts";
 
 const { users, channels, categories, broadcasts, channelPanels, channelSubTiers } = schema;
 type UserRow = typeof users.$inferSelect;
@@ -74,6 +74,7 @@ export function toBroadcastSummary(
   b: BroadcastRow,
   category: Pick<CategoryRow, "id" | "slug" | "name"> | null,
   viewers: number,
+  catchingUp = 0,
 ): BroadcastSummary {
   return {
     id: b.id,
@@ -82,6 +83,8 @@ export function toBroadcastSummary(
     startedAt: iso(b.startedAt),
     mature: b.mature,
     viewerCount: viewers,
+    // Absent = 0 (the contract's default), so a channel without DVR viewers looks as before.
+    ...(catchingUp > 0 ? { catchingUpCount: catchingUp } : {}),
     thumbnailUrl: mediaUrl(deps, b.thumbnailKey),
   };
 }
@@ -105,7 +108,8 @@ export async function liveSummary(deps: Deps, c: ChannelRow): Promise<BroadcastS
     .where(eq(broadcasts.id, c.liveBroadcastId))
     .limit(1);
   if (!row || row.b.endedAt) return null;
-  return toBroadcastSummary(deps, row.b, row.cat, await viewerCount(deps, c.id));
+  const [viewers, catchingUp] = await Promise.all([viewerCount(deps, c.id), catchingUpCounts(deps, [c.id])]);
+  return toBroadcastSummary(deps, row.b, row.cat, viewers, catchingUp.get(c.id) ?? 0);
 }
 
 /** Live summaries for many channels at once (directory, follows, search). */
@@ -123,12 +127,14 @@ export async function liveSummaries(deps: Deps, chans: readonly ChannelRow[]): P
         live.map((c) => c.liveBroadcastId as string),
       ),
     );
-  const counts = await viewerCounts(
-    deps,
-    live.map((c) => c.id),
-  );
+  const ids = live.map((c) => c.id);
+  const [counts, catchingUp] = await Promise.all([viewerCounts(deps, ids), catchingUpCounts(deps, ids)]);
   for (const r of rows)
-    if (!r.b.endedAt) out.set(r.b.channelId, toBroadcastSummary(deps, r.b, r.cat, counts.get(r.b.channelId) ?? 0));
+    if (!r.b.endedAt)
+      out.set(
+        r.b.channelId,
+        toBroadcastSummary(deps, r.b, r.cat, counts.get(r.b.channelId) ?? 0, catchingUp.get(r.b.channelId) ?? 0),
+      );
   return out;
 }
 

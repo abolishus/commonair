@@ -18,6 +18,7 @@
  */
 import { BUS, UserControlMessage } from "@commonair/contracts/events";
 import { exportObjectKey } from "@commonair/contracts/internal";
+import { ChannelCaptionsSettings } from "@commonair/contracts/shapes";
 import { lockLegalHold, schema, type Executor } from "@commonair/db";
 import { and, asc, eq, gt, inArray, isNotNull, isNull, lte, ne, or, sql } from "drizzle-orm";
 import type { WorkerContext } from "../context.ts";
@@ -26,7 +27,7 @@ import { moderationMetrics } from "../moderation/metrics.ts";
 import { dmcaHiddenKey } from "../dmca/objects.ts";
 import { thumbnailPrefix } from "../moderation/objects.ts";
 import { vodObjectPrefixes } from "../vod/prefixes.ts";
-import { audit, endBroadcast, safeErrorCode, type EndedBroadcast } from "../moderation/records.ts";
+import { audit, endLiveOrRehearsal, safeErrorCode, type EndedBroadcast } from "../moderation/records.ts";
 import { publishLiveEnded } from "../moderation/t0.ts";
 
 const s = schema;
@@ -432,7 +433,7 @@ export async function completeDeletion(ctx: WorkerContext, deletionId: string): 
       // The user's channel: off air, content unpublished, profile pseudonymized, keys revoked.
       const [channel] = await tx.select().from(s.channels).where(eq(s.channels.ownerId, userId)).for("update");
       if (channel) {
-        if (channel.liveBroadcastId) ended = await endBroadcast(tx, channel.liveBroadcastId, now);
+        ended = await endLiveOrRehearsal(tx, channel, now);
         const vods = await tx
           .update(s.vods)
           .set({ status: "deleted", removedReason: DELETED_REASON })
@@ -532,8 +533,22 @@ export async function completeDeletion(ctx: WorkerContext, deletionId: string): 
           .where(and(eq(s.streamKeys.channelId, channel.id), isNull(s.streamKeys.revokedAt)));
         await tx
           .update(s.channels)
-          .set({ slug: pseudonym, displayName: pseudonym, title: "", description: "", theme: {}, tags: [] })
+          .set({
+            slug: pseudonym,
+            displayName: pseudonym,
+            title: "",
+            description: "",
+            theme: {},
+            tags: [],
+            // W2: the caption mask words are free text the owner typed.
+            captionsSettings: ChannelCaptionsSettings.parse({}),
+          })
           .where(eq(s.channels.id, channel.id));
+        // W2: a shared analytics link of a deleted channel stops working.
+        await tx
+          .update(s.analyticsShareLinks)
+          .set({ revokedAt: now })
+          .where(and(eq(s.analyticsShareLinks.channelId, channel.id), isNull(s.analyticsShareLinks.revokedAt)));
         // E8: the channel bot's username is derived from the old slug, so it goes with the owner's
         // identity. Its id, role and ledger rows stay (ADR 0004). Setting pseudonymized_at is what
         // lets the app role rewrite a username (0007's identity guard).

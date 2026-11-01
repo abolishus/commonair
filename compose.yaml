@@ -79,6 +79,8 @@ x-app-env: &app-env
   S3_EVIDENCE_ACCESS_KEY_ID: ""
   S3_EVIDENCE_SECRET_ACCESS_KEY: ""
   EVIDENCE_PRIVATE_KEY: ""
+  # The attestation signing key goes to the worker only (batch 6 decision (l)).
+  INTEGRITY_SIGNING_KEY: ""
   # onnxruntime-node's postinstall would fetch proprietary CUDA binaries (ADR 0008).
   ONNXRUNTIME_NODE_INSTALL: skip
 
@@ -409,6 +411,7 @@ services:
       OTEL_SERVICE_NAME: worker
       S3_EVIDENCE_ACCESS_KEY_ID: ${S3_EVIDENCE_ACCESS_KEY_ID:-}
       S3_EVIDENCE_SECRET_ACCESS_KEY: ${S3_EVIDENCE_SECRET_ACCESS_KEY:-}
+      INTEGRITY_SIGNING_KEY: ${INTEGRITY_SIGNING_KEY:-}
       MODERATION_HASHLIST_CSAM: /var/lib/commonair/moderation/csam.pdq
       MODERATION_HASHLIST_NCII: /var/lib/commonair/moderation/ncii.pdq
       MODERATION_CLASSIFIER_MODEL: /var/lib/commonair/models/model.onnx

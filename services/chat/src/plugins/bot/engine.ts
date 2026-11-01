@@ -103,7 +103,8 @@ export class BotEngine {
     const verdict = checkFilters(ctx.body, bot.config.filters, ctx.standing);
     if (!verdict) return "continue";
     const seconds = Math.min(bot.config.filters.timeoutSeconds, MAX_TIMEOUT_SECONDS);
-    if (seconds > 0) this.timeout(ctx.channel, bot, ctx.user.username, seconds, verdict.kind);
+    // A dry run (rehearsal chat simulation) only learns the verdict: nobody is timed out.
+    if (seconds > 0 && !ctx.dryRun) this.timeout(ctx.channel, bot, ctx.user.username, seconds, verdict.kind);
     return { drop: verdict.code, text: verdict.text };
   }
 

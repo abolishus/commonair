@@ -6,7 +6,10 @@
  * batch 6 decision (q)), so it keeps its own copy of the kinds. This test (which may import both)
  * keeps the copy and the API entities in step with the wire format the vectors pin.
  */
-import { ATTESTATION_KINDS as CONTRACT_KINDS } from "@commonair/contracts/enums";
+import {
+  ATTESTATION_KINDS as CONTRACT_KINDS,
+  EXCLUSION_CATEGORIES as CONTRACT_CATEGORIES,
+} from "@commonair/contracts/enums";
 import {
   AttestationEntry,
   AttestationEnvelope,
@@ -15,13 +18,22 @@ import {
 } from "@commonair/contracts/dto";
 import { describe, expect, test } from "vite-plus/test";
 import vectors from "../vectors.json" with { type: "json" };
-import { ATTESTATION_ALGORITHM, ATTESTATION_KINDS, type AttestationError } from "../src/attestation.ts";
+import {
+  ATTESTATION_ALGORITHM,
+  ATTESTATION_KINDS,
+  type AttestationError,
+  EXCLUSION_CATEGORIES,
+} from "../src/attestation.ts";
 
 const v = vectors.attestation;
 
 describe("attestation format and the contracts", () => {
   test("ATTESTATION_KINDS is the contracts enum, in order", () => {
     expect([...ATTESTATION_KINDS]).toEqual([...CONTRACT_KINDS]);
+  });
+
+  test("EXCLUSION_CATEGORIES is the contracts enum, in order", () => {
+    expect([...EXCLUSION_CATEGORIES]).toEqual([...CONTRACT_CATEGORIES]);
   });
 
   test("the signed envelopes are contract envelopes", () => {
@@ -50,6 +62,11 @@ describe("attestation format and the contracts", () => {
       salt: null,
     };
     expect(AttestationEntry.parse(entry)).toEqual(entry);
+    // The owner's view: the committed breakdown (only some categories) and its salt.
+    const owned = { ...entry, breakdown: v.reasons.breakdown, salt: v.reasons.salt };
+    expect(AttestationEntry.parse(owned)).toEqual(owned);
+    expect(AttestationEntry.parse({ ...entry, breakdown: {}, salt: v.reasons.salt }).breakdown).toEqual({});
+    expect(AttestationEntry.safeParse({ ...owned, breakdown: { datacenter_asn: 1 } }).success).toBe(false);
     expect(AttestationEntry.safeParse({ ...entry, entryHash: v.supersede.entryHash.toUpperCase() }).success).toBe(
       false,
     );

@@ -15962,7 +15962,7 @@
         },
         "revenue_splits_window": {
           "name": "revenue_splits_window",
-          "value": "\"revenue_splits\".\"ends_at\" is null or \"revenue_splits\".\"ends_at\" > \"revenue_splits\".\"starts_at\""
+          "value": "\"revenue_splits\".\"ends_at\" is null or \"revenue_splits\".\"ends_at\" >= \"revenue_splits\".\"starts_at\""
         }
       },
       "isRLSEnabled": false

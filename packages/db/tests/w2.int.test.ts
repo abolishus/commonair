@@ -259,6 +259,16 @@ describe("revenue splits (ADR 0013 decision 8)", () => {
       await refused(app.update(s.revenueSplitShares).set({ bps: 200 }).where(eq(s.revenueSplitShares.splitId, sp.id))),
     ).toBe("42501");
     await answer(sp.id, crew);
+    // Once anyone has answered, the shares are what they answered to.
+    expect(
+      await refused(
+        app.insert(s.revenueSplitShares).values({ splitId: sp.id, recipientUserId: await newUser(), bps: 100 }),
+        /answered/,
+      ),
+    ).toBe("42501");
+    expect(
+      await refused(app.delete(s.revenueSplitShares).where(eq(s.revenueSplitShares.splitId, sp.id)), /answered/),
+    ).toBe("42501");
     await accept(sp.id);
     expect(
       await refused(
@@ -353,6 +363,72 @@ describe("revenue splits (ADR 0013 decision 8)", () => {
     ).toBe("23514");
   });
 
+  test("a fixed window whose preset end has passed can still be ended at that end", async () => {
+    const { channelId } = await newChannel();
+    const crew = await newUser();
+    // A preset window that closed an hour ago (database clock).
+    const [sp] = await app
+      .insert(s.revenueSplits)
+      .values({
+        channelId,
+        version: 1,
+        basis: "all",
+        startsAt: sql`now() - interval '2 hours'`,
+        endsAt: sql`now() - interval '1 hour'`,
+      })
+      .returning();
+    await app.insert(s.revenueSplitShares).values({ splitId: sp!.id, recipientUserId: crew, bps: 500 });
+    await answer(sp!.id, crew);
+    await accept(sp!.id);
+    // Moving the end is still refused when it would be in the past; keeping it is not.
+    expect(
+      await refused(
+        app
+          .update(s.revenueSplits)
+          .set({ status: "ended", endedAt: sql`now()`, endsAt: sql`now() - interval '90 minutes'` })
+          .where(eq(s.revenueSplits.id, sp!.id)),
+      ),
+    ).toBe("23514");
+    const [ended] = await app
+      .update(s.revenueSplits)
+      .set({ status: "ended", endedAt: sql`now()` })
+      .where(eq(s.revenueSplits.id, sp!.id))
+      .returning();
+    expect(ended?.status).toBe("ended");
+  });
+
+  test("a proposal withdrawn before acceptance never applies and never counts toward the cap", async () => {
+    const { channelId } = await newChannel();
+    const [a, b] = [await newUser(), await newUser()];
+    const withdrawn = await proposal(channelId, [[a, 6000]]);
+    await app
+      .update(s.revenueSplits)
+      .set({ status: "ended", endedAt: sql`now()`, endsAt: sql`now() + interval '1 hour'` })
+      .where(eq(s.revenueSplits.id, withdrawn.id));
+    const cash = await account("asset:cash:w2-withdrawn", "asset");
+    const rev = await account("revenue:w2-withdrawn", "revenue");
+    expect(
+      await refused(
+        post({
+          kind: "payment",
+          entries: [
+            [cash, 1000],
+            [rev, -1000],
+          ],
+          metadata: { splitVersionId: withdrawn.id },
+          after: async (tx, txId) => {
+            await tx.insert(s.revenueSplitPostings).values({ ledgerTransactionId: txId, splitId: withdrawn.id });
+          },
+        }),
+        /accepted/,
+      ),
+    ).toBe("23514");
+    // 6000 withdrawn + 6000 here would exceed the cap if the withdrawn proposal counted.
+    const sp = await proposal(channelId, [[b, 6000]]);
+    await answer(sp.id, b);
+    await accept(sp.id);
+  });
+
   test("a posting link names a payment whose splitVersionId is an accepted version, and is append-only", async () => {
     const { channelId } = await newChannel();
     const crew = await newUser();
@@ -399,10 +475,12 @@ describe("revenue splits (ADR 0013 decision 8)", () => {
 
 describe("split suspense and write-offs (ADR 0013 decisions 6, 7)", () => {
   let crew = "";
+  let treasurer = "";
   let suspense = "";
   let earnings = "";
   beforeAll(async () => {
     crew = await newUser();
+    treasurer = await newUser("treasurer");
     suspense = await account(`liability:split-suspense:${crew}`, "liability");
     earnings = await account(`liability:creator:${crew}`, "liability");
     const hold = await account(`liability:creator-hold:${crew}`, "liability");
@@ -415,15 +493,17 @@ describe("split suspense and write-offs (ADR 0013 decisions 6, 7)", () => {
       ],
     });
   });
-  const audit = async (tx: Executor, txId: string) => {
+  const auditBy = (actorId: string) => async (tx: Executor, txId: string) => {
     await tx.insert(s.auditLog).values({
       actorType: "user",
-      actorId: crew,
+      actorId,
       action: "money.split.suspense.release",
       subjectType: "ledger_transaction",
       subjectId: txId,
     });
   };
+
+  const audit = (tx: Executor, txId: string) => auditBy(treasurer)(tx, txId);
 
   test("only a release or a forfeit debits split suspense, and only with its audit row", async () => {
     const entries: [string, number][] = [
@@ -432,6 +512,10 @@ describe("split suspense and write-offs (ADR 0013 decisions 6, 7)", () => {
     ];
     expect(await refused(post({ kind: "hold_release", entries, after: audit }), /release or a forfeit/)).toBe("23514");
     expect(await refused(post({ kind: "split_suspense_release", entries }), /audit_log/)).toBe("23514");
+    // The audit row must be a treasurer's or an admin's.
+    expect(
+      await refused(post({ kind: "split_suspense_release", entries, after: auditBy(crew) }), /treasurer or an admin/),
+    ).toBe("23514");
     await post({ kind: "split_suspense_release", entries, after: audit });
     await post({ kind: "split_suspense_forfeit", entries, after: audit });
   });
@@ -465,6 +549,34 @@ describe("split suspense and write-offs (ADR 0013 decisions 6, 7)", () => {
       await refused(post({ kind: "split_shortfall_writeoff", entries, after: decide(t1) }), /second treasurer/),
     ).toBe("42501");
     expect(await refused(post({ kind: "split_shortfall_writeoff", entries, after: decide(plain) }))).toBe("42501");
+    // The posting is exactly the proposal: the right accounts, the proposal's amount.
+    expect(
+      await refused(
+        post({
+          kind: "split_shortfall_writeoff",
+          entries: [
+            [writeoff, 299],
+            [receivable, -299],
+          ],
+          after: decide(t2),
+        }),
+        /proposal's amount/,
+      ),
+    ).toBe("23514");
+    const elsewhere = await account(`asset:receivable:split-shortfall:${await newUser()}`, "asset");
+    expect(
+      await refused(
+        post({
+          kind: "split_shortfall_writeoff",
+          entries: [
+            [writeoff, 300],
+            [elsewhere, -300],
+          ],
+          after: decide(t2),
+        }),
+        /proposal's amount/,
+      ),
+    ).toBe("23514");
     await post({ kind: "split_shortfall_writeoff", entries, after: decide(t2) });
     expect(
       await refused(

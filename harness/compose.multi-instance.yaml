@@ -57,6 +57,7 @@ x-multi-app-env: &app-env
   S3_EVIDENCE_ACCESS_KEY_ID: ""
   S3_EVIDENCE_SECRET_ACCESS_KEY: ""
   EVIDENCE_PRIVATE_KEY: ""
+  INTEGRITY_SIGNING_KEY: ""
   ONNXRUNTIME_NODE_INSTALL: skip
 
 x-multi-app-depends: &app-depends
@@ -160,6 +161,7 @@ services:
       OTEL_SERVICE_NAME: worker
       S3_EVIDENCE_ACCESS_KEY_ID: ${S3_EVIDENCE_ACCESS_KEY_ID:-}
       S3_EVIDENCE_SECRET_ACCESS_KEY: ${S3_EVIDENCE_SECRET_ACCESS_KEY:-}
+      INTEGRITY_SIGNING_KEY: ${INTEGRITY_SIGNING_KEY:-}
       MODERATION_CLASSIFIER_MODEL: /var/lib/commonair/models/model.onnx
       # harness/compose.trust-safety.yaml
       MODERATION_HASHLIST_CSAM: /fixtures/moderation/csam.pdq
