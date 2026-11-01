@@ -3,10 +3,11 @@
 
 /**
  * Build the publishable package into `dist/` (ADR 0027 §5, ADR 0035): `vp pack` (tsdown) bundles
- * `src/index.ts` as ESM with one bundled `index.d.ts`, inlining `@commonair/contracts` (private,
- * never published; see `stage`) and keeping `@orpc/*` and `zod` as dependencies. Then
+ * `src/index.ts` as ESM with one bundled `index.d.ts`, inlining `@commonair/contracts` and the
+ * self-contained `@commonair/tokens` files in `TOKENS_INLINE` (private, never published; see
+ * `stage`) and keeping `@orpc/*` and `zod` as dependencies. Then
  * `dist/package.json` is written from `package.json` with exact dependency versions, and the README
- * and the Apache-2.0 licence text are copied. Every contract file the bundle inlines must allow
+ * and the Apache-2.0 licence text are copied. Every contract or tokens file the bundle inlines must allow
  * Apache-2.0 in its SPDX header (dual-licensed, ADR 0035), or the build fails; only a local or
  * dry-run build may pass `--allow-unlicensed-inline` to skip that.
  *
@@ -21,6 +22,14 @@ import { SITE } from "../../config/src/site.ts";
 const PKG_DIR = path.resolve(import.meta.dirname, "..");
 const ROOT = path.resolve(PKG_DIR, "../..");
 const CONTRACTS_SRC = path.join(ROOT, "packages/contracts/src") + path.sep;
+const TOKENS_SRC = path.join(ROOT, "packages/tokens/src") + path.sep;
+
+/**
+ * The `@commonair/tokens` subpaths the SDK may import, each a self-contained, dual-licensed file
+ * (no imports but `zod`; batch 6 decision (q)) → its file under `packages/tokens/src/`. The rest
+ * of the package (Node `Buffer`, contract imports) is never inlined.
+ */
+export const TOKENS_INLINE: Readonly<Record<string, string>> = { "@commonair/tokens/attestation": "attestation.ts" };
 
 /** Dependencies the bundle keeps external (everything else is inlined). */
 export const EXTERNAL = [/^@orpc\//, /^zod(\/|$)/];
@@ -40,6 +49,8 @@ export interface BuildResult {
   inlinedCode: string[];
   /** Repository-relative contract files inlined into `index.d.ts` (types). */
   inlinedTypes: string[];
+  /** Repository-relative `packages/tokens` files inlined into either (code or types). */
+  inlinedTokens: string[];
 }
 
 /** The exact version a `catalog:` (or exact) specifier resolves to, from the root catalog. */
@@ -104,9 +115,20 @@ export function rewriteContractImports(
   );
 }
 
+const TOKENS_IMPORT = /(from\s+")(@commonair\/tokens\/[\w-]+)(")/g;
+
+/** Rewrite the `TOKENS_INLINE` imports of one source file to relative paths into `tokensDir`. */
+export function rewriteTokensImports(code: string, fromDir: string, tokensDir: string): string {
+  const prefix = posix(path.relative(fromDir, tokensDir)) || ".";
+  return code.replace(TOKENS_IMPORT, (m, a: string, spec: string, b: string) => {
+    const file = TOKENS_INLINE[spec];
+    return file === undefined ? m : `${a}${prefix}/${file}${b}`;
+  });
+}
+
 /**
- * Copy the SDK and the contract sources side by side under one directory, with the contract
- * imports rewritten to relative paths. The declaration generator (tsgo, via rolldown-plugin-dts)
+ * Copy the SDK, the contract sources and the `TOKENS_INLINE` files side by side under one
+ * directory, with their imports rewritten to relative paths. The declaration generator (tsgo, via rolldown-plugin-dts)
  * only emits files below its tsconfig's directory, so the contracts must sit below it to be
  * inlined into `index.d.ts`. The stage lives in `.cache/` (git-ignored) inside this package, so
  * `zod` and `@orpc/*` still resolve from `packages/sdk/node_modules`.
@@ -116,15 +138,27 @@ async function stage(dir: string): Promise<void> {
     exports: Record<string, string>;
   };
   const contractsDir = path.join(dir, "contracts");
+  const tokensDir = path.join(dir, "tokens");
   await cp(CONTRACTS_SRC, contractsDir, { recursive: true });
+  await mkdir(tokensDir, { recursive: true });
+  for (const file of Object.values(TOKENS_INLINE)) {
+    const code = await readFile(path.join(TOKENS_SRC, file), "utf8");
+    if (/["']@commonair\//.test(code))
+      throw new Error(`packages/tokens/src/${file}: inlined tokens files import nothing of ours`);
+    await writeFile(path.join(tokensDir, file), code);
+  }
   for (const file of await readdir(path.join(PKG_DIR, "src"), { recursive: true })) {
     if (!file.endsWith(".ts")) continue;
     const to = path.join(dir, "src", file);
-    const code = rewriteContractImports(
-      await readFile(path.join(PKG_DIR, "src", file), "utf8"),
+    const code = rewriteTokensImports(
+      rewriteContractImports(
+        await readFile(path.join(PKG_DIR, "src", file), "utf8"),
+        path.dirname(to),
+        contractsDir,
+        contractsPkg.exports,
+      ),
       path.dirname(to),
-      contractsDir,
-      contractsPkg.exports,
+      tokensDir,
     );
     if (/["']@commonair\//.test(code)) throw new Error(`${file}: an @commonair import the stage cannot rewrite`);
     await mkdir(path.dirname(to), { recursive: true });
@@ -135,7 +169,7 @@ async function stage(dir: string): Promise<void> {
     JSON.stringify({
       extends: posix(path.relative(dir, path.join(ROOT, "tsconfig.base.json"))),
       compilerOptions: { lib: ["es2024", "dom"], types: [] },
-      include: ["src", "contracts"],
+      include: ["src", "contracts", "tokens"],
     }),
   );
 }
@@ -152,14 +186,14 @@ export function filesNotAllowingApache(files: Record<string, string>): string[] 
     .sort();
 }
 
-/** Throw unless every inlined contract file may ship under Apache-2.0 (ADR 0035). */
+/** Throw unless every inlined contract or tokens file may ship under Apache-2.0 (ADR 0035). */
 export async function assertInlinedLicenses(files: string[]): Promise<void> {
   const texts: Record<string, string> = {};
   for (const f of files) texts[f] = await readFile(path.join(ROOT, f), "utf8");
   const bad = filesNotAllowingApache(texts);
   if (bad.length > 0)
     throw new Error(
-      `inlined contract files do not allow Apache-2.0 (ADR 0035 needs "AGPL-3.0-or-later OR Apache-2.0"): ${bad.join(", ")}`,
+      `inlined files do not allow Apache-2.0 (ADR 0035 needs "AGPL-3.0-or-later OR Apache-2.0"): ${bad.join(", ")}`,
     );
 }
 
@@ -169,9 +203,11 @@ export async function buildSdk(
   const outDir = path.resolve(opts.outDir ?? path.join(PKG_DIR, "dist"));
   const stageDir = path.join(PKG_DIR, ".cache", `build-${process.pid}-${Date.now()}`);
   const stagedContracts = path.join(stageDir, "contracts") + path.sep;
+  const stagedTokens = path.join(stageDir, "tokens") + path.sep;
   await rm(outDir, { recursive: true, force: true });
   const code = new Set<string>();
   const types = new Set<string>();
+  const tokens = new Set<string>();
   try {
     await stage(stageDir);
     const handle = await build({
@@ -199,6 +235,8 @@ export async function buildSdk(
           const file = id.replace(/\?.*$/, "").replace(/\.d\.ts$/, ".ts");
           if (file.startsWith(stagedContracts))
             into.add(rel(path.join(CONTRACTS_SRC, file.slice(stagedContracts.length))));
+          else if (file.startsWith(stagedTokens))
+            tokens.add(rel(path.join(TOKENS_SRC, file.slice(stagedTokens.length))));
         }
       }
       await bundle[Symbol.asyncDispose]();
@@ -211,7 +249,7 @@ export async function buildSdk(
 
   if (!opts.allowUnlicensedInline) {
     try {
-      await assertInlinedLicenses([...new Set([...code, ...types])]);
+      await assertInlinedLicenses([...new Set([...code, ...types, ...tokens])]);
     } catch (err) {
       await rm(outDir, { recursive: true, force: true });
       throw err;
@@ -229,7 +267,7 @@ export async function buildSdk(
   );
   await copyFile(path.join(PKG_DIR, "README.md"), path.join(outDir, "README.md"));
   await copyFile(path.join(ROOT, "LICENSES/Apache-2.0.txt"), path.join(outDir, "LICENSE"));
-  return { outDir, inlinedCode: [...code].sort(), inlinedTypes: [...types].sort() };
+  return { outDir, inlinedCode: [...code].sort(), inlinedTypes: [...types].sort(), inlinedTokens: [...tokens].sort() };
 }
 
 if (import.meta.main) {
@@ -240,4 +278,5 @@ if (import.meta.main) {
   console.warn(`built ${rel(result.outDir)}`);
   console.warn(`inlined contract files (code): ${result.inlinedCode.join(", ")}`);
   console.warn(`inlined contract files (types): ${result.inlinedTypes.join(", ")}`);
+  console.warn(`inlined tokens files: ${result.inlinedTokens.join(", ") || "none"}`);
 }

@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@commonair/contracts": "workspace:*",
+    "@commonair/tokens": "workspace:*",
     "@orpc/client": "catalog:",
     "@orpc/contract": "catalog:",
     "zod": "catalog:"
