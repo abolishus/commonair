@@ -122,7 +122,7 @@ jobs:
               ffmpeg: "false",
               playwright-deps: "false",
               browsers: "false",
-              model: "false",
+              moderation-model: "false",
             }
           # ffmpeg: the harness unit tests probe and run the installed one.
           - {
@@ -133,7 +133,7 @@ jobs:
               ffmpeg: "true",
               playwright-deps: "false",
               browsers: "false",
-              model: "false",
+              moderation-model: "false",
             }
           # The harness integration tests drive Chromium and WebKit; the classifier's runs the model.
           - {
@@ -144,7 +144,7 @@ jobs:
               ffmpeg: "true",
               playwright-deps: "true",
               browsers: "true",
-              model: "true",
+              moderation-model: "true",
             }
           - {
               group: relay,
@@ -154,7 +154,7 @@ jobs:
               ffmpeg: "false",
               playwright-deps: "false",
               browsers: "false",
-              model: "false",
+              moderation-model: "false",
             }
     env:
       GROUP: ${{ matrix.group }}
@@ -174,7 +174,7 @@ jobs:
           ffmpeg: ${{ matrix.ffmpeg }}
           playwright-deps: ${{ matrix.playwright-deps }}
           browsers: ${{ matrix.browsers }}
-          model: ${{ matrix.model }}
+          moderation-model: ${{ matrix.moderation-model }}
       - name: OpenTofu
         # The static group's `tofu` step (infra/tofu/check.sh); pinned and checksummed in tools.ts.
         if: matrix.group == 'static'
@@ -248,7 +248,9 @@ jobs:
           ffmpeg: "true"
           playwright-deps: "true"
           browsers: "true"
-          model: "true"
+          moderation-model: "true"
+          # Only the captions shard runs whisper (batch 6 decision (c)).
+          captions-model: ${{ matrix.shard == 'captions' && 'true' || 'false' }}
       - name: Verify
         # Above verify's own limits (platform up 25 + browsers 10 + scenario 45), so a hung
         # scenario is stopped by verify and still leaves its report and summary.

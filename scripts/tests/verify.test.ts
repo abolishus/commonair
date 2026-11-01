@@ -183,11 +183,25 @@ describe("CI verify jobs", () => {
     );
   });
 
-  test("integration and harness get the model, the browsers, their libraries and ffmpeg", () => {
+  test("integration and harness get the moderation model, the browsers, their libraries and ffmpeg", () => {
     const integration = groups.find((g) => g.group === "integration")!;
     const harnessSetup = ci.jobs.harness.steps.find((s: { uses?: string }) => s.uses?.includes("actions/setup")).with;
     for (const w of [integration, harnessSetup])
-      expect([w.model, w.browsers, w["playwright-deps"], w.ffmpeg]).toEqual(["true", "true", "true", "true"]);
+      expect([w["moderation-model"], w.browsers, w["playwright-deps"], w.ffmpeg]).toEqual([
+        "true",
+        "true",
+        "true",
+        "true",
+      ]);
+  });
+
+  // Batch 6 decision (c): only the captions shard runs whisper, so only it fetches the weights.
+  test("only the captions shard fetches the captions weights", () => {
+    const harnessSetup = ci.jobs.harness.steps.find((s: { uses?: string }) => s.uses?.includes("actions/setup")).with;
+    expect(harnessSetup["captions-model"]).toBe("${{ matrix.shard == 'captions' && 'true' || 'false' }}");
+    expect(Object.keys(FULL_SHARDS)).toContain("captions");
+    for (const g of groups) expect(g["captions-model"] ?? "false").toBe("false");
+    expect(setup.inputs["captions-model"].default).toBe("false");
   });
 
   test("unit gets ffmpeg (the harness unit tests run it); static and relay touch neither apt nor ffmpeg", () => {
@@ -207,9 +221,20 @@ describe("CI verify jobs", () => {
   test("the setup action installs what those inputs ask for, gated only on the input", () => {
     const steps = setup.runs.steps as { name?: string; if?: string; run?: string }[];
     const byRun = (r: string) => steps.find((s) => s.run?.trim() === r);
-    expect(byRun("bun scripts/fetch-model.ts")?.if).toBe("inputs.model == 'true'");
+    expect(byRun("bun scripts/fetch-model.ts")?.if).toBe("inputs.moderation-model == 'true'");
     expect(byRun("bun run --filter @commonair/harness browsers")?.if).toBe("inputs.browsers == 'true'");
     expect(steps.find((s) => s.name === "Playwright browsers cache")?.if).toBe("inputs.browsers == 'true'");
-    expect(steps.find((s) => s.name === "Moderation model cache")?.if).toBe("inputs.model == 'true'");
+    expect(steps.find((s) => s.name === "Moderation model cache")?.if).toBe("inputs.moderation-model == 'true'");
+    expect(steps.find((s) => s.name === "Captions model")?.if).toBe("inputs.captions-model == 'true'");
+    expect(steps.find((s) => s.name === "Captions model cache")?.if).toBe("inputs.captions-model == 'true'");
+  });
+
+  // Unpinned weights (CAPTIONS_MODEL.revision null) must not fail or fetch anything.
+  test("the captions fetch is a no-op until the weights are pinned", () => {
+    const steps = setup.runs.steps as { name?: string; run?: string }[];
+    const run = steps.find((s) => s.name === "Captions model")?.run ?? "";
+    expect(run).toContain("captionsModelUrl() === null");
+    expect(run).toContain("bun scripts/fetch-model.ts --model captions");
+    expect(run).toMatch(/else\n\s*echo /);
   });
 });

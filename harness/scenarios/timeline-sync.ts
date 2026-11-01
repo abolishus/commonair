@@ -16,6 +16,9 @@
  * (`src/w1/steps.ts`) and run only when named. Owned by the orchestrator: units fill their step
  * modules in `src/w1/`.
  *
+ * W2 extension (`--set w2=`, `src/w2/steps.ts`): `replay-panel` (W2-vod-watch) after the steps; it
+ * adds steps 1 and 3, whose VOD and marker messages it plays.
+ *
  * Needs `DATABASE_URL` (outbox and backdating), the ops hook (harness/compose.e6.yaml) and the
  * harness stack (harness/compose.w1.yaml).
  */
@@ -31,12 +34,18 @@ import {
 } from "../src/w1/steps.ts";
 import { stepLiveMediaTime, stepReplayExclusions, stepRetention } from "../src/w1/timeline.ts";
 import { stepForcedLatencies } from "../src/w1/timeline-web.ts";
+import { stepReplayPanel } from "../src/w2/replay.ts";
+import { type W2Extension, w2ExtensionTitle, w2Extensions, withW2Steps } from "../src/w2/steps.ts";
 
 const STEPS: Readonly<Record<TimelineStep, (run: W1Run) => Promise<void>>> = {
   1: stepLiveMediaTime,
   2: stepForcedLatencies,
   3: stepReplayExclusions,
   4: stepRetention,
+};
+
+const W2_STEPS: Readonly<Record<W2Extension<"timeline-sync">, (run: W1Run) => Promise<void>>> = {
+  "replay-panel": stepReplayPanel,
 };
 
 export default defineScenario({
@@ -48,15 +57,20 @@ export default defineScenario({
   timeoutMs: 20 * 60_000,
   async run(ctx) {
     const selected = parseTimelineSteps(ctx.param("steps", "all"));
-    const { steps, added } = withPrerequisites(selected, TIMELINE_STEP_PREREQUISITES);
+    // `--set w2=` names a pending extension; by default only merged ones run (src/w2/steps.ts).
+    const w2 = w2Extensions("timeline-sync", ctx.param("w2", ""));
+    const forW2 = withW2Steps(selected, w2.run);
+    const { steps, added } = withPrerequisites(forW2.steps, TIMELINE_STEP_PREREQUISITES);
     const via = parseVia(ctx.param("via", "web"));
-    ctx.data("steps", { selected, run: steps, addedPrerequisites: added });
+    ctx.data("steps", { selected, run: steps, addedPrerequisites: [...forW2.added, ...added].sort((a, b) => a - b) });
+    ctx.data("w2.extensions", w2);
     ctx.data("via", via);
-    if (steps.length === 0) {
+    if (steps.length === 0 && w2.run.length === 0) {
       ctx.skipStep("timeline-sync", "every step is pending (no W1 unit merged yet); name one with --set steps=");
       return;
     }
     const run = await newW1Run(ctx, { via, prefix: "w1t" });
     for (const n of steps) await ctx.step(timelineTitle(n, "run"), () => STEPS[n](run));
+    for (const name of w2.run) await ctx.step(w2ExtensionTitle(name, "run"), () => W2_STEPS[name](run));
   },
 });

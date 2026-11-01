@@ -4,17 +4,19 @@
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vite-plus/test";
-import { FULL_SHARDS } from "../../harness/src/shards.ts";
+import { FULL_SHARDS, PATH_FILTERED_SHARDS } from "../../harness/src/shards.ts";
 import {
   ALL,
   EVERYTHING,
   type ImportGraph,
   changesFor,
   classify,
+  filteredShardsReached,
   harnessGraph,
   isDeploy,
   isDocsOnly,
   isTestOnly,
+  matrixShards,
   outputs,
   scenariosReaching,
   selectScenarios,
@@ -138,13 +140,90 @@ describe("shardsFor and outputs", () => {
     expect(shardsFor(["clock-skew"])).toEqual(["clock"]);
   });
   test("nothing selected: code false, and a non-empty shard list for the skipped matrix", () => {
-    expect(outputs({ scenarios: [], deploy: false })).toBe(
+    expect(outputs({ scenarios: [], deploy: false, filteredShards: [] })).toBe(
       `code=false\nscenarios=\nshards=${JSON.stringify(Object.keys(FULL_SHARDS))}\ndeploy=false\n`,
     );
-    expect(outputs({ scenarios: ["interact"], deploy: true })).toBe(
+    expect(outputs({ scenarios: ["interact"], deploy: true, filteredShards: [] })).toBe(
       'code=true\nscenarios=interact\nshards=["interact"]\ndeploy=true\n',
     );
     expect(outputs(EVERYTHING)).toContain("scenarios=all\n");
+  });
+});
+
+// Batch 6 decision (c): the captions shard (whisper and its weights) runs on pushes that reach
+// captions, media or origin code, and on every nightly run and dispatch.
+describe("path-filtered shards", () => {
+  const without = Object.keys(FULL_SHARDS).filter((s) => s !== "captions");
+
+  test("every path-filtered shard is a full shard, and captions is one", () => {
+    for (const s of Object.keys(PATH_FILTERED_SHARDS)) expect(Object.keys(FULL_SHARDS)).toContain(s);
+    expect(Object.keys(PATH_FILTERED_SHARDS)).toEqual(["captions"]);
+    expect(FULL_SHARDS.captions).toEqual(["captions"]);
+  });
+
+  test.each([
+    "packages/captions/src/model.ts",
+    "services/media/src/captions/worker.ts",
+    "services/media/src/service.ts",
+    "services/origin/src/playlist.ts",
+    "services/origin/src/dvr.ts",
+    "services/api/src/captions/tracks.ts",
+    "apps/web/src/player/captions-toggle.tsx",
+    "apps/web/src/routes/_studio/captions.tsx",
+    "apps/web/src/i18n/locales/en/w2-captions.json",
+    "packages/chat-filter/src/content.ts",
+    "infra/containers/whisper.Containerfile",
+    "scripts/fetch-model.ts",
+    "harness/compose.w2-captions.yaml",
+    "harness/scenarios/captions.ts",
+    "harness/src/w2/captions/index.ts",
+    "harness/fixtures/captions/speech.wav",
+    "compose.yaml",
+  ])("%s reaches captions", (f) => expect(filteredShardsReached([f])).toEqual(["captions"]));
+
+  test.each([
+    "services/api/src/routes/playback.ts",
+    "services/chat/src/core.ts",
+    "apps/web/src/player/controller.ts",
+    "packages/contracts/src/api/entities.ts",
+    "harness/src/w2/splits.ts",
+    "harness/compose.w1.yaml",
+    "services/media/tests/captions.int.test.ts", // tests never count
+    "services/origin/README.md", // nor docs
+    "docs/decisions/0011-captions.md",
+  ])("%s does not", (f) => expect(filteredShardsReached([f])).toEqual([]));
+
+  test("a push selecting every scenario drops captions unless it reaches captions paths", () => {
+    expect(matrixShards({ scenarios: ALL, deploy: false, filteredShards: [] })).toEqual(without);
+    expect(matrixShards({ scenarios: ALL, deploy: false, filteredShards: ["captions"] })).toEqual(
+      Object.keys(FULL_SHARDS),
+    );
+    expect(outputs({ scenarios: ALL, deploy: false, filteredShards: [] })).toContain(
+      `shards=${JSON.stringify(without)}\n`,
+    );
+  });
+
+  test("a narrowed selection keeps the captions shard only when it holds the captions scenario", () => {
+    expect(matrixShards({ scenarios: ["captions", "interact"], deploy: false, filteredShards: [] })).toEqual([
+      "interact",
+      "captions",
+    ]);
+    expect(matrixShards({ scenarios: ["interact"], deploy: false, filteredShards: ["captions"] })).toEqual([
+      "interact",
+    ]);
+  });
+
+  test("the nightly run, a dispatch and an unreadable diff run captions", () => {
+    expect(EVERYTHING.filteredShards).toEqual(["captions"]);
+    expect(matrixShards(EVERYTHING)).toEqual(Object.keys(FULL_SHARDS));
+    expect(changesFor({ EVENT_NAME: "schedule", BASE: "a", SHA: "b" }, ROOT).filteredShards).toEqual(["captions"]);
+  });
+
+  test("classify: product code outside the filters selects everything but captions", () => {
+    const c = classify(["services/api/src/routes/playback.ts"], GRAPH);
+    expect(c).toEqual({ scenarios: ALL, deploy: false, filteredShards: [] });
+    expect(matrixShards(c)).toEqual(without);
+    expect(classify(["services/media/src/session.ts"], GRAPH).filteredShards).toEqual(["captions"]);
   });
 });
 
@@ -173,15 +252,21 @@ describe("changesFor", () => {
     expect(changesFor({ EVENT_NAME: "push", BASE: "4a29455~1", SHA: "4a29455" }, ROOT)).toEqual({
       scenarios: [],
       deploy: false,
+      filteredShards: [],
     });
     // The consent race fix: harness/src/e9/consent.ts and its unit test.
     expect(changesFor({ EVENT_NAME: "push", BASE: "1c4266f", SHA: "d51c084" }, ROOT)).toEqual({
       scenarios: ["developer-platform"],
       deploy: false,
+      filteredShards: [],
     });
   });
 
   test("classify combines the selection with the deploy check", () => {
-    expect(classify(["packages/db/drizzle/0037_x.sql"], GRAPH)).toEqual({ scenarios: ALL, deploy: true });
+    expect(classify(["packages/db/drizzle/0037_x.sql"], GRAPH)).toEqual({
+      scenarios: ALL,
+      deploy: true,
+      filteredShards: [],
+    });
   });
 });

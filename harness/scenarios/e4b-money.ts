@@ -81,6 +81,8 @@ import { stepBreakdown, stepReconciliation } from "../src/w1/breakdown.ts";
 import { stepFraudHold } from "../src/w1/fraud.ts";
 import { type MoneyExtension, w1HooksFor } from "../src/w1/kit.ts";
 import { type W1Extension, extensionTitle, w1Extensions } from "../src/w1/steps.ts";
+import { stepSplitClawback, stepSplitNewPayee, stepSplitRelease, stepSplitWonChargeback } from "../src/w2/splits.ts";
+import { type W2Extension, w2ExtensionTitle, w2Extensions } from "../src/w2/steps.ts";
 import { ApiActor, type SocialActor, type WaitBudget, WebActor, remainingMs } from "../src/social.ts";
 import type { SignedInUser } from "../src/users.ts";
 import { waitFor } from "../src/wait.ts";
@@ -823,11 +825,14 @@ async function e4bMoney(ctx: ScenarioContext, sessions: WebSession[], check: Sce
   const unbalanced = unbalancedTransactions(ledger.rows);
   ctx.assert("every transaction sums to zero per currency", unbalanced.length === 0, { unbalanced });
 
-  // ------------------------------------------------------------ W1 extensions
-  // `--set w1=` names pending ones; by default only merged extensions run (src/w1/steps.ts).
+  // ------------------------------------------------------------ W1 and W2 extensions
+  // `--set w1=` / `--set w2=` name pending ones; by default only merged extensions run
+  // (src/w1/steps.ts, src/w2/steps.ts).
   const extensions = w1Extensions("e4b-money", ctx.param("w1", ""));
   ctx.data("w1.extensions", extensions);
-  if (extensions.length === 0) return;
+  const w2 = w2Extensions("e4b-money", ctx.param("w2", ""));
+  ctx.data("w2.extensions", w2);
+  if (extensions.length === 0 && w2.run.length === 0) return;
   // Stripe: the checkout's reference is empty until the payment succeeds; its PaymentIntent is the reference then.
   const pay = (v: { paymentId: string; reference: string }) => ({
     paymentId: v.paymentId,
@@ -855,4 +860,11 @@ async function e4bMoney(ctx: ScenarioContext, sessions: WebSession[], check: Sce
     "fraud-hold": stepFraudHold,
   };
   for (const name of extensions) await ctx.step(extensionTitle(name, "run"), () => W1_STEPS[name](ext));
+  const W2_STEPS: Readonly<Record<W2Extension<"e4b-money">, (e: MoneyExtension) => Promise<void>>> = {
+    "split-release": stepSplitRelease,
+    "split-clawback": stepSplitClawback,
+    "split-won-chargeback": stepSplitWonChargeback,
+    "split-new-payee": stepSplitNewPayee,
+  };
+  for (const name of w2.run) await ctx.step(w2ExtensionTitle(name, "run"), () => W2_STEPS[name](ext));
 }

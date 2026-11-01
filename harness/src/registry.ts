@@ -69,6 +69,10 @@ export const FULL_REQUIRED = [
   "notifications",
   // N2: the pseudo-locale run with the untranslated-text scanner (ADR 0029, batch 5 decision (k)).
   "e2e-basic-en-xa",
+  // W2: open captions, free live DVR and rehearsal mode (ADR 0011, ADR 0016, feature-wins §4.11).
+  "captions",
+  "live-dvr",
+  "rehearsal",
 ] as const;
 
 /** `full`'s scenarios that one shard runs, in `full`'s order. Pure. */
