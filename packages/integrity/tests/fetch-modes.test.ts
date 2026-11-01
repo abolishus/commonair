@@ -88,32 +88,12 @@ describe("fetchChecks by playback mode", () => {
     expect(r.mediaUnconfirmed).toBe(true);
   });
 
-  test("DVR is origin-only: no P2P share and judged as origin even for a relay or CDN session", () => {
+  test("DVR has no P2P share and is judged as origin for a CDN session", () => {
     const s = { ...origin, dvrSeconds: 120 };
     // P2P evidence never lowers the DVR expectation.
     expect(
       fetchChecks(s, null, { ...ctx, p2p: evidenced, dvrFetches: { playlists: 30, segments: 4, parts: 0 } }).checks,
     ).toEqual(["too_few_segments"]);
-    // A relay session's DVR part is judged on the origin counters; its live part has none (0 s),
-    // so the missing relay receipts leave nothing unconfirmed: an honest catch-up verifies.
-    const relay = { ...s, assignedSource: "relay" as const };
-    expect(
-      fetchChecks(relay, { relayObjects: null, claimedSeconds: 0 }, { ...ctx, dvrFetches: dvrOk(120) }),
-    ).toMatchObject({ checks: [], mediaUnconfirmed: false, skipped: null });
-    expect(fetchChecks(relay, null, { ...ctx, dvrFetches: dvrOk(120) })).toMatchObject({
-      checks: [],
-      mediaUnconfirmed: false,
-    });
-    // With live seconds and no receipts the live part is still unconfirmed.
-    expect(
-      fetchChecks(
-        { ...relay, watchSeconds: 180, dvrSeconds: 120 },
-        { relayObjects: null, claimedSeconds: 60 },
-        { ...ctx, dvrFetches: dvrOk(120) },
-      ).mediaUnconfirmed,
-    ).toBe(true);
-    // And an all-DVR relay session without DVR fetches is still unconfirmed by the DVR part.
-    expect(fetchChecks(relay, null, ctx).mediaUnconfirmed).toBe(true);
     const cdn = { ...s, assignedSource: "cdn" as const };
     expect(fetchChecks(cdn, null, { ...ctx, dvrFetches: dvrOk(120) })).toMatchObject({
       checks: [],
@@ -122,6 +102,40 @@ describe("fetchChecks by playback mode", () => {
     });
     // A CDN session with no DVR seconds stays unjudged.
     expect(fetchChecks({ ...cdn, dvrSeconds: 0 }, null, { ...ctx, dvrFetches: dvrOk(8) }).skipped).toBe("cdn");
+  });
+
+  test("a relay session's DVR is judged on its relay's receipts (ADR 0016 Amendment 1)", () => {
+    const relay = { assignedSource: "relay" as const, watchSeconds: 180, dvrSeconds: 120 };
+    // 60 live seconds at 1 s segments plus 120 DVR seconds at 4 s: 90 objects expected.
+    const ok = fetchChecks(relay, { relayObjects: 90, claimedSeconds: 60, claimedDvrSeconds: 120 }, ctx);
+    expect(ok).toMatchObject({ checks: [], mediaUnconfirmed: false, skipped: null });
+    expect(ok.measures).toMatchObject({ expectedSegments: 90, claimedDvrSeconds: 120, segmentRatio: 1 });
+    // All DVR: the receipts alone confirm it; the origin's DVR counters play no part.
+    const allDvr = { ...relay, watchSeconds: 120 };
+    expect(
+      fetchChecks(
+        allDvr,
+        { relayObjects: 30, claimedSeconds: 0, claimedDvrSeconds: 120 },
+        { ...ctx, dvrFetches: null },
+      ),
+    ).toMatchObject({ checks: [], mediaUnconfirmed: false });
+    expect(fetchChecks(allDvr, { relayObjects: 0, claimedSeconds: 0, claimedDvrSeconds: 120 }, ctx).checks).toEqual([
+      "no_media_fetched",
+    ]);
+    expect(fetchChecks(allDvr, { relayObjects: 5, claimedSeconds: 0, claimedDvrSeconds: 120 }, ctx).checks).toEqual([
+      "too_few_segments",
+    ]);
+    // No receipt coverage holds it pending, whatever the origin counted.
+    expect(fetchChecks(allDvr, null, { ...ctx, dvrFetches: dvrOk(120) })).toMatchObject({
+      mediaUnconfirmed: true,
+      skipped: "no_accounting",
+    });
+    expect(
+      fetchChecks(allDvr, { relayObjects: null, claimedSeconds: 0 }, { ...ctx, dvrFetches: dvrOk(120) })
+        .mediaUnconfirmed,
+    ).toBe(true);
+    // Absent `claimedDvrSeconds` is 0: the live-only judgement.
+    expect(fetchChecks({ ...relay, dvrSeconds: 0 }, { relayObjects: 60, claimedSeconds: 60 }, ctx).checks).toEqual([]);
   });
 
   test("threshold edges on the DVR part (4 s segments, 10 expected)", () => {

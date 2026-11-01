@@ -318,8 +318,9 @@ export async function scoreActiveSessions(
           until && until > f.startedAt
             ? {
                 relayObjects: relay.objects.get(f.id) ?? 0,
-                // Receipts cover live fetches only; DVR is origin-only (ADR 0016 decision 5).
+                // Receipts count live and DVR objects alike since relays serve DVR (ADR 0016 Amendment 1).
                 claimedSeconds: claimedSecondsUntil(beats, until.getTime(), f, { mode: "live" }),
+                claimedDvrSeconds: claimedSecondsUntil(beats, until.getTime(), f, { mode: "dvr" }),
               }
             : null;
       } else if (f.assignedSource === "cdn") {

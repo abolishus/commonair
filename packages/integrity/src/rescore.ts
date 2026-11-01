@@ -37,7 +37,7 @@ import type { ExclusionCategory } from "@commonair/contracts/enums";
 import { EVENTS } from "@commonair/contracts/events";
 import { type Executor, schema, uuidv7 } from "@commonair/db";
 import { categoryOfReason, exclusionCategoryOf, SIGNAL_CATEGORIES } from "./constants.ts";
-import { MIN_HEARTBEATS_TO_VERIFY } from "./score.ts";
+import { MIN_HEARTBEATS_TO_VERIFY, overThreshold } from "./score.ts";
 import { noisyOr } from "./signals/combine.ts";
 import { loadThresholds } from "./thresholds.ts";
 import {
@@ -97,12 +97,8 @@ export interface Rescored {
   score: number;
 }
 
-/**
- * The live scorer's exclusion rule (`scoreSession`: a score above `sessionExcludeScore` excludes).
- * CONTRACT-REQUEST: `score.ts` should export this predicate and use it itself, so the two cannot
- * drift; until then the parity test in `tests/rescore.test.ts` runs both on the same scores.
- */
-export const overThreshold = (score: number, threshold: number): boolean => score > threshold;
+/** The live scorer's exclusion rule, shared so a re-score cannot drift from it. */
+export { overThreshold };
 
 /**
  * Whether an overturn of `category` decided at `decidedAt` covers this session: excluded, ended,

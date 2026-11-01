@@ -44,6 +44,9 @@ function fingerprintOf(session: SessionFacts, beats: readonly HeartbeatSample[])
   return { ...session.fingerprint, ...latest };
 }
 
+/** The exclusion rule: a score above `sessionExcludeScore` excludes (the re-score uses it too). */
+export const overThreshold = (score: number, threshold: number): boolean => score > threshold;
+
 export function scoreSession(
   session: SessionFacts,
   heartbeats: readonly HeartbeatSample[],
@@ -77,7 +80,7 @@ export function scoreSession(
   // Not a signal, so no allowance removes it: it records what was not checked.
   if (media.skipped !== null) reasons.push(FETCH_UNJUDGED);
   const beats = Math.max(session.heartbeats, heartbeats.length);
-  if (score > context.sessionExcludeScore) return { verdict: "excluded", score, reasons, signals };
+  if (overThreshold(score, context.sessionExcludeScore)) return { verdict: "excluded", score, reasons, signals };
   if (beats < MIN_HEARTBEATS_TO_VERIFY) {
     return { verdict: "pending", score, reasons: [...reasons, INSUFFICIENT_HEARTBEATS], signals };
   }

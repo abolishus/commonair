@@ -114,6 +114,11 @@ export interface RelayFetchSummary {
   relayObjects: number | null;
   /** Seconds of playback the session claimed inside the window those receipts cover. */
   claimedSeconds: number;
+  /**
+   * Of the covered window, the seconds claimed in `dvr` mode: relays serve DVR since batch 7
+   * decision (x), and their receipts count DVR objects too. Absent = 0.
+   */
+  claimedDvrSeconds?: number;
 }
 
 /**

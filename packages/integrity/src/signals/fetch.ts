@@ -37,8 +37,10 @@
  * DVR seconds (`dvrSeconds`, from `playback_sessions.dvr_seconds`; absent = 0, all live), and the
  * origin's counters split the same way (`dvrFetches`, from `/dvr/` entries marked `mode: "dvr"`;
  * absent mode = live). Each part is judged against its own fetches: the live part as above with
- * the live seconds, the DVR part as an origin session (DVR is origin-only: no relay, no CDN, no
- * P2P share) on the recorder's full segments (`dvrSegmentDurationSeconds`, no parts). A client
+ * the live seconds, the DVR part as an origin session (no CDN, no P2P share) on the recorder's
+ * full segments (`dvrSegmentDurationSeconds`, no parts). A relay session is the exception: its
+ * relay serves its DVR too (ADR 0016 Amendment 1), and the receipts count both modes' objects
+ * without telling them apart, so it is judged once against both modes' claimed seconds. A client
  * that claims `live` while fetching only `/dvr/` shows no live media and fails `no_media_fetched`;
  * one that claims `dvr` without a DVR grant has no DVR fetches and fails the same way. Once either
  * mode has origin counters, the other mode's missing counters are zeros, not "no accounting".
@@ -146,13 +148,16 @@ const hasCounts = (f: FetchSummary | null | undefined): f is FetchSummary =>
  * module comment). Without DVR seconds or DVR fetches this is exactly the single-mode judgement.
  */
 export function fetchChecks(session: FetchSession, fetches: FetchEvidence, ctx: FetchCtx): FetchFindings {
+  // A relay session's DVR is served by its relay (ADR 0016 Amendment 1): its receipts count both
+  // modes' objects, so it is judged once, against both modes' seconds (modeChecks' relay branch).
+  if (session.assignedSource === "relay") return modeChecks(session, fetches, ctx);
   const total = Math.max(0, session.watchSeconds);
   const dvrSeconds = Math.min(total, Math.max(0, session.dvrSeconds ?? 0));
   const dvrFetches = ctx.dvrFetches ?? null;
   if (dvrSeconds === 0 && !hasCounts(dvrFetches)) return modeChecks(session, fetches, ctx);
 
   // Origin counters exist for one mode: the other mode's absence is a zero, not a gap.
-  const origin = session.assignedSource !== "relay" && session.assignedSource !== "cdn";
+  const origin = session.assignedSource !== "cdn";
   const liveFetches = fetches === null && origin && hasCounts(dvrFetches) ? ZERO : fetches;
   const live = modeChecks({ ...session, watchSeconds: total - dvrSeconds }, liveFetches, ctx);
   const dvrDur = ctx.dvrSegmentDurationSeconds ?? DVR_SEGMENT_SECONDS;
@@ -201,7 +206,10 @@ function modeChecks(
     // A relay session verifies only on its relay's receipts; without coverage it stays pending.
     if (fetches === null || !isRelayFetch(fetches) || fetches.relayObjects === null) return none("no_accounting", true);
     // Relays count every media object (a part counts as one), so only "too few" is meaningful.
-    const expected = (Math.max(0, fetches.claimedSeconds) / segDur) * share;
+    const dvrDur = ctx.dvrSegmentDurationSeconds ?? DVR_SEGMENT_SECONDS;
+    const dvrClaimed = Math.max(0, fetches.claimedDvrSeconds ?? 0);
+    const expected = (Math.max(0, fetches.claimedSeconds) / segDur + dvrClaimed / dvrDur) * share;
+    if (dvrClaimed > 0) measures.claimedDvrSeconds = round(dvrClaimed);
     measures.relayObjects = round(fetches.relayObjects);
     measures.claimedSeconds = round(fetches.claimedSeconds);
     measures.expectedSegments = round(expected);
@@ -276,8 +284,8 @@ export function claimedSecondsUntil(
   session: Pick<SessionFacts, "watchSeconds" | "startedAt" | "lastHeartbeatAt"> & { dvrSeconds?: number },
   opts: { mode?: PlaybackMode } = {},
 ): number {
-  // With a mode, only that mode's playback counts (a beat without one is live); relay receipts
-  // cover live fetches only, so a relay session's DVR seconds are judged on the origin's counters.
+  // With a mode, only that mode's playback counts (a beat without one is live). Relay receipts
+  // count both modes' objects, so the relay judgement takes each mode's seconds separately.
   const counted = opts.mode === undefined ? beats : beats.filter((b) => (b.mode ?? "live") === opts.mode);
   if (beats.length > 0) return round(counted.filter((b) => b.at <= untilMs).reduce((a, b) => a + b.playedSeconds, 0));
   const start = session.startedAt.getTime();
