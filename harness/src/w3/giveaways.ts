@@ -82,6 +82,17 @@ export async function rerunDraw(v: Verification): Promise<string[]> {
   return problems;
 }
 
+/**
+ * With every entrant eligible at the draw, the winners are exactly the first `winnerCount` drawn
+ * indices, in rank order: `rerunDraw` alone would also accept a winner wrongly passed over.
+ */
+export async function winnersAreFirstDrawn(v: Verification): Promise<boolean> {
+  if (v.seed === null) return false;
+  const first = await draw(v.seed, v.entries, v.winnerCount);
+  const byRank = [...v.winners].sort((a, b) => a.rank - b.rank);
+  return byRank.length === first.length && byRank.every((w, i) => w.index === first[i]);
+}
+
 /** `data.reason` of an oRPC error, or null. */
 export function reasonOf(err: unknown): string | null {
   if (typeof err !== "object" || err === null) return null;
@@ -247,6 +258,8 @@ export async function stepGiveaway(run: InteractW3Extension): Promise<void> {
     ctx.assert(title("verify publishes no salt"), !("salt" in v), Object.keys(v));
     const problems = await rerunDraw(v);
     ctx.assert(title("the re-run matches"), problems.length === 0, { problems, v });
+    // Both entrants are eligible here, so nobody may have been passed over.
+    ctx.assert(title("no eligible winner passed over"), await winnersAreFirstDrawn(v), v);
     ctx.assert(
       title("verify's winners are the draw's"),
       v.winners.map((w) => w.pseudonym).join() === drawn.winners.map((w) => w.pseudonym).join(),

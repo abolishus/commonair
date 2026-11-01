@@ -15,6 +15,7 @@ import { PageContainer } from "@commonair/ui/layouts";
 import * as React from "react";
 import { type MessageKey, t } from "../../i18n/index.ts";
 import { api, type Api } from "../../lib/api.ts";
+import { fillNode } from "../../lib/fill.tsx";
 import { giveawaysEnabled } from "../../chat/interact/client.ts";
 import { FormError } from "../form-error.tsx";
 import { NotFoundState } from "../money/not-found.tsx";
@@ -115,7 +116,7 @@ export function GiveawayVerifyPage({
         <StatusBadge tone={v.status === "open" ? "success" : "neutral"}>{t(STATUS_KEYS[v.status])}</StatusBadge>
         {v.drawnAt ? (
           <span className="text-xs text-muted-foreground">
-            {t("giveaways.verify.drawnAt")} <RelativeTime date={v.drawnAt} />
+            {fillNode(t("giveaways.verify.drawnAt"), "time", <RelativeTime date={v.drawnAt} />)}
           </span>
         ) : null}
       </div>

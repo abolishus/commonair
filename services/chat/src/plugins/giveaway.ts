@@ -26,12 +26,18 @@ export interface GiveawayPluginOptions {
   replyIntervalMs?: number;
   /** How long a channel's open keyword giveaway is cached (default 5 s). */
   cacheMs?: number;
+  /**
+   * How long "no open keyword giveaway" is cached (default 500 ms). Short, so a keyword typed
+   * right after the streamer opens one is not dropped by a lookup made just before.
+   */
+  emptyCacheMs?: number;
 }
 
 /** The contract's keyword shape (`interact.giveaways.open`): a quick filter before any lookup. */
 const KEYWORD_SHAPE = /^!?[A-Za-z0-9]{2,20}$/;
 const DEFAULT_REPLY_INTERVAL_MS = 30_000;
 const DEFAULT_CACHE_MS = 5_000;
+const DEFAULT_EMPTY_CACHE_MS = 500;
 const MAX_TRACKED_CHANNELS = 10_000;
 
 interface Open {
@@ -47,6 +53,7 @@ export interface GiveawayMiddleware extends MessageMiddleware {
 export function createGiveawayMiddleware(opts: GiveawayPluginOptions): GiveawayMiddleware {
   const replyIntervalMs = opts.replyIntervalMs ?? DEFAULT_REPLY_INTERVAL_MS;
   const cacheMs = opts.cacheMs ?? DEFAULT_CACHE_MS;
+  const emptyCacheMs = opts.emptyCacheMs ?? DEFAULT_EMPTY_CACHE_MS;
   let host: PluginHost | null = null;
   let entries = 0;
   const openCache = new Map<string, { at: number; open: Open | null }>();
@@ -60,7 +67,7 @@ export function createGiveawayMiddleware(opts: GiveawayPluginOptions): GiveawayM
   async function openKeywordGiveaway(h: PluginHost, channelId: string): Promise<Open | null> {
     const now = Date.now();
     const hit = openCache.get(channelId);
-    if (hit && now - hit.at < cacheMs) return hit.open;
+    if (hit && now - hit.at < (hit.open ? cacheMs : emptyCacheMs)) return hit.open;
     const g = schema.giveaways;
     const [row] = await h.db
       .select({ id: g.id, keyword: g.keyword })

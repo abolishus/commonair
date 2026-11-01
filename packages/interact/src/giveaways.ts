@@ -160,8 +160,19 @@ export async function verifiedWatchSeconds(
   return v.success && v.data.b === liveBroadcastId ? v.data.s : 0;
 }
 
-/** Platform suspension or deletion, or an active channel ban or timeout. */
-export async function bannedFor(db: Executor, channelId: string, userId: string, now: Date): Promise<boolean> {
+/**
+ * Platform suspension or deletion, or an active channel ban or timeout. With
+ * `includeTimeouts: false` (the draw) only a permanent channel ban counts: a short timeout at draw
+ * time must not cost a winner the prize, nor let a moderator exclude an entrant just before the draw.
+ */
+export async function bannedFor(
+  db: Executor,
+  channelId: string,
+  userId: string,
+  now: Date,
+  opts: { includeTimeouts?: boolean } = {},
+): Promise<boolean> {
+  const includeTimeouts = opts.includeTimeouts ?? true;
   const [u] = await db
     .select({ banned: schema.users.banned, banExpires: schema.users.banExpires, deletedAt: schema.users.deletedAt })
     .from(schema.users)
@@ -178,7 +189,7 @@ export async function bannedFor(db: Executor, channelId: string, userId: string,
         isNull(schema.chatBans.liftedAt),
       ),
     );
-  return bans.some((b) => b.expiresAt === null || b.expiresAt > now);
+  return bans.some((b) => b.expiresAt === null || (includeTimeouts && b.expiresAt > now));
 }
 
 /** Read the facts eligibility needs. Valkey is read only when the giveaway requires verified watching. */

@@ -63,6 +63,12 @@ export function requireGiveawaysEnabled(ctx: Pick<Deps, "env">): void {
 // or hide what a viewer reads. Joiners stay (emoji sequences need them).
 const INVISIBLE = /[\p{Cc}​‪-‮⁦-⁩﻿]/gu;
 
+// The giveaways_text column check, in code points as Postgres counts them.
+const TITLE_MAX = 60;
+const PRIZE_MAX = 200;
+// Code points, not graphemes: a surrogate pair is one character to Postgres.
+const codePoints = (s: string) => s.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, "_").length;
+
 /** Streamer text shown to viewers: NFC, no control or direction-override characters, one line. */
 export function scrubText(s: string): string {
   return s.normalize("NFC").replace(INVISIBLE, " ").replace(/\s+/g, " ").trim();
@@ -199,6 +205,9 @@ export async function openGiveaway(ctx: Ctx, caller: Caller, channel: ChannelRow
   const prize = scrubText(input.prize);
   if (title.length === 0) throw badRequest("The title is empty");
   if (prize.length === 0) throw badRequest("The prize is empty");
+  // NFC can lengthen text past the column check (giveaways_text): refuse it as a 400, not a 500.
+  if (codePoints(title) > TITLE_MAX) throw badRequest(`The title is longer than ${TITLE_MAX} characters`);
+  if (codePoints(prize) > PRIZE_MAX) throw badRequest(`The prize is longer than ${PRIZE_MAX} characters`);
 
   // An expired giveaway still marked open would hold the one-open index.
   const [stale] = await ctx.db
@@ -343,7 +352,13 @@ async function lockRow(tx: Executor, id: string): Promise<GiveawayRow | null> {
   return row ?? null;
 }
 
-/** Winners from the revealed seed; an ineligible (banned, deleted) winner is skipped for the next. */
+/**
+ * Winners from the revealed seed; an ineligible winner (platform-banned, deleted, or permanently
+ * banned in the channel; a timeout does not count) is skipped for the next. `draw(k)` is a prefix of
+ * `draw(k + 1)`, so only as much of the permutation as the winners need is computed (one HMAC per
+ * drawn index), growing geometrically while winners are skipped: the row lock is held briefly
+ * even with many entrants.
+ */
 export async function computeWinners(
   tx: Executor,
   row: GiveawayRow,
@@ -361,16 +376,24 @@ export async function computeWinners(
   const sorted = sortEntries(rows.map((r) => r.pseudonym));
   const byPseudonym = new Map(rows.map((r) => [r.pseudonym, r.userId]));
   const entries = sorted.map((p) => ({ pseudonym: p, userId: byPseudonym.get(p) as string }));
-  const order = await draw(seed, sorted, sorted.length);
   // Eligibility only for the candidates the draw reaches, in drawn order.
   const ok = new Map<number, boolean>();
   let found = 0;
-  for (const i of order) {
-    if (found >= row.winnerCount) break;
-    const entrant = entries[i];
-    const eligible = entrant !== undefined && !(await bannedFor(tx, row.channelId, entrant.userId, now));
-    ok.set(i, eligible);
-    if (eligible) found++;
+  let checked = 0;
+  let count = Math.min(row.winnerCount, sorted.length);
+  let order: number[] = [];
+  for (;;) {
+    order = await draw(seed, sorted, count);
+    for (; checked < order.length && found < row.winnerCount; checked++) {
+      const i = order[checked] as number;
+      const entrant = entries[i];
+      const eligible =
+        entrant !== undefined && !(await bannedFor(tx, row.channelId, entrant.userId, now, { includeTimeouts: false }));
+      ok.set(i, eligible);
+      if (eligible) found++;
+    }
+    if (found >= row.winnerCount || count >= sorted.length) break;
+    count = Math.min(sorted.length, count + Math.max(row.winnerCount - found, count));
   }
   const { winners, skipped } = pickWinners(order, (i) => ok.get(i) ?? false, row.winnerCount);
   return { entries, winners, skipped };

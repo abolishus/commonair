@@ -5,9 +5,12 @@
  * `giveaway-close` (ADR 0039 §2): close a giveaway's entries at its `closes_at`. The API schedules
  * it (delayed, one job id per giveaway) when a timed giveaway opens. Closing is the shared
  * `closeGiveawayInTx` (status `closed` and a `system` audit row in one transaction); the draw stays
- * the streamer's action. Early (a clock skew between the API and the worker) or for a giveaway that
- * is no longer open, it does nothing: the trigger already refuses entries past `closes_at`, and the
- * API closes a due giveaway on its next read.
+ * the streamer's action. For a giveaway that is no longer open it does nothing; early (a clock skew
+ * between the API and the worker) it throws so BullMQ retries. The trigger already refuses entries
+ * past `closes_at`, and the API closes a due giveaway on its next read.
+ *
+ * It deliberately ignores `GIVEAWAYS_ENABLED`: closing on schedule only stops entries, so turning
+ * the flag off must not leave a giveaway open past the time its entrants were promised.
  */
 import { eq } from "drizzle-orm";
 import { GIVEAWAY_JOBS, GiveawayCloseJob, QUEUES } from "@commonair/contracts/internal";

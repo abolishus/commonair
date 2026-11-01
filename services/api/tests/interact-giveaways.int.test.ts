@@ -358,6 +358,55 @@ describe("the draw", () => {
     }
   });
 
+  test("a winner timed out at draw time still wins (only bans skip)", async () => {
+    const g = await fresh();
+    for (const v of viewers.slice(0, 3)) await enter(v, g.id);
+    await act(streamer, g.id, "close");
+    const seed = await sealedSeed(g.id);
+    const rows = await owner().select().from(schema.giveawayEntries).where(eq(schema.giveawayEntries.giveawayId, g.id));
+    const sorted = rows.map((r) => r.pseudonym).sort();
+    const order = await draw(seed, sorted, sorted.length);
+    const first = rows.find((r) => r.pseudonym === sorted[order[0]!])!;
+    await owner()
+      .insert(schema.chatBans)
+      .values({ channelId, userId: first.userId, reason: "", expiresAt: new Date(Date.now() + 10 * 60_000) });
+    try {
+      expect((await act(streamer, g.id, "draw")).status).toBe(200);
+      const v = (await verify(viewers[4]!, g.id)).body;
+      expect(v.winners).toEqual([{ rank: 1, index: order[0], pseudonym: sorted[order[0]!], username: null }]);
+      const drawAudit = (await audits(g.id)).find((a) => a.action === "giveaway.draw")!;
+      expect(drawAudit.details).toMatchObject({ skippedIndices: [] });
+    } finally {
+      await owner()
+        .update(schema.chatBans)
+        .set({ liftedAt: new Date() })
+        .where(and(eq(schema.chatBans.channelId, channelId), eq(schema.chatBans.userId, first.userId)));
+    }
+  });
+
+  test("more places than eligible entrants: every eligible entrant wins, in drawn order", async () => {
+    const g = await fresh({ winnerCount: 5 });
+    for (const v of viewers.slice(0, 3)) await enter(v, g.id);
+    await act(streamer, g.id, "close");
+    const seed = await sealedSeed(g.id);
+    const rows = await owner().select().from(schema.giveawayEntries).where(eq(schema.giveawayEntries.giveawayId, g.id));
+    const sorted = rows.map((r) => r.pseudonym).sort();
+    const order = await draw(seed, sorted, sorted.length);
+    const banned = rows.find((r) => r.pseudonym === sorted[order[1]!])!;
+    await owner().insert(schema.chatBans).values({ channelId, userId: banned.userId, reason: "" });
+    try {
+      expect((await act(streamer, g.id, "draw")).status).toBe(200);
+      const v = (await verify(viewers[4]!, g.id)).body;
+      expect(v.winners.map((w) => w.index)).toEqual([order[0], order[2]]);
+      expect(winnersMatchDraw(order, v.winners, 5)).toEqual({ match: true, skipped: 1 });
+    } finally {
+      await owner()
+        .update(schema.chatBans)
+        .set({ liftedAt: new Date() })
+        .where(and(eq(schema.chatBans.channelId, channelId), eq(schema.chatBans.userId, banned.userId)));
+    }
+  });
+
   test("a banned viewer cannot enter", async () => {
     const g = await fresh();
     const v = viewers[4]!;
@@ -465,6 +514,8 @@ describe("timing and input", () => {
     expect((await open(streamer, { durationMinutes: 1441 })).status).toBe(400);
     expect((await open(streamer, { eligibility: { subscriberOnly: true } })).status).toBe(400);
     expect((await open(streamer, { title: "‮​ " })).status).toBe(400);
+    // 60 characters that NFC decomposes to 120 (composition exclusions): a 400, not a 500.
+    expect((await open(streamer, { title: "\u0958".repeat(60) })).status).toBe(400);
     // Viewers cannot open one.
     expect((await open(viewers[0]!)).status).toBe(403);
   });

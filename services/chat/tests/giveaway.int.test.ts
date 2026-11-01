@@ -26,6 +26,8 @@ let on: ChatService;
 let off: ChatService;
 let plugin: GiveawayMiddleware;
 let offPlugin: GiveawayMiddleware;
+let cachedPlugin: GiveawayMiddleware;
+let cached: ChatService;
 const clients: Client[] = [];
 
 const connect = async (svc: ChatService, uid: string) => {
@@ -41,16 +43,19 @@ beforeAll(async () => {
   // Separate isolations: each instance runs only its own plugin.
   on = await startInstance(t.app.db, isolation(), { middlewares: [plugin] });
   off = await startInstance(t.app.db, isolation(), { middlewares: [offPlugin] });
+  // Default caching: an open giveaway for 5 s, "none open" only briefly.
+  cachedPlugin = createGiveawayMiddleware({ enabled: true, replyIntervalMs: 60_000 });
+  cached = await startInstance(t.app.db, isolation(), { middlewares: [cachedPlugin] });
 });
 
 afterAll(async () => {
   for (const c of clients) c.close();
-  await Promise.allSettled([on?.stop(), off?.stop()]);
+  await Promise.allSettled([on?.stop(), off?.stop(), cached?.stop()]);
   await t?.drop();
 });
 
-/** A channel with its bot on and an open keyword giveaway. */
-async function room(eligibility: Partial<{ minVerifiedWatchSeconds: number }> = {}) {
+/** A channel with its bot on and no giveaway yet. */
+async function bare() {
   const owner = await createUser(t.db);
   const bot = await createUser(t.db, { accountType: "bot", botOwnerId: owner.id });
   const ch = await createChannel(t.db, owner);
@@ -58,6 +63,15 @@ async function room(eligibility: Partial<{ minVerifiedWatchSeconds: number }> = 
   await t.db
     .insert(schema.botConfigs)
     .values({ channelId: ch.id, enabled: true, config: BotConfig.parse({}), botUserId: bot.id });
+  return { owner, bot, ch };
+}
+
+/** A channel with its bot on and an open keyword giveaway. */
+async function room(
+  eligibility: Partial<{ minVerifiedWatchSeconds: number }> = {},
+  base?: Awaited<ReturnType<typeof bare>>,
+) {
+  const { owner, bot, ch } = base ?? (await bare());
   const id = uuidv7();
   const salt = newSalt();
   await t.db.insert(schema.giveaways).values({
@@ -137,6 +151,22 @@ describe("keyword entry", () => {
     await new Promise((res) => setTimeout(res, 300));
     expect(await entriesOf(r.id)).toHaveLength(0);
     expect(await c.never(fromBot(r.bot.id), 200)).toBe(true);
+  });
+
+  test("a keyword typed just before a giveaway opens does not hide it for long", async () => {
+    const b = await bare();
+    const v = await createUser(t.db);
+    const c = await connect(cached, v.id);
+    await c.join(b.ch.slug);
+    // Nothing open yet: this lookup caches "none open".
+    await c.say(b.ch.slug, "!win");
+    await new Promise((res) => setTimeout(res, 300));
+    const r = await room({}, b);
+    await new Promise((res) => setTimeout(res, 700));
+    // Another case: the chat's repeat-message rule would hold an identical second message.
+    const sent = await c.say(b.ch.slug, "!WIN");
+    expect(sent.notice).toBeNull();
+    await eventually(async () => ((await entriesOf(r.id)).length === 1 ? true : null));
   });
 
   test("with GIVEAWAYS_ENABLED off the plugin does nothing", async () => {

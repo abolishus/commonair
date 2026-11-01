@@ -28,9 +28,18 @@ export interface GiveawayCardProps {
 }
 
 /** What the card's action row shows, from the giveaway and the viewer. */
-export type GiveawayCardState = "enter" | "signIn" | "entered" | "ineligible" | "won" | "closed" | "drawn";
+export type GiveawayCardState =
+  | "enter"
+  | "signIn"
+  | "entered"
+  | "ineligible"
+  | "won"
+  | "closed"
+  | "cancelled"
+  | "drawn";
 
 export function giveawayCardState(g: GiveawayDto, signedIn: boolean): GiveawayCardState {
+  if (g.status === "cancelled") return "cancelled";
   if (g.me?.won) return "won";
   if (g.me?.entered) return g.status === "drawn" ? "drawn" : "entered";
   if (g.status === "drawn") return "drawn";
@@ -127,6 +136,7 @@ export function GiveawayCard({
             </p>
           ) : null}
           {state === "closed" ? <p className="text-xs">{t("giveaways.card.closed")}</p> : null}
+          {state === "cancelled" ? <p className="text-xs">{t("giveaways.card.cancelled")}</p> : null}
           {state === "drawn" ? (
             <p className="text-xs">{t("giveaways.card.drawn", { count: g.winners.length })}</p>
           ) : null}

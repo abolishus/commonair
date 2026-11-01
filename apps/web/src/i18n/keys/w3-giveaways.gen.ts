@@ -15,6 +15,7 @@ export type Key =
   | "giveaways.card.enter"
   | "giveaways.card.entered"
   | "giveaways.card.won"
+  | "giveaways.card.cancelled"
   | "giveaways.card.closed"
   | "giveaways.card.drawn"
   | "giveaways.card.signIn"

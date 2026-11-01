@@ -175,6 +175,24 @@ export function winnersFollowDraw(
   return { match: true, skipped };
 }
 
+/**
+ * As much of the draw as the check needs: up to the last published winner (`draw(k)` is a prefix of
+ * `draw(k + 1)`, so a longer prefix never changes the answer), growing geometrically, which is one
+ * HMAC per drawn index rather than per entrant. With fewer winners than places every entry was
+ * passed over or won, so the whole permutation is needed.
+ */
+async function drawnPrefix(seed: string, v: GiveawayVerificationDto): Promise<number[]> {
+  const n = v.entries.length;
+  if (v.winners.length < v.winnerCount) return draw(seed, v.entries, n);
+  let count = Math.min(n, v.winnerCount);
+  for (;;) {
+    const order = await draw(seed, v.entries, count);
+    const drawn = new Set(order);
+    if (count >= n || v.winners.every((w) => drawn.has(w.index))) return order;
+    count = Math.min(n, count * 2);
+  }
+}
+
 /** Re-run the draw in the browser: commitment, sorted entries, then winners. */
 export async function verifyDraw(v: GiveawayVerificationDto): Promise<VerifyOutcome> {
   if (v.status === "cancelled") return { state: "cancelled" };
@@ -182,7 +200,7 @@ export async function verifyDraw(v: GiveawayVerificationDto): Promise<VerifyOutc
   if (!(await verifyReveal(v.seed, v.seedCommitment)))
     return { state: "checked", match: false, problem: "commitment", skipped: 0 };
   if (!isSortedUnique(v.entries)) return { state: "checked", match: false, problem: "entries", skipped: 0 };
-  const order = await draw(v.seed, v.entries, v.entries.length);
+  const order = await drawnPrefix(v.seed, v);
   const named = v.winners.every((w) => v.entries[w.index] === w.pseudonym);
   const r = winnersFollowDraw(order, v.winners, v.winnerCount);
   const match = named && r.match;

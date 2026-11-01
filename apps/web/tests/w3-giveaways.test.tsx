@@ -186,6 +186,9 @@ describe("the viewer card", () => {
     expect(giveawayCardState(giveaway({ me: entered, status: "drawn" }), true)).toBe("drawn");
     expect(giveawayCardState(giveaway({ me: { ...entered, won: true }, status: "drawn" }), true)).toBe("won");
     expect(giveawayCardState(giveaway({ status: "closed" }), true)).toBe("closed");
+    // An entrant is not told "you're in" on a cancelled giveaway.
+    expect(giveawayCardState(giveaway({ me: entered, status: "cancelled" }), true)).toBe("cancelled");
+    expect(giveawayCardState(giveaway({ status: "cancelled" }), false)).toBe("cancelled");
   });
 
   it("enters with one click, then shows the viewer is in", async () => {

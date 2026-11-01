@@ -4,7 +4,7 @@
 /** The `giveaway` extension's pure helpers: the harness's own re-run of the draw, and refusal reasons. */
 import { describe, expect, it } from "vite-plus/test";
 import { commit, draw, newSeed } from "../../../packages/draw/src/index.ts";
-import { reasonOf, rerunDraw, type Verification } from "../../src/w3/giveaways.ts";
+import { reasonOf, rerunDraw, type Verification, winnersAreFirstDrawn } from "../../src/w3/giveaways.ts";
 
 const entries = Array.from({ length: 5 }, (_, i) => `${i}`.repeat(64)).sort();
 
@@ -45,6 +45,23 @@ describe("rerunDraw", () => {
     expect((await rerunDraw({ ...v, winners: renamed })).join()).toMatch(/another pseudonym/);
     expect((await rerunDraw({ ...v, winnerCount: 1 })).join()).toMatch(/2 winners for 1 places/);
     expect(await rerunDraw({ ...v, seed: null })).toEqual(["the seed is not revealed"]);
+  });
+});
+
+describe("winnersAreFirstDrawn", () => {
+  it("accepts the first drawn indices only: a passed-over winner, a short list or no seed fail", async () => {
+    const v = await honest(2);
+    expect(await winnersAreFirstDrawn(v)).toBe(true);
+    const order = await draw(v.seed as string, entries, entries.length);
+    const skipped = [order[0], order[2]].map((index, i) => ({
+      rank: i + 1,
+      index: index as number,
+      pseudonym: entries[index as number] as string,
+    }));
+    expect(await rerunDraw({ ...v, winners: skipped })).toEqual([]);
+    expect(await winnersAreFirstDrawn({ ...v, winners: skipped })).toBe(false);
+    expect(await winnersAreFirstDrawn({ ...v, winners: v.winners.slice(0, 1) })).toBe(false);
+    expect(await winnersAreFirstDrawn({ ...v, seed: null })).toBe(false);
   });
 });
 
