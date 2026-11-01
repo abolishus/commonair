@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package relay ties the member relay together: identity, registration,
-// heartbeats, the viewer-facing server, accounting and receipt delivery.
+// heartbeats, the purge feed, the viewer-facing server, accounting and
+// receipt delivery.
 package relay
 
 import (
@@ -26,6 +27,7 @@ import (
 	"github.com/abolishus/commonair/relay/internal/apiclient"
 	"github.com/abolishus/commonair/relay/internal/cache"
 	"github.com/abolishus/commonair/relay/internal/identity"
+	"github.com/abolishus/commonair/relay/internal/purge"
 	"github.com/abolishus/commonair/relay/internal/receipts"
 	"github.com/abolishus/commonair/relay/internal/server"
 	"github.com/abolishus/commonair/relay/internal/tokens"
@@ -70,6 +72,7 @@ type Relay struct {
 	meter   *accounting.Meter
 	queue   *receipts.Queue
 	sender  *receipts.Sender
+	purges  *purge.Loop
 
 	mu                sync.Mutex
 	receiptInterval   time.Duration
@@ -157,6 +160,8 @@ func New(opts Options) (*Relay, error) {
 		queue:   queue,
 	}
 	r.sender = &receipts.Sender{Queue: queue, API: api, Log: opts.Log, MinBackoff: opts.RetryMin, MaxBackoff: opts.RetryMax}
+	// The purge cursor sits beside the key in the state directory (batch 7 decision (x)).
+	r.purges = &purge.Loop{API: api, Dir: opts.DataDir, Log: opts.Log, MinBackoff: opts.RetryMin, MaxBackoff: opts.RetryMax}
 	r.srv = server.New(server.Config{
 		Version:   opts.Version,
 		PullToken: opts.Token,
@@ -165,7 +170,16 @@ func New(opts Options) (*Relay, error) {
 		Ledger:    r.ledger,
 		Viewers:   r.viewers,
 		Log:       opts.Log,
+		PurgeSeq:  r.purges.Seq,
 	})
+	r.purges.Target = r.srv
+	r.purges.Key = func() ed25519.PublicKey {
+		if st := r.srv.State(); st != nil {
+			return st.OriginKey
+		}
+		return nil
+	}
+	r.purges.Load()
 	if key.Created {
 		opts.Log.Info("generated relay identity", "publicKey", key.PublicB64)
 	}
@@ -208,8 +222,10 @@ func (r *Relay) Start() {
 	if r.draining.Load() {
 		hbCancel() // drained before Start: never register
 	}
-	r.wg.Add(2)
+	r.wg.Add(3)
 	go func() { defer r.wg.Done(); r.sender.Run(ctx) }()
+	// Purges keep applying while draining: the viewers still here must not see removed media.
+	go func() { defer r.wg.Done(); r.purges.Run(ctx) }()
 	go func() { defer r.wg.Done(); r.control(ctx, hbCtx) }()
 }
 

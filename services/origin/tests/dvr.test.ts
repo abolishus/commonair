@@ -29,6 +29,8 @@ const VOD = "0192f3a4-5b6c-7d8e-9f01-00000000aa01";
 const OTHER_VOD = "0192f3a4-5b6c-7d8e-9f01-00000000aa02";
 const CHANNEL = "0192f3a4-5b6c-7d8e-9f01-00000000cc01";
 const SID = "0192f3a4-5b6c-7d8e-9f01-00000000dd01";
+const RELAY_ID = "0192f3a4-5b6c-7d8e-9f01-00000000ee01";
+const RELAY_TOKEN = `relay_${"g".repeat(43)}`;
 const NOW_MS = Date.parse("2026-11-01T12:00:00.000Z");
 const NOW = NOW_MS / 1000;
 const T0 = Date.parse("2026-11-01T11:00:00.000Z");
@@ -244,6 +246,10 @@ function setup(opts: { segments?: number; window?: number; cap?: number } = {}) 
       windowLookups++;
       return opts.window ?? 60;
     },
+    // One relay token is known (`Bearer relay_good…`); anything else is refused.
+    relays: {
+      authenticate: async (header: string | null) => (header === `Bearer ${RELAY_TOKEN}` ? { id: RELAY_ID } : null),
+    },
   };
   const handler = createDvrHandler(deps);
   const get = async (path: string, init: RequestInit & { t?: string | null } = {}) => {
@@ -252,8 +258,17 @@ function setup(opts: { segments?: number; window?: number; cap?: number } = {}) 
     const raw = new URL(url).pathname;
     return handler(new Request(url, init), raw);
   };
+  /** A relay pull of `/relay-pull/dvr/<path>`, with the known relay token unless told otherwise. */
+  const pull = async (path: string, init: RequestInit & { bearer?: string | null; peer?: string } = {}) => {
+    const url = `http://origin/relay-pull/dvr/${path}`;
+    const bearer = init.bearer === undefined ? RELAY_TOKEN : init.bearer;
+    const headers = new Headers(init.headers);
+    if (bearer !== null) headers.set("authorization", `Bearer ${bearer}`);
+    return handler(new Request(url, { ...init, headers }), new URL(url).pathname, init.peer ?? "10.0.0.9");
+  };
   return {
     get,
+    pull,
     objects,
     reads,
     logged,
@@ -507,6 +522,129 @@ describe("/dvr/ request handling", () => {
     registerDvrRoutes(registry, ctx);
     expect(registry.find(`/dvr/${VOD}/index.m3u8`)?.name).toBe("dvr");
     expect(registry.find("/hls/live/a/index.m3u8")).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------------------
+// Relay pulls (batch 7 decision (x), ADR 0016 Amendment 1 A1.3).
+
+describe("/relay-pull/dvr/", () => {
+  const relayLog = (kind: "playlist" | "segment", bytes: number, obj?: string): SegmentFetch => ({
+    sid: RELAY_ID,
+    cid: CHANNEL,
+    src: "relay",
+    rid: RELAY_ID,
+    kind,
+    bytes,
+    at: NOW_MS,
+    ...(obj ? { obj } : {}),
+    mode: "dvr",
+  });
+
+  test("the relay bearer token, as the live pull: missing or unknown is 401, repeated failures 429", async () => {
+    const s = setup();
+    expect((await s.pull(`${VOD}/index.m3u8`, { bearer: null })).status).toBe(401);
+    // A viewer's DVR token is no relay credential.
+    expect((await s.pull(`${VOD}/index.m3u8?t=${await token()}`, { bearer: null })).status).toBe(401);
+    for (let i = 0; i < 8; i++) expect((await s.pull(`${VOD}/index.m3u8`, { bearer: "relay_nope" })).status).toBe(401);
+    const limited = await s.pull(`${VOD}/index.m3u8`, { bearer: "relay_nope" });
+    expect(limited.status).toBe(429);
+    expect(limited.headers.get("retry-after")).toBe("60");
+    // Even the right token from that peer waits out the minute; another peer is unaffected.
+    expect((await s.pull(`${VOD}/index.m3u8`)).status).toBe(429);
+    expect((await s.pull(`${VOD}/index.m3u8`, { peer: "10.0.0.10" })).status).toBe(200);
+    s.advance(60_000);
+    expect((await s.pull(`${VOD}/index.m3u8`)).status).toBe(200);
+    expect(s.reads.filter((k) => k.endsWith("index.m3u8"))).toHaveLength(2); // refused pulls read nothing
+  });
+
+  test("the same window, with bare relative URIs, logged as the relay's dvr fetch", async () => {
+    const s = setup();
+    const res = await s.pull(`${VOD}/index.m3u8`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe("private, no-store");
+    const body = await res.text();
+    const uris = segmentLines(body);
+    expect(uris).toHaveLength(15);
+    expect(uris[0]).toBe("r0_000085.m4s");
+    expect(body).toContain(`#EXT-X-MAP:URI="r0_init.mp4"`);
+    expect(body).not.toContain("?t=");
+    expect(body).toContain("#EXT-X-MEDIA-SEQUENCE:85");
+    expect(s.logged).toEqual([relayLog("playlist", Number(res.headers.get("content-length")))]);
+    // The viewer route shares the cached recording.
+    expect((await s.get(`${VOD}/index.m3u8`)).status).toBe(200);
+    expect(s.reads.filter((k) => k.endsWith("index.m3u8"))).toHaveLength(1);
+  });
+
+  test("listed segments only; HEAD is not logged", async () => {
+    const s = setup();
+    const seg = await s.pull(`${VOD}/r0_000099.m4s`);
+    expect(seg.status).toBe(200);
+    expect(await seg.text()).toBe("seg99");
+    expect(seg.headers.get("cache-control")).toBe("private, no-store");
+    expect((await s.pull(`${VOD}/r0_init.mp4`)).status).toBe(200);
+    expect((await s.pull(`${VOD}/r0_000010.m4s`)).status).toBe(404);
+    expect((await s.pull(`${VOD}/r0_000098.m4s`, { method: "HEAD" })).status).toBe(200);
+    expect(s.logged).toEqual([
+      relayLog("segment", 5, `dvr/${VOD}/r0_000099.m4s`),
+      relayLog("segment", 4, `dvr/${VOD}/r0_init.mp4`),
+    ]);
+  });
+
+  test("the same state checks: removal, restriction, suspension, DVR off and a finished VOD close it", async () => {
+    for (const change of [
+      { removedReason: "moderation" },
+      { broadcastRestricted: true },
+      { channelSuspended: true },
+      { dvrEnabled: false },
+      { broadcastLive: false },
+      { vodStatus: "processing" as const },
+      { nciiHidden: true },
+    ] satisfies Partial<DvrState>[]) {
+      const s = setup();
+      expect((await s.pull(`${VOD}/index.m3u8`)).status).toBe(200);
+      s.setState(change);
+      s.advance(VOD_STATE_TTL_MS);
+      expect([(await s.pull(`${VOD}/index.m3u8`)).status, change]).toEqual([404, change]);
+      expect([(await s.pull(`${VOD}/r0_000099.m4s`)).status, change]).toEqual([404, change]);
+    }
+    const s = setup();
+    s.setState({}, `vods/${VOD}/`);
+    expect((await s.pull(`${VOD}/index.m3u8`)).status).toBe(404);
+  });
+
+  test("bad paths are 404 before any lookup", async () => {
+    const s = setup();
+    for (const p of [`${VOD}/x/index.m3u8`, `NOTAUUID/index.m3u8`, `${VOD}/../index.m3u8`, `${VOD}/index.txt`])
+      expect([(await s.pull(p)).status, p]).toEqual([404, p]);
+    expect(s.reads).toEqual([]);
+  });
+
+  test("the viewer route still refuses a relay DVR token: relay viewers rewind on their relay", async () => {
+    const s = setup();
+    const relayToken = await token({ src: "relay", rid: RELAY_ID });
+    expect((await s.get(`${VOD}/index.m3u8`, { t: relayToken })).status).toBe(401);
+  });
+
+  test("without relay auth wired the relay route is 404", async () => {
+    const deps = setupDeps();
+    const res = await createDvrHandler(deps)(
+      new Request(`http://origin/relay-pull/dvr/${VOD}/index.m3u8`, {
+        headers: { authorization: `Bearer ${RELAY_TOKEN}` },
+      }),
+      `/relay-pull/dvr/${VOD}/index.m3u8`,
+    );
+    expect(res.status).toBe(404);
+  });
+
+  test("one registry entry serves both routes; live relay pulls are not its", () => {
+    const registry = new OriginRouteRegistry();
+    registerDvrRoutes(registry, { ...setupDeps(), db: {} } as unknown as OriginRouteContext);
+    expect(registry.names).toEqual(["dvr"]);
+    expect(registry.find(`/relay-pull/dvr/${VOD}/index.m3u8`)?.name).toBe("dvr");
+    expect(registry.find(`/dvr/${VOD}/index.m3u8`)?.name).toBe("dvr");
+    expect(registry.find("/relay-pull/live/a/index.m3u8")).toBeUndefined();
+    expect(registry.find("/cdn/dvr/x")).toBeUndefined();
   });
 });
 

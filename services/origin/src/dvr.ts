@@ -21,6 +21,13 @@
  *   segment still being recorded is unlisted, and a 404.
  * - `cache-control: private, no-store` on everything. Every playlist and segment served (GET) goes
  *   to the segment log with `mode: "dvr"`, so integrity judges DVR seconds on DVR fetches (decision 6).
+ *
+ * **Relays** (batch 7 decision (x), ADR 0016 Amendment 1 A1.3) pull the same objects from
+ * `GET|HEAD /relay-pull/dvr/<vodId>/<file>` with the live pull's relay bearer token (failures
+ * limited per peer). The state checks and the window cut are the same; playlist URIs are bare
+ * relative ones (the relay adds its viewers' tokens). Fetches go to the segment log as `src:
+ * relay` with the relay's id. The viewer route keeps refusing relay tokens: a relay's viewers
+ * rewind on the relay.
  */
 import { eq } from "drizzle-orm";
 import { DVR_RULES } from "@commonair/contracts/enums";
@@ -28,7 +35,9 @@ import { DVR_ROUTE, dvrServable, dvrTokenPath, VOD_PLAYLIST, vodPrefix } from "@
 import type { PlaybackClaims } from "@commonair/contracts/tokens";
 import { schema, type Executor } from "@commonair/db";
 import { verifyPlaybackToken } from "@commonair/tokens";
+import { RelayAuth } from "./auth.ts";
 import { Coalescer, TtlCache } from "./cache.ts";
+import { FailureLimiter } from "./clientip.ts";
 import { CORS, mediaFail, objectHeaders, readObject } from "./media.ts";
 import { parseDvrPath } from "./paths.ts";
 import { rewritePlaylist } from "./playlist.ts";
@@ -209,6 +218,8 @@ export type DvrDeps = Pick<
 > & {
   /** The channel's `dvr_window_seconds`; the default reads Postgres (cached `DVR_WINDOW_TTL_MS`). */
   channelWindow: (channelId: string) => Promise<number>;
+  /** Member relays' bearer tokens for `/relay-pull/dvr/`; absent = that route answers 404. */
+  relays?: Pick<RelayAuth, "authenticate">;
 };
 
 /** The channel's DVR window from Postgres, cached per channel. */
@@ -243,10 +254,19 @@ export function dvrTokenRefusal(
 
 const NO_STORE = "private, no-store";
 
+/** The relay pull route for DVR (ADR 0016 Amendment 1 A1.3): `/relay-pull/dvr/<vodId>/<file>`. */
+export const RELAY_PULL_DVR_ROUTE = `/relay-pull${DVR_ROUTE}`;
+/** Failed relay authentications per peer address per minute before 429 (as the live pull route). */
+export const RELAY_PULL_FAILURES_PER_MINUTE = 10;
+
+/** Who is pulling: a viewer's DVR token, or a member relay's bearer token. */
+type DvrPuller = { kind: "viewer"; claims: PlaybackClaims; token: string } | { kind: "relay"; relayId: string };
+
 export function createDvrHandler(deps: DvrDeps): RouteHandler {
   const playlists = new TtlCache<RecordingPlaylist | null>(10_000, deps.now);
   const reads = new Coalescer<RecordingPlaylist | null>();
   const media = deps.media;
+  const relayFailures = new FailureLimiter(RELAY_PULL_FAILURES_PER_MINUTE, 60_000, 50_000, deps.now);
 
   /** The recording's playlist, null when it does not exist yet. Throws on a storage failure. */
   async function recording(vodId: string): Promise<RecordingPlaylist | null> {
@@ -261,21 +281,38 @@ export function createDvrHandler(deps: DvrDeps): RouteHandler {
     }).promise;
   }
 
-  return async (req, rawPath) => {
-    if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
-    if (req.method !== "GET" && req.method !== "HEAD")
-      return mediaFail(405, "method_not_allowed", { allow: "GET, HEAD, OPTIONS" });
-    const path = parseDvrPath(rawPath);
-    if (!path || !media) return mediaFail(404, "not_found");
-
-    // The token first: a wrong one learns nothing about the VOD.
+  /** The viewer's token first: a wrong one learns nothing about the VOD. */
+  async function viewer(req: Request, vodId: string): Promise<DvrPuller | Response> {
     const token = new URL(req.url).searchParams.get("t");
     if (!token || token.length > 4096) return mediaFail(401, "unauthorized");
     const v = await verifyPlaybackToken(deps.publicKey, token, Math.floor(deps.now() / 1000));
     if (!v.ok) return mediaFail(401, "unauthorized");
-    const refusal = dvrTokenRefusal(v.value, path.vodId);
-    if (refusal) return mediaFail(401, "unauthorized");
-    const claims = v.value;
+    // Viewers of a relay use the relay: a relay token never opens the origin's `/dvr/`.
+    if (dvrTokenRefusal(v.value, vodId)) return mediaFail(401, "unauthorized");
+    return { kind: "viewer", claims: v.value, token };
+  }
+
+  /** The relay's bearer token, checked as the live pull checks it (failures limited per peer). */
+  async function relay(req: Request, peerIp: string | undefined): Promise<DvrPuller | Response> {
+    if (!deps.relays) return mediaFail(404, "not_found");
+    const ip = peerIp ?? "unknown";
+    if (relayFailures.blocked(ip)) return mediaFail(429, "too_many_failed_attempts", { "retry-after": "60" });
+    const r = await deps.relays.authenticate(req.headers.get("authorization"));
+    if (r) return { kind: "relay", relayId: r.id };
+    relayFailures.fail(ip);
+    return mediaFail(401, "unauthorized");
+  }
+
+  return async (req, rawPath, peerIp) => {
+    const relayPull = rawPath.startsWith(RELAY_PULL_DVR_ROUTE);
+    if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
+    if (req.method !== "GET" && req.method !== "HEAD")
+      return mediaFail(405, "method_not_allowed", { allow: "GET, HEAD, OPTIONS" });
+    const path = parseDvrPath(relayPull ? rawPath.slice("/relay-pull".length) : rawPath);
+    if (!path || !media) return mediaFail(404, "not_found");
+
+    const who = relayPull ? await relay(req, peerIp) : await viewer(req, path.vodId);
+    if (who instanceof Response) return who;
 
     let vod: VodState | null;
     try {
@@ -287,7 +324,7 @@ export function createDvrHandler(deps: DvrDeps): RouteHandler {
     // Only the private prefix holds a recording; a VOD already under `vods/` is not recording.
     if (!vod || !dvrServable(dvrStateOf(vod)) || vod.storagePrefix !== vodPrefix(path.vodId, "private"))
       return mediaFail(404, "not_found");
-    if (claims.cid !== vod.channelId) return mediaFail(401, "unauthorized");
+    if (who.kind === "viewer" && who.claims.cid !== vod.channelId) return mediaFail(401, "unauthorized");
 
     let rec: RecordingPlaylist | null;
     let windowSeconds: number;
@@ -301,13 +338,18 @@ export function createDvrHandler(deps: DvrDeps): RouteHandler {
     if (!rec || rec.segments.length === 0 || windowSeconds <= 0) return mediaFail(404, "not_found");
     const cut = cutToWindow(rec, windowSeconds);
     const dir = `dvr/${path.vodId}`;
+    const channelId = vod.channelId;
     const account = (kind: "playlist" | "segment", bytes: number) => {
-      deps.metrics.egress("origin", bytes);
-      deps.metrics.request("dvr", kind, "origin", 200);
+      const src = who.kind === "viewer" ? "origin" : "relay";
+      deps.metrics.egress(src, bytes);
+      deps.metrics.request("dvr", kind, src, 200);
       deps.segments.record({
-        sid: claims.sid,
-        cid: claims.cid,
-        src: "origin",
+        // A relay pull serves no one viewer session, so it is logged under the relay's id. The
+        // worker never counts `relay` entries as session evidence: relay viewers are judged on
+        // the relay's receipts.
+        ...(who.kind === "viewer"
+          ? { sid: who.claims.sid, cid: who.claims.cid, src: "origin" as const }
+          : { sid: who.relayId, cid: channelId, src: "relay" as const, rid: who.relayId }),
         kind,
         bytes,
         at: deps.now(),
@@ -318,7 +360,12 @@ export function createDvrHandler(deps: DvrDeps): RouteHandler {
 
     if (path.kind === "playlist") {
       if (path.file !== VOD_PLAYLIST) return mediaFail(404, "not_found");
-      const body = rewritePlaylist(cut.text, { dir, root: dir, target: { kind: "relative", token } });
+      // Viewers get URIs carrying their token; a relay gets bare relative URIs and adds its viewers'.
+      const body = rewritePlaylist(cut.text, {
+        dir,
+        root: dir,
+        target: who.kind === "viewer" ? { kind: "relative", token: who.token } : { kind: "relative" },
+      });
       const bytes = new TextEncoder().encode(body).byteLength;
       const headers = new Headers(CORS);
       headers.set("content-type", "application/vnd.apple.mpegurl");
@@ -347,10 +394,18 @@ export function createDvrHandler(deps: DvrDeps): RouteHandler {
   };
 }
 
+/** `/dvr/` and `/relay-pull/dvr/`: one route entry (one shared playlist cache), split by `match`. */
+export const isDvrPath = (rawPath: string) => rawPath.startsWith(DVR_ROUTE) || rawPath.startsWith(RELAY_PULL_DVR_ROUTE);
+
 export function registerDvrRoutes(registry: OriginRouteRegistry, ctx: OriginRouteContext): void {
   registry.register({
     name: "dvr",
-    prefix: DVR_ROUTE,
-    handle: createDvrHandler({ ...ctx, channelWindow: dbChannelWindow(ctx.db, ctx.now) }),
+    prefix: "/",
+    match: isDvrPath,
+    handle: createDvrHandler({
+      ...ctx,
+      channelWindow: dbChannelWindow(ctx.db, ctx.now),
+      relays: new RelayAuth({ db: ctx.db }),
+    }),
   });
 }

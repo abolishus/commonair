@@ -238,33 +238,42 @@ async function dvrVodFor(
   return shown ? v.id : null;
 }
 
-/** A DVR token: the live session's id, `path = dvr/<vodId>`, origin only, never `dm`, 120 s. */
-async function signDvr(deps: Deps, sid: string, channelId: string, vodId: string): Promise<string> {
+/**
+ * A DVR token: the live session's id, `path = dvr/<vodId>`, never `dm`, 120 s. A relay-assigned
+ * session's token is a relay token for its relay (batch 7 decision (x): relays serve DVR since the
+ * signed purge); every other session's is an origin token, so the CDN never serves DVR.
+ */
+async function signDvr(deps: Deps, sid: string, channelId: string, vodId: string, a: Assignment): Promise<string> {
   const iat = Math.floor(deps.now().getTime() / 1000);
   return signPlaybackToken(deps.signingKey, {
     v: 1,
     sid,
     cid: channelId,
     path: dvrTokenPath(vodId),
-    src: "origin",
+    ...(a.source === "relay" ? { src: "relay" as const, rid: a.relayId } : { src: "origin" as const }),
     iat,
     exp: iat + DVR_TOKEN_TTL_SECONDS,
   });
 }
 
-/** The DVR playlist, always on the origin (`PLAYBACK_PUBLIC_URL`): relays and the CDN never serve DVR (decision 5). */
-export const dvrPlaylistUrl = (deps: Deps, vodId: string, token: string) =>
-  `${deps.env.PLAYBACK_PUBLIC_URL.replace(/\/+$/, "")}${DVR_ROUTE}${vodId}/${VOD_PLAYLIST}?t=${encodeURIComponent(token)}`;
+/**
+ * The DVR playlist: on the session's relay for a relay-assigned session (ADR 0016 Amendment 1
+ * A1.3), otherwise on the origin (`PLAYBACK_PUBLIC_URL`); never on the CDN.
+ */
+export const dvrPlaylistUrl = (deps: Deps, vodId: string, token: string, a: Assignment = { source: "origin" }) =>
+  `${(a.source === "relay" ? a.url : deps.env.PLAYBACK_PUBLIC_URL).replace(/\/+$/, "")}${DVR_ROUTE}${vodId}/${VOD_PLAYLIST}?t=${encodeURIComponent(token)}`;
 
 /**
  * A fresh DVR token for a session holding a grant, when the rules still admit it (the VOD still
  * records, visibility, channel settings, data mode off); undefined otherwise. The origin re-checks
- * the VOD state on every request; this re-checks who may watch it.
+ * the VOD state on every request; this re-checks who may watch it. Minted for the session's
+ * current assignment `a`, like the live token.
  */
 async function refreshDvr(
   deps: Deps,
   s: typeof playbackSessions.$inferSelect,
   dataMode: number | null,
+  a: Assignment,
 ): Promise<string | undefined> {
   if (dataMode !== null || !s.broadcastId) return undefined;
   const vodId = await deps.valkey.get(dvrKey(s.id));
@@ -276,7 +285,7 @@ async function refreshDvr(
     .where(eq(broadcasts.id, s.broadcastId));
   if (!row) return undefined;
   const allowed = await dvrVodFor(deps, row.c, row.b, () => audienceOfUser(deps, s.userId, row.c), dataMode);
-  return allowed === vodId ? signDvr(deps, s.id, s.channelId, vodId) : undefined;
+  return allowed === vodId ? signDvr(deps, s.id, s.channelId, vodId, a) : undefined;
 }
 
 export const playback = {
@@ -340,14 +349,14 @@ export const playback = {
     // The grant is what the tracker and `p2p.iceServers` check; the swarm id is the broadcast id.
     if (p2pEnabled) await deps.valkey.set(KEYS.p2pGrant(sid), b.id, "EX", P2P_GRANT_TTL_SECONDS);
     const { token, claims } = await signFor(deps, sid, c.id, path, assignment, input.dataMode);
-    // DVR is origin-only, so a relay or CDN session still gets its DVR playlist on the origin.
+    // A relay session rewinds on its relay (decision (x)); origin and CDN sessions on the origin.
     const dvrVod = await dvrVodFor(deps, c, b, () => viewerAudience(deps, caller, c), input.dataMode);
     let dvr: { windowSeconds: number; url: string } | null = null;
     if (dvrVod) {
       await deps.valkey.set(dvrKey(sid), dvrVod, "EX", VERIFY_STATE_TTL_SECONDS);
       dvr = {
         windowSeconds: dvrWindowSeconds(c.dvrWindowSeconds, deps.env.DVR_MAX_WINDOW_SECONDS),
-        url: dvrPlaylistUrl(deps, dvrVod, await signDvr(deps, sid, c.id, dvrVod)),
+        url: dvrPlaylistUrl(deps, dvrVod, await signDvr(deps, sid, c.id, dvrVod, assignment), assignment),
       };
     }
     return {
@@ -531,8 +540,8 @@ export const playback = {
     if (gate && !(await confirmedAdult(deps, s.userId ?? undefined)))
       throw apiError("FORBIDDEN", "Confirm you are 18 or older to watch this stream");
     const { token } = await signFor(deps, s.id, s.channelId, claims.path, a, dataMode, claims.rb);
-    // The DVR token is refreshed beside the live one (same lifetime); none in data mode.
-    const dvrToken = await refreshDvr(deps, s, dataMode);
+    // The DVR token is refreshed beside the live one (same lifetime and source); none in data mode.
+    const dvrToken = await refreshDvr(deps, s, dataMode, a);
     return {
       ok: true as const,
       token,

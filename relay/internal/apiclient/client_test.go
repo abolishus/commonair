@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/abolishus/commonair/relay/internal/tokens"
 )
@@ -117,5 +118,47 @@ func TestRegisterRejectsIncompleteResponse(t *testing.T) {
 	}
 	if _, err := New("ftp://x", "t", "v", nil); err == nil {
 		t.Fatal("non-http API accepted")
+	}
+}
+
+func TestPurgesLongPollsWithoutTheShortTimeout(t *testing.T) {
+	var gotMethod, gotPath, gotQuery, gotAuth string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath, gotQuery, gotAuth = r.Method, r.URL.Path, r.URL.RawQuery, r.Header.Get("Authorization")
+		// Longer than the short-call timeout below: the long poll must not inherit it.
+		time.Sleep(150 * time.Millisecond)
+		_, _ = w.Write([]byte(`{"payload":"eyJ9","signature":"sig"}`))
+	}))
+	defer ts.Close()
+	c, err := New(ts.URL, "relay_x", "v", &http.Client{Timeout: 50 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := c.Purges(context.Background(), 42)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotMethod != http.MethodGet || gotPath != "/api/relay/purges" || gotQuery != "after=42" || gotAuth != "Bearer relay_x" {
+		t.Fatalf("%s %s?%s auth %q", gotMethod, gotPath, gotQuery, gotAuth)
+	}
+	if got.Payload != "eyJ9" || got.Signature != "sig" {
+		t.Fatalf("%+v", got)
+	}
+	// The short calls keep their timeout.
+	if _, err := c.Heartbeat(context.Background(), HeartbeatRequest{}); err == nil {
+		t.Fatal("heartbeat should time out")
+	}
+}
+
+func TestPurgesErrorsAreClassified(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"code":"UNAUTHORIZED","message":"no"}`))
+	}))
+	defer ts.Close()
+	c, _ := New(ts.URL, "t", "v", nil)
+	_, err := c.Purges(context.Background(), 0)
+	if e, ok := AsError(err); !ok || !e.Unknown() {
+		t.Fatalf("%v", err)
 	}
 }

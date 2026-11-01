@@ -93,6 +93,21 @@ func (c *LRU) removeElement(el *list.Element) {
 	c.used -= it.size
 }
 
+// DeleteFunc removes every entry whose key match accepts and returns how many
+// it removed. It walks the whole cache under the lock: purges are rare.
+func (c *LRU) DeleteFunc(match func(key string) bool) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	n := 0
+	for key, el := range c.items {
+		if match(key) {
+			c.removeElement(el)
+			n++
+		}
+	}
+	return n
+}
+
 // Bytes is the current accounted size.
 func (c *LRU) Bytes() int64 {
 	c.mu.Lock()

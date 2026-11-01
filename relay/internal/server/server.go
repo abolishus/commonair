@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package server is the relay's viewer-facing HTTP surface: /hls/ (token
-// checked, pull-through cached, accounted) and /healthz.
+// checked, pull-through cached, accounted), /dvr/ (live DVR, batch 7 decision
+// (x); see dvr.go) and /healthz.
 package server
 
 import (
@@ -64,6 +65,8 @@ type Config struct {
 	// An LL-HLS player needs a blocking playlist reload, a part or two and a
 	// rendition report at most; more means a misbehaving or abusive client.
 	MaxRequestsPerSession int
+	// PurgeSeq reports the purge feed cursor for /healthz (nil: not shown).
+	PurgeSeq func() int64
 }
 
 // Defaults for Config; exported so the command can size its shutdown window.
@@ -86,6 +89,10 @@ type Server struct {
 
 	sessMu   sync.Mutex
 	sessReqs map[string]int
+
+	// DVR playlists this relay has fetched, by VOD id (dvr.go).
+	dvrMu   sync.Mutex
+	dvrVods map[string]*dvrVod
 
 	inflight sync.WaitGroup
 }
@@ -124,6 +131,7 @@ func New(cfg Config) *Server {
 		cfg: cfg, fetchCtx: ctx, cancelFetch: cancel,
 		fetchSlots: make(chan struct{}, cfg.MaxOriginFetches),
 		sessReqs:   map[string]int{},
+		dvrVods:    map[string]*dvrVod{},
 	}
 }
 
@@ -200,6 +208,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.healthz)
 	mux.HandleFunc("/hls/", s.hls)
+	mux.HandleFunc("/dvr/", s.dvr)
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) { httpError(w, http.StatusNotFound, "not found") })
 	h := securityHeaders(mux)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -230,6 +239,8 @@ type Health struct {
 	Status  string `json:"status"`
 	Version string `json:"version"`
 	Viewers int    `json:"viewers"`
+	// PurgeSeq is the newest purge row applied (batch 7 decision (x)).
+	PurgeSeq *int64 `json:"purgeSeq,omitempty"`
 }
 
 func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
@@ -238,6 +249,10 @@ func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h := Health{Status: "ok", Version: s.cfg.Version, Viewers: s.cfg.Viewers.Count(s.cfg.Now())}
+	if s.cfg.PurgeSeq != nil {
+		seq := s.cfg.PurgeSeq()
+		h.PurgeSeq = &seq
+	}
 	code := http.StatusOK
 	st := s.state.Load()
 	switch {
@@ -265,49 +280,74 @@ func setCORS(h http.Header) {
 }
 
 func (s *Server) hls(w http.ResponseWriter, r *http.Request) {
+	v, ok := s.admit(w, r, "/hls/", "/hls/", hls.ValidPath)
+	if !ok {
+		return
+	}
+	defer v.done()
+	if hls.IsPlaylist(v.path) {
+		s.servePlaylist(w, r, v.st, v.claims, v.path, v.token, r.URL.Query())
+		return
+	}
+	s.serveMedia(w, r, v.st, v.claims, v.path)
+}
+
+// viewerRequest is an admitted viewer request: registered relay, genuine token
+// bound to this relay and path, a viewer slot and a session request slot.
+type viewerRequest struct {
+	st     *State
+	claims tokens.PlaybackClaims
+	path   string
+	token  string
+	done   func()
+}
+
+// admit runs the checks every viewer route shares and answers the request
+// itself when one fails. The token is checked against the request path with
+// strip removed ("/hls/" serves "live/…", "/" leaves "dvr/…"); valid vets it.
+func (s *Server) admit(w http.ResponseWriter, r *http.Request, route, strip string, valid func(string) bool) (viewerRequest, bool) {
 	setCORS(w.Header())
 	switch r.Method {
 	case http.MethodOptions:
 		w.WriteHeader(http.StatusNoContent)
-		return
+		return viewerRequest{}, false
 	case http.MethodGet, http.MethodHead:
 	default:
 		w.Header().Set("Allow", "GET, HEAD, OPTIONS")
 		httpError(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
+		return viewerRequest{}, false
 	}
 	st := s.state.Load()
 	switch {
 	case st == nil:
 		w.Header().Set("Retry-After", "5")
 		httpError(w, http.StatusServiceUnavailable, "relay is not registered yet")
-		return
+		return viewerRequest{}, false
 	case st.Status == StatusSuspended:
 		httpError(w, http.StatusGone, "relay is suspended")
-		return
+		return viewerRequest{}, false
 	}
 
 	// Encoded characters (RawPath set) are never legitimate in HLS paths.
-	p := strings.TrimPrefix(r.URL.Path, "/hls/")
-	if r.URL.RawPath != "" || !hls.ValidPath(p) {
+	p := strings.TrimPrefix(r.URL.Path, strip)
+	if r.URL.RawPath != "" || !strings.HasPrefix(r.URL.Path, route) || !valid(p) {
 		httpError(w, http.StatusNotFound, "not found")
-		return
+		return viewerRequest{}, false
 	}
-	q := r.URL.Query()
-	token := q.Get("t")
+	token := r.URL.Query().Get("t")
 	if token == "" {
 		httpError(w, http.StatusUnauthorized, "missing token")
-		return
+		return viewerRequest{}, false
 	}
 	now := s.cfg.Now()
 	claims, err := tokens.VerifyPlayback(st.OriginKey, token, now, tokens.DefaultSkew)
 	if err != nil {
 		httpError(w, http.StatusUnauthorized, "invalid or expired token")
-		return
+		return viewerRequest{}, false
 	}
 	if err := (tokens.Binding{RelayID: st.RelayID}).Check(claims, p); err != nil {
 		httpError(w, http.StatusForbidden, "token not valid for this relay or path")
-		return
+		return viewerRequest{}, false
 	}
 	if s.draining.Load() {
 		// Viewers already here keep playing until the player follows switchTo
@@ -315,24 +355,19 @@ func (s *Server) hls(w http.ResponseWriter, r *http.Request) {
 		if !s.cfg.Viewers.Touch(claims.SID, now) {
 			w.Header().Set("Retry-After", "5")
 			httpError(w, http.StatusServiceUnavailable, "relay is shutting down")
-			return
+			return viewerRequest{}, false
 		}
 	} else if !s.cfg.Viewers.Admit(claims.SID, now) {
 		w.Header().Set("Retry-After", "10")
 		httpError(w, http.StatusServiceUnavailable, "relay at capacity")
-		return
+		return viewerRequest{}, false
 	}
 	if !s.enterSession(claims.SID) {
 		w.Header().Set("Retry-After", "1")
 		httpError(w, http.StatusTooManyRequests, "too many concurrent requests for this session")
-		return
+		return viewerRequest{}, false
 	}
-	defer s.leaveSession(claims.SID)
-	if hls.IsPlaylist(p) {
-		s.servePlaylist(w, r, st, claims, p, token, q)
-		return
-	}
-	s.serveMedia(w, r, st, claims, p)
+	return viewerRequest{st: st, claims: claims, path: p, token: token, done: func() { s.leaveSession(claims.SID) }}, true
 }
 
 func (s *Server) servePlaylist(w http.ResponseWriter, r *http.Request, st *State, c tokens.PlaybackClaims, p, token string, q url.Values) {
@@ -422,10 +457,24 @@ func (s *Server) blockingPlaylist(ctx context.Context, st *State, p string, d hl
 	return s.playlist(ctx, st, p, d.Query, "pl:", s.cfg.BlockingPlaylistTTL)
 }
 
+// CaptionTTL is how long a relay keeps a caption file (decision (y)): `.vtt`
+// files change while a stream is live, so they are neither pinned nor counted.
+const CaptionTTL = 30 * time.Second
+
+// isCaption reports whether p is a live caption file (live/<slug>/captions/…/<name>.vtt).
+func isCaption(p string) bool {
+	return strings.Contains(p, "/captions/") && strings.HasSuffix(p, ".vtt")
+}
+
 func (s *Server) serveMedia(w http.ResponseWriter, r *http.Request, st *State, c tokens.PlaybackClaims, p string) {
+	caption := isCaption(p)
 	entry, err := s.cfg.Store.Get(r.Context(), "m:"+p, func(callCtx context.Context) (cache.Entry, error) {
 		return s.limitedFetch(callCtx, s.cfg.MediaTimeout, func(fctx context.Context) (cache.Entry, error) {
-			return s.fetchOrigin(fctx, st.PullBase, p, maxMediaBytes)
+			e, err := s.fetchOrigin(fctx, st.PullBase, p, maxMediaBytes)
+			if err == nil && caption {
+				e.Expires = s.cfg.Now().Add(CaptionTTL)
+			}
+			return e, err
 		})
 	})
 	if err != nil {
@@ -443,6 +492,12 @@ func (s *Server) serveMedia(w http.ResponseWriter, r *http.Request, st *State, c
 		ct = "application/octet-stream"
 	}
 	h.Set("Content-Type", ct)
+	if caption {
+		// Not media: not counted toward receipts, and not pinned (decision (y)).
+		h.Set("Cache-Control", "private, max-age=30")
+		http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(entry.Body))
+		return
+	}
 	// Segment names are unique per stream and never change.
 	h.Set("Cache-Control", "private, max-age=86400, immutable")
 	cw := &countingWriter{ResponseWriter: w, rc: http.NewResponseController(w), onBytes: func(n int64) { s.cfg.Ledger.AddBytes(c.SID, n) }}
@@ -471,7 +526,7 @@ func (s *Server) originFailure(w http.ResponseWriter, r *http.Request, p string,
 	switch {
 	case r.Context().Err() != nil:
 		// The viewer left; nothing to answer.
-	case errors.Is(err, errNotFound):
+	case errors.Is(err, errNotFound), errors.Is(err, cache.ErrPurged):
 		httpError(w, http.StatusNotFound, "not found")
 	case errors.Is(err, errBusy):
 		w.Header().Set("Retry-After", "1")
