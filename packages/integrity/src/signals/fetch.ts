@@ -169,7 +169,10 @@ export function fetchChecks(session: FetchSession, fetches: FetchEvidence, ctx: 
   return {
     checks: [...new Set([...live.checks, ...dvr.checks])],
     measures,
-    mediaUnconfirmed: live.mediaUnconfirmed || dvr.mediaUnconfirmed,
+    // No live seconds and no live accounting (an all-DVR relay session has no receipts): there
+    // is no live media to confirm, so only the DVR part can leave it unconfirmed.
+    mediaUnconfirmed:
+      (live.mediaUnconfirmed && !(total - dvrSeconds === 0 && live.skipped !== null)) || dvr.mediaUnconfirmed,
     // Unjudged only when the live part was and there is no DVR part to judge instead.
     skipped: dvrSeconds > 0 ? null : live.skipped,
   };

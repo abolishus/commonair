@@ -143,18 +143,31 @@ describe("mergeAllowances", () => {
 });
 
 describe("catching up (ADR 0016 decision 6)", () => {
-  test("a DVR session takes no live slot; DVR sessions rank among themselves", () => {
+  test("one pool for every mode: live sessions rank first, then DVR, newest first in each", () => {
     const sessions = [
       live("tab-live", { start: 300, userId: "u" }),
       live("tab-dvr", { start: 100, userId: "u", mode: "dvr" }),
       live("tab-dvr2", { start: 50, userId: "u", mode: "dvr" }),
     ];
     const r = rankConcurrency(sessions);
-    expect(r.get("tab-live")!.device).toEqual({ rank: 1, concurrent: 1 });
-    expect(r.get("tab-live")!.account).toEqual({ rank: 1, concurrent: 1 });
-    expect(r.get("tab-dvr2")!.device).toEqual({ rank: 1, concurrent: 2 });
-    expect(r.get("tab-dvr")!.device).toEqual({ rank: 2, concurrent: 2 });
-    expect(r.get("tab-dvr")!.account).toEqual({ rank: 2, concurrent: 2 });
+    // The older live tab still outranks newer DVR tabs: catching up never pushes it down.
+    expect(r.get("tab-live")!.device).toEqual({ rank: 1, concurrent: 3 });
+    expect(r.get("tab-live")!.account).toEqual({ rank: 1, concurrent: 3 });
+    expect(r.get("tab-dvr2")!.device).toEqual({ rank: 2, concurrent: 3 });
+    expect(r.get("tab-dvr")!.device).toEqual({ rank: 3, concurrent: 3 });
+    expect(r.get("tab-dvr")!.account).toEqual({ rank: 3, concurrent: 3 });
+  });
+
+  test("a DVR claim adds no slots: live + DVR on one device share the cap", () => {
+    const sessions = [
+      live("l1", { start: 40 }),
+      live("l2", { start: 30 }),
+      live("d1", { start: 20, mode: "dvr" }),
+      live("d2", { start: 10, mode: "dvr" }),
+    ];
+    const r = rankConcurrency(sessions);
+    expect(sessions.map((s) => r.get(s.id)!.device.rank)).toEqual([2, 1, 4, 3]);
+    expect(new Set(sessions.map((s) => r.get(s.id)!.device.concurrent))).toEqual(new Set([4]));
   });
 
   test("absent mode is live", () => {

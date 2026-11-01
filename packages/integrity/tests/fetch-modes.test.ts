@@ -94,13 +94,26 @@ describe("fetchChecks by playback mode", () => {
     expect(
       fetchChecks(s, null, { ...ctx, p2p: evidenced, dvrFetches: { playlists: 30, segments: 4, parts: 0 } }).checks,
     ).toEqual(["too_few_segments"]);
-    // A relay session's DVR part is judged on the origin counters; its live part has none (0 s).
+    // A relay session's DVR part is judged on the origin counters; its live part has none (0 s),
+    // so the missing relay receipts leave nothing unconfirmed: an honest catch-up verifies.
     const relay = { ...s, assignedSource: "relay" as const };
     expect(
       fetchChecks(relay, { relayObjects: null, claimedSeconds: 0 }, { ...ctx, dvrFetches: dvrOk(120) }),
-    ).toMatchObject({
-      mediaUnconfirmed: true,
+    ).toMatchObject({ checks: [], mediaUnconfirmed: false, skipped: null });
+    expect(fetchChecks(relay, null, { ...ctx, dvrFetches: dvrOk(120) })).toMatchObject({
+      checks: [],
+      mediaUnconfirmed: false,
     });
+    // With live seconds and no receipts the live part is still unconfirmed.
+    expect(
+      fetchChecks(
+        { ...relay, watchSeconds: 180, dvrSeconds: 120 },
+        { relayObjects: null, claimedSeconds: 60 },
+        { ...ctx, dvrFetches: dvrOk(120) },
+      ).mediaUnconfirmed,
+    ).toBe(true);
+    // And an all-DVR relay session without DVR fetches is still unconfirmed by the DVR part.
+    expect(fetchChecks(relay, null, ctx).mediaUnconfirmed).toBe(true);
     const cdn = { ...s, assignedSource: "cdn" as const };
     expect(fetchChecks(cdn, null, { ...ctx, dvrFetches: dvrOk(120) })).toMatchObject({
       checks: [],

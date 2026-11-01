@@ -177,6 +177,13 @@ describe("the L shortcut", () => {
     expect(key("l", {}, textarea)).toBe(false);
     expect(key("l", {}, editable)).toBe(false);
     expect(key("l", {}, button)).toBe(true);
+    // The scrubber thumb: `L` returns to live while it has focus.
+    const range = { tagName: "INPUT", type: "range" } as unknown as EventTarget;
+    const checkbox = { tagName: "INPUT", type: "checkbox" } as unknown as EventTarget;
+    const search = { tagName: "INPUT", type: "search" } as unknown as EventTarget;
+    expect(key("l", {}, range)).toBe(true);
+    expect(key("l", {}, checkbox)).toBe(true);
+    expect(key("l", {}, search)).toBe(false);
     expect(isTypingTarget(null)).toBe(false);
   });
 });

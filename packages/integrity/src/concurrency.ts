@@ -62,6 +62,8 @@ export const liveViewers = <T extends Pick<LiveSession, "mode">>(sessions: reado
 const byStart = (a: LiveSession, b: LiveSession) =>
   a.startedAt.getTime() - b.startedAt.getTime() || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
+const liveFirst = (s: LiveSession) => (modeOf(s) === "live" ? 0 : 1);
+
 function groupBy<T>(xs: readonly T[], key: (x: T) => string | null): Map<string, T[]> {
   const out = new Map<string, T[]>();
   for (const x of xs) {
@@ -110,8 +112,9 @@ export interface SessionConcurrency {
 }
 
 /**
- * Newest-first rank per device and per account, over sessions that are not superseded. Live and
- * DVR sessions are ranked apart (each mode is its own pool): catching up never takes a live slot.
+ * Rank per device and per account, over sessions that are not superseded: live sessions first,
+ * then DVR, newest first within each. One pool for every mode, so a DVR claim (client-asserted)
+ * never adds slots to the cap, and catching up still never pushes a live tab down.
  */
 export function rankConcurrency(
   live: readonly LiveSession[],
@@ -122,16 +125,16 @@ export function rankConcurrency(
   const account = new Map<string, Concurrency>();
   const rank = (groups: Map<string, LiveSession[]>, into: Map<string, Concurrency>) => {
     for (const group of groups.values()) {
-      group.sort(byStart).reverse();
+      group.sort((a, b) => liveFirst(a) - liveFirst(b) || byStart(b, a));
       group.forEach((s, i) => into.set(s.id, { rank: i + 1, concurrent: group.length }));
     }
   };
   rank(
-    groupBy(counted, (s) => `${modeOf(s)}\u0000${s.deviceHash}`),
+    groupBy(counted, (s) => s.deviceHash),
     device,
   );
   rank(
-    groupBy(counted, (s) => (s.userId === null ? null : `${modeOf(s)}\u0000${s.userId}`)),
+    groupBy(counted, (s) => s.userId),
     account,
   );
   const out = new Map<string, SessionConcurrency>();

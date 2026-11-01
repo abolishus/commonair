@@ -119,13 +119,30 @@ export function seekerFor(c: DvrSeam): DvrSeeker {
   return s;
 }
 
+/** Input types that take no text, so a letter key is not typing there. */
+const NON_TYPING_INPUTS = new Set([
+  "range",
+  "checkbox",
+  "radio",
+  "button",
+  "submit",
+  "reset",
+  "image",
+  "color",
+  "file",
+]);
+
 /** Whether a key event comes from somewhere typing happens (chat), where `L` is a letter. */
 export function isTypingTarget(target: EventTarget | null): boolean {
   const el = target as (HTMLElement & { isContentEditable?: boolean }) | null;
   if (!el || typeof el.tagName !== "string") return false;
   if (el.isContentEditable) return true;
   const tag = el.tagName.toLowerCase();
-  return tag === "input" || tag === "textarea" || tag === "select";
+  if (tag === "textarea" || tag === "select") return true;
+  if (tag !== "input") return false;
+  // The scrubber thumb is an input[type=range]: `L` must still work while stepping through it.
+  const type = ((el as HTMLInputElement).type ?? "text").toLowerCase();
+  return !NON_TYPING_INPUTS.has(type);
 }
 
 /** The `L` shortcut: back to live, unless typing or with a modifier held. */

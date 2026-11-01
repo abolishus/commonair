@@ -16,7 +16,7 @@ import { createDb, uuidv7 } from "@commonair/db";
 import { mediaPath } from "@commonair/contracts/internal";
 import { dataModeCeilingBps } from "@commonair/contracts/enums";
 import { dvrTokenPath } from "@commonair/contracts/storage";
-import { signPlaybackToken, importSigningKey } from "@commonair/tokens";
+import { b64url, signPlaybackToken, importSigningKey } from "@commonair/tokens";
 import type { ApiClient } from "../../api/client.ts";
 import { newDeviceId } from "../../fingerprint.ts";
 import type { Via } from "../../money.ts";
@@ -30,9 +30,10 @@ import { WebSession } from "../../web/session.ts";
 import { dvrTitle, type DvrStep } from "../steps.ts";
 import { DvrHttpViewer, nextSegmentName } from "./viewer.ts";
 
-/** The origin's 5 s per-instance state cache, plus slack for a loaded CI runner. */
+/** The origin's 5 s per-instance state cache, plus one poll interval and a little request time. */
 export const DVR_CLOSE_WITHIN_MS = 5_000;
-export const DVR_CLOSE_SLACK_MS = 3_000;
+export const DVR_CLOSE_POLL_MS = 250;
+export const DVR_CLOSE_SLACK_MS = 1_000;
 const LIVE_TIMEOUT_MS = 60_000;
 const RECORDING_TIMEOUT_MS = 90_000;
 const UI_TIMEOUT_MS = 30_000;
@@ -321,14 +322,18 @@ async function step3(run: DvrRun): Promise<void> {
     await waitFor(
       "/dvr/ 404 after removal",
       async () => (await statusOf(url)) === 404 && (await statusOf(segment)) === 404,
-      { timeoutMs: DVR_CLOSE_WITHIN_MS + DVR_CLOSE_SLACK_MS * 2, intervalMs: 250, signal: ctx.signal },
+      { timeoutMs: DVR_CLOSE_WITHIN_MS * 3, intervalMs: DVR_CLOSE_POLL_MS, signal: ctx.signal },
     );
     return Date.now() - removed;
   });
   ctx.metric("dvrRemovalClosedMs", elapsed, "ms");
-  ctx.check(t("closed within the cache TTL (with CI slack)"), elapsed <= DVR_CLOSE_WITHIN_MS + DVR_CLOSE_SLACK_MS, {
-    elapsed,
-  });
+  ctx.check(
+    t("closed within the cache TTL (one poll and 1 s of slack)"),
+    elapsed <= DVR_CLOSE_WITHIN_MS + DVR_CLOSE_SLACK_MS,
+    {
+      elapsed,
+    },
+  );
   const after = await grantOf(run.anon(), ch.channel);
   ctx.check(t("a new session gets no DVR for the removed recording"), after.dvrWindowSeconds === 0, {
     dvrWindowSeconds: after.dvrWindowSeconds,
@@ -445,8 +450,34 @@ async function step6(run: DvrRun): Promise<void> {
     dvrWindowSeconds: s.dvrWindowSeconds,
   });
   ctx.assert(t("the session's token carries dm"), s.dataMode !== null);
+  // Its token is for `live/<slug>`, so this 401 is the path binding, not the dm refusal.
   const refused = await statusOf(dvrFileUrl(url, "index.m3u8", s.token));
-  ctx.assert(t("its dm token is refused by /dvr/"), refused === 401, { refused });
+  ctx.assert(t("its live token is refused by /dvr/"), refused === 401, { refused });
+  // A token for the DVR path itself that carries dm. The claims schema refuses `dm` on `dvr/`
+  // paths, so it is signed raw: what a forger with the key would send.
+  const key = process.env.PLAYBACK_SIGNING_KEY;
+  if (!key || !ch.vodId) {
+    ctx.skipStep(t("a dvr/<vodId> token carrying dm is refused"), "PLAYBACK_SIGNING_KEY is not set");
+    return;
+  }
+  const signing = await importSigningKey(key);
+  const now = Math.floor(Date.now() / 1000);
+  const body = new TextEncoder().encode(
+    JSON.stringify({
+      v: 1,
+      sid: s.sessionId,
+      cid: ch.channelId,
+      path: dvrTokenPath(ch.vodId),
+      src: "origin",
+      dm: dataModeCeilingBps(800),
+      iat: now,
+      exp: now + 120,
+    }),
+  );
+  const sig = new Uint8Array(await crypto.subtle.sign({ name: "Ed25519" }, signing.privateKey, body));
+  const dmToken = `${b64url(body)}.${b64url(sig)}`;
+  const dmRefused = await statusOf(dvrFileUrl(url, "index.m3u8", dmToken));
+  ctx.assert(t("a dvr/<vodId> token carrying dm is refused by /dvr/"), dmRefused === 401, { dmRefused });
 }
 
 // ------------------------------------------------------------ 7. vods off means no dvr
