@@ -958,6 +958,7 @@ export const federationJobId = (name: string, id: string) => `${name}-${id}`;
 
 /** Relay purges (decision (x)) on `QUEUES.relayPurge`: write `relay_purges` rows for one outbox event. */
 export const RELAY_PURGE_JOBS = { emit: "relay-purge" } as const;
+export const relayPurgeJobId = (name: string, id: string) => `${name}-${id}`;
 export const RelayPurgeEmitJob = z.object({ eventId: z.uuid() });
 export type RelayPurgeEmitJob = z.infer<typeof RelayPurgeEmitJob>;
 

@@ -5,6 +5,7 @@
  * The account export's `interact.json` against a real database: the requester's points, ledger,
  * poll votes, prediction bets and song requests in every channel, and nothing of anyone else's.
  */
+import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { schema as s, type Database } from "@commonair/db";
 import { createTestDatabase, type TestDatabase } from "@commonair/db/testing";
@@ -78,15 +79,16 @@ async function activity(c: { id: string }, userId: string, n: number) {
         { id: "o1", title: "Yes", points: 0, users: 1 },
         { id: "o2", title: "No", points: 0, users: 0 },
       ],
-      status: "resolved",
       windowSeconds: 60,
       locksAt: at(40),
     })
     .returning({ id: s.predictions.id });
   if (!prediction) throw new Error("no prediction");
+  // Bets go in while it is open (0046 refuses a bet on a resolved prediction), then it resolves.
   await db
     .insert(s.predictionBets)
     .values({ predictionId: prediction.id, userId, outcomeId: "o1", points: 2 * n, placedAt: at(2) });
+  await db.update(s.predictions).set({ status: "resolved" }).where(eq(s.predictions.id, prediction.id));
   await db
     .insert(s.songRequests)
     .values({ channelId: c.id, requesterId: userId, url: `https://example.org/song-${n}`, createdAt: at(3) });

@@ -138,7 +138,8 @@ describe("follower count (decision (aa))", () => {
     // Simulate drift (as before 0046: exclusion never decremented), then run the migration's recount.
     await owner.update(s.channels).set({ followerCount: 41 }).where(eq(s.channels.id, channelId));
     const recount = readFileSync(join(MIGRATIONS_DIR, "0046_b7_protections.sql"), "utf8")
-      .split("--> statement-breakpoint")[0]!
+      .split("--> statement-breakpoint")
+      .find((stmt) => stmt.includes("UPDATE public.channels c"))!
       .replace(/^--.*$/gm, "");
     await owner.execute(sql.raw(recount));
     expect(await count(channelId)).toBe(1);
@@ -306,6 +307,14 @@ describe("watch rooms (ADR 0017 decision 3)", () => {
         /stays ended/,
       ),
     ).toBe("42501");
+    // Decision (q): a live room is invite-only; only an ended one drops its hash.
+    const live = await room();
+    expect(
+      await refused(
+        app.update(s.watchRooms).set({ inviteHash: null }).where(eq(s.watchRooms.id, live.roomId)),
+        /watch_rooms_invite_live/,
+      ),
+    ).toBe("23514");
     // Retention deletes the room; members and messages cascade.
     await app.insert(s.watchRoomMessages).values({ roomId: r.roomId, authorId: members[1]!, body: "hi" });
     await app.delete(s.watchRooms).where(eq(s.watchRooms.id, r.roomId));
@@ -345,6 +354,8 @@ describe("draws (decision (s))", () => {
   test("the commitment is immutable and the seed is revealed once, only if it matches", async () => {
     const g = await giveaway();
     expect(await refused(set(g.id, { seedCommitment: sha(hex(32)) }), /never changes/)).toBe("42501");
+    // Never while entries are open, even with the right seed.
+    expect(await refused(set(g.id, { seed: g.seed }), /after entries close/)).toBe("23514");
     await set(g.id, { status: "closed", closedAt: new Date() });
     expect(await refused(set(g.id, { seed: hex(32) }), /does not match/)).toBe("23514");
     expect(await refused(set(g.id, { status: "drawn" }), /seed revealed/)).toBe("23514");
@@ -432,7 +443,7 @@ describe("draws (decision (s))", () => {
     expect(await verifyReveal(row!.seed!, row!.seedCommitment)).toBe(true);
   });
 
-  test("entries only while open and before closes_at; winners are entrants, append-only", async () => {
+  test("entries only while open, after opens_at and before closes_at; winners are entrants, append-only", async () => {
     const g = await giveaway();
     const [a, b] = [await newUser(), await newUser()];
     await app.insert(s.giveawayEntries).values({ giveawayId: g.id, userId: a, pseudonym: "p-a" });
@@ -461,6 +472,14 @@ describe("draws (decision (s))", () => {
         /an entrant/,
       ),
     ).toBe("23514");
+    // Closed but the seed not yet revealed: no winners.
+    expect(
+      await refused(
+        app.insert(s.giveawayWinners).values({ giveawayId: g.id, userId: a, rank: 1, drawIndex: 0 }),
+        /seed is revealed/,
+      ),
+    ).toBe("23514");
+    await set(g.id, { seed: g.seed });
     expect(
       await refused(
         app.insert(s.giveawayWinners).values({ giveawayId: g.id, userId: a, rank: 2, drawIndex: 0 }),
@@ -485,6 +504,27 @@ describe("draws (decision (s))", () => {
         /closed to entries/,
       ),
     ).toBe("23514");
+    // A scheduled giveaway takes no entries before it opens.
+    const [early] = await app
+      .insert(s.giveaways)
+      .values({
+        channelId: (await newChannel()).channelId,
+        title: "Later",
+        prize: "p",
+        eligibility: { minAccountAgeDays: 0, minFollowDays: null, minVerifiedWatchSeconds: 0 },
+        winnerCount: 1,
+        seedCommitment: sha(hex(32)),
+        sealedSeed: "sealed",
+        salt: hex(16),
+        opensAt: new Date(Date.now() + 60_000),
+      })
+      .returning({ id: s.giveaways.id });
+    expect(
+      await refused(
+        app.insert(s.giveawayEntries).values({ giveawayId: early!.id, userId: b, pseudonym: "p-b" }),
+        /closed to entries/,
+      ),
+    ).toBe("23514");
   });
 
   test("jury panels follow the same commitment rule", async () => {
@@ -503,7 +543,7 @@ describe("draws (decision (s))", () => {
 });
 
 describe("predictions (decision (v))", () => {
-  test("a bet at or after the lock media time is refused, as are the owner, moderators and editors", async () => {
+  test("a bet at, after or without a media time once locked is refused, as are the owner, moderators and editors", async () => {
     const { channelId, ownerId } = await newChannel();
     const lock = new Date("2026-11-01T10:00:00Z");
     const [p] = await app
@@ -522,16 +562,37 @@ describe("predictions (decision (v))", () => {
     // Owner-role inserts still pass through the trigger (it is the database rule, not a grant).
     expect(await refused(bet(await newUser(), lock), /locked at/)).toBe("23514");
     expect(await refused(bet(await newUser(), new Date(lock.getTime() + 1)), /locked at/)).toBe("23514");
-    await bet(await newUser(), new Date(lock.getTime() - 1));
-    expect(await refused(bet(ownerId, null), /cannot bet/)).toBe("23514");
+    // Fail closed: once the lock media time is known, a bet must carry its own.
+    expect(await refused(bet(await newUser(), null), /no media time/)).toBe("23514");
+    const before = new Date(lock.getTime() - 1);
+    await bet(await newUser(), before);
+    expect(await refused(bet(ownerId, before), /cannot bet/)).toBe("23514");
     for (const role of ["moderator", "editor"] as const) {
       const u = await newUser();
       await app.insert(s.channelRoles).values({ channelId, userId: u, role });
-      expect(await refused(bet(u, null), /cannot bet/)).toBe("23514");
+      expect(await refused(bet(u, before), /cannot bet/)).toBe("23514");
     }
     const vip = await newUser();
     await app.insert(s.channelRoles).values({ channelId, userId: vip, role: "vip" });
-    await bet(vip, null);
+    await bet(vip, before);
+    // Before any lock media time is known, a bet without one is fine; a settled prediction takes none.
+    const [q] = await app
+      .insert(s.predictions)
+      .values({
+        channelId: (await newChannel()).channelId,
+        title: "u",
+        outcomes: [],
+        windowSeconds: 60,
+        locksAt: new Date(Date.now() + 60_000),
+      })
+      .returning({ id: s.predictions.id });
+    const betQ = (userId: string) =>
+      owner.insert(s.predictionBets).values({ predictionId: q!.id, userId, outcomeId: "a", points: 1, mediaTs: null });
+    await betQ(await newUser());
+    for (const status of ["resolved", "canceled"] as const) {
+      await owner.update(s.predictions).set({ status }).where(eq(s.predictions.id, q!.id));
+      expect(await refused(betQ(await newUser()), /takes no bets/)).toBe("23514");
+    }
   });
 });
 
@@ -551,6 +612,13 @@ describe("jury (decision (u))", () => {
   }
   const seat = (panelId: string, userId: string) =>
     app.insert(s.jurySeats).values({ panelId, userId }).returning({ id: s.jurySeats.id });
+  async function decidedCase(): Promise<{ id: string }> {
+    const [c] = await owner
+      .insert(s.moderationCases)
+      .values({ tier: "t2", origin: "classifier", status: "labelled", subjectType: "vod", subjectId: uuidv7() })
+      .returning({ id: s.moderationCases.id });
+    return c!;
+  }
 
   test("a seat needs an active membership, no staff role, a known adult age and a live opt-in", async () => {
     const p = await panel("2026-09");
@@ -566,20 +634,26 @@ describe("jury (decision (u))", () => {
     expect(await refused(app.delete(s.jurySeats).where(eq(s.jurySeats.panelId, p)))).toBe("42501");
   });
 
-  test("never T0, hash-list, legal-hold or watch-room cases", async () => {
+  test("never open, T0, hash-list, NCII, minor-safety, minor, legal-hold or watch-room cases", async () => {
     const p = await panel("2026-08");
-    const kase = async (v: Partial<typeof s.moderationCases.$inferInsert>) => {
+    // Cases start undecided (0016); most here are then decided, as the sample needs.
+    const kase = async ({ status = "actioned", ...v }: Partial<typeof s.moderationCases.$inferInsert>) => {
       const [c] = await owner
         .insert(s.moderationCases)
         .values({ tier: "t1", origin: "classifier", subjectType: "broadcast", subjectId: uuidv7(), ...v })
         .returning({ id: s.moderationCases.id });
+      if (status !== "open")
+        await owner.update(s.moderationCases).set({ status }).where(eq(s.moderationCases.id, c!.id));
       return c!.id;
     };
     const add = (subjectKind: "moderation_case" | "report", subjectId: string) =>
       app.insert(s.juryCases).values({ panelId: p, subjectKind, subjectId });
     await add("moderation_case", await kase({}));
     expect(
-      await refused(add("moderation_case", await kase({ tier: "t0", origin: "hash_list" })), /never sampled/),
+      await refused(
+        add("moderation_case", await kase({ tier: "t0", origin: "hash_list", status: "open" })),
+        /never sampled/,
+      ),
     ).toBe("23514");
     expect(
       await refused(add("moderation_case", await kase({ listCategory: "ncii", origin: "hash_list" })), /never sampled/),
@@ -588,17 +662,51 @@ describe("jury (decision (u))", () => {
     await owner.insert(s.legalHolds).values({ userId: held, reason: "litigation", reasonCode: "litigation" });
     expect(await refused(add("moderation_case", await kase({ userId: held })), /legal hold/)).toBe("23514");
     expect(await refused(add("moderation_case", uuidv7()), /names a moderation case/)).toBe("23503");
+    expect(await refused(add("moderation_case", await kase({ status: "open" })), /decided/)).toBe("23514");
+    expect(await refused(add("moderation_case", await kase({ status: "dismissal_pending" })), /decided/)).toBe("23514");
+    // A report-origin T1 case for NCII or minor safety has no list category; its clause gives it away.
+    for (const ruleRef of ["decency.intimate-images@1", "illegal.ncii@2", "safety.minors@1"]) {
+      expect(await refused(add("moderation_case", await kase({ origin: "human", ruleRef })), /never sampled/)).toBe(
+        "23514",
+      );
+    }
+    await add("moderation_case", await kase({ origin: "human", ruleRef: "decency.harassment@1" }));
+    // A minor or an unknown age as the subject's user or the channel's owner.
+    expect(
+      await refused(add("moderation_case", await kase({ userId: await newUser({ birthDate: MINOR }) })), /minor/),
+    ).toBe("23514");
+    expect(
+      await refused(add("moderation_case", await kase({ userId: await newUser({ birthDate: null }) })), /minor/),
+    ).toBe("23514");
+    const minorOwner = await newUser({ birthDate: MINOR });
+    const [minorCh] = await app
+      .insert(s.channels)
+      .values({ ownerId: minorOwner, slug: `m${minorOwner.slice(-10)}`, displayName: "Minor" })
+      .returning({ id: s.channels.id });
+    expect(await refused(add("moderation_case", await kase({ channelId: minorCh!.id })), /minor/)).toBe("23514");
     const report = async (v: Partial<typeof s.reports.$inferInsert>) => {
       const [r] = await owner
         .insert(s.reports)
-        .values({ subjectType: "user", subjectId: uuidv7(), reason: "spam", status: "actioned", ...v })
+        .values({ subjectType: "user", subjectId: await newUser(), reason: "spam", status: "actioned", ...v })
         .returning({ id: s.reports.id });
       return r!.id;
     };
     await add("report", await report({}));
     expect(await refused(add("report", await report({ subjectType: "watch_room" })), /never sampled/)).toBe("23514");
     expect(await refused(add("report", await report({ reason: "ncii" })), /never sampled/)).toBe("23514");
+    expect(await refused(add("report", await report({ reason: "minor_safety" })), /never sampled/)).toBe("23514");
+    expect(await refused(add("report", await report({ status: "open" })), /resolved reports/)).toBe("23514");
     expect(await refused(add("report", await report({ subjectId: held })), /legal hold/)).toBe("23514");
+    const minor = await newUser({ birthDate: MINOR });
+    expect(await refused(add("report", await report({ subjectId: minor })), /minor/)).toBe("23514");
+    expect(await refused(add("report", await report({ reporterId: minor })), /minor/)).toBe("23514");
+    expect(
+      await refused(
+        add("report", await report({ subjectType: "channel", subjectId: minorCh!.id, channelId: minorCh!.id })),
+        /minor/,
+      ),
+    ).toBe("23514");
+    await add("report", await report({ reporterId: await newUser(), subjectId: await newUser() }));
   });
 
   test("only a seat of the case's open panel votes, once, append-only", async () => {
@@ -606,13 +714,10 @@ describe("jury (decision (u))", () => {
     const other = await panel("2026-06");
     const [mine] = await seat(p, await member());
     const [foreign] = await seat(other, await member());
-    const [c] = await owner
-      .insert(s.moderationCases)
-      .values({ tier: "t2", origin: "classifier", subjectType: "vod", subjectId: uuidv7() })
-      .returning({ id: s.moderationCases.id });
+    const c = await decidedCase();
     const [jc] = await app
       .insert(s.juryCases)
-      .values({ panelId: p, subjectKind: "moderation_case", subjectId: c!.id })
+      .values({ panelId: p, subjectKind: "moderation_case", subjectId: c.id })
       .returning({ id: s.juryCases.id });
     const vote = (seatId: string) =>
       app.insert(s.juryVotes).values({ caseId: jc!.id, seatId, vote: "agree", reasonCode: "clause_fits" });
@@ -623,6 +728,42 @@ describe("jury (decision (u))", () => {
       "42501",
     );
     expect(await refused(app.delete(s.juryVotes).where(eq(s.juryVotes.caseId, jc!.id)))).toBe("42501");
+    // A case that turns ineligible after sampling (here: a legal hold) can still be withdrawn,
+    // once, and takes no more votes; pseudonyms stay writable; the subject never changes.
+    const c2 = await decidedCase();
+    const [jc2] = await app
+      .insert(s.juryCases)
+      .values({ panelId: p, subjectKind: "moderation_case", subjectId: c2.id })
+      .returning({ id: s.juryCases.id });
+    await owner
+      .insert(s.legalHolds)
+      .values({ userId: await newUser(), caseId: c2.id, reason: "litigation", reasonCode: "litigation" });
+    const upd2 = (v: Partial<typeof s.juryCases.$inferInsert>) =>
+      app.update(s.juryCases).set(v).where(eq(s.juryCases.id, jc2!.id));
+    await upd2({ pseudonymMap: { a: "Juror-1" } });
+    expect(await refused(upd2({ withdrawnAt: new Date() }), /jury_cases_withdrawn/)).toBe("23514");
+    await upd2({ withdrawnAt: new Date(), withdrawnReason: "legal_hold" });
+    expect(await refused(upd2({ withdrawnReason: "appeal" }), /withdrawn once/)).toBe("42501");
+    expect(await refused(upd2({ withdrawnAt: null, withdrawnReason: null }), /withdrawn once/)).toBe("42501");
+    expect(await refused(upd2({ subjectId: uuidv7() }), /never changes/)).toBe("42501");
+    expect(
+      await refused(
+        app.insert(s.juryVotes).values({ caseId: jc2!.id, seatId: mine!.id, vote: "agree", reasonCode: "clause_fits" }),
+        /not withdrawn/,
+      ),
+    ).toBe("23514");
+    expect(
+      await refused(
+        app.insert(s.juryCases).values({
+          panelId: p,
+          subjectKind: "moderation_case",
+          subjectId: (await decidedCase()).id,
+          withdrawnAt: new Date(),
+          withdrawnReason: "ineligible",
+        }),
+        /before it is withdrawn/,
+      ),
+    ).toBe("23514");
     // A closed panel takes no votes.
     const [late] = await seat(p, await member());
     await app.update(s.juryPanels).set({ closedAt: new Date() }).where(eq(s.juryPanels.id, p));

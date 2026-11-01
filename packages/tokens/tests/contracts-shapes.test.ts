@@ -99,6 +99,7 @@ describe("standing statement envelope: contracts mirror packages/tokens", () => 
       issuer: "https://instance.example",
       kid: key.kid,
       channelId: "01890000-0000-7000-8000-00000000c001",
+      bundleSha256: "f".repeat(64),
       issuedAt: "2023-11-14T22:13:20.000Z",
       expiresAt: "2023-12-14T22:13:20.000Z",
       activeSuspension: true,

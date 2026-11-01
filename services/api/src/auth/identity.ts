@@ -64,6 +64,8 @@ export const RESERVED_USERNAMES: ReadonlySet<string> = new Set([
   "moderator",
   "moderators",
   "move",
+  // Caddy sends /nodeinfo/* to the API (federation), so a channel by that name would lose its pages.
+  "nodeinfo",
   "null",
   "oauth",
   "oauth2",

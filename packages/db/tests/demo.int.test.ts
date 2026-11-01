@@ -100,13 +100,13 @@ async function insertRealData(): Promise<RealData> {
     .values({ id: realKey, channelId: realChannel, keyHash: `h${uuidv7()}`, prefix: "live_realkey" });
 
   // Follows among real users, plus a demo viewer following the real channel (removed by clear).
+  // The 0046 trigger keeps follower_count (3 here); the app never writes it.
   await app.insert(s.follows).values([
     { followerId: prefixOnly, channelId: realChannel },
     { followerId: domainOnly, channelId: realChannel },
     { followerId: realUser, channelId: domainOnlyChannel },
     { followerId: demoViewer.id, channelId: realChannel },
   ]);
-  await app.update(s.channels).set({ followerCount: 3 }).where(eq(s.channels.id, realChannel));
 
   const messages = [uuidv7(), uuidv7(), uuidv7()];
   await app.insert(s.chatMessages).values([

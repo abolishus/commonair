@@ -195,7 +195,8 @@ Anything else is a **contract request**.
   6. The schedule is shown as carried, not applied.
   7. Paste panels and see them on the channel page.
   8. The mock recorded the revocation.
-  9. With `TWITCH_IMPORT_ENABLED` false, the page shows the unavailable state.
+     (Not a step: with `TWITCH_IMPORT_ENABLED` false the page shows the unavailable state, covered by
+     the API integration and web unit tests, because the `w3` stack forces the flag on everywhere.)
 
 ## Done means
 

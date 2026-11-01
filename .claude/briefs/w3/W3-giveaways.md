@@ -88,14 +88,15 @@ request.
        and keeps the seed server-side (encrypted at rest, using `encryptSecret`) until the draw;
      - emits `channel.giveaway.begin`.
    - **`enter`:** one per account; refuses an ineligible entrant with a reason code; stores
-     `pseudonym(salt, userId)`.
+     `pseudonym(salt, userId)`. `Giveaway.me.pseudonym` shows the caller their own, and only theirs.
    - **`close`** (manual or by the timed job), then **`draw`:**
-     - computes the winners, reveals `seed` and `salt`, writes `giveaway_winners`, emits
+     - computes the winners, reveals `seed` (never `salt`: user ids are public, so the salt would
+       map every pseudonym back to its account), writes `giveaway_winners`, emits
        `channel.giveaway.end`, and sends winners an in-app notification (existing notifications
        path);
      - writes audit rows at open, close, draw and cancel.
-   - **`verify`** (public): returns the commitment, seed, salt, pseudonyms sorted and the winners'
-     indices and pseudonyms. Usernames appear only for winners, and only if the winner allows it
+   - **`verify`** (public): returns the commitment, seed, pseudonyms sorted and the winners'
+     indices and pseudonyms (no salt). Usernames appear only for winners, and only if the winner allows it
      (default: the pseudonym only).
 3. **Chat plugin (`plugins/giveaway.ts`).** If a giveaway with a keyword is open, a message that
    equals the keyword enters the sender through the same API logic (a shared function in
@@ -106,7 +107,7 @@ request.
    - **Viewer `giveaway-card.tsx`:** enter button, eligibility reason, "no purchase necessary"
      line, a link to the official rules (instance legal document) and a link to verify.
    - **Public verify page `$channel_.giveaways.$giveawayId.tsx`:** shows the commitment, revealed
-     seed and salt, and the entry and winner lists. It re-runs the draw in the browser with
+     seed, and the entry and winner lists (and, for a signed-in entrant, which pseudonym is theirs). It re-runs the draw in the browser with
      `packages/draw` and shows "matches" or "does not match".
    - Hide everything when the flag is off.
    - Strings go in `w3-giveaways`, `en` and `es`.
@@ -138,7 +139,8 @@ request.
   3. A viewbot account is refused.
   4. Close and draw.
   5. The harness re-runs the draw from `verify` and matches the winners.
-  6. The flag-off instance refuses `open`.
+     (The flag-off refusal of `open` is an API integration test, not a scenario step: the `w3` stack
+     turns `GIVEAWAYS_ENABLED` on for every replica.)
 
 ## Done means
 

@@ -30,6 +30,7 @@ import {
   PORTABILITY_JOBS,
   QUEUES,
   RELAY_PURGE_JOBS,
+  relayPurgeJobId,
   federationJobId,
   portabilityJobId,
   type FederationFanoutJob,
@@ -144,7 +145,7 @@ export async function b7JobsFor(
         queue: QUEUES.relayPurge,
         name: RELAY_PURGE_JOBS.emit,
         data: { eventId: row.id },
-        opts: { jobId: `${RELAY_PURGE_JOBS.emit}-${row.id}` },
+        opts: { jobId: relayPurgeJobId(RELAY_PURGE_JOBS.emit, row.id) },
       });
     switch (row.type) {
       case "channel.moved": {

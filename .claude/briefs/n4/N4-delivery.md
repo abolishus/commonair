@@ -175,6 +175,8 @@ Anything else is a **contract request**.
   6. `Undo{Follow}`, go live again. Nothing is delivered.
   7. A blocked domain's `Follow` is refused at the inbox.
   8. Suspend the channel. The peer receives `Delete` of the actor.
+  9. (Needs 3; N4-web's `federation-follower-remove`, or the API.) Remove the peer as a follower:
+     it is gone from the list and receives nothing more.
 
 ## Done means
 

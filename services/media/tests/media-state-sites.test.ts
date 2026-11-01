@@ -6,7 +6,9 @@
  * is listed here with its count, and there is no suspension write (media never suspends). A
  * tracked file runs those writes inside `withMediaState` (`src/media-state.ts`); an untracked one
  * says why it needs no event. A new write site, or one more write in a listed file, fails until it
- * is added here, which means deciding whether it writes the event.
+ * is added here, which means deciding whether it writes the event. Bumping a tracked file's count
+ * means its new write is inside the helper and has an event test of its own: the count alone cannot
+ * tell a wrapped write from an unwrapped one.
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
@@ -47,14 +49,32 @@ function mediaWrites(src: string): number {
     `\\.(?:update|delete|insert)\\(\\s*(?:(?:${[...names].join("|")})|\\w+\\.(?:vods|clips))\\s*\\)`,
     "g",
   );
-  return [...src.matchAll(re)].length;
+  return [...src.matchAll(re)].length + [...src.matchAll(RAW_MEDIA_WRITE)].length;
 }
 
-/** Writes of `suspended_at`, of a user's ban, and the shared DMCA lifts in `@commonair/db`. */
+/** Raw SQL: `update vods`, `delete from clips`, `insert into "vods"`. */
+const RAW_MEDIA_WRITE = /\b(?:update|delete\s+from|insert\s+into)\s+"?(?:vods|clips)\b/gi;
+
+/** The text of the call whose `(` is at `open`, up to its matching `)`. */
+function callBody(src: string, open: number): string {
+  let depth = 0;
+  for (let i = open; i < src.length; i++) {
+    if (src[i] === "(") depth++;
+    else if (src[i] === ")" && --depth === 0) return src.slice(open, i + 1);
+  }
+  return src.slice(open);
+}
+
+/**
+ * Every `.set(…)` / `.values(…)` naming `suspendedAt`, `banned` or `banExpires`, whatever the value
+ * (`now`, `ctx.now()`, `input.banned`, a ternary of objects), and the shared DMCA lifts in
+ * `@commonair/db`. Select projections and type annotations are not writes and are not counted.
+ */
 function suspensionWrites(src: string): number {
-  const re =
-    /suspendedAt:\s*(?:now\b|null\b|sql`)|\bbanned:\s*(?:true|false)\b|\b(?:liftDmcaSuspensionInTx|reconcileDmcaTerminationInTx)\(/g;
-  return [...src.matchAll(re)].length;
+  let n = 0;
+  for (const m of src.matchAll(/\.(?:set|values)\(/g))
+    if (/\b(?:suspendedAt|banned|banExpires)\s*:/.test(callBody(src, m.index + m[0].length - 1))) n++;
+  return n + [...src.matchAll(/\b(?:liftDmcaSuspensionInTx|reconcileDmcaTerminationInTx)\(/g)].length;
 }
 
 function scan(count: (src: string) => number): Record<string, number> {
@@ -93,8 +113,11 @@ describe("decision (z) write sites", () => {
       "tx.update(vodsT); tx.delete(clips); tx.insert(v); tx.update(t); tx.update(s.vods); tx.update(users);",
       "x.set({ suspendedAt: now }); x.set({ banned: true }); liftDmcaSuspensionInTx(tx, id);",
       "x.select({ suspendedAt: channels.suspendedAt });",
+      "x.set({ suspendedAt: ctx.now(), reason: f(a, b) }); x.set(on ? { banned: input.banned } : { banExpires: at });",
+      "type C = { suspendedAt: Date | null }; x.set({ title: t });",
+      "await sql`update vods set visibility = 'private'`; sql`DELETE FROM clips`; sql`insert into \"vods\" (id)`;",
     ].join("\n");
-    expect(mediaWrites(src)).toBe(5);
-    expect(suspensionWrites(src)).toBe(3);
+    expect(mediaWrites(src)).toBe(8);
+    expect(suspensionWrites(src)).toBe(5);
   });
 });

@@ -147,7 +147,14 @@ function StudioLayout(): React.JSX.Element {
   return (
     <StudioShell
       header={<AppHeader studio />}
-      groups={[{ id: "studio", items: studioNav(pathname, { chatSafety: instance.chatSafety }).map(studioItem) }]}
+      groups={[
+        {
+          id: "studio",
+          items: studioNav(pathname, { chatSafety: instance.chatSafety, twitchImport: instance.twitchImport }).map(
+            studioItem,
+          ),
+        },
+      ]}
       sidebarLabel={t("studio.nav")}
       skipLabel={t("nav.skipToContent")}
       footer={<AppFooter />}

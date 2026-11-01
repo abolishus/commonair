@@ -76,7 +76,7 @@ const giveaway = (over: Partial<GiveawayDto> = {}): GiveawayDto => ({
   closesAt: null,
   drawnAt: null,
   entries: 3,
-  me: { entered: false, eligible: true, reason: null, won: false },
+  me: { entered: false, pseudonym: null, eligible: true, reason: null, won: false },
   winners: [],
   ...over,
 });
@@ -205,7 +205,9 @@ describe("useChatInteract giveaway state", () => {
     const { result } = hook(client);
     await waitFor(() => expect(result.current.giveaway).not.toBeNull());
     act(() => {
-      result.current.setGiveaway(giveaway({ me: { entered: true, eligible: true, reason: null, won: false } }));
+      result.current.setGiveaway(
+        giveaway({ me: { entered: true, pseudonym: "p", eligible: true, reason: null, won: false } }),
+      );
     });
     expect(result.current.giveaway?.me?.entered).toBe(true);
     act(() => {

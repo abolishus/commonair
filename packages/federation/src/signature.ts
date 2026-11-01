@@ -8,18 +8,24 @@
  * We sign `(request-target) host date digest` (no `digest` on a body-less GET) and emit
  * `Signature: keyId="…",algorithm="rsa-sha256",headers="…",signature="…"`. Inbound, we require
  * `(request-target)`, `host` and `date` to be covered (and `digest` whenever there is a body),
- * accept `rsa-sha256`, `hs2019` or no algorithm, and refuse a `Date` outside the skew window, a
- * digest that does not match the body, and a `keyId` on another origin than the actor. The
- * worker must still check that the fetched key document's `owner` is the actor.
+ * accept `rsa-sha256`, `hs2019` or no algorithm, and refuse a `Date` that is not an HTTP-date
+ * (IMF-fixdate) or is outside the skew window, a digest that does not match the body, and a key
+ * that does not belong to the actor: its `keyId` on another origin, or the fetched key document's
+ * `owner` another actor (the caller passes that `owner` with the key).
  */
 import { type Body, digest, fromBase64, toBase64, verifyDigest } from "./digest.ts";
-import { importPrivateKeyPem, importPublicKeyPem, RSA_ALGORITHM } from "./keys.ts";
+import { checkKeyBits, importPrivateKeyPem, importPublicKeyPem, RSA_ALGORITHM } from "./keys.ts";
 
 /**
  * ADR 0030 decision 4: 12 hours. Mirrors `FEDERATION_RULES.dateSkewSeconds` in
  * `@commonair/contracts` (not imported so this package stays dependency-free).
  */
 export const DATE_SKEW_SECONDS = 43_200;
+/** How far ahead of our clock a `Date` may be (Mastodon's clock-skew margin): one hour. */
+export const FUTURE_SKEW_SECONDS = 3_600;
+/** RFC 7231 section 7.1.1.1 IMF-fixdate, the only HTTP-date form senders generate. */
+const IMF_FIXDATE =
+  /^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), [0-3]\d (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{4} [0-2]\d:[0-5]\d:[0-6]\d GMT$/;
 export const SIGNATURE_ALGORITHM = "rsa-sha256";
 /** Algorithm names accepted inbound; `hs2019` means "derive it from the key" (RSA here). */
 const ACCEPTED_ALGORITHMS = new Set([SIGNATURE_ALGORITHM, "hs2019"]);
@@ -50,8 +56,18 @@ export interface VerifyRequestInput {
   body?: Body;
 }
 
+/**
+ * The sender's key as the caller fetched it by `keyId`: the public key, and the key document's
+ * `owner` (the actor it belongs to). A key whose owner is not the request's actor is refused.
+ */
+export interface SenderKey {
+  publicKey: string | CryptoKey;
+  owner: string;
+}
+
 export interface VerifyOptions {
   now?: Date;
+  /** Past skew; the future margin is the smaller of this and `FUTURE_SKEW_SECONDS`. */
   skewSeconds?: number;
   /** The actor the request speaks for; read from the body's `actor` when omitted. */
   actorId?: string;
@@ -64,7 +80,7 @@ export type SignatureError =
   | "unsupported_algorithm"
   /** A required header is not covered, or a covered header is absent from the request. */
   | "missing_header"
-  /** The `keyId` is not on the actor's origin, or there is no actor to compare with. */
+  /** The `keyId` is not on the actor's origin, the key's owner is another actor, or there is no actor. */
   | "key_actor_mismatch"
   | "bad_date"
   | "date_skew"
@@ -208,7 +224,7 @@ function actorFromBody(body: Body | undefined): string | null {
 /** Verify an inbound signed request against the sender's published public key. */
 export async function verifyRequest(
   req: VerifyRequestInput,
-  publicKey: string | CryptoKey,
+  senderKey: SenderKey,
   opts: VerifyOptions = {},
 ): Promise<VerifyRequestResult> {
   const headers = normalizeHeaders(req.headers);
@@ -233,12 +249,16 @@ export async function verifyRequest(
   if (text === null) return { ok: false, error: "missing_header" };
 
   const actorId = opts.actorId ?? actorFromBody(req.body);
-  if (!actorId || !sameOrigin(params.keyId, actorId)) return { ok: false, error: "key_actor_mismatch" };
+  if (!actorId || !sameOrigin(params.keyId, actorId) || senderKey.owner !== actorId)
+    return { ok: false, error: "key_actor_mismatch" };
 
-  const date = Date.parse(headers.get("date") ?? "");
+  const rawDate = headers.get("date") ?? "";
+  const date = IMF_FIXDATE.test(rawDate) ? Date.parse(rawDate) : Number.NaN;
   if (Number.isNaN(date)) return { ok: false, error: "bad_date" };
   const now = (opts.now ?? new Date()).getTime();
-  if (Math.abs(now - date) > (opts.skewSeconds ?? DATE_SKEW_SECONDS) * 1000) return { ok: false, error: "date_skew" };
+  const skew = opts.skewSeconds ?? DATE_SKEW_SECONDS;
+  if (now - date > skew * 1000 || date - now > Math.min(skew, FUTURE_SKEW_SECONDS) * 1000)
+    return { ok: false, error: "date_skew" };
 
   if (hasBody && !(await verifyDigest(headers.get("digest") ?? "", req.body as Body)))
     return { ok: false, error: "digest_mismatch" };
@@ -247,7 +267,8 @@ export async function verifyRequest(
 
   let key: CryptoKey;
   try {
-    key = typeof publicKey === "string" ? await importPublicKeyPem(publicKey) : publicKey;
+    const k = senderKey.publicKey;
+    key = typeof k === "string" ? await importPublicKeyPem(k) : checkKeyBits(k);
   } catch {
     return { ok: false, error: "bad_key" };
   }

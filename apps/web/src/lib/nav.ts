@@ -164,6 +164,8 @@ export interface AdminNavOptions {
   legal?: boolean;
   /** Admins: co-op administration (appoint workers), integrity flags, egress, incidents, OAuth apps and federation. */
   admin?: boolean;
+  /** The instance federates (`features.federation`); the admin federation page is hidden otherwise. */
+  federation?: boolean;
 }
 
 /** Trailing slashes do not change the page (`/relays/` is `/relays`). */
@@ -220,6 +222,8 @@ export function accountMenu(
 export interface StudioNavOptions {
   /** The instance runs the verified-watch gate or the surge guard (`features.watchGate || features.surgeGuard`). */
   chatSafety?: boolean;
+  /** Twitch import is available (`features.twitchImport`: flag on and credentials set; never under `--no-proprietary`). */
+  twitchImport?: boolean;
 }
 
 export function studioNav(pathname: string, options: StudioNavOptions = {}): StudioEntry[] {
@@ -238,7 +242,7 @@ export function studioNav(pathname: string, options: StudioNavOptions = {}): Stu
     { id: "crew", to: "/crew", current: path === "/crew" },
     { id: "relays", to: "/relays", current: path === "/relays" },
     { id: "move", to: "/move", current: path === "/move" },
-    { id: "import", to: "/import", current: path === "/import" },
+    ...(options.twitchImport === true ? [{ id: "import", to: "/import", current: path === "/import" } as const] : []),
     { id: "developer", to: "/developer", current: path === "/developer" || path.startsWith("/developer/") },
   ];
 }
@@ -293,8 +297,10 @@ export function adminNav(pathname: string, options: AdminNavOptions): AdminEntry
           { id: "egress", to: "/admin/egress" },
           { id: "incidents", to: "/admin/incidents" },
           { id: "apps", to: "/admin/apps" },
-          { id: "federation", to: "/admin/federation" },
         ] as const)
+      : []),
+    ...(options.admin === true && options.federation === true
+      ? [{ id: "federation", to: "/admin/federation" } as const]
       : []),
   ];
   return entries.map((entry) => ({ ...entry, current: path === entry.to }));

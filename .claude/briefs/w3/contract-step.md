@@ -132,7 +132,7 @@ audience.
 - `channel.follow` input gains an optional `moveLink: {nonce}`.
 
 **Giveaways:** `interact.giveaways.{current, open, enter, close, draw, cancel, verify}`. `verify`
-is public: the commitment, the revealed seed and salt, the pseudonym list and the winners.
+is public: the commitment, the revealed seed, the pseudonym list and the winners (never the salt).
 `instance.info().features.giveaways` is added.
 
 **Jury:** `jury.{optIn, optOut, status, panel, cases, vote}` (juror) and

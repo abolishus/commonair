@@ -113,8 +113,8 @@ describe("new scenarios' step tables", () => {
   test("the step counts the briefs list, numbered from 1", () => {
     expect(WATCH_ROOM_STEP_NUMBERS).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
     expect(PORTABILITY_STEP_NUMBERS).toEqual([1, 2, 3, 4, 5]);
-    expect(TWITCH_IMPORT_STEP_NUMBERS).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
-    expect(FEDERATION_STEP_NUMBERS).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(TWITCH_IMPORT_STEP_NUMBERS).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(FEDERATION_STEP_NUMBERS).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
     for (const t of TABLES) expect(Object.keys(t.steps).map(Number), t.name).toEqual([...t.numbers]);
   });
 

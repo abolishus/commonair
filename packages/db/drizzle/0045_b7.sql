@@ -8,6 +8,7 @@ CREATE TYPE "public"."import_status" AS ENUM('previewed', 'queued', 'running', '
 CREATE TYPE "public"."jury_reason_code" AS ENUM('clause_fits', 'clause_does_not_fit', 'action_too_severe', 'action_too_lenient', 'context_missing', 'evidence_unclear', 'other');--> statement-breakpoint
 CREATE TYPE "public"."jury_subject_kind" AS ENUM('moderation_case', 'report');--> statement-breakpoint
 CREATE TYPE "public"."jury_vote" AS ENUM('agree', 'disagree', 'unsure');--> statement-breakpoint
+CREATE TYPE "public"."jury_withdraw_reason" AS ENUM('legal_hold', 'ncii', 'appeal', 'ineligible');--> statement-breakpoint
 CREATE TYPE "public"."portability_source" AS ENUM('commonair', 'twitch');--> statement-breakpoint
 CREATE TYPE "public"."relay_purge_reason" AS ENUM('vod_hidden', 'clip_hidden', 'restricted', 'suspended', 'recording_ended');--> statement-breakpoint
 CREATE TYPE "public"."room_age_band" AS ENUM('minor', 'adult');--> statement-breakpoint
@@ -139,7 +140,7 @@ CREATE TABLE "giveaways" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "giveaways_winner_count" CHECK ("giveaways"."winner_count" between 1 and 10),
 	CONSTRAINT "giveaways_commitment" CHECK ("giveaways"."seed_commitment" ~ '^[0-9a-f]{64}$'),
-	CONSTRAINT "giveaways_salt" CHECK ("giveaways"."salt" ~ '^[0-9a-f]{32,128}$'),
+	CONSTRAINT "giveaways_salt" CHECK ("giveaways"."salt" ~ '^([0-9a-f]{2}){16,64}$'),
 	CONSTRAINT "giveaways_text" CHECK (length("giveaways"."title") between 1 and 60 and length("giveaways"."prize") between 1 and 200)
 );
 --> statement-breakpoint
@@ -150,7 +151,10 @@ CREATE TABLE "jury_cases" (
 	"subject_id" uuid NOT NULL,
 	"rule_ref" text,
 	"pseudonym_map" jsonb DEFAULT '{}'::jsonb NOT NULL,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"withdrawn_at" timestamp with time zone,
+	"withdrawn_reason" "jury_withdraw_reason",
+	CONSTRAINT "jury_cases_withdrawn" CHECK (("jury_cases"."withdrawn_at" is null) = ("jury_cases"."withdrawn_reason" is null))
 );
 --> statement-breakpoint
 CREATE TABLE "jury_flags" (
@@ -263,7 +267,8 @@ CREATE TABLE "watch_rooms" (
 	"ended_at" timestamp with time zone,
 	"end_reason" "room_end_reason",
 	CONSTRAINT "watch_rooms_end" CHECK (("watch_rooms"."ended_at" is null) = ("watch_rooms"."end_reason" is null)),
-	CONSTRAINT "watch_rooms_invite_hash" CHECK ("watch_rooms"."invite_hash" is null or "watch_rooms"."invite_hash" ~ '^[0-9a-f]{64}$')
+	CONSTRAINT "watch_rooms_invite_hash" CHECK ("watch_rooms"."invite_hash" is null or "watch_rooms"."invite_hash" ~ '^[0-9a-f]{64}$'),
+	CONSTRAINT "watch_rooms_invite_live" CHECK ("watch_rooms"."invite_hash" is not null or "watch_rooms"."ended_at" is not null)
 );
 --> statement-breakpoint
 ALTER TABLE "channels" ALTER COLUMN "chat_settings" SET DEFAULT '{"slowModeSeconds":0,"followersOnlyMinutes":null,"subscribersOnly":false,"emoteOnly":false,"minAccountAgeDays":0,"requireVerifiedEmail":true,"linksAllowed":true,"minVerifiedWatchSeconds":0,"verifiedWatchExemptSubscribers":true,"surgeGuard":{"enabled":false,"triggerUnverifiedRatio":0.5,"cooldownMinutes":10,"onRaid":true}}'::jsonb;--> statement-breakpoint

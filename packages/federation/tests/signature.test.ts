@@ -23,6 +23,8 @@ import { DATE, federationVectors, KEYS, NOW } from "../src/vectors.ts";
 import vectors from "../vectors.json" with { type: "json" };
 
 const pub = vectors.publicKeys;
+/** The vectors' sender as the worker would pass it: alice's key, owned by alice. */
+const ALICE = { publicKey: pub.actor, owner: "https://mastodon.example/users/alice" };
 
 describe("vectors", () => {
   test("the committed file is exactly what the generator produces", async () => {
@@ -35,7 +37,8 @@ describe("vectors", () => {
   });
 
   test.each(vectors.vectors.map((v) => [v.name, v] as const))("%s", async (_, v) => {
-    const r = await verifyRequest(v.request, pub[v.verify.key as "actor" | "other"], {
+    const key = { publicKey: pub[v.verify.key as "actor" | "other"], owner: v.verify.owner };
+    const r = await verifyRequest(v.request, key, {
       now: new Date(v.verify.now),
       ...(v.verify.actorId ? { actorId: v.verify.actorId } : {}),
     });
@@ -60,7 +63,14 @@ describe("vectors", () => {
 
   test("every tamper case named in the contract step is covered", () => {
     const errors = new Set(vectors.vectors.map((v) => v.expect));
-    for (const e of ["digest_mismatch", "date_skew", "key_actor_mismatch", "bad_signature", "missing_header"])
+    for (const e of [
+      "digest_mismatch",
+      "date_skew",
+      "key_actor_mismatch",
+      "bad_signature",
+      "missing_header",
+      "bad_date",
+    ])
       expect(errors.has(e)).toBe(true);
   });
 });
@@ -95,14 +105,15 @@ describe("signRequest", () => {
     });
     expect(Math.abs(Date.parse(headers.date as string) - Date.now())).toBeLessThan(5_000);
     const req = { method: "POST", url: "https://instance.example/ap/inbox?x=1", headers, body };
-    expect(await verifyRequest(req, key.publicKeyPem)).toEqual({
+    const sender = { publicKey: key.publicKeyPem, owner: "https://peer.example/u/a" };
+    expect(await verifyRequest(req, sender)).toEqual({
       ok: true,
       keyId: "https://peer.example/u/a#main-key",
       actorId: "https://peer.example/u/a",
       headers: ["(request-target)", "host", "date", "digest"],
     });
     // The query string is part of the request target.
-    expect(await verifyRequest({ ...req, url: "https://instance.example/ap/inbox" }, key.publicKeyPem)).toEqual({
+    expect(await verifyRequest({ ...req, url: "https://instance.example/ap/inbox" }, sender)).toEqual({
       ok: false,
       error: "bad_signature",
     });
@@ -115,11 +126,11 @@ describe("signRequest", () => {
     const sig = h.get("signature") as string;
     h.delete("signature");
     h.set("authorization", `Signature ${sig}`);
-    const r = await verifyRequest({ ...inbound, headers: h }, pub.actor, { now: new Date(NOW) });
+    const r = await verifyRequest({ ...inbound, headers: h }, ALICE, { now: new Date(NOW) });
     expect(r.ok).toBe(true);
     // An Authorization header of another scheme is not a signature.
     h.set("authorization", "Bearer abc");
-    expect(await verifyRequest({ ...inbound, headers: h }, pub.actor, { now: new Date(NOW) })).toEqual({
+    expect(await verifyRequest({ ...inbound, headers: h }, ALICE, { now: new Date(NOW) })).toEqual({
       ok: false,
       error: "missing_signature",
     });
@@ -141,15 +152,15 @@ describe("verifyRequest edges", () => {
   });
 
   test("a custom skew and an explicit actor are honoured", async () => {
-    expect(await verifyRequest(inbound, pub.actor, { now, skewSeconds: 30 })).toEqual({
+    expect(await verifyRequest(inbound, ALICE, { now, skewSeconds: 30 })).toEqual({
       ok: false,
       error: "date_skew",
     });
-    expect(await verifyRequest(inbound, pub.actor, { now, actorId: "https://other.example/users/alice" })).toEqual({
+    expect(await verifyRequest(inbound, ALICE, { now, actorId: "https://other.example/users/alice" })).toEqual({
       ok: false,
       error: "key_actor_mismatch",
     });
-    expect(await verifyRequest({ ...inbound, body: "not json" }, pub.actor, { now })).toEqual({
+    expect(await verifyRequest({ ...inbound, body: "not json" }, ALICE, { now })).toEqual({
       ok: false,
       error: "key_actor_mismatch",
     });
@@ -165,18 +176,37 @@ describe("verifyRequest edges", () => {
       privateKey: KEYS.actor,
       now,
     });
-    expect((await verifyRequest({ method: "POST", url: inbound.url, headers, body }, pub.actor, { now })).ok).toBe(
-      true,
-    );
+    expect((await verifyRequest({ method: "POST", url: inbound.url, headers, body }, ALICE, { now })).ok).toBe(true);
   });
 
   test("a bad key or signature encoding is refused", async () => {
-    expect(await verifyRequest(inbound, "not a pem", { now })).toEqual({ ok: false, error: "bad_key" });
+    expect(await verifyRequest(inbound, { ...ALICE, publicKey: "not a pem" }, { now })).toEqual({
+      ok: false,
+      error: "bad_key",
+    });
+    // A caller's own CryptoKey is held to the same size bounds as an imported PEM.
+    const small = (await crypto.subtle.generateKey(
+      { name: "RSASSA-PKCS1-v1_5", modulusLength: 1024, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" },
+      true,
+      ["sign", "verify"],
+    )) as CryptoKeyPair;
+    expect(await verifyRequest(inbound, { ...ALICE, publicKey: small.publicKey }, { now })).toEqual({
+      ok: false,
+      error: "bad_key",
+    });
+    const own = await crypto.subtle.importKey(
+      "spki",
+      createPublicKey(pub.actor).export({ type: "spki", format: "der" }),
+      { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+      true,
+      ["verify"],
+    );
+    expect((await verifyRequest(inbound, { ...ALICE, publicKey: own }, { now })).ok).toBe(true);
     const bad = {
       ...inbound.headers,
       signature: (inbound.headers.signature as string).replace(/signature="[^"]*"/, 'signature="%%%"'),
     };
-    expect(await verifyRequest({ ...inbound, headers: bad }, pub.actor, { now })).toEqual({
+    expect(await verifyRequest({ ...inbound, headers: bad }, ALICE, { now })).toEqual({
       ok: false,
       error: "malformed_signature",
     });

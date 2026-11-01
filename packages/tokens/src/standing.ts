@@ -13,8 +13,13 @@
  * AGPL-only (the SDK does not inline it), so it imports the shared helpers.
  *
  * Counts and flags only: no names, no reasons, no user ids (ADR 0004).
+ *
+ * The statement is bound to the bundle that carries it: `bundleSha256` is the digest of that
+ * bundle with `standing` set to null (`standingBundleDigest`), and its `issuer` is the bundle's
+ * exporting instance. `checkStandingBinding` refuses a statement spliced into another bundle.
  */
 import { z } from "zod";
+import { PortabilityBundle } from "@commonair/contracts/portability";
 import { type AttestationKey, deriveKid, fromB64url, toB64url } from "./attestation.ts";
 
 export const STANDING_VERSION = 1;
@@ -32,6 +37,7 @@ const KID = /^[A-Za-z0-9_-]{22}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const ISO_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const ORIGIN = /^https?:\/\/[a-z0-9.-]+(?::\d{1,5})?$/;
+const HEX64 = /^[0-9a-f]{64}$/;
 const timestamp = z
   .string()
   .regex(ISO_UTC)
@@ -49,6 +55,8 @@ export const StandingStatement = z
     issuer: z.string().max(255).regex(ORIGIN),
     kid: z.string().regex(KID),
     channelId: z.string().regex(UUID),
+    /** `standingBundleDigest` of the bundle this statement travels in. */
+    bundleSha256: z.string().regex(HEX64),
     issuedAt: timestamp,
     expiresAt: timestamp,
     activeSuspension: z.boolean(),
@@ -171,4 +179,30 @@ export async function verifyStanding(
   if (Date.parse(parsed.data.issuedAt) - STANDING_SKEW_SECONDS * 1000 > t) return { ok: false, error: "not_yet_valid" };
   if (Date.parse(parsed.data.expiresAt) <= t) return { ok: false, error: "expired" };
   return { ok: true, statement: parsed.data, key };
+}
+
+/**
+ * The digest a statement binds: lowercase hex SHA-256 of the UTF-8 JSON of the Zod-parsed bundle
+ * (schema key order) with `standing` set to null. The exporter computes it before signing; the
+ * importer recomputes it from the `bundle.json` it parsed. Throws on an invalid bundle.
+ */
+export async function standingBundleDigest(bundle: unknown): Promise<string> {
+  const parsed = PortabilityBundle.parse({ ...(bundle as Record<string, unknown>), standing: null });
+  const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", enc.encode(JSON.stringify(parsed))));
+  return Array.from(hash, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+export type StandingBindingError = "bundle_mismatch" | "issuer_mismatch";
+
+/**
+ * Whether a verified statement belongs to this bundle: its digest matches, and its issuer is the
+ * bundle's exporting instance (`instance.domain`, host and port). Null when it does.
+ */
+export async function checkStandingBinding(
+  statement: StandingStatement,
+  bundle: PortabilityBundle,
+): Promise<StandingBindingError | null> {
+  if (new URL(statement.issuer).host !== bundle.instance.domain) return "issuer_mismatch";
+  if (statement.bundleSha256 !== (await standingBundleDigest(bundle))) return "bundle_mismatch";
+  return null;
 }

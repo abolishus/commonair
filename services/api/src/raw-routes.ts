@@ -51,13 +51,15 @@ export function matchFederationRoute(path: string): FederationMatch | null {
   const m = AP_CHANNEL.exec(path);
   if (!m?.[1]) return null;
   const channelId = m[1].toLowerCase();
-  switch (m[2]) {
+  // The regex is case-insensitive, so `/INBOX` must still be the inbox (POST), not a GET.
+  const sub = m[2]?.toLowerCase();
+  switch (sub) {
     case undefined:
       return { route: { kind: "actor", channelId }, method: "GET" };
     case "inbox":
       return { route: { kind: "inbox", channelId }, method: "POST" };
     default:
-      return { route: { kind: m[2].toLowerCase() as "outbox" | "followers", channelId }, method: "GET" };
+      return { route: { kind: sub as "outbox" | "followers", channelId }, method: "GET" };
   }
 }
 

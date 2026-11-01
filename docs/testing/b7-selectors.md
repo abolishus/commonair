@@ -152,40 +152,39 @@ Units build on these and never edit `chat/interact/{state,client,use-chat-intera
 
 ### Giveaways (W3-giveaways)
 
-| Test id                      | Element and attributes                                               |
-| ---------------------------- | -------------------------------------------------------------------- |
-| `giveaway-panel`             | The studio panel on `/interact`; absent while giveaways are off      |
-| `giveaway-form`              | The open form                                                        |
-| `giveaway-title`             | Title input                                                          |
-| `giveaway-prize`             | Prize input                                                          |
-| `giveaway-winner-count`      | Winner count input                                                   |
-| `giveaway-keyword`           | Chat keyword input (optional)                                        |
-| `giveaway-duration`          | Duration in minutes (optional)                                       |
-| `giveaway-min-account-age`   | Eligibility: account age in days                                     |
-| `giveaway-min-follow-days`   | Eligibility: days following (empty = following not required)         |
-| `giveaway-min-watch`         | Eligibility: verified-watch seconds                                  |
-| `giveaway-open`              | Opens the giveaway (`interact.giveaways.open`)                       |
-| `giveaway-live`              | The open giveaway; `data-giveaway-id`, `data-status`, `data-entries` |
-| `giveaway-commitment`        | The published seed commitment                                        |
-| `giveaway-close`             | Closes entries                                                       |
-| `giveaway-draw`              | Draws the winners                                                    |
-| `giveaway-cancel`            | Cancels; opens a `ConfirmDialog`                                     |
-| `giveaway-cancel-confirm`    | The dialog's confirm button                                          |
-| `chat-giveaway`              | The viewer card; `data-giveaway-id`, `data-status`, `data-entries`   |
-| `chat-giveaway-enter`        | Enter (`interact.giveaways.enter`)                                   |
-| `chat-giveaway-entered`      | "You're in"                                                          |
-| `chat-giveaway-ineligible`   | Why the viewer cannot enter; `data-reason` (`Giveaway.me.reason`)    |
-| `chat-giveaway-no-purchase`  | The "no purchase necessary" line                                     |
-| `chat-giveaway-rules-link`   | The official rules (instance legal document)                         |
-| `chat-giveaway-verify-link`  | Link to `/$channel/giveaways/$giveawayId`                            |
-| `chat-giveaway-won`          | The viewer won                                                       |
-| `giveaway-verify-page`       | The verify page container; `data-giveaway-id`, `data-status`         |
-| `giveaway-verify-commitment` | The commitment                                                       |
-| `giveaway-verify-seed`       | The revealed seed (empty before the draw)                            |
-| `giveaway-verify-salt`       | The revealed salt                                                    |
-| `giveaway-verify-entry`      | An entry pseudonym; `data-index`                                     |
-| `giveaway-verify-winner`     | A winner; `data-rank`, `data-index`                                  |
-| `giveaway-verify-result`     | The in-browser re-run; `data-match` `true`/`false`                   |
+| Test id                      | Element and attributes                                                                                        |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `giveaway-panel`             | The studio panel on `/interact`; absent while giveaways are off                                               |
+| `giveaway-form`              | The open form                                                                                                 |
+| `giveaway-title`             | Title input                                                                                                   |
+| `giveaway-prize`             | Prize input                                                                                                   |
+| `giveaway-winner-count`      | Winner count input                                                                                            |
+| `giveaway-keyword`           | Chat keyword input (optional)                                                                                 |
+| `giveaway-duration`          | Duration in minutes (optional)                                                                                |
+| `giveaway-min-account-age`   | Eligibility: account age in days                                                                              |
+| `giveaway-min-follow-days`   | Eligibility: days following (empty = following not required)                                                  |
+| `giveaway-min-watch`         | Eligibility: verified-watch seconds                                                                           |
+| `giveaway-open`              | Opens the giveaway (`interact.giveaways.open`)                                                                |
+| `giveaway-live`              | The open giveaway; `data-giveaway-id`, `data-status`, `data-entries`                                          |
+| `giveaway-commitment`        | The published seed commitment                                                                                 |
+| `giveaway-close`             | Closes entries                                                                                                |
+| `giveaway-draw`              | Draws the winners                                                                                             |
+| `giveaway-cancel`            | Cancels; opens a `ConfirmDialog`                                                                              |
+| `giveaway-cancel-confirm`    | The dialog's confirm button                                                                                   |
+| `chat-giveaway`              | The viewer card; `data-giveaway-id`, `data-status`, `data-entries`                                            |
+| `chat-giveaway-enter`        | Enter (`interact.giveaways.enter`)                                                                            |
+| `chat-giveaway-entered`      | "You're in"                                                                                                   |
+| `chat-giveaway-ineligible`   | Why the viewer cannot enter; `data-reason` (`Giveaway.me.reason`)                                             |
+| `chat-giveaway-no-purchase`  | The "no purchase necessary" line                                                                              |
+| `chat-giveaway-rules-link`   | The official rules (instance legal document)                                                                  |
+| `chat-giveaway-verify-link`  | Link to `/$channel/giveaways/$giveawayId`                                                                     |
+| `chat-giveaway-won`          | The viewer won                                                                                                |
+| `giveaway-verify-page`       | The verify page container; `data-giveaway-id`, `data-status`                                                  |
+| `giveaway-verify-commitment` | The commitment                                                                                                |
+| `giveaway-verify-seed`       | The revealed seed (empty before the draw)                                                                     |
+| `giveaway-verify-entry`      | An entry pseudonym; `data-index`; `data-mine="true"` on the signed-in entrant's own (the salt is never shown) |
+| `giveaway-verify-winner`     | A winner; `data-rank`, `data-index`                                                                           |
+| `giveaway-verify-result`     | The in-browser re-run; `data-match` `true`/`false`                                                            |
 
 ### Advisory jury (W3-jury)
 
@@ -293,8 +292,9 @@ Steps are pending until the unit that implements them merges (`harness/src/w3/st
   shows the fixture channel; import title, tags, category, description and emotes with
   `import-assertion`; the channel page shows the title; accepted emotes work in chat and the T0
   emote is rejected with the T0 job run; `import-schedule` is carried, not applied; pasted panels
-  (`import-panels-save`) show on the channel page; the mock recorded the revocation; with the flag
-  off the page shows `import-unavailable`.
+  (`import-panels-save`) show on the channel page; the mock recorded the revocation. The flag-off
+  `import-unavailable` page is not a scenario step: the `w3` stack forces the flag on for every
+  replica, so the API integration tests and web unit tests cover it.
 - **`federation` (N4-api, N4-delivery, N4-web; `via=web` uses `harness/src/n4/web.ts`):**
   `federation-enabled` on; the peer resolves `@slug@domain` (`federation-handle`) and follows,
   receiving a signed `Accept`; going live delivers a signed `Create{Note}`, a VOD a
@@ -304,7 +304,8 @@ Steps are pending until the unit that implements them merges (`harness/src/w3/st
 - **`interact` extensions:** `giveaway` (W3-giveaways: with `GIVEAWAYS_ENABLED=true`,
   `giveaway-open` with a keyword; verified viewers enter by keyword and by `chat-giveaway-enter`; a
   viewbot is refused; close and draw; the harness re-runs the draw from `verify`, and
-  `giveaway-verify-result` is `data-match="true"`; the flag-off instance refuses `open`),
+  `giveaway-verify-result` is `data-match="true"`; the flag-off refusal is an API integration test,
+  not a step, since the `w3` stack turns the flag on for every replica),
   `surge-raid` (W3-surge-raids: the target turns on `surge-guard-on-raid`; a raid with three
   verified viewers and a viewbot swarm opens a `trigger: "raid"` surge shown as `surge-raid`; the
   verified raiders chat, the bots get the surge notice; a moderator override ends it) and

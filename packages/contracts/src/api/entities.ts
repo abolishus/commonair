@@ -2192,6 +2192,12 @@ export const Giveaway = z.object({
   me: z
     .object({
       entered: z.boolean(),
+      /**
+       * The caller's own pseudonym once entered, so they can find themselves in the public entry
+       * list. Only ever shown to that member: the salt that would map pseudonyms to accounts is
+       * never published.
+       */
+      pseudonym: z.string().nullable(),
       eligible: z.boolean(),
       reason: z.enum(["account_age", "follow_age", "not_following", "verified_watch", "banned"]).nullable(),
       won: z.boolean(),
@@ -2200,7 +2206,11 @@ export const Giveaway = z.object({
   winners: z.array(z.object({ rank: z.number().int().positive(), pseudonym: z.string() })),
 });
 export type Giveaway = z.infer<typeof Giveaway>;
-/** `interact.giveaways.verify` (public): everything needed to re-run the draw. */
+/**
+ * `interact.giveaways.verify` (public): everything needed to re-run the draw (the seed and the
+ * sorted pseudonyms). The pseudonym salt is never included: user ids are public, so the salt would
+ * let anyone compute every member's pseudonym and see who entered and who won.
+ */
 export const GiveawayVerification = z.object({
   id: Id,
   channelSlug: Slug,
@@ -2209,7 +2219,6 @@ export const GiveawayVerification = z.object({
   seedCommitment: z.string(),
   /** Revealed at the draw; null before. */
   seed: z.string().nullable(),
-  salt: z.string().nullable(),
   /** Entry pseudonyms, sorted (the draw's input order). */
   entries: z.array(z.string()),
   winnerCount: z.number().int(),

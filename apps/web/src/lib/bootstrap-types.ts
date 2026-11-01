@@ -24,7 +24,16 @@ export interface Bootstrap {
    * `p2pDefault`: the operator's `P2P_DEFAULT` (`instance.info` `features.p2pDefault`).
    * `chatSafety`: `features.watchGate || features.surgeGuard`, which shows the studio's `/chat` page.
    */
-  instance: { name: string; sourceUrl: string | null; p2pDefault: "off" | "on"; chatSafety: boolean };
+  instance: {
+    name: string;
+    sourceUrl: string | null;
+    p2pDefault: "off" | "on";
+    chatSafety: boolean;
+    /** `features.twitchImport`: shows the studio's "Import from Twitch" entry. Absent = off. */
+    twitchImport?: boolean;
+    /** `features.federation`: shows the admin federation entry. Absent = off. */
+    federation?: boolean;
+  };
   me: SessionUser | null;
   theme: Theme;
   /** Server time of the request, so relative times hydrate identically. */

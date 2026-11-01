@@ -612,8 +612,8 @@
           "columns": [
             {
               "expression": "lower(\"email\")",
-              "isExpression": true,
               "asc": true,
+              "isExpression": true,
               "nulls": "last"
             }
           ],
@@ -1332,8 +1332,8 @@
           "columns": [
             {
               "expression": "to_tsvector('simple', \"display_name\" || ' ' || \"title\" || ' ' || \"description\")",
-              "isExpression": true,
               "asc": true,
+              "isExpression": true,
               "nulls": "last"
             }
           ],
@@ -1904,8 +1904,8 @@
           "columns": [
             {
               "expression": "(\"payload\"->>'channelId')",
-              "isExpression": true,
               "asc": true,
+              "isExpression": true,
               "nulls": "last"
             }
           ],
@@ -4353,8 +4353,8 @@
             },
             {
               "expression": "coalesce(\"media_ts\", \"created_at\")",
-              "isExpression": true,
               "asc": true,
+              "isExpression": true,
               "nulls": "last"
             },
             {
@@ -4475,8 +4475,8 @@
           "columns": [
             {
               "expression": "coalesce(\"channel_id\", '00000000-0000-0000-0000-000000000000'::uuid)",
-              "isExpression": true,
               "asc": true,
+              "isExpression": true,
               "nulls": "last"
             },
             {
@@ -18861,7 +18861,7 @@
         },
         "giveaways_salt": {
           "name": "giveaways_salt",
-          "value": "\"giveaways\".\"salt\" ~ '^[0-9a-f]{32,128}$'"
+          "value": "\"giveaways\".\"salt\" ~ '^([0-9a-f]{2}){16,64}$'"
         },
         "giveaways_text": {
           "name": "giveaways_text",
@@ -18918,6 +18918,19 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "withdrawn_at": {
+          "name": "withdrawn_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "withdrawn_reason": {
+          "name": "withdrawn_reason",
+          "type": "jury_withdraw_reason",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -18967,7 +18980,12 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "jury_cases_withdrawn": {
+          "name": "jury_cases_withdrawn",
+          "value": "(\"jury_cases\".\"withdrawn_at\" is null) = (\"jury_cases\".\"withdrawn_reason\" is null)"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.jury_flags": {
@@ -20130,6 +20148,10 @@
         "watch_rooms_invite_hash": {
           "name": "watch_rooms_invite_hash",
           "value": "\"watch_rooms\".\"invite_hash\" is null or \"watch_rooms\".\"invite_hash\" ~ '^[0-9a-f]{64}$'"
+        },
+        "watch_rooms_invite_live": {
+          "name": "watch_rooms_invite_live",
+          "value": "\"watch_rooms\".\"invite_hash\" is not null or \"watch_rooms\".\"ended_at\" is not null"
         }
       },
       "isRLSEnabled": false
@@ -21310,6 +21332,16 @@
         "block",
         "hold",
         "replace"
+      ]
+    },
+    "public.jury_withdraw_reason": {
+      "name": "jury_withdraw_reason",
+      "schema": "public",
+      "values": [
+        "legal_hold",
+        "ncii",
+        "appeal",
+        "ineligible"
       ]
     }
   },

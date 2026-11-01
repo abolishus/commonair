@@ -266,7 +266,10 @@ has no purge. Relays count every fetched file toward receipts (`Ledger.AddSegmen
   1 s.
 - **Reset.** A relay whose `after` is older than the retained rows (rows after it have been
   deleted, so it is more than 7 days behind) gets a signed batch with `reset: true` and no items
-  (the key is present only when true; a batch carrying both is malformed). The relay evicts every
+  (the key is present only when true; a batch carrying both is malformed). "Older than the retained rows" is
+  not read from the rows themselves: `bigserial` leaves gaps (rolled-back inserts), so
+  `min(seq) > after + 1` would reset relays for nothing. The cleanup job records the highest `seq`
+  it deleted as a watermark, and a request whose `after` is below that watermark gets the reset. The relay evicts every
   cached `live/` and `dvr/` object and continues from the answer's `seq`. Replaying a reset only
   empties the cache again, which is safe. A relay that restarts has an empty cache and starts from
   0, receiving the retained rows.

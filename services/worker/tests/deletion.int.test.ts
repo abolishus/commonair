@@ -34,6 +34,7 @@ import {
   waitFor,
   type TestEnv,
 } from "./fixtures.ts";
+import { mediaStates } from "./media-state-helpers.ts";
 
 const storage = stackStorage();
 const site = siteAt("http://localhost:3000");
@@ -683,7 +684,7 @@ describe.skipIf(!storage)("account deletion (E6)", () => {
     expect(left.map((r) => [r.userId, r.blockedUserId])).toEqual([[A.user.id, B.user.id]]);
   });
 
-  test("follows lower the trigger-kept count; grants, jury opt-in and imports go; links and giveaways lose their author (batch 7)", async () => {
+  test("follows lower the trigger-kept count; grants, jury opt-in, imports and federation go; links are revoked, giveaways cancelled (batch 7)", async () => {
     const U = await makeUser(db()); // the deleted member, follower of S and owner of a channel
     const S = await makeUser(db());
     const O = await makeUser(db()); // another follower and grant holder
@@ -724,9 +725,56 @@ describe.skipIf(!storage)("account deletion (E6)", () => {
         createdById: U.user.id,
       })
       .returning();
+    // A public clip with no VOD of its broadcast: deletion makes it non-public (decision (z)).
+    const [ub] = await db()
+      .insert(schema.broadcasts)
+      .values({ channelId: U.channel.id, ingestProtocol: "rtmp", path: `live/${U.channel.slug}`, endedAt: new Date() })
+      .returning();
+    const uClip = uuidv7();
+    await db()
+      .insert(schema.clips)
+      .values({
+        id: uClip,
+        channelId: U.channel.id,
+        broadcastId: ub!.id,
+        title: "c",
+        startOffset: 0,
+        durationSeconds: 10,
+        status: "ready",
+        storageKey: `clips/${uClip}.mp4`,
+      });
+    await app().insert(schema.federationActors).values({
+      channelId: U.channel.id,
+      enabled: true,
+      keyId: "https://x.test/ap/channels/u#main-key",
+      publicKeyPem: "pem",
+      privateKeyEnc: "enc",
+    });
+    await app().insert(schema.federationFollowers).values({
+      channelId: U.channel.id,
+      actorId: "https://remote.test/users/r",
+      inbox: "https://remote.test/users/r/inbox",
+      domain: "remote.test",
+    });
+    await app()
+      .update(schema.channels)
+      .set({ federationSettings: { enabled: true } })
+      .where(eq(schema.channels.id, U.channel.id));
     await schedule(U.user.id);
     expect(await runAccountDeletions(ctx())).toMatchObject({ completed: 1, failed: 0 });
     expect(await count()).toBe(1);
+    expect(
+      await db().select().from(schema.federationActors).where(eq(schema.federationActors.channelId, U.channel.id)),
+    ).toEqual([]);
+    expect(
+      await db()
+        .select()
+        .from(schema.federationFollowers)
+        .where(eq(schema.federationFollowers.channelId, U.channel.id)),
+    ).toEqual([]);
+    const [uc] = await db().select().from(schema.channels).where(eq(schema.channels.id, U.channel.id));
+    expect(uc!.federationSettings).toEqual({ enabled: false });
+    expect(await mediaStates(db(), "media.clip.state", uClip)).toEqual([[false, "deleted"]]);
     const grants = await db()
       .select()
       .from(schema.followPortabilityGrants)
@@ -738,8 +786,10 @@ describe.skipIf(!storage)("account deletion (E6)", () => {
     ).toEqual([]);
     const [l] = await db().select().from(schema.moveLinks).where(eq(schema.moveLinks.id, link!.id));
     expect(l!.createdById).toBeNull();
+    expect(l!.revokedAt).not.toBeNull();
     const [gg] = await db().select().from(schema.giveaways).where(eq(schema.giveaways.id, g!.id));
     expect(gg!.createdById).toBeNull();
+    expect([gg!.status, gg!.cancelledAt === null]).toEqual(["cancelled", false]);
   });
 
   test("caption edits and share links lose their author; rehearsal invitations go (W2)", async () => {
@@ -990,6 +1040,11 @@ describe.skipIf(!storage)("account deletion (E6)", () => {
     await schedule(D.user.id);
     expect(await runAccountDeletions(ctx())).toMatchObject({ completed: 1, failed: 0 });
     for (const k of hidden) expect(await S3.head(MEDIA_BUCKET, k), k).toBeNull();
+    // Decision (z): the public VOD stops being public. The already-deleted VOD says nothing, and
+    // nor does the clip: a removed VOD of its broadcast already kept it from being public.
+    expect(await mediaStates(db(), "media.vod.state", vodId)).toEqual([[false, "deleted"]]);
+    expect(await mediaStates(db(), "media.vod.state", goneVodId)).toEqual([]);
+    expect(await mediaStates(db(), "media.clip.state", clipId)).toEqual([]);
   });
 
   test("VOD objects are deleted under both own prefixes (and their DMCA copies), whatever storage_prefix says", async () => {
