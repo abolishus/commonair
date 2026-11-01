@@ -25,7 +25,14 @@ import {
   type AudioSource,
 } from "../src/captions/source.ts";
 import { CaptionStream, MAX_PENDING, type CueSink } from "../src/captions/stream.ts";
-import { WhisperError, whisperClient, whisperLanguage, type Transcriber } from "../src/captions/whisper.ts";
+import {
+  WHISPER_AUDIO_CTX,
+  WhisperError,
+  chunkFrames,
+  whisperClient,
+  whisperLanguage,
+  type Transcriber,
+} from "../src/captions/whisper.ts";
 
 const logger = createLogger({ service: "media-test", level: "fatal" });
 const T0 = Date.parse("2026-11-01T12:00:00.000Z");
@@ -166,6 +173,24 @@ describe("whisper client", () => {
     expect(form?.get("language")).toBe("pt");
     expect(form?.get("response_format")).toBe("verbose_json");
     expect(whisperLanguage("EN")).toBe("en");
+  });
+
+  test("bounds the encoder context to a few chunks, not whisper's 30 s window", async () => {
+    let seen: FormData | null = null;
+    const client = whisperClient({
+      baseUrl: "http://w",
+      fetch: (async (_url: string, init: RequestInit) => {
+        seen = init.body as FormData;
+        return Response.json({ segments: [] });
+      }) as unknown as typeof fetch,
+    });
+    await client.transcribe(wavFile(new Uint8Array(4)), "en");
+    expect((seen as FormData | null)?.get("audio_ctx")).toBe(String(WHISPER_AUDIO_CTX));
+    // Covers the chunk with room to spare (below about 2.5 chunks whisper looped on the fixture) ...
+    expect(WHISPER_AUDIO_CTX).toBeGreaterThanOrEqual(3 * chunkFrames());
+    // ... and well under the full window (1500 frames), which is what made it slower than real time.
+    expect(WHISPER_AUDIO_CTX).toBeLessThanOrEqual(1500 / 2);
+    expect(chunkFrames(3)).toBe(150);
   });
 
   test("errors are typed: status, unavailable, timeout", async () => {

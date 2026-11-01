@@ -216,3 +216,27 @@ So the scenario speaks the fixture three times (each pass at a new chunk phase) 
 gate no longer decides between `base` and `small` on its own: synthetic formant speech is harder
 for whisper than people are, and a recorded CC0 human reading would be the better measure. That
 choice, and whether captions should move to `small` where the CPU allows, are for the maintainer.
+
+### 2026-11-01: cue timing; whisper's encoder context is bounded to 512 frames
+
+The second CI run (41291975172) failed the `captions` cue-timing gate: every timed segment was
+listed 1.06 to 3.44 s after a player 9 s behind would reach it (the follower polls once a second,
+so the true figure is up to 1 s less). The 9 s target was right; whisper was too slow to reach it:
+
+- **whisper ran slower than the audio.** The sidecar log shows 38 back-to-back requests in 116.4 s,
+  3.13 s per 3 s chunk on the runner's two threads. The worker's queue (`MAX_PENDING`, two
+  waiting chunks) never drained: one slow chunk at the start (4.6 s) left one chunk waiting, and the
+  wait then grew about 0.13 s per chunk until a chunk was skipped as backlog (segment 23), which
+  matches the lateness climbing from 1.1 to 3.4 s and dropping once. Listing time was the 3 s chunk
+  plus up to three whisper calls, not a publication delay.
+- **What it costs.** whisper.cpp pads every request to a 30 s window (1500 encoder frames), so a
+  3 s chunk costs as much as 30 s of audio. The client now sends `audio_ctx=512` (10.24 s, over
+  three chunks; `services/media/src/captions/whisper.ts`). Measured with the pinned build and
+  `ggml-base-q5_1` on the fixture, chunked as the worker chunks it, over six chunk phases: default
+  2.14 s per chunk and WER 0.21 to 0.40 (mean 0.29); 512 frames 0.66 s and WER 0.19 to 0.34 (mean
+  0.25); 384 frames 0.53 s, WER mean 0.30; 256 frames looped on some chunks (3.4 s, max). At the same
+  ratio the CI runner needs about 1 s per chunk (not yet measured there), so a cue should be listed
+  about 4 to 5 s after its segment starts,
+  which leaves the player's 9 s (`CAPTIONS_LATENCY_SECONDS`, unchanged in `@commonair/captions`
+  and in the web player) room for hls.js's subtitle playlist refresh. It also takes about two
+  thirds off decision 3's per-stream CPU, so S1-a's cap measurements should use this setting.
