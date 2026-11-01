@@ -7,6 +7,9 @@
  * statements and clause-citing platform mod actions once each, suppresses cells under k = 10,
  * moves the overturn rate on an overturned appeal, splits NCII requests by their 48 h deadline,
  * never shows a CSAM-list T0 case, keeps month boundaries at 00:00 UTC and answers signed out.
+ *
+ * The test hooks are off here, so windows end at the start of the API's day: reads run with the
+ * API's clock set to tomorrow (today's writes count) or to a fixed date for the month windows.
  */
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "vite-plus/test";
@@ -63,11 +66,27 @@ afterAll(async () => {
 });
 beforeEach(() => clearEnforcementCache());
 
-async function report(window = "30d", headers: Record<string, string> = {}): Promise<Report> {
+/** Runs `fn` with the API's clock at `at` (the report's windows follow it). */
+async function atTime<T>(at: Date, fn: () => Promise<T>): Promise<T> {
+  const realNow = api.deps.now;
+  api.deps.now = () => at;
+  try {
+    return await fn();
+  } finally {
+    api.deps.now = realNow;
+  }
+}
+const tomorrow = () => new Date(Date.now() + DAY);
+/** Within 12 months of 2020-02, 2020-01 and 2019-12 (the month-window tests' data). */
+const JUNE_2020 = new Date("2020-06-15T12:00:00.000Z");
+
+async function report(window = "30d", headers: Record<string, string> = {}, at: Date = tomorrow()): Promise<Report> {
   clearEnforcementCache();
-  const res = await fetch(`${api.url}/api/transparency/enforcement?window=${window}`, { headers });
-  expect(res.status).toBe(200);
-  return EnforcementReport.parse(await res.json());
+  return atTime(at, async () => {
+    const res = await fetch(`${api.url}/api/transparency/enforcement?window=${window}`, { headers });
+    expect(res.status).toBe(200);
+    return EnforcementReport.parse(await res.json());
+  });
 }
 const rowOf = (r: Report, ref: string, tier: Row["tier"]) => r.rows.find((x) => x.ruleRef === ref && x.tier === tier);
 const valueOf = (c: Report["total"] | undefined) => (c && !c.suppressed ? c.value : undefined);
@@ -160,6 +179,9 @@ describe("transparency.enforcement is public", () => {
     const r = EnforcementReport.parse(res.body);
     expect(r.window).toBe("30d");
     expect(new Date(r.to).getTime() - new Date(r.from).getTime()).toBe(30 * DAY);
+    // A closed window: it ends at the start of today (UTC).
+    expect(r.to.slice(11)).toBe("00:00:00.000Z");
+    expect(new Date(r.to).getTime()).toBeLessThanOrEqual(Date.now());
   });
 
   test("a malformed window is refused", async () => {
@@ -219,7 +241,7 @@ describe("rule_ref writers (API)", () => {
     expect(figures(after)).toEqual(figures(before));
   });
 
-  test("an unknown clause is refused and nothing is written", async () => {
+  test("an unknown or reserved clause is refused and nothing is written", async () => {
     const v = await vod();
     const id = await fileReport("vod", v, "spam");
     const res = await mod.client.call("POST", `/api/admin/reports/${id}`, {
@@ -229,6 +251,14 @@ describe("rule_ref writers (API)", () => {
       clauseId: "no.such-clause",
     });
     expect(res.status).toBe(400);
+    // The illegal ground is the NCII request process's, not a staff citation.
+    const ncii = await mod.client.call("POST", `/api/admin/reports/${id}`, {
+      status: "actioned",
+      resolution: "removed",
+      action: "remove_content",
+      clauseId: "illegal.ncii",
+    });
+    expect(ncii.status).toBe(400);
     expect(await db().select().from(schema.modActions).where(eq(schema.modActions.reportId, id))).toEqual([]);
   });
 
@@ -490,34 +520,70 @@ describe("report figures", () => {
     await statements(10, { clauseId: "honesty.impersonation", at: new Date("2020-02-01T00:00:00.000Z") });
     await statements(10, { clauseId: "honesty.impersonation", at: new Date("2020-01-31T23:59:59.999Z") });
     await statements(10, { clauseId: "decency.hate", at: new Date("2019-12-31T23:59:59.999Z") });
-    const feb = await report("2020-02");
+    const feb = await report("2020-02", {}, JUNE_2020);
     expect(feb.from).toBe("2020-02-01T00:00:00.000Z");
     expect(feb.to).toBe("2020-03-01T00:00:00.000Z");
     expect(rowOf(feb, "honesty.impersonation@1", "t1")?.count).toEqual({ suppressed: false, value: 10 });
-    const jan = await report("2020-01");
+    const jan = await report("2020-01", {}, JUNE_2020);
     expect(rowOf(jan, "honesty.impersonation@1", "t1")?.count).toEqual({ suppressed: false, value: 10 });
     expect(rowOf(jan, "decency.hate@1", "t1")).toBeUndefined();
-    const dec = await report("2019-12");
+    const dec = await report("2019-12", {}, JUNE_2020);
     expect(dec.to).toBe("2020-01-01T00:00:00.000Z");
     expect(rowOf(dec, "decency.hate@1", "t1")?.count).toEqual({ suppressed: false, value: 10 });
     expect(dec.total).toEqual({ suppressed: false, value: 10 });
   });
 
   test("clause titles follow the request's language", async () => {
-    const es = await report("2020-02", { "accept-language": "es" });
+    const es = await report("2020-02", { "accept-language": "es" }, JUNE_2020);
     expect(rowOf(es, "honesty.impersonation@1", "t1")?.clauseTitle).toBe("Suplantación de identidad");
-    const en = await report("2020-02");
+    const en = await report("2020-02", {}, JUNE_2020);
     expect(rowOf(en, "honesty.impersonation@1", "t1")?.clauseTitle).toBe("Impersonation");
   });
 
   test("the answer is cached for a minute", async () => {
     clearEnforcementCache();
-    const first = await fetch(`${api.url}/api/transparency/enforcement?window=2019-12`).then((r) => r.json());
+    const get = () =>
+      atTime(JUNE_2020, () => fetch(`${api.url}/api/transparency/enforcement?window=2019-12`).then((r) => r.json()));
+    const first = await get();
     await statements(5, { clauseId: "decency.hate", at: new Date("2019-12-15T00:00:00.000Z") });
-    const cached = await fetch(`${api.url}/api/transparency/enforcement?window=2019-12`).then((r) => r.json());
+    const cached = await get();
     expect(cached).toEqual(first);
-    const fresh = await report("2019-12");
+    const fresh = await report("2019-12", {}, JUNE_2020);
     expect(rowOf(fresh, "decency.hate@1", "t1")?.count).toEqual({ suppressed: false, value: 15 });
+  });
+
+  test("months older than the twelve the report offers come back empty", async () => {
+    const r = await report("2020-02");
+    expect(r.rows).toEqual([]);
+    expect(r.total).toEqual({ suppressed: false, value: 0 });
+  });
+
+  test("30d overlapping two months: a slice under k hides the 30d figure", async () => {
+    // At 2021-03-10 12:00 UTC: 30d = [Feb 8, Mar 10), Feb = [Feb 1, Mar 1), Mar = [Mar 1, Mar 10).
+    const at = new Date("2021-03-10T12:00:00.000Z");
+    const clauseId = "safety.self-harm";
+    await statements(4, { clauseId, at: new Date("2021-02-05T12:00:00.000Z") });
+    await statements(12, { clauseId, at: new Date("2021-02-20T12:00:00.000Z") });
+    await statements(12, { clauseId, at: new Date("2021-03-05T12:00:00.000Z") });
+    // Today (after the window's end): in no window yet.
+    await statements(3, { clauseId, at: new Date("2021-03-10T06:00:00.000Z") });
+    const ref = `${clauseId}@1`;
+    const feb = await report("2021-02", {}, at);
+    expect(rowOf(feb, ref, "t1")?.count).toEqual({ suppressed: false, value: 16 });
+    const mar = await report("2021-03", {}, at);
+    expect(mar.to).toBe("2021-03-10T00:00:00.000Z");
+    expect(rowOf(mar, ref, "t1")?.count).toEqual({ suppressed: false, value: 12 });
+    // 30d would be 24: 24 − 12 (March) = 12 in February's part, and 16 − 12 = the 4 outside it.
+    let rolling = await report("30d", {}, at);
+    expect(rolling.from).toBe("2021-02-08T00:00:00.000Z");
+    expect(rolling.to).toBe("2021-03-10T00:00:00.000Z");
+    expect(rowOf(rolling, ref, "t1")?.count).toEqual({ suppressed: true });
+    expect(rolling.total).toEqual({ suppressed: true });
+    // With 10 outside the 30d part, no slice is under k.
+    await statements(6, { clauseId, at: new Date("2021-02-03T12:00:00.000Z") });
+    rolling = await report("30d", {}, at);
+    expect(rowOf(rolling, ref, "t1")?.count).toEqual({ suppressed: false, value: 24 });
+    expect(rolling.total).toEqual({ suppressed: false, value: 24 });
   });
 
   test("NCII requests: on time, late (decided after, or past the deadline undecided)", async () => {
@@ -553,18 +619,12 @@ describe("report figures", () => {
     }
     for (let i = 0; i < 5; i++) await request();
     // Deadlines are the database clock + 48 h: read the report three days on.
-    const realNow = api.deps.now;
-    api.deps.now = () => new Date(Date.now() + 3 * DAY);
-    try {
-      const r = await report();
-      expect(r.ncii).toEqual({
-        due: { suppressed: false, value: 20 },
-        onTime: { suppressed: false, value: 10 },
-        late: { suppressed: false, value: 10 },
-      });
-    } finally {
-      api.deps.now = realNow;
-    }
+    const r = await report("30d", {}, new Date(Date.now() + 3 * DAY));
+    expect(r.ncii).toEqual({
+      due: { suppressed: false, value: 20 },
+      onTime: { suppressed: false, value: 10 },
+      late: { suppressed: false, value: 10 },
+    });
     // Today, every one of those deadlines is still ahead: none is due in the last 30 days.
     expect(valueOf((await report()).ncii.due)).toBe(0);
   });

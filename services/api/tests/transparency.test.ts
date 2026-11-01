@@ -12,6 +12,7 @@ import {
   assemble,
   cell,
   clauseTitleIn,
+  forcedBy,
   mergeCells,
   partsOf,
   publishCell,
@@ -212,22 +213,33 @@ describe("assemble", () => {
 describe("windowBounds", () => {
   const now = new Date("2026-11-15T08:30:00Z");
 
-  test("30d is the rolling [now − 30 d, now)", () => {
+  test("30d ends at the start of today (UTC): [today − 30 d, today)", () => {
     const b = windowBounds("30d", now);
+    expect(b).toEqual({
+      from: new Date("2026-10-16T00:00:00Z"),
+      to: new Date("2026-11-15T00:00:00Z"),
+      empty: false,
+      open: false,
+    });
+    // Two reads the same day cover the same window: no minute-by-minute differencing.
+    expect(windowBounds("30d", new Date("2026-11-15T23:59:59.999Z"))).toEqual(b);
+  });
+
+  test("with the test hooks (live) 30d is the open-ended [now − 30 d, now)", () => {
+    const b = windowBounds("30d", now, { live: true });
     expect(b.to).toEqual(now);
     expect(b.from).toEqual(new Date("2026-10-16T08:30:00Z"));
-    expect(b.future).toBe(false);
-    expect(b.rolling).toBe(true);
+    expect(b.open).toBe(true);
   });
 
   test("a month runs from its first day 00:00 UTC to the next month's", () => {
     expect(windowBounds("2026-10", now)).toEqual({
       from: new Date("2026-10-01T00:00:00.000Z"),
       to: new Date("2026-11-01T00:00:00.000Z"),
-      future: false,
-      rolling: false,
+      empty: false,
+      open: false,
     });
-    expect(windowBounds("2024-02", now).to).toEqual(new Date("2024-03-01T00:00:00.000Z"));
+    expect(windowBounds("2026-02", now).to).toEqual(new Date("2026-03-01T00:00:00.000Z"));
   });
 
   test("December runs into January of the next year", () => {
@@ -236,15 +248,111 @@ describe("windowBounds", () => {
     expect(b.to).toEqual(new Date("2026-01-01T00:00:00.000Z"));
   });
 
-  test("the current month is not future (it ends in the future); next month is", () => {
-    expect(windowBounds("2026-11", now).future).toBe(false);
-    expect(windowBounds("2026-12", now).future).toBe(true);
-    expect(windowBounds("2026-12", new Date("2026-12-01T00:00:00Z")).future).toBe(false);
+  test("the current month runs to the start of today (to its end when live); next month is empty", () => {
+    expect(windowBounds("2026-11", now)).toMatchObject({ to: new Date("2026-11-15T00:00:00Z"), empty: false });
+    expect(windowBounds("2026-11", now, { live: true }).to).toEqual(new Date("2026-12-01T00:00:00Z"));
+    expect(windowBounds("2026-12", now).empty).toBe(true);
+    expect(windowBounds("2026-12", now, { live: true }).empty).toBe(true);
+    // On the first, the month has no whole day yet.
+    expect(windowBounds("2026-12", new Date("2026-12-01T09:00:00Z")).empty).toBe(true);
+    expect(windowBounds("2026-12", new Date("2026-12-01T09:00:00Z"), { live: true }).empty).toBe(false);
+  });
+
+  test("months older than the 12 the report offers are empty (nothing is queried)", () => {
+    expect(windowBounds("2025-12", now).empty).toBe(false);
+    expect(windowBounds("2025-11", now).empty).toBe(true);
+    expect(windowBounds("2020-02", now).empty).toBe(true);
+    // Across a year boundary: in January the oldest offered month is February of last year.
+    const jan = new Date("2027-01-10T00:00:00Z");
+    expect(windowBounds("2026-02", jan).empty).toBe(false);
+    expect(windowBounds("2026-01", jan).empty).toBe(true);
   });
 
   test("anything else is refused (the contract validates first)", () => {
     expect(() => windowBounds("2026-13", now)).toThrow("not a report window");
     expect(() => windowBounds("7d", now)).toThrow("not a report window");
+  });
+});
+
+describe("overlapping windows (30d against the calendar months)", () => {
+  const w = windowBounds("30d", new Date("2026-11-15T08:30:00Z"));
+  const nil = { due: 0, onTime: 0, late: 0 };
+  const piece = (cells: Cell[], ncii = nil) => ({ cells, ncii });
+
+  test("a small slice of the previous month hides the 30d row (30d − Nov = Oct part; Oct − that = the rest)", () => {
+    // Oct 1–15: 4 (outside 30d), Oct 16–31: 12, Nov 1–14: 12. Published: Oct 16, Nov 12, 30d 24.
+    const outOct = mk({ count: 4, fully: 4, detected: 4 });
+    const inOct = mk({ count: 12, fully: 12, detected: 12 });
+    const inNov = mk({ count: 12, fully: 12, detected: 12 });
+    const a = assemble("30d", w, [inOct, inNov], nil, [piece([outOct]), piece([inOct]), piece([inNov])]);
+    expect(a.rows[0]?.count).toEqual(S);
+    expect(a.rows[0]?.automatedDecision).toEqual({ fully: S, partially: v(0), not: v(0) });
+    // The only row hidden: the total would give it away.
+    expect(a.total).toEqual(S);
+    // Without the pieces it would have been shown.
+    expect(assemble("30d", w, [inOct, inNov], nil).rows[0]?.count).toEqual(v(24));
+  });
+
+  test("a small slice inside 30d hides it too, and a sibling row keeps the total visible", () => {
+    const small = mk({ clauseId: "honesty.spam", tier: null, count: 3, not: 3 });
+    const big = mk({ clauseId: "honesty.spam", tier: null, count: 20, not: 20 });
+    const other = mk({ clauseId: "decency.hate", tier: null, count: 30, not: 30 });
+    const otherSmall = mk({ clauseId: "decency.hate", tier: null, count: 5, not: 5 });
+    const a = assemble("30d", w, [small, big, other, otherSmall], nil, [
+      piece([small, other]),
+      piece([big, otherSmall]),
+    ]);
+    expect(a.rows.map((r) => r.count)).toEqual([S, S]);
+    expect(a.total).toEqual(v(58));
+  });
+
+  test("a figure small in one slice is hidden in 30d; the split hides a sibling with it", () => {
+    const p1 = mk({ count: 20, fully: 15, not: 5, detected: 15, appealed: 3, overturned: 0 });
+    const p2 = mk({ count: 20, fully: 20, detected: 20, appealed: 10, overturned: 10 });
+    const a = assemble("30d", w, [p1, p2], nil, [piece([p1]), piece([p2])]);
+    const row = a.rows[0];
+    expect(row?.count).toEqual(v(40));
+    // `not` is 5 in one slice: hidden, and `fully` with it so count − fully does not show it.
+    expect(row?.automatedDecision).toEqual({ fully: S, partially: v(0), not: S });
+    // The human-detected rest is 5 in one slice.
+    expect(row?.automatedDetection).toEqual(S);
+    expect(row?.appealed).toEqual(S);
+    expect(row?.overturned).toEqual(v(10));
+  });
+
+  test("a small slice of the total hides the total, even with two rows hidden", () => {
+    // Slice 1 holds a: 4 and b: 3 (a total of 7); slice 2 holds a: 20, b: 20, c: 30.
+    const a1 = mk({ count: 4, fully: 4, detected: 4 });
+    const b1 = mk({ clauseId: "honesty.spam", count: 3, fully: 3, detected: 3 });
+    const a2 = mk({ count: 20, fully: 20, detected: 20 });
+    const b2 = mk({ clauseId: "honesty.spam", count: 20, fully: 20, detected: 20 });
+    const c2 = mk({ clauseId: "decency.hate", count: 30, fully: 30, detected: 30 });
+    const r = assemble("30d", w, [a1, b1, a2, b2, c2], nil, [piece([a1, b1]), piece([a2, b2, c2])]);
+    expect(r.rows.map((x) => [x.clauseId, x.count])).toEqual([
+      ["safety.weapons", S],
+      ["decency.hate", v(30)],
+      ["honesty.spam", S],
+    ]);
+    // Two hidden rows would leave the total, but 30d − slice 2's month gives slice 1's 7.
+    expect(r.total).toEqual(S);
+    expect(assemble("30d", w, [a1, b1, a2, b2, c2], nil, [piece([a1, b1, a2, b2, c2])]).total).toEqual(v(77));
+  });
+
+  test("NCII: a small slice hides that figure, and the due total when it is the only one", () => {
+    const n = { due: 30, onTime: 20, late: 10 };
+    const r = assemble("30d", w, [], n, [
+      piece([], { due: 15, onTime: 15, late: 0 }),
+      piece([], { due: 15, onTime: 5, late: 10 }),
+    ]);
+    expect(r.ncii).toEqual({ due: S, onTime: S, late: v(10) });
+    expect(forcedBy([piece([], { due: 12, onTime: 10, late: 0 })]).ncii).toEqual({ pending: true });
+  });
+
+  test("zero is never forced hidden", () => {
+    const p = mk({ count: 3, fully: 3, detected: 3 });
+    const f = forcedBy([piece([p])]).cells.get("safety.weapons@1|t1");
+    expect(f).toEqual({ count: true, fully: true, detected: true });
+    expect(publishCell(mk({ count: 40, fully: 40, detected: 40 }), f).automatedDecision.partially).toEqual(v(0));
   });
 });
 
@@ -269,20 +377,48 @@ describe("rule-ref helpers", () => {
 
   test("a staff clause id resolves to its current version; none is null; unknown is refused", () => {
     expect(staffRuleRef("honesty.spam")).toBe("honesty.spam@1");
+    expect(staffRuleRef("decency.intimate-images")).toBe("decency.intimate-images@1");
     expect(staffRuleRef(undefined)).toBeNull();
     expect(() => staffRuleRef("no.such-clause")).toThrow("Unknown clause");
   });
 
-  test("case decisions: category first, else the case's own clause, else general", () => {
-    expect(caseDecisionRuleRef({ category: "weapons", ruleRef: "safety.weapons@1" }, "warn")).toBe("safety.weapons@1");
-    expect(caseDecisionRuleRef({ category: null, ruleRef: "safety.minors@1" }, "suspend")).toBe("safety.minors@1");
-    expect(caseDecisionRuleRef({ category: null, ruleRef: null }, "end_stream")).toBe("guidelines.general@1");
+  test("staff cannot cite the illegal ground the NCII process reserves", () => {
+    expect(() => staffRuleRef("illegal.ncii")).toThrow("not available to staff actions");
+  });
+
+  test("case decisions: category first, else a human case's report reason, else general", () => {
+    const human = { origin: "human" } as const;
+    const classifier = { origin: "classifier" } as const;
+    expect(caseDecisionRuleRef({ ...classifier, category: "weapons", ruleRef: "safety.weapons@1" }, "warn")).toBe(
+      "safety.weapons@1",
+    );
+    expect(caseDecisionRuleRef({ ...human, category: null, ruleRef: "safety.minors@1" }, "suspend")).toBe(
+      "safety.minors@1",
+    );
+    expect(caseDecisionRuleRef({ ...human, category: null, ruleRef: null }, "end_stream")).toBe("guidelines.general@1");
+  });
+
+  test("a T0 NCII-list case's clause is not what a decision on it cites (the statement cites general)", () => {
+    expect(caseDecisionRuleRef({ origin: "hash_list", category: null, ruleRef: "illegal.ncii@1" }, "suspend")).toBe(
+      "guidelines.general@1",
+    );
+    // Escalated to T0 by a moderator (origin human), still not a report reason.
+    expect(caseDecisionRuleRef({ origin: "human", category: null, ruleRef: "illegal.ncii@1" }, "warn")).toBe(
+      "guidelines.general@1",
+    );
+    // A classifier case without a category does not borrow a report reason either.
+    expect(caseDecisionRuleRef({ origin: "classifier", category: null, ruleRef: "safety.minors@1" }, "warn")).toBe(
+      "guidelines.general@1",
+    );
   });
 
   test("a decided case keeps its clause; one without takes the decision's (none for clear)", () => {
-    expect(caseRuleRefAfter({ category: "weapons", ruleRef: "safety.weapons@1" }, "clear")).toBe("safety.weapons@1");
-    expect(caseRuleRefAfter({ category: "self_harm", ruleRef: null }, "warn")).toBe("safety.self-harm@1");
-    expect(caseRuleRefAfter({ category: null, ruleRef: null }, "clear")).toBeNull();
+    const o = { origin: "classifier" } as const;
+    expect(caseRuleRefAfter({ ...o, category: "weapons", ruleRef: "safety.weapons@1" }, "clear")).toBe(
+      "safety.weapons@1",
+    );
+    expect(caseRuleRefAfter({ ...o, category: "self_harm", ruleRef: null }, "warn")).toBe("safety.self-harm@1");
+    expect(caseRuleRefAfter({ ...o, category: null, ruleRef: null }, "clear")).toBeNull();
   });
 });
 

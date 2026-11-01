@@ -50,12 +50,21 @@ const GROUP_KEYS: Record<Group, MessageKey> = {
   illegal: "enforcement.group.illegal",
   general: "enforcement.group.general",
 };
-const TIER_KEYS: Record<NonNullable<EnforcementRowDto["tier"]> | "none", MessageKey> = {
+const TIER_KEYS: Record<NonNullable<EnforcementRowDto["tier"]>, MessageKey> = {
   t0: "enforcement.tier.t0",
   t1: "enforcement.tier.t1",
   t2: "enforcement.tier.t2",
-  none: "enforcement.tier.none",
 };
+
+/**
+ * How a row's actions were taken. Without a tier, an illegal-ground row is the NCII request
+ * process (staff cannot cite that ground, so no staff action merges into it); any other is a staff
+ * decision (a report resolution or an account suspension).
+ */
+export function tierLabelKey(row: Pick<EnforcementRowDto, "tier" | "group">): MessageKey {
+  if (row.tier) return TIER_KEYS[row.tier];
+  return row.group === "illegal" ? "enforcement.tier.request" : "enforcement.tier.none";
+}
 
 /** `data-*` value of a published count: the number, or `suppressed`. */
 export const countAttr = (c: Count): string => (c.suppressed ? "suppressed" : String(c.value));
@@ -143,7 +152,7 @@ function RuleRow({ row }: { row: EnforcementRowDto }): React.JSX.Element {
           <span className="font-medium">{row.clauseTitle}</span>
           <span className="flex flex-wrap gap-x-2 text-xs text-muted-foreground">
             <span className="font-mono break-all">{row.ruleRef}</span>
-            <span>{t(TIER_KEYS[row.tier ?? "none"])}</span>
+            <span>{t(tierLabelKey(row))}</span>
           </span>
         </Field>
         <Field label={t("enforcement.column.actions")} className="sm:col-span-2 sm:text-end">

@@ -18,6 +18,7 @@ import {
   countAttr,
   nciiPending,
   overturnRate,
+  tierLabelKey,
   windowOptions,
   type EnforcementReportDto,
   type EnforcementRowDto,
@@ -111,6 +112,7 @@ describe("EnforcementFigures (stories: dark and light at 320 px)", () => {
       expect(spam.dataset.suppressed).toBe("true");
       expect(spam.dataset.count).toBeUndefined();
       expect(spam.dataset.tier).toBe("none");
+      expect(spam.textContent).toContain(t("enforcement.tier.none"));
       expect(one("enforcement-report-automated", spam).dataset.not).toBe("suppressed");
       expect(one("enforcement-report-overturn", spam).dataset.suppressed).toBe("true");
       const markers = all("enforcement-report-suppressed", spam);
@@ -180,5 +182,14 @@ describe("helpers", () => {
   it("countAttr", () => {
     expect(countAttr(n(0))).toBe("0");
     expect(countAttr(S)).toBe("suppressed");
+  });
+});
+
+describe("tier labels", () => {
+  it("names the tier; without one, the NCII request process apart from staff decisions", () => {
+    expect(tierLabelKey({ tier: "t1", group: "safety" })).toBe("enforcement.tier.t1");
+    expect(tierLabelKey({ tier: "t0", group: "illegal" })).toBe("enforcement.tier.t0");
+    expect(tierLabelKey({ tier: null, group: "illegal" })).toBe("enforcement.tier.request");
+    expect(tierLabelKey({ tier: null, group: "honesty" })).toBe("enforcement.tier.none");
   });
 });

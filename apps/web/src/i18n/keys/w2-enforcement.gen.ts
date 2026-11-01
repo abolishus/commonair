@@ -28,6 +28,7 @@ export type Key =
   | "enforcement.tier.t1"
   | "enforcement.tier.t2"
   | "enforcement.tier.none"
+  | "enforcement.tier.request"
   | "enforcement.automated.fully"
   | "enforcement.automated.partially"
   | "enforcement.automated.not"

@@ -16,6 +16,12 @@
  * Privacy: any count under `ENFORCEMENT_REPORT_RULES.k` (zero excepted) is `{suppressed: true}`,
  * and a figure that, with the visible cells beside it, would give a suppressed cell away is
  * suppressed too (complementary suppression). Ratios go out as integer numerator and denominator.
+ *
+ * Windows overlap: `30d` covers the end of one calendar month and the start of the next, and both
+ * months are published too. So windows end at a whole UTC day (the start of today), and a `30d`
+ * figure is suppressed when any slice a reader could difference out of the published windows (the
+ * `30d` part of each month, and the rest of that month) is under k. What stays possible is
+ * differencing day by day (yesterday's report against today's), which ADR 0019 accepts.
  */
 import type { EnforcementReport } from "@commonair/contracts/dto";
 import {
@@ -26,7 +32,8 @@ import {
 import { schema } from "@commonair/db";
 import { resolveCatalog } from "@commonair/email";
 import { findClause } from "@commonair/moderation";
-import { and, eq, gte, isNotNull, lt, sql } from "drizzle-orm";
+import { and, eq, gte, isNotNull, lt, sql, type SQL } from "drizzle-orm";
+import type { PgColumn } from "drizzle-orm/pg-core";
 // The report grouping lives with the catalog (`@commonair/moderation`'s `clauses.ts`); the package
 // index does not export it yet (contract request), so it is imported by path.
 import {
@@ -54,37 +61,56 @@ type SourceAction = (typeof ENFORCEMENT_SOURCE_ACTIONS)[number];
 export interface WindowBounds {
   from: Date;
   to: Date;
-  /** A month that has not started: nothing to query. */
-  future: boolean;
   /**
-   * The rolling window ends now: actions are counted with no upper bound, so a row the database
-   * stamped a moment ahead of this process's clock is not missed.
+   * Nothing to query: a month that has not started (or starts today), or one older than the
+   * months the report offers (`ENFORCEMENT_REPORT_RULES.months`, the current one included).
    */
-  rolling: boolean;
+  empty: boolean;
+  /**
+   * Test hooks only: the rolling window ends now and is queried with no upper bound, so the harness
+   * reads its own actions at once (and a row the database stamped a moment ahead of this process's
+   * clock is not missed). Never on a public instance: an open window can be differenced by minute.
+   */
+  open: boolean;
 }
 
 const MONTH = /^(\d{4})-(0[1-9]|1[0-2])$/;
 
-/** `[now − 30 d, now)`, or `[first day 00:00 UTC, first day of the next month)`. */
-export function windowBounds(window: EnforcementWindow, now: Date): WindowBounds {
-  if (window === "30d")
+const startOfUtcDay = (d: Date) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+const startOfUtcMonth = (d: Date) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1));
+
+/**
+ * `30d` = `[today 00:00 UTC − 30 d, today 00:00 UTC)`; a month = `[first day 00:00 UTC, first day
+ * of the next month)`, cut at today 00:00 UTC while it runs. With `live` (test hooks) `30d` is
+ * `[now − 30 d, now)`, open-ended, and the current month runs to its end.
+ */
+export function windowBounds(window: EnforcementWindow, now: Date, opts: { live?: boolean } = {}): WindowBounds {
+  const live = opts.live ?? false;
+  const today = startOfUtcDay(now);
+  if (window === "30d") {
+    const end = live ? now : today;
     return {
-      from: new Date(now.getTime() - ENFORCEMENT_REPORT_RULES.rollingDays * DAY_MS),
-      to: now,
-      future: false,
-      rolling: true,
+      from: new Date(end.getTime() - ENFORCEMENT_REPORT_RULES.rollingDays * DAY_MS),
+      to: end,
+      empty: false,
+      open: live,
     };
+  }
   const m = MONTH.exec(window);
   if (!m) throw new Error(`not a report window: ${window}`);
   const year = Number(m[1]);
   const month = Number(m[2]) - 1;
   const from = new Date(Date.UTC(year, month, 1));
   // Date.UTC carries month 12 into January of the next year.
-  const to = new Date(Date.UTC(year, month + 1, 1));
+  const next = new Date(Date.UTC(year, month + 1, 1));
   // Years 0–99 would be read as 1900–1999 by Date.UTC.
   from.setUTCFullYear(year);
-  to.setUTCFullYear(month === 11 ? year + 1 : year);
-  return { from, to, future: from.getTime() > now.getTime(), rolling: false };
+  next.setUTCFullYear(month === 11 ? year + 1 : year);
+  const to = live || next.getTime() <= today.getTime() ? next : today;
+  // The window picker offers the current month and the ones before it, `months` in all.
+  const oldest = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - (ENFORCEMENT_REPORT_RULES.months - 1), 1);
+  const t = from.getTime();
+  return { from, to, empty: t >= to.getTime() || t > now.getTime() || t < oldest, open: false };
 }
 
 // ---------------------------------------------------------------- suppression
@@ -98,15 +124,18 @@ export function cell(n: number): ReportCount {
 }
 
 const isSmall = (n: number) => n > 0 && n < K;
+type Flag = boolean | undefined;
+/** Suppressed by the k rule, or forced by another window (`forcedBy`); zero is never hidden. */
+const hidden = (n: number, forced: Flag) => n > 0 && (n < K || forced === true);
 
 /**
  * A total over parts that partition it: suppressed (besides its own k rule) when exactly one part
  * is suppressed, since total − visible parts would give that part away. With two or more
  * suppressed parts only their sum shows.
  */
-export function totalOver(total: number, parts: readonly number[]): ReportCount {
+export function totalOver(total: number, parts: readonly number[], forced: readonly Flag[] = []): ReportCount {
   if (isSmall(total)) return SUPPRESSED;
-  return parts.filter(isSmall).length === 1 ? SUPPRESSED : visible(total);
+  return parts.filter((n, i) => hidden(n, forced[i])).length === 1 ? SUPPRESSED : visible(total);
 }
 
 /**
@@ -114,12 +143,12 @@ export function totalOver(total: number, parts: readonly number[]): ReportCount 
  * smallest non-zero visible one, so the total minus the visible parts never isolates a suppressed
  * part. (Every other part zero cannot happen: the total would then be that part, under k.)
  */
-export function partsOf(parts: readonly number[]): ReportCount[] {
-  const out = parts.map(cell);
-  if (parts.filter(isSmall).length !== 1) return out;
+export function partsOf(parts: readonly number[], forced: readonly Flag[] = []): ReportCount[] {
+  const out = parts.map((n, i) => (hidden(n, forced[i]) ? SUPPRESSED : visible(n)));
+  if (parts.filter((n, i) => hidden(n, forced[i])).length !== 1) return out;
   let pick = -1;
   for (const [i, n] of parts.entries())
-    if (!isSmall(n) && n > 0 && (pick < 0 || n < (parts[pick] ?? Number.POSITIVE_INFINITY))) pick = i;
+    if (!hidden(n, forced[i]) && n > 0 && (pick < 0 || n < (parts[pick] ?? Number.POSITIVE_INFINITY))) pick = i;
   if (pick >= 0) out[pick] = SUPPRESSED;
   return out;
 }
@@ -194,14 +223,25 @@ export function mergeCells(cells: readonly Cell[]): Cell[] {
 const GROUP_ORDER = new Map<ReportGroup, number>(REPORT_GROUP_IDS.map((g, i) => [g, i]));
 const TIER_ORDER = (t: ModerationTier | null) => (t === null ? 9 : Number(t.slice(1)));
 
+const FIGURES = ["count", "fully", "partially", "not", "detected", "appealed", "overturned"] as const;
+/** Figures another window forces hidden; `human` is `count − detected`. */
+export type Forced = Partial<Record<(typeof FIGURES)[number] | "human", true>>;
+const NCII_FIGURES = ["due", "onTime", "late", "pending"] as const;
+export type NciiForced = Partial<Record<(typeof NCII_FIGURES)[number], true>>;
+
+/** Zero, or hidden: with the row's count hidden, a non-zero part would show it. */
+const zeroOrHidden = (n: number): ReportCount => (n === 0 ? visible(0) : SUPPRESSED);
+
 /** A published row; `clauseTitle` is filled per request locale. */
-export function publishCell(c: Cell): Omit<Row, "clauseTitle"> {
-  const count = cell(c.count);
-  const [fully, partially, not] = count.suppressed
-    ? [cell(c.fully), cell(c.partially), cell(c.not)]
-    : (partsOf([c.fully, c.partially, c.not]) as [ReportCount, ReportCount, ReportCount]);
+export function publishCell(c: Cell, forced: Forced = {}): Omit<Row, "clauseTitle"> {
+  const count = hidden(c.count, forced.count) ? SUPPRESSED : visible(c.count);
+  const split = [c.fully, c.partially, c.not];
+  const [fully, partially, not] = (
+    count.suppressed ? split.map(zeroOrHidden) : partsOf(split, [forced.fully, forced.partially, forced.not])
+  ) as [ReportCount, ReportCount, ReportCount];
   // `count − detected` is the human-detected cell: publishing `detected` beside the count shows it.
-  const detected = count.suppressed || isSmall(c.count - c.detected) ? SUPPRESSED : cell(c.detected);
+  const detected =
+    count.suppressed || hidden(c.count - c.detected, forced.human) || forced.detected ? SUPPRESSED : cell(c.detected);
   return {
     ruleRef: `${c.clauseId}@${c.clauseVersion}`,
     clauseId: c.clauseId,
@@ -212,15 +252,57 @@ export function publishCell(c: Cell): Omit<Row, "clauseTitle"> {
     automatedDecision: { fully, partially, not },
     automatedDetection: detected,
     // The overturn rate's denominator is the count: with it suppressed, so is the rate.
-    appealed: count.suppressed ? SUPPRESSED : cell(c.appealed),
-    overturned: count.suppressed ? SUPPRESSED : cell(c.overturned),
+    appealed: count.suppressed || hidden(c.appealed, forced.appealed) ? SUPPRESSED : visible(c.appealed),
+    overturned: count.suppressed || hidden(c.overturned, forced.overturned) ? SUPPRESSED : visible(c.overturned),
   };
 }
 
 /** The NCII line: `pending` (due − on time − late) is derivable, so it is a part of `due` too. */
-export function publishNcii(n: NciiCounts): EnforcementReport["ncii"] {
-  const pending = Math.max(0, n.due - n.onTime - n.late);
-  return { due: totalOver(n.due, [n.onTime, n.late, pending]), onTime: cell(n.onTime), late: cell(n.late) };
+export function publishNcii(n: NciiCounts, forced: NciiForced = {}): EnforcementReport["ncii"] {
+  const pending = nciiPending(n);
+  return {
+    due: hidden(n.due, forced.due)
+      ? SUPPRESSED
+      : totalOver(n.due, [n.onTime, n.late, pending], [forced.onTime, forced.late, forced.pending]),
+    onTime: hidden(n.onTime, forced.onTime) ? SUPPRESSED : visible(n.onTime),
+    late: hidden(n.late, forced.late) ? SUPPRESSED : visible(n.late),
+  };
+}
+
+const nciiPending = (n: NciiCounts) => Math.max(0, n.due - n.onTime - n.late);
+
+/**
+ * A slice of a window that a reader can difference out of the published windows: the part of the
+ * `30d` window in one calendar month, or the rest of that month.
+ */
+export interface Piece {
+  cells: readonly Cell[];
+  ncii: NciiCounts;
+}
+
+/** Every figure some piece holds under k (zero excepted): those are hidden in the window. */
+export function forcedBy(pieces: readonly Piece[]): {
+  cells: Map<string, Forced>;
+  total: boolean;
+  ncii: NciiForced;
+} {
+  const cells = new Map<string, Forced>();
+  let total = false;
+  const ncii: NciiForced = {};
+  for (const p of pieces) {
+    const merged = mergeCells(p.cells);
+    for (const c of merged) {
+      const key = cellKey(c);
+      const f = cells.get(key) ?? {};
+      for (const k of FIGURES) if (isSmall(c[k])) f[k] = true;
+      if (isSmall(c.count - c.detected)) f.human = true;
+      cells.set(key, f);
+    }
+    if (isSmall(merged.reduce((s, c) => s + c.count, 0))) total = true;
+    const n = { ...p.ncii, pending: nciiPending(p.ncii) };
+    for (const k of NCII_FIGURES) if (isSmall(n[k])) ncii[k] = true;
+  }
+  return { cells, total, ncii };
 }
 
 export interface Assembled {
@@ -231,16 +313,22 @@ export interface Assembled {
   ncii: EnforcementReport["ncii"];
 }
 
-/** Pure: raw cells and NCII counts → the published figures, rows ordered by area, rule and tier. */
+/**
+ * Pure: raw cells and NCII counts → the published figures, rows ordered by area, rule and tier.
+ * `pieces` are the window's slices another published window exposes (`forcedBy`).
+ */
 export function assemble(
   window: EnforcementWindow,
   bounds: WindowBounds,
   cells: readonly Cell[],
   ncii: NciiCounts,
+  pieces: readonly Piece[] = [],
 ): Assembled {
+  const forced = forcedBy(pieces);
   const merged = mergeCells(cells).filter((c) => c.count > 0);
+  const forcedOf = (c: Cell) => forced.cells.get(cellKey(c)) ?? {};
   const rows = merged
-    .map(publishCell)
+    .map((c) => publishCell(c, forcedOf(c)))
     .sort(
       (a, b) =>
         (GROUP_ORDER.get(a.group) ?? 99) - (GROUP_ORDER.get(b.group) ?? 99) ||
@@ -249,27 +337,54 @@ export function assemble(
         TIER_ORDER(a.tier) - TIER_ORDER(b.tier),
     );
   const counts = merged.map((c) => c.count);
-  const total = totalOver(
-    counts.reduce((s, n) => s + n, 0),
-    counts,
-  );
-  return { window, bounds, rows, total, ncii: publishNcii(ncii) };
+  const sum = counts.reduce((s, n) => s + n, 0);
+  const total = hidden(sum, forced.total)
+    ? SUPPRESSED
+    : totalOver(
+        sum,
+        counts,
+        merged.map((c) => forcedOf(c).count),
+      );
+  return { window, bounds, rows, total, ncii: publishNcii(ncii, forced.ncii) };
 }
 
 // ---------------------------------------------------------------- queries
+
+/** A query range: `to` null is open-ended; with `split`, rows are bucketed per piece (`bucketOf`). */
+interface Range {
+  from: Date;
+  to: Date | null;
+  split?: Date;
+}
+
+/**
+ * `YYYY-MM:in` / `YYYY-MM:out`: the UTC month and which side of `split` (the `30d` start) a row
+ * falls on. The instant is inlined (a server-made ISO string, never input) so the select and the
+ * group by render the same expression.
+ */
+const bucketOf = (col: PgColumn, split: Date): SQL<string> =>
+  sql<string>`to_char(${col} at time zone 'UTC', 'YYYY-MM') || case when ${col} >= ${sql.raw(
+    `'${split.toISOString()}'::timestamptz`,
+  )} then ':in' else ':out' end`;
+
+const inRange = (col: PgColumn, r: Range) => and(gte(col, r.from), r.to ? lt(col, r.to) : undefined);
 
 const appealedSql = (subjectType: unknown, subjectId: unknown, overturned: boolean) =>
   sql<number>`count(*) filter (where exists (select 1 from ${appeals} a where a.subject_type = ${subjectType} and a.subject_id = ${subjectId}${
     overturned ? sql` and a.status = 'overturned'` : sql``
   }))::int`;
 
-/** Statements in the window, per clause and source action. */
-async function statementCells(deps: Deps, b: WindowBounds): Promise<Cell[]> {
+type Bucketed<T> = T & { bucket: string };
+
+/** Statements in the range, per clause and source action (and bucket). */
+async function statementCells(deps: Deps, r: Range): Promise<Bucketed<Cell>[]> {
+  const bucket = r.split ? bucketOf(st.createdAt, r.split) : sql<string>`''`;
   const rows = await deps.db
     .select({
       clauseId: st.clauseId,
       clauseVersion: st.clauseVersion,
       sourceAction: st.sourceAction,
+      bucket,
       count: sql<number>`count(*)::int`,
       fully: sql<number>`count(*) filter (where ${st.automatedDecision} = 'fully')::int`,
       partially: sql<number>`count(*) filter (where ${st.automatedDecision} = 'partially')::int`,
@@ -279,16 +394,18 @@ async function statementCells(deps: Deps, b: WindowBounds): Promise<Cell[]> {
       overturned: appealedSql(st.appealSubjectType, st.appealSubjectId, true),
     })
     .from(st)
-    .where(and(gte(st.createdAt, b.from), b.rolling ? undefined : lt(st.createdAt, b.to)))
-    .groupBy(st.clauseId, st.clauseVersion, st.sourceAction);
-  return rows.map(({ sourceAction, ...r }) => ({ ...r, tier: tierOfSource(sourceAction) }));
+    .where(inRange(st.createdAt, r))
+    .groupBy(st.clauseId, st.clauseVersion, st.sourceAction, ...(r.split ? [bucket] : []));
+  return rows.map(({ sourceAction, ...row }) => ({ ...row, tier: tierOfSource(sourceAction) }));
 }
 
 /** Platform mod actions citing a clause that have no statement: decided by a person, after a report or not. */
-async function modActionCells(deps: Deps, b: WindowBounds): Promise<Cell[]> {
+async function modActionCells(deps: Deps, r: Range): Promise<Bucketed<Cell>[]> {
+  const bucket = r.split ? bucketOf(modActions.createdAt, r.split) : sql<string>`''`;
   const rows = await deps.db
     .select({
       ruleRef: modActions.ruleRef,
+      bucket,
       count: sql<number>`count(*)::int`,
       appealed: appealedSql(sql`'moderation_action'`, modActions.id, false),
       overturned: appealedSql(sql`'moderation_action'`, modActions.id, true),
@@ -299,54 +416,81 @@ async function modActionCells(deps: Deps, b: WindowBounds): Promise<Cell[]> {
         eq(modActions.scope, "platform"),
         isNotNull(modActions.ruleRef),
         sql`${modActions.subjectType} is distinct from 'moderation_case'`,
-        gte(modActions.createdAt, b.from),
-        b.rolling ? undefined : lt(modActions.createdAt, b.to),
+        inRange(modActions.createdAt, r),
       ),
     )
-    .groupBy(modActions.ruleRef);
-  return rows.flatMap((r) => {
-    const ref = r.ruleRef ? parseRuleRef(r.ruleRef) : null;
+    .groupBy(modActions.ruleRef, ...(r.split ? [bucket] : []));
+  return rows.flatMap((row) => {
+    const ref = row.ruleRef ? parseRuleRef(row.ruleRef) : null;
     if (!ref) return [];
     return [
       {
+        bucket: row.bucket,
         clauseId: ref.id,
         clauseVersion: ref.version,
         tier: null,
-        count: r.count,
+        count: row.count,
         fully: 0,
         partially: 0,
-        not: r.count,
+        not: row.count,
         detected: 0,
-        appealed: r.appealed,
-        overturned: r.overturned,
+        appealed: row.appealed,
+        overturned: row.overturned,
       },
     ];
   });
 }
 
-async function nciiCounts(deps: Deps, b: WindowBounds, now: Date): Promise<NciiCounts> {
+/** NCII requests by deadline (and bucket); `late` counts undecided requests past their deadline at `now`. */
+async function nciiCounts(deps: Deps, r: Range, now: Date): Promise<Bucketed<NciiCounts>[]> {
+  const bucket = r.split ? bucketOf(nciiRequests.deadlineAt, r.split) : sql<string>`''`;
   const actedAt = sql`least(${nciiRequests.decidedAt}, ${nciiRequests.autoHiddenAt})`;
-  const [r] = await deps.db
+  const query = deps.db
     .select({
+      bucket,
       due: sql<number>`count(*)::int`,
       onTime: sql<number>`count(*) filter (where ${actedAt} <= ${nciiRequests.deadlineAt})::int`,
       late: sql<number>`count(*) filter (where coalesce(${actedAt}, ${now.toISOString()}::timestamptz) > ${nciiRequests.deadlineAt})::int`,
     })
     .from(nciiRequests)
-    .where(and(gte(nciiRequests.deadlineAt, b.from), lt(nciiRequests.deadlineAt, b.to)));
-  return { due: r?.due ?? 0, onTime: r?.onTime ?? 0, late: r?.late ?? 0 };
+    .where(inRange(nciiRequests.deadlineAt, r));
+  return r.split ? query.groupBy(bucket) : query;
 }
 
-/** The raw figures for a window (three queries), or nothing for a month that has not started. */
-export async function loadReport(deps: Deps, window: EnforcementWindow, now: Date): Promise<Assembled> {
-  const bounds = windowBounds(window, now);
-  if (bounds.future) return assemble(window, bounds, [], { due: 0, onTime: 0, late: 0 });
+const NO_NCII: NciiCounts = { due: 0, onTime: 0, late: 0 };
+const sumNcii = (xs: readonly NciiCounts[]): NciiCounts =>
+  xs.reduce((a, x) => ({ due: a.due + x.due, onTime: a.onTime + x.onTime, late: a.late + x.late }), NO_NCII);
+
+/**
+ * The raw figures for a window (three queries), or nothing for an empty one. The closed `30d`
+ * window is read from the start of its first month, bucketed, so each piece another window
+ * exposes is known (`forcedBy`).
+ */
+export async function loadReport(
+  deps: Deps,
+  window: EnforcementWindow,
+  bounds: WindowBounds,
+  now: Date,
+): Promise<Assembled> {
+  if (bounds.empty) return assemble(window, bounds, [], NO_NCII);
+  const split = window === "30d" && !bounds.open;
+  const range: Range = split
+    ? { from: startOfUtcMonth(bounds.from), to: bounds.to, split: bounds.from }
+    : { from: bounds.from, to: bounds.open ? null : bounds.to };
   const [statements, actions, ncii] = await Promise.all([
-    statementCells(deps, bounds),
-    modActionCells(deps, bounds),
-    nciiCounts(deps, bounds, now),
+    statementCells(deps, range),
+    modActionCells(deps, range),
+    nciiCounts(deps, range, now),
   ]);
-  return assemble(window, bounds, [...statements, ...actions], ncii);
+  const cells = [...statements, ...actions];
+  if (!split) return assemble(window, bounds, cells, sumNcii(ncii));
+  const buckets = new Set([...cells, ...ncii].map((x) => x.bucket));
+  const pieces = [...buckets].map((b) => ({
+    cells: cells.filter((c) => c.bucket === b),
+    ncii: sumNcii(ncii.filter((n) => n.bucket === b)),
+  }));
+  const inside = (x: { bucket: string }) => x.bucket.endsWith(":in");
+  return assemble(window, bounds, cells.filter(inside), sumNcii(ncii.filter(inside)), pieces);
 }
 
 // ---------------------------------------------------------------- titles, cache, entry point
@@ -358,6 +502,7 @@ export function clauseTitleIn(locale: string, clauseId: string, clauseVersion: n
   return titles[key] ?? clauseId;
 }
 
+/** By window and bounds, least recently used first. */
 const cache = new Map<string, { at: number; report: Assembled }>();
 
 /** Drop the in-process cache (tests). */
@@ -371,13 +516,21 @@ export async function enforcementReport(
   opts: { locale?: string } = {},
 ): Promise<EnforcementReport> {
   const now = deps.now();
-  // The harness stack (test hooks on) reads its own actions back at once.
-  let entry = deps.env.MODERATION_TEST_HOOKS ? undefined : cache.get(window);
+  // The harness stack (test hooks on) reads its own actions back at once, uncached.
+  const live = deps.env.MODERATION_TEST_HOOKS;
+  const bounds = windowBounds(window, now, { live });
+  const key = `${window}|${bounds.from.toISOString()}|${bounds.to.toISOString()}`;
+  let entry = live ? undefined : cache.get(key);
   const age = entry ? now.getTime() - entry.at : Number.POSITIVE_INFINITY;
-  if (!entry || age < 0 || age >= CACHE_MS) {
-    entry = { at: now.getTime(), report: await loadReport(deps, window, now) };
-    if (cache.size >= CACHE_MAX) cache.clear();
-    cache.set(window, entry);
+  if (!entry || age < 0 || age >= CACHE_MS)
+    entry = { at: now.getTime(), report: await loadReport(deps, window, bounds, now) };
+  cache.delete(key);
+  if (!live) {
+    for (const oldest of cache.keys()) {
+      if (cache.size < CACHE_MAX) break;
+      cache.delete(oldest);
+    }
+    cache.set(key, entry);
   }
   const { report } = entry;
   const locale = opts.locale ?? "en";
