@@ -1,0 +1,19 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Harness override for the `captions` scenario (W2-captions, ADR 0011): media talks to the whisper
+# sidecar, and one captions slot per media host, so the capacity step needs only two streams (the
+# second one queues). The sidecar itself is behind compose.yaml's `captions` profile, which needs
+# the pinned weights (`bun scripts/fetch-model.ts --model captions`); enable the profile only where
+# they were fetched (the captions shard). Without it, media's whisper calls fail and the chunks are
+# dropped: captions stay off, nothing else changes.
+
+services:
+  media:
+    environment:
+      WHISPER_URL: http://whisper:8080
+      CAPTIONS_MAX_STREAMS: "1"
+
+  whisper:
+    volumes:
+      - ${CAPTIONS_MODEL:-./.cache/models/whisper-ggml-base-q5_1.bin}:/models/ggml-base-q5_1.bin:ro,Z

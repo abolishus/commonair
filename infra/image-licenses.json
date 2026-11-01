@@ -117,7 +117,7 @@
     "license": "GPL-2.0-or-later AND GPL-3.0-or-later AND MIT",
     "source": "https://github.com/debuerreotype/debuerreotype/blob/master/LICENSE",
     "tag": "trixie-20261005",
-    "notes": "Debian 13 base (dpkg/apt GPL-2.0-or-later, coreutils GPL-3.0-or-later, debuerreotype tooling MIT); every package carries its own DFSG license in /usr/share/doc/*/copyright. Test only: the Debian host of scripts/selfhost/e2e.ts, which apt-installs systemd (LGPL-2.1-or-later) and podman (Apache-2.0) into it."
+    "notes": "Debian 13 base (dpkg/apt GPL-2.0-or-later, coreutils GPL-3.0-or-later, debuerreotype tooling MIT); every package carries its own DFSG license in /usr/share/doc/*/copyright. Used by: the selfhost e2e host (test) and the whisper sidecar image (shipped). The e2e host is the Debian host of scripts/selfhost/e2e.ts, which apt-installs systemd (LGPL-2.1-or-later) and podman (Apache-2.0) into it. The sidecar uses it as the base (build and runtime stages) of our own whisper image (infra/containers/whisper.Containerfile, ADR 0011), which adds the whisper-server binary of whisper.cpp (MIT, https://github.com/ggml-org/whisper.cpp/blob/v1.9.5/LICENSE) built from tag v1.9.5, commit d1be6fde11ac6e0407606b4e42fe72d34add8037; the captions weights (MIT) are mounted at run time, never in the image."
   },
   "quay.io/fedora/fedora": {
     "license": "GPL-2.0-or-later AND GPL-3.0-or-later AND MIT",
