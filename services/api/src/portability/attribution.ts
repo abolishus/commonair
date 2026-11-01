@@ -6,10 +6,13 @@
  * in its transaction, only for a new follow, right after inserting the row. The follower count is
  * the `follows` trigger's (decision (aa)): never touch `channels.follower_count` here.
  *
- * Contract-step stub: W3-portability resolves the nonce and, for a live link of this channel,
- * sets `follows.source = 'move_link'` and `follows.move_link_id`. Until then it does nothing.
+ * A nonce that names a live link of this channel sets `follows.source = 'move_link'` and
+ * `follows.move_link_id`. A revoked, expired, unknown or other channel's link attributes nothing:
+ * the visitor still follows (as `direct`), and the answer does not reveal which case it was.
  */
-import type { Executor } from "@commonair/db";
+import { type Executor, schema } from "@commonair/db";
+import { and, eq } from "drizzle-orm";
+import { findLink, linkState } from "./links.ts";
 
 export interface FollowAttribution {
   followerId: string;
@@ -18,4 +21,12 @@ export interface FollowAttribution {
   moveLink: { nonce: string } | null;
 }
 
-export async function attributeFollow(_tx: Executor, _follow: FollowAttribution): Promise<void> {}
+export async function attributeFollow(tx: Executor, follow: FollowAttribution): Promise<void> {
+  if (!follow.moveLink) return;
+  const link = await findLink(tx, follow.channelId, follow.moveLink.nonce);
+  if (!link || linkState(link, new Date()) !== "active") return;
+  await tx
+    .update(schema.follows)
+    .set({ source: "move_link", moveLinkId: link.id })
+    .where(and(eq(schema.follows.followerId, follow.followerId), eq(schema.follows.channelId, follow.channelId)));
+}

@@ -9,5 +9,14 @@
   "goLiveDigest.itemNoTitle": "{channel}",
   "goLiveDigest.more": "{count, plural, one {# canal más que sigues está en vivo} other {# canales más que sigues están en vivo}}",
   "goLiveDigest.why": "Activaste los correos de transmisiones en vivo de los canales que sigues en {instance}.",
-  "goLiveDigest.settings": "Elige qué correos de transmisiones en vivo recibes"
+  "goLiveDigest.settings": "Elige qué correos de transmisiones en vivo recibes",
+  "channelMoved.subject": "{channel} se ha mudado",
+  "channelMoved.preview": "Pediste a {instance} que te avisara si {channel} se mudaba. Ya lo ha hecho.",
+  "channelMoved.heading": "{channel} se ha mudado",
+  "channelMoved.body": "{channel} dice que ahora puedes encontrar su canal en este sitio:",
+  "channelMoved.caution": "Este sitio lo eligió quien transmite, no {instance}. La página del canal aquí muestra la dirección completa; revísala antes de visitarla.",
+  "channelMoved.openChannel": "Ver el aviso en {instance}",
+  "channelMoved.subscriptions": "Si tienes una suscripción a {channel}, sigue activa hasta que quien transmite la termine.",
+  "channelMoved.why": "Pediste a {instance} que te enviara un correo una sola vez si {channel} se mudaba. Este es ese correo, y hemos borrado tu solicitud.",
+  "channelMoved.settings": "Gestiona tu configuración de privacidad"
 }

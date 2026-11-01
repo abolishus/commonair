@@ -1,15 +1,24 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-/** Build a portability bundle export. Owned by W3-portability; a no-op stub until it lands (batch 7 contract step §5.1). */
+/**
+ * `PORTABILITY_JOBS.build`: a `bundle` export, through the shared export pipeline (`buildExport`:
+ * claim, build, upload, TTL, mail). `portability.bundle.create` enqueues it with the export id as
+ * the job id; the bundle itself is built by `exports/bundle.ts`.
+ */
 import { PORTABILITY_JOBS, PortabilityBuildJob, QUEUES } from "@commonair/contracts/internal";
-import { stubHandler } from "../b7/stub.ts";
+import { buildExport } from "../exports/build.ts";
 import { defineJob } from "../runtime/registry.ts";
+
+const ATTEMPTS = 3;
 
 export const job = defineJob({
   queue: QUEUES.portability,
   name: PORTABILITY_JOBS.build,
-  description: "Build a portability bundle export",
+  description: "Build a portability bundle export, upload it and mail the owner a link",
   data: PortabilityBuildJob,
-  handler: stubHandler(PORTABILITY_JOBS.build),
+  attempts: ATTEMPTS,
+  backoffMs: 15_000,
+  handler: async ({ exportId }, ctx, meta) =>
+    buildExport(ctx, exportId, { lastAttempt: meta.attemptsMade + 1 >= ATTEMPTS }),
 });
