@@ -14,6 +14,9 @@
  * subscribes, rejoins the viewer class on the subscription, exits as a member by subscription only,
  * is not re-enrolled by the sync, and rejoins (`membership-rejoin-viewer`, E7).
  *
+ * W3 extension (`--set w3=`, `src/w3/steps.ts`): `jury` (the advisory jury, ADR 0038;
+ * `src/w3/jury.ts`) runs after the last step.
+ *
  * Governance windows run on the database clock: every wait is on state (`coop.proposals.get`)
  * with a deadline, ticking `proposals-advance` through the test hook. `--set via=api` drives
  * everything through the API; the default drives the web flows the spec names. The stack must be
@@ -90,6 +93,9 @@ import type { WaitBudget } from "../src/social.ts";
 import type { SignedInUser } from "../src/users.ts";
 import type { Viewer } from "../src/viewer.ts";
 import { waitFor } from "../src/wait.ts";
+import { stepJury } from "../src/w3/jury.ts";
+import type { CoopW3Extension } from "../src/w3/kit.ts";
+import { type W3Extension, w3ExtensionTitle, w3Extensions } from "../src/w3/steps.ts";
 import { signInViaUi } from "../src/web/flows.ts";
 import { ROUTES, TEST_IDS } from "../src/web/selectors.ts";
 import { WebSession, byTestId } from "../src/web/session.ts";
@@ -106,6 +112,10 @@ const TIP_CENTS = 1_000;
 const DEFAULT_QUALIFY_SECONDS = 600;
 const DEFAULT_VIEWERS_PER_STREAM = 2;
 const NOTE = "harness e5-coop";
+
+const W3_STEPS: Readonly<Record<W3Extension<"e5-coop">, (ext: CoopW3Extension) => Promise<void>>> = {
+  jury: stepJury,
+};
 
 interface People {
   v: SignedInUser;
@@ -229,7 +239,10 @@ async function e5Coop(ctx: ScenarioContext, sessions: WebSession[], check: Scena
   const steps = parseCoopSteps(ctx.param("steps", "all"));
   const via = parseVia(ctx.param("via", "web"));
   const appRole = ctx.param("appRole", DEFAULT_APP_ROLE);
+  // `--set w3=` names a pending extension; by default only merged ones run (src/w3/steps.ts).
+  const w3 = w3Extensions("e5-coop", ctx.param("w3", ""));
   ctx.data("steps", steps);
+  ctx.data("w3.extensions", w3);
   ctx.data("via", via);
   ctx.data("runStart", runStart.toISOString());
 
@@ -384,6 +397,9 @@ async function e5Coop(ctx: ScenarioContext, sessions: WebSession[], check: Scena
         break;
     }
   }
+
+  const ext: CoopW3Extension = { ctx, via, people, hooks, databaseUrl, appRole, currency, check };
+  for (const name of w3.run) await ctx.step(w3ExtensionTitle(name, "run"), () => W3_STEPS[name](ext));
 }
 
 function summarizeTicks(hooks: CoopHooks): Record<string, { count: number; skipped: number; errors: number }> {

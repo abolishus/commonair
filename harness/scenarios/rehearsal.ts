@@ -18,16 +18,25 @@
  * `--set via=api` drives the web setup through the API. Steps whose unit has not merged are
  * pending (`src/w2/steps.ts`) and run only when named. W2-rehearsal fills this file and
  * `src/w2/rehearsal/`.
+ *
+ * W3 extension (`--set w3=`, `src/w3/steps.ts`): `moderation-samples` (B7-followups,
+ * `src/w2/rehearsal/index.ts`: the report counts moderation samples) after the steps; it adds step 1.
  */
 import { parseVia } from "../src/money.ts";
 import { defineScenario } from "../src/scenario.ts";
-import { REHEARSAL_STEP_RUNNERS, newRehearsalRun } from "../src/w2/rehearsal/index.ts";
+import { REHEARSAL_STEP_RUNNERS, newRehearsalRun, stepModerationSamples } from "../src/w2/rehearsal/index.ts";
 import {
   REHEARSAL_STEP_PREREQUISITES,
   parseRehearsalSteps,
   rehearsalTitle,
   withPrerequisites,
 } from "../src/w2/steps.ts";
+import type { RehearsalW3Extension } from "../src/w3/kit.ts";
+import { type W3Extension, w3ExtensionTitle, w3Extensions, withW3Steps } from "../src/w3/steps.ts";
+
+const W3_STEPS: Readonly<Record<W3Extension<"rehearsal">, (run: RehearsalW3Extension) => Promise<void>>> = {
+  "moderation-samples": stepModerationSamples,
+};
 
 export default defineScenario({
   name: "rehearsal",
@@ -38,9 +47,15 @@ export default defineScenario({
   timeoutMs: 20 * 60_000,
   async run(ctx) {
     const selected = parseRehearsalSteps(ctx.param("steps", "all"));
-    const { steps, added } = withPrerequisites(selected, REHEARSAL_STEP_PREREQUISITES);
+    // `--set w3=` names a pending extension; by default only merged ones run (src/w3/steps.ts).
+    const w3 = w3Extensions("rehearsal", ctx.param("w3", ""));
+    const forW3 = withW3Steps(selected, w3.run);
+    const prerequisites = withPrerequisites(forW3.steps, REHEARSAL_STEP_PREREQUISITES);
+    const steps = prerequisites.steps;
+    const added = [...new Set([...forW3.added, ...prerequisites.added])].sort((a, b) => a - b);
     const via = parseVia(ctx.param("via", "web"));
     ctx.data("steps", { selected, run: steps, addedPrerequisites: added });
+    ctx.data("w3.extensions", w3);
     ctx.data("via", via);
     if (steps.length === 0) {
       ctx.skipStep("rehearsal", "every step is pending (W2-rehearsal not merged yet); name one with --set steps=");
@@ -48,5 +63,6 @@ export default defineScenario({
     }
     const run = await newRehearsalRun(ctx, { via });
     for (const n of steps) await ctx.step(rehearsalTitle(n, "run"), () => REHEARSAL_STEP_RUNNERS[n](run));
+    for (const name of w3.run) await ctx.step(w3ExtensionTitle(name, "run"), () => W3_STEPS[name](run));
   },
 });

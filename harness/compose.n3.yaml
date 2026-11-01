@@ -1,0 +1,37 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# Compose override for the N3 `twitch-import` harness scenario ONLY (ADR 0031). Never use it on a
+# public instance: it turns the import on with fake Twitch OAuth credentials and points every
+# Twitch URL at the in-harness mock (harness/src/mocks/twitch/), which listens over plain http on
+# this machine at TWITCH_MOCK_PORT (harness/src/n3/index.ts). The containers reach it as the e9
+# webhook receiver: through host.containers.internal, allowed by OUTBOUND_ALLOW_PRIVATE_NETWORKS.
+# The fake credentials also satisfy the `oauth` need. The real Twitch API is never called.
+#
+# Layered only for the `w3` and `interact` shards and their scenarios, with
+# harness/compose.w3.yaml and harness/compose.n4.yaml (scripts/infra.ts `W3_OVERRIDES`):
+#
+#   bun scripts/infra.ts stack --harness --w3
+#
+# The `multi` replicas get the same values (they share the queues, so a job may run on either);
+# harness/tests/w3/overlays.test.ts keeps them identical. N3-import fills in anything else the
+# mock needs.
+
+x-n3-env: &n3-env
+  OAUTH_TWITCH_CLIENT_ID: harness-twitch-client-id
+  OAUTH_TWITCH_CLIENT_SECRET: harness-twitch-client-secret
+  TWITCH_IMPORT_ENABLED: "true"
+  TWITCH_API_BASE_URL: http://host.containers.internal:4791/helix
+  TWITCH_AUTH_BASE_URL: http://host.containers.internal:4791/oauth2
+  TWITCH_IMAGE_HOSTS: host.containers.internal
+  OUTBOUND_ALLOW_PRIVATE_NETWORKS: "true"
+
+services:
+  api:
+    environment: *n3-env
+  worker:
+    environment: *n3-env
+  api-2:
+    environment: *n3-env
+  worker-2:
+    environment: *n3-env

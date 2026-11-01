@@ -11,6 +11,7 @@ import {
   podmanDesktopRunning,
   CAPTIONS_OVERRIDE,
   HARNESS_OVERRIDES,
+  W3_OVERRIDES,
   stackFiles,
   stackProfiles,
   staleImageContainers,
@@ -311,6 +312,29 @@ describe("stackFiles", () => {
     expect(files.at(-1)?.endsWith(CAPTIONS_OVERRIDE)).toBe(true);
     expect(stackFiles(["--harness"]).some((f) => f.endsWith(CAPTIONS_OVERRIDE))).toBe(false);
     expect(HARNESS_OVERRIDES).toContain("harness/compose.multi-instance.yaml");
+  });
+
+  // Batch 7 decision (d): giveaways, the Twitch mock and federation only on the w3 and interact shards.
+  test("--w3 layers the batch 7 overrides after the harness ones (and captions), with --harness only", () => {
+    const tail = (args: string[]) => args.filter((a) => a !== "-f").map((f) => f.slice(f.indexOf("/harness/") + 1));
+    const files = tail(stackFiles(["--harness", "--w3"]));
+    expect(files).toHaveLength(1 + HARNESS_OVERRIDES.length + W3_OVERRIDES.length);
+    expect(files.slice(1)).toEqual([...HARNESS_OVERRIDES, ...W3_OVERRIDES]);
+    expect(tail(stackFiles(["--harness", "--multi", "--captions", "--w3"])).slice(1)).toEqual([
+      ...HARNESS_OVERRIDES,
+      CAPTIONS_OVERRIDE,
+      ...W3_OVERRIDES,
+    ]);
+    // The overrides also set the multi replicas' environment: the multi override comes first.
+    expect(files.indexOf("harness/compose.multi-instance.yaml")).toBeLessThan(files.indexOf(W3_OVERRIDES[0]));
+    expect(stackProfiles(["--harness", "--multi", "--w3"])).toEqual(["harness", "multi"]);
+    for (const f of W3_OVERRIDES) {
+      expect(HARNESS_OVERRIDES as readonly string[]).not.toContain(f);
+      expect(stackFiles(["--harness"]).some((a) => a.endsWith(f))).toBe(false);
+    }
+    expect(() => stackFiles(["--w3"])).toThrow(/--w3 needs --harness/);
+    expect(() => stackFiles(["harness/compose.n4.yaml"])).toThrow(/--harness --w3/);
+    expect(() => stackFiles(["--harness", "harness/compose.w3.yaml"])).toThrow(/--harness --w3/);
   });
 
   test("refuses a missing file or an option instead of starting the wrong stack", () => {

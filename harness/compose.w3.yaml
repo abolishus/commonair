@@ -1,0 +1,34 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# Compose override for the batch 7 W3 harness steps (docs/testing/b7-selectors.md): turns
+# giveaways on instance-wide (GIVEAWAYS_ENABLED, ADR 0039; batch 7 decision (a) ships it off
+# everywhere else). A channel still has no giveaway until its streamer opens one.
+#
+# Layered only for the `w3` and `interact` shards and their scenarios, with
+# harness/compose.n3.yaml and harness/compose.n4.yaml (scripts/infra.ts `W3_OVERRIDES`):
+#
+#   bun scripts/infra.ts stack --harness --w3
+#
+# The `multi` replicas get the same values (they share the queues, so a job may run on either);
+# harness/tests/w3/overlays.test.ts keeps them identical.
+
+services:
+  api:
+    environment:
+      GIVEAWAYS_ENABLED: "true"
+  chat:
+    environment:
+      GIVEAWAYS_ENABLED: "true"
+  worker:
+    environment:
+      GIVEAWAYS_ENABLED: "true"
+  api-2:
+    environment:
+      GIVEAWAYS_ENABLED: "true"
+  chat-2:
+    environment:
+      GIVEAWAYS_ENABLED: "true"
+  worker-2:
+    environment:
+      GIVEAWAYS_ENABLED: "true"

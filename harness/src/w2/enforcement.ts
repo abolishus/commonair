@@ -362,3 +362,17 @@ export const enforcementExtension: SafetyW2Extension<EnforcementBefore> = {
     }
   },
 };
+
+/**
+ * `trust-safety` W3 extension `sor-resolve` (batch 7; `src/w3/steps.ts`): a report resolved with a
+ * suspension has a statement of reasons. Runs around the scenario's steps, as `enforcement`. Stub
+ * entry point from the batch 7 contract step: B7-followups fills it.
+ */
+export const sorResolveExtension: SafetyW2Extension = {
+  async before(_run: Run): Promise<unknown> {
+    return undefined;
+  },
+  async after(_run: Run, _before: unknown): Promise<void> {
+    throw new Error("B7-followups not merged");
+  },
+};
