@@ -154,11 +154,12 @@ export function createHandler(deps: HandlerDeps): OriginFetch {
       const dataMode = dm !== undefined && isMultivariantText(text);
       if (variants.length > 0 || dataMode) text = synthesizeMultivariant([{ rendition: "source", text }, ...variants]);
       if (dataMode) text = filterForDataMode(text, dm);
-      // SUBTITLES only where the `.vtt` route serves them: a viewer's own origin token, never a
-      // rehearsal (`rb`), never a CDN pull. Relay pulls join once the relay neither counts nor
-      // pins `.vtt` (follow-up: relay `serveMedia`).
+      // SUBTITLES only where the `.vtt` route serves them: a viewer's own origin token (never a
+      // rehearsal `rb`, never a CDN pull) and member relays, which neither count nor pin `.vtt`
+      // (decision (y), W3-dvr-relay).
       const captionsReachable =
-        p.route === "hls" && p.claims.rb === undefined && !(p.claims.src === "cdn" && deps.cdn.baseUrl);
+        p.route === "relayPull" ||
+        (p.route === "hls" && p.claims.rb === undefined && !(p.claims.src === "cdn" && deps.cdn.baseUrl));
       if (deps.subtitles && captionsReachable && isMultivariantText(text))
         text = withSubtitles(
           text,
