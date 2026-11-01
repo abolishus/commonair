@@ -3,7 +3,17 @@
 
 /** The `jury` extension's own checks (src/w3/jury.ts): the seed check, the k rule per row, grouping. */
 import { describe, expect, test } from "vite-plus/test";
-import { clauseIdOf, rowProblem, seedMatches, sharedCase, stepJury, tallies } from "../../src/w3/jury.ts";
+import { UsernameFactory } from "../../src/users.ts";
+import {
+  clauseIdOf,
+  JURY_PREFIX,
+  JURY_USERNAME_LIKE,
+  rowProblem,
+  seedMatches,
+  sharedCase,
+  stepJury,
+  tallies,
+} from "../../src/w3/jury.ts";
 
 const S = { suppressed: true as const };
 const n = (value: number) => ({ suppressed: false as const, value });
@@ -72,5 +82,28 @@ describe("grouping and the shared case", () => {
   test("the step is implemented", () => {
     expect(stepJury).toBeTypeOf("function");
     expect(stepJury.toString()).not.toContain("not merged");
+  });
+});
+
+describe("the rerun cleanup only matches the step's own members", () => {
+  // Postgres LIKE with the default backslash escape, as a regex (usernames are [a-z0-9_]).
+  const like = (pattern: string): RegExp => {
+    let out = "^";
+    for (let i = 0; i < pattern.length; i++) {
+      const ch = pattern[i] as string;
+      if (ch === "\\") out += pattern[++i] ?? "";
+      else if (ch === "%") out += ".*";
+      else if (ch === "_") out += ".";
+      else out += ch;
+    }
+    return new RegExp(out + "$");
+  };
+  test("harness usernames match, look-alikes do not", () => {
+    const re = like(JURY_USERNAME_LIKE);
+    const names = new UsernameFactory("abc12");
+    expect(re.test(names.next(JURY_PREFIX))).toBe(true);
+    expect(re.test("e5xjury_abc")).toBe(false);
+    expect(re.test("e5_juryx_abc")).toBe(false);
+    expect(re.test("alice")).toBe(false);
   });
 });

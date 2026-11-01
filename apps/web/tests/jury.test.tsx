@@ -145,6 +145,33 @@ describe("opt-in states", () => {
     expect(byId("jury-ineligible")?.textContent).toContain(t("jury.ineligible.staff"));
   });
 
+  it("ineligible but still opted in: the reason and a switch to leave the draw", async () => {
+    const props = page({
+      status: status({ eligible: false, optedIn: true, optedInAt: "2026-11-01T00:00:00.000Z" }),
+      ineligible: "not_member",
+    });
+    expect(byId("jury-ineligible")?.dataset.reason).toBe("not_member");
+    expect(byId("jury-optin")?.dataset.state).toBe("on");
+    await act(async () => {
+      fireEvent.click(byId("jury-optin")!);
+    });
+    expect(props.onOptInChange).toHaveBeenCalledWith(false);
+  });
+
+  it("off but still opted in: the disabled state and a switch to leave the draw", async () => {
+    const props = page({
+      status: status({ enabled: false, optedIn: true, optedInAt: "2026-11-01T00:00:00.000Z" }),
+    });
+    expect(byId("jury-disabled")).not.toBeNull();
+    expect(byId("jury-page")?.textContent).toContain(t("jury.disabled.stillIn"));
+    expect(byId("jury-optin")?.dataset.state).toBe("on");
+    expect(byId("jury-optin-explainer")).toBeNull();
+    await act(async () => {
+      fireEvent.click(byId("jury-optin")!);
+    });
+    expect(props.onOptInChange).toHaveBeenCalledWith(false);
+  });
+
   it("seated: the panel with its close date and cases", () => {
     page({
       status: status({ optedIn: true, seat: { panelId: PANEL_ID, period: "2026-11" } }),

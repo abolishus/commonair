@@ -8,9 +8,10 @@
  */
 import { JURY_RULES } from "@commonair/contracts/enums";
 import { commit, newSalt, newSeed, verifyReveal } from "@commonair/draw";
+import type { Executor } from "@commonair/db";
 import { describe, expect, test } from "vite-plus/test";
 import { poolEntries, reportRuleRef } from "../src/jury/candidates.ts";
-import { selectPanel } from "../src/jury/draw.ts";
+import { selectPanel, tryInsert } from "../src/jury/draw.ts";
 import { caseMap, panelPseudonyms, SUBJECT_KEY } from "../src/jury/pseudonyms.ts";
 import {
   candidateEntries,
@@ -178,12 +179,11 @@ describe("pseudonyms", () => {
     expect(other.get("u1")).not.toBe(a.get("u1"));
   });
 
-  test("a case map names the subject and the shown parties, never anyone else", async () => {
+  test("a case map holds the subject's pseudonym only, keyed by `subject`, never a user id", async () => {
     const names = await panelPseudonyms(newSalt(), ["subj", "owner", "reporter"]);
-    const map = caseMap(names, "subj", ["subj", "owner"]);
-    expect(map[SUBJECT_KEY]).toBe(names.get("subj"));
-    expect(Object.keys(map).sort()).toEqual(["owner", "subj", SUBJECT_KEY].sort());
-    expect(Object.values(map)).not.toContain(names.get("reporter"));
+    const map = caseMap(names, "subj");
+    expect(map).toEqual({ [SUBJECT_KEY]: names.get("subj") });
+    expect(caseMap(names, "nobody")).toEqual({});
   });
 });
 
@@ -244,5 +244,32 @@ describe("settings and the draw", () => {
   test("the panel period is the UTC month", () => {
     expect(panelPeriod(new Date("2026-12-31T23:59:59Z"))).toBe("2026-12");
     expect(panelPeriod(new Date("2027-01-01T00:00:00Z"))).toBe("2027-01");
+  });
+});
+
+describe("tryInsert", () => {
+  const failing = (err: unknown) =>
+    ({
+      transaction: async () => {
+        throw err;
+      },
+    }) as unknown as Executor;
+  const pgError = (code: string) => Object.assign(new Error("db"), { code });
+  test("a trigger refusal (check or foreign key violation) skips the row", async () => {
+    expect(await tryInsert(failing(pgError("23514")), async () => undefined)).toBe(false);
+    // Drizzle wraps the driver's error: the code is found on the cause.
+    expect(await tryInsert(failing(new Error("wrapped", { cause: pgError("23503") })), async () => undefined)).toBe(
+      false,
+    );
+  });
+  test("anything else aborts the draw", async () => {
+    await expect(tryInsert(failing(pgError("40001")), async () => undefined)).rejects.toThrow("db");
+    await expect(tryInsert(failing(new Error("connection reset")), async () => undefined)).rejects.toThrow(
+      "connection reset",
+    );
+  });
+  test("a clean insert counts", async () => {
+    const ok = { transaction: async (fn: (sp: unknown) => Promise<void>) => fn({}) } as unknown as Executor;
+    expect(await tryInsert(ok, async () => undefined)).toBe(true);
   });
 });

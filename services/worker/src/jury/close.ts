@@ -20,11 +20,23 @@ import { systemAudit } from "@commonair/governance";
 import { decryptSecret } from "@commonair/tokens";
 import { and, eq, inArray, isNull, lte } from "drizzle-orm";
 import type { WorkerContext } from "../context.ts";
+import { messageSenders } from "./candidates.ts";
 import { PANEL_MS } from "./sample.ts";
 import { JURY_SEED_PURPOSE } from "./seed.ts";
 import { countVotes, majorityDisagrees, totalVotes } from "./votes.ts";
 
-const { juryPanels, juryCases, juryVotes, juryFlags, moderationCases, reports, channels, legalHolds, appeals } = schema;
+const {
+  juryPanels,
+  juryCases,
+  juryVotes,
+  juryFlags,
+  moderationCases,
+  reports,
+  channels,
+  chatMessages,
+  legalHolds,
+  appeals,
+} = schema;
 
 type Withdrawal = "legal_hold" | "appeal";
 
@@ -48,22 +60,42 @@ export async function ineligibleCases(tx: Executor, panelId: string): Promise<Ma
         r.id,
         [r.userId, r.ownerId].filter((x): x is string => x !== null),
       );
-  if (reportIds.length)
-    for (const r of await tx
+  if (reportIds.length) {
+    const rows = await tx
       .select({
         id: reports.id,
         reporterId: reports.reporterId,
         subjectType: reports.subjectType,
         subjectId: reports.subjectId,
+        evidence: reports.evidence,
         ownerId: channels.ownerId,
       })
       .from(reports)
       .leftJoin(channels, eq(channels.id, reports.channelId))
-      .where(inArray(reports.id, reportIds)))
+      .where(inArray(reports.id, reportIds));
+    // Every party the sampler weighed (loadCandidates): message authors and senders included.
+    const messageIds = rows.filter((r) => r.subjectType === "chat_message").map((r) => r.subjectId);
+    const authors = new Map(
+      (messageIds.length
+        ? await tx
+            .select({ id: chatMessages.id, userId: chatMessages.userId })
+            .from(chatMessages)
+            .where(inArray(chatMessages.id, messageIds))
+        : []
+      ).map((m) => [m.id, m.userId]),
+    );
+    for (const r of rows)
       parties.set(
         r.id,
-        [r.reporterId, r.ownerId, r.subjectType === "user" ? r.subjectId : null].filter((x): x is string => x !== null),
+        [
+          r.reporterId,
+          r.ownerId,
+          r.subjectType === "user" ? r.subjectId : null,
+          r.subjectType === "chat_message" ? authors.get(r.subjectId) : null,
+          ...(r.subjectType === "message_set" ? messageSenders(r.evidence) : []),
+        ].filter((x): x is string => typeof x === "string"),
       );
+  }
   const holds = await tx
     .select({ userId: legalHolds.userId, caseId: legalHolds.caseId })
     .from(legalHolds)

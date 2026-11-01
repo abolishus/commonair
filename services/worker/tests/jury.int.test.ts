@@ -399,4 +399,44 @@ describe("draw and close", () => {
     const [after] = await app.select().from(s.juryPanels).where(eq(s.juryPanels.id, p!.id));
     expect(after!.seed).toBe("ef".repeat(32));
   });
+
+  test("close withdraws a report whose message author or set sender came under a hold during the panel", async () => {
+    const { encryptSecret } = await import("@commonair/tokens");
+    const [p] = await owner
+      .insert(s.juryPanels)
+      .values({
+        period: "2003-03",
+        seedCommitment: await commit("12".repeat(32)),
+        sealedSeed: await encryptSecret(AUTH_SECRET, JURY_SEED_PURPOSE, "12".repeat(32)),
+      })
+      .returning({ id: s.juryPanels.id });
+    const ch = await channel();
+    const author = await newUser();
+    const [msg] = await owner
+      .insert(s.chatMessages)
+      .values({ channelId: ch.channelId, userId: author, body: "hi" })
+      .returning({ id: s.chatMessages.id });
+    const sender = await newUser();
+    const byMessage = await resolvedReport({
+      subjectType: "chat_message",
+      subjectId: msg!.id,
+      channelId: ch.channelId,
+    });
+    const bySet = await resolvedReport({
+      subjectType: "message_set",
+      subjectId: uuidv7(),
+      channelId: ch.channelId,
+      evidence: { messages: [{ id: uuidv7(), userId: sender, body: "x" }] },
+    });
+    const kept = await resolvedReport();
+    for (const id of [byMessage, bySet, kept])
+      await app.insert(s.juryCases).values({ panelId: p!.id, subjectKind: "report", subjectId: id });
+    for (const userId of [author, sender])
+      await owner.insert(s.legalHolds).values({ userId, reason: "litigation", reasonCode: "litigation" });
+
+    expect(await runClose(makeCtx(app), { panelId: p!.id }, NOW)).toEqual({ closed: 1, withdrawn: 2, flagged: 0 });
+    const cases = await app.select().from(s.juryCases).where(eq(s.juryCases.panelId, p!.id));
+    const reason = (id: string) => cases.find((c) => c.subjectId === id)!.withdrawnReason;
+    expect([reason(byMessage), reason(bySet), reason(kept)]).toEqual(["legal_hold", "legal_hold", null]);
+  });
 });

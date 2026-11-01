@@ -9,6 +9,7 @@ export type Key =
   | "jury.loading"
   | "jury.disabled.title"
   | "jury.disabled.description"
+  | "jury.disabled.stillIn"
   | "jury.optin.title"
   | "jury.optin.label"
   | "jury.optin.on"

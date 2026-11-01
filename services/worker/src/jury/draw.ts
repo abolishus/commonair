@@ -22,7 +22,7 @@
 import { JURY_JOBS, QUEUES } from "@commonair/contracts/internal";
 import { schema, type Executor } from "@commonair/db";
 import { commit, drawEntries, newSalt, newSeed } from "@commonair/draw";
-import { emitEvent, systemAudit } from "@commonair/governance";
+import { emitEvent, pgCode, systemAudit } from "@commonair/governance";
 import { decryptSecret, encryptSecret } from "@commonair/tokens";
 import { and, eq } from "drizzle-orm";
 import type { WorkerContext } from "../context.ts";
@@ -117,15 +117,24 @@ async function committedPanel(ctx: WorkerContext, period: string, now: Date): Pr
   return after;
 }
 
-/** Insert in a savepoint: a row the 0046 triggers refuse is skipped, not fatal. */
-async function tryInsert(tx: Executor, insert: (sp: Executor) => Promise<unknown>): Promise<boolean> {
+/** SQLSTATEs the 0046 jury triggers refuse a row with: check_violation, foreign_key_violation. */
+const TRIGGER_REFUSALS: ReadonlySet<string> = new Set(["23514", "23503"]);
+
+/**
+ * Insert in a savepoint: a row the 0046 triggers refuse is skipped, not fatal. Anything else (a
+ * dropped connection, a serialization failure) aborts the draw, so the panel is not committed
+ * short and a rerun can still draw it.
+ */
+export async function tryInsert(tx: Executor, insert: (sp: Executor) => Promise<unknown>): Promise<boolean> {
   try {
     await tx.transaction(async (sp) => {
       await insert(sp);
     });
     return true;
-  } catch {
-    return false;
+  } catch (err) {
+    const code = pgCode(err);
+    if (code !== undefined && TRIGGER_REFUSALS.has(code)) return false;
+    throw err;
   }
 }
 
@@ -155,7 +164,7 @@ export async function runDraw(ctx: WorkerContext, now: Date = ctx.now()): Promis
     // A fresh salt per panel, used here once and never stored.
     const names = await panelPseudonyms(
       newSalt(),
-      rows.flatMap((c) => [c.subjectPartyId, ...c.shownPartyIds]),
+      rows.map((c) => c.subjectPartyId),
     );
 
     let seats = 0;
@@ -170,7 +179,7 @@ export async function runDraw(ctx: WorkerContext, now: Date = ctx.now()): Promis
           subjectKind: kind,
           subjectId: id,
           ruleRef: c.ruleRef,
-          pseudonymMap: caseMap(names, c.subjectPartyId, c.shownPartyIds),
+          pseudonymMap: caseMap(names, c.subjectPartyId),
         }),
       );
       if (ok) cases++;

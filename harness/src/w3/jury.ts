@@ -28,6 +28,9 @@ import type { CoopW3Extension } from "./kit.ts";
 
 /** Members the step enrols (the brief's 12), against the default panel size of 7. */
 export const JURY_MEMBERS = 12;
+/** Username prefix of the step's own members, and the LIKE pattern that matches only them. */
+export const JURY_PREFIX = "e5_jury";
+export const JURY_USERNAME_LIKE = "e5\\_jury\\_%";
 const K = 10;
 const HOOK_TIMEOUT_MS = 75_000;
 const WINDOW_SLACK_MS = 90_000;
@@ -298,7 +301,7 @@ export async function stepJury(ext: CoopW3Extension): Promise<void> {
 
   // ------------------------------------------------------------ members
   const members = await ctx.step(`jury: sign up ${String(JURY_MEMBERS)} members and a legal reviewer`, () =>
-    Promise.all(Array.from({ length: JURY_MEMBERS + 1 }, () => p.signUp({ prefix: "e5_jury" }))),
+    Promise.all(Array.from({ length: JURY_MEMBERS + 1 }, () => p.signUp({ prefix: JURY_PREFIX }))),
   );
   const legal = members.pop() as SignedInUser;
   await ctx.step("jury: grant the legal reviewer (operator CLI)", () =>
@@ -332,8 +335,18 @@ export async function stepJury(ext: CoopW3Extension): Promise<void> {
 
   // ------------------------------------------------------------ 3. cases
   await withSql(ext.databaseUrl, async (sql) => {
-    // A rerun in the same month: this month's panel is the harness's own; drop it so the draw runs.
-    const gone = await sql`delete from jury_panels where period = ${period} returning id`;
+    // A rerun in the same month: drop this month's panel so the draw runs, but only when every
+    // seat on it is a harness jury member (`e5_jury_…`). Anyone else's panel stays, and the draw
+    // assertion below then reports it.
+    const gone = await sql`
+      delete from jury_panels p
+      where p.period = ${period}
+        and exists (select 1 from jury_seats s where s.panel_id = p.id)
+        and not exists (
+          select 1 from jury_seats s join users u on u.id = s.user_id
+          where s.panel_id = p.id and u.username not like ${JURY_USERNAME_LIKE}
+        )
+      returning p.id`;
     if (gone.length) ctx.log.info("jury: dropped this month's earlier harness panel", { panels: gone.length });
   });
   const seeded = await ctx.step("jury: 3. seed closed T1/T2 cases and reports, one T0 and one NCII case", () =>

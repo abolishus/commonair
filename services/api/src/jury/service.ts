@@ -180,7 +180,7 @@ async function caseFacts(db: Executor, cases: readonly CaseRow[]): Promise<Map<s
         tier: null,
         outcome: r.status,
         automated: false,
-        holdIds: [subjectUser, r.ownerId, r.reporterId].filter((x): x is string => typeof x === "string"),
+        holdIds: [subjectUser, r.ownerId, r.reporterId, ...senders].filter((x): x is string => typeof x === "string"),
         evidence: textItems(r.evidence),
         frameKeys: [],
       });

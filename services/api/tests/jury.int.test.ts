@@ -292,6 +292,36 @@ describe("a seated juror", () => {
     expect(audit).toMatchObject({ actorId: alice.userId, details: { panelId } });
   });
 
+  test("a report whose set sender is under a legal hold is hidden until the close withdraws it", async () => {
+    const sender = await rowUser();
+    const [rp] = await owner()
+      .insert(schema.reports)
+      .values({
+        subjectType: "message_set",
+        subjectId: uuidv7(),
+        reporterId: await rowUser(),
+        reason: "spam",
+        status: "actioned",
+        evidence: { messages: [{ id: uuidv7(), userId: sender, body: "spam spam" }] },
+        resolvedAt: new Date(Date.now() - DAY),
+      })
+      .returning({ id: schema.reports.id });
+    const [jc] = await app()
+      .insert(schema.juryCases)
+      .values({ panelId, subjectKind: "report", subjectId: rp!.id, ruleRef: "honesty.spam@1" })
+      .returning({ id: schema.juryCases.id });
+    const visible = async () =>
+      (await alice.client.call<Case[]>("GET", "/api/jury/cases")).body.some((c) => c.id === jc!.id);
+    expect(await visible()).toBe(true);
+    await owner().insert(schema.legalHolds).values({ userId: sender, reason: "litigation", reasonCode: "litigation" });
+    expect(await visible()).toBe(false);
+    const vote = await alice.client.call("POST", `/api/jury/cases/${jc!.id}/vote`, {
+      vote: "agree",
+      reasonCode: "clause_fits",
+    });
+    expect(vote.status).toBe(404);
+  });
+
   test("results: only the commitment while open; at close, per clause with cells under k suppressed", async () => {
     const anon = client(api);
     const open = await anon.call<Results>("GET", `/api/transparency/jury?period=${PERIOD}`);

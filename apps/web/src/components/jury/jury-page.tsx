@@ -34,13 +34,12 @@ const EXPLAINER: readonly MessageKey[] = [
   "jury.explainer.optout",
 ];
 
-function OptIn({
-  status,
-  ineligible,
+/** The draw switch, with its saving state. */
+function DrawSwitch({
+  optedIn,
   onOptInChange,
 }: {
-  status: JuryStatusDto;
-  ineligible: IneligibleReason;
+  optedIn: boolean;
   onOptInChange: (on: boolean) => Promise<void>;
 }): React.JSX.Element {
   const [busy, setBusy] = React.useState(false);
@@ -55,24 +54,36 @@ function OptIn({
     }
   };
   return (
+    <Field orientation="horizontal">
+      <Switch
+        id={switchId}
+        data-testid="jury-optin"
+        data-state={optedIn ? "on" : "off"}
+        checked={optedIn}
+        disabled={busy}
+        onCheckedChange={(on: boolean) => void change(on)}
+      />
+      <div className="flex flex-col gap-1">
+        <FieldLabel htmlFor={switchId}>{t("jury.optin.label")}</FieldLabel>
+        <FieldDescription>{optedIn ? t("jury.optin.on") : t("jury.optin.off")}</FieldDescription>
+      </div>
+    </Field>
+  );
+}
+
+function OptIn({
+  status,
+  ineligible,
+  onOptInChange,
+}: {
+  status: JuryStatusDto;
+  ineligible: IneligibleReason;
+  onOptInChange: (on: boolean) => Promise<void>;
+}): React.JSX.Element {
+  return (
     <Section heading={t("jury.optin.title")}>
       <div className="flex flex-col gap-4">
-        {status.eligible ? (
-          <Field orientation="horizontal">
-            <Switch
-              id={switchId}
-              data-testid="jury-optin"
-              data-state={status.optedIn ? "on" : "off"}
-              checked={status.optedIn}
-              disabled={busy}
-              onCheckedChange={(on: boolean) => void change(on)}
-            />
-            <div className="flex flex-col gap-1">
-              <FieldLabel htmlFor={switchId}>{t("jury.optin.label")}</FieldLabel>
-              <FieldDescription>{status.optedIn ? t("jury.optin.on") : t("jury.optin.off")}</FieldDescription>
-            </div>
-          </Field>
-        ) : (
+        {!status.eligible && (
           <AlertCallout
             data-testid="jury-ineligible"
             data-reason={ineligible}
@@ -88,6 +99,8 @@ function OptIn({
             }
           />
         )}
+        {/* Someone who opted in and has since lost eligibility can still leave the draw. */}
+        {(status.eligible || status.optedIn) && <DrawSwitch optedIn={status.optedIn} onOptInChange={onOptInChange} />}
         <div data-testid="jury-optin-explainer" className="flex flex-col gap-2">
           <h3 className="text-sm font-medium">{t("jury.explainer.title")}</h3>
           <ul className="flex max-w-prose list-disc flex-col gap-1 ps-5 text-sm text-muted-foreground">
@@ -97,6 +110,15 @@ function OptIn({
           </ul>
         </div>
       </div>
+    </Section>
+  );
+}
+
+/** While the jury is off, someone still in its draw can leave it (opting out is always open). */
+function DisabledOptOut({ onOptInChange }: { onOptInChange: (on: boolean) => Promise<void> }): React.JSX.Element {
+  return (
+    <Section heading={t("jury.optin.title")} description={t("jury.disabled.stillIn")}>
+      <DrawSwitch optedIn onOptInChange={onOptInChange} />
     </Section>
   );
 }
@@ -226,12 +248,15 @@ export function JuryPage({
           <Skeleton className="h-32 w-full" />
         </SkeletonGroup>
       ) : !status.enabled ? (
-        <EmptyState
-          data-testid="jury-disabled"
-          icon={JusticeScale01Icon}
-          title={t("jury.disabled.title")}
-          description={t("jury.disabled.description")}
-        />
+        <>
+          <EmptyState
+            data-testid="jury-disabled"
+            icon={JusticeScale01Icon}
+            title={t("jury.disabled.title")}
+            description={t("jury.disabled.description")}
+          />
+          {status.optedIn && <DisabledOptOut onOptInChange={onOptInChange} />}
+        </>
       ) : (
         <>
           <OptIn status={status} ineligible={ineligible} onOptInChange={onOptInChange} />

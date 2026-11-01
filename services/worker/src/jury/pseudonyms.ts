@@ -5,7 +5,8 @@
  * Per-panel pseudonyms (ADR 0038 §5): a juror sees the same name for the same person across the
  * panel's cases, and different names on another panel. Each panel gets a fresh random salt that
  * is used once and never stored (only the resulting `pseudonym_map` is), so neither the revealed
- * draw seed nor public user ids can unmask a pseudonym later.
+ * draw seed nor public user ids can unmask a pseudonym later. The map holds the pseudonym alone,
+ * under `subject`, never a user id: it is not a re-identification table.
  */
 import { pseudonym } from "@commonair/draw";
 
@@ -24,20 +25,10 @@ export async function panelPseudonyms(salt: string, ids: Iterable<string>): Prom
 }
 
 /**
- * One case's `pseudonym_map`: `subject` → the primary subject's pseudonym, plus each named
- * party's. Reporters are never in it (they are never shown).
+ * One case's `pseudonym_map`: `subject` → the primary subject's pseudonym, the only name a juror is
+ * shown. No user id is stored; reporters and other parties are never in it.
  */
-export function caseMap(
-  names: ReadonlyMap<string, string>,
-  subjectId: string,
-  partyIds: readonly string[],
-): Record<string, string> {
-  const map: Record<string, string> = {};
+export function caseMap(names: ReadonlyMap<string, string>, subjectId: string): Record<string, string> {
   const subject = names.get(subjectId);
-  if (subject !== undefined) map[SUBJECT_KEY] = subject;
-  for (const id of partyIds) {
-    const n = names.get(id);
-    if (n !== undefined) map[id] = n;
-  }
-  return map;
+  return subject === undefined ? {} : { [SUBJECT_KEY]: subject };
 }

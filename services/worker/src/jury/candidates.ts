@@ -27,15 +27,14 @@ type ReportReason = (typeof REPORT_REASONS)[number];
 export interface CandidateRow extends CandidateFacts {
   /** Whom the case is about, for the `subject` pseudonym (a user, else the subject itself). */
   subjectPartyId: string;
-  /** Named parties other than the reporter (they get pseudonyms; reporters never do). */
-  shownPartyIds: string[];
 }
 
 /** The clause a report cites: its reason's (`REPORT_REASON_CLAUSES`), as its case would. */
 export const reportRuleRef = (reason: ReportReason): string =>
   clauseRef(clauseFor({ action: "moderation.case.warn", category: null, reportReason: reason }));
 
-function messageSenders(evidence: Record<string, unknown>): string[] {
+/** The senders a `message_set` report's evidence names. */
+export function messageSenders(evidence: Record<string, unknown>): string[] {
   const list = (evidence as { messages?: unknown }).messages;
   if (!Array.isArray(list)) return [];
   return list.flatMap((m) =>
@@ -167,7 +166,6 @@ export async function loadCandidates(tx: Executor, now: Date, days?: number): Pr
       partiesUnknown: false,
       legalHold: heldCases.has(c.id) || p.shown.some((u) => heldUsers.has(u)),
       subjectPartyId: c.userId ?? c.ownerId ?? c.subjectId,
-      shownPartyIds: p.shown,
     });
   });
   reports.forEach((r, i) => {
@@ -179,7 +177,8 @@ export async function loadCandidates(tx: Executor, now: Date, days?: number): Pr
         : r.subjectType === "chat_message"
           ? (authors.get(r.subjectId) ?? r.subjectId)
           : r.subjectType === "message_set"
-            ? r.subjectId
+            ? // A set is not a person: name its first sender (a set with none is never sampled).
+              (messageSenders(r.evidence)[0] ?? r.ownerId ?? r.subjectId)
             : (r.ownerId ?? r.subjectId);
     out.push({
       kind: "report",
@@ -195,7 +194,6 @@ export async function loadCandidates(tx: Executor, now: Date, days?: number): Pr
       partiesUnknown: p.unknown,
       legalHold: all.some((u) => heldUsers.has(u)),
       subjectPartyId: subjectParty,
-      shownPartyIds: p.shown,
     });
   });
   return out;
