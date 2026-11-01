@@ -120,6 +120,19 @@ kills it; set `TimeoutStopSec=50` likewise under systemd.
   identical in-flight requests coalesced. Every URI in a playlist is rewritten to stay on this
   relay and carry the viewer's token. Segments go through a size-bounded LRU cache with
   coalesced misses, so each segment is fetched from the origin once.
+- **DVR** (ADR 0016 Amendment 1). `GET /dvr/<vodId>/<file>?t=<token>` takes a relay token for
+  `dvr/<vodId>` with this relay's id; `/hls/` serves `live/` paths only. Playlists and segments
+  are pulled from `<origin>/relay-pull/dvr/`. A segment is served only while the relay's own copy
+  of the DVR playlist, refreshed at most 1 s ago, lists it, and only if the last good playlist
+  fetch is under 5 s old; an origin 404 or 403 evicts the VOD. Answers are `private, no-store`,
+  and DVR bytes and segments are counted in receipts like live ones.
+- **Purges.** The relay long-polls `GET <api>/api/relay/purges?after=<seq>` and verifies each
+  batch with the origin public key. A forged or malformed batch, a non-reset batch behind the
+  cursor, or one with items outside `(after, seq]` is refused whole. Each item evicts its path
+  prefix and leaves a 60 s tombstone, so a fill already in flight is not cached; a reset evicts
+  every `live/` and `dvr/` object. The cursor is kept in `data-dir/purge-seq`.
+- **Captions.** Live `.vtt` segments are cached 30 s and served with
+  `max-age=30`; they are neither counted nor pinned.
 - **Limits.** New viewers beyond capacity get `503` (the platform's assignment should prevent
   this). At most 256 distinct origin fetches run at once (more get `503`), over at most 128
   connections to the origin; one viewer session may have at most 8 requests in flight (more
@@ -128,7 +141,8 @@ kills it; set `TimeoutStopSec=50` likewise under systemd.
   beyond what a segment can hold, get `400` without reaching the origin. When the API marks
   the relay `suspended`, viewer requests get `410` and heartbeats continue so a reinstatement
   takes effect immediately.
-- **Health.** `GET /healthz` returns `{"status","version","viewers"}`; the origin health-checks it.
+- **Health.** `GET /healthz` returns `{"status","version","viewers","purgeSeq"}`; the origin
+  health-checks it.
   It reports `starting` until registration succeeds and `draining` (503) during shutdown.
 - **Heartbeats** report active viewers, egress (an exponentially weighted moving average, in
   Mbps) and cache size at the interval the API sets. What the relay does with the answer:
@@ -212,7 +226,8 @@ Each line of `bin/SHA256SUMS` then matches the line for the same file in the rel
 | `internal/tokens`       | Strict base64url, playback token verification, receipt signing |
 | `internal/identity`     | Relay key generation and loading                              |
 | `internal/apiclient`    | Relay protocol client (register, heartbeat, receipts)         |
-| `internal/server`       | `/hls/` and `/healthz` handlers, origin pull                   |
+| `internal/server`       | `/hls/`, `/dvr/` and `/healthz` handlers, origin pull          |
+| `internal/purge`        | Signed purge feed: long poll, verification, cursor             |
 | `internal/hls`          | Path validation, playlist rewriting, LL-HLS directives        |
 | `internal/cache`        | Size-bounded LRU and request coalescing                       |
 | `internal/accounting`   | Per-session byte/segment ledger, viewer limit, egress EWMA    |

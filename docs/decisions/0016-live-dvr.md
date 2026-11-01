@@ -269,7 +269,10 @@ has no purge. Relays count every fetched file toward receipts (`Ledger.AddSegmen
   (the key is present only when true; a batch carrying both is malformed). "Older than the retained rows" is
   not read from the rows themselves: `bigserial` leaves gaps (rolled-back inserts), so
   `min(seq) > after + 1` would reset relays for nothing. The cleanup job records the highest `seq`
-  it deleted as a watermark, and a request whose `after` is below that watermark gets the reset. The relay evicts every
+  it deleted as a watermark, and a request whose `after` is below that watermark gets the reset.
+  The watermark is kept in Valkey (`KEYS.relayPurgeWatermark`), only ever raised, and written
+  before the delete; a cursor above every issued `seq` (a database reset) is also answered with a
+  reset. The relay evicts every
   cached `live/` and `dvr/` object and continues from the answer's `seq`. Replaying a reset only
   empties the cache again, which is safe. A relay that restarts has an empty cache and starts from
   0, receiving the retained rows.
@@ -283,10 +286,12 @@ has no purge. Relays count every fetched file toward receipts (`Ledger.AddSegmen
   to (`non_canonical`) and any schema violation (`malformed`). The contracts mirror
   (`RelayPurgeBatch`) is kept equal to `PurgeBatch` by a test in `packages/tokens`.
 - **A bad signature** refuses the whole batch (logged and counted); the relay keeps its `after`
-  and polls again with backoff.
+  and polls again with backoff. So does a non-reset batch whose `seq` is below the relay's cursor,
+  or with an item outside `(after, seq]` (a replayed old batch never moves the cursor back).
 - **Why signed, if the channel is authenticated.** The purge is an instruction to the relay's cache
   from the origin, and the relay already holds the origin's key: a signature makes it the origin's
-  instruction whatever path carried it. A replayed old batch can only purge again, which is safe;
+  instruction whatever path carried it. A replayed old batch is refused (above), and could only
+  purge again anyway, which is safe;
   a withheld batch is covered by A1.3.
 
 ### A1.3 Relay DVR rules
