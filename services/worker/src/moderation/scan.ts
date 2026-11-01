@@ -9,6 +9,8 @@
 import { KEYS, type ModerationScanJob, type ModerationScores } from "@commonair/contracts/internal";
 import { schema, uuidv7, type Executor } from "@commonair/db";
 import {
+  clauseFor,
+  clauseRef,
   encodeImage,
   MODERATION_CONSTANTS,
   reviewFrameKey,
@@ -175,6 +177,7 @@ export async function applyT1(
         category: i.category,
         priority: MODERATION_CONSTANTS.T1_PRIORITY,
         slaDueAt: new Date(now.getTime() + MODERATION_CONSTANTS.T1_SLA_MINUTES * MINUTE),
+        ruleRef: clauseRef(clauseFor({ action: "moderation.t1.restrict", category: i.category })),
         createdAt: now,
         updatedAt: now,
       });
@@ -287,6 +290,7 @@ export async function applyT2(
         userId: channel.ownerId,
         category: "sexual",
         priority: 0,
+        ruleRef: clauseRef(clauseFor({ action: "moderation.t2.label" })),
         createdAt: now,
         updatedAt: now,
       });

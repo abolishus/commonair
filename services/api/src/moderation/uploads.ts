@@ -20,6 +20,8 @@ import { ORPCError } from "@orpc/server";
 import type { MODERATION_SUBJECTS } from "@commonair/contracts/enums";
 import { schema, uuidv7 } from "@commonair/db";
 import {
+  clauseFor,
+  clauseRef,
   decodeImage,
   encodeImage,
   MODERATION_CONSTANTS,
@@ -159,6 +161,7 @@ async function openUploadCase(
       category: hit.category,
       priority: MODERATION_CONSTANTS.T1_PRIORITY,
       slaDueAt: new Date(now.getTime() + MODERATION_CONSTANTS.T1_SLA_MINUTES * 60_000),
+      ruleRef: clauseRef(clauseFor({ action: "moderation.t1.upload_reject", category: hit.category })),
     });
     await tx.insert(schema.moderationFlags).values({
       id: flagId,
