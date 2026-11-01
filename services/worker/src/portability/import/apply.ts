@@ -42,7 +42,9 @@
  * inserted twice; a `done` import returns its stored result. Transport failures of the upload
  * route (the API down) throw, so the job retries.
  */
+import { ChatControlMessage } from "@commonair/contracts/chat";
 import type { ImportItemKind, ImportItemOutcome } from "@commonair/contracts/enums";
+import { BUS } from "@commonair/contracts/events";
 import { type UploadCommitBody, type UploadCommitResult } from "@commonair/contracts/internal";
 import type { BundleEmote, PortabilityBundle } from "@commonair/contracts/portability";
 import { UPLOAD_TYPES } from "@commonair/contracts/shapes";
@@ -91,7 +93,11 @@ export type ApplyBundleResult =
   | { ok: true; status: "done"; items: StoredItem[] }
   | { ok: false; status: "failed"; reason: "importer_legal_hold" | "channel_suspended" | "not_runnable" };
 
-type Ctx = Pick<WorkerContext, "db" | "logger" | "mediaBucket" | "now"> & { storage?: ObjectStorage };
+type Ctx = Pick<WorkerContext, "db" | "logger" | "mediaBucket" | "now"> & {
+  storage?: ObjectStorage;
+  /** For the chat `invalidate` after emotes land; without it chat sees them when its cache expires. */
+  valkey?: Pick<WorkerContext["valkey"], "publish">;
+};
 
 const itemId = (kind: ImportItemKind, ref: string) => `${kind}:${ref}`;
 const EXT: Record<string, string> = {
@@ -275,6 +281,8 @@ export async function applyBundle(
     }
     await importEmote(ctx, commit, who, input, e, saved.get(itemId("emote", e.code))?.key ?? null, record);
   }
+  // Chat caches a channel's emotes: tell it, as `chat.emotes.create` does, so they work at once.
+  if (choices.emotes.length > 0) await invalidateChatEmotes(ctx, who.channelId);
 
   // The schedule is carried, never applied (decision (b)).
   if (bundle.schedule.length > 0 && !finished("schedule", "schedule"))
@@ -294,6 +302,17 @@ export async function applyBundle(
     imported: items.filter((i) => i.outcome === "imported").length,
   });
   return { ok: true, status: "done", items };
+}
+
+async function invalidateChatEmotes(ctx: Ctx, channelId: string): Promise<void> {
+  if (!ctx.valkey) return;
+  try {
+    const frame = ChatControlMessage.parse({ op: "invalidate", scope: "channel" });
+    await ctx.valkey.publish(BUS.chatControl(channelId), JSON.stringify(frame));
+  } catch (err) {
+    // The emotes are saved; chat picks them up when its cache entry expires.
+    ctx.logger.warn("chat emote invalidate failed", { channelId, err: (err as Error).name });
+  }
 }
 
 async function applyChannelFields(tx: Executor, channelId: string, bundle: PortabilityBundle, now: Date) {

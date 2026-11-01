@@ -14,7 +14,9 @@
  *   legal hold on the importer refuses, an expired statement imports as unverified.
  */
 import { ACCOUNT_ACTION_REVERSALS } from "@commonair/contracts/enums";
+import { BUS } from "@commonair/contracts/events";
 import { MODERATION_JOBS } from "@commonair/contracts/internal";
+import type { PortabilityBundle } from "@commonair/contracts/portability";
 import { schema, uuidv7 } from "@commonair/db";
 import { MemoryMailer, TEMPLATE_IDS } from "@commonair/email";
 import { importStandingSigningKey, type StandingSigningKey } from "@commonair/tokens/standing";
@@ -27,7 +29,7 @@ import { signUpAndSignIn, startApi, type TestApi } from "../../api/tests/harness
 import { commitUpload } from "../src/b7/upload-commit.ts";
 import type { WorkerContext } from "../src/context.ts";
 import { buildBundle } from "../src/exports/bundle.ts";
-import { readBundleArchive } from "../src/portability/archive.ts";
+import { readBundleArchive, writeBundleArchive } from "../src/portability/archive.ts";
 import { applyBundle, runImportJob, type StoredItem } from "../src/portability/import/index.ts";
 import { sendMovedNotices } from "../src/portability/moved.ts";
 import { standingFacts } from "../src/portability/standing.ts";
@@ -50,6 +52,15 @@ async function newKey(): Promise<StandingSigningKey> {
   return importStandingSigningKey(Buffer.from(pkcs8).toString("base64"));
 }
 
+/** Chat-control frames the worker published (channel id, frame). */
+const published: Array<[string, unknown]> = [];
+const recordingValkey = {
+  publish: async (channel: string, message: string) => {
+    published.push([channel, JSON.parse(message)]);
+    return 1;
+  },
+};
+
 /** The worker's context on the API's test database, as the app role. */
 function ctx(over: Partial<WorkerContext> = {}): WorkerContext {
   return {
@@ -62,6 +73,7 @@ function ctx(over: Partial<WorkerContext> = {}): WorkerContext {
     site: siteAt(api.url),
     webhooks: fastWebhooks({ authSecret: AUTH_SECRET }),
     mailer,
+    valkey: recordingValkey,
     now: () => new Date(),
     ...over,
   } as WorkerContext;
@@ -259,6 +271,8 @@ describe.skipIf(!storage)("portability (worker)", () => {
     expect(outcome("emote", "wave")).toEqual(["imported", null]);
     expect(outcome("emote", "clash")).toEqual(["skipped", "code_taken"]);
     expect(outcome("emote", "bad")).toEqual(["rejected", "upload_rejected"]);
+    // Chat was told to reload the channel's emotes.
+    expect(published).toContainEqual([BUS.chatControl(destCh.id), { op: "invalidate", scope: "channel" }]);
     // The T0 fixture went through the same pipeline as a user upload: the T0 job was enqueued.
     expect(t0Queue.jobs.filter((j) => j.name === MODERATION_JOBS.t0)).toHaveLength(1);
 
@@ -499,9 +513,101 @@ describe.skipIf(!storage)("portability (worker)", () => {
     expect(await standingFacts(db(), ch.id, now)).toMatchObject({ activeSuspension: true, legalHold: true });
   });
 
+  test("not upheld: an overturned action, a lifted suspension, a chatter's message removed here", async () => {
+    const u = await signUpAndSignIn(api);
+    const chatter = await signUpAndSignIn(api);
+    const ch = await channelOf(u);
+    const now = new Date();
+    const earlier = new Date(now.getTime() - 86_400_000);
+    const [suspend] = await db()
+      .insert(schema.modActions)
+      .values({
+        scope: "platform",
+        channelId: ch.id,
+        targetUserId: u.userId,
+        action: "suspend_user",
+        ruleRef: "safety.weapons@1",
+        createdAt: earlier,
+      })
+      .returning({ id: schema.modActions.id });
+    await db().insert(schema.appeals).values({
+      appellantId: u.userId,
+      kind: "moderation",
+      subjectType: "moderation_action",
+      subjectId: suspend!.id,
+      body: "the clause does not apply",
+      status: "overturned",
+      resolvedAt: now,
+    });
+    await db()
+      .insert(schema.modActions)
+      .values([
+        // Lifted by staff without an appeal.
+        {
+          scope: "platform",
+          channelId: ch.id,
+          action: "suspend_channel",
+          ruleRef: "safety.weapons@1",
+          createdAt: earlier,
+        },
+        {
+          scope: "platform",
+          channelId: ch.id,
+          action: "unsuspend_channel",
+          ruleRef: "safety.weapons@1",
+          createdAt: now,
+        },
+        // A report on a chatter's message posted in this channel (`report.resolve`).
+        {
+          scope: "platform",
+          channelId: ch.id,
+          targetUserId: chatter.userId,
+          action: "remove_content",
+          ruleRef: "safety.weapons@1",
+        },
+      ]);
+    expect((await standingFacts(db(), ch.id, now)).upheldActions).toEqual({ t0: 0, t1: 0, t2: 0 });
+    // A suspension of the owner that stands still counts.
+    await db().insert(schema.modActions).values({
+      scope: "platform",
+      targetUserId: u.userId,
+      action: "suspend_user",
+      ruleRef: "safety.weapons@1",
+      createdAt: now,
+    });
+    expect((await standingFacts(db(), ch.id, now)).upheldActions).toEqual({ t0: 0, t1: 1, t2: 0 });
+  });
+
   test("a bad archive is refused at preview with a stable code", async () => {
     const destUser = await signUpAndSignIn(api);
     const row = await preview({ user: destUser, channelId: (await channelOf(destUser)).id }, new Uint8Array([1, 2, 3]));
     expect(row).toMatchObject({ status: "failed", preview: { state: "refused", refusal: "bundle_not_a_zip" } });
+  });
+
+  test("an uploaded bundle claiming another source is refused at preview, not left queued", async () => {
+    const destUser = await signUpAndSignIn(api);
+    const bundle: PortabilityBundle = {
+      v: 1,
+      source: "twitch",
+      exportedAt: new Date().toISOString(),
+      instance: { domain: "old.example", software: "commonair", version: "abc" },
+      channel: {
+        title: "Night owls",
+        description: "Late streams",
+        tags: ["chill"],
+        language: "en",
+        mature: false,
+        categorySlug: "just-chatting",
+        categoryName: "Just Chatting",
+      },
+      panels: [],
+      emotes: [],
+      schedule: [],
+      standing: null,
+    };
+    const { bytes } = await writeBundleArchive(bundle, new Map(), new Date());
+    expect((await readBundleArchive(bytes)).ok).toBe(true);
+    const row = await preview({ user: destUser, channelId: (await channelOf(destUser)).id }, bytes);
+    expect(row).toMatchObject({ status: "failed", preview: { state: "refused", refusal: "bundle_source" } });
   });
 });

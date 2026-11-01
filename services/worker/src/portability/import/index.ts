@@ -13,7 +13,7 @@ import type { WorkerContext } from "../../context.ts";
 import { emit } from "../../moderation/records.ts";
 import { readBundleArchive, sha256Hex } from "../archive.ts";
 import { applyBundle, type ApplyBundleOptions } from "./apply.ts";
-import { type PreviewOptions, runPreview, type StoredPreview } from "./preview.ts";
+import { type PreviewOptions, refuse, runPreview, type StoredPreview } from "./preview.ts";
 
 export {
   applyBundle,
@@ -63,7 +63,15 @@ export async function runImportJob(
 ): Promise<Record<string, number>> {
   const [row] = await ctx.db.select().from(imports).where(eq(imports.id, importId));
   if (!row || row.source !== "commonair") return { skipped: 1 };
-  if (row.status === "previewed") return runPreview(ctx, importId, opts);
+  if (row.status === "previewed") {
+    try {
+      return await runPreview(ctx, importId, opts);
+    } catch (err) {
+      // Storage down on every attempt: fail the row, or the web would poll a pending preview forever.
+      if (opts.lastAttempt) return refuse(ctx, importId, "preview_failed");
+      throw err;
+    }
+  }
   if (row.status !== "queued" && row.status !== "running") return { skipped: 1 };
   try {
     const preview = row.preview as unknown as StoredPreview;

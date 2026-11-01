@@ -11,8 +11,11 @@
  *   - a `moderation_cases` row of the channel (or its owner) resolved `actioned`, `confirmed` or
  *     still `labelled` (a T2 label not overturned), counted under its own tier;
  *   - a platform `mod_actions` row with a `rule_ref` against the channel or its owner that no case
- *     produced (report-driven actions) and no appeal overturned, counted as `t1` (a human platform
- *     decision, as the T1 review queue is).
+ *     produced (report-driven actions), no `moderation_action` appeal overturned and, for a
+ *     suspension, no later `unsuspend_*` of the same target lifted, counted as `t1` (a human
+ *     platform decision, as the T1 review queue is). "Against the channel" means the owner is the
+ *     target, or the channel is and no other user is: staff removing a chatter's message in the
+ *     channel does not count against it.
  * - **Key** (`PORTABILITY_SIGNING_KEY`, worker only): published to `portability_signing_keys` on
  *   first use (and by `ensurePortabilityKeyPublished` on worker start), retiring any other active
  *   key in the same transaction, as attestation keys are (ADR 0014 decision 1).
@@ -102,11 +105,26 @@ export async function standingFacts(db: Executor, channelId: string, issuedAt: D
         eq(modActions.scope, "platform"),
         inArray(modActions.action, [...RESTRICTIVE_PLATFORM_ACTIONS]),
         sql`${modActions.ruleRef} is not null`,
-        or(eq(modActions.channelId, channelId), eq(modActions.targetUserId, c.ownerId)),
+        // Aimed at the channel or its owner: a platform action on a chatter's message in this
+        // channel (`report.resolve` records the channel it was posted in) is not the channel's.
+        or(
+          eq(modActions.targetUserId, c.ownerId),
+          and(
+            eq(modActions.channelId, channelId),
+            or(isNull(modActions.targetUserId), eq(modActions.targetUserId, c.ownerId)),
+          ),
+        ),
         gte(modActions.createdAt, since),
         or(isNull(modActions.subjectType), ne(modActions.subjectType, "moderation_case")),
-        sql`not exists (select 1 from ${appeals} where ${appeals.subjectType} = 'mod_action'
+        sql`not exists (select 1 from ${appeals} where ${appeals.subjectType} = 'moderation_action'
           and ${appeals.subjectId} = ${modActions.id} and ${appeals.status} = 'overturned')`,
+        // A suspension later lifted (`unsuspend_*` on the same target) did not stand.
+        sql`not (${modActions.action} = 'suspend_channel' and exists (select 1 from ${modActions} u
+          where u.action = 'unsuspend_channel' and u.scope = 'platform' and u.channel_id = ${modActions.channelId}
+          and u.created_at >= ${modActions.createdAt}))`,
+        sql`not (${modActions.action} = 'suspend_user' and exists (select 1 from ${modActions} u
+          where u.action = 'unsuspend_user' and u.scope = 'platform' and u.target_user_id = ${modActions.targetUserId}
+          and u.created_at >= ${modActions.createdAt}))`,
       ),
     );
   upheld.t1 += Number(actions?.n ?? 0);

@@ -41,8 +41,24 @@ import { MovePanel, type MovePanelProps } from "../src/components/portability/mo
 import { locale, t, uiMessages } from "../src/i18n/index.ts";
 
 vi.mock("@tanstack/react-router", () => ({
-  Link: ({ children, className }: { children?: React.ReactNode; className?: string }) => (
-    <span className={className}>{children}</span>
+  // Rendered as a span carrying where it would go (path and search), for href assertions.
+  Link: ({
+    children,
+    className,
+    to,
+    search,
+    params: _params,
+    ...rest
+  }: {
+    children?: React.ReactNode;
+    className?: string;
+    to?: string;
+    search?: Record<string, string>;
+    params?: unknown;
+  }) => (
+    <span className={className} data-to={`${to ?? ""}?${new URLSearchParams(search ?? {}).toString()}`} {...rest}>
+      {children}
+    </span>
   ),
 }));
 
@@ -371,6 +387,7 @@ function landing(over: Partial<MoveLandingViewProps> = {}) {
     state: "active",
     channel: { slug: "ada", displayName: "Ada", avatarUrl: null, title: "Night owls", followerCount: 12 },
     signedIn: true,
+    returnTo: "/m/ada/AAAAAAAAAAAAAAAAAAAAAA",
     following: false,
     pending: false,
     loadFailed: false,
@@ -388,6 +405,14 @@ describe("the landing page", () => {
     expect(container.textContent).toContain("Night owls");
     fireEvent.click(q(container, "move-landing-follow")!);
     expect(onFollow).toHaveBeenCalledOnce();
+  });
+
+  it("signed out: sign-in comes back to this link, so the follow is still attributed", () => {
+    const { container } = landing({ signedIn: false });
+    const a = q(container, "move-landing-follow");
+    const href = new URL(a?.dataset.to ?? "", "http://x");
+    expect(href.pathname).toBe("/signin");
+    expect(href.searchParams.get("returnTo")).toBe("/m/ada/AAAAAAAAAAAAAAAAAAAAAA");
   });
 
   it("following: the button says so and does nothing", () => {

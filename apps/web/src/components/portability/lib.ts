@@ -170,6 +170,7 @@ const REASON_KEYS: Record<string, MessageKey> = {
   archive_missing: "portability.reason.archiveMissing",
   archive_changed: "portability.reason.archiveChanged",
   import_failed: "portability.reason.importFailed",
+  preview_failed: "portability.reason.previewFailed",
 };
 
 /** A reason code's message; bundle read errors (`bundle_*`) share one. */

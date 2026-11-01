@@ -45,7 +45,8 @@ export function createPortabilityQueue(valkeyUrl: string, prefix: string): Porta
       const data: PortabilityImportJob = { importId };
       const job = await queue.add(PORTABILITY_JOBS.import, data, {
         jobId: portabilityJobId(PORTABILITY_JOBS.import, `${importId}-preview`),
-        attempts: 2,
+        // The worker's job fails the preview on its last attempt (`PORTABILITY_JOBS.import`, 3).
+        attempts: 3,
         backoff: { type: "fixed", delay: 2_000 },
         removeOnComplete: 1000,
         removeOnFail: 1000,

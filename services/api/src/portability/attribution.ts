@@ -19,12 +19,14 @@ export interface FollowAttribution {
   channelId: string;
   /** The `channels.follow` input's `moveLink`; null for a direct follow. */
   moveLink: { nonce: string } | null;
+  /** The caller's clock (`deps.now()`); the wall clock when the call site does not pass one. */
+  now?: Date;
 }
 
 export async function attributeFollow(tx: Executor, follow: FollowAttribution): Promise<void> {
   if (!follow.moveLink) return;
   const link = await findLink(tx, follow.channelId, follow.moveLink.nonce);
-  if (!link || linkState(link, new Date()) !== "active") return;
+  if (!link || linkState(link, follow.now ?? new Date()) !== "active") return;
   await tx
     .update(schema.follows)
     .set({ source: "move_link", moveLinkId: link.id })

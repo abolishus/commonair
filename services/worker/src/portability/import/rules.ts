@@ -14,7 +14,11 @@ export const MAX_EMOTES = 100;
 export const MAX_PANELS = 20;
 export const EMOTE_CODE = /^[A-Za-z0-9]{2,20}$/;
 const TAG = /^[\p{L}\p{N}-]+$/u;
-/** A stream key pasted into text is redacted before it is stored (the studio scrubs the same way). */
+/**
+ * A stream key pasted into text is redacted before it is stored. Unlike the studio's `scrubKeys`,
+ * the importer does not also revoke the key: a bundle's text comes from another instance, so a
+ * key in it is not one of ours, save for a bundle this instance exported itself.
+ */
 const STREAM_KEY = /live_[A-Za-z0-9_-]{43}/g;
 
 export const redactStreamKeys = (text: string): string => text.replace(STREAM_KEY, "[redacted]");

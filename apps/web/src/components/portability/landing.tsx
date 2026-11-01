@@ -33,6 +33,8 @@ export interface MoveLandingViewProps {
   state: LandingState | null;
   channel: LandingChannel | null;
   signedIn: boolean;
+  /** Where sign-in returns to: this link, so a newcomer's follow is still attributed to it. */
+  returnTo: string;
   following: boolean;
   pending: boolean;
   loadFailed: boolean;
@@ -96,7 +98,11 @@ export function MoveLandingView(props: MoveLandingViewProps): React.JSX.Element 
               {props.following ? t("portability.landing.following") : t("portability.landing.follow")}
             </AccentButton>
           ) : (
-            <AccentButton data-testid="move-landing-follow" nativeButton={false} render={<Link to="/signin" />}>
+            <AccentButton
+              data-testid="move-landing-follow"
+              nativeButton={false}
+              render={<Link to="/signin" search={{ returnTo: props.returnTo }} />}
+            >
               <HugeiconsIcon icon={FavouriteIcon} strokeWidth={2} aria-hidden />
               {t("portability.landing.signInToFollow")}
             </AccentButton>
@@ -170,6 +176,7 @@ export function MoveLanding({
       state={malformed ? "unknown" : state}
       channel={malformed ? null : info}
       signedIn={signedIn}
+      returnTo={`/m/${encodeURIComponent(channel)}/${encodeURIComponent(nonce)}`}
       following={following}
       pending={pending}
       loadFailed={failed}

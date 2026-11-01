@@ -90,7 +90,8 @@ export function standingSummary(check: StandingCheck): Record<string, unknown> {
   };
 }
 
-async function refuse(
+/** Fail a `previewed` import with a stable code (also used for a preview that cannot run). */
+export async function refuse(
   ctx: WorkerContext,
   importId: string,
   refusal: string,
@@ -134,6 +135,9 @@ export async function runPreview(
   const bytes = new Uint8Array(await res.arrayBuffer());
   const read = await readBundleArchive(bytes);
   if (!read.ok) return refuse(ctx, importId, `bundle_${read.error}`);
+  // Only CommonAir bundles come through an upload; a Twitch import is N3's own path. A hand-edited
+  // `source` would otherwise preview, then be skipped by the apply and stay queued forever.
+  if (read.bundle.source !== "commonair") return refuse(ctx, importId, "bundle_source");
 
   const gate = await importerRefusal(ctx.db, row.userId, row.channelId);
   if (gate) return refuse(ctx, importId, gate);
