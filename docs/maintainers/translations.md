@@ -99,6 +99,12 @@ squash-merge rule; if the repository disallows merge commits or requires linear 
 merge commits first. Never install Weblate's **Squash Git commits** add-on: each translator's commit
 carries their own sign-off.
 
+**Release notes**: `scripts/release/changelog.ts` reads `git log --no-merges` over the whole range,
+so a merged Weblate PR would add one "Chores" entry per translator commit. Until the script skips
+them (a pending change: `--first-parent`, or dropping `chore(i18n)` commits it reaches only through
+a merge), trim those lines from the generated notes by hand and keep one "Translations updated"
+line.
+
 ## 3. Components
 
 Create one component by hand, then let **Component discovery** create the rest.
@@ -177,9 +183,10 @@ until Weblate's output matches `vp fmt`, rather than reformatting the `weblate` 
   for that language. The maintainer adds it in the Weblate PR or a follow-up.
 - **`email: *`**: every directory under `packages/email/src/messages/locales/` must be listed in
   `BUNDLED` (`packages/email/src/messages/bundled.ts`) and must have all eight group files, or the
-  email tests fail. Set **Adding new translation** on the eight email components to **Create
-  existing project languages; contact maintainers for new languages**, and add an email language
-  in a maintainer PR (the eight files from **Start new translation**, then the `BUNDLED` line).
+  email tests fail. Set **Adding new translation** on the eight email components to **Contact
+  maintainers** (check the label on the day; it may read "Contact maintainers for new languages"),
+  and add an email language in a maintainer PR (the eight files from **Start new translation**, then
+  the `BUNDLED` line).
 
 ## 4. Checks and flags
 
@@ -261,7 +268,17 @@ chore(i18n): add {{ language_name }} to {{ component_name }}
 Signed-off-by: {{ author }}
 ```
 
-**Delete message**: `chore(i18n): remove {{ language_name }} from {{ component_name }}`.
+**Delete message** (removing a language, done by a maintainer):
+
+```text
+chore(i18n): remove {{ language_name }} from {{ component_name }}
+
+Signed-off-by: {{ author }}
+```
+
+If Weblate leaves `{{ author }}` empty in this template, delete commits are reviewed like add-on
+commits (section 9, step 2).
+
 **Add-on message**: `chore(i18n): {{ addon_name }} on {{ component_name }}` (mechanical commits by
 Weblate itself, such as the cleanup add-on; they carry no authored content, and the maintainer who
 merges the PR vouches for them). **Merge request message**: title
@@ -284,7 +301,9 @@ all **Needs editing** once, right after discovery and before announcing the proj
    fail.
 2. Project **CommonAir → Tools → Bulk edit** (project-wide; or per component if the project-level
    tool is not offered):
-   - **Query**: `language:es AND state:translated AND NOT key:dmca.goodFaith AND NOT key:dmca.accuracy AND NOT key:copyright.counter.goodFaith AND NOT key:copyright.counter.jurisdiction`
+   - **Query**: `language:es AND state:translated AND NOT component:glossary AND NOT key:dmca.goodFaith AND NOT key:dmca.accuracy AND NOT key:copyright.counter.goodFaith AND NOT key:copyright.counter.jurisdiction`
+     (`NOT component:glossary` keeps the Spanish glossary terms, which are maintained in the CSV and
+     reviewed in its own PRs, out of the draft review and out of the count in step 4.)
    - **State to set**: **Needs editing**
    - **Add labels**: `agent draft` (create the label first under **Project → Labels**), so the draft
      stays findable after review.
@@ -293,7 +312,8 @@ all **Needs editing** once, right after discovery and before announcing the proj
    needing edit**, **Conflict handling** **Change translated strings**. (JSON has no fuzzy marker
    of its own, so **Strings needing edit** has no effect here.) Bulk edit does the same in one step.
 4. Check: **Project → Languages → Spanish** shows about 3,300 strings needing editing and 0
-   translated (besides the four read-only ones). After the next repository update the count must
+   translated outside the glossary (besides the four read-only ones; the `glossary` component's
+   roughly 150 Spanish terms stay translated). After the next repository update the count must
    not drop; if it did, Weblate re-read the files as translated and step 2 runs again.
 
 **Following review**: the Spanish language page's **Needs editing** column, per component; the
@@ -364,7 +384,8 @@ Weblate would not read as a term).
 1. CI green. A red catalog test names the key and locale: fix it in Weblate (the string's page),
    not on the branch, so Weblate does not conflict with itself; the PR updates on the next commit.
    Use **Repository maintenance → Commit** and **Push** to hurry it.
-2. Every commit has a `Signed-off-by` matching its author (add-on commits excepted, see section 5).
+2. Every commit has a `Signed-off-by` matching its author (add-on commits, and delete commits whose
+   sign-off came out empty, excepted; see section 5).
 3. Only paths under the three `locales/` trees and the glossary CSVs change. Anything else is a
    configuration mistake: close the PR and fix the component.
 4. Spot-check a few strings against the glossary and [docs/translators/](../translators/README.md),

@@ -87,6 +87,8 @@ Spanish: {n, selectordinal, other {#.º}}
 - Two apostrophes `''` show as one; you rarely need this.
 - An apostrophe before a brace starts quoting: `'{literal}'` shows `{literal}` instead of a
   placeholder. Avoid it unless the English does the same.
+- The same happens before `|`, and before `#` inside a plural: `l'#` would hide the number. There,
+  write `''` (`l''#`) or the typographic `’` (`l’#`).
 - Typographic apostrophes (`’`) are always plain text, and are the better choice where your
   language uses them.
 
