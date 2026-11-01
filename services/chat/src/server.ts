@@ -14,7 +14,7 @@ import { createValkey, runService, valkeyCheck, type RunningService, type Valkey
 import { Authenticator } from "./auth.ts";
 import { Bus } from "./bus.ts";
 import { splitChatCommand } from "./commands.ts";
-import { ChatCore, REQUIRES_LOGIN } from "./core.ts";
+import { ChatCore, REQUIRES_LOGIN, type WatchRoomFactory } from "./core.ts";
 import { Directory, type DirectoryOptions } from "./directory.ts";
 import { createDryRunRoute } from "./dry-run.ts";
 import { type Limiter, ValkeyLimiter } from "./limiter.ts";
@@ -25,7 +25,7 @@ import { MODERATE_SCOPE, Moderation } from "./moderation.ts";
 import { type FilterRunner, inlineFilterRunner, WorkerFilterRunner } from "@commonair/chat-filter";
 import { MessageWriter, type WriterOptions } from "./persistence.ts";
 import { errorFields } from "./errors.ts";
-import { BUS, UserControlMessage, userControlTargets } from "@commonair/contracts";
+import { BUS, RoomControlMessage, UserControlMessage, userControlTargets } from "@commonair/contracts";
 import { INTERNAL_ROUTES } from "@commonair/contracts/internal";
 import { parseJson } from "./control.ts";
 import type { MessageMiddleware, PluginHost } from "./pipeline.ts";
@@ -79,6 +79,10 @@ export interface ChatServiceOptions {
   watchGate?: boolean;
   /** `CHAT_SURGE_GUARD` (ADR 0015 decision 6). Default off. */
   surgeGuard?: boolean;
+  /** `GIVEAWAYS_ENABLED` (batch 7 decision (a)): the giveaway plugin is a no-op while false. Default off. */
+  giveaways?: boolean;
+  /** Builds the watch-room handler (default `WatchRooms`); tests inject a recording one. */
+  watchRooms?: WatchRoomFactory;
 }
 
 export interface ChatService {
@@ -117,7 +121,7 @@ export async function startChatService(opts: ChatServiceOptions): Promise<ChatSe
   });
   const writer = new MessageWriter(opts.db, logger, metrics, opts.writer);
   const frameWriter: Writer = { maxBufferedBytes: opts.maxBufferedBytes ?? 1024 * 1024, metrics };
-  const middlewares = opts.middlewares ?? plugins();
+  const middlewares = opts.middlewares ?? plugins({ giveaways: opts.giveaways ?? false });
   const sockets = new Set<ChatSocket>();
   const auth = new Authenticator(opts.db, opts.internalSecret, opts.oauthRevalidateMs);
   const filterRunner: FilterRunner =
@@ -194,6 +198,8 @@ export async function startChatService(opts: ChatServiceOptions): Promise<ChatSe
     filterRunner,
     latency,
     watchGate,
+    valkey,
+    ...(opts.watchRooms ? { watchRooms: opts.watchRooms } : {}),
   });
   core = chat;
 
@@ -201,6 +207,12 @@ export async function startChatService(opts: ChatServiceOptions): Promise<ChatSe
     bus.acquire(bus.names.events(), (raw) => chat.onEvent(raw)),
     bus.acquire(bus.names.live(), (raw) => chat.onLive(raw)),
     bus.acquire((opts.busPrefix ?? "") + BUS.userControl, (raw) => onUserControl(raw)),
+    // Batch 7: a room ended or a member removed (a ban during the room), from the API or worker.
+    bus.acquire(bus.names.roomControl(), (raw) => {
+      const msg = parseJson(RoomControlMessage, raw);
+      if (msg) chat.watchRooms.onControl(msg);
+      else logger.warn("malformed room control message");
+    }),
   ]);
   await initPlugins(middlewares, {
     chat,
@@ -287,7 +299,43 @@ export async function startChatService(opts: ChatServiceOptions): Promise<ChatSe
         );
       case "send":
         return handleSend(ws, frame, to);
+      case "room.join":
+      case "room.part":
+      case "room.send":
+      case "room.sync":
+        return handleRoom(ws, frame, to);
     }
+  };
+
+  /**
+   * Watch rooms (batch 7): signed-in members only; join and part spend a control token like a
+   * channel join. Everything else (the room token, bands, blocks, limits) is `WatchRooms`'s.
+   */
+  const handleRoom = async (
+    ws: ChatSocket,
+    frame: Extract<ClientFrame, { op: "room.join" | "room.part" | "room.send" | "room.sync" }>,
+    to: Reply,
+  ): Promise<void> => {
+    if (!ws.data.identity.userId) return replyNotice(ws, to, REQUIRES_LOGIN);
+    if ((frame.op === "room.join" || frame.op === "room.part") && !takeToken(ws.data, Date.now()))
+      return replyError(ws, to, "rate_limited", "Too many requests.");
+    const rooms = chat.watchRooms;
+    let notice: Rejection | null = null;
+    switch (frame.op) {
+      case "room.join":
+        notice = await rooms.join(ws, frame);
+        break;
+      case "room.part":
+        notice = await rooms.part(ws, frame);
+        break;
+      case "room.send":
+        notice = await rooms.send(ws, frame);
+        break;
+      case "room.sync":
+        notice = await rooms.sync(ws, frame);
+        break;
+    }
+    if (notice) replyNotice(ws, to, notice);
   };
 
   const handleSend = async (ws: ChatSocket, frame: Extract<ClientFrame, { op: "send" }>, to: Reply): Promise<void> => {
@@ -415,6 +463,9 @@ export async function startChatService(opts: ChatServiceOptions): Promise<ChatSe
         if (!sockets.delete(ws)) return;
         metrics.connectionClosed(ws.data.identity.via);
         void chat.partAll(ws).catch((err: unknown) => logger.warn("part on close failed", errorFields(err)));
+        void chat.watchRooms
+          .partAll(ws)
+          .catch((err: unknown) => logger.warn("room part on close failed", errorFields(err)));
       },
     },
     onShutdown: async () => {
@@ -422,6 +473,9 @@ export async function startChatService(opts: ChatServiceOptions): Promise<ChatSe
       stopLagWatch();
       pool.stop();
       await writer.close();
+      await chat.watchRooms
+        .close?.()
+        .catch((err: unknown) => logger.warn("watch rooms close failed", errorFields(err)));
       for (const mw of middlewares)
         await mw
           .close?.()
@@ -504,6 +558,7 @@ export async function startChatService(opts: ChatServiceOptions): Promise<ChatSe
       identity: prepared.identity,
       user: prepared.user,
       rooms: new Map(),
+      watchRooms: new Set(),
       lastSeen: now,
       closed: false,
       bucket: { tokens: 20, updated: now },

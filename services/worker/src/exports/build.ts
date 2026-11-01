@@ -18,6 +18,7 @@ import { and, asc, eq, inArray, lt } from "drizzle-orm";
 import type { WorkerContext } from "../context.ts";
 import { safeErrorCode } from "../moderation/records.ts";
 import { buildArchive } from "./archive.ts";
+import { buildBundle } from "./bundle.ts";
 import { collect, type ExportKind } from "./collectors.ts";
 
 /** Stable `data_exports.error` codes (never free text). */
@@ -119,22 +120,32 @@ export async function buildExport(
       .select({ id: s.channels.id })
       .from(s.channels)
       .where(eq(s.channels.ownerId, row.userId));
-    if (row.kind === "channel" && !channel) throw new PermanentExportError(EXPORT_ERRORS.noChannel);
+    if ((row.kind === "channel" || row.kind === "bundle") && !channel)
+      throw new PermanentExportError(EXPORT_ERRORS.noChannel);
     if (!ctx.storage) throw new Error("object storage is not configured");
 
     const scope = { userId: row.userId, channelId: channel?.id ?? null };
-    // One snapshot for every file, so the archive is consistent with itself.
-    const files = await ctx.db.transaction((tx) => collect(tx, row.kind, scope), {
-      isolationLevel: "repeatable read",
-      accessMode: "read only",
-    });
-    const { bytes } = buildArchive({
-      kind: row.kind,
-      exportId: row.id,
-      userId: row.userId,
-      generatedAt: ctx.now(),
-      files,
-    });
+    const bytes =
+      row.kind === "bundle" && channel
+        ? // Batch 7 (ADR 0037): a portability bundle, built by its own module; the rest of the
+          // pipeline (claim, upload, TTL, mail) is shared.
+          await buildBundle(ctx, {
+            exportId: row.id,
+            userId: row.userId,
+            channelId: channel.id,
+            generatedAt: ctx.now(),
+          })
+        : buildArchive({
+            kind: row.kind,
+            exportId: row.id,
+            userId: row.userId,
+            generatedAt: ctx.now(),
+            // One snapshot for every file, so the archive is consistent with itself.
+            files: await ctx.db.transaction((tx) => collect(tx, row.kind, scope), {
+              isolationLevel: "repeatable read",
+              accessMode: "read only",
+            }),
+          }).bytes;
     await ctx.storage.put(ctx.exportsBucket, key, Buffer.from(bytes), { contentType: "application/zip" });
     uploaded = true;
 

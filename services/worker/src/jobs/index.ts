@@ -7,6 +7,7 @@
  * add it to this list.
  */
 import { integrityJobs } from "../integrity/jobs.ts";
+import { job as giveawayClose } from "../interact/giveaways/close.ts";
 import type { JobDefinition } from "../runtime/registry.ts";
 import { job as accountDeletion } from "./account-deletion.ts";
 import { job as broadcastRollup, retentionJob as broadcastRollupRetention } from "./broadcast-rollup.ts";
@@ -25,6 +26,14 @@ import { job as integrityAttestation, reconcileJob as attestationReconcile } fro
 import { job as interactTick } from "./interact-tick.ts";
 import { job as exportBuild } from "./export-build.ts";
 import { job as exportCleanup } from "./export-cleanup.ts";
+import { job as federationDeliver } from "./federation-deliver.ts";
+import { job as federationFanout } from "./federation-fanout.ts";
+import { job as federationInbox } from "./federation-inbox.ts";
+import { job as federationRotate } from "./federation-rotate.ts";
+import { job as federationSweep } from "./federation-sweep.ts";
+import { job as importTwitch } from "./import-twitch.ts";
+import { job as juryClose } from "./jury-close.ts";
+import { job as juryDraw } from "./jury-draw.ts";
 import { job as legalConsentRetention } from "./legal-consent-retention.ts";
 import { job as liveCounters } from "./live-counters.ts";
 import { job as oauthExpire } from "./oauth-expire.ts";
@@ -47,12 +56,17 @@ import { job as moderationT0Escalated } from "./moderation-t0-escalated.ts";
 import { job as moderationT0Media } from "./moderation-t0-media.ts";
 import { job as moderationT0 } from "./moderation-t0.ts";
 import { job as pointsAccrue } from "./points-accrue.ts";
+import { job as portabilityBuild } from "./portability-build.ts";
+import { job as portabilityImport } from "./portability-import.ts";
+import { job as portabilityMoved } from "./portability-moved.ts";
 import { job as pruneWebhookDeliveries } from "./prune-webhook-deliveries.ts";
 import { job as raidsExecute } from "./raids-execute.ts";
 import { capSweepJob as rehearsalCapSweep, job as rehearsalDriver } from "./rehearsal-driver.ts";
+import { cleanupJob as relayPurgeCleanup, job as relayPurge } from "./relay-purge.ts";
 import { job as relaysOffline } from "./relays-offline.ts";
 import { job as vodPlacement } from "./vod-placement.ts";
 import { job as vodRetention } from "./vod-retention.ts";
+import { job as watchRoomRetention } from "./watch-room-retention.ts";
 import { job as webhookDeliver } from "./webhook-deliver.ts";
 import { job as webhookFanout } from "./webhook-fanout.ts";
 import { job as webhookRedeliver } from "./webhook-redeliver.ts";
@@ -121,4 +135,20 @@ export const JOBS = [
   attestationReconcile,
   rehearsalDriver,
   rehearsalCapSweep,
+  // Batch 7: W3, N3, N4.
+  watchRoomRetention,
+  portabilityMoved,
+  portabilityBuild,
+  portabilityImport,
+  importTwitch,
+  giveawayClose,
+  juryDraw,
+  juryClose,
+  federationInbox,
+  federationDeliver,
+  federationFanout,
+  federationRotate,
+  federationSweep,
+  relayPurge,
+  relayPurgeCleanup,
 ] as readonly JobDefinition[];

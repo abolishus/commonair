@@ -14,6 +14,8 @@ export interface ConnData {
   user: { id: string; username: string; displayName: string } | null;
   /** slug → channelId of joined rooms. */
   rooms: Map<string, string>;
+  /** Watch-room ids this socket joined (batch 7; `watch-rooms.ts` keeps it). */
+  watchRooms: Set<string>;
   lastSeen: number;
   closed: boolean;
   /** Token bucket for join/part/command frames (not chat sends, which have their own limits). */
