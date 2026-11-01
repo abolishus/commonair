@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * Batch 7 schema (0045, 0046; .claude/briefs/w3/contract-step.md §3): the follower-count trigger
+ * Batch 7 schema (0045, 0046, 0047; .claude/briefs/w3/contract-step.md §3): the follower-count trigger
  * and its recount, watch-room age bands, draw commitments, giveaway entries and winners, prediction
  * bets, jury seats, cases and votes, federation key history, move links, portability signing keys,
  * relay purges, the jury settings and the seed. Run as the least-privilege app role, by direct
@@ -613,10 +613,12 @@ describe("jury (decision (u))", () => {
   const seat = (panelId: string, userId: string) =>
     app.insert(s.jurySeats).values({ panelId, userId }).returning({ id: s.jurySeats.id });
   async function decidedCase(): Promise<{ id: string }> {
+    // `labelled` is still open (0047), so a sampled case is decided: opened, then actioned.
     const [c] = await owner
       .insert(s.moderationCases)
-      .values({ tier: "t2", origin: "classifier", status: "labelled", subjectType: "vod", subjectId: uuidv7() })
+      .values({ tier: "t2", origin: "classifier", subjectType: "vod", subjectId: uuidv7() })
       .returning({ id: s.moderationCases.id });
+    await owner.update(s.moderationCases).set({ status: "actioned" }).where(eq(s.moderationCases.id, c!.id));
     return c!;
   }
 
@@ -707,6 +709,68 @@ describe("jury (decision (u))", () => {
       ),
     ).toBe("23514");
     await add("report", await report({ reporterId: await newUser(), subjectId: await newUser() }));
+  });
+
+  test("0047 backstop: no bot seat, no labelled case, and message authors and set senders are parties", async () => {
+    const p = await panel("2026-05");
+    const bot = await member();
+    await owner.update(s.users).set({ accountType: "bot" }).where(eq(s.users.id, bot));
+    expect(await refused(seat(p, bot), /bot/)).toBe("23514");
+
+    const [labelled] = await owner
+      .insert(s.moderationCases)
+      .values({ tier: "t2", origin: "classifier", subjectType: "vod", subjectId: uuidv7() })
+      .returning({ id: s.moderationCases.id });
+    await owner.update(s.moderationCases).set({ status: "labelled" }).where(eq(s.moderationCases.id, labelled!.id));
+    const add = (subjectKind: "moderation_case" | "report", subjectId: string) =>
+      app.insert(s.juryCases).values({ panelId: p, subjectKind, subjectId });
+    expect(await refused(add("moderation_case", labelled!.id), /decided/)).toBe("23514");
+
+    const { channelId } = await newChannel();
+    const message = async (userId: string) => {
+      const [m] = await owner
+        .insert(s.chatMessages)
+        .values({ channelId, userId, body: "hi" })
+        .returning({ id: s.chatMessages.id });
+      return m!.id;
+    };
+    const report = async (v: Partial<typeof s.reports.$inferInsert>) => {
+      const [r] = await owner
+        .insert(s.reports)
+        .values({ subjectType: "user", subjectId: uuidv7(), reason: "spam", status: "actioned", channelId, ...v })
+        .returning({ id: s.reports.id });
+      return r!.id;
+    };
+    const byMessage = async (userId: string) =>
+      report({ subjectType: "chat_message", subjectId: await message(userId) });
+    const bySet = (userIds: string[]) =>
+      report({
+        subjectType: "message_set",
+        subjectId: uuidv7(),
+        evidence: { messages: userIds.map((userId) => ({ id: uuidv7(), userId, body: "x" })) },
+      });
+    const held = await newUser();
+    await owner.insert(s.legalHolds).values({ userId: held, reason: "litigation", reasonCode: "litigation" });
+    const minor = await newUser({ birthDate: MINOR });
+
+    await add("report", await byMessage(await newUser()));
+    expect(await refused(add("report", await byMessage(minor)), /minor/)).toBe("23514");
+    expect(await refused(add("report", await byMessage(held)), /legal hold/)).toBe("23514");
+    // A message the retention job already deleted: its author is unknown, so it fails closed.
+    expect(
+      await refused(add("report", await report({ subjectType: "chat_message", subjectId: uuidv7() })), /unknown/),
+    ).toBe("23514");
+
+    await add("report", await bySet([await newUser(), await newUser()]));
+    expect(await refused(add("report", await bySet([await newUser(), minor])), /minor/)).toBe("23514");
+    expect(await refused(add("report", await bySet([held])), /legal hold/)).toBe("23514");
+    expect(await refused(add("report", await bySet([])), /unknown/)).toBe("23514");
+    expect(
+      await refused(
+        add("report", await report({ subjectType: "message_set", subjectId: uuidv7(), evidence: { messages: "x" } })),
+        /unknown/,
+      ),
+    ).toBe("23514");
   });
 
   test("only a seat of the case's open panel votes, once, append-only", async () => {

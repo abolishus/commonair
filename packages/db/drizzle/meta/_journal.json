@@ -330,6 +330,13 @@
       "when": 1793552276781,
       "tag": "0046_b7_protections",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1793562924225,
+      "tag": "0047_b7_jury_backstop",
+      "breakpoints": true
     }
   ]
 }
