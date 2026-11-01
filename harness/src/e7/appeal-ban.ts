@@ -148,7 +148,13 @@ export async function stepAppealLiftsBan(run: Run): Promise<void> {
       return u;
     });
     await ctx.step(t("an admin suspends W"), () =>
-      staff.admin.api.client.safety.suspend({ username: w.username, target: "user", suspended: true, reason: NOTE }),
+      staff.admin.api.client.safety.suspend({
+        username: w.username,
+        target: "user",
+        suspended: true,
+        reason: NOTE,
+        clauseId: "guidelines.general",
+      }),
     );
     const suspendId = await ctx.step(t("W's suspension mod action"), () =>
       waitFor("suspend_user mod action", () => latestSuspendAction(run.databaseUrl, w.id), settle),

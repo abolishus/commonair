@@ -258,6 +258,7 @@ describe("overturned moderation_action appeals", () => {
     const s = await mod.client.call("POST", `/api/admin/users/${v.username}/suspension`, {
       target: "user",
       suspended: true,
+      clauseId: "honesty.spam",
       reason: "Spam",
     });
     expect(s.status, JSON.stringify(s.body)).toBe(200);
@@ -385,6 +386,7 @@ describe("overturned moderation_action appeals", () => {
       target: "user",
       suspended: true,
       durationSeconds: 3600,
+      clauseId: "honesty.spam",
       reason: "Spam",
     });
     expect(s.status, JSON.stringify(s.body)).toBe(200);
@@ -409,6 +411,7 @@ describe("overturned moderation_action appeals", () => {
     const s = await mod.client.call("POST", `/api/admin/users/${v.username}/suspension`, {
       target: "channel",
       suspended: true,
+      clauseId: "honesty.spam",
       reason: "Spam",
     });
     expect(s.status, JSON.stringify(s.body)).toBe(200);

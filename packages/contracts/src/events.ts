@@ -31,6 +31,9 @@ import {
   PAYMENT_FRAUD_KINDS,
   PAYMENT_FRAUD_STATUSES,
   SHARE_STATUSES,
+  ATTESTATION_KINDS,
+  SPLIT_BASES,
+  SPLIT_STATUSES,
 } from "./enums.ts";
 
 const id = z.string();
@@ -754,6 +757,75 @@ export const EVENTS = {
       user_id: id,
       action: z.enum(ACCOUNT_ACTIONS),
       reversal: z.enum(ACCOUNT_ACTION_REVERSALS),
+    },
+  }),
+  // Internal (W2). Ids, enums and counts only; none is offered to apps.
+  "channel.split.update": def({
+    version: "1",
+    condition: [],
+    scopes: [],
+    internal: true,
+    description: "Internal: a revenue split version was proposed, accepted, rejected or ended (ADR 0013)",
+    payload: {
+      channel_id: id,
+      split_id: id,
+      version: z.number().int(),
+      status: z.enum(SPLIT_STATUSES),
+      basis: z.enum(SPLIT_BASES),
+      recipient_user_ids: z.array(id),
+    },
+  }),
+  "analytics.rollup.ready": def({
+    version: "1",
+    condition: [],
+    scopes: [],
+    internal: true,
+    description: "Internal: a broadcast's audience rollup was written (again); attestations re-check it",
+    payload: { broadcast_id: id, channel_id: id, reason: z.enum(["offline", "rescore", "test"]) },
+  }),
+  "integrity.attestation.appended": def({
+    version: "1",
+    condition: [],
+    scopes: [],
+    internal: true,
+    description: "Internal: an attestation entry was appended to a channel's chain (ADR 0014)",
+    payload: {
+      attestation_id: id,
+      channel_id: id,
+      broadcast_id: id,
+      seq: z.number().int(),
+      kind: z.enum(ATTESTATION_KINDS),
+      kid: z.string(),
+    },
+  }),
+  "integrity.sessions.rescored": def({
+    version: "1",
+    condition: [],
+    scopes: [],
+    internal: true,
+    description:
+      "Internal: ended sessions of a broadcast were re-scored (a group appeal overturned); the rollup re-runs",
+    payload: { broadcast_id: id, channel_id: id, sessions: z.number().int() },
+  }),
+  "rehearsal.armed": def({
+    version: "1",
+    condition: [],
+    scopes: [],
+    internal: true,
+    description: "Internal: a channel armed a rehearsal (the next publish starts it, decision (f))",
+    payload: { channel_id: id, arm_id: id, expires_at: ts },
+  }),
+  "rehearsal.ended": def({
+    version: "1",
+    condition: [],
+    scopes: [],
+    internal: true,
+    description: "Internal: a rehearsal ended or was disarmed",
+    payload: {
+      channel_id: id,
+      arm_id: id,
+      broadcast_id: id.nullable(),
+      reason: z.enum(["disarmed", "publisher_ended", "cap", "safety", "expired"]),
     },
   }),
 } as const;

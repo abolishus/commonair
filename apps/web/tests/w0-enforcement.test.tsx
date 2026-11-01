@@ -90,6 +90,7 @@ function stubClient(items: EnforcementStatementDto[], over: Partial<EnforcementC
     kind: s.kind,
     subjectType: s.subjectType,
     subjectId: s.subjectId,
+    exclusionCategory: null,
     body,
     status: "open",
     resolution: null,

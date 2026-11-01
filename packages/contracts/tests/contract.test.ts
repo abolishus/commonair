@@ -149,6 +149,8 @@ describe("events", () => {
     expect(INTERNAL_EVENT_TYPES.toSorted()).toEqual([
       "account.action.recorded",
       "account.action.reversed",
+      "analytics.rollup.ready",
+      "channel.split.update",
       "chat.surge.begin",
       "chat.surge.end",
       "coop.council.recomputed",
@@ -164,6 +166,8 @@ describe("events", () => {
       "dmca.counter.suit_filed",
       "dmca.notice.decided",
       "dmca.notice.received",
+      "integrity.attestation.appended",
+      "integrity.sessions.rescored",
       "legal.hold.placed",
       "moderation.case.resolved",
       "moderation.flagged",
@@ -173,6 +177,8 @@ describe("events", () => {
       "ncii.request.decided",
       "ncii.request.received",
       "ncmec.draft.created",
+      "rehearsal.armed",
+      "rehearsal.ended",
     ]);
     for (const t of INTERNAL_EVENT_TYPES) {
       expect(PUBLIC_EVENT_TYPES).not.toContain(t);

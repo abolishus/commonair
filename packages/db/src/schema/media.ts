@@ -18,6 +18,7 @@ import {
 import { users } from "./auth.ts";
 import { categories, channels } from "./channels.ts";
 import {
+  broadcastKind,
   clipStatus,
   createdAt,
   deliverySource,
@@ -39,6 +40,12 @@ export const broadcasts = pgTable(
       .notNull()
       .references(() => channels.id, { onDelete: "cascade" }),
     streamKeyId: uuid(),
+    /**
+     * Batch 6 decision (f): `rehearsal` broadcasts are seen only by their invitees: never
+     * `channels.live_broadcast_id`, no `stream.online`, refused in `stream_hours`, ledger postings
+     * and attestations (migration 0043). Never changes after insert.
+     */
+    kind: broadcastKind().notNull().default("live"),
     ingestProtocol: ingestProtocol().notNull(),
     /** MediaMTX path name (live/<channel slug>). */
     path: text().notNull(),

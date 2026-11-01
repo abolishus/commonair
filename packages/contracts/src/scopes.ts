@@ -18,6 +18,7 @@ export const SCOPES = {
   "channel:manage:bot": "Manage the built-in channel bot (commands, timers, variables, filters)",
   "channel:read:points": "Read loyalty point balances",
   "channel:manage:points": "Grant or deduct loyalty points",
+  "channel:manage:splits": "Propose, accept, reject and end revenue splits",
   "user:read:email": "Read the user's email address",
   "user:read:follows": "Read the channels the user follows",
   "user:manage:follows": "Follow and unfollow channels",

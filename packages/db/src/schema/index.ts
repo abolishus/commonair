@@ -15,3 +15,6 @@ export * from "./moderation.ts";
 export * from "./platform.ts";
 export * from "./interactive.ts";
 export * from "./notify.ts";
+export * from "./splits.ts";
+export * from "./captions.ts";
+export * from "./analytics.ts";

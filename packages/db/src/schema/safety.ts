@@ -17,6 +17,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import type { EnforcementFacts } from "@commonair/contracts/dto";
+import { RULE_REF_PATTERN } from "@commonair/contracts/enums";
 import { users } from "./auth.ts";
 import { channels } from "./channels.ts";
 import {
@@ -36,6 +37,7 @@ import {
   enforcementRestrictionDetail,
   enforcementRestrictionKind,
   enforcementSource,
+  exclusionCategory,
   exportKind,
   id,
   incidentStatus,
@@ -207,11 +209,15 @@ export const modActions = pgTable(
     subjectType: text(),
     subjectId: uuid(),
     reportId: uuid(),
+    /** Decision (d): the clause a platform action cites (`<id>@<version>`); never on channel-scope actions. */
+    ruleRef: text(),
     createdAt: createdAt(),
   },
   (t) => [
     index("mod_actions_channel_idx").on(t.channelId, t.createdAt),
     index("mod_actions_target_idx").on(t.targetUserId),
+    check("mod_actions_rule_ref_format", sql`${t.ruleRef} is null or ${t.ruleRef} ~ '${sql.raw(RULE_REF_PATTERN)}'`),
+    check("mod_actions_rule_ref_platform", sql`${t.ruleRef} is null or ${t.scope} = 'platform'`),
   ],
 );
 
@@ -253,10 +259,20 @@ export const appeals = pgTable(
     resolverId: uuid(),
     resolution: text(),
     resolvedAt: ts(),
+    /** Decision (d): the appealed decision's clause (`<id>@<version>`), when it cites one. */
+    ruleRef: text(),
+    /** Decision (m): the category of an `exclusion_group` appeal (`subject_id` is the broadcast). */
+    exclusionCategory: exclusionCategory(),
     createdAt: createdAt(),
   },
   (t) => [
     index("appeals_queue_idx").on(t.status, t.createdAt),
+    check("appeals_rule_ref_format", sql`${t.ruleRef} is null or ${t.ruleRef} ~ '${sql.raw(RULE_REF_PATTERN)}'`),
+    check(
+      "appeals_exclusion_category",
+      sql`(${t.subjectType} = 'exclusion_group') = (${t.exclusionCategory} is not null)`,
+    ),
+    check("appeals_exclusion_group_kind", sql`${t.subjectType} <> 'exclusion_group' or ${t.kind} = 'integrity'`),
     // Integrity allowance lookups: overturned appeals for a session, user or flag.
     index("appeals_subject_idx").on(t.subjectType, t.subjectId),
     uniqueIndex("appeals_open_uq")

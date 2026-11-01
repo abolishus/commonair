@@ -712,6 +712,8 @@ async function transparency(deps: Deps, months: number) {
             decidedAt: new Date(d.decided_at).toISOString(),
           })),
         members: memberCounts,
+        // W2-splits fills these from the split-suspense postings (ADR 0013 decisions 6, 7).
+        splitSuspense: { released: 0, forfeited: 0, writeOffs: 0, heldAtMonthEnd: money(0, currency) },
       };
     })
     .reverse();

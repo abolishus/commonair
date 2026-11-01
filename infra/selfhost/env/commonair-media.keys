@@ -5,6 +5,7 @@
 # The keys of commonair.env that commonair-media receives (scripts/selfhost/render-env.sh),
 # from mediaServiceEnv (services/media/src/env.ts), minus what the unit sets itself.
 AUTH_SECRET
+CAPTIONS_MAX_STREAMS
 DATABASE_POOL_MAX
 EVIDENCE_PUBLIC_KEY
 GOVERNANCE_BOOTSTRAP_JSON
@@ -33,3 +34,4 @@ S3_SECRET_ACCESS_KEY
 TRANSCODE_HWACCEL
 TRANSCODE_MAX_LADDERS
 TRANSCODE_VIEWER_THRESHOLD
+WHISPER_URL

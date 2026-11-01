@@ -246,7 +246,11 @@ export const playback = {
       expiresAt: iso(new Date(claims.exp * 1000)),
       renditions: await renditionsFor(deps, c.id),
       captions: [],
+      captionsState: "off",
       dataMode: claims.dm ?? null,
+      // W2-dvr owns these (contract step §4): no DVR until it lands.
+      dvrWindowSeconds: 0,
+      dvrPlaylistUrl: null,
     };
   }),
 

@@ -6,7 +6,7 @@
  * reads and writes, so the origin's allowlist, the recorder, retention and the moderation movers
  * cannot drift apart.
  */
-import type { VISIBILITIES, VOD_STATUSES } from "./enums.ts";
+import type { BROADCAST_KINDS, VISIBILITIES, VOD_STATUSES } from "./enums.ts";
 
 /**
  * First key segments that hold published objects; the origin's `/media/` route serves only these.
@@ -73,3 +73,61 @@ export const VOD_ROUTE = "/vod/";
 export const vodTokenPath = (vodId: string): string => `vod/${vodId}`;
 /** A VOD token lives for the VOD's duration plus an hour, capped here (accepted: 12 h, no refresh). */
 export const VOD_TOKEN_MAX_TTL_SECONDS = 12 * 60 * 60;
+
+/**
+ * Live DVR (ADR 0016 decision 2): `GET|HEAD /dvr/<vodId>/<file>?t=<token>` on the origin. The
+ * route reads only `recordings/<vodId>/index.m3u8` (the in-progress recording) and its segments.
+ */
+export const DVR_ROUTE = "/dvr/";
+/**
+ * The `PlaybackClaims.path` a DVR token carries (`src = "origin"`, never `dm`). No MediaMTX path,
+ * VOD token path or relay binding covers it, so a DVR token authorizes nothing else.
+ */
+export const dvrTokenPath = (vodId: string): string => `dvr/${vodId}`;
+
+/** What the `/dvr/` route checks on every playlist and segment request (through the 5 s VOD state cache). */
+export interface DvrState {
+  /** Only a `recording` VOD has a live recording to rewind. */
+  vodStatus: (typeof VOD_STATUSES)[number];
+  /** `vods.removed_reason`; any value refuses. */
+  removedReason: string | null;
+  /** The VOD's broadcast has not ended. */
+  broadcastLive: boolean;
+  /** `broadcasts.kind`: a rehearsal has no DVR (batch 6 decision (g)). */
+  broadcastKind: (typeof BROADCAST_KINDS)[number];
+  /** The broadcast carries a T1 restriction. */
+  broadcastRestricted: boolean;
+  channelSuspended: boolean;
+  /** `channels.dvr_enabled`. */
+  dvrEnabled: boolean;
+  /** A hidden NCII item covers the VOD. */
+  nciiHidden: boolean;
+  /** A DMCA item covering the VOD is hidden and not restored. */
+  dmcaHidden: boolean;
+}
+
+/**
+ * Whether the origin may serve DVR for a VOD now (ADR 0016 decision 3, beside `vodPlacement`).
+ * Anything else answers 404, so a removal, a T0 or a restriction stops DVR within the cache TTL on
+ * every origin instance. Visibility is checked once, by the API, when it mints the token (`vodShown`).
+ */
+export const dvrServable = (s: DvrState): boolean =>
+  s.vodStatus === "recording" &&
+  s.removedReason === null &&
+  s.broadcastLive &&
+  s.broadcastKind === "live" &&
+  !s.broadcastRestricted &&
+  !s.channelSuspended &&
+  s.dvrEnabled &&
+  !s.nciiHidden &&
+  !s.dmcaHidden;
+
+/**
+ * A VOD's captions live under its own prefix (`<prefix>captions/<language>.vtt`, ADR 0011), so
+ * every mover (finalize, placement, moderation) carries them with the VOD's other objects.
+ */
+export const VOD_CAPTIONS_DIR = "captions/";
+export const vodCaptionsKey = (prefix: string, language: string): string => {
+  if (!/^[a-z]{2,3}(-[A-Za-z0-9]{2,4})?$/.test(language)) throw new RangeError(`invalid caption language: ${language}`);
+  return `${prefix}${VOD_CAPTIONS_DIR}${language}.vtt`;
+};

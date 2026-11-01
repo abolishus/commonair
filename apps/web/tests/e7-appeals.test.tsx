@@ -60,6 +60,7 @@ const appealOf = (subjectId: string, over: Partial<AppealDto> = {}): AppealDto =
   kind: "account",
   subjectType: "account_action",
   subjectId,
+  exclusionCategory: null,
   body: "This strike was a mistake.",
   status: "open",
   resolution: null,

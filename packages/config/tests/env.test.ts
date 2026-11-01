@@ -7,7 +7,11 @@ import { describe, expect, test } from "vite-plus/test";
 import {
   ALL_ENV_SCHEMAS,
   EnvError,
+  attestationEnv,
+  captionsEnv,
   chatEnv,
+  costModelEnv,
+  dvrEnv,
   coreEnv,
   evidenceOpenEnv,
   evidenceSealEnv,
@@ -220,5 +224,43 @@ describe("env", () => {
       `${SITE.repository.url}/tree/abc123`,
     );
     expect(sourceLink({ sourceUrl: `${SITE.repository.url}/`, sourceCommit: "unknown" })).toBe(SITE.repository.url);
+  });
+});
+
+describe("W2 env (contract step §5)", () => {
+  test("captions: two streams by default, 0 turns them off, the whisper URL is optional", () => {
+    expect(loadEnv(captionsEnv, {})).toEqual({ CAPTIONS_MAX_STREAMS: 2 });
+    expect(loadEnv(captionsEnv, { CAPTIONS_MAX_STREAMS: "0" }).CAPTIONS_MAX_STREAMS).toBe(0);
+    expect(() => loadEnv(captionsEnv, { CAPTIONS_MAX_STREAMS: "-1" })).toThrow(EnvError);
+    expect(() => loadEnv(captionsEnv, { WHISPER_URL: "not a url" })).toThrow(EnvError);
+  });
+
+  test("the DVR cap defaults to two hours (decision (b)); 0 is off", () => {
+    expect(loadEnv(dvrEnv, {}).DVR_MAX_WINDOW_SECONDS).toBe(7200);
+    expect(loadEnv(dvrEnv, { DVR_MAX_WINDOW_SECONDS: "0" }).DVR_MAX_WINDOW_SECONDS).toBe(0);
+    expect(() => loadEnv(dvrEnv, { DVR_MAX_WINDOW_SECONDS: "90000" })).toThrow(EnvError);
+  });
+
+  test("the cost model is JSON, cents per GB by source; unset costs nothing", () => {
+    expect(loadEnv(costModelEnv, {}).INFRA_COST_MODEL).toEqual({ currency: "usd", centsPerGb: {} });
+    expect(
+      loadEnv(costModelEnv, { INFRA_COST_MODEL: '{"centsPerGb":{"origin":1.5,"cdn":2}}' }).INFRA_COST_MODEL,
+    ).toEqual({ currency: "usd", centsPerGb: { origin: 1.5, cdn: 2 } });
+    for (const bad of ["{", '{"centsPerGb":{"ftp":1}}', '{"centsPerGb":{"origin":-1}}', '{"currency":"USD"}'])
+      expect(() => loadEnv(costModelEnv, { INFRA_COST_MODEL: bad }), bad).toThrow(EnvError);
+  });
+
+  test("the attestation key must be an Ed25519 PKCS#8 key", async () => {
+    const pair = (await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"])) as unknown as {
+      privateKey: CryptoKey;
+    };
+    const pkcs8 = Buffer.from(await crypto.subtle.exportKey("pkcs8", pair.privateKey)).toString("base64");
+    expect(loadEnv(attestationEnv, { INTEGRITY_SIGNING_KEY: pkcs8 }).INTEGRITY_SIGNING_KEY).toBe(pkcs8);
+    expect(() => loadEnv(attestationEnv, {})).toThrow(EnvError);
+    const x25519 = (await crypto.subtle.generateKey({ name: "X25519" }, true, ["deriveBits"])) as unknown as {
+      privateKey: CryptoKey;
+    };
+    const wrong = Buffer.from(await crypto.subtle.exportKey("pkcs8", x25519.privateKey)).toString("base64");
+    expect(() => loadEnv(attestationEnv, { INTEGRITY_SIGNING_KEY: wrong })).toThrow(/Ed25519/);
   });
 });

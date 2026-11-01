@@ -100,8 +100,9 @@ export const INTEGRITY_SUBJECTS = ["session", "user", "channel", "relay", "follo
 export const INTEGRITY_DECISIONS = ["pending_review", "excluded", "allowed"] as const;
 export const APPEAL_KINDS = ["integrity", "moderation", "dmca", "account"] as const;
 /**
- * What an appeal is about. Integrity appeals use `session`, `user` or `integrity_flag` (the
- * integrity allowance rules read exactly these); the others name the decision's own table.
+ * What an appeal is about. Integrity appeals use `session`, `user`, `integrity_flag` (the
+ * integrity allowance rules read exactly these) or `exclusion_group`; the others name the
+ * decision's own table.
  */
 export const APPEAL_SUBJECTS = [
   "session",
@@ -119,6 +120,11 @@ export const APPEAL_SUBJECTS = [
    * removal or auto-hide (ADR 0019 answer 4). The requester is never told who appealed.
    */
   "ncii_request_item",
+  /**
+   * W2b group appeals (decision (m)): one exclusion category within one broadcast. `subject_id` is
+   * the broadcast id; `appeals.exclusion_category` holds the category (non-null exactly then).
+   */
+  "exclusion_group",
 ] as const;
 export const APPEAL_STATUSES = ["open", "upheld", "overturned"] as const;
 export const ACTOR_TYPES = ["user", "moderator", "admin", "system", "bot", "app"] as const;
@@ -454,3 +460,86 @@ export const dataModeCeilingBps = (mbPerHour: number): number =>
     DATA_MODE.maxCeilingBps,
     Math.max(DATA_MODE.minCeilingBps, Math.round((mbPerHour * 8_000_000) / 3600 / DATA_MODE.overheadFactor)),
   );
+
+// Feature wins, wave 2 (W2; .claude/briefs/w2/contract-step.md, docs/testing/w2-selectors.md) ---
+
+/**
+ * `broadcasts.kind` (batch 6 decision (f)). A `rehearsal` is seen only by its invitees: it never
+ * sets `channels.live_broadcast_id`, never emits `stream.online` / `stream.offline`, and the
+ * database refuses it in `stream_hours`, ledger postings and attestations (migration 0043).
+ */
+export const BROADCAST_KINDS = ["live", "rehearsal"] as const;
+export type BroadcastKind = (typeof BROADCAST_KINDS)[number];
+/** Rehearsal limits (decision (g)). */
+export const REHEARSAL_RULES = {
+  armTtlSeconds: 600,
+  maxDurationSeconds: 1800,
+  maxInvitees: 5,
+  vodKeepSeconds: 86_400,
+} as const;
+/** Which revenue a split version covers (ADR 0013 decision 8). `all` covers both. */
+export const SPLIT_BASES = ["tips", "subs", "all"] as const;
+export type SplitBasis = (typeof SPLIT_BASES)[number];
+/**
+ * A split version: `proposed` until every recipient accepts (`accepted`, applies to payments
+ * after `starts_at`), `rejected` if any recipient refuses, `ended` once the owner ends it (never
+ * backdated). A change is a new version (ADR 0013 decision 8).
+ */
+export const SPLIT_STATUSES = ["proposed", "accepted", "ended", "rejected"] as const;
+export type SplitStatus = (typeof SPLIT_STATUSES)[number];
+/** A recipient's answer to a proposed split version. */
+export const SPLIT_ACCEPTANCE_DECISIONS = ["accepted", "rejected"] as const;
+/** A split-shortfall write-off proposal (ADR 0013 decision 6): two approvers. */
+export const SPLIT_WRITEOFF_STATUSES = ["proposed", "approved", "rejected"] as const;
+/** Split limits: basis points per recipient and per basis (the database checks the total). */
+export const SPLIT_RULES = { maxRecipients: 10, maxBpsTotal: 10_000, minBps: 1 } as const;
+/**
+ * `broadcast_caption_tracks.status` (ADR 0011): `queued` waits for a captions slot, `active` is
+ * being written live, `ready` is stitched into the VOD, `failed` gave up, `deleted` was dropped
+ * (no VOD kept, ADR 0011 decision 6).
+ */
+export const CAPTION_TRACK_STATUSES = ["queued", "active", "ready", "failed", "deleted"] as const;
+export type CaptionTrackStatus = (typeof CAPTION_TRACK_STATUSES)[number];
+/** What `PlaybackStart.captionsState` tells the player about live captions. */
+export const CAPTIONS_STATES = ["off", "queued", "active"] as const;
+/** Attestation entry kinds (ADR 0014 decisions 1 and 4, decision (r)). */
+export const ATTESTATION_KINDS = ["broadcast", "supersede", "reissue"] as const;
+export type AttestationKind = (typeof ATTESTATION_KINDS)[number];
+/**
+ * Why a session was excluded, coarser than signal codes so analytics, attestations and group
+ * appeals never reveal a signal or a threshold (decision (k)). A session's category is that of its
+ * first exclusion reason; `SIGNAL_CATEGORIES` in `@commonair/integrity` maps every signal code.
+ */
+export const EXCLUSION_CATEGORIES = [
+  "datacenter",
+  "privacy_relay",
+  "concurrency",
+  "automation",
+  "playback_pattern",
+  "other",
+] as const;
+export type ExclusionCategory = (typeof EXCLUSION_CATEGORIES)[number];
+/** Creator Analytics privacy rules (decision (k)). */
+export const ANALYTICS_RULES = {
+  /** Groups (excluded categories, sources) smaller than this are omitted, and counted as hidden. */
+  minGroupSessions: 5,
+  /** A broadcast shows in analytics and share links this long after it ends. */
+  displayDelaySeconds: 86_400,
+  /** Per-minute audience rows are kept this long; per-broadcast totals stay. */
+  minuteRetentionDays: 90,
+  /** Share links expire at most this long after creation. */
+  maxShareLinkDays: 90,
+} as const;
+/** Group appeals (decision (m)): per broadcast, and per channel per rolling window. */
+export const GROUP_APPEAL_RULES = { perBroadcast: 1, perChannel: 3, windowDays: 7 } as const;
+/**
+ * `rule_ref` on `moderation_cases`, `appeals` and `mod_actions` (decision (d)): `<clause id>@<version>`
+ * from `CLAUSES` (`@commonair/moderation`). The database CHECK uses exactly this pattern.
+ */
+export const RULE_REF_PATTERN = "^[a-z][a-z0-9.-]*@[1-9][0-9]*$";
+/** The public enforcement report (decision (d)): counts below `k` are suppressed. */
+export const ENFORCEMENT_REPORT_RULES = { k: 10, rollingDays: 30, months: 12 } as const;
+/** A DVR token lives as long as a live playback token and is refreshed by heartbeats (ADR 0016 decision 2). */
+export const DVR_TOKEN_TTL_SECONDS = 120;
+/** `channels.dvr_window_seconds` bounds; the instance cap `DVR_MAX_WINDOW_SECONDS` clamps it further. */
+export const DVR_RULES = { defaultWindowSeconds: 1800, minWindowSeconds: 60, maxWindowSeconds: 86_400 } as const;

@@ -213,15 +213,16 @@ your app starts and every hour, as Twitch asks of its apps.
 | `channel:manage:bot`         | Manage the built-in channel bot (commands, timers, variables, filters)                     |
 | `channel:read:points`        | Read loyalty point balances                                                                |
 | `channel:manage:points`      | Grant or deduct loyalty points                                                             |
+| `channel:manage:splits`      | Propose, accept, reject and end revenue splits                                             |
 | `user:read:email`            | Read the user's email address                                                              |
 | `user:read:follows`          | Read the channels the user follows                                                         |
 | `user:manage:follows`        | Follow and unfollow channels                                                               |
 | `clips:edit`                 | Create clips                                                                               |
 
-**Sensitive scopes**: `user:read:email`, `channel:manage`, `moderator:manage:chat` and
-`channel:manage:points` are marked as sensitive on the consent page. Ask for them only when your
-app needs them; people are rightly wary of an app that wants to change their channel or their
-viewers' points.
+**Sensitive scopes**: `user:read:email`, `channel:manage`, `moderator:manage:chat`,
+`channel:manage:points` and `channel:manage:splits` are marked as sensitive on the consent page.
+Ask for them only when your app needs them; people are rightly wary of an app that wants to change
+their channel, their viewers' points or who their revenue goes to.
 
 Ask for the fewest scopes you need. A grant can be widened later by sending the person through
 the consent page again with the larger set.

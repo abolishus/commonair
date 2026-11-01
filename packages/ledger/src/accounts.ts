@@ -40,6 +40,12 @@ const CHART: readonly ChartEntry[] = [
     name: (p) => `Clawback receivable from creator ${p}`,
   },
   {
+    pattern: new RegExp(`^asset:receivable:split-shortfall:(${UUID})$`),
+    type: "asset",
+    owned: true,
+    name: (p) => `Split shortfall suspense from owner ${p}`,
+  },
+  {
     pattern: new RegExp(`^liability:creator:(${UUID})$`),
     type: "liability",
     owned: true,
@@ -57,6 +63,12 @@ const CHART: readonly ChartEntry[] = [
     owned: true,
     name: (p) => `Payout reserved, not yet sent ${p}`,
   },
+  {
+    pattern: new RegExp(`^liability:split-suspense:(${UUID})$`),
+    type: "liability",
+    owned: true,
+    name: (p) => `Withheld split shares of ${p}`,
+  },
   { pattern: /^liability:tax-payable$/, type: "liability", owned: false, name: () => "Sales tax payable" },
   {
     pattern: new RegExp(`^liability:member-share:(${UUID})$`),
@@ -72,6 +84,12 @@ const CHART: readonly ChartEntry[] = [
   },
   { pattern: /^revenue:platform-cut$/, type: "revenue", owned: false, name: () => "Co-op share of revenue" },
   { pattern: /^expense:payment-fees$/, type: "expense", owned: false, name: () => "Payment processing fees" },
+  {
+    pattern: /^expense:split-shortfall-writeoff$/,
+    type: "expense",
+    owned: false,
+    name: () => "Split shortfalls written off",
+  },
   {
     pattern: new RegExp(`^expense:infrastructure:(${SLUG})$`),
     type: "expense",
@@ -119,14 +137,19 @@ export const accounts = {
   cash: (provider: string) => `asset:cash:${slug("provider", provider)}`,
   providerReceivable: (provider: string) => `asset:receivable:provider:${slug("provider", provider)}`,
   creatorReceivable: (user: string) => `asset:receivable:creator:${userId(user)}`,
+  /** ADR 0013 decision 6: what an owner absorbed for a split and could not cover. */
+  splitShortfall: (owner: string) => `asset:receivable:split-shortfall:${userId(owner)}`,
   creator: (user: string) => `liability:creator:${userId(user)}`,
   creatorHold: (user: string) => `liability:creator-hold:${userId(user)}`,
   payoutClearing: (user: string) => `liability:payout-clearing:${userId(user)}`,
+  /** ADR 0013 decision 7: a suspended, terminated or held recipient's released lots. */
+  splitSuspense: (user: string) => `liability:split-suspense:${userId(user)}`,
   taxPayable: () => "liability:tax-payable",
   memberShare: (user: string) => `liability:member-share:${userId(user)}`,
   patronagePayable: (user: string) => `liability:patronage-payable:${userId(user)}`,
   platformCut: () => "revenue:platform-cut",
   paymentFees: () => "expense:payment-fees",
+  splitShortfallWriteOff: () => "expense:split-shortfall-writeoff",
   infrastructure: (category: string) => `expense:infrastructure:${slug("cost category", category)}`,
   retainedSurplus: () => "equity:retained-surplus",
 } as const;

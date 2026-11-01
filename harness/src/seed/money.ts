@@ -17,6 +17,12 @@ const TABLES = [
   "ledger_accounts",
   "ledger_transactions",
   "ledger_entries",
+  // W2-splits (ADR 0013).
+  "revenue_splits",
+  "revenue_split_shares",
+  "revenue_split_acceptances",
+  "revenue_split_postings",
+  "split_writeoff_proposals",
 ] as const;
 
 export const unit: SeedUnit = {

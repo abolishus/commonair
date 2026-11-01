@@ -16,6 +16,7 @@ import type { ValkeyClient } from "@commonair/service";
 import { HAS_ALLOWANCE, loadAllowances } from "./allowance.ts";
 import { followBurst, type FollowFact } from "./channel.ts";
 import { findSuperseded, type LiveSession, rankConcurrency, SUPERSEDE_DEFAULTS } from "./concurrency.ts";
+import { DEFAULT_FINALIZE_SECONDS } from "./constants.ts";
 import type { NetworkClassifier } from "./network.ts";
 import { NOT_EVIDENCED, readP2pEvidence } from "./p2p.ts";
 import { checkReceipt, relayStanding, type ReceiptHistoryEntry } from "./relay.ts";
@@ -116,11 +117,11 @@ async function liveSessions(db: Executor, stale: Date): Promise<LiveSession[]> {
   // Two branches so each matches a partial index (`playback_sessions_live_hb_idx` for the first).
   const live = rows(
     await db.execute(sql`
-      select id, device_hash, user_id, channel_id, started_at, last_heartbeat_at as seen
+      select id, device_hash, user_id, channel_id, started_at, last_heartbeat_at as seen, playback_mode
         from playback_sessions
        where ended_at is null and last_heartbeat_at > ${tsz(stale)}
       union all
-      select id, device_hash, user_id, channel_id, started_at, started_at as seen
+      select id, device_hash, user_id, channel_id, started_at, started_at as seen, playback_mode
         from playback_sessions
        where ended_at is null and last_heartbeat_at is null and started_at > ${tsz(stale)}`),
   );
@@ -131,6 +132,7 @@ async function liveSessions(db: Executor, stale: Date): Promise<LiveSession[]> {
     channelId: String(r.channel_id),
     startedAt: date(r.started_at),
     lastSeenAt: date(r.seen),
+    mode: r.playback_mode === "dvr" ? "dvr" : "live",
   }));
 }
 
@@ -212,7 +214,7 @@ export async function scoreActiveSessions(
   const thresholds = await loadThresholds(db);
   const limit = opts.limit ?? 5000;
   const stale = new Date(now.getTime() - (opts.staleSeconds ?? 120) * 1000);
-  const finalize = new Date(now.getTime() - (opts.finalizeSeconds ?? 3600) * 1000);
+  const finalize = new Date(now.getTime() - (opts.finalizeSeconds ?? DEFAULT_FINALIZE_SECONDS) * 1000);
   const result: ScoreSessionsResult = {
     scored: 0,
     counts: { verified: 0, excluded: 0, pending: 0 },

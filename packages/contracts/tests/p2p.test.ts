@@ -76,7 +76,10 @@ describe("contract shapes", () => {
     expiresAt: "2026-10-27T00:00:00.000Z",
     renditions: ["source"],
     captions: [],
+    captionsState: "off",
     dataMode: null,
+    dvrWindowSeconds: 0,
+    dvrPlaylistUrl: null,
   };
 
   test("PlaybackStart.p2p requires available and digestUrl", () => {

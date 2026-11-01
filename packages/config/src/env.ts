@@ -464,6 +464,68 @@ export const integrityEnv = z.object({
   INTEGRITY_DATACENTER_CIDRS_FILE: z.string().optional(),
 });
 
+// Feature wins, wave 2 (W2; .claude/briefs/w2/contract-step.md §5) ------------------------
+
+/** Open captions (ADR 0011, decision (j)). Media only. */
+export const captionsEnv = z.object({
+  /** Live caption workers per media host (FIFO queue beyond it); 0 turns live captions off. */
+  CAPTIONS_MAX_STREAMS: z.coerce.number().int().min(0).max(64).default(2),
+  /** The whisper.cpp sidecar's HTTP server (internal network only); unset: live captions stay off. */
+  WHISPER_URL: z.url().optional(),
+});
+
+/** Live DVR (ADR 0016, decision (b)). API and origin. */
+export const dvrEnv = z.object({
+  /** Instance cap on a channel's DVR window in seconds (channels default to 1800); 0 turns DVR off. */
+  DVR_MAX_WINDOW_SECONDS: z.coerce.number().int().min(0).max(86_400).default(7200),
+});
+
+/**
+ * Delivery sources the cost model prices. Mirrors `DELIVERY_SOURCES` in `@commonair/contracts`
+ * (config cannot import it); `services/worker/tests/infra-cost-model.test.ts` keeps them equal.
+ */
+export const COST_MODEL_SOURCES = ["origin", "relay", "p2p", "cdn"] as const;
+/**
+ * `INFRA_COST_MODEL` (decision (k)): marginal egress cost in cents per GB (10^9 bytes) by delivery
+ * source, fractional allowed; a source left out costs 0. The rollup multiplies bytes by these and
+ * rounds once, at the broadcast total, half-up.
+ */
+export const InfraCostModel = z.object({
+  currency: z
+    .string()
+    .regex(/^[a-z]{3}$/)
+    .default("usd"),
+  centsPerGb: z.partialRecord(z.enum(COST_MODEL_SOURCES), z.number().min(0).max(100_000)).default({}),
+});
+export type InfraCostModel = z.output<typeof InfraCostModel>;
+const jsonText = z.string().transform((v, ctx) => {
+  try {
+    return JSON.parse(v) as unknown;
+  } catch {
+    ctx.addIssue({ code: "custom", message: "must be JSON" });
+    return z.NEVER;
+  }
+});
+/** Creator Analytics' cost model. Worker (rollup) and API (P&L). */
+export const costModelEnv = z.object({
+  /** JSON `{"currency":"usd","centsPerGb":{"origin":1,"relay":0,"p2p":0,"cdn":2}}`; unset: every source costs 0. */
+  INFRA_COST_MODEL: jsonText.pipe(InfraCostModel).default({ currency: "usd", centsPerGb: {} }),
+});
+
+/** Ed25519 PKCS#8 DER prefix: SEQUENCE, version 0, AlgorithmIdentifier 1.3.101.112, OCTET STRING(OCTET STRING(32)). */
+const ED25519_PKCS8_PREFIX = "302e020100300506032b657004220420";
+/**
+ * Signed audience attestations (ADR 0014 decision 1, decision (l)). **Worker only**: the API and
+ * the web never load this schema, so they can never sign.
+ */
+export const attestationEnv = z.object({
+  /** Attestation signing key (Ed25519 PKCS#8 DER, base64). Rotate by replacing it and restarting the worker. */
+  INTEGRITY_SIGNING_KEY: z.string().refine((v) => {
+    const b = base64Bytes(v);
+    return b?.length === 48 && hexOf(b.subarray(0, 16)) === ED25519_PKCS8_PREFIX;
+  }, "must be a base64 Ed25519 PKCS#8 private key (bun scripts/init-env.ts --merge)"),
+});
+
 export const developerEnv = z.object({
   /** Allow http:// and private-network EventSub webhook callbacks. Development and harness only. */
   EVENTSUB_ALLOW_INSECURE_CALLBACKS: bool.default(false),
@@ -718,6 +780,10 @@ export const ALL_ENV_SCHEMAS = {
   playbackEnv,
   turnEnv: turnShape,
   integrityEnv,
+  captionsEnv,
+  dvrEnv,
+  costModelEnv,
+  attestationEnv,
   developerEnv,
   webPushEnv: webPushShape,
   workerEnv,

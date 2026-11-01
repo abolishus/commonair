@@ -454,6 +454,7 @@ describe("transparency", () => {
     egressBySource: egress({ origin: 600, relay: 400 }),
     governance: [],
     members: { streamer: 0, viewer: 0, worker: 0 },
+    splitSuspense: { released: 0, forfeited: 0, writeOffs: 0, heldAtMonthEnd: usd(0) },
     ...over,
   });
 

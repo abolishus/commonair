@@ -23,6 +23,8 @@
   "oauth.scope.channel.read.points.body": "Ver cuántos puntos tienen los espectadores en tu canal.",
   "oauth.scope.channel.manage.points.title": "Dar y quitar puntos del canal",
   "oauth.scope.channel.manage.points.body": "Sumar puntos a los espectadores de tu canal o quitárselos.",
+  "oauth.scope.channel.manage.splits.title": "Gestionar repartos de ingresos",
+  "oauth.scope.channel.manage.splits.body": "Proponer, aceptar, rechazar y terminar repartos de los ingresos de tu canal.",
   "oauth.scope.user.read.email.title": "Ver tu dirección de correo",
   "oauth.scope.user.read.email.body": "Leer la dirección de correo de tu cuenta.",
   "oauth.scope.user.read.follows.title": "Ver a quién sigues",

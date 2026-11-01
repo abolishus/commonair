@@ -28,6 +28,8 @@ export type Key =
   | "oauth.scope.channel.read.points.body"
   | "oauth.scope.channel.manage.points.title"
   | "oauth.scope.channel.manage.points.body"
+  | "oauth.scope.channel.manage.splits.title"
+  | "oauth.scope.channel.manage.splits.body"
   | "oauth.scope.user.read.email.title"
   | "oauth.scope.user.read.email.body"
   | "oauth.scope.user.read.follows.title"

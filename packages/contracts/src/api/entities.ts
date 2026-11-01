@@ -7,7 +7,9 @@ import * as E from "../enums.ts";
 import {
   AlertTemplate,
   BotConfig,
+  ChannelCaptionsSettings,
   ChannelChatSettings,
+  ChannelDvrSettings,
   ChannelTheme,
   EmoteRange,
   PatronageLine,
@@ -65,8 +67,13 @@ export const BroadcastSummary = z.object({
   category: Category.pick({ id: true, slug: true, name: true }).nullable(),
   startedAt: Timestamp,
   mature: z.boolean(),
-  /** Verified viewers only; excluded traffic never appears in public counts. */
+  /** Verified viewers watching live only; excluded traffic never appears in public counts. */
   viewerCount: z.number().int().nonnegative(),
+  /**
+   * ADR 0016 decision 6 ("the public count shows both numbers"): verified viewers rewound in DVR
+   * mode, counted apart from `viewerCount`. Absent = 0 (W2-dvr fills it).
+   */
+  catchingUpCount: z.number().int().nonnegative().optional(),
   thumbnailUrl: z.string().nullable(),
   /**
    * `under_review` while a T1 moderation case restricts the broadcast (the thumbnail is then
@@ -204,6 +211,10 @@ export const StreamHealth = z.object({
   }),
 });
 
+/** One subtitle track (WebVTT). On `PlaybackStart` only active live tracks; on `Vod` only ready ones. */
+export const CaptionTrack = z.object({ language: z.string(), label: z.string(), url: z.string() });
+export type CaptionTrack = z.infer<typeof CaptionTrack>;
+
 export const Vod = z.object({
   id: Id,
   channelSlug: Slug,
@@ -217,6 +228,8 @@ export const Vod = z.object({
   expiresAt: Timestamp.nullable(),
   /** Why processing failed (status `failed`), else null. */
   failedReason: z.enum(E.VOD_FAILED_REASONS).nullable(),
+  /** W2-captions: the VOD's ready caption tracks (empty when none or not yet stitched). */
+  captions: z.array(CaptionTrack),
 });
 export const Clip = z.object({
   id: Id,
@@ -229,6 +242,12 @@ export const Clip = z.object({
   thumbnailUrl: z.string().nullable(),
   views: z.number().int(),
   createdAt: Timestamp,
+  /**
+   * W2-vod-watch: the wall-clock start of the window the clip was cut from (broadcast
+   * `started_at + start_offset`, the value `clips.chat` uses), so replay can place chat against
+   * the MP4's `currentTime`. Null when the clip has no broadcast.
+   */
+  windowStartedAt: Timestamp.nullable(),
 });
 export const SimulcastTarget = z.object({
   id: Id,
@@ -273,9 +292,25 @@ export const PlaybackStart = z.object({
   heartbeatIntervalMs: z.number().int(),
   expiresAt: Timestamp,
   renditions: z.array(z.enum(E.RENDITIONS)),
-  captions: z.array(z.object({ language: z.string(), label: z.string(), url: z.string() })),
+  /** Active live caption tracks (W2-captions `captionTracksFor`); empty for rehearsals. */
+  captions: z.array(CaptionTrack),
+  /**
+   * Why there are or are not captions: `off` (the channel or instance has them off, or a
+   * rehearsal), `queued` (waiting for a captions slot on the media host), `active`.
+   */
+  captionsState: z.enum(E.CAPTIONS_STATES),
   /** The data-mode ceiling in the session's token (ADR 0018), null when off. */
   dataMode: z.number().int().nullable(),
+  /**
+   * Live DVR (ADR 0016): seconds the viewer may rewind, `min(channel window, DVR_MAX_WINDOW_SECONDS)`;
+   * 0 = no DVR (no recording, DVR off, data mode on, a rehearsal, or the VOD gate refuses).
+   */
+  dvrWindowSeconds: z.number().int().nonnegative(),
+  /**
+   * The DVR playlist on `PLAYBACK_PUBLIC_URL` (`/dvr/<vodId>/index.m3u8?t=<dvr token>`), even for
+   * relay- or CDN-assigned sessions (DVR is origin-only); null exactly when `dvrWindowSeconds` is 0.
+   */
+  dvrPlaylistUrl: z.string().nullable(),
 });
 export const Heartbeat = z.object({
   sessionId: Id,
@@ -1050,6 +1085,17 @@ export const TransparencyMonth = z.object({
     }),
   ),
   members: z.record(z.enum(E.MEMBER_CLASSES), z.number().int()),
+  /**
+   * ADR 0013 decisions 6 and 7: withheld split shares and split shortfalls this month. Counts and
+   * totals only, never who. `heldAtMonthEnd`: the `liability:split-suspense:*` balance at month end;
+   * the write-off amount itself is the `split-shortfall-writeoff` line in `costs`.
+   */
+  splitSuspense: z.object({
+    released: z.number().int().nonnegative(),
+    forfeited: z.number().int().nonnegative(),
+    writeOffs: z.number().int().nonnegative(),
+    heldAtMonthEnd: Money,
+  }),
 });
 
 export const IntegrityFlag = z.object({
@@ -1062,20 +1108,36 @@ export const IntegrityFlag = z.object({
   decision: z.enum(E.INTEGRITY_DECISIONS),
   createdAt: Timestamp,
 });
+/**
+ * What was excluded from a channel's counts and why (decision (k)): from the per-broadcast rollup,
+ * integer seconds, by exclusion category (never a signal code or a threshold). Groups under
+ * `ANALYTICS_RULES.minGroupSessions` sessions are left out and counted in `hiddenGroups`.
+ */
 export const IntegritySummary = z.object({
   channelSlug: Slug,
   periodStart: Timestamp,
   periodEnd: Timestamp,
-  verifiedViewerHours: z.number(),
-  excludedViewerHours: z.number(),
-  excludedFollows: z.number().int(),
-  exclusionsBySignal: z.array(z.object({ signal: z.string(), sessions: z.number().int(), viewerHours: z.number() })),
+  verifiedViewerSeconds: z.number().int().nonnegative(),
+  /** Pending and fetch-unjudged sessions: neither verified nor excluded (ADR 0014 decision 7). */
+  unverifiedViewerSeconds: z.number().int().nonnegative(),
+  excludedViewerSeconds: z.number().int().nonnegative(),
+  excludedFollows: z.number().int().nonnegative(),
+  exclusionsByCategory: z.array(
+    z.object({
+      category: z.enum(E.EXCLUSION_CATEGORIES),
+      sessions: z.number().int().nonnegative(),
+      viewerSeconds: z.number().int().nonnegative(),
+    }),
+  ),
+  hiddenGroups: z.number().int().nonnegative(),
 });
 export const Appeal = z.object({
   id: Id,
   kind: z.enum(E.APPEAL_KINDS),
   subjectType: z.string(),
   subjectId: Id,
+  /** `exclusion_group` appeals only (`subjectId` is then the broadcast id); else null. */
+  exclusionCategory: z.enum(E.EXCLUSION_CATEGORIES).nullable(),
   body: z.string(),
   status: z.enum(E.APPEAL_STATUSES),
   resolution: z.string().nullable(),
@@ -1361,6 +1423,8 @@ export const InstanceInfo = z.object({
     watchGate: z.boolean(),
     /** CHAT_SURGE_GUARD (ADR 0015 decision 6). */
     surgeGuard: z.boolean(),
+    /** DVR_MAX_WINDOW_SECONDS (ADR 0016): the studio offers DVR windows up to this; 0 = DVR off. */
+    dvrMaxWindowSeconds: z.number().int().nonnegative(),
   }),
   minAge: z.number().int(),
 });
@@ -1601,3 +1665,304 @@ export const DiscordWebhookStatus = z.object({
   lastError: z.enum(E.DISCORD_WEBHOOK_ERRORS).nullable(),
 });
 export type DiscordWebhookStatus = z.infer<typeof DiscordWebhookStatus>;
+
+// Feature wins, wave 2 (W2; .claude/briefs/w2/contract-step.md §1.3, docs/testing/w2-selectors.md)
+
+/** Captions and DVR settings for the studio (owner only: the mask list is private). */
+export const ChannelMediaSettings = z.object({
+  captions: ChannelCaptionsSettings,
+  /** The instance default (`captions.defaultEnabled`) a null `captions.enabled` follows. */
+  captionsInstanceDefault: z.boolean(),
+  dvr: ChannelDvrSettings,
+  /** `DVR_MAX_WINDOW_SECONDS`; the effective window is `min(dvr.windowSeconds, this)`. */
+  dvrMaxWindowSeconds: z.number().int().nonnegative(),
+});
+export type ChannelMediaSettings = z.infer<typeof ChannelMediaSettings>;
+
+/** One editable cue of a VOD caption track (timing is fixed in v1, ADR 0011). */
+export const CaptionCue = z.object({
+  /** Index in the track, stable across text edits. */
+  index: z.number().int().nonnegative(),
+  startMs: z.number().int().nonnegative(),
+  endMs: z.number().int().nonnegative(),
+  text: z.string().max(500),
+});
+export const VodCaptions = z.object({
+  vodId: Id,
+  language: z.string(),
+  status: z.enum(E.CAPTION_TRACK_STATUSES),
+  cues: z.array(CaptionCue),
+  /** Last edit, if any (`caption_edits`). */
+  editedAt: Timestamp.nullable(),
+});
+export type VodCaptions = z.infer<typeof VodCaptions>;
+
+/** Revenue splits (ADR 0013). User refs only; never a payout account or an email. */
+export const SplitShare = z.object({
+  recipient: UserPublic.pick({ id: true, username: true, displayName: true }),
+  bps: z.number().int().min(E.SPLIT_RULES.minBps).max(E.SPLIT_RULES.maxBpsTotal),
+  /** The recipient's answer; null while undecided. */
+  decision: z.enum(E.SPLIT_ACCEPTANCE_DECISIONS).nullable(),
+  decidedAt: Timestamp.nullable(),
+});
+export const RevenueSplit = z.object({
+  id: Id,
+  channelSlug: Slug,
+  version: z.number().int().positive(),
+  status: z.enum(E.SPLIT_STATUSES),
+  basis: z.enum(E.SPLIT_BASES),
+  /** Applies to payments succeeding in [startsAt, endsAt); endsAt null = until ended. */
+  startsAt: Timestamp,
+  endsAt: Timestamp.nullable(),
+  shares: z.array(SplitShare),
+  createdAt: Timestamp,
+  acceptedAt: Timestamp.nullable(),
+  endedAt: Timestamp.nullable(),
+  /** The caller's own pending decision, when the caller is a recipient. */
+  awaitingYou: z.boolean(),
+});
+export type RevenueSplit = z.infer<typeof RevenueSplit>;
+/** A proposal to write off an owner's split-shortfall suspense balance (ADR 0013 decision 6; two approvers). */
+export const SplitWriteOff = z.object({
+  id: Id,
+  owner: UserPublic.pick({ id: true, username: true }),
+  amount: Money,
+  status: z.enum(E.SPLIT_WRITEOFF_STATUSES),
+  proposedBy: UserPublic.pick({ id: true, username: true }),
+  proposedAt: Timestamp,
+  approvedBy: UserPublic.pick({ id: true, username: true }).nullable(),
+  approvedAt: Timestamp.nullable(),
+});
+export type SplitWriteOff = z.infer<typeof SplitWriteOff>;
+
+/** Rehearsal mode (decisions (f), (g)). */
+export const RehearsalStatus = z.object({
+  state: z.enum(["idle", "armed", "rehearsing"]),
+  armId: Id.nullable(),
+  /** Armed: when the arm lapses (TTL 10 min). */
+  armExpiresAt: Timestamp.nullable(),
+  /** Rehearsing: the open rehearsal broadcast and when the 30-minute cap ends it. */
+  broadcastId: Id.nullable(),
+  endsAt: Timestamp.nullable(),
+  invitees: z.array(UserPublic.pick({ id: true, username: true, displayName: true })),
+});
+export type RehearsalStatus = z.infer<typeof RehearsalStatus>;
+const RehearsalRuleCounts = z.object({
+  wordFilter: z.number().int().nonnegative(),
+  link: z.number().int().nonnegative(),
+  duplicate: z.number().int().nonnegative(),
+  rateLimit: z.number().int().nonnegative(),
+  other: z.number().int().nonnegative(),
+});
+export const RehearsalReport = z.object({
+  broadcastId: Id,
+  startedAt: Timestamp,
+  endedAt: Timestamp.nullable(),
+  /** `safety`: a T0 hit ended it; the report says no more than that. */
+  endReason: z.enum(["disarmed", "publisher_ended", "cap", "safety", "expired"]).nullable(),
+  chat: z.object({
+    accepted: z.number().int().nonnegative(),
+    held: RehearsalRuleCounts,
+    rejected: RehearsalRuleCounts,
+  }),
+  ingest: z.array(
+    z.object({
+      check: z.enum(["bitrate", "fps", "keyframe_interval", "dropped_frames", "audio", "video"]),
+      ok: z.boolean(),
+      /** When a dip started, if any. */
+      dips: z.array(z.object({ at: Timestamp, seconds: z.number().int().nonnegative() })),
+    }),
+  ),
+  moderation: z.object({ samples: z.number().int().nonnegative(), flagged: z.boolean() }),
+  inviteesWatched: z.array(UserPublic.pick({ id: true, username: true })),
+  updatedAt: Timestamp,
+});
+export type RehearsalReport = z.infer<typeof RehearsalReport>;
+/** An invitee's (or the owner's) origin-only playback for a rehearsal, never through `liveBroadcastId`. */
+export const RehearsalWatch = z.object({
+  sessionId: Id,
+  playlistUrl: z.string(),
+  token: z.string(),
+  expiresAt: Timestamp,
+  heartbeatIntervalMs: z.number().int(),
+});
+export type RehearsalWatch = z.infer<typeof RehearsalWatch>;
+
+/**
+ * Creator Analytics (decision (k), feature-wins §4.9). Integer seconds and bytes; categories, never
+ * signal codes, thresholds or user ids. Groups under `ANALYTICS_RULES.minGroupSessions` are omitted
+ * and counted in `hiddenGroups`. Costs are marginal and owner-private.
+ */
+const AudienceTotals = z.object({
+  verifiedViewerSeconds: z.number().int().nonnegative(),
+  unverifiedViewerSeconds: z.number().int().nonnegative(),
+  excludedViewerSeconds: z.number().int().nonnegative(),
+  peakVerifiedConcurrent: z.number().int().nonnegative(),
+  sessions: z.number().int().nonnegative(),
+});
+const ExclusionGroup = z.object({
+  category: z.enum(E.EXCLUSION_CATEGORIES),
+  sessions: z.number().int().nonnegative(),
+  viewerSeconds: z.number().int().nonnegative(),
+});
+const DeliveryMix = z.array(
+  z.object({
+    source: z.enum(E.DELIVERY_SOURCES),
+    bytes: z.number().int().nonnegative(),
+    verifiedViewerSeconds: z.number().int().nonnegative(),
+  }),
+);
+export const BroadcastAnalytics = z.object({
+  broadcastId: Id,
+  title: z.string(),
+  startedAt: Timestamp,
+  endedAt: Timestamp,
+  durationSeconds: z.number().int().nonnegative(),
+  totals: AudienceTotals,
+  /** One point per minute (verified, unverified, excluded concurrent sessions). */
+  minutes: z.array(
+    z.object({
+      at: Timestamp,
+      verified: z.number().int().nonnegative(),
+      unverified: z.number().int().nonnegative(),
+      excluded: z.number().int().nonnegative(),
+    }),
+  ),
+  /** False once the per-minute rows aged out (90 days): only totals remain. */
+  minutesRetained: z.boolean(),
+  exclusions: z.array(ExclusionGroup),
+  hiddenGroups: z.number().int().nonnegative(),
+  delivery: DeliveryMix,
+  /** Marginal cost of serving it (owner only; null on share links). */
+  cost: Money.nullable(),
+});
+export type BroadcastAnalytics = z.infer<typeof BroadcastAnalytics>;
+export const AnalyticsRange = z.object({
+  from: Timestamp,
+  to: Timestamp,
+  totals: AudienceTotals,
+  broadcasts: z.array(
+    z.object({
+      broadcastId: Id,
+      title: z.string(),
+      startedAt: Timestamp,
+      durationSeconds: z.number().int().nonnegative(),
+      totals: AudienceTotals,
+    }),
+  ),
+  delivery: DeliveryMix,
+  cost: Money.nullable(),
+});
+export type AnalyticsRange = z.infer<typeof AnalyticsRange>;
+export const AnalyticsExclusions = z.object({
+  from: Timestamp,
+  to: Timestamp,
+  groups: z.array(ExclusionGroup.extend({ broadcastId: Id })),
+  hiddenGroups: z.number().int().nonnegative(),
+});
+export type AnalyticsExclusions = z.infer<typeof AnalyticsExclusions>;
+export const AnalyticsPnl = z.object({
+  from: Timestamp,
+  to: Timestamp,
+  /** Ledger revenue lines (read-only), net of reversals. */
+  revenue: Money,
+  /** Marginal serving cost from the rollup and `INFRA_COST_MODEL`. */
+  cost: Money,
+  net: Money,
+  byBroadcast: z.array(z.object({ broadcastId: Id, revenue: Money, cost: Money })),
+});
+export type AnalyticsPnl = z.infer<typeof AnalyticsPnl>;
+export const AnalyticsShareLink = z.object({
+  id: Id,
+  broadcastId: Id,
+  /** The full link, returned once on create (the token is stored hashed); null on reads. */
+  url: z.string().nullable(),
+  expiresAt: Timestamp,
+  revokedAt: Timestamp.nullable(),
+  createdAt: Timestamp,
+});
+export type AnalyticsShareLink = z.infer<typeof AnalyticsShareLink>;
+
+/**
+ * Signed audience attestations (ADR 0014). `envelope` is exactly what was signed: base64url payload
+ * bytes and signature (`@commonair/tokens/attestation`); verifiers verify the bytes first and
+ * parse after. `breakdown` and `salt` reveal the reasons commitment: owner or share link only.
+ */
+export const AttestationEnvelope = z.object({ payload: z.string(), signature: z.string() });
+export const AttestationEntry = z.object({
+  id: Id,
+  channelSlug: Slug,
+  broadcastId: Id,
+  seq: z.number().int().positive(),
+  kind: z.enum(E.ATTESTATION_KINDS),
+  kid: z.string(),
+  entryHash: z.string(),
+  prevHash: z.string().nullable(),
+  supersedes: z.string().nullable(),
+  signedAt: Timestamp,
+  envelope: AttestationEnvelope,
+  /** A later entry for the same broadcast replaces this one (it still verifies). */
+  superseded: z.boolean(),
+  breakdown: z.record(z.enum(E.EXCLUSION_CATEGORIES), z.number().int().nonnegative()).nullable(),
+  salt: z.string().nullable(),
+});
+export type AttestationEntry = z.infer<typeof AttestationEntry>;
+export const AttestationKey = z.object({
+  kid: z.string(),
+  algorithm: z.literal("Ed25519"),
+  /** Raw 32-byte public key, base64url. */
+  publicKey: z.string(),
+  firstUsedAt: Timestamp,
+  retiredAt: Timestamp.nullable(),
+  compromisedAt: Timestamp.nullable(),
+});
+export type AttestationKey = z.infer<typeof AttestationKey>;
+/** `/.well-known/commonair-attestation`: the instance origin and its full key history. */
+export const AttestationKeyHistory = z.object({ origin: z.string(), keys: z.array(AttestationKey) });
+export const AttestationVerifyResult = z.object({
+  valid: z.boolean(),
+  /** Why not, when `valid` is false. */
+  problem: z
+    .enum(["bad_signature", "unknown_kid", "compromised_kid", "wrong_origin", "chain_break", "malformed", "superseded"])
+    .nullable(),
+  origin: z.string().nullable(),
+  /** The parsed statement, only once the signature verified. */
+  statement: z.record(z.string(), z.unknown()).nullable(),
+});
+export type AttestationVerifyResult = z.infer<typeof AttestationVerifyResult>;
+
+/**
+ * The public enforcement report (decision (d), ADR 0019). A cell under `ENFORCEMENT_REPORT_RULES.k`
+ * is `{suppressed: true}`, never a number; zero is not suppressed. Ratios are integer numerator
+ * and denominator; the client divides.
+ */
+export const ReportCount = z.discriminatedUnion("suppressed", [
+  z.object({ suppressed: z.literal(false), value: z.number().int().nonnegative() }),
+  z.object({ suppressed: z.literal(true) }),
+]);
+export type ReportCount = z.infer<typeof ReportCount>;
+export const EnforcementReportRow = z.object({
+  /** `<clause id>@<version>`. */
+  ruleRef: z.string(),
+  clauseId: z.string(),
+  clauseVersion: z.number().int().positive(),
+  /** The clause's plain-language title in the request locale (the web has no clause catalog). */
+  clauseTitle: z.string(),
+  group: z.enum(["safety", "decency", "honesty", "creative", "mature", "illegal", "general"]),
+  tier: z.enum(E.MODERATION_TIERS).nullable(),
+  count: ReportCount,
+  automatedDecision: z.object({ fully: ReportCount, partially: ReportCount, not: ReportCount }),
+  automatedDetection: ReportCount,
+  appealed: ReportCount,
+  overturned: ReportCount,
+});
+export const EnforcementReport = z.object({
+  window: z.union([z.literal("30d"), z.string().regex(/^\d{4}-\d{2}$/)]),
+  from: Timestamp,
+  to: Timestamp,
+  rows: z.array(EnforcementReportRow),
+  total: ReportCount,
+  ncii: z.object({ due: ReportCount, onTime: ReportCount, late: ReportCount }),
+  generatedAt: Timestamp,
+});
+export type EnforcementReport = z.infer<typeof EnforcementReport>;

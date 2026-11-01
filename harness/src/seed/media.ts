@@ -17,6 +17,14 @@ const TABLES = [
   "relay_nodes",
   "relay_issuance",
   "relay_receipts",
+  // W2: captions, rehearsal invitees and the audience rollup.
+  "broadcast_caption_tracks",
+  "caption_edits",
+  "rehearsal_invitees",
+  "broadcast_audience_minutes",
+  "broadcast_audience_totals",
+  "broadcast_costs",
+  "analytics_share_links",
 ] as const;
 
 export const unit: SeedUnit = {

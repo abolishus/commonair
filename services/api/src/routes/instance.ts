@@ -121,6 +121,7 @@ export const instance = {
         vod: true,
         watchGate: env.CHAT_WATCH_GATE === "on",
         surgeGuard: env.CHAT_SURGE_GUARD === "on",
+        dvrMaxWindowSeconds: env.DVR_MAX_WINDOW_SECONDS,
       },
       minAge: env.AUTH_MIN_AGE,
     };

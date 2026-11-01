@@ -188,6 +188,7 @@ const vod = (over: Partial<VodDto> = {}): VodDto => ({
   createdAt: iso(NOW - HOUR),
   expiresAt: null,
   failedReason: null,
+  captions: [],
   ...over,
 });
 const clip = (over: Partial<ClipDto> = {}): ClipDto => ({
@@ -201,6 +202,7 @@ const clip = (over: Partial<ClipDto> = {}): ClipDto => ({
   thumbnailUrl: null,
   views: 1234,
   createdAt: iso(NOW - HOUR),
+  windowStartedAt: null,
   ...over,
 });
 

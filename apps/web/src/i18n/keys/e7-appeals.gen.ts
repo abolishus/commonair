@@ -32,6 +32,7 @@ export type Key =
   | "appeals.account.subject.integrity_flag"
   | "appeals.account.subject.dmca_notice"
   | "appeals.account.subject.account_action"
+  | "appeals.account.subject.exclusion_group"
   | "appeals.account.kind.integrity"
   | "appeals.account.kind.moderation"
   | "appeals.account.kind.dmca"

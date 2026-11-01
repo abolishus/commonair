@@ -683,6 +683,58 @@ describe.skipIf(!storage)("account deletion (E6)", () => {
     expect(left.map((r) => [r.userId, r.blockedUserId])).toEqual([[A.user.id, B.user.id]]);
   });
 
+  test("caption edits and share links lose their author; rehearsal invitations go (W2)", async () => {
+    const U = await makeUser(db()); // the deleted editor and invitee
+    const O = await makeUser(db()); // another editor
+    const S = await makeUser(db()); // the channel
+    const b = await makeBroadcast(db(), S.channel.id);
+    const [track] = await app()
+      .insert(schema.broadcastCaptionTracks)
+      .values({ broadcastId: b.id, language: "en", status: "ready" })
+      .returning();
+    await app()
+      .insert(schema.captionEdits)
+      .values([
+        { trackId: track!.id, editorUserId: U.user.id, cuesChanged: 2 },
+        { trackId: track!.id, editorUserId: O.user.id, cuesChanged: 1 },
+      ]);
+    const armId = uuidv7();
+    await app()
+      .insert(schema.rehearsalInvitees)
+      .values([
+        { armId, channelId: S.channel.id, userId: U.user.id },
+        { armId, channelId: S.channel.id, userId: O.user.id },
+      ]);
+    await app()
+      .insert(schema.analyticsShareLinks)
+      .values({
+        channelId: U.channel.id,
+        broadcastId: (await makeBroadcast(db(), U.channel.id)).id,
+        tokenHash: `h-${uuidv7()}`,
+        createdById: U.user.id,
+        expiresAt: new Date(Date.now() + 86_400_000),
+      });
+    await schedule(U.user.id);
+    expect(await runAccountDeletions(ctx())).toMatchObject({ completed: 1, failed: 0 });
+    const edits = await db().select().from(schema.captionEdits).where(eq(schema.captionEdits.trackId, track!.id));
+    expect(edits.toSorted((x, y) => x.cuesChanged - y.cuesChanged).map((e) => [e.editorUserId, e.cuesChanged])).toEqual(
+      [
+        [O.user.id, 1],
+        [null, 2],
+      ],
+    );
+    const invitees = await db()
+      .select()
+      .from(schema.rehearsalInvitees)
+      .where(eq(schema.rehearsalInvitees.armId, armId));
+    expect(invitees.map((i) => i.userId)).toEqual([O.user.id]);
+    const links = await db()
+      .select()
+      .from(schema.analyticsShareLinks)
+      .where(eq(schema.analyticsShareLinks.channelId, U.channel.id));
+    expect(links.map((l) => l.createdById)).toEqual([null]);
+  });
+
   test("notification state goes: the member's own, and every follower's about their channel (N1)", async () => {
     const S = await makeUser(db()); // the deleted streamer
     const F = await makeUser(db()); // a follower of S, also a streamer others follow

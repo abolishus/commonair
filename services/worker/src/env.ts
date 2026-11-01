@@ -22,6 +22,8 @@ import {
   valkeyEnv,
   webPushRefinement,
   webPushShape,
+  attestationEnv,
+  costModelEnv,
   workerEnv as workerTuningEnv,
 } from "@commonair/config";
 import { QUEUES } from "@commonair/contracts/internal";
@@ -59,6 +61,9 @@ export const workerEnv = z
     ...internalEnv.pick({ INTERNAL_API_SECRET: true }).shape,
     // N1: web push (ADR 0028 decision 1); the worker signs with the VAPID private key.
     ...webPushShape.shape,
+    // W2: the rollup's cost model (decision (k)) and the attestation key, worker only (decision (l)).
+    ...costModelEnv.shape,
+    ...attestationEnv.shape,
   })
   .superRefine((env, ctx) => {
     if (env.MODERATION_CLASSIFIER === "scripted" && !env.MODERATION_TEST_HOOKS)

@@ -18,7 +18,17 @@ import type { ReceiptPayload } from "@commonair/contracts/shapes";
 import { users } from "./auth.ts";
 import { channels } from "./channels.ts";
 import { broadcasts } from "./media.ts";
-import { createdAt, deliverySource, id, receiptStatus, relayStatus, sessionVerdict, ts, updatedAt } from "./_shared.ts";
+import {
+  createdAt,
+  deliverySource,
+  id,
+  playbackMode,
+  receiptStatus,
+  relayStatus,
+  sessionVerdict,
+  ts,
+  updatedAt,
+} from "./_shared.ts";
 
 export const relayNodes = pgTable(
   "relay_nodes",
@@ -92,6 +102,10 @@ export const playbackSessions = pgTable(
       .default(sql`'{}'::text[]`),
     score: doublePrecision(),
     scoredAt: ts(),
+    /** ADR 0016 decision 6: the mode of the last heartbeat (`dvr` sessions are catching up, not live viewers). */
+    playbackMode: playbackMode().notNull().default("live"),
+    /** Credited seconds played in DVR mode (part of `watch_seconds`). */
+    dvrSeconds: integer().notNull().default(0),
   },
   (t) => [
     index("playback_sessions_broadcast_idx").on(t.broadcastId, t.verdict),

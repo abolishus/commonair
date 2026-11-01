@@ -5,6 +5,7 @@ import { z } from "zod";
 import {
   ALL_ENV_SCHEMAS,
   authEnv,
+  captionsEnv,
   databaseEnv,
   developerEnv,
   evidenceSealEnv,
@@ -34,5 +35,7 @@ export const mediaServiceEnv = z.object({
   MEDIA_PORT: servicePorts.shape.MEDIA_PORT,
   /** Dev/harness only: simulcast targets on loopback/private networks are allowed. */
   OUTBOUND_ALLOW_PRIVATE_NETWORKS: developerEnv.shape.OUTBOUND_ALLOW_PRIVATE_NETWORKS,
+  // W2-captions (ADR 0011): the captions worker's slots and the whisper sidecar.
+  ...captionsEnv.shape,
 });
 export type MediaServiceEnv = z.output<typeof mediaServiceEnv>;

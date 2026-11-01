@@ -137,6 +137,7 @@ export const toAppeal = (a: AppealRow) => ({
   kind: a.kind,
   subjectType: a.subjectType,
   subjectId: a.subjectId,
+  exclusionCategory: a.exclusionCategory,
   body: a.body,
   status: a.status,
   resolution: a.resolution,
@@ -224,6 +225,10 @@ async function subjectConcerns(deps: Deps, type: Subject, id: string, userId: st
         .limit(1);
       return r !== undefined;
     }
+    // W2b-group-appeals: `exclusion_group` is checked by `createGroupAppeal` (analytics/appeals.ts),
+    // which `appeals.create` calls instead; this generic check never admits one.
+    case "exclusion_group":
+      return false;
     case "ncii_request_item": {
       // Only an item that restricted something (removed or auto-hidden) can be appealed, by the
       // owner of the channel it is on, or the clip's creator.

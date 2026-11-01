@@ -29,7 +29,9 @@ export const PlaybackClaims = z
      * same key, lifetime capped by `VOD_TOKEN_MAX_TTL_SECONDS`). No MediaMTX path starts `vod/`,
      * so the live `/hls` route (`services/origin/src/auth.ts`, exact path match) and the relay
      * (`relay/internal/tokens/playback.go` `Binding.Check`, path prefix) refuse a VOD token by
-     * path mismatch; no separate token kind, crypto or vector.
+     * path mismatch; no separate token kind, crypto or vector. A DVR token (ADR 0016 decision 2)
+     * carries `dvrTokenPath(vodId)` = `dvr/<id>`, `src = "origin"`, the live session's id and the
+     * live lifetime; it is refused the same way by `/hls`, `/vod` and every relay.
      */
     path: z.string(),
     src: z.enum(DELIVERY_SOURCES),
@@ -45,7 +47,9 @@ export const PlaybackClaims = z
   })
   .refine((c) => (c.src === "relay") === (c.rid !== undefined), "rid is required exactly when src is relay")
   .refine(
-    (c) => c.dm === undefined || (c.src === "origin" && !c.path.startsWith("vod/")),
+    // ADR 0018 decision 7 / ADR 0016 decision 7: DVR has only the source rendition, so a data-mode
+    // session cannot rewind; `dvr/` paths never carry `dm`.
+    (c) => c.dm === undefined || (c.src === "origin" && !c.path.startsWith("vod/") && !c.path.startsWith("dvr/")),
     "dm only on origin tokens for a live path",
   );
 export type PlaybackClaims = z.infer<typeof PlaybackClaims>;

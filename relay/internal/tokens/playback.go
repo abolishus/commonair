@@ -123,12 +123,13 @@ func parseClaims(b []byte) (PlaybackClaims, error) {
 	if (c.Src == "relay") != (c.RID != "") {
 		return c, ErrMalformed
 	}
-	// The contract's second refine (ADR 0018): dm only on origin tokens for a live path.
+	// The contract's second refine (ADR 0018, ADR 0016 decision 7): dm only on origin tokens for a
+	// live path, never on a VOD (`vod/`) or DVR (`dvr/`) token.
 	if dm, present := raw["dm"]; present {
 		if c.DM, err = jsonInt(dm); err != nil || c.DM < 32000 || c.DM > 8000000 {
 			return c, ErrMalformed
 		}
-		if c.Src != "origin" || strings.HasPrefix(c.Path, "vod/") {
+		if c.Src != "origin" || strings.HasPrefix(c.Path, "vod/") || strings.HasPrefix(c.Path, "dvr/") {
 			return c, ErrMalformed
 		}
 	}

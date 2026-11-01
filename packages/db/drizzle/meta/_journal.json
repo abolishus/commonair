@@ -295,6 +295,20 @@
       "when": 1793345045020,
       "tag": "0041_w1_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1793503397868,
+      "tag": "0042_w2",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1793503423770,
+      "tag": "0043_w2_protections",
+      "breakpoints": true
     }
   ]
 }

@@ -11,7 +11,9 @@ import * as E from "../enums.ts";
 import {
   AlertTemplate,
   BotConfig,
+  ChannelCaptionsSettingsPatch,
   ChannelChatSettingsPatch,
+  ChannelDvrSettingsPatch,
   ChannelTheme,
   GovernanceChange,
   MAX_UPLOAD_BYTES,
@@ -58,7 +60,18 @@ const ChatReplayInput = z.object({
   id: Id,
   cursor: z.string().max(200).optional(),
   limit: z.number().int().min(1).max(500).default(200),
+  /**
+   * W2-vod-watch: start at the first `(at, id)` at or after this instant (ignored with `cursor`),
+   * so a seek deep into a long VOD is one request.
+   */
+  from: Timestamp.optional(),
 });
+
+/** A clause the staff action cites (`CLAUSES` in `@commonair/moderation`, ADR 0019 acceptance answer 3). */
+const ClauseId = z
+  .string()
+  .max(64)
+  .regex(/^[a-z][a-z0-9.-]*$/);
 
 const ChannelUpdate = z.object({
   title: z.string().max(140).optional(),
@@ -603,6 +616,35 @@ export const contract = {
         .input(ChannelRef.extend({ username: Slug, role: z.enum(E.CHANNEL_ROLES) }))
         .output(Ok),
     },
+    /** W2: captions and DVR settings (owner only: the mask list is private). */
+    mediaSettings: owner
+      .route({
+        method: "GET",
+        path: "/channels/{channel}/media-settings",
+        summary: "Captions and DVR settings",
+        ...tag("Channels"),
+      })
+      .input(ChannelRef)
+      .output(D.ChannelMediaSettings),
+    /**
+     * Saving clamps `dvr.windowSeconds` to `DVR_MAX_WINDOW_SECONDS` and validates every mask
+     * pattern with the safe-regex check (PRECONDITION_FAILED `requirement: mask_pattern`).
+     */
+    updateMediaSettings: owner
+      .meta({ access: "owner", scopes: ["channel:manage"], rateLimit: "write" })
+      .route({
+        method: "PATCH",
+        path: "/channels/{channel}/media-settings",
+        summary: "Update captions and DVR settings",
+        ...tag("Channels"),
+      })
+      .input(
+        ChannelRef.extend({
+          captions: ChannelCaptionsSettingsPatch.optional(),
+          dvr: ChannelDvrSettingsPatch.optional(),
+        }),
+      )
+      .output(D.ChannelMediaSettings),
   },
 
   stream: {
@@ -705,6 +747,73 @@ export const contract = {
         .input(ChannelRef.extend({ id: Id }))
         .output(Ok),
     },
+    /**
+     * Rehearsal mode (W2-rehearsal, decisions (f), (g)): a private test broadcast seen only by up to
+     * five invitees who follow the channel. Owner sessions only (no app tokens). Refusals are
+     * PRECONDITION_FAILED with `requirement` one of `live`, `suspended`, `armed`, `rehearsing`,
+     * `invitee_limit`, `not_follower`, `not_armed`.
+     */
+    rehearsal: {
+      arm: owner
+        .meta({ access: "owner", rateLimit: "write" })
+        .route({
+          method: "POST",
+          path: "/channels/{channel}/rehearsal",
+          summary: "Arm a rehearsal: the next publish within 10 minutes starts it",
+          ...tag("Streaming"),
+        })
+        .input(ChannelRef)
+        .output(D.RehearsalStatus),
+      disarm: owner
+        .meta({ access: "owner", rateLimit: "write" })
+        .route({
+          method: "DELETE",
+          path: "/channels/{channel}/rehearsal",
+          summary: "Disarm, or end a running rehearsal",
+          ...tag("Streaming"),
+        })
+        .input(ChannelRef)
+        .output(D.RehearsalStatus),
+      status: owner
+        .route({
+          method: "GET",
+          path: "/channels/{channel}/rehearsal",
+          summary: "Armed, rehearsing or idle, with the time left",
+          ...tag("Streaming"),
+        })
+        .input(ChannelRef)
+        .output(D.RehearsalStatus),
+      invite: owner
+        .meta({ access: "owner", rateLimit: "write" })
+        .route({
+          method: "POST",
+          path: "/channels/{channel}/rehearsal/invitees",
+          summary: "Add or remove a rehearsal invitee (a follower; at most five)",
+          ...tag("Streaming"),
+        })
+        .input(ChannelRef.extend({ username: Slug, remove: z.boolean().default(false) }))
+        .output(D.RehearsalStatus),
+      report: owner
+        .route({
+          method: "GET",
+          path: "/channels/{channel}/rehearsal/report",
+          summary: "The checklist of the current or last rehearsal (kept 24 h)",
+          ...tag("Streaming"),
+        })
+        .input(ChannelRef.extend({ broadcastId: Id.optional() }))
+        .output(D.RehearsalReport),
+      /** The owner and invitees only, signed in; `playback.start` never resolves a rehearsal. */
+      watch: user
+        .meta({ access: "user", rateLimit: "playback" })
+        .route({
+          method: "POST",
+          path: "/channels/{channel}/rehearsal/watch",
+          summary: "Watch a rehearsal you were invited to (origin only)",
+          ...tag("Streaming"),
+        })
+        .input(ChannelRef.extend({ deviceId: z.string().min(16).max(64) }))
+        .output(D.RehearsalWatch),
+    },
   },
 
   playback: {
@@ -754,6 +863,8 @@ export const contract = {
         z.object({
           ok: z.literal(true),
           token: z.string().optional(),
+          /** A fresh DVR token (120 s) for sessions with a DVR grant; refreshed beside the live one. */
+          dvrToken: z.string().optional(),
           switchTo: z.string().optional(),
           /**
            * The beat came sooner than the server's floor and was ignored (nothing recorded).
@@ -827,6 +938,38 @@ export const contract = {
       .route({ method: "GET", path: "/vods/{id}/chat", summary: "Chat replay for a VOD", ...tag("VODs") })
       .input(ChatReplayInput)
       .output(D.ChatReplayPage),
+    /** W2-captions (ADR 0011). `get` follows the VOD's visibility; `update` is the owner's or an editor's. */
+    captions: {
+      get: base
+        .route({
+          method: "GET",
+          path: "/vods/{id}/captions/{language}",
+          summary: "A VOD's caption cues",
+          ...tag("VODs"),
+        })
+        .input(z.object({ id: Id, language: z.string().regex(/^[a-z]{2,3}(-[A-Za-z0-9]{2,4})?$/) }))
+        .output(D.VodCaptions),
+      /** Changes cue text only (timing is fixed in v1); masking is re-applied and the edit recorded by user id. */
+      update: owner
+        .meta({ access: "owner", rateLimit: "write" })
+        .route({
+          method: "PATCH",
+          path: "/vods/{id}/captions/{language}",
+          summary: "Correct caption text",
+          ...tag("VODs"),
+        })
+        .input(
+          z.object({
+            id: Id,
+            language: z.string().regex(/^[a-z]{2,3}(-[A-Za-z0-9]{2,4})?$/),
+            cues: z
+              .array(z.object({ index: z.number().int().nonnegative(), text: z.string().max(500) }))
+              .min(1)
+              .max(2000),
+          }),
+        )
+        .output(D.VodCaptions),
+    },
   },
 
   clips: {
@@ -1301,6 +1444,85 @@ export const contract = {
       })
       .input(PageInput.extend({ role: z.enum(["payer", "payee"]).default("payer") }))
       .output(page(D.PaymentBreakdown)),
+    /**
+     * Revenue splits (ADR 0013, W2-splits). Every change is a new version and applies to future
+     * revenue only; `end` cannot be backdated and notifies the recipients. Recipients need a payout
+     * account and an account `payout.rules.splitRecipientMinAccountAgeDays` old; the owner is
+     * never a crew recipient. Each change writes `audit_log` and `channel.split.update`.
+     */
+    splits: {
+      /** The channel's versions (owner), or the splits the caller receives (`channel` omitted). */
+      list: user
+        .meta({ access: "user", scopes: ["channel:manage:splits"] })
+        .route({ method: "GET", path: "/splits", summary: "Revenue splits you own or receive", ...tag("Monetization") })
+        .input(PageInput.extend({ channel: Slug.optional() }))
+        .output(page(D.RevenueSplit)),
+      propose: owner
+        .meta({ access: "owner", scopes: ["channel:manage:splits"], rateLimit: "write" })
+        .route({
+          method: "POST",
+          path: "/channels/{channel}/splits",
+          summary: "Propose a new split version",
+          ...tag("Monetization"),
+        })
+        .input(
+          ChannelRef.extend({
+            basis: z.enum(E.SPLIT_BASES),
+            shares: z
+              .array(
+                z.object({
+                  username: Slug,
+                  bps: z
+                    .number()
+                    .int()
+                    .min(E.SPLIT_RULES.minBps)
+                    .max(E.SPLIT_RULES.maxBpsTotal - 1),
+                }),
+              )
+              .min(1)
+              .max(E.SPLIT_RULES.maxRecipients)
+              .refine(
+                (s) => s.reduce((a, x) => a + x.bps, 0) < E.SPLIT_RULES.maxBpsTotal,
+                "crew shares leave the owner something",
+              )
+              .refine((s) => new Set(s.map((x) => x.username)).size === s.length, "each recipient once"),
+            /** Optional window; starts now when absent, never in the past. */
+            startsAt: Timestamp.optional(),
+            endsAt: Timestamp.optional(),
+          }),
+        )
+        .output(D.RevenueSplit),
+      accept: user
+        .meta({ access: "user", scopes: ["channel:manage:splits"], rateLimit: "write" })
+        .route({
+          method: "POST",
+          path: "/splits/{id}/accept",
+          summary: "Accept a split you were offered",
+          ...tag("Monetization"),
+        })
+        .input(z.object({ id: Id }))
+        .output(D.RevenueSplit),
+      reject: user
+        .meta({ access: "user", scopes: ["channel:manage:splits"], rateLimit: "write" })
+        .route({
+          method: "POST",
+          path: "/splits/{id}/reject",
+          summary: "Refuse a split you were offered",
+          ...tag("Monetization"),
+        })
+        .input(z.object({ id: Id }))
+        .output(D.RevenueSplit),
+      end: owner
+        .meta({ access: "owner", scopes: ["channel:manage:splits"], rateLimit: "write" })
+        .route({
+          method: "POST",
+          path: "/channels/{channel}/splits/{id}/end",
+          summary: "End a split for payments after now",
+          ...tag("Monetization"),
+        })
+        .input(ChannelRef.extend({ id: Id }))
+        .output(D.RevenueSplit),
+    },
     /** Manual adapter: the treasurer records offline payments, refunds and payouts. */
     treasurer: {
       payments: treasurer
@@ -1469,6 +1691,62 @@ export const contract = {
           })
           .input(z.object({ id: Id }))
           .output(D.PaymentFraudFlag),
+      },
+      /**
+       * Split shortfall and withheld shares (ADR 0013 decisions 6 and 7). Every step writes
+       * `audit_log` in the posting's transaction (the database refuses a suspense debit without one).
+       */
+      splits: {
+        writeOffs: treasurer
+          .route({
+            method: "GET",
+            path: "/treasurer/split-write-offs",
+            summary: "Split-shortfall write-off proposals",
+            ...tag("Treasury"),
+          })
+          .input(PageInput.extend({ status: z.enum(E.SPLIT_WRITEOFF_STATUSES).optional() }))
+          .output(page(D.SplitWriteOff)),
+        /** Only after `payout.rules.splitShortfallWriteOffDays` without owner earnings, or the owner's deletion or termination. */
+        proposeWriteOff: treasurer
+          .route({
+            method: "POST",
+            path: "/treasurer/split-write-offs",
+            summary: "Propose writing off an owner's split shortfall",
+            ...tag("Treasury"),
+          })
+          .input(z.object({ username: Slug, note: z.string().max(500).default("") }))
+          .output(D.SplitWriteOff),
+        /** Two approvers: a different treasurer, or an admin, than the proposer (database-enforced). */
+        approveWriteOff: finance
+          .route({
+            method: "POST",
+            path: "/treasurer/split-write-offs/{id}/approve",
+            summary: "Approve (post) or reject a write-off",
+            ...tag("Treasury"),
+          })
+          .errors(SECOND_APPROVER)
+          .input(z.object({ id: Id, approve: z.boolean(), note: z.string().max(500).default("") }))
+          .output(D.SplitWriteOff),
+        /** The recipient's restriction was lifted: move the withheld share to their released earnings. */
+        releaseSuspense: finance
+          .route({
+            method: "POST",
+            path: "/treasurer/split-suspense/{username}/release",
+            summary: "Release a recipient's withheld split shares",
+            ...tag("Treasury"),
+          })
+          .input(z.object({ username: Slug, note: z.string().max(500).default("") }))
+          .output(z.object({ released: Money })),
+        /** Deleted or permanently terminated, appeals exhausted: forfeit to the owners, never the co-op. */
+        forfeitSuspense: finance
+          .route({
+            method: "POST",
+            path: "/treasurer/split-suspense/{username}/forfeit",
+            summary: "Forfeit a recipient's withheld split shares to the channel owners",
+            ...tag("Treasury"),
+          })
+          .input(z.object({ username: Slug, note: z.string().max(500).default("") }))
+          .output(z.object({ forfeited: Money })),
       },
     },
   },
@@ -2630,6 +2908,196 @@ export const contract = {
         }),
       )
       .output(D.IntegrityFlag),
+    /**
+     * Signed audience attestations (ADR 0014, W2b-attestations). Owners see breakdown and salt;
+     * publication waits for the analytics display delay. Nothing here signs: the worker does.
+     */
+    attestations: {
+      list: owner
+        .route({
+          method: "GET",
+          path: "/channels/{channel}/attestations",
+          summary: "Your channel's attestation chain",
+          ...tag("Integrity"),
+        })
+        .input(ChannelRef.extend(PageInput.shape))
+        .output(page(D.AttestationEntry)),
+      get: owner
+        .route({
+          method: "GET",
+          path: "/channels/{channel}/attestations/{id}",
+          summary: "One attestation entry",
+          ...tag("Integrity"),
+        })
+        .input(ChannelRef.extend({ id: Id }))
+        .output(D.AttestationEntry),
+      /** An expiring link revealing the breakdown (checked against the commitment); the token is stored hashed. */
+      share: owner
+        .meta({ access: "owner", rateLimit: "write" })
+        .route({
+          method: "POST",
+          path: "/channels/{channel}/attestations/{id}/share",
+          summary: "Create an expiring share link for an attestation",
+          ...tag("Integrity"),
+        })
+        .input(ChannelRef.extend({ id: Id, expiresInDays: z.number().int().min(1).max(90).default(30) }))
+        .output(z.object({ url: z.string(), expiresAt: Timestamp })),
+      /** What a share link shows: the entry with its breakdown, or NOT_FOUND once expired or revoked. */
+      shared: base
+        .route({
+          method: "GET",
+          path: "/attestations/shared/{token}",
+          summary: "An attestation shared with you",
+          ...tag("Integrity"),
+        })
+        .input(z.object({ token: z.string().min(16).max(128) }))
+        .output(D.AttestationEntry),
+      /** Public verifier: checks the signature against the key history, then the statement. */
+      verify: base
+        .meta({ access: "public", rateLimit: "expensive" })
+        .route({
+          method: "POST",
+          path: "/attestations/verify",
+          summary: "Verify a signed attestation or a window bundle",
+          ...tag("Integrity"),
+        })
+        .input(
+          z.object({
+            envelope: D.AttestationEnvelope.optional(),
+            /** A window proof: contiguous entries of one channel, oldest first (ADR 0014 decision 6). */
+            bundle: z.array(D.AttestationEnvelope).min(1).max(2000).optional(),
+          }),
+        )
+        .output(D.AttestationVerifyResult),
+    },
+    keys: {
+      /** `/.well-known/commonair-attestation` (Caddy rewrites it to this path under `/api`). */
+      list: base
+        .route({
+          method: "GET",
+          path: "/.well-known/commonair-attestation",
+          summary: "The instance's attestation key history",
+          ...tag("Integrity"),
+        })
+        .output(D.AttestationKeyHistory),
+      /** Decision (r): an audited admin procedure; verifiers then reject the kid and the worker re-issues. */
+      compromise: admin
+        .route({
+          method: "POST",
+          path: "/admin/integrity/keys/{kid}/compromise",
+          summary: "Mark an attestation key compromised and re-issue its entries",
+          ...tag("Integrity"),
+        })
+        .input(z.object({ kid: z.string().min(1).max(64), reason: z.string().min(1).max(1000) }))
+        .output(D.AttestationKey),
+    },
+  },
+
+  /**
+   * Creator Analytics (W2-rollup-analytics, decision (k)): owner only, from the per-broadcast
+   * rollup; a broadcast shows 24 h after it ends. No third-party scope yet (`analytics:read`).
+   */
+  analytics: {
+    broadcast: owner
+      .route({
+        method: "GET",
+        path: "/channels/{channel}/analytics/broadcasts/{broadcastId}",
+        summary: "One broadcast's audience, exclusions, delivery and cost",
+        ...tag("Analytics"),
+      })
+      .input(ChannelRef.extend({ broadcastId: Id }))
+      .output(D.BroadcastAnalytics),
+    range: owner
+      .route({
+        method: "GET",
+        path: "/channels/{channel}/analytics",
+        summary: "Audience totals over a date range",
+        ...tag("Analytics"),
+      })
+      .input(ChannelRef.extend({ from: Timestamp, to: Timestamp }))
+      .output(D.AnalyticsRange),
+    exclusions: owner
+      .route({
+        method: "GET",
+        path: "/channels/{channel}/analytics/exclusions",
+        summary: "Excluded groups by category over a date range",
+        ...tag("Analytics"),
+      })
+      .input(ChannelRef.extend({ from: Timestamp, to: Timestamp }))
+      .output(D.AnalyticsExclusions),
+    pnl: owner
+      .route({
+        method: "GET",
+        path: "/channels/{channel}/analytics/pnl",
+        summary: "Revenue against marginal serving cost",
+        ...tag("Analytics"),
+      })
+      .input(ChannelRef.extend({ from: Timestamp, to: Timestamp }))
+      .output(D.AnalyticsPnl),
+    /** What a share link shows (no cost), or NOT_FOUND once expired or revoked. */
+    shared: base
+      .route({
+        method: "GET",
+        path: "/analytics/shared/{token}",
+        summary: "A broadcast's analytics shared with you",
+        ...tag("Analytics"),
+      })
+      .input(z.object({ token: z.string().min(16).max(128) }))
+      .output(D.BroadcastAnalytics),
+    shareLink: {
+      list: owner
+        .route({
+          method: "GET",
+          path: "/channels/{channel}/analytics/share-links",
+          summary: "Your analytics share links",
+          ...tag("Analytics"),
+        })
+        .input(ChannelRef.extend(PageInput.shape))
+        .output(page(D.AnalyticsShareLink)),
+      create: owner
+        .meta({ access: "owner", rateLimit: "write" })
+        .route({
+          method: "POST",
+          path: "/channels/{channel}/analytics/share-links",
+          summary: "Share one broadcast's analytics through an expiring link",
+          ...tag("Analytics"),
+        })
+        .input(
+          ChannelRef.extend({
+            broadcastId: Id,
+            expiresInDays: z.number().int().min(1).max(E.ANALYTICS_RULES.maxShareLinkDays).default(30),
+          }),
+        )
+        .output(D.AnalyticsShareLink),
+      revoke: owner
+        .meta({ access: "owner", rateLimit: "write" })
+        .route({
+          method: "DELETE",
+          path: "/channels/{channel}/analytics/share-links/{id}",
+          summary: "Revoke a share link",
+          ...tag("Analytics"),
+        })
+        .input(ChannelRef.extend({ id: Id }))
+        .output(Ok),
+    },
+  },
+
+  /** Public transparency reports beside `coop.transparency` (W2-enforcement-report, decision (d)). */
+  transparency: {
+    enforcement: base
+      .route({
+        method: "GET",
+        path: "/transparency/enforcement",
+        summary: "Platform enforcement by rule: counts, automation, appeals and overturns",
+        ...tag("Transparency"),
+      })
+      .input(
+        z.object({
+          /** `30d` (rolling) or a calendar month `YYYY-MM` (UTC). */
+          window: z.union([z.literal("30d"), z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/)]).default("30d"),
+        }),
+      )
+      .output(D.EnforcementReport),
   },
 
   appeals: {
@@ -2642,12 +3110,24 @@ export const contract = {
         ...tag("Appeals"),
       })
       .input(
-        z.object({
-          kind: z.enum(E.APPEAL_KINDS),
-          subjectType: z.enum(E.APPEAL_SUBJECTS),
-          subjectId: Id,
-          body: z.string().min(10).max(5000),
-        }),
+        z
+          .object({
+            kind: z.enum(E.APPEAL_KINDS),
+            subjectType: z.enum(E.APPEAL_SUBJECTS),
+            /** For `exclusion_group`: the broadcast id. */
+            subjectId: Id,
+            /** `exclusion_group` only (kind `integrity`): the excluded group's category (decision (m)). */
+            category: z.enum(E.EXCLUSION_CATEGORIES).optional(),
+            body: z.string().min(10).max(5000),
+          })
+          .refine((i) => (i.subjectType === "exclusion_group") === (i.category !== undefined), {
+            message: "category is required exactly for exclusion_group",
+            path: ["category"],
+          })
+          .refine((i) => i.subjectType !== "exclusion_group" || i.kind === "integrity", {
+            message: "exclusion_group appeals are integrity appeals",
+            path: ["kind"],
+          }),
       )
       .output(D.Appeal),
     mine: user
@@ -2738,15 +3218,25 @@ export const contract = {
         ...tag("Safety"),
       })
       .input(
-        z.object({
-          id: Id,
-          status: z.enum(["actioned", "dismissed"]),
-          resolution: z.string().min(1).max(5000),
-          action: z
-            .enum(["none", "remove_content", "suspend_user", "suspend_channel", "ban_from_channel"])
-            .default("none"),
-          durationSeconds: z.number().int().positive().optional(),
-        }),
+        z
+          .object({
+            id: Id,
+            status: z.enum(["actioned", "dismissed"]),
+            resolution: z.string().min(1).max(5000),
+            action: z
+              .enum(["none", "remove_content", "suspend_user", "suspend_channel", "ban_from_channel"])
+              .default("none"),
+            durationSeconds: z.number().int().positive().optional(),
+            /**
+             * ADR 0019 acceptance answer 3: the clause a platform action cites (its statement and
+             * `rule_ref`). Required for every action but `none` and `ban_from_channel` (channel scope).
+             */
+            clauseId: ClauseId.optional(),
+          })
+          .refine((i) => i.action === "none" || i.action === "ban_from_channel" || i.clauseId !== undefined, {
+            message: "a platform action cites a clause",
+            path: ["clauseId"],
+          }),
       )
       .output(D.Report),
     modLog: mod
@@ -2872,13 +3362,20 @@ export const contract = {
         ...tag("Safety"),
       })
       .input(
-        z.object({
-          username: Slug,
-          target: z.enum(["user", "channel"]),
-          suspended: z.boolean(),
-          reason: z.string().min(1).max(2000),
-          durationSeconds: z.number().int().positive().optional(),
-        }),
+        z
+          .object({
+            username: Slug,
+            target: z.enum(["user", "channel"]),
+            suspended: z.boolean(),
+            reason: z.string().min(1).max(2000),
+            durationSeconds: z.number().int().positive().optional(),
+            /** ADR 0019 acceptance answer 3: the clause a suspension cites; required to suspend, not to lift. */
+            clauseId: ClauseId.optional(),
+          })
+          .refine((i) => !i.suspended || i.clauseId !== undefined, {
+            message: "a suspension cites a clause",
+            path: ["clauseId"],
+          }),
       )
       .output(Ok),
   },

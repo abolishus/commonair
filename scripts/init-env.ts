@@ -32,7 +32,14 @@ if (existsSync(target) && !merge && !process.argv.includes("--force")) {
 
 const hex = (bytes: number) =>
   Array.from(crypto.getRandomValues(new Uint8Array(bytes)), (b) => b.toString(16).padStart(2, "0")).join("");
-const { pkcs8B64 } = await generateSigningKey();
+// One fresh Ed25519 key per `__generate_ed25519__` variable: the playback key and the attestation
+// key (ADR 0014 decision 1) must never be the same key.
+const exampleText = readFileSync(".env.example", "utf8").replace(/\r\n/g, "\n");
+const ed25519 = new Map<string, string>();
+for (const line of exampleText.split("\n")) {
+  const m = /^([A-Z0-9_]+)=__generate_ed25519__$/.exec(line);
+  if (m?.[1]) ed25519.set(m[1], (await generateSigningKey()).pkcs8B64);
+}
 // Evidence keypair (ADR 0006 Q4): raw 32-byte public key and PKCS#8 private key, base64.
 const b64 = (b: ArrayBuffer) => Buffer.from(b).toString("base64");
 const evidence = (await crypto.subtle.generateKey({ name: "X25519" }, true, ["deriveBits"])) as CryptoKeyPair;
@@ -89,8 +96,7 @@ function databaseUrl(url: string): string {
   }
 }
 
-const out = readFileSync(".env.example", "utf8")
-  .replace(/\r\n/g, "\n")
+const out = exampleText
   .split("\n")
   .map((line) => {
     const [key] = line.split("=");
@@ -99,7 +105,7 @@ const out = readFileSync(".env.example", "utf8")
     if (key === "DATABASE_URL" && !existing.has(key)) return `${key}=${databaseUrl(line.slice(line.indexOf("=") + 1))}`;
     if (key === "VALKEY_URL") return `${key}=${valkeyUrl(existing.get(key) ?? line.slice(line.indexOf("=") + 1))}`;
     if (key !== undefined && existing.has(key)) return `${key}=${existing.get(key)}`;
-    if (line.endsWith("=__generate_ed25519__")) return `${key}=${pkcs8B64}`;
+    if (line.endsWith("=__generate_ed25519__") && key !== undefined) return `${key}=${ed25519.get(key) ?? ""}`;
     if (line.endsWith("=__generate_hex64__")) return `${key}=${hex(32)}`;
     if (line.endsWith("=__generate_x25519_public__")) return `${key}=${evidencePublic}`;
     if (line.endsWith("=__generate_x25519_private__")) return `${key}=${evidencePrivate}`;

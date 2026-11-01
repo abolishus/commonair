@@ -25,6 +25,10 @@ const TABLES = [
   "dmca_notice_items",
   "dmca_counter_notices",
   "integrity_flags",
+  // W2b-attestations (ADR 0014).
+  "integrity_signing_keys",
+  "integrity_attestations",
+  "attestation_share_links",
   "legal_holds",
   "incidents",
   "data_exports",

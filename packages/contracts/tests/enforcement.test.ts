@@ -36,7 +36,8 @@ const statement = {
 describe("enums", () => {
   test("the new legal kind and appeal subject are appended", () => {
     expect(LEGAL_DOCUMENT_KINDS.at(-1)).toBe("enforcement_notice");
-    expect(APPEAL_SUBJECTS.at(-1)).toBe("ncii_request_item");
+    expect(APPEAL_SUBJECTS).toContain("ncii_request_item");
+    expect(APPEAL_SUBJECTS.at(-1)).toBe("exclusion_group");
   });
 
   test("the source actions are ADR 0019 decision 3's allowlist", () => {
