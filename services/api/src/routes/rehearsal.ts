@@ -13,11 +13,15 @@ import {
   type RehearsalActor,
 } from "../stream/rehearsal.ts";
 
-const actor = (context: Ctx): RehearsalActor => ({
-  deps: context.deps,
-  channel: requireChannel(context),
-  userId: requireCaller(context).user.id,
-});
+const actor = (context: Ctx): RehearsalActor => {
+  const caller = requireCaller(context);
+  return {
+    deps: context.deps,
+    channel: requireChannel(context),
+    userId: caller.user.id,
+    session: caller.kind === "session",
+  };
+};
 
 export const rehearsal = {
   arm: os.stream.rehearsal.arm.handler(({ context }) => armRehearsal(actor(context))),
@@ -30,6 +34,11 @@ export const rehearsal = {
     rehearsalReport(actor(context), input.broadcastId),
   ),
   watch: os.stream.rehearsal.watch.handler(({ context, input }) =>
-    watchRehearsal(context.deps, requireCaller(context).user.id, { channel: input.channel, deviceId: input.deviceId }),
+    watchRehearsal(
+      context.deps,
+      requireCaller(context).user.id,
+      { channel: input.channel, deviceId: input.deviceId },
+      { ipHash: context.req.ipHash, userAgent: context.req.userAgent },
+    ),
   ),
 };
