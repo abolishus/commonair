@@ -1,1 +1,14 @@
-{}
+{
+  "fairPrediction.locksNote": "Locks at what you see: if your stream is a little behind, you can still bet on what you have seen.",
+  "fairPrediction.refused.notLive": "Bets count only while you watch live. Jump to live to bet.",
+  "fairPrediction.refused.behind": "Your stream is too far behind live to bet. Jump to live to bet.",
+  "fairPrediction.refused.unverified": "Watch the stream signed in for a little longer before you bet.",
+  "fairPrediction.refused.closed": "Betting had already locked at this point in the stream, or you have already bet.",
+  "fairPrediction.result.summary": "{pool} {name} in the pool · {winners, plural, =0 {no winners} one {# winner} other {# winners}}",
+  "fairPrediction.result.paid": "{paid} {name} paid out: the payouts add up to the pool.",
+  "fairPrediction.result.refunded": "{paid} {name} returned: every bet was refunded.",
+  "fairPrediction.result.mismatch": "{paid} {name} paid out of a {pool} {name} pool.",
+  "fairPrediction.studio.teamNote": "You, your editors and your moderators can't bet on this channel's predictions. Betting locks at what each viewer sees.",
+  "fairPrediction.studio.resolvedBy": "Resolved by {user}",
+  "fairPrediction.studio.canceledBy": "Canceled by {user}"
+}

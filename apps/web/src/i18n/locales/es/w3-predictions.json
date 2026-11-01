@@ -1,1 +1,14 @@
-{}
+{
+  "fairPrediction.locksNote": "Se cierra según lo que ves: si tu transmisión va un poco atrasada, aún puedes apostar por lo que ya viste.",
+  "fairPrediction.refused.notLive": "Las apuestas solo cuentan mientras ves en directo. Vuelve al directo para apostar.",
+  "fairPrediction.refused.behind": "Tu transmisión va demasiado atrasada respecto al directo para apostar. Vuelve al directo para apostar.",
+  "fairPrediction.refused.unverified": "Mira la transmisión con tu sesión iniciada un poco más antes de apostar.",
+  "fairPrediction.refused.closed": "Las apuestas ya se habían cerrado en este punto de la transmisión, o ya apostaste.",
+  "fairPrediction.result.summary": "{pool} {name} en el bote · {winners, plural, =0 {sin ganadores} one {# ganador} other {# ganadores}}",
+  "fairPrediction.result.paid": "{paid} {name} pagados: los pagos suman el bote completo.",
+  "fairPrediction.result.refunded": "{paid} {name} devueltos: se reembolsaron todas las apuestas.",
+  "fairPrediction.result.mismatch": "{paid} {name} pagados de un bote de {pool} {name}.",
+  "fairPrediction.studio.teamNote": "Ni tú, ni tus editores, ni tus moderadores pueden apostar en las predicciones de este canal. Las apuestas se cierran según lo que ve cada espectador.",
+  "fairPrediction.studio.resolvedBy": "Resuelta por {user}",
+  "fairPrediction.studio.canceledBy": "Cancelada por {user}"
+}

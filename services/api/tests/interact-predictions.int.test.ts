@@ -171,11 +171,17 @@ describe("a prediction runs", () => {
       expect(a.reason).toBe("");
       expect(JSON.stringify(a.details)).not.toMatch(/Who wins|Alpha|Beta/);
     }
-    expect(audits.find((a) => a.action === "prediction.resolve")?.details).toEqual({
+    const resolveAudit = audits.find((a) => a.action === "prediction.resolve");
+    // Batch 7 decision (v): the outcome and the result card's figures; the resolver is the actor.
+    expect(resolveAudit?.actorId).toBe(editor.userId);
+    expect(resolveAudit?.details).toEqual({
       status: "resolved",
+      winningOutcomeId: A,
       bettors: 3,
       credited: 2,
       pool: 600,
+      winners: 2,
+      payoutSum: 600,
       refunded: false,
     });
   });
