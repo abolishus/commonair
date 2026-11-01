@@ -93,6 +93,17 @@ func (c *LRU) removeElement(el *list.Element) {
 	c.used -= it.size
 }
 
+// Delete removes key and reports whether it was cached.
+func (c *LRU) Delete(key string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	el, ok := c.items[key]
+	if ok {
+		c.removeElement(el)
+	}
+	return ok
+}
+
 // DeleteFunc removes every entry whose key match accepts and returns how many
 // it removed. It walks the whole cache under the lock: purges are rare.
 func (c *LRU) DeleteFunc(match func(key string) bool) int {

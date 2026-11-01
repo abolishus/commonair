@@ -176,3 +176,36 @@ func TestExpiredTombstoneDoesNotDropFill(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+// A purge that runs wholly between a fill's tombstone check and its Put finds
+// nothing to evict; the fill must notice the tombstone afterwards and drop itself.
+func TestStorePurgeBetweenCheckAndPutIsNotCached(t *testing.T) {
+	s := NewStore(1 << 20)
+	s.beforePut = func(key string) {
+		if key == "m:dvr/v/a.mp4" {
+			s.DeletePrefix("dvr/v/")
+		}
+	}
+	_, err := s.Get(context.Background(), "m:dvr/v/a.mp4", func(context.Context) (Entry, error) { return Entry{Body: body(5)}, nil })
+	if !errors.Is(err, ErrPurged) {
+		t.Fatalf("err %v, want ErrPurged", err)
+	}
+	if _, ok := s.LRU.Get("m:dvr/v/a.mp4"); ok || s.LRU.Len() != 0 {
+		t.Fatal("the purged fill was cached")
+	}
+	// Other prefixes are untouched by the hook.
+	if _, err := s.Get(context.Background(), "m:dvr/w/a.mp4", func(context.Context) (Entry, error) { return Entry{Body: body(5)}, nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := s.LRU.Get("m:dvr/w/a.mp4"); !ok {
+		t.Fatal("an unrelated fill was not cached")
+	}
+}
+
+func TestLRUDelete(t *testing.T) {
+	c := NewLRU(1 << 20)
+	c.Put("m:a", Entry{Body: body(10)})
+	if !c.Delete("m:a") || c.Delete("m:a") || c.Len() != 0 || c.Bytes() != 0 {
+		t.Fatalf("len %d bytes %d", c.Len(), c.Bytes())
+	}
+}

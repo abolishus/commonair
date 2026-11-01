@@ -280,7 +280,9 @@ func setCORS(h http.Header) {
 }
 
 func (s *Server) hls(w http.ResponseWriter, r *http.Request) {
-	v, ok := s.admit(w, r, "/hls/", "/hls/", hls.ValidPath)
+	// Live only: DVR has its own route with the listing, freshness and
+	// tombstone rules, so a dvr/ token must never reach the live cache path.
+	v, ok := s.admit(w, r, "/hls/", "/hls/", liveValidPath)
 	if !ok {
 		return
 	}
@@ -291,6 +293,8 @@ func (s *Server) hls(w http.ResponseWriter, r *http.Request) {
 	}
 	s.serveMedia(w, r, v.st, v.claims, v.path)
 }
+
+func liveValidPath(p string) bool { return strings.HasPrefix(p, "live/") && hls.ValidPath(p) }
 
 // viewerRequest is an admitted viewer request: registered relay, genuine token
 // bound to this relay and path, a viewer slot and a session request slot.

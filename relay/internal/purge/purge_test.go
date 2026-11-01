@@ -216,6 +216,36 @@ func TestPollReset(t *testing.T) {
 	}
 }
 
+// A replayed older genuine batch, or one whose items fall outside (after, seq],
+// is refused whole and never moves the cursor back.
+func TestPollRefusesBatchesBehindTheCursor(t *testing.T) {
+	pub, priv := newKey(t)
+	for name, b := range map[string]tokens.PurgeBatch{
+		"seq behind":       {Seq: 5, Items: []tokens.PurgeItem{{Seq: 5, Prefix: "dvr/v/", Reason: "vod_hidden"}}},
+		"empty and behind": {Seq: 4},
+		"item at cursor":   {Seq: 12, Items: []tokens.PurgeItem{{Seq: 10, Prefix: "dvr/v/", Reason: "vod_hidden"}, {Seq: 12, Prefix: "dvr/w/", Reason: "vod_hidden"}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			target := &recorder{}
+			l := &Loop{API: &fakeAPI{answers: []answer{{signed: sign(t, priv, b)}}}, Target: target, Log: quiet()}
+			l.seq.Store(10)
+			changed, err := l.Poll(context.Background(), pub)
+			if changed || !errors.Is(err, errRefused) || l.Refused() != 1 || l.Seq() != 10 {
+				t.Fatalf("changed %v err %v refused %d seq %d", changed, err, l.Refused(), l.Seq())
+			}
+			if got, all := target.snapshot(); len(got) != 0 || all != 0 {
+				t.Fatalf("applied %v (all %d)", got, all)
+			}
+		})
+	}
+	// An empty batch at the cursor is the ordinary nothing-new answer.
+	l := &Loop{API: &fakeAPI{answers: []answer{{signed: sign(t, priv, tokens.PurgeBatch{Seq: 10})}}}, Target: &recorder{}, Log: quiet()}
+	l.seq.Store(10)
+	if changed, err := l.Poll(context.Background(), pub); changed || err != nil || l.Refused() != 0 {
+		t.Fatalf("idle poll: %v %v", changed, err)
+	}
+}
+
 func TestCursorPersistsInTheStateDir(t *testing.T) {
 	dir := t.TempDir()
 	pub, priv := newKey(t)

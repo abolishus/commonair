@@ -17,6 +17,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"errors"
+	"fmt"
 	"log/slog"
 	"math/rand/v2"
 	"os"
@@ -221,6 +222,23 @@ func (l *Loop) Poll(ctx context.Context, key ed25519.PublicKey) (bool, error) {
 		l.refused.Add(1)
 		l.Log.Error("purge batch failed verification; ignoring it", "err", err.Error(), "after", after)
 		return false, errors.Join(errRefused, err)
+	}
+	// Batches carry no freshness of their own, so an older genuine batch could
+	// be replayed on path; it may never move the cursor back. A reset may (a
+	// database reset), and it only empties the cache.
+	if !b.Reset {
+		if b.Seq < after {
+			l.refused.Add(1)
+			l.Log.Error("purge batch behind the cursor; ignoring it", "after", after, "seq", b.Seq)
+			return false, fmt.Errorf("%w: batch seq %d behind cursor %d", errRefused, b.Seq, after)
+		}
+		for _, it := range b.Items {
+			if it.Seq <= after || it.Seq > b.Seq {
+				l.refused.Add(1)
+				l.Log.Error("purge item outside the batch window; ignoring the batch", "after", after, "seq", b.Seq, "item", it.Seq)
+				return false, fmt.Errorf("%w: item seq %d outside (%d, %d]", errRefused, it.Seq, after, b.Seq)
+			}
+		}
 	}
 	if b.Reset {
 		l.Target.PurgeAll()

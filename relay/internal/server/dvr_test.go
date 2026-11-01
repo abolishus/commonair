@@ -194,6 +194,21 @@ func TestDvrServesListedSegmentsAndCountsThem(t *testing.T) {
 	}
 }
 
+// A DVR token on the live /hls/ route would skip the listing, freshness and
+// tombstone rules and cache DVR media as immutable: the live route takes live/ only.
+func TestHlsRouteRefusesDvrPaths(t *testing.T) {
+	f, o, _ := newDvrFixture(t)
+	tok := f.dvrToken()
+	for _, p := range []string{"/hls/dvr/" + vodA + "/seg1.mp4?t=" + tok, "/hls/dvr/" + vodA + "/index.m3u8?t=" + tok} {
+		if resp, _ := f.get(t, p); resp.StatusCode != http.StatusNotFound {
+			t.Fatalf("%s: %d", p, resp.StatusCode)
+		}
+	}
+	if o.segments.Load() != 0 || o.playlists.Load() != 0 {
+		t.Fatalf("the origin was asked: %d segments, %d playlists", o.segments.Load(), o.playlists.Load())
+	}
+}
+
 func TestDvrRefusesUnlistedSegments(t *testing.T) {
 	f, o, _ := newDvrFixture(t)
 	if resp, _ := f.get(t, "/dvr/"+vodA+"/seg9.mp4?t="+f.dvrToken()); resp.StatusCode != http.StatusNotFound {

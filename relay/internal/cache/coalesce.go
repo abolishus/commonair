@@ -113,6 +113,8 @@ type Store struct {
 	LRU   *LRU
 	group Group
 	tombs tombstones
+	// beforePut runs between a fill's tombstone check and its Put (tests).
+	beforePut func(key string)
 }
 
 // NewStore returns a Store with an LRU of capacity bytes.
@@ -139,7 +141,16 @@ func (s *Store) Get(ctx context.Context, key string, fetch func(context.Context)
 		if s.tombs.coveredSince(PathOf(key), gen) {
 			return Entry{}, ErrPurged
 		}
+		if s.beforePut != nil {
+			s.beforePut(key)
+		}
 		s.LRU.Put(key, e)
+		// A purge that ran wholly between the check above and the Put found
+		// nothing to evict; its tombstone is already up, so look again.
+		if s.tombs.coveredSince(PathOf(key), gen) {
+			s.LRU.Delete(key)
+			return Entry{}, ErrPurged
+		}
 		return e, nil
 	})
 }
