@@ -16,10 +16,12 @@
  *    flagged (row, audit row, staff list); no T0 or NCII case was sampled; the revealed seed
  *    matches its commitment; no outcome changed.
  *
- * Raw SQL runs on the owner connection with Bun.SQL (ids bound with `sql.array`; timestamps are
- * the database's own `now()`). The step leaves its members opted out and exited.
+ * Raw SQL runs on the owner connection with Bun.SQL (new rows' ids minted with `uuidv7()`, as the
+ * tables have no id default; id lists bound with `sql.array`; timestamps are the database's own
+ * `now()`). The step leaves its members opted out and exited.
  */
 import { INTERNAL_ROUTES, INTERNAL_SECRET_HEADER } from "@commonair/contracts/internal";
+import { uuidv7 } from "@commonair/db";
 import { governancePeriods } from "../coop.ts";
 import { grantRole } from "../money-db.ts";
 import { internalSecret } from "../safety-io.ts";
@@ -138,108 +140,133 @@ async function withSql<T>(url: string, fn: (sql: InstanceType<typeof Bun.SQL>) =
   }
 }
 
-interface Seeded {
+export interface Seeded {
   ok: string[];
   t0: string;
   ncii: string;
   reports: string[];
 }
 
+/** Who the seeded cases and reports are about, by id. */
+export interface SeedParties {
+  /** The two streamers and their channels. */
+  s1: string;
+  s2: string;
+  ch1: string;
+  ch2: string;
+  /** The seeded reports' reporter and reported user. */
+  reporter: string;
+  reported: string;
+  /** A user holding the `legal` role, who confirms the T0 case. */
+  legal: string;
+}
+
 /**
  * Closed cases and resolved reports from the last day, on the streamers' channels and between
  * adult accounts, plus a T0 (decided by a `legal` reviewer, as the trigger requires) and an NCII
- * case that must never be sampled.
+ * case that must never be sampled. Neither table has a database default for `id` (the app mints
+ * UUIDv7s through Drizzle), so these raw inserts mint theirs with `uuidv7()`.
  */
+export async function seedJuryCases(sql: InstanceType<typeof Bun.SQL>, p: SeedParties): Promise<Seeded> {
+  const kase = async (v: {
+    tier: string;
+    origin: string;
+    category: string | null;
+    listCategory: string | null;
+    ruleRef: string | null;
+    status: string;
+    channelId: string;
+    userId: string;
+    resolvedBy: string | null;
+  }): Promise<string> => {
+    const id = uuidv7();
+    await sql`
+      insert into moderation_cases (id, tier, origin, category, list_category, subject_type, subject_id, channel_id, user_id, rule_ref)
+      values (${id}::uuid, ${v.tier}::moderation_tier, ${v.origin}::moderation_case_origin, ${v.category}::moderation_category,
+              ${v.listCategory}::hash_list_category, 'broadcast', ${uuidv7()}::uuid, ${v.channelId}::uuid, ${v.userId}::uuid, ${v.ruleRef})`;
+    // Cases start undecided (0016); deciding them is a separate update, as in production.
+    await sql`
+      update moderation_cases set status = ${v.status}::moderation_case_status, resolved_at = now() - interval '1 day',
+             resolved_by_id = ${v.resolvedBy}::uuid
+       where id = ${id}::uuid`;
+    return id;
+  };
+  const ok: string[] = [];
+  for (let i = 0; i < 6; i++) {
+    ok.push(
+      await kase({
+        tier: i < 4 ? "t1" : "t2",
+        origin: "classifier",
+        category: i < 4 ? "weapons" : "sexual",
+        listCategory: null,
+        ruleRef: i < 4 ? "safety.weapons@1" : "mature.unlabelled@1",
+        status: i < 4 ? "actioned" : "confirmed",
+        channelId: i % 2 === 0 ? p.ch1 : p.ch2,
+        userId: i % 2 === 0 ? p.s1 : p.s2,
+        resolvedBy: null,
+      }),
+    );
+  }
+  // A CSAM-list T0 case cites no clause (ADR 0019 decision 1); confirming it takes a `legal` reviewer.
+  const t0 = await kase({
+    tier: "t0",
+    origin: "hash_list",
+    category: null,
+    listCategory: "csam",
+    ruleRef: null,
+    status: "confirmed",
+    channelId: p.ch1,
+    userId: p.s1,
+    resolvedBy: p.legal,
+  });
+  const ncii = await kase({
+    tier: "t1",
+    origin: "human",
+    category: null,
+    listCategory: null,
+    ruleRef: "decency.intimate-images@1",
+    status: "actioned",
+    channelId: p.ch2,
+    userId: p.s2,
+    resolvedBy: null,
+  });
+  const reports: string[] = [];
+  for (let i = 0; i < 8; i++) {
+    const id = uuidv7();
+    await sql`
+      insert into reports (id, reporter_id, subject_type, subject_id, reason, status, resolved_at)
+      values (${id}::uuid, ${p.reporter}::uuid, 'user', ${p.reported}::uuid, ${i < 5 ? "harassment" : "spam"}::report_reason,
+              ${i % 3 === 0 ? "dismissed" : "actioned"}::report_status, now() - interval '1 day')`;
+    reports.push(id);
+  }
+  return { ok, t0, ncii, reports };
+}
+
 async function seedCases(ext: CoopW3Extension, legal: SignedInUser): Promise<Seeded> {
   const { s1, s2, v, w } = ext.people;
   return withSql(ext.databaseUrl, async (sql) => {
-    const [ch1] = await sql`select id::text as id from channels where owner_id = ${s1.id}`;
-    const [ch2] = await sql`select id::text as id from channels where owner_id = ${s2.id}`;
+    const [ch1] = (await sql`select id::text as id from channels where owner_id = ${s1.id}`) as { id: string }[];
+    const [ch2] = (await sql`select id::text as id from channels where owner_id = ${s2.id}`) as { id: string }[];
     if (!ch1 || !ch2) throw new Error("the streamers have no channels");
-    const kase = async (v: {
-      tier: string;
-      origin: string;
-      category: string | null;
-      listCategory: string | null;
-      ruleRef: string | null;
-      status: string;
-      channelId: string;
-      userId: string;
-      resolvedBy: string | null;
-    }): Promise<string> => {
-      const [row] = await sql`
-        insert into moderation_cases (tier, origin, category, list_category, subject_type, subject_id, channel_id, user_id, rule_ref)
-        values (${v.tier}::moderation_tier, ${v.origin}::moderation_case_origin, ${v.category}::moderation_category,
-                ${v.listCategory}::hash_list_category, 'broadcast', gen_random_uuid(), ${v.channelId}::uuid, ${v.userId}::uuid, ${v.ruleRef})
-        returning id::text as id`;
-      const id = (row as { id: string }).id;
-      // Cases start undecided (0016); deciding them is a separate update, as in production.
-      await sql`
-        update moderation_cases set status = ${v.status}::moderation_case_status, resolved_at = now() - interval '1 day',
-               resolved_by_id = ${v.resolvedBy}::uuid
-         where id = ${id}::uuid`;
-      return id;
-    };
-    const ok: string[] = [];
-    for (let i = 0; i < 6; i++) {
-      const s = i % 2 === 0 ? s1 : s2;
-      ok.push(
-        await kase({
-          tier: i < 4 ? "t1" : "t2",
-          origin: "classifier",
-          category: i < 4 ? "weapons" : "sexual",
-          listCategory: null,
-          ruleRef: i < 4 ? "safety.weapons@1" : "mature.unlabelled@1",
-          status: i < 4 ? "actioned" : "confirmed",
-          channelId: (i % 2 === 0 ? ch1 : ch2).id as string,
-          userId: s.id,
-          resolvedBy: null,
-        }),
-      );
-    }
-    // A CSAM-list T0 case cites no clause (ADR 0019 decision 1); confirming it takes a `legal` reviewer.
-    const t0 = await kase({
-      tier: "t0",
-      origin: "hash_list",
-      category: null,
-      listCategory: "csam",
-      ruleRef: null,
-      status: "confirmed",
-      channelId: ch1.id as string,
-      userId: s1.id,
-      resolvedBy: legal.id,
+    return seedJuryCases(sql, {
+      s1: s1.id,
+      s2: s2.id,
+      ch1: ch1.id,
+      ch2: ch2.id,
+      reporter: w.id,
+      reported: v.id,
+      legal: legal.id,
     });
-    const ncii = await kase({
-      tier: "t1",
-      origin: "human",
-      category: null,
-      listCategory: null,
-      ruleRef: "decency.intimate-images@1",
-      status: "actioned",
-      channelId: ch2.id as string,
-      userId: s2.id,
-      resolvedBy: null,
-    });
-    const reports: string[] = [];
-    for (let i = 0; i < 8; i++) {
-      const [row] = await sql`
-        insert into reports (reporter_id, subject_type, subject_id, reason, status, resolved_at)
-        values (${w.id}::uuid, 'user', ${v.id}::uuid, ${i < 5 ? "harassment" : "spam"}::report_reason,
-                ${i % 3 === 0 ? "dismissed" : "actioned"}::report_status, now() - interval '1 day')
-        returning id::text as id`;
-      reports.push((row as { id: string }).id);
-    }
-    return { ok, t0, ncii, reports };
   });
 }
 
-interface Outcome {
+export interface Outcome {
   id: string;
   status: string;
   resolution: string | null;
 }
 
-async function outcomes(url: string, ids: readonly string[]): Promise<Outcome[]> {
+export async function outcomes(url: string, ids: readonly string[]): Promise<Outcome[]> {
   return withSql(url, async (sql) => [
     ...((await sql`
       select id::text as id, status::text as status, resolution from moderation_cases where id = any(${sql.array([...ids], "uuid")})
