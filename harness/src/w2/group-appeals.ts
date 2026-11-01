@@ -388,3 +388,13 @@ export async function stepGroupAppeal(ext: IntegrityW2Extension): Promise<void> 
     { statement: result.statement, rollup: rolled },
   );
 }
+
+/**
+ * `integrity-basic` W3 extension `group-appeal-threshold` (batch 7 decision (g); `src/w3/steps.ts`):
+ * after an overturn, a session left with only a sub-threshold signal is verified. Runs after W2's
+ * extensions, with `group` and `signed`. Stub entry point from the batch 7 contract step:
+ * B7-followups fills it.
+ */
+export async function stepGroupAppealThreshold(_ext: IntegrityW2Extension): Promise<void> {
+  throw new Error("B7-followups not merged");
+}

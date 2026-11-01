@@ -73,6 +73,12 @@ export const FULL_REQUIRED = [
   "captions",
   "live-dvr",
   "rehearsal",
+  // W3, N3, N4 (batch 7): watch rooms, audience portability, import from Twitch and ActivityPub
+  // federation (feature-wins §4.13, ADR 0037, ADR 0031, ADR 0030).
+  "watch-room",
+  "portability",
+  "twitch-import",
+  "federation",
 ] as const;
 
 /** `full`'s scenarios that one shard runs, in `full`'s order. Pure. */

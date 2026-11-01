@@ -17,7 +17,12 @@
  * web steps' setup through the API. Steps whose unit has not merged are pending (`src/e8/steps.ts`)
  * and run only when named. Owned by the orchestrator: units fill their step modules in `src/e8/`.
  *
- * Needs `DATABASE_URL` (outbox checks, the role CLI) and the harness stack (harness/compose.e8.yaml).
+ * W3 extensions (`--set w3=`, `src/w3/steps.ts`) run after the selected steps: `giveaway`
+ * (`src/w3/giveaways.ts`), `surge-raid` (`src/w3/surge-raids.ts`) and `fair-prediction`
+ * (`src/w3/predictions.ts`). Each sets up what it needs on the shared run.
+ *
+ * Needs `DATABASE_URL` (outbox checks, the role CLI) and the harness stack (harness/compose.e8.yaml;
+ * the W3 extensions also harness/compose.w3.yaml, `stack --harness --w3`).
  */
 import { parseVia } from "../src/money.ts";
 import {
@@ -35,6 +40,11 @@ import { stepRaid } from "../src/e8/raids.ts";
 import { stepInteractStudio } from "../src/e8/studio.ts";
 import { stepViewer } from "../src/e8/viewer.ts";
 import { defineScenario } from "../src/scenario.ts";
+import { stepGiveaway } from "../src/w3/giveaways.ts";
+import type { InteractW3Extension } from "../src/w3/kit.ts";
+import { stepFairPrediction } from "../src/w3/predictions.ts";
+import { type W3Extension, w3ExtensionTitle, w3Extensions } from "../src/w3/steps.ts";
+import { stepSurgeRaid } from "../src/w3/surge-raids.ts";
 
 const STEPS: Readonly<Record<InteractStep, (run: E8Run) => Promise<void>>> = {
   1: stepPoll,
@@ -43,6 +53,12 @@ const STEPS: Readonly<Record<InteractStep, (run: E8Run) => Promise<void>>> = {
   4: stepGoal,
   5: stepInteractStudio,
   6: stepViewer,
+};
+
+const W3_STEPS: Readonly<Record<W3Extension<"interact">, (run: InteractW3Extension) => Promise<void>>> = {
+  giveaway: stepGiveaway,
+  "surge-raid": stepSurgeRaid,
+  "fair-prediction": stepFairPrediction,
 };
 
 export default defineScenario({
@@ -58,11 +74,15 @@ export default defineScenario({
     const via = parseVia(ctx.param("via", "web"));
     ctx.data("steps", { selected, run: steps, addedPrerequisites: added });
     ctx.data("via", via);
-    if (steps.length === 0) {
+    // `--set w3=` names a pending extension; by default only merged ones run (src/w3/steps.ts).
+    const w3 = w3Extensions("interact", ctx.param("w3", ""));
+    ctx.data("w3.extensions", w3);
+    if (steps.length === 0 && w3.run.length === 0) {
       ctx.skipStep("interact", "every step is pending (no E8 unit merged yet); name one with --set steps=");
       return;
     }
     const run = await newE8Run(ctx, { via, prefix: "e8i" });
     for (const n of steps) await ctx.step(interactTitle(n, "run"), () => STEPS[n](run));
+    for (const name of w3.run) await ctx.step(w3ExtensionTitle(name, "run"), () => W3_STEPS[name](run));
   },
 });

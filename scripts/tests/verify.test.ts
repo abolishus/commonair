@@ -10,6 +10,7 @@ import {
   FULL_SCENARIO_TIMEOUT_MIN,
   captionsStack,
   GROUPS,
+  W3_STACK_SHARDS,
   SHARD_TIMEOUT_MIN,
   fullScenarioArg,
   infraUpCmd,
@@ -17,6 +18,7 @@ import {
   selectGroups,
   shardError,
   steps,
+  w3Stack,
 } from "../verify.ts";
 
 describe("selectGroups", () => {
@@ -69,6 +71,18 @@ describe("steps", () => {
     expect(captionsStack("full:captions", [])).toEqual(["--captions"]);
     expect(captionsStack("full", ["captions"])).toEqual(["--captions"]);
     for (const shard of ["full", "full:relay", "full:long", "full:rest"]) expect(captionsStack(shard, [])).toEqual([]);
+  });
+
+  // Batch 7 decision (d): the batch 7 flags and mocks are on only where their scenarios run.
+  test("the w3 and interact shards, all of full, and their scenarios layer the batch 7 overrides", () => {
+    expect(W3_STACK_SHARDS).toEqual(["w3", "interact"]);
+    for (const sh of W3_STACK_SHARDS) expect(Object.keys(FULL_SHARDS)).toContain(sh);
+    for (const name of ["full", "full:w3", "full:interact"]) expect(w3Stack(name, [])).toEqual(["--w3"]);
+    for (const name of ["watch-room", "portability", "twitch-import", "federation", "interact", "channel-bot"])
+      expect(w3Stack("", [name])).toEqual(["--w3"]);
+    for (const shard of ["full:relay", "full:long", "full:notify", "full:captions", "full:rest", ""])
+      expect(w3Stack(shard, [])).toEqual([]);
+    expect(w3Stack("", ["trust-safety", "e2e-relay"])).toEqual([]);
   });
 
   // Review of that fix (HIGH): on a fresh volume, infra up's migrate seeded default governance

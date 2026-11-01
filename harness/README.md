@@ -81,6 +81,13 @@ written before N1 has none, and with push on and no keys the API and the worker 
 taking the whole stack down: run `bun scripts/init-env.ts --merge` once (it adds the missing keys
 and keeps every other value). CI writes a fresh `.env`, so it is unaffected.
 
+The batch 7 overrides (`harness/compose.w3.yaml`: giveaways; `harness/compose.n3.yaml`: the Twitch
+import against the harness mock, with fake Twitch OAuth credentials; `harness/compose.n4.yaml`:
+federation) are layered only with `stack --harness --w3`, which `verify` passes for all of `full`,
+the `w3` and `interact` shards and their scenarios. Every other shard keeps those flags off and no
+OAuth provider. A run of `full`, `watch-room`, `portability`, `twitch-import`, `federation` or
+`interact` by hand needs `bun scripts/infra.ts stack --harness --w3`.
+
 ```sh
 # once, if .env predates N1: add the VAPID pair (keeps every other value)
 bun scripts/init-env.ts --merge
@@ -363,6 +370,18 @@ steps 4 and 5) and `timeline-sync` (`replay-panel`, after steps 1 and 3) are doc
 w2=<extension>[,…]` (or `none`) the extensions, which add the extensions and scenario steps they
 need. `captions` runs in its own CI shard, only on pushes that reach captions, media or origin
 code (`PATH_FILTERED_SHARDS`) and on the nightly run; `live-dvr` and `rehearsal` run in `notify`.
+
+Batch 7's scenarios, `watch-room` (W3), `portability` (W3), `twitch-import` (N3, against the
+Twitch mock; it needs `oauth`, so `--profile no-proprietary` skips it) and `federation` (N4,
+against the in-harness ActivityPub peer), run in the `w3` shard. The extension steps batch 7 adds
+to `interact` (`giveaway`, `surge-raid`, `fair-prediction`), `e5-coop` (`jury`, after the last
+step), `e2e-relay` (`dvr-relay`, `dvr-purge`, `relay-vtt`, while the relay serves verified
+viewers), `trust-safety` (`sor-resolve`, around the steps), `integrity-basic`
+(`group-appeal-threshold`, after W2's) and `rehearsal` (`moderation-samples`) are documented with
+[docs/testing/b7-selectors.md](../docs/testing/b7-selectors.md). Pending steps are listed in
+`src/w3/steps.ts`; `--set steps=` names those of the four new scenarios and `--set
+w3=<extension>[,…]` (or `none`) the extensions, which add the extensions, scenario steps and W2
+extensions they need.
 
 `e2e-basic` drives `apps/web` with Playwright and selects only by the routes and `data-testid`s in
 [docs/testing/e1-selectors.md](../docs/testing/e1-selectors.md), mirrored in `src/web/selectors.ts`

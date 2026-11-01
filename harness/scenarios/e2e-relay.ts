@@ -13,6 +13,10 @@
  * Knobs: `--set relayHost=<addr> relayPort=<n> httpViewers=4 browserViewers=2 bots=12 liar=true
  * drain=true via=web|api` (see src/relay-plan.ts). `via=api` creates and retires relays through
  * the API and uses HTTP viewers only.
+ *
+ * W3 extensions (`--set w3=`, `src/w3/steps.ts`; ADR 0016 amendment 1, `src/w3/dvr-relay/`):
+ * `dvr-relay`, `dvr-purge` (adds `dvr-relay`) and `relay-vtt` run once the honest viewers are
+ * verified on the Go relay, before the liar relay and the drain.
  */
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -28,6 +32,9 @@ import { DEFAULT_REPORT_DIR } from "../src/report.ts";
 import { type ScenarioContext, defineScenario } from "../src/scenario.ts";
 import type { SignedInUser } from "../src/users.ts";
 import { ViewbotSwarm } from "../src/viewbot.ts";
+import { stepDvrPurge, stepDvrRelay, stepRelayVtt } from "../src/w3/dvr-relay/index.ts";
+import type { RelayW3Extension } from "../src/w3/kit.ts";
+import { type W3Extension, w3ExtensionTitle, w3Extensions } from "../src/w3/steps.ts";
 import { waitFor } from "../src/wait.ts";
 import { signInViaUi, signUpViaUi } from "../src/web/flows.ts";
 import { ROUTES, TEST_IDS as T, tid } from "../src/web/selectors.ts";
@@ -53,6 +60,12 @@ const LIAR_NAME = "liar";
 const REDACT = [tid(T.relayToken), tid(T.relayRunCommand), tid(T.streamKey)];
 
 type RelayNode = Awaited<ReturnType<ApiClient["relays"]["mine"]>>[number];
+
+const W3_STEPS: Readonly<Record<W3Extension<"e2e-relay">, (ext: RelayW3Extension) => Promise<void>>> = {
+  "dvr-relay": stepDvrRelay,
+  "dvr-purge": stepDvrPurge,
+  "relay-vtt": stepRelayVtt,
+};
 
 /** What the harness reads about a relay, from the `/relays` row (web) or `relays.mine` (api). */
 export interface RelayRead {
@@ -170,6 +183,9 @@ async function e2eRelay(
   const signal = ctx.signal;
   const ui = { timeout: UI_TIMEOUT_MS };
   const web = plan.via === "web";
+  // `--set w3=` names a pending extension; by default only merged ones run (src/w3/steps.ts).
+  const w3 = w3Extensions("e2e-relay", ctx.param("w3", ""));
+  ctx.data("w3.extensions", w3);
   const { probe } = web ? await playerBundles() : { probe: "" };
   const openSession = async (label: string) => {
     const s = await WebSession.open({
@@ -454,6 +470,23 @@ async function e2eRelay(
     check,
     assignedHttp.flatMap((v) => (v.sessionId ? [v.sessionId] : [])),
   );
+
+  // ── W3: DVR from the relay, purges, relay captions ──────────────────────────────────────────
+  if (w3.run.length > 0) {
+    const ext: RelayW3Extension = {
+      ctx,
+      platform: p,
+      check,
+      channel,
+      streamer,
+      member,
+      relay: goRelay,
+      relayId,
+      openHttpViewer: openHttp,
+      onRelay: (v) => onRelay(v, relayId),
+    };
+    for (const name of w3.run) await ctx.step(w3ExtensionTitle(name, "run"), () => W3_STEPS[name](ext));
+  }
 
   // ── 5. Over-reporting relay ──────────────────────────────────────────────────────────────
   let liarAssigned = 0;

@@ -33,7 +33,9 @@
  * (`harness/compose.e5-coop.yaml`, `COOP_TEST_HOOKS=true`) and is skipped without it.
  *
  * Extensions: W1's `data-mode` (`--set w1=`) while the channel is live; W2's `group`, `signed`,
- * `tamper` and `group-appeal` (`--set w2=`, `src/w2/steps.ts`) after the viewers stop.
+ * `tamper` and `group-appeal` (`--set w2=`, `src/w2/steps.ts`) after the viewers stop; then the
+ * batch 7 `group-appeal-threshold` (`--set w3=`, `src/w3/steps.ts`; B7-followups,
+ * `src/w2/group-appeals.ts`), which adds W2's `group` and `signed`.
  */
 import { CoopHooks, CoopHooksOff } from "../src/coop-io.ts";
 import { HttpViewer } from "../src/http-viewer.ts";
@@ -55,10 +57,12 @@ import type { IntegrityExtension } from "../src/w1/kit.ts";
 import { type W1Extension, extensionTitle, w1Extensions } from "../src/w1/steps.ts";
 import type { Viewer } from "../src/viewer.ts";
 import { stepSigned, stepTamper } from "../src/w2/attestations.ts";
-import { stepGroupAppeal } from "../src/w2/group-appeals.ts";
+import { stepGroupAppeal, stepGroupAppealThreshold } from "../src/w2/group-appeals.ts";
 import type { IntegrityW2Extension } from "../src/w2/kit.ts";
 import { stepGroup } from "../src/w2/rollup.ts";
 import { type W2Extension, w2ExtensionTitle, w2Extensions } from "../src/w2/steps.ts";
+import type { IntegrityW3Extension } from "../src/w3/kit.ts";
+import { type W3Extension, w3ExtensionTitle, w3Extensions, w3W2Missing } from "../src/w3/steps.ts";
 import { ViewbotSwarm } from "../src/viewbot.ts";
 import { waitFor } from "../src/wait.ts";
 
@@ -197,6 +201,10 @@ const W2_STEPS: Readonly<Record<W2Extension<"integrity-basic">, (e: IntegrityW2E
   signed: stepSigned,
   tamper: stepTamper,
   "group-appeal": stepGroupAppeal,
+};
+
+const W3_STEPS: Readonly<Record<W3Extension<"integrity-basic">, (e: IntegrityW3Extension) => Promise<void>>> = {
+  "group-appeal-threshold": stepGroupAppealThreshold,
 };
 
 export default defineScenario({
@@ -556,15 +564,22 @@ export default defineScenario({
     }
 
     // `--set w2=` names a pending one; by default only merged extensions run (src/w2/steps.ts).
-    const w2 = w2Extensions("integrity-basic", ctx.param("w2", ""));
+    // `--set w3=` likewise; a W3 extension adds the W2 extensions it needs (src/w3/steps.ts).
+    const w3 = w3Extensions("integrity-basic", ctx.param("w3", ""));
+    const w2Asked = w2Extensions("integrity-basic", ctx.param("w2", ""));
+    const w2Missing = w3W2Missing(w3.run, w2Asked.run);
+    const w2 =
+      w2Missing.length === 0 ? w2Asked : w2Extensions("integrity-basic", [...w2Asked.run, ...w2Missing].join(","));
     ctx.data("w2.extensions", w2);
-    const broadcastId = w2.run.length > 0 ? await broadcastOf(process.env.DATABASE_URL, swarm.sessionIds[0]) : null;
+    ctx.data("w3.extensions", { ...w3, addedW2: w2Missing });
+    const extended = w2.run.length > 0 || w3.run.length > 0;
+    const broadcastId = extended ? await broadcastOf(process.env.DATABASE_URL, swarm.sessionIds[0]) : null;
 
     await ctx.step("stop", () =>
       Promise.all([swarm.stop(), ...honest.map((v) => v.stop()), ...fetchless.map((f) => f.stop()), cdnBot?.stop()]),
     );
 
-    if (w2.run.length > 0) {
+    if (extended) {
       const { id: channelId } = await streamer.api.client.channels.get({ channel });
       let ended: Promise<void> | null = null;
       const ext: IntegrityW2Extension = {
@@ -586,6 +601,7 @@ export default defineScenario({
         },
       };
       for (const name of w2.run) await ctx.step(w2ExtensionTitle(name, "run"), () => W2_STEPS[name](ext));
+      for (const name of w3.run) await ctx.step(w3ExtensionTitle(name, "run"), () => W3_STEPS[name](ext));
     }
   },
 });

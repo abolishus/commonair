@@ -471,3 +471,12 @@ export const REHEARSAL_STEP_RUNNERS: Readonly<Record<RehearsalStep, (run: Rehear
   6: rehearsalVod,
   7: auditRows,
 };
+
+/**
+ * `rehearsal` W3 extension `moderation-samples` (batch 7; `src/w3/steps.ts`): the rehearsal
+ * report's moderation sample count is above zero. Runs after the scenario's steps, with step 1.
+ * Stub entry point from the batch 7 contract step: B7-followups fills it.
+ */
+export async function stepModerationSamples(_run: RehearsalRun): Promise<void> {
+  throw new Error("B7-followups not merged");
+}

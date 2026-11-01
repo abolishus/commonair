@@ -12,7 +12,9 @@
  *                               --multi (with --harness) also starts the `multi` replicas
  *                               (api-2, chat-2, worker-2, origin-2) for `multi-instance`;
  *                               --captions (with --harness) layers harness/compose.w2-captions.yaml
- *                               and the `captions` profile (whisper), for the captions shard only
+ *                               and the `captions` profile (whisper), for the captions shard only;
+ *                               --w3 (with --harness) layers the batch 7 overrides (W3_OVERRIDES),
+ *                               for the w3 and interact shards and their scenarios
  *   bun scripts/infra.ts down   stop everything (volumes kept)
  *   bun scripts/infra.ts reset  stop everything and delete volumes
  */
@@ -456,6 +458,14 @@ export const HARNESS_OVERRIDES = [
  */
 export const CAPTIONS_OVERRIDE = "harness/compose.w2-captions.yaml";
 
+/**
+ * The batch 7 overrides (W3, N3, N4): giveaways, the Twitch import against the harness mock, and
+ * federation. Layered only with `stack --harness --w3` (scripts/verify.ts `w3Stack`: the `w3` and
+ * `interact` shards and their scenarios), after the harness overrides, so the other shards keep
+ * every batch 7 flag at its shipped default (off) and no OAuth provider.
+ */
+export const W3_OVERRIDES = ["harness/compose.w3.yaml", "harness/compose.n3.yaml", "harness/compose.n4.yaml"] as const;
+
 /** The `multi` profile's replicas (harness/compose.multi-instance.yaml, scenario `multi-instance`). */
 export const MULTI_REPLICAS = ["api-2", "chat-2", "worker-2", "origin-2"];
 
@@ -478,9 +488,18 @@ export function stackProfiles(args: readonly string[]): string[] {
 
 /** `-f` arguments for `stack`: none for the plain stack, else compose.yaml plus each override. */
 export function stackFiles(args: readonly string[]): string[] {
-  const rest = args.filter((a) => a !== "--harness" && a !== "--multi" && a !== "--captions");
+  if (args.includes("--w3") && !args.includes("--harness"))
+    throw new Error("--w3 needs --harness (the batch 7 overrides are harness overrides)");
+  const rest = args.filter((a) => a !== "--harness" && a !== "--multi" && a !== "--captions" && a !== "--w3");
+  // They also set the `multi` replicas' environment, which only the multi override defines.
+  const bare = rest.filter((a) => (W3_OVERRIDES as readonly string[]).includes(a));
+  if (bare.length > 0) throw new Error(`${bare.join(", ")}: layer the batch 7 overrides with --harness --w3`);
   const harness = args.includes("--harness")
-    ? [...HARNESS_OVERRIDES, ...(args.includes("--captions") ? [CAPTIONS_OVERRIDE] : [])]
+    ? [
+        ...HARNESS_OVERRIDES,
+        ...(args.includes("--captions") ? [CAPTIONS_OVERRIDE] : []),
+        ...(args.includes("--w3") ? W3_OVERRIDES : []),
+      ]
     : [];
   const overrides = [...harness, ...rest];
   if (overrides.length === 0) return [];

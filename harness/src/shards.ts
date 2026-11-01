@@ -7,6 +7,9 @@
  * Parts of `full` for parallel runners (e2e-relay ~9 min; trust-safety ~6.5 and e5-coop ~3;
  * clock-skew ~20, it holds a broadcast through a ladder restart; the rest ~9.5). `rest` is everything the named shards leave,
  * so a new scenario is always in some shard. Each shard runs in `full`'s order.
+ *
+ * Scenario time per shard on the full run of 8a562d9a (2026-11-01, run 41309310706): relay 8m09s,
+ * long 7m42s (trust-safety 4m36, e5-coop 3m06), interact 11m29s, notify 7m48s, rest 16m20s.
  */
 export const FULL_SHARDS = {
   relay: ["e2e-relay"],
@@ -15,12 +18,18 @@ export const FULL_SHARDS = {
   interact: ["interact", "channel-bot"],
   // W1 (batch 4): ~15 min with both, so N1's notifications runs apart (decision (m), ~12 min cap).
   features: ["timeline-sync", "surge-guard"],
-  // N1's notifications (~3 min) leaves the most room under the ~12 min cap, so W2's DVR and
-  // rehearsal scenarios join it (batch 6). Re-measure once their steps land; split if it passes 12.
+  // Batch 6 joined W2's DVR and rehearsal scenarios to N1's notifications. Measured on the full
+  // run of 8a562d9a (2026-11-01, run 41309310706): 7m48s (live-dvr 4m08, notifications 2m47,
+  // rehearsal 53s), under the ~12 min cap, so nothing moved. B7-followups' rehearsal step is short.
   notify: ["notifications", "live-dvr", "rehearsal"],
   // W2 (batch 6 decision (c)): the whisper sidecar and its weights, path-filtered on pushes
   // (`PATH_FILTERED_SHARDS`) and always on the nightly run.
   captions: ["captions"],
+  // Batch 7 decision (d): W3's watch rooms and portability, N3's Twitch import and N4's
+  // federation, on the stack with the batch 7 overrides (scripts/verify.ts `w3Stack`). Not
+  // path-filtered. Re-measure after wave 2, as `interact` (11m29s on the same run: channel-bot
+  // 7m28, interact 4m00), which gains the giveaway, surge-raid and fair-prediction steps.
+  w3: ["watch-room", "portability", "twitch-import", "federation"],
   rest: null,
 } as const satisfies Record<string, readonly string[] | null>;
 export type FullShard = keyof typeof FULL_SHARDS;

@@ -37,6 +37,7 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { FULL_SHARDS } from "../harness/src/shards.ts";
 import { killCurrentStep, runStep, type StepResult } from "./run-step.ts";
 
 const args = process.argv.slice(2);
@@ -108,6 +109,20 @@ export function infraUpCmd(harnessFollows: boolean): string[] {
 /** `--captions` for the stack when the run is the captions shard or names the captions scenario. */
 export function captionsStack(fullName: string, scenarioNames: readonly string[]): string[] {
   return fullName === "full:captions" || scenarioNames.includes("captions") ? ["--captions"] : [];
+}
+
+/** The shards that run on the batch 7 overrides (`stack --harness --w3`, scripts/infra.ts `W3_OVERRIDES`). */
+export const W3_STACK_SHARDS = ["w3", "interact"] as const satisfies readonly (keyof typeof FULL_SHARDS)[];
+
+/**
+ * `--w3` for the stack when the run is all of `full`, the `w3` or `interact` shard, or names one of
+ * their scenarios: giveaways, the Twitch import against its mock and federation are on only there.
+ */
+export function w3Stack(fullName: string, scenarioNames: readonly string[]): string[] {
+  const shards: readonly string[] = W3_STACK_SHARDS;
+  const names = W3_STACK_SHARDS.flatMap((sh): readonly string[] => FULL_SHARDS[sh]);
+  const shardRun = fullName === "full" || shards.some((sh) => fullName === `full:${sh}`);
+  return shardRun || scenarioNames.some((n) => names.includes(n)) ? ["--w3"] : [];
 }
 
 /** One CI harness shard. */
@@ -189,7 +204,17 @@ export const steps: Step[] = [
     timeoutMin: 25,
     // --multi: the second api/chat/worker/origin the `multi-instance` scenario needs (S1-c).
     // --captions: the whisper sidecar, for the captions shard only (batch 6 decision (c)).
-    cmd: ["bun", "scripts/infra.ts", "stack", "--harness", "--multi", ...captionsStack(shard, scenarios)],
+    // --w3: the batch 7 flags and mocks, for the w3 and interact shards (batch 7 decision (d)).
+    cmd: [
+      "bun",
+      "scripts/infra.ts",
+      "stack",
+      "--harness",
+      "--multi",
+      ...captionsStack(shard, scenarios),
+      // Without --full, `shard` is still "full": only the named scenarios count then.
+      ...w3Stack(full ? shard : "", scenarios),
+    ],
     when: () => (full || scenarios.length > 0) && process.env.VERIFY_INFRA !== "external",
   },
   {
