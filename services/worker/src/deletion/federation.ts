@@ -8,13 +8,74 @@
  * (`federation_actor_keys`, append-only) and object ids stay: they hold no personal data.
  * `completeDeletion` merges the returned counts into its own.
  *
- * Owned by N4. Until N4 lands this only removes rows. N4 adds the `Delete` of the actor to every
- * follower inbox: it must capture what that needs (inboxes, and a signature or the key) inside
- * this transaction, before the rows below go, because a channel is pseudonymized, never deleted,
- * so no cascade ever removes them later.
+ * Remote servers are told with `Delete` of the actor, in two halves so nothing leaves before the
+ * deletion commits:
+ *
+ * 1. `captureRetiredActor(tx, …)`, inside the transaction and before `deleteFederationData`,
+ *    reads what the `Delete` needs while the rows still exist: the follower inboxes and the
+ *    still-encrypted key. It writes nothing.
+ * 2. `sendRetiredActorDelete(ctx, …)`, after the commit, stashes the key in Valkey
+ *    (`retiredKeyStashKey`, a day's TTL, longer than every retry) and queues the deliveries,
+ *    which sign with the stash (the actor row is gone by then).
+ *
+ * A rollback therefore sends nothing. A crash between the commit and step 2 loses the `Delete`
+ * (the rows are gone, so no later run can rebuild it); remote servers then keep a stale actor
+ * whose key fetch 404s, which is how they learn of most deleted accounts anyway.
  */
 import { schema as s, type Executor } from "@commonair/db";
+import { actorUrls, deleteActorActivity } from "@commonair/federation";
 import { eq } from "drizzle-orm";
+import type { WorkerContext } from "../context.ts";
+import type { FederationConfig } from "../federation/config.ts";
+import {
+  enqueueDeliveries,
+  RETIRED_KEY_TTL_SECONDS,
+  type RetiredKey,
+  retiredKeyStashKey,
+} from "../federation/deliver.ts";
+import { followerInboxes } from "../federation/local.ts";
+
+/** What the after-commit `Delete` of a deleted channel's actor needs (no personal data). */
+export interface RetiredActor {
+  channelId: string;
+  key: RetiredKey;
+  inboxes: string[];
+}
+
+/**
+ * Inside the deletion transaction, before `deleteFederationData`: the actor's key and follower
+ * inboxes, or null when there is nobody to tell (flag off, no actor, no followers).
+ */
+export async function captureRetiredActor(
+  tx: Executor,
+  channelId: string,
+  cfg: Pick<FederationConfig, "enabled">,
+): Promise<RetiredActor | null> {
+  if (!cfg.enabled) return null;
+  const [actor] = await tx
+    .select({ keyId: s.federationActors.keyId, privateKeyEnc: s.federationActors.privateKeyEnc })
+    .from(s.federationActors)
+    .where(eq(s.federationActors.channelId, channelId));
+  if (!actor) return null;
+  const inboxes = await followerInboxes(tx, channelId);
+  return inboxes.length > 0 ? { channelId, key: actor, inboxes } : null;
+}
+
+/** After the commit: stash the key and queue the `Delete` deliveries. Returns how many were queued. */
+export async function sendRetiredActorDelete(
+  ctx: Pick<WorkerContext, "valkey" | "enqueueBulk">,
+  cfg: Pick<FederationConfig, "site">,
+  retired: RetiredActor,
+): Promise<number> {
+  await ctx.valkey.set(
+    retiredKeyStashKey(retired.channelId),
+    JSON.stringify(retired.key satisfies RetiredKey),
+    "EX",
+    RETIRED_KEY_TTL_SECONDS,
+  );
+  const urls = actorUrls(cfg.site.publicUrl, retired.channelId);
+  return enqueueDeliveries(ctx, retired.channelId, null, deleteActorActivity(urls), retired.inboxes);
+}
 
 export async function deleteFederationData(tx: Executor, channelId: string): Promise<Record<string, number>> {
   const followers = await tx

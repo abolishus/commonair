@@ -1,9 +1,10 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-/** Process one ActivityPub inbox item. Owned by N4-delivery; a no-op stub until it lands (batch 7 contract step §5.1). */
+/** Process one ActivityPub inbox item: verify the signature and apply the activity (ADR 0030 decision 5). */
 import { FEDERATION_JOBS, FederationInboxJob, QUEUES } from "@commonair/contracts/internal";
-import { stubHandler } from "../b7/stub.ts";
+import { federationConfig } from "../federation/config.ts";
+import { runInbox } from "../federation/inbox.ts";
 import { defineJob } from "../runtime/registry.ts";
 
 export const job = defineJob({
@@ -11,5 +12,8 @@ export const job = defineJob({
   name: FEDERATION_JOBS.inbox,
   description: "Process one ActivityPub inbox item",
   data: FederationInboxJob,
-  handler: stubHandler(FEDERATION_JOBS.inbox),
+  handler: async (data, ctx) => {
+    const r = await runInbox(data.itemId, ctx, federationConfig(ctx));
+    return { [r.outcome]: 1 };
+  },
 });
