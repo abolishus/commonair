@@ -2,33 +2,48 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * The captions model's weights (ADR 0011, batch 6 decision (j)): `ggml-base-q5_1.bin` from the
- * whisper.cpp ggml repository, fetched by `bun scripts/fetch-model.ts` and mounted read-only into
- * the whisper sidecar. Never committed, never baked into an image, never served to clients.
+ * The captions model's weights (ADR 0011 decision 1, batch 6 decision (j)): `ggml-base-q5_1.bin`
+ * from the whisper.cpp ggml repository, fetched by `bun scripts/fetch-model.ts --model captions`
+ * and mounted read-only into the whisper sidecar. Never committed, never baked into an image,
+ * never served to clients.
  *
- * Placeholder from the W2 contract step: W2-captions pins `revision`, `sha256` (required: fetch
- * refuses null or a mismatch) and `sizeBytes`, names the MIT licence file read at that revision,
- * and adds the model selector to `fetch-model.ts`. Same shape as `MODEL` in
- * `packages/moderation/src/model.ts`.
+ * Licence: MIT. Read at the pinned revision from the repository's `README.md` model card
+ * (front matter `license: mit`; the repository has no separate LICENSE file); the weights are
+ * OpenAI Whisper's (`github.com/openai/whisper`, LICENSE: MIT) converted to ggml. Checked
+ * 2026-11-01. Unlike the classifier entry, the digest is required: `fetch-model` refuses a
+ * captions file with no pinned digest or a different one (ADR 0011 decision 1).
+ *
+ * Why `base` quantized (q5_1, 57 MiB): multilingual, about 1 s per 3 s chunk on two CPU threads,
+ * so two streams per media host fit beside the ladder (decision (j)); `small` costs roughly three
+ * times the CPU. The `captions` harness's WER threshold (< 0.25) decides whether it stays.
  */
 import { fileURLToPath } from "node:url";
 
-export const CAPTIONS_MODEL = {
+export interface CaptionsModelEntry {
+  repo: string;
+  revision: string | null;
+  file: string;
+  sha256: string | null;
+  sizeBytes: number | null;
+  provider: string;
+}
+
+export const CAPTIONS_MODEL: CaptionsModelEntry = {
   repo: "ggerganov/whisper.cpp",
-  revision: null as string | null,
+  /** The repository head on 2026-11-01; the file itself last changed in f281eb45 (2023-09-06). */
+  revision: "5359861c739e955e79d9a303bcbc70fb988958b1",
   file: "ggml-base-q5_1.bin",
-  sha256: null as string | null,
-  sizeBytes: null as number | null,
+  /** sha256 of the file at the revision (the Hugging Face LFS oid). */
+  sha256: "422f1ae452ade6f30a004d7e5c6a43195e4433bc370bf23fac9cc591f01a8898",
+  sizeBytes: 59_707_625,
   provider: "whisper.cpp:ggml-base-q5_1",
-} as const;
+};
 
 /** Where fetch-model writes the captions weights by default (the sidecar mounts this file). */
 export const DEFAULT_CAPTIONS_MODEL_PATH = fileURLToPath(
   new URL("../../../.cache/models/whisper-ggml-base-q5_1.bin", import.meta.url),
 );
 
-/** Null until the revision is pinned: nothing may fetch an unpinned file. */
-export const captionsModelUrl = (): string | null =>
-  CAPTIONS_MODEL.revision === null
-    ? null
-    : `https://huggingface.co/${CAPTIONS_MODEL.repo}/resolve/${CAPTIONS_MODEL.revision}/${CAPTIONS_MODEL.file}`;
+/** The download URL; null while the revision is unpinned: nothing may fetch an unpinned file. */
+export const captionsModelUrl = (entry: CaptionsModelEntry = CAPTIONS_MODEL): string | null =>
+  entry.revision === null ? null : `https://huggingface.co/${entry.repo}/resolve/${entry.revision}/${entry.file}`;

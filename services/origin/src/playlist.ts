@@ -239,6 +239,57 @@ export function synthesizeMultivariant(sources: VariantSource[]): string {
 }
 
 // ---------------------------------------------------------------------------------------
+// Live captions (ADR 0011)
+
+/** The one subtitles group the origin adds; namespaced groups are `<rendition>-<id>`, so it cannot collide. */
+export const CAPTIONS_GROUP = "commonair-captions";
+
+export interface SubtitleRendition {
+  /** BCP 47 tag; also the track's directory (`captions/<language>/index.m3u8`). */
+  language: string;
+  /** NAME: the language's own name. */
+  name: string;
+}
+
+const quotedAttr = (s: string) => `"${s.replace(/["\r\n]/g, "")}"`;
+
+/**
+ * Advertise live caption tracks in a multivariant playlist (input before `rewritePlaylist`, URIs
+ * relative to the channel root): one `EXT-X-MEDIA:TYPE=SUBTITLES` per track, `DEFAULT=NO` and
+ * `AUTOSELECT=NO` (captions are the viewer's choice), and `SUBTITLES` on every variant, the
+ * audio-only one included. Called only while a track is active: with no tracks the playlist is
+ * returned unchanged. Upstream subtitle groups (MediaMTX has none today) are replaced, so every
+ * variant names exactly the group that exists. Works before or after `filterForDataMode`, which
+ * keeps media groups a kept variant references.
+ */
+export function withSubtitles(multivariant: string, tracks: readonly SubtitleRendition[]): string {
+  if (tracks.length === 0 || !isMultivariantText(multivariant)) return multivariant;
+  const lines = multivariant.split(/\r?\n/);
+  const out: string[] = [];
+  let inserted = false;
+  const media = tracks.map(
+    (t) =>
+      `#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="${CAPTIONS_GROUP}",NAME=${quotedAttr(t.name)},LANGUAGE=${quotedAttr(t.language)},DEFAULT=NO,AUTOSELECT=NO,FORCED=NO,URI=${quotedAttr(`captions/${t.language}/index.m3u8`)}`,
+  );
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (line.startsWith("#EXT-X-MEDIA:") && attr(parseAttributes(line.slice(13)), "TYPE") === "SUBTITLES") continue;
+    if (line.startsWith("#EXT-X-STREAM-INF:")) {
+      if (!inserted) {
+        out.push(...media, "");
+        inserted = true;
+      }
+      const attrs = parseAttributes(line.slice(18));
+      setAttr(attrs, "SUBTITLES", `"${CAPTIONS_GROUP}"`);
+      out.push(`#EXT-X-STREAM-INF:${serializeAttributes(attrs)}`);
+      continue;
+    }
+    out.push(raw);
+  }
+  return out.join("\n");
+}
+
+// ---------------------------------------------------------------------------------------
 // Data mode (ADR 0018 decision 5)
 
 /** LL-HLS tags a data-mode media playlist drops (RFC 8216bis §4.4.3.7–4.4.5.3, §4.4.3.8). */

@@ -19,8 +19,10 @@
  * run only when named. W2-captions fills this file and `src/w2/captions/`.
  *
  * Runs in its own CI shard (`captions`, batch 6 decision (c)): on pushes that reach captions,
- * media or origin code, and nightly. Needs the whisper sidecar and the captions weights
- * (`bun scripts/fetch-model.ts`, W2-captions).
+ * media or origin code, and nightly. Needs the whisper sidecar (compose profile `captions`), the
+ * captions weights (`bun scripts/fetch-model.ts --model captions`) and the harness override
+ * `harness/compose.w2-captions.yaml` (`WHISPER_URL`, `CAPTIONS_MAX_STREAMS=1`). The speech fixture
+ * is `harness/fixtures/captions/speech.ogg` (regenerated from `reference.txt` when missing).
  */
 import { parseVia } from "../src/money.ts";
 import { defineScenario } from "../src/scenario.ts";

@@ -1,0 +1,28 @@
+/*
+ * SPDX-FileCopyrightText: 2026 CommonAir contributors
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Live and VOD captions on the player's video (ADR 0011): theme tokens only. The viewer's size and
+ * contrast are data attributes on the root element (`captions-state.ts` `applyCaptionStyle`).
+ */
+video::cue {
+  color: var(--overlay-foreground);
+  background-color: var(--overlay);
+  font-family: var(--font-sans);
+  line-height: 1.3;
+}
+
+:root[data-cc-size="small"] video::cue {
+  font-size: 80%;
+}
+
+:root[data-cc-size="large"] video::cue {
+  font-size: 150%;
+}
+
+/* High contrast: opaque theme background and foreground instead of the translucent overlay. */
+:root[data-cc-contrast="high"] video::cue {
+  color: var(--foreground);
+  background-color: var(--background);
+  font-weight: 600;
+}

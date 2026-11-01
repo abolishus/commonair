@@ -398,6 +398,23 @@ services:
     healthcheck: *app-healthcheck
     # GPU (NVENC) is opt-in: see infra/README.md (CDI device `nvidia.com/gpu=all`).
 
+  # Live captions' speech sidecar (ADR 0011): whisper.cpp built from source in our own image, the
+  # weights mounted read-only (`bun scripts/fetch-model.ts --model captions`; never baked in). Behind
+  # the `captions` profile because the weights file must exist; media reaches it at WHISPER_URL
+  # (http://whisper:8080) on the compose network, and no port is published.
+  whisper:
+    profiles: [captions]
+    image: ${IMAGE_REGISTRY:-localhost/commonair}/whisper:${IMAGE_TAG:-dev}
+    build:
+      context: .
+      dockerfile: infra/containers/whisper.Containerfile
+    restart: unless-stopped
+    volumes:
+      - ${CAPTIONS_MODEL:-./.cache/models/whisper-ggml-base-q5_1.bin}:/models/ggml-base-q5_1.bin:ro,Z
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "/usr/local/bin/whisper-health"]
+
   worker:
     image: ${IMAGE_REGISTRY:-localhost/commonair}/worker:${IMAGE_TAG:-dev}
     ports: ["${BIND_ADDRESS:-127.0.0.1}:${WORKER_PORT:-3005}:3005"]
