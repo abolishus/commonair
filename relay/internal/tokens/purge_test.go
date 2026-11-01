@@ -149,6 +149,37 @@ func TestPurgeEdges(t *testing.T) {
 	}
 }
 
+// TestPurgeReset: the signed reset (ADR 0016 A1.2) round-trips, marshals the
+// way TS does, and is the only batch carrying the reset key.
+func TestPurgeReset(t *testing.T) {
+	_, priv, pub := loadVectors(t)
+	v := loadB7Vectors(t)
+	var valid *SignedPurgeBatch
+	for _, c := range v.Purge.Cases {
+		if c.Name == "valid reset" {
+			valid = &c.Signed
+		}
+	}
+	if valid == nil {
+		t.Fatal("no valid reset vector")
+	}
+	got, err := VerifyPurgeBatch(pub, *valid)
+	if err != nil || !got.Reset || got.Seq != 120 || len(got.Items) != 0 {
+		t.Fatalf("verify reset = %+v, %v", got, err)
+	}
+	signed, err := SignPurgeBatch(priv, PurgeBatch{Seq: 120, Reset: true})
+	if err != nil || signed != *valid {
+		t.Fatalf("sign reset = %+v (%v), want %+v", signed, err, *valid)
+	}
+	b, _ := MarshalPurgeBatch(PurgeBatch{Seq: 1})
+	if string(b) != `{"seq":1,"items":[]}` {
+		t.Fatalf("a batch without reset marshals %s", b)
+	}
+	if _, err := SignPurgeBatch(priv, PurgeBatch{Seq: 1, Reset: true, Items: []PurgeItem{{Seq: 1, Prefix: "live/a/", Reason: "x"}}}); !errors.Is(err, ErrMalformed) {
+		t.Fatalf("reset with items: %v", err)
+	}
+}
+
 func TestPurgePrefixes(t *testing.T) {
 	for _, p := range []string{"dvr/01890000-0000-7000-8000-000000000009/", "live/alice/", "live/alice/captions/"} {
 		if !purgePrefixRE.MatchString(p) {

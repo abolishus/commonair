@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 
 /**
  * Closed value sets shared by the database (pgEnum), Zod schemas, and clients.
@@ -695,5 +695,8 @@ export type MediaStateReason = (typeof MEDIA_STATE_REASONS)[number];
 /** Why a relay purge row was written (decision (x)). */
 export const RELAY_PURGE_REASONS = ["vod_hidden", "clip_hidden", "restricted", "suspended", "recording_ended"] as const;
 export type RelayPurgeReason = (typeof RELAY_PURGE_REASONS)[number];
-/** The relay purge feed (decision (x)): a long poll is held up to this long; rows are kept this many days. */
-export const RELAY_PURGE_RULES = { holdSeconds: 25, retentionDays: 7, maxItems: 500 } as const;
+/**
+ * The relay purge feed (decision (x)): a long poll is held up to this long; rows are kept this many
+ * days; one answer carries at most `maxItems` rows; a prefix is at most `prefixMaxLength` bytes.
+ */
+export const RELAY_PURGE_RULES = { holdSeconds: 25, retentionDays: 7, maxItems: 500, prefixMaxLength: 256 } as const;

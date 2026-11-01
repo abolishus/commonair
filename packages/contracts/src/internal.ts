@@ -277,8 +277,13 @@ export const KEYS = {
    * Batch 7 decision (w), the raid carry: when a raid executes, the worker writes this key for the
    * **target** channel and each raider who was a verified watcher of the source in the last
    * `RAID_RULES.carryMinutes`, with `b` = the target's live broadcast, `s` = the target's gate
-   * threshold, `f` = the source value's `f`, and `EX RAID_RULES.surgeMinutes * 60`. A later scoring
-   * pass may overwrite it with the raider's own standing. No separate carry key exists.
+   * threshold, `f` = the source value's `f`, and `EX RAID_RULES.surgeMinutes * 60`. No separate
+   * carry key exists.
+   *
+   * Every writer (the scoring pass and the raid carry) uses the merge-write
+   * `VERIFIED_WATCH_MERGE` (`services/worker/src/integrity/verified-watch.ts`), never a plain
+   * `SET`: for the same broadcast `b` the larger `s` and the longer TTL are kept, so a scoring
+   * pass never shortens or lowers a carry; a value for another broadcast is replaced.
    */
   verifiedWatch: (channelId: string, userId: string) => `verified-watch:${channelId}:${userId}`,
   /** ADR 0015 decision 6: STRING JSON `SurgeOverride`, TTL `until − now + 60 s`. */

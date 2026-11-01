@@ -16,8 +16,8 @@
 --      `ROOM_LIMITS.maxMembers` (8) active members. A room's host, channel, broadcast and band never
 --      change; a member row never re-opens.
 --   3. Draws (decision (s)): `seed_commitment` is immutable on `giveaways` and `jury_panels`;
---      `seed` is set once, only if SHA-256 of the seed equals the commitment (the seed's hex-decoded
---      bytes, or its UTF-8 text); a drawn giveaway has its seed. `giveaway_entries` take inserts only
+--      `seed` is set once, only if it is 16-64 bytes of lowercase hex whose decoded bytes hash
+--      (SHA-256) to the commitment, as `packages/draw` `commit()`; a drawn giveaway has its seed. `giveaway_entries` take inserts only
 --      while the giveaway is open and before `closes_at`, never change, and are deleted only while
 --      it is open; `giveaway_winners` are entrants, append-only. One open giveaway per channel is
 --      the 0045 partial unique index.
@@ -204,9 +204,10 @@ CREATE TRIGGER watch_room_members_guard BEFORE INSERT OR UPDATE ON public.watch_
 -- 3. Draws (giveaways and jury panels) ------------------------------------------------------
 CREATE FUNCTION commonair_seed_matches(seed text, commitment text) RETURNS boolean
 LANGUAGE sql IMMUTABLE SET search_path = pg_catalog, public, pg_temp AS $$
-  SELECT seed IS NOT NULL AND commitment IS NOT NULL AND (
-    (seed ~ '^([0-9a-f]{2})+$' AND encode(sha256(decode(seed, 'hex')), 'hex') = commitment)
-    OR encode(sha256(convert_to(seed, 'UTF8')), 'hex') = commitment)
+  -- packages/draw commit(): SHA-256 over the seed's raw bytes (16-64), never over its hex text.
+  SELECT seed IS NOT NULL AND commitment IS NOT NULL
+    AND seed ~ '^([0-9a-f]{2}){16,64}$'
+    AND encode(sha256(decode(seed, 'hex')), 'hex') = commitment
 $$;
 --> statement-breakpoint
 

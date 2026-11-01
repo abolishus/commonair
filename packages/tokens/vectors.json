@@ -657,6 +657,54 @@
           "signature": "G8y0xUP0Y6OkvWDB2powqhI7ERWAYNlBtRb4jF0iB5hF9vJ6mWP6Dgr1GEGZnTgpD4hJ3B5p6u7CDu6KSUClDw"
         },
         "error": "malformed"
+      },
+      {
+        "name": "valid reset",
+        "signed": {
+          "payload": "eyJzZXEiOjEyMCwiaXRlbXMiOltdLCJyZXNldCI6dHJ1ZX0",
+          "signature": "Nxh14GOCo2pvbwVA_YDp3NLupc-Vmk_KEHgetEsFxN8BU9-FuUZVZUPX5YKP2Vvm2PMF6OcuE51YqlIpB3v4BA"
+        },
+        "error": null
+      },
+      {
+        "name": "reset carrying items",
+        "signed": {
+          "payload": "eyJzZXEiOjQyLCJpdGVtcyI6W3sic2VxIjo0MCwicHJlZml4IjoiZHZyLzAxODkwMDAwLTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwOS8iLCJyZWFzb24iOiJ2b2RfcmVtb3ZlZCJ9LHsic2VxIjo0MSwicHJlZml4IjoibGl2ZS9hbGljZS8iLCJyZWFzb24iOiJzdXNwZW5kZWQifSx7InNlcSI6NDIsInByZWZpeCI6ImxpdmUvYWxpY2UvY2FwdGlvbnMvIiwicmVhc29uIjoicmVzdHJpY3RlZCJ9XSwicmVzZXQiOnRydWV9",
+          "signature": "ctLQLJy_Um6uBkJZJiSaZ6p7TUXbXyWE2Hvru7U10CUMRwh3uqPgbUrotjq_iVKxb1vgwq38cHfRLxTc5cyUCg"
+        },
+        "error": "malformed"
+      },
+      {
+        "name": "reset false",
+        "signed": {
+          "payload": "eyJzZXEiOjEyMCwiaXRlbXMiOltdLCJyZXNldCI6ZmFsc2V9",
+          "signature": "FzctCPLbQLEic9tJnQbQXxVpCCntKVos1TWrP8BexFeRHelYhR2R2xtczlCS-BBtmZIOc554l1wszTy3soi-Bw"
+        },
+        "error": "malformed"
+      },
+      {
+        "name": "reset null",
+        "signed": {
+          "payload": "eyJzZXEiOjEyMCwiaXRlbXMiOltdLCJyZXNldCI6bnVsbH0",
+          "signature": "AMGNwv7rXkIAS8YvRjJfLzHMRXQ6N1AWBPIE3bzmwUzOTnkuphYpuim0mh4Eaq5odU7RawLwrBHPOlTIWAQNBg"
+        },
+        "error": "malformed"
+      },
+      {
+        "name": "reset as a string",
+        "signed": {
+          "payload": "eyJzZXEiOjEyMCwiaXRlbXMiOltdLCJyZXNldCI6InRydWUifQ",
+          "signature": "Vqj0Mtl0UNerzNIGXE4vx9g4JHuvGqfQIQVhHYbbL-OEQndj2AlVN8SBUx29zZo-41mRlJZX2H8hNho4QgfcBw"
+        },
+        "error": "malformed"
+      },
+      {
+        "name": "valid signature over a reset before items",
+        "signed": {
+          "payload": "eyJzZXEiOjEyMCwicmVzZXQiOnRydWUsIml0ZW1zIjpbXX0",
+          "signature": "hJmbLQoEhnqjjwQnqSgW4z_iE1QJgbjxlAQsOwwc-sVk4KGqDb-7aGAplxMoK0YSJOAw6vfZyPvVGnf6I3DBAw"
+        },
+        "error": "non_canonical"
       }
     ]
   }

@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 
 /** Public data transfer objects. These, not database rows, are what the API returns. */
 import { z } from "zod";
@@ -2336,25 +2336,58 @@ export const FederationDomainBlock = z.object({
 });
 
 /**
- * The relay purge feed (decision (x)): `relays.purges`, long-polled by relays. `payload` is signed
- * with the origin playback key (`signPurgeBatch` in `packages/tokens`); relays verify it with the
- * heartbeat's `originPublicKey`.
+ * The relay purge feed (decision (x), ADR 0016 Amendment 1): `relays.purges`, long-polled by
+ * relays. The answer is the `SignedPurgeBatch` envelope of `packages/tokens` (`purge.ts`):
+ * `payload` is the base64url of the canonical JSON of a `RelayPurgeBatch`, `signature` the
+ * base64url Ed25519 signature over those bytes with the origin playback key. Relays verify the
+ * bytes with the heartbeat's `originPublicKey` before parsing them.
+ *
+ * Contracts may not import `packages/tokens` (it depends on contracts), so `RelayPurgeBatch`
+ * mirrors its `PurgeBatch`; `packages/tokens/tests/contracts-shapes.test.ts` keeps them equal.
  */
-export const RelayPurgeItem = z.object({
-  seq: z.number().int().positive(),
-  /** A path prefix relays evict and stop serving (`dvr/<vodId>/`, `vod/<vodId>/`, `clips/<clipId>/`, `live/<slug>/`). */
-  prefix: z.string().min(1).max(256),
-  reason: z.enum(E.RELAY_PURGE_REASONS),
+/** A relay cache path prefix ending in "/" (`dvr/<vodId>/`, `live/<slug>/`, `live/<slug>/captions/`); no `..`. */
+export const RELAY_PURGE_PREFIX = /^(?:live|dvr)\/(?:[A-Za-z0-9_-][A-Za-z0-9._-]*\/)+$/;
+/** The wire rule for a reason code; the origin writes only `RELAY_PURGE_REASONS`. */
+export const RELAY_PURGE_REASON = /^[a-z][a-z0-9_]{0,31}$/;
+const purgeSeq = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+export const RelayPurgeItem = z.strictObject({
+  seq: purgeSeq.min(1),
+  prefix: z.string().max(E.RELAY_PURGE_RULES.prefixMaxLength).regex(RELAY_PURGE_PREFIX),
+  reason: z.string().regex(RELAY_PURGE_REASON),
 });
-export const RelayPurgeBatch = z.object({
-  /** The highest seq this answer covers; the relay passes it as `after` next time. */
-  seq: z.number().int().nonnegative(),
-  items: z.array(RelayPurgeItem).max(E.RELAY_PURGE_RULES.maxItems),
-});
+export type RelayPurgeItem = z.infer<typeof RelayPurgeItem>;
+/** The signed payload. Key order is the canonical byte order. */
+export const RelayPurgeBatch = z
+  .strictObject({
+    /** The cursor: the last item's seq, or the request's `after` when there are no items. */
+    seq: purgeSeq,
+    /** Strictly ascending by seq. */
+    items: z.array(RelayPurgeItem).max(E.RELAY_PURGE_RULES.maxItems),
+    /**
+     * Present only when true: `after` is older than the retained rows (more than
+     * `RELAY_PURGE_RULES.retentionDays` behind). No items; the relay evicts every cached `live/`
+     * and `dvr/` object and continues from `seq`.
+     */
+    reset: z.literal(true).optional(),
+  })
+  .superRefine((b, ctx) => {
+    if (b.reset && b.items.length > 0)
+      ctx.addIssue({ code: "custom", path: ["items"], message: "a reset carries no items" });
+    for (let i = 1; i < b.items.length; i++)
+      if ((b.items[i] as RelayPurgeItem).seq <= (b.items[i - 1] as RelayPurgeItem).seq)
+        ctx.addIssue({ code: "custom", path: ["items", i, "seq"], message: "items are not strictly ascending" });
+    const last = b.items.at(-1);
+    if (last && last.seq !== b.seq)
+      ctx.addIssue({ code: "custom", path: ["seq"], message: "seq is not the last item's" });
+  });
 export type RelayPurgeBatch = z.infer<typeof RelayPurgeBatch>;
 export const RelayPurgeFeed = z.object({
-  payload: RelayPurgeBatch,
-  /** Ed25519 over the canonical JSON of `payload`, base64url. */
+  /** base64url (no padding) of the canonical JSON of a `RelayPurgeBatch`. */
+  payload: z
+    .string()
+    .min(1)
+    .regex(/^[A-Za-z0-9_-]+$/),
+  /** Ed25519 over the payload bytes, base64url. */
   signature: z.string().regex(/^[A-Za-z0-9_-]{86}$/),
 });
 export type RelayPurgeFeed = z.infer<typeof RelayPurgeFeed>;

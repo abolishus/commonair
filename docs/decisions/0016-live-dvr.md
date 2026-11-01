@@ -240,26 +240,45 @@ has no purge. Relays count every fetched file toward receipts (`Ledger.AddSegmen
   - `dvr/<vodId>/` when a VOD stops being public or its recording ends;
   - `live/<slug>/` when a live channel is T1-restricted or suspended;
   - `live/<slug>/captions/` where only captions must go.
-- **Retention.** A daily cleanup drops rows older than 7 days. The `reason` is a code, never free
-  text (ADR 0004).
+- **Prefixes.** A prefix ends in `/` and matches
+  `^(?:live|dvr)/(?:[A-Za-z0-9_-][A-Za-z0-9._-]*/)+$`, at most 256 bytes: only the relay's own
+  cache trees, and no segment starts with a dot, so `..` cannot occur.
+- **Reasons.** The `reason` is a code, never free text (ADR 0004). The origin writes only
+  `RELAY_PURGE_REASONS` (`vod_hidden`, `clip_hidden`, `restricted`, `suspended`,
+  `recording_ended`); the wire rule is `^[a-z][a-z0-9_]{0,31}$`, so a relay accepts codes added
+  later and only logs and counts them.
+- **Retention.** A daily cleanup drops rows older than 7 days (`RELAY_PURGE_RULES.retentionDays`).
 
 ### A1.2 The purge feed: a long poll with a signed answer
 
 - **Request.** `GET /api/relay/purges?after=<seq>`, with the relay protocol's bearer auth.
-- **Answer.** The rows after `seq`, at most 500, as a signed envelope
-  `{ payload: { seq, items: [{ seq, prefix, reason }] }, signature }`. `payload.seq` is the highest
-  `seq` the answer covers; the relay sends it as the next `after`.
+- **Answer.** The rows after `after`, oldest first, at most 500 (`RELAY_PURGE_RULES.maxItems`;
+  more rows wait for the next poll), as the signed envelope `{ payload, signature }`
+  (`RelayPurgeFeed`). `payload` is the base64url of the canonical JSON of a `PurgeBatch`
+  `{ seq, items: [{ seq, prefix, reason }], reset? }`.
+- **The `seq` cursor.** Item `seq`s are the rows' `relay_purges.seq`, strictly ascending.
+  `payload.seq` is the cursor: the last item's `seq` when there are items, otherwise the request's
+  `after` (or, for a reset, the newest row's `seq`, or `after` if there is none). The relay
+  applies every item, then sends `payload.seq` as the next `after`; a row at or below a relay's
+  cursor is never sent to it again.
 - **Hold.** With nothing new, the API holds the request up to **25 s**, woken early by a Valkey
   pub/sub nudge from the emitter, then answers an empty batch. A harness hook shortens the hold to
   1 s.
-- **Reset.** A relay whose `after` is older than the retained rows (more than 7 days behind) gets a
-  signed answer telling it to reset; it clears its DVR and live caches and continues from the
-  answer's `seq`. A relay that restarts starts from 0 and receives the retained rows.
+- **Reset.** A relay whose `after` is older than the retained rows (rows after it have been
+  deleted, so it is more than 7 days behind) gets a signed batch with `reset: true` and no items
+  (the key is present only when true; a batch carrying both is malformed). The relay evicts every
+  cached `live/` and `dvr/` object and continues from the answer's `seq`. Replaying a reset only
+  empties the cache again, which is safe. A relay that restarts has an empty cache and starts from
+  0, receiving the retained rows.
 - **Signature** (`packages/tokens`: `signPurgeBatch`, `verifyPurgeBatch`; Go mirror
   `relay/internal/tokens/purge.go`; vectors under `purge` in `packages/tokens/vectors.json`, tested
-  in TS and Go): Ed25519 with the origin's playback key, which relays already trust as
-  `originPublicKey`. As with receipts, `payload` and `signature` are base64url and the signed bytes
-  are the JSON of the Zod-parsed payload; the relay verifies the bytes before parsing.
+  in TS and Go, including the reset cases): Ed25519 with the origin's playback key, which relays
+  already trust as `originPublicKey`. As with receipts, `payload` and `signature` are base64url
+  (no padding; the signature is 86 characters) and the signed bytes are the JSON of the Zod-parsed
+  payload in schema key order (`seq`, `items`, `reset`). The relay verifies the signature over the
+  bytes before parsing, then refuses bytes that are not the canonical encoding of what they parse
+  to (`non_canonical`) and any schema violation (`malformed`). The contracts mirror
+  (`RelayPurgeBatch`) is kept equal to `PurgeBatch` by a test in `packages/tokens`.
 - **A bad signature** refuses the whole batch (logged and counted); the relay keeps its `after`
   and polls again with backoff.
 - **Why signed, if the channel is authenticated.** The purge is an instruction to the relay's cache
@@ -316,7 +335,7 @@ For the maintainer. Each item is the recommended default; accepting the amendmen
 
 1. **Purge before DVR (x):** relays may serve DVR only with the signed purge in place.
 2. **Feed:** `relay_purges` rows from the media-state events, a 25 s long poll, at most 500 rows,
-   7-day retention, a signed reset for a relay further behind.
+   7-day retention, a signed `reset: true` batch for a relay further behind.
 3. **Signature:** Ed25519 with the origin playback key, verified with `originPublicKey`.
 4. **Relay DVR:** 1 s playlist refresh, 5 s stale-playlist rule, immediate eviction on 404/403 or
    purge, 60 s tombstones, `private, no-store`, counted in receipts; still no CDN DVR.

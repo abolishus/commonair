@@ -18,6 +18,8 @@ import { uuidv7 } from "../src/ids.ts";
 import { MIGRATIONS_DIR } from "../src/migrate.ts";
 import * as s from "../src/schema/index.ts";
 import { createTestDatabase, type TestDatabase } from "../src/testing.ts";
+// packages/draw has no dependencies (WebCrypto only); db tests reach it by path, not as a package.
+import { commit, newSalt, newSeed, verifyReveal } from "../../draw/src/index.ts";
 
 vi.setConfig({ testTimeout: 30_000, hookTimeout: 60_000 });
 
@@ -349,7 +351,7 @@ describe("draws (decision (s))", () => {
     await set(g.id, { seed: g.seed, status: "drawn", drawnAt: new Date() });
     expect(await refused(set(g.id, { seed: hex(32) }), /revealed once/)).toBe("42501");
     expect(await refused(set(g.id, { status: "open" }), /cannot become/)).toBe("23514");
-    // A seed at insert is refused; a UTF-8 seed matching its commitment is accepted.
+    // A seed at insert is refused.
     const ch = (await newChannel()).channelId;
     const text = "a text seed";
     const utf8 = createHash("sha256").update(text).digest("hex");
@@ -369,6 +371,65 @@ describe("draws (decision (s))", () => {
         /never at insert/,
       ),
     ).toBe("23514");
+  });
+
+  test("a packages/draw commit() reveals; its hex text, a wrong or a short seed does not", async () => {
+    const seed = newSeed();
+    const commitment = await commit(seed);
+    const ch = (await newChannel()).channelId;
+    const [g] = await app
+      .insert(s.giveaways)
+      .values({
+        channelId: ch,
+        title: "t",
+        prize: "p",
+        eligibility: { minAccountAgeDays: 0, minFollowDays: null, minVerifiedWatchSeconds: 0 },
+        winnerCount: 1,
+        seedCommitment: commitment,
+        sealedSeed: "x",
+        salt: newSalt(),
+      })
+      .returning({ id: s.giveaways.id });
+    await set(g!.id, { status: "closed", closedAt: new Date() });
+    expect(await refused(set(g!.id, { seed: newSeed() }), /does not match/)).toBe("23514");
+    expect(await refused(set(g!.id, { seed: seed.toUpperCase() }), /does not match/)).toBe("23514");
+    // The commitment of the seed's UTF-8 text is not what commit() produces, so it never reveals.
+    const textCommitted = await app
+      .insert(s.giveaways)
+      .values({
+        channelId: (await newChannel()).channelId,
+        title: "t",
+        prize: "p",
+        eligibility: { minAccountAgeDays: 0, minFollowDays: null, minVerifiedWatchSeconds: 0 },
+        winnerCount: 1,
+        seedCommitment: createHash("sha256").update(seed).digest("hex"),
+        sealedSeed: "x",
+        salt: newSalt(),
+      })
+      .returning({ id: s.giveaways.id });
+    await set(textCommitted[0]!.id, { status: "closed", closedAt: new Date() });
+    expect(await refused(set(textCommitted[0]!.id, { seed }), /does not match/)).toBe("23514");
+    // 15 bytes is below packages/draw's minimum, even with a matching commitment.
+    const short = hex(15);
+    const [g2] = await app
+      .insert(s.giveaways)
+      .values({
+        channelId: (await newChannel()).channelId,
+        title: "t",
+        prize: "p",
+        eligibility: { minAccountAgeDays: 0, minFollowDays: null, minVerifiedWatchSeconds: 0 },
+        winnerCount: 1,
+        seedCommitment: sha(short),
+        sealedSeed: "x",
+        salt: newSalt(),
+      })
+      .returning({ id: s.giveaways.id });
+    await set(g2!.id, { status: "closed", closedAt: new Date() });
+    expect(await refused(set(g2!.id, { seed: short }), /does not match/)).toBe("23514");
+    await set(g!.id, { seed, status: "drawn", drawnAt: new Date() });
+    const [row] = await app.select().from(s.giveaways).where(eq(s.giveaways.id, g!.id));
+    expect(row!.seed).toBe(seed);
+    expect(await verifyReveal(row!.seed!, row!.seedCommitment)).toBe(true);
   });
 
   test("entries only while open and before closes_at; winners are entrants, append-only", async () => {
