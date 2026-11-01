@@ -52,6 +52,9 @@
   "federation.blocks.add": "Bloquear dominio",
   "federation.blocks.added": "{domain} está bloqueado.",
   "federation.blocks.addFailed": "No se pudo bloquear el dominio. Inténtalo de nuevo.",
+  "federation.blocks.addTitle": "¿Bloquear {domain}?",
+  "federation.blocks.addBody": "Los servidores de {domain} y sus subdominios ya no podrán seguir a los canales de aquí, y sus seguidores se eliminan ahora. Desbloquear más tarde no recupera esos seguidores.",
+  "federation.blocks.addConfirm": "Bloquear",
   "federation.blocks.invalid": "Escribe un nombre de dominio, como example.social.",
   "federation.blocks.duplicate": "{domain} ya está bloqueado.",
   "federation.blocks.covered": "{domain} ya está bloqueado por el bloqueo de {parent}.",
@@ -72,7 +75,7 @@
   "federation.keys.intro": "Cada canal federado firma sus publicaciones con su propia clave. Las claves rotan solas cada año; rótalas todas ahora si crees que se ha filtrado una.",
   "federation.keys.rotate": "Rotar todas las claves",
   "federation.keys.confirmTitle": "¿Rotar la clave de cada canal?",
-  "federation.keys.confirmBody": "Cada canal federado recibe ahora una clave nueva. Los servidores remotos obtienen la clave nueva la próxima vez que comprueban una publicación, así que algunas entregas pueden rechazarse durante un rato.",
+  "federation.keys.confirmBody": "Cada canal federado recibe ahora una clave nueva, y se envía la clave nueva a los servidores de sus seguidores. Algunas entregas pueden rechazarse hasta que la tengan.",
   "federation.keys.rotated": "{count, plural, =0 {No hay claves que rotar.} one {# clave rotada.} other {# claves rotadas.}}",
   "federation.keys.rotateFailed": "No se pudieron rotar las claves. Inténtalo de nuevo."
 }

@@ -516,11 +516,36 @@ describe("the admin page", () => {
     const input = q(container, "federation-block-domain") as HTMLInputElement;
     fireEvent.change(input, { target: { value: " Spam.Example " } });
     fireEvent.submit(input.closest("form")!);
+    await confirmButton();
+    expect(q(document, "federation-block-confirm")?.textContent).toContain(
+      t("federation.blocks.addBody", { domain: "spam.example" }),
+    );
+    expect(fake.calls.added).toEqual([]);
+    fireEvent.click(await confirmButton());
     await waitFor(() => expect(qa(container, "federation-block")).toHaveLength(2));
+    await noDialog();
     expect(fake.calls.added).toEqual(["spam.example"]);
     expect(qa(container, "federation-block")[0]?.dataset.domain).toBe("spam.example");
     expect(input.value).toBe("");
     expect(toasts.success).toEqual([t("federation.blocks.added", { domain: "spam.example" })]);
+  });
+
+  it("add asks first: cancel calls nothing and keeps the input", async () => {
+    const fake = fakeAdmin();
+    const { container } = wrap(<FederationAdminPage instanceEnabled client={fake.client} />);
+    await waitFor(() => expect(q(container, "federation-blocks")?.textContent).toContain(t("federation.blocks.empty")));
+    const input = q(container, "federation-block-domain") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "big.example" } });
+    fireEvent.click(q(container, "federation-block-add")!);
+    await confirmButton();
+    expect(document.body.textContent).toContain(t("federation.blocks.addTitle", { domain: "big.example" }));
+    await waitFor(() => expect(document.activeElement?.getAttribute("data-testid")).toBe("confirm-dialog-cancel"));
+    fireEvent.click(q(document, "confirm-dialog-cancel")!);
+    await noDialog();
+    expect(fake.calls.added).toEqual([]);
+    expect(input.value).toBe("big.example");
+    expect(qa(container, "federation-block")).toHaveLength(0);
+    expect(toasts.success).toEqual([]);
   });
 
   it("a server refusal shows the invalid message; another failure toasts", async () => {
@@ -531,6 +556,7 @@ describe("the admin page", () => {
     );
     fireEvent.change(q(r1.container, "federation-block-domain")!, { target: { value: "spam.example" } });
     fireEvent.click(q(r1.container, "federation-block-add")!);
+    fireEvent.click(await confirmButton());
     await waitFor(() =>
       expect(q(r1.container, "federation-block-error")?.textContent).toBe(t("federation.blocks.invalid")),
     );
@@ -542,6 +568,7 @@ describe("the admin page", () => {
     );
     fireEvent.change(q(r2.container, "federation-block-domain")!, { target: { value: "spam.example" } });
     fireEvent.click(q(r2.container, "federation-block-add")!);
+    fireEvent.click(await confirmButton());
     await waitFor(() => expect(toasts.error).toEqual([t("federation.blocks.addFailed")]));
   });
 

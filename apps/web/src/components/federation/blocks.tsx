@@ -3,8 +3,8 @@
 
 /**
  * `/admin/federation` (ADR 0030 decision 7, docs/testing/b7-selectors.md "Federation"): the
- * instance's domain block list (add with validation and the subdomain rule explained, remove
- * with confirmation) and "Rotate all keys". Every action ends in a toast. While the instance does
+ * instance's domain block list (add with validation, the subdomain rule explained and a
+ * confirmation; remove with confirmation) and "Rotate all keys". Every action ends in a toast. While the instance does
  * not federate, the page says how to turn federation on instead.
  */
 import { ConfirmDialog, EmptyState, RelativeTime, SkeletonGroup, SkeletonText } from "@commonair/ui";
@@ -108,7 +108,10 @@ export function FederationBlocks({ client }: { client: FederationAdminClient }):
     };
   }, [client]);
 
-  const submit = async (e: React.FormEvent<HTMLFormElement>) => {
+  // A block drops that server's followers for good (ADR 0030 decision 7), so it asks first.
+  const [pending, setPending] = React.useState<string | null>(null);
+
+  const submit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (adding) return;
     const check = checkBlockDomain(
@@ -120,9 +123,13 @@ export function FederationBlocks({ client }: { client: FederationAdminClient }):
       return;
     }
     setError(null);
+    setPending(check.domain);
+  };
+
+  const add = async (domain: string) => {
     setAdding(true);
     try {
-      const added = await client.addBlock(check.domain);
+      const added = await client.addBlock(domain);
       setBlocks((prev) => [added, ...(prev ?? []).filter((b) => b.domain !== added.domain)]);
       setInput("");
       toast.success(t("federation.blocks.added", { domain: added.domain }));
@@ -147,7 +154,7 @@ export function FederationBlocks({ client }: { client: FederationAdminClient }):
         <CardDescription>{t("federation.blocks.intro")}</CardDescription>
       </CardHeader>
       <CardContent className="flex min-w-0 flex-col gap-6">
-        <form className="flex min-w-0 flex-col gap-2" onSubmit={(e) => void submit(e)} noValidate>
+        <form className="flex min-w-0 flex-col gap-2" onSubmit={submit} noValidate>
           <Field>
             <FieldLabel htmlFor={inputId}>{t("federation.blocks.domainLabel")}</FieldLabel>
             <div className="flex min-w-0 flex-wrap gap-2">
@@ -185,6 +192,18 @@ export function FederationBlocks({ client }: { client: FederationAdminClient }):
             </div>
           )}
         </form>
+        <ConfirmDialog
+          open={pending !== null}
+          onOpenChange={(open) => {
+            if (!open) setPending(null);
+          }}
+          title={t("federation.blocks.addTitle", { domain: pending ?? "" })}
+          description={t("federation.blocks.addBody", { domain: pending ?? "" })}
+          confirmLabel={t("federation.blocks.addConfirm")}
+          variant="destructive"
+          contentProps={{ "data-testid": "federation-block-confirm" }}
+          onConfirm={() => (pending === null ? Promise.resolve() : add(pending))}
+        />
         <section aria-labelledby={listHeadingId} className="flex min-w-0 flex-col gap-2">
           <h3 id={listHeadingId} className="text-sm font-medium">
             {t("federation.blocks.listTitle")}

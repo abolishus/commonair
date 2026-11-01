@@ -52,6 +52,9 @@
   "federation.blocks.add": "Block domain",
   "federation.blocks.added": "{domain} is blocked.",
   "federation.blocks.addFailed": "The domain could not be blocked. Try again.",
+  "federation.blocks.addTitle": "Block {domain}?",
+  "federation.blocks.addBody": "Servers at {domain} and its subdomains can no longer follow channels here, and their followers are dropped now. Unblocking later does not bring those followers back.",
+  "federation.blocks.addConfirm": "Block",
   "federation.blocks.invalid": "Enter a domain name, such as example.social.",
   "federation.blocks.duplicate": "{domain} is already blocked.",
   "federation.blocks.covered": "{domain} is already blocked by the block on {parent}.",
@@ -72,7 +75,7 @@
   "federation.keys.intro": "Each federated channel signs its posts with its own key. Keys rotate yearly on their own; rotate them all now if you think a key has leaked.",
   "federation.keys.rotate": "Rotate all keys",
   "federation.keys.confirmTitle": "Rotate every channel's key?",
-  "federation.keys.confirmBody": "Every federated channel gets a new key now. Remote servers fetch the new key the next time they check a post, so deliveries may be refused for a short while.",
+  "federation.keys.confirmBody": "Every federated channel gets a new key now, and its followers' servers are sent the new key. A few deliveries may be refused until they have it.",
   "federation.keys.rotated": "{count, plural, =0 {No keys to rotate.} one {# key rotated.} other {# keys rotated.}}",
   "federation.keys.rotateFailed": "The keys could not be rotated. Try again."
 }

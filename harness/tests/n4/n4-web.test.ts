@@ -21,8 +21,12 @@ describe("n4 web steps", () => {
   test("select by ids the web renders, documented unless they are the shared confirm or a web extra", () => {
     const ids = Object.values(FEDERATION_IDS);
     const ownIds = ids.filter((id) => id !== "confirm-dialog-confirm");
-    const documented = ids.filter((id) => id !== "confirm-dialog-confirm" && id !== "federation-followers-more");
-    expect(ownIds.filter((id) => !webSource.includes(`data-testid="${id}"`))).toEqual([]);
+    // Web extras awaiting their b7-selectors.md rows (contract request).
+    const extras = new Set(["confirm-dialog-confirm", "federation-followers-more", "federation-block-confirm"]);
+    const documented = ids.filter((id) => !extras.has(id));
+    const rendered = (id: string) =>
+      webSource.includes(`data-testid="${id}"`) || webSource.includes(`"data-testid": "${id}"`);
+    expect(ownIds.filter((id) => !rendered(id))).toEqual([]);
     expect(documented.filter((id) => !doc.includes(`| \`${id}\``))).toEqual([]);
   });
 

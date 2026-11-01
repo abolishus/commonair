@@ -38,6 +38,7 @@ export const FEDERATION_IDS = {
   adminPage: "federation-admin-page",
   blockDomain: "federation-block-domain",
   blockAdd: "federation-block-add",
+  blockConfirm: "federation-block-confirm",
   blocks: "federation-blocks",
   block: "federation-block",
   confirm: "confirm-dialog-confirm",
@@ -190,6 +191,8 @@ export async function addDomainBlockViaWeb(ctx: ScenarioContext, as: SignedInUse
     await checkAxe(ctx, page, F.adminPage);
     await page.locator(tid(F.blockDomain)).fill(domain, { timeout: UI_TIMEOUT_MS });
     await page.locator(tid(F.blockAdd)).click({ timeout: UI_TIMEOUT_MS });
+    await page.locator(tid(F.blockConfirm)).waitFor({ timeout: UI_TIMEOUT_MS });
+    await page.locator(tid(F.confirm)).click({ timeout: UI_TIMEOUT_MS });
     // The page stores the normalized (lower-case) domain.
     await page.locator(tid(F.block, { domain: domain.trim().toLowerCase() })).waitFor({ timeout: UI_TIMEOUT_MS });
   });
