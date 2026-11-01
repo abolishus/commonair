@@ -126,7 +126,12 @@ const bump = <K extends string>(m: Partial<Record<K, number>>, k: K, by = 1) => 
 /**
  * Bucket every session into each minute it overlaps and total its seconds. A minute's figures are
  * the sessions active at some point in it (so a short session that ended and one that started in
- * the same minute both count there); the peak is the largest such verified figure.
+ * the same minute both count there). The peak is not read off those buckets, which would count a
+ * reconnect twice: it is the most verified sessions open at one instant (`peakConcurrent`).
+ *
+ * A session with less than one whole second inside the broadcast (zero length, or wholly outside)
+ * counts nowhere: not in `sessions`, not in a group's size, not in a minute. Otherwise a burst of
+ * instant reconnects could make up a group of 5 on its own.
  */
 export function rollUp(
   b: { startedAt: Date; endedAt: Date },
@@ -135,7 +140,7 @@ export function rollUp(
   const byMinute = new Map<number, MinuteRow>();
   const totals: RollupTotals = {
     durationSeconds: Math.max(0, Math.floor((b.endedAt.getTime() - b.startedAt.getTime()) / 1000)),
-    sessions: sessions.length,
+    sessions: 0,
     peakVerifiedConcurrent: 0,
     verifiedViewerSeconds: 0,
     unverifiedViewerSeconds: 0,
@@ -144,11 +149,15 @@ export function rollUp(
     excludedSessionsByCategory: {},
     verifiedSecondsBySource: {},
   };
+  const verifiedWindows: { start: number; end: number }[] = [];
   for (const s of sessions) {
-    const c = classifySession(s);
     const w = sessionWindow(s, b);
     const seconds = windowSeconds(w);
+    if (seconds === 0) continue;
+    totals.sessions++;
+    const c = classifySession(s);
     if (c.kind === "verified") {
+      verifiedWindows.push(w);
       totals.verifiedViewerSeconds += seconds;
       bump(totals.verifiedSecondsBySource, s.assignedSource, seconds);
     } else if (c.kind === "unverified") totals.unverifiedViewerSeconds += seconds;
@@ -183,8 +192,29 @@ export function rollUp(
     }
   }
   const minutes = [...byMinute.values()].sort((x, y) => x.minute.getTime() - y.minute.getTime());
-  for (const m of minutes) totals.peakVerifiedConcurrent = Math.max(totals.peakVerifiedConcurrent, m.verified);
+  totals.peakVerifiedConcurrent = peakConcurrent(verifiedWindows);
   return { minutes, totals };
+}
+
+/**
+ * The most windows open at one instant, by a sweep over start (+1) and end (-1) events. Windows are
+ * half-open, so at equal times the end comes first: back-to-back sessions (a reconnect) never
+ * overlap.
+ */
+export function peakConcurrent(windows: readonly { start: number; end: number }[]): number {
+  const events: [at: number, delta: 1 | -1][] = [];
+  for (const w of windows) {
+    if (w.end <= w.start) continue;
+    events.push([w.start, 1], [w.end, -1]);
+  }
+  events.sort((x, y) => x[0] - y[0] || x[1] - y[1]);
+  let open = 0;
+  let peak = 0;
+  for (const [, delta] of events) {
+    open += delta;
+    if (open > peak) peak = open;
+  }
+  return peak;
 }
 
 /** Cost-model rates are kept to a millionth of a cent per GB. */

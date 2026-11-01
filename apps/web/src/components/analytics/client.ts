@@ -13,14 +13,36 @@ export interface AnalyticsClient {
   revokeShareLink: (q: { channel: string; id: string }) => Promise<unknown>;
 }
 
-/** Share links one page lists (the newest; older ones stay revocable through the API). */
+/** Share links one request lists (the contract's page maximum). */
 export const SHARE_LINK_PAGE = 100;
+/**
+ * Pages the studio reads at most. The list is the whole channel's, newest first, and the page
+ * filters it to one broadcast, so it pages through rather than stopping at the newest 100.
+ */
+export const SHARE_LINK_MAX_PAGES = 20;
+
+/** Every page of a cursor-paged list, up to `maxPages`; `nextCursor` is non-null when it stopped early. */
+export async function allPages<T>(
+  fetchPage: (cursor: string | undefined) => Promise<{ items: T[]; nextCursor: string | null }>,
+  maxPages: number = SHARE_LINK_MAX_PAGES,
+): Promise<{ items: T[]; nextCursor: string | null }> {
+  const items: T[] = [];
+  let cursor: string | undefined;
+  for (let i = 0; i < maxPages; i++) {
+    const p = await fetchPage(cursor);
+    items.push(...p.items);
+    if (p.nextCursor === null) return { items, nextCursor: null };
+    cursor = p.nextCursor;
+  }
+  return { items, nextCursor: cursor ?? null };
+}
 
 export function analyticsClient(): AnalyticsClient {
   return {
     range: (q) => api().analytics.range(q),
     broadcast: (q) => api().analytics.broadcast(q),
-    shareLinks: (q) => api().analytics.shareLink.list({ channel: q.channel, limit: SHARE_LINK_PAGE }),
+    shareLinks: (q) =>
+      allPages((cursor) => api().analytics.shareLink.list({ channel: q.channel, limit: SHARE_LINK_PAGE, cursor })),
     createShareLink: (q) => api().analytics.shareLink.create({ ...q, expiresInDays: 30 }),
     revokeShareLink: (q) => api().analytics.shareLink.revoke(q),
   };

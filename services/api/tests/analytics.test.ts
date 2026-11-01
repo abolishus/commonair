@@ -13,6 +13,7 @@ import {
   displayable,
   groupsOf,
   periodOf,
+  shownFollowCount,
   sumGroups,
   suppressGroups,
 } from "../src/analytics/rules.ts";
@@ -45,6 +46,10 @@ describe("small-group suppression", () => {
     expect(suppressGroups([g(5)])).toEqual({ shown: [g(5)], hidden: 0 });
     expect(suppressGroups([g(6), g(4), g(1)])).toEqual({ shown: [g(6)], hidden: 2 });
     expect(suppressGroups([])).toEqual({ shown: [], hidden: 0 });
+  });
+
+  test("excluded follows under the threshold show as 0", () => {
+    expect([0, 1, 4, 5, 6].map((n) => shownFollowCount(n))).toEqual([0, 0, 0, 5, 6]);
   });
 
   test("groups come from a broadcast's totals in category order, empty ones left out", () => {

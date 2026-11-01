@@ -7,6 +7,7 @@ import {
   classifySession,
   marginalCostCents,
   minutesOf,
+  peakConcurrent,
   rollUp,
   type RollupSession,
   sessionWindow,
@@ -101,12 +102,13 @@ describe("rollUp", () => {
       session({ verdictReasons: ["fetch_unjudged"], assignedSource: "cdn", startedAt: at(5), endedAt: at(6) }),
       session({ verdict: "excluded", verdictReasons: ["datacenter_ip"], startedAt: at(1), endedAt: at(3) }),
       session({ verdict: "excluded", verdictReasons: ["headless"], startedAt: at(2), endedAt: at(2, 30) }),
-      session({ startedAt: at(4), endedAt: at(4) }), // zero length: a session, no seconds
+      session({ startedAt: at(4), endedAt: at(4) }), // zero length: counts nowhere
+      session({ verdict: "excluded", verdictReasons: ["headless"], startedAt: at(12), endedAt: at(13) }), // outside
     ];
     const { minutes, totals } = rollUp(broadcast, sessions);
     expect(totals).toEqual({
       durationSeconds: 600,
-      sessions: 7,
+      sessions: 6,
       peakVerifiedConcurrent: 2,
       verifiedViewerSeconds: 180,
       unverifiedViewerSeconds: 240,
@@ -128,6 +130,40 @@ describe("rollUp", () => {
     expect(minutes.map((m) => m.minute.getTime())).toEqual([0, 1, 2, 3, 5].map((n) => at(n).getTime()));
     // The fetch-unjudged CDN session is raw CDN delivery, never verified CDN delivery.
     expect(minutes.at(-1)).toMatchObject({ verified: 0, unverified: 1, rawBySource: { cdn: 1 }, verifiedBySource: {} });
+  });
+
+  test("the peak is concurrency at an instant, not sessions per minute", () => {
+    // A reconnect inside one minute: two sessions in minute 1 that never overlap.
+    const { minutes, totals } = rollUp(broadcast, [
+      session({ startedAt: at(1), endedAt: at(1, 20) }),
+      session({ startedAt: at(1, 20), endedAt: at(1, 50) }),
+    ]);
+    expect(minutes[0]).toMatchObject({ minute: at(1), verified: 2 });
+    expect(totals.peakVerifiedConcurrent).toBe(1);
+  });
+
+  test("only verified sessions make the peak", () => {
+    const { totals } = rollUp(broadcast, [
+      session({ startedAt: at(1), endedAt: at(5) }),
+      session({ startedAt: at(2), endedAt: at(4) }),
+      session({ verdict: "pending", startedAt: at(2), endedAt: at(4) }),
+      session({ verdict: "excluded", verdictReasons: ["headless"], startedAt: at(2), endedAt: at(4) }),
+    ]);
+    expect(totals.peakVerifiedConcurrent).toBe(2);
+  });
+
+  test("a group is never made of sub-second reconnects", () => {
+    const blips = Array.from({ length: 6 }, (_, i) =>
+      session({
+        verdict: "excluded",
+        verdictReasons: ["headless"],
+        startedAt: at(2, i),
+        endedAt: new Date(at(2, i).getTime() + 500),
+      }),
+    );
+    const { minutes, totals } = rollUp(broadcast, blips);
+    expect(totals).toMatchObject({ sessions: 0, excludedSessionsByCategory: {}, excludedViewerSeconds: 0 });
+    expect(minutes).toEqual([]);
   });
 
   test("no sessions: no minutes, zero totals", () => {
@@ -161,5 +197,21 @@ describe("marginal cost", () => {
   test("exact for large byte counts and fractional rates", () => {
     // 9 PB at 0.123456 c/GB = 1,111,104 cents exactly, beyond float-safe products.
     expect(marginalCostCents({ origin: 9_000_000 * GB }, { centsPerGb: { origin: 0.123456 } })).toBe(1_111_104);
+  });
+});
+
+describe("peakConcurrent", () => {
+  const w = (start: number, end: number) => ({ start, end });
+  test("empty, and empty windows, give 0", () => {
+    expect(peakConcurrent([])).toBe(0);
+    expect(peakConcurrent([w(5, 5), w(7, 3)])).toBe(0);
+  });
+  test("back-to-back windows do not overlap; nested and staggered ones do", () => {
+    expect(peakConcurrent([w(0, 10), w(10, 20), w(20, 30)])).toBe(1);
+    expect(peakConcurrent([w(0, 100), w(10, 20), w(15, 30), w(25, 40)])).toBe(3);
+    expect(peakConcurrent([w(0, 10), w(0, 10), w(9, 11)])).toBe(3);
+  });
+  test("order of input does not matter", () => {
+    expect(peakConcurrent([w(25, 40), w(15, 30), w(0, 100), w(10, 20)])).toBe(3);
   });
 });

@@ -13,7 +13,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import type * as React from "react";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { AnalyticsView } from "../src/components/analytics/analytics-page.tsx";
-import type { AnalyticsClient } from "../src/components/analytics/client.ts";
+import { type AnalyticsClient, allPages } from "../src/components/analytics/client.ts";
 import {
   deliveryShares,
   hoursOf,
@@ -215,5 +215,24 @@ describe("analytics data helpers", () => {
     expect(pickBroadcast(range.broadcasts, B2)).toBe(B2);
     expect(pickBroadcast(range.broadcasts, "gone")).toBe(B1);
     expect(pickBroadcast([], null)).toBeNull();
+  });
+});
+
+describe("allPages", () => {
+  const pages: Record<string, { items: number[]; nextCursor: string | null }> = {
+    start: { items: [1, 2], nextCursor: "b" },
+    b: { items: [3], nextCursor: "c" },
+    c: { items: [4], nextCursor: null },
+  };
+  const fetchPage = vi.fn<(cursor: string | undefined) => Promise<{ items: number[]; nextCursor: string | null }>>(
+    async (cursor) => pages[cursor ?? "start"]!,
+  );
+
+  it("follows the cursor to the last page", async () => {
+    expect(await allPages(fetchPage)).toEqual({ items: [1, 2, 3, 4], nextCursor: null });
+  });
+
+  it("stops at the page cap and says where it stopped", async () => {
+    expect(await allPages(fetchPage, 2)).toEqual({ items: [1, 2, 3], nextCursor: "c" });
   });
 });

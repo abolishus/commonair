@@ -115,11 +115,19 @@ async function readRollup(url: string, broadcastId: string, swarm: readonly stri
              excluded_viewer_seconds::int as excluded,
              excluded_sessions_by_category as "bySessions", excluded_seconds_by_category as "bySeconds"
         from broadcast_audience_totals where broadcast_id = ${broadcastId}::uuid`) as RollupRow[];
+    // The rollup counts only sessions with a whole second inside the broadcast (open ones clipped
+    // at its end); "every swarm session is excluded" is over all of them.
     const [v] = (await sql`
-      select count(*)::int as sessions,
-             count(*) filter (where verdict = 'excluded')::int as excluded,
+      with s as (
+        select ps.id, ps.verdict,
+               least(coalesce(ps.ended_at, b.ended_at), b.ended_at) - greatest(ps.started_at, b.started_at)
+                 >= interval '1 second' as counted
+          from playback_sessions ps join broadcasts b on b.id = ps.broadcast_id
+         where ps.broadcast_id = ${broadcastId}::uuid)
+      select count(*) filter (where counted)::int as sessions,
+             count(*) filter (where counted and verdict = 'excluded')::int as excluded,
              count(*) filter (where verdict = 'excluded' and id = any(${[...swarm]}::uuid[]))::int as "swarmExcluded"
-        from playback_sessions where broadcast_id = ${broadcastId}::uuid`) as {
+        from s`) as {
       sessions: number;
       excluded: number;
       swarmExcluded: number;

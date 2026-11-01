@@ -63,8 +63,9 @@ test("integers and categories from the rollup, small groups hidden per broadcast
   await seed(72, { datacenter: 5, privacy_relay: 4 }, 2500);
   // Inside the display delay: not counted yet.
   await seed(3, { datacenter: 50 }, 99_999);
-  // Two excluded follows in the period, one outside it.
-  for (const excludedAt of [new Date(Date.now() - 10 * HOUR), new Date(Date.now() - 20 * HOUR), null]) {
+  // Five excluded follows past the display delay; one inside it and one not excluded are not counted.
+  const followExclusions = [30, 31, 32, 33, 34, 10].map((h) => new Date(Date.now() - h * HOUR));
+  for (const excludedAt of [...followExclusions, null]) {
     const fan = await signUpAndSignIn(api);
     await db().insert(schema.follows).values({ followerId: fan.userId, channelId, excludedAt });
   }
@@ -75,7 +76,7 @@ test("integers and categories from the rollup, small groups hidden per broadcast
     verifiedViewerSeconds: 7500,
     unverifiedViewerSeconds: 22,
     excludedViewerSeconds: 2100,
-    excludedFollows: 2,
+    excludedFollows: 5,
     exclusionsByCategory: [{ category: "datacenter", sessions: 15, viewerSeconds: 1500 }],
     hiddenGroups: 2,
   });
@@ -93,6 +94,16 @@ test("an explicit period, and a stranger is refused", async () => {
     `/api/channels/${owner.username}/integrity?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
   );
   expect(r.body).toMatchObject({ verifiedViewerSeconds: 5000, periodStart: from, periodEnd: to, excludedFollows: 0 });
+  // Four excluded follows (31-34 h ago) in this period: under the threshold, shown as 0.
+  const few = new URLSearchParams({
+    from: new Date(Date.now() - 40 * HOUR).toISOString(),
+    to: new Date(Date.now() - 30.5 * HOUR).toISOString(),
+  });
+  const r4 = await owner.client.call<Record<string, unknown>>(
+    "GET",
+    `/api/channels/${owner.username}/integrity?${few}`,
+  );
+  expect(r4.body).toMatchObject({ excludedFollows: 0 });
   const stranger = await signUpAndSignIn(api);
   expect((await stranger.client.call("GET", `/api/channels/${owner.username}/integrity`)).status).toBe(403);
 });

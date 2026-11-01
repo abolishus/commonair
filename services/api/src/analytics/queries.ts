@@ -28,6 +28,7 @@ import {
   displayCutoff,
   displayable,
   groupsOf,
+  shownFollowCount,
   sumGroups,
   suppressGroups,
 } from "./rules.ts";
@@ -327,6 +328,8 @@ export async function channelSummary(
         eq(schema.follows.channelId, q.channelId),
         gte(schema.follows.excludedAt, q.from),
         lt(schema.follows.excludedAt, q.to),
+        // The same 24 h delay as the broadcasts: a fresh exclusion is not shown yet.
+        q.bypassed ? undefined : lte(schema.follows.excludedAt, displayCutoff(deps.now())),
       ),
     );
   const sum = (k: "verifiedViewerSeconds" | "unverifiedViewerSeconds" | "excludedViewerSeconds") =>
@@ -338,7 +341,7 @@ export async function channelSummary(
     verifiedViewerSeconds: sum("verifiedViewerSeconds"),
     unverifiedViewerSeconds: sum("unverifiedViewerSeconds"),
     excludedViewerSeconds: sum("excludedViewerSeconds"),
-    excludedFollows: follows?.n ?? 0,
+    excludedFollows: shownFollowCount(follows?.n ?? 0),
     exclusionsByCategory: sumGroups(groups),
     hiddenGroups: hidden,
   };

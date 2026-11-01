@@ -41,6 +41,14 @@ export function displayable(endedAt: Date | null, now: Date, bypassed: boolean):
 /** The latest `ended_at` a broadcast may have to be shown at `now` (no bypass). */
 export const displayCutoff = (now: Date): Date => new Date(now.getTime() - ANALYTICS_RULES.displayDelaySeconds * 1000);
 
+/**
+ * Excluded follows in a period, as shown: a count under `ANALYTICS_RULES.minGroupSessions` shows as
+ * 0, so the owner cannot tell that one particular follow was just excluded (the same threshold as
+ * the exclusion groups; follows are one group with no category).
+ */
+export const shownFollowCount = (n: number, min: number = ANALYTICS_RULES.minGroupSessions): number =>
+  n >= min ? n : 0;
+
 export interface ExclusionGroup {
   category: ExclusionCategory;
   sessions: number;
