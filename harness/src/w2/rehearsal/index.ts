@@ -474,9 +474,29 @@ export const REHEARSAL_STEP_RUNNERS: Readonly<Record<RehearsalStep, (run: Rehear
 
 /**
  * `rehearsal` W3 extension `moderation-samples` (batch 7; `src/w3/steps.ts`): the rehearsal
- * report's moderation sample count is above zero. Runs after the scenario's steps, with step 1.
- * Stub entry point from the batch 7 contract step: B7-followups fills it.
+ * report's moderation sample count is above zero. Media counts each frame its moderation samples
+ * on a rehearsal (`KEYS.rehearsalModerationSamples`) and the driver copies the count into the
+ * report on its next write. Runs after the scenario's steps, with step 1 (whose rehearsal ran for
+ * well over one sample interval).
  */
-export async function stepModerationSamples(_run: RehearsalRun): Promise<void> {
-  throw new Error("B7-followups not merged");
+export async function stepModerationSamples(run: RehearsalRun): Promise<void> {
+  const { ctx, channel } = run;
+  ctx.assert("moderation-samples: step 1 left a rehearsal broadcast", run.broadcastId !== null);
+  if (run.broadcastId === null) return;
+  const broadcastId = run.broadcastId;
+  const report = await ctx.step("moderation-samples: the report counts moderation samples", () =>
+    waitFor(
+      "a report with a moderation sample count above zero",
+      async () => {
+        const r = await run.streamer.api.client.stream.rehearsal.report({ channel, broadcastId });
+        return r.moderation.samples > 0 ? r : null;
+      },
+      { timeoutMs: REPORT_TIMEOUT_MS, intervalMs: 2000, signal: ctx.signal },
+    ).catch(() => run.streamer.api.client.stream.rehearsal.report({ channel, broadcastId })),
+  );
+  ctx.metric("rehearsal.moderation.samples", report.moderation.samples);
+  ctx.assert("moderation-samples: the report's moderation sample count is above zero", report.moderation.samples > 0, {
+    moderation: report.moderation,
+    broadcastId,
+  });
 }

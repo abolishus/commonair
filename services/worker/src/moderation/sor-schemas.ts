@@ -5,13 +5,14 @@
  * The `audit_log.details` shapes the statements-of-reasons builder reads (ADR 0019 decision 5).
  * They are an internal contract with the action writers (`moderation/scan.ts`, `t0.ts`,
  * `ncii-clock.ts` here; `services/api/src/moderation/uploads.ts`, `routes/moderation.ts`,
- * `routes/ncii.ts` in the API): each schema names only the fields the builder needs, so a writer
+ * `routes/ncii.ts` and `routes/safety.ts` in the API): each schema names only the fields the builder needs, so a writer
  * adding fields changes nothing, and a writer dropping or renaming one makes the row fail to
  * parse loudly (skipped, `sor_build_failures_total{action}`, logged by audit id) instead of
  * producing a wrong statement. Fixtures copied from each writer's current shape are in
  * `tests/moderation-sor.test.ts`.
  */
 import {
+  ENFORCEMENT_GROUNDS,
   ENFORCEMENT_SOURCE_ACTIONS,
   HASH_LIST_CATEGORIES,
   MODERATION_CATEGORIES,
@@ -75,8 +76,41 @@ const t0Match = z.object({
   listCategory: z.enum(HASH_LIST_CATEGORIES),
 });
 
-/** Batch 7 contract step placeholder: B7-followups defines these rows' details. */
-const pendingB7 = z.looseObject({});
+/**
+ * What a staff action cites (ADR 0019 answer 3: a required `clauseId` in both staff inputs): the
+ * clause with the version and ground in force when the action applied, and the `mod_actions` row
+ * the action wrote (the statement's appeal subject, and how the enforcement report knows the
+ * action has its statement).
+ */
+const staffCitation = {
+  modActionId: id,
+  clauseId: z.string().min(1).max(100),
+  clauseVersion: z.number().int().min(1),
+  ground: z.enum(ENFORCEMENT_GROUNDS),
+};
+const staffSuspend = z.object({
+  /** The suspended account (`user.suspend`), or the suspended channel's owner (`channel.suspend`). */
+  userId: id,
+  durationSeconds: z.number().int().positive().nullable(),
+  ...staffCitation,
+});
+const REPORT_ACTIONS = ["none", "remove_content", "suspend_user", "suspend_channel", "ban_from_channel"] as const;
+/**
+ * A report resolve: a statement only for a suspension that took effect (`suspended: true`, set by
+ * the writer). The suspended channel is the audit row's `channel_id`.
+ */
+const reportResolve = z.union([
+  z.object({
+    reportId: id,
+    action: z.enum(["suspend_user", "suspend_channel"]),
+    suspended: z.literal(true),
+    /** The reported account (the mod action's target). */
+    userId: id,
+    durationSeconds: z.number().int().positive().nullable(),
+    ...staffCitation,
+  }),
+  z.object({ reportId: id, action: z.enum(REPORT_ACTIONS), suspended: z.literal(false).nullable() }),
+]);
 
 export const SOR_DETAILS = {
   "moderation.t1.restrict": t1Restrict,
@@ -88,11 +122,9 @@ export const SOR_DETAILS = {
   "ncii.decide": nciiDecide,
   "ncii.auto_hide": nciiAutoHide,
   "moderation.t0.match": t0Match,
-  // Batch 7 contract step: allowlisted now, built by B7-followups. Until then `expectsStatement`
-  // excludes them, so neither the builder nor the coverage sweep selects them.
-  "report.resolve": pendingB7,
-  "user.suspend": pendingB7,
-  "channel.suspend": pendingB7,
+  "report.resolve": reportResolve,
+  "user.suspend": staffSuspend,
+  "channel.suspend": staffSuspend,
 } as const satisfies Record<SourceAction, z.ZodType>;
 
 export type SorDetails = { [A in SourceAction]: z.infer<(typeof SOR_DETAILS)[A]> };
@@ -106,15 +138,18 @@ export const isSourceAction = (action: string): action is SourceAction =>
  * (no URL resolved to a subject), and a T0 match on any list but an NCII list (CSAM: no
  * statement, accepted answer 1, counsel to confirm). Also decisions that restricted nothing: an
  * `end_stream` that ended no stream (a clip or chat case, or a stream already over) and a
- * suspension whose every target was skipped by the writer. The builder and the coverage sweep
- * share this predicate, so a "no" row is never selected and never counted as missing.
+ * suspension whose every target was skipped by the writer. A report resolve is stated only when
+ * it suspended someone (`suspended: true`): a dismissal, a channel ban (channel scope, never
+ * stated), a content removal (no statement content type covers chat, and none is built yet for
+ * the rest) and a suspension already in force have none. A lift (`user.unsuspend`,
+ * `channel.unsuspend`) is not allowlisted. The builder and the coverage sweep share this
+ * predicate, so a "no" row is never selected and never counted as missing.
  */
 export function expectsStatement(a = schema.auditLog): SQL {
   const i = schema.nciiRequestItems;
   // Compared as text: a malformed id in `details` must not make the whole query fail.
   return sql`not (
-    -- Batch 7 contract step: allowlisted, not built yet (B7-followups removes this line).
-    ${a.action} in ('report.resolve', 'user.suspend', 'channel.suspend')
+    (${a.action} = 'report.resolve' and ${a.details} ->> 'suspended' is distinct from 'true')
     or (${a.action} = 'ncii.decide' and ${a.details} ->> 'decision' is distinct from 'removed')
     or (${a.action} = 'moderation.t0.match' and ${a.details} ->> 'listCategory' is distinct from 'ncii')
     or (${a.action} = 'moderation.case.end_stream' and ${a.details} ->> 'streamEnded' = 'false')

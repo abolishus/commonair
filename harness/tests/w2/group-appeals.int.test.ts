@@ -8,7 +8,7 @@
 import { createDb, schema, uuidv7, type DbHandle } from "@commonair/db";
 import { createTestDatabase, type TestDatabase } from "@commonair/db/testing";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
-import { readGroup, readVerdicts } from "../../src/w2/group-appeals.ts";
+import { readExcluded, readGroup, readVerdicts, readWeights } from "../../src/w2/group-appeals.ts";
 
 let t: TestDatabase;
 let h: DbHandle;
@@ -102,5 +102,38 @@ describe("readVerdicts", () => {
       [auto]: ["excluded", ["headless", "datacenter_ip"]],
     });
     expect(await readVerdicts(t.url, [])).toEqual([]);
+  });
+});
+
+describe("readExcluded and readWeights (batch 7 decision (g))", () => {
+  test("every excluded session of the broadcast, the seeded threshold and the strongest score per signal", async () => {
+    const flag = (subjectId: string, signal: string, score: number, decision: "excluded" | "allowed" = "excluded") => ({
+      subjectType: "session" as const,
+      subjectId,
+      channelId,
+      signal,
+      score,
+      decision,
+    });
+    await h.db
+      .insert(schema.integrityFlags)
+      .values([
+        flag(dc[1] as string, "datacenter_ip", 0.6, "allowed"),
+        flag(dc[1] as string, "headless", 0.5),
+        flag(dc[1] as string, "headless", 0.8),
+        flag(auto, "headless", 0.8),
+      ]);
+    const sessions = await readExcluded(t.url, broadcastId);
+    expect(sessions.map((x) => x.id).sort()).toEqual([...dc, auto].sort());
+    const w = await readWeights(
+      t.url,
+      sessions.map((x) => x.id),
+    );
+    expect(w.threshold).toBe(0.7);
+    // An allowed flag still carries its score.
+    expect(w.flags.get(dc[1] as string)).toEqual({ datacenter_ip: 0.6, headless: 0.8 });
+    expect(w.flags.get(auto)).toEqual({ headless: 0.8 });
+    expect(w.flags.get(dc[0] as string)).toBeUndefined();
+    expect((await readWeights(t.url, [])).flags.size).toBe(0);
   });
 });

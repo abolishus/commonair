@@ -18,7 +18,7 @@
  */
 import { and, asc, desc, eq, inArray, isNull, lt, or, sql, type SQL } from "drizzle-orm";
 import type { REPORT_REASONS, REPORT_SUBJECTS } from "@commonair/contracts/enums";
-import { MODERATION_CONSTANTS } from "@commonair/moderation";
+import { findClause, MODERATION_CONSTANTS, parseRuleRef } from "@commonair/moderation";
 import { schema, type Executor } from "@commonair/db";
 import type { Deps } from "../deps.ts";
 import { audit } from "../events/audit.ts";
@@ -152,6 +152,19 @@ function waveMessages(evidence: unknown): WaveMessage[] {
       typeof (m as WaveMessage).id === "string" &&
       typeof (m as WaveMessage).userId === "string",
   );
+}
+
+/**
+ * What a staff suspension's audit row carries for its statement of reasons (worker
+ * `sor-schemas.ts`): the `mod_actions` row and the cited clause at its version and ground. The
+ * contract makes a suspension cite a clause and `staffRuleRef` refuses an unknown one, so a
+ * missing citation here is a bug, not input.
+ */
+function staffCitation(ruleRef: string | null, modActionId: string) {
+  const ref = ruleRef ? parseRuleRef(ruleRef) : null;
+  const clause = ref ? findClause(ref.id, ref.version) : undefined;
+  if (!clause) throw new Error("a staff suspension without a known clause");
+  return { modActionId, clauseId: clause.id, clauseVersion: clause.version, ground: clause.ground };
 }
 
 /** One `delete` control frame per removed message, after commit, so live chats drop the lines. */
@@ -321,6 +334,7 @@ export const safety = {
       let suspendedUser: string | null = null;
       let chatBan: { channelId: string; userId: string } | null = null;
       let removedMessages: string[] = [];
+      let suspended = false;
       if (r.subjectType === "message_set" && (input.action === "suspend_user" || input.action === "ban_from_channel"))
         throw badRequest("A wave has several senders: act on each message");
       switch (input.action) {
@@ -376,6 +390,7 @@ export const safety = {
             input.durationSeconds,
           );
           ended = s.ended;
+          suspended = s.changed;
           if (kind === "user" && s.changed) suspendedUser = info.userId;
           break;
         }
@@ -402,25 +417,34 @@ export const safety = {
         .where(and(eq(reports.id, r.id), eq(reports.status, "open")))
         .returning();
       if (!updated) throw conflict("This report is already resolved");
-      if (input.action !== "none")
-        await tx.insert(modActions).values({
-          scope: input.action === "ban_from_channel" ? "channel" : "platform",
-          channelId: info?.channelId ?? null,
-          moderatorId: caller.user.id,
-          targetUserId: info?.userId ?? null,
-          action:
-            input.action === "ban_from_channel"
-              ? "ban"
-              : input.action === "remove_content"
-                ? "remove_content"
-                : input.action,
-          reason: input.resolution,
-          durationSeconds: input.durationSeconds ?? null,
-          subjectType: r.subjectType,
-          subjectId: r.subjectId,
-          reportId: r.id,
-          ruleRef: input.action === "ban_from_channel" ? null : staffRuleRef(input.clauseId),
-        });
+      const ruleRef =
+        input.action === "none" || input.action === "ban_from_channel" ? null : staffRuleRef(input.clauseId);
+      const [action] =
+        input.action === "none"
+          ? []
+          : await tx
+              .insert(modActions)
+              .values({
+                scope: input.action === "ban_from_channel" ? "channel" : "platform",
+                channelId: info?.channelId ?? null,
+                moderatorId: caller.user.id,
+                targetUserId: info?.userId ?? null,
+                action:
+                  input.action === "ban_from_channel"
+                    ? "ban"
+                    : input.action === "remove_content"
+                      ? "remove_content"
+                      : input.action,
+                reason: input.resolution,
+                durationSeconds: input.durationSeconds ?? null,
+                subjectType: r.subjectType,
+                subjectId: r.subjectId,
+                reportId: r.id,
+                ruleRef,
+              })
+              .returning({ id: modActions.id });
+      // What the statement builder reads (`sor-schemas.ts`): ids, enums and the cited clause only.
+      const stated = suspended && action !== undefined && info?.userId ? staffCitation(ruleRef, action.id) : null;
       await audit(tx, {
         actorType: staffActorType(caller.user.role),
         actorId: caller.user.id,
@@ -436,6 +460,9 @@ export const safety = {
           reportSubjectType: r.subjectType,
           reportSubjectId: r.subjectId,
           durationSeconds: input.durationSeconds ?? null,
+          // True only for a suspension that took effect: the one resolve a statement states.
+          suspended: stated !== null,
+          ...(stated ? { userId: info?.userId, ...stated } : {}),
         },
       });
       return { updated, ended, suspendedUser, chatBan, removedMessages };
@@ -583,20 +610,25 @@ export const safety = {
         input.durationSeconds,
       );
       if (s.changed) {
-        await tx.insert(modActions).values({
-          scope: "platform",
-          channelId: input.target === "channel" ? (ch?.id ?? null) : null,
-          moderatorId: caller.user.id,
-          targetUserId: target.id,
-          action: (input.suspended ? `suspend_${input.target}` : `unsuspend_${input.target}`) as
-            | "suspend_user"
-            | "suspend_channel"
-            | "unsuspend_user"
-            | "unsuspend_channel",
-          reason: input.reason,
-          durationSeconds: input.suspended ? (input.durationSeconds ?? null) : null,
-          ruleRef: input.suspended ? staffRuleRef(input.clauseId) : null,
-        });
+        const ruleRef = input.suspended ? staffRuleRef(input.clauseId) : null;
+        const [action] = await tx
+          .insert(modActions)
+          .values({
+            scope: "platform",
+            channelId: input.target === "channel" ? (ch?.id ?? null) : null,
+            moderatorId: caller.user.id,
+            targetUserId: target.id,
+            action: (input.suspended ? `suspend_${input.target}` : `unsuspend_${input.target}`) as
+              | "suspend_user"
+              | "suspend_channel"
+              | "unsuspend_user"
+              | "unsuspend_channel",
+            reason: input.reason,
+            durationSeconds: input.suspended ? (input.durationSeconds ?? null) : null,
+            ruleRef,
+          })
+          .returning({ id: modActions.id });
+        if (!action) throw new Error("mod action not written");
         await audit(tx, {
           actorType: staffActorType(caller.user.role),
           actorId: caller.user.id,
@@ -605,7 +637,15 @@ export const safety = {
           subjectId: input.target === "user" ? target.id : (ch?.id ?? target.id),
           channelId: ch?.id ?? null,
           reason: input.reason,
-          details: { userId: target.id, durationSeconds: input.suspended ? (input.durationSeconds ?? null) : null },
+          // A suspension carries what its statement of reasons needs (worker `sor-schemas.ts`); a
+          // lift restricts nothing and has no statement.
+          details: input.suspended
+            ? {
+                userId: target.id,
+                durationSeconds: input.durationSeconds ?? null,
+                ...staffCitation(ruleRef, action.id),
+              }
+            : { userId: target.id, durationSeconds: null, modActionId: action.id },
         });
       }
       return s;

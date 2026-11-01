@@ -168,11 +168,14 @@ describe("rehearsal driver", () => {
         await valkey.del(KEYS.rehearsalArmed(channel.id), KEYS.rehearsalSession(channel.id));
       }
     });
+    // Media's frame scan counted the rehearsal's moderation samples (batch 7 follow-up).
+    await valkey.set(KEYS.rehearsalModerationSamples(b.id), "7", "EX", 600);
     const result = await driveRehearsal(r.deps, { armId: arm.armId, channelId: channel.id });
     expect(result).toMatchObject({ broadcasts: 1, ended: 1, expired: 0 });
 
     const rep = (await report(b.id))!;
     expect(rep.endReason).toBe("publisher_ended");
+    expect(rep.moderation.samples).toBe(7);
     expect(rep.endedAt).toBe(new Date(start + 70 * S).toISOString());
     // ~3 msg/s for 70 s plus the 50-message burst.
     const burst = r.chat.calls.filter((c) => c.body.startsWith(BURST_BODY) || c.sender.startsWith("spam"));

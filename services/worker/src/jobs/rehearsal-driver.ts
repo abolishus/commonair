@@ -9,7 +9,8 @@
  * - runs the `@commonair/sim` chat script (~3 msg/s and one 50-message spam burst) through the chat
  *   dry run, which applies the channel's real send pipeline and never posts anything;
  * - reads the ingest health samples the media service writes every 5 s and times the dips;
- * - counts moderation flags on the broadcast (a T0 suspends the channel as live: "safety");
+ * - counts moderation flags on the broadcast (a T0 suspends the channel as live: "safety"), and
+ *   reads how many frames moderation sampled (`KEYS.rehearsalModerationSamples`, media's count);
  * - enforces the 30-minute cap per arm, from the arm's first rehearsal (a reconnect does not
  *   restart it): refuse the reconnect, end, `rehearsal.ended`, audit, kick. `capSweepJob` enforces
  *   the same cap on a schedule, so it holds when no driver job has a slot or a job died;
@@ -315,6 +316,17 @@ async function flagged(db: Database, broadcastId: string): Promise<boolean> {
   return f !== undefined;
 }
 
+/**
+ * Frames media's moderation sampled on the rehearsal (`KEYS.rehearsalModerationSamples`). Never
+ * below what the report already shows: the key can expire or be missed on a read the report
+ * already counted past.
+ */
+export async function moderationSamples(valkey: ValkeyClient, broadcastId: string, shown: number): Promise<number> {
+  const raw = await valkey.get(KEYS.rehearsalModerationSamples(broadcastId));
+  const n = raw === null ? 0 : Number.parseInt(raw, 10);
+  return Number.isSafeInteger(n) && n > shown ? n : shown;
+}
+
 async function watched(db: Database, broadcastId: string, ownerId: string) {
   return db
     .selectDistinct({ id: users.id, username: users.username })
@@ -455,7 +467,10 @@ async function driveBroadcast(
       ...report,
       chat,
       ingest: await healthOf(deps.db, b.id),
-      moderation: { samples: report.moderation.samples, flagged: await flagged(deps.db, b.id) },
+      moderation: {
+        samples: await moderationSamples(deps.valkey, b.id, report.moderation.samples),
+        flagged: await flagged(deps.db, b.id),
+      },
       inviteesWatched: await watched(deps.db, b.id, ownerId),
       updatedAt: iso(now),
     };

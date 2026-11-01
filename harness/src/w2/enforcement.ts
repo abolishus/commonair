@@ -363,16 +363,166 @@ export const enforcementExtension: SafetyW2Extension<EnforcementBefore> = {
   },
 };
 
+/** The clause the staff resolution cites (a terms clause, as `staffRuleRef` requires). */
+export const SOR_RESOLVE_CLAUSE = "decency.harassment";
+const SOR_RESOLVE_DURATION_SECONDS = 3_600;
+
+export interface ResolveAudit {
+  id: string;
+  details: Record<string, unknown>;
+}
+
+export interface StatementOf {
+  recipientUserId: string;
+  source: string;
+  restrictionKind: string;
+  restrictionDetail: string;
+  restrictionEndsAt: string | null;
+  clauseId: string;
+  appealSubjectType: string | null;
+  appealSubjectId: string | null;
+  factsCode: string;
+}
+
+/**
+ * What the statement of a report resolved with a user suspension must say (ADR 0019 answer 3;
+ * `services/worker/src/moderation/sor-build.ts`): to the suspended account, an Art. 16 notice,
+ * account/suspended until the ban ends, the cited clause, appealable on the mod action. Empty when
+ * it does.
+ */
+export function resolveStatementProblems(
+  s: StatementOf,
+  want: { targetId: string; modActionId: unknown; clauseId: string; endsAtMs: number },
+): string[] {
+  const out: string[] = [];
+  if (s.recipientUserId !== want.targetId) out.push("recipient");
+  if (s.source !== "notice_art16") out.push(`source ${s.source}`);
+  if (`${s.restrictionKind}/${s.restrictionDetail}` !== "account/suspended")
+    out.push(`restriction ${s.restrictionKind}/${s.restrictionDetail}`);
+  // The audit row's time and the ban's expiry are the same transaction's `now`; allow clock skew.
+  const ends = s.restrictionEndsAt === null ? null : Date.parse(s.restrictionEndsAt);
+  if (ends === null || Math.abs(ends - want.endsAtMs) > 120_000) out.push(`ends ${s.restrictionEndsAt}`);
+  if (s.clauseId !== want.clauseId) out.push(`clause ${s.clauseId}`);
+  if (s.appealSubjectType !== "moderation_action" || s.appealSubjectId !== want.modActionId)
+    out.push(`appeal ${s.appealSubjectType}/${s.appealSubjectId}`);
+  if (s.factsCode !== "moderator_review") out.push(`facts ${s.factsCode}`);
+  return out;
+}
+
+async function resolveAudit(h: DbHandle, reportId: string): Promise<ResolveAudit | null> {
+  const [a] = await h.sql<ResolveAudit[]>`
+    select id::text as id, details from audit_log where action = 'report.resolve' and subject_id = ${reportId}::uuid`;
+  return a ?? null;
+}
+
+async function statementsOf(h: DbHandle, auditId: string): Promise<StatementOf[]> {
+  return h.sql<StatementOf[]>`
+    select recipient_user_id::text as "recipientUserId", source::text as source,
+           restriction_kind::text as "restrictionKind", restriction_detail::text as "restrictionDetail",
+           to_char(restriction_ends_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as "restrictionEndsAt",
+           clause_id as "clauseId", appeal_subject_type::text as "appealSubjectType",
+           appeal_subject_id::text as "appealSubjectId", facts ->> 'code' as "factsCode"
+      from enforcement_statements where source_audit_id = ${auditId}::uuid`;
+}
+
 /**
  * `trust-safety` W3 extension `sor-resolve` (batch 7; `src/w3/steps.ts`): a report resolved with a
- * suspension has a statement of reasons. Runs around the scenario's steps, as `enforcement`. Stub
- * entry point from the batch 7 contract step: B7-followups fills it.
+ * suspension has a statement of reasons, and a dismissed one has none. Runs after the scenario's
+ * steps, with its own reporter and reported account; the platform moderator resolves both reports.
+ * The dismissal is resolved first, so once the builder (which works oldest first) has stated the
+ * suspension it has passed the dismissal too.
  */
 export const sorResolveExtension: SafetyW2Extension = {
   async before(_run: Run): Promise<unknown> {
     return undefined;
   },
-  async after(_run: Run, _before: unknown): Promise<void> {
-    throw new Error("B7-followups not merged");
+  async after(run: Run, _before: unknown): Promise<void> {
+    const { ctx } = run;
+    const reporter = await ctx.step("sor-resolve: sign up a reporter and the account it reports", () =>
+      ctx.platform.signUp({ prefix: "ts_sor_rep" }),
+    );
+    const target = await ctx.platform.signUp({ prefix: "ts_sor_target" });
+    const bystander = await ctx.platform.signUp({ prefix: "ts_sor_other" });
+    run.emails.push(reporter.email, target.email, bystander.email);
+    const file = (subjectId: string) =>
+      reporter.api.client.safety.report({ subjectType: "user", subjectId, reason: "harassment", details: "" });
+
+    const dismissed = await ctx.step("sor-resolve: a report the moderator dismisses", async () => {
+      const r = await file(bystander.id);
+      await run.staff.mod.api.client.safety.resolve({
+        id: r.id,
+        status: "dismissed",
+        resolution: "No action (harness).",
+      });
+      return r.id;
+    });
+    const suspended = await ctx.step("sor-resolve: a report the moderator resolves with a suspension", async () => {
+      const r = await file(target.id);
+      await run.staff.mod.api.client.safety.resolve({
+        id: r.id,
+        status: "actioned",
+        resolution: "Suspended (harness).",
+        action: "suspend_user",
+        durationSeconds: SOR_RESOLVE_DURATION_SECONDS,
+        clauseId: SOR_RESOLVE_CLAUSE,
+      });
+      return { id: r.id, at: Date.now() };
+    });
+
+    const db = createDb({ url: run.databaseUrl, max: 1, applicationName: "commonair-harness-b7-sor-resolve" });
+    try {
+      const audits = await ctx.step("sor-resolve: read both resolutions' audit rows", async () => ({
+        suspended: await resolveAudit(db, suspended.id),
+        dismissed: await resolveAudit(db, dismissed),
+      }));
+      const sa = audits.suspended;
+      ctx.assert("sor-resolve: the suspension's audit row names its mod action and clause", sa !== null, sa);
+      if (!sa) return;
+      ctx.assert(
+        "sor-resolve: ids and the clause only (no free text in the details)",
+        sa.details.suspended === true &&
+          sa.details.clauseId === SOR_RESOLVE_CLAUSE &&
+          typeof sa.details.modActionId === "string" &&
+          !JSON.stringify(sa.details).includes("harness)"),
+        sa.details,
+      );
+      ctx.assert(
+        "sor-resolve: the dismissal states nothing",
+        audits.dismissed?.details.suspended === false,
+        audits.dismissed,
+      );
+
+      const stated = await ctx.step("sor-resolve: the builder writes the suspension's statement", () =>
+        waitFor(
+          "a statement for the report resolved with a suspension",
+          async () => {
+            const rows = await statementsOf(db, sa.id);
+            return rows.length > 0 ? rows : null;
+          },
+          { timeoutMs: STATEMENT_TIMEOUT_MS, intervalMs: 2_000, signal: ctx.signal },
+        ),
+      );
+      ctx.assert("sor-resolve: exactly one statement", stated.length === 1, stated);
+      const s = stated[0];
+      const problems = s
+        ? resolveStatementProblems(s, {
+            targetId: target.id,
+            modActionId: sa.details.modActionId,
+            clauseId: SOR_RESOLVE_CLAUSE,
+            // The ban ends a duration after the resolve (the harness clock, skew allowed).
+            endsAtMs: suspended.at + SOR_RESOLVE_DURATION_SECONDS * 1000,
+          })
+        : ["missing"];
+      ctx.assert("sor-resolve: the statement matches the suspension", problems.length === 0, {
+        problems,
+        statement: s,
+      });
+      if (audits.dismissed) {
+        const none = await statementsOf(db, audits.dismissed.id);
+        ctx.assert("sor-resolve: the dismissed report has no statement", none.length === 0, none);
+      }
+    } finally {
+      await db.close();
+    }
   },
 };

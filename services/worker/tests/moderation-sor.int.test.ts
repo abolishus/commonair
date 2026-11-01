@@ -264,6 +264,133 @@ describe("build", () => {
     expect(await statementsFor(target.user.id)).toEqual([]);
   });
 
+  // Batch 7: the staff suspensions, on the `details` the API's `routes/safety.ts` writes.
+  test("an actioned report resolve, a user suspend and a channel suspend each yield a statement; a dismiss and an unsuspend none", async () => {
+    const reported = await makeUser(owner());
+    const suspended = await makeUser(owner());
+    const channelOwner = await makeUser(owner());
+    const staff = await makeUser(owner());
+    const modAction = async (
+      targetUserId: string,
+      action: "suspend_user" | "suspend_channel",
+      channelId: string | null,
+    ) => {
+      const [m] = await owner()
+        .insert(schema.modActions)
+        .values({
+          scope: "platform",
+          channelId,
+          moderatorId: staff.user.id,
+          targetUserId,
+          action,
+          ruleRef: "decency.harassment@1",
+        })
+        .returning({ id: schema.modActions.id });
+      return m!.id;
+    };
+    const cite = (modActionId: string) => ({
+      modActionId,
+      clauseId: "decency.harassment",
+      clauseVersion: 1,
+      ground: "terms",
+    });
+    const auditIn = async (action: string, channelId: string | null, details: Record<string, unknown>) => {
+      const id = uuidv7();
+      await owner().insert(schema.auditLog).values({
+        id,
+        actorType: "moderator",
+        actorId: staff.user.id,
+        action,
+        subjectType: "test",
+        subjectId: id,
+        channelId,
+        details,
+      });
+      return id;
+    };
+    const resolveAudit = await auditIn("report.resolve", reported.channel.id, {
+      reportId: uuidv7(),
+      status: "actioned",
+      action: "suspend_user",
+      reportSubjectType: "chat_message",
+      reportSubjectId: uuidv7(),
+      durationSeconds: 3600,
+      suspended: true,
+      userId: reported.user.id,
+      ...cite(await modAction(reported.user.id, "suspend_user", reported.channel.id)),
+    });
+    const userAudit = await auditIn("user.suspend", suspended.channel.id, {
+      userId: suspended.user.id,
+      durationSeconds: null,
+      ...cite(await modAction(suspended.user.id, "suspend_user", null)),
+    });
+    const channelAudit = await auditIn("channel.suspend", channelOwner.channel.id, {
+      userId: channelOwner.user.id,
+      durationSeconds: null,
+      ...cite(await modAction(channelOwner.user.id, "suspend_channel", channelOwner.channel.id)),
+    });
+    // None: a dismissal, a resolve whose suspension was already in force, and the lifts.
+    const dismissed = await auditIn("report.resolve", reported.channel.id, {
+      reportId: uuidv7(),
+      status: "dismissed",
+      action: "none",
+      reportSubjectType: "chat_message",
+      reportSubjectId: uuidv7(),
+      durationSeconds: null,
+      suspended: false,
+    });
+    const noop = await auditIn("report.resolve", reported.channel.id, {
+      reportId: uuidv7(),
+      status: "actioned",
+      action: "suspend_user",
+      reportSubjectType: "user",
+      reportSubjectId: reported.user.id,
+      durationSeconds: null,
+      suspended: false,
+    });
+    const lift = await auditIn("user.unsuspend", suspended.channel.id, {
+      userId: suspended.user.id,
+      durationSeconds: null,
+      modActionId: uuidv7(),
+    });
+
+    await buildStatements(ctx());
+    const all = await owner().select().from(schema.enforcementStatements);
+    const of = (auditId: string) => all.filter((s) => s.sourceAuditId === auditId);
+    expect(of(resolveAudit)).toEqual([
+      expect.objectContaining({
+        sourceAction: "report.resolve",
+        recipientUserId: reported.user.id,
+        contentType: "account",
+        restrictionKind: "account",
+        restrictionDetail: "suspended",
+        clauseId: "decency.harassment",
+        clauseVersion: 1,
+        groundKind: "terms",
+        source: "notice_art16",
+        automatedDecision: "not",
+        appealSubjectType: "moderation_action",
+      }),
+    ]);
+    expect(of(userAudit)).toEqual([
+      expect.objectContaining({ recipientUserId: suspended.user.id, contentType: "account", source: "own_initiative" }),
+    ]);
+    expect(of(channelAudit)).toEqual([
+      expect.objectContaining({
+        recipientUserId: channelOwner.user.id,
+        contentType: "channel",
+        contentId: channelOwner.channel.id,
+        restrictionKind: "service",
+      }),
+    ]);
+    for (const none of [dismissed, noop, lift]) expect(of(none)).toEqual([]);
+    expect((await buildStatements(ctx())).inserted).toBe(0);
+    // The coverage sweep shares the predicate: the no-statement rows are never missing.
+    const cov = await sorCoverage(ctx());
+    expect(cov.byAction["report.resolve"] ?? 0).toBe(0);
+    expect(cov.byAction["user.suspend"] ?? 0).toBe(0);
+  });
+
   test("the statement table is append-only for the owner and the app role", async () => {
     const r = await restrict();
     await buildStatements(ctx());

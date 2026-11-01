@@ -5,7 +5,7 @@
  * `me.enforcement.list`: the caller's statements of reasons (ADR 0019 decision 8), newest first,
  * keyset cursor on `(created_at, id)` like `me.notifications`. A GET, so a suspended user can
  * still read it. The stored statement never changes; what is computed here is computed on read:
- * the clause title (message catalog), the explanation (the clause's section of the pinned
+ * the clause title (message catalog, in the member's locale), the explanation (the clause's section of the pinned
  * `enforcement_notice`), the moderator's note (`moderation_cases.resolution_note`, never stored
  * in the statement), an existing appeal and whether the decision has since been reversed.
  *
@@ -14,7 +14,7 @@
  */
 import type { EnforcementStatement } from "@commonair/contracts/dto";
 import type { APPEAL_SUBJECTS } from "@commonair/contracts/enums";
-import { en } from "@commonair/email";
+import { resolveCatalog } from "@commonair/email";
 import { findClause, noticeSection, plainNoticeText } from "@commonair/moderation";
 import { schema } from "@commonair/db";
 import { and, desc, eq, inArray, lt, or } from "drizzle-orm";
@@ -23,18 +23,22 @@ import { decodeCursor, encodeCursor, isKeyCursor, pageOf } from "../lib/cursor.t
 import { legalVariables, renderLegalText } from "../lib/legal.ts";
 import { os, requireCaller } from "../lib/orpc.ts";
 
-const { enforcementStatements: st, legalDocuments, moderationCases, appeals } = schema;
+const { enforcementStatements: st, legalDocuments, moderationCases, appeals, users } = schema;
 type Row = typeof st.$inferSelect;
 type AppealSubject = (typeof APPEAL_SUBJECTS)[number];
 
 /** The source actions whose `moderation_case` appeal subject is a case a moderator may later clear. */
 const CLEARABLE = new Set(["moderation.t1.restrict", "moderation.t1.upload_reject"]);
 
-/** The clause's plain-language title from the email catalog (the one catalog API, worker and mail share). */
-export function clauseTitle(clauseId: string, clauseVersion: number): string {
+/**
+ * The clause's plain-language title in the member's locale, from the email catalog (the one catalog
+ * API, worker and mail share; English, then the id, as fallbacks). The member's stored locale, as
+ * their statement emails use it (batch 5 follow-up).
+ */
+export function clauseTitle(clauseId: string, clauseVersion: number, locale: string | null = null): string {
   const key = findClause(clauseId, clauseVersion)?.titleKey ?? `clause.${clauseId}`;
-  const v = (en.enforcementStatement as Record<string, string>)[key];
-  return v ?? clauseId;
+  const titles = resolveCatalog(locale ?? undefined).catalog.enforcementStatement as Record<string, string>;
+  return titles[key] ?? clauseId;
 }
 
 export const meEnforcement = {
@@ -56,6 +60,8 @@ export const meEnforcement = {
       .orderBy(desc(st.createdAt), desc(st.id))
       .limit(input.limit + 1);
     const page = rows.slice(0, input.limit);
+    const [me] = await deps.db.select({ locale: users.locale }).from(users).where(eq(users.id, caller.user.id));
+    const locale = me?.locale ?? null;
 
     const noticeIds = [...new Set(page.map((r) => r.noticeDocumentId))];
     const notices = new Map(
@@ -169,7 +175,7 @@ export const meEnforcement = {
               ? { kind: "moderation" as const, subjectType: subject.type as AppealSubject, subjectId: subject.id }
               : null,
           createdAt: iso(r.createdAt),
-          clauseTitle: clauseTitle(r.clauseId, r.clauseVersion),
+          clauseTitle: clauseTitle(r.clauseId, r.clauseVersion, locale),
           explanation: explanation(r),
           noticeIsDraft: notices.get(r.noticeDocumentId)?.isDraft ?? true,
           moderatorNote,
