@@ -1,0 +1,26 @@
+{
+  "data": [
+    {
+      "id": "90000001",
+      "login": "pixelgardener",
+      "display_name": "PixelGardener",
+      "type": "",
+      "broadcaster_type": "affiliate",
+      "description": "Cozy pixel-art gardening streams. Seeds, sprites and slow mornings.",
+      "profile_image_url": "{{cdn}}/user/90000001.png",
+      "offline_image_url": "",
+      "created_at": "2020-01-01T00:00:00Z"
+    },
+    {
+      "id": "90000002",
+      "login": "otherfixture",
+      "display_name": "OtherFixture",
+      "type": "",
+      "broadcaster_type": "",
+      "description": "A second made-up account, for the account-mismatch checks.",
+      "profile_image_url": "{{cdn}}/user/90000002.png",
+      "offline_image_url": "",
+      "created_at": "2021-01-01T00:00:00Z"
+    }
+  ]
+}

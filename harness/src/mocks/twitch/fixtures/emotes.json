@@ -1,0 +1,86 @@
+{
+  "90000001": {
+    "data": [
+      {
+        "id": "emotesv2_pgwave",
+        "name": "pgWave",
+        "images": {
+          "url_1x": "{{cdn}}/emoticons/v2/emotesv2_pgwave/static/light/1.0",
+          "url_2x": "{{cdn}}/emoticons/v2/emotesv2_pgwave/static/light/2.0",
+          "url_4x": "{{cdn}}/emoticons/v2/emotesv2_pgwave/static/light/3.0"
+        },
+        "tier": "1000",
+        "emote_type": "subscriptions",
+        "emote_set_id": "301",
+        "format": ["static"],
+        "scale": ["1.0", "2.0", "3.0"],
+        "theme_mode": ["light", "dark"]
+      },
+      {
+        "id": "emotesv2_pghype",
+        "name": "pgHype",
+        "images": {
+          "url_1x": "{{cdn}}/emoticons/v2/emotesv2_pghype/static/light/1.0",
+          "url_2x": "{{cdn}}/emoticons/v2/emotesv2_pghype/static/light/2.0",
+          "url_4x": "{{cdn}}/emoticons/v2/emotesv2_pghype/static/light/3.0"
+        },
+        "tier": "2000",
+        "emote_type": "subscriptions",
+        "emote_set_id": "302",
+        "format": ["static"],
+        "scale": ["1.0", "2.0", "3.0"],
+        "theme_mode": ["light", "dark"]
+      },
+      {
+        "id": "emotesv2_pghi",
+        "name": "pgHi",
+        "images": {
+          "url_1x": "{{cdn}}/emoticons/v2/emotesv2_pghi/static/light/1.0",
+          "url_2x": "{{cdn}}/emoticons/v2/emotesv2_pghi/static/light/2.0",
+          "url_4x": "{{cdn}}/emoticons/v2/emotesv2_pghi/static/light/3.0"
+        },
+        "tier": "",
+        "emote_type": "follower",
+        "emote_set_id": "300",
+        "format": ["static"],
+        "scale": ["1.0", "2.0", "3.0"],
+        "theme_mode": ["light", "dark"]
+      },
+      {
+        "id": "emotesv2_pgbad",
+        "name": "pgBad",
+        "images": {
+          "url_1x": "{{cdn}}/emoticons/v2/emotesv2_pgbad/static/light/1.0",
+          "url_2x": "{{cdn}}/emoticons/v2/emotesv2_pgbad/static/light/2.0",
+          "url_4x": "{{cdn}}/emoticons/v2/emotesv2_pgbad/static/light/3.0"
+        },
+        "tier": "3000",
+        "emote_type": "subscriptions",
+        "emote_set_id": "303",
+        "format": ["static"],
+        "scale": ["1.0", "2.0", "3.0"],
+        "theme_mode": ["light", "dark"]
+      },
+      {
+        "id": "emotesv2_pgbits",
+        "name": "pgBits",
+        "images": {
+          "url_1x": "{{cdn}}/emoticons/v2/emotesv2_pgbits/static/light/1.0",
+          "url_2x": "{{cdn}}/emoticons/v2/emotesv2_pgbits/static/light/2.0",
+          "url_4x": "{{cdn}}/emoticons/v2/emotesv2_pgbits/static/light/3.0"
+        },
+        "tier": "",
+        "emote_type": "bitstier",
+        "emote_set_id": "304",
+        "format": ["static"],
+        "scale": ["1.0", "2.0", "3.0"],
+        "theme_mode": ["light", "dark"]
+      }
+    ],
+    "template": "{{cdn}}/emoticons/v2/{{id}}/{{format}}/{{theme_mode}}/{{scale}}"
+  },
+  "90000002": {
+    "data": [],
+    "template": "{{cdn}}/emoticons/v2/{{id}}/{{format}}/{{theme_mode}}/{{scale}}"
+  }
+}

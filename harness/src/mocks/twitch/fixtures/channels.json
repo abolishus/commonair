@@ -1,0 +1,30 @@
+{
+  "data": [
+    {
+      "broadcaster_id": "90000001",
+      "broadcaster_login": "pixelgardener",
+      "broadcaster_name": "PixelGardener",
+      "broadcaster_language": "en",
+      "game_id": "509658",
+      "game_name": "Pixel Art Gardening",
+      "title": "Planting sprites until the sun comes up",
+      "delay": 0,
+      "tags": ["PixelArt", "Cozy", "Gardening"],
+      "content_classification_labels": ["MatureGame"],
+      "is_branded_content": false
+    },
+    {
+      "broadcaster_id": "90000002",
+      "broadcaster_login": "otherfixture",
+      "broadcaster_name": "OtherFixture",
+      "broadcaster_language": "other",
+      "game_id": "",
+      "game_name": "",
+      "title": "Another made-up channel",
+      "delay": 0,
+      "tags": [],
+      "content_classification_labels": [],
+      "is_branded_content": false
+    }
+  ]
+}

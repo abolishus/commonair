@@ -1,0 +1,32 @@
+{
+  "90000001": [
+    {
+      "id": "seg-1",
+      "start_time": "2026-11-03T18:00:00Z",
+      "end_time": "2026-11-03T21:00:00Z",
+      "title": "Seed swap Tuesday",
+      "canceled_until": null,
+      "category": { "id": "509658", "name": "Pixel Art Gardening" },
+      "is_recurring": true
+    },
+    {
+      "id": "seg-2",
+      "start_time": "2026-11-05T18:00:00Z",
+      "end_time": "2026-11-05T20:00:00Z",
+      "title": "Sprite sketching Thursday",
+      "canceled_until": null,
+      "category": { "id": "509658", "name": "Pixel Art Gardening" },
+      "is_recurring": true
+    },
+    {
+      "id": "seg-3",
+      "start_time": "2026-11-07T16:00:00Z",
+      "end_time": null,
+      "title": "Harvest stream",
+      "canceled_until": null,
+      "category": null,
+      "is_recurring": false
+    }
+  ],
+  "90000002": []
+}
