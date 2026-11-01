@@ -562,6 +562,153 @@ describe("decision 3, row by row", () => {
   });
 });
 
+/**
+ * Platform staff suspensions (batch 7, ADR 0019 answer 3), on the `details` shapes
+ * `services/api/src/routes/safety.ts` writes: `report.resolve` and `safety.suspend`.
+ */
+describe("staff suspensions", () => {
+  const target = id();
+  const citation = () => ({
+    modActionId: id(),
+    clauseId: "decency.harassment",
+    clauseVersion: 1,
+    ground: "terms",
+  });
+  const resolve = (action: string, o: Record<string, unknown> = {}) => ({
+    reportId: id(),
+    status: "actioned",
+    action,
+    reportSubjectType: "chat_message",
+    reportSubjectId: id(),
+    durationSeconds: 3600,
+    suspended: true,
+    userId: target,
+    ...citation(),
+    ...o,
+  });
+  const suspend = (userId: string, o: Record<string, unknown> = {}) => ({
+    userId,
+    durationSeconds: null,
+    ...citation(),
+    ...o,
+  });
+
+  test("report.resolve with suspend_user → account/suspended to the reported account, ending with the ban", async () => {
+    const d = resolve("suspend_user");
+    const [s, ...rest] = statements(await planStatements(row("report.resolve", d), lookup(world())));
+    expect(rest).toHaveLength(0);
+    expect(s).toMatchObject({
+      sourceAction: "report.resolve",
+      recipientUserId: target,
+      channelId,
+      content: { type: "account", id: target },
+      restriction: { kind: "account", detail: "suspended", endsAt: new Date(AT.getTime() + 3600_000).toISOString() },
+      facts: { code: "moderator_review", caseId: d.modActionId, caseOrigin: "human", decision: "suspend" },
+      // A user's report is an Art. 16 notice.
+      source: "notice_art16",
+      automatedDetection: false,
+      automatedDecision: "not",
+      ground: { kind: "terms", clauseId: "decency.harassment", clauseVersion: 1, legalBasis: null },
+      appeal: { kind: "moderation", subjectType: "moderation_action", subjectId: d.modActionId },
+    });
+    expectNoForbiddenData(s!);
+  });
+
+  test("report.resolve with suspend_channel → service/suspended to the channel's owner, no expiry", async () => {
+    // The reported account owns the channel: it may appeal the action.
+    const own = resolve("suspend_channel", { userId: owner });
+    const [s] = statements(await planStatements(row("report.resolve", own), lookup(world())));
+    expect(s).toMatchObject({
+      recipientUserId: owner,
+      content: { type: "channel", id: channelId },
+      restriction: { kind: "service", detail: "suspended", endsAt: null },
+      appeal: { kind: "moderation", subjectType: "moderation_action", subjectId: own.modActionId },
+    });
+    // A message's author is not the channel's owner: the owner is told, but only the action's
+    // target can appeal it (`appeals.create`), so the statement offers no appeal.
+    const [other] = statements(
+      await planStatements(row("report.resolve", resolve("suspend_channel")), lookup(world())),
+    );
+    expect(other).toMatchObject({ recipientUserId: owner, appeal: null });
+  });
+
+  test("user.suspend → account/suspended, own initiative; indefinite without a duration", async () => {
+    const d = suspend(target, { durationSeconds: 86_400 });
+    const [s] = statements(await planStatements(row("user.suspend", d), lookup(world())));
+    expect(s).toMatchObject({
+      sourceAction: "user.suspend",
+      recipientUserId: target,
+      content: { type: "account", id: target },
+      restriction: { kind: "account", detail: "suspended", endsAt: new Date(AT.getTime() + 86_400_000).toISOString() },
+      source: "own_initiative",
+      automatedDecision: "not",
+      appeal: { kind: "moderation", subjectType: "moderation_action", subjectId: d.modActionId },
+    });
+    const [forever] = statements(await planStatements(row("user.suspend", suspend(target)), lookup(world())));
+    expect(forever?.restriction.endsAt).toBeNull();
+  });
+
+  test("channel.suspend → service/suspended to the owner, who is the target", async () => {
+    const d = suspend(owner);
+    const [s] = statements(await planStatements(row("channel.suspend", d), lookup(world())));
+    expect(s).toMatchObject({
+      sourceAction: "channel.suspend",
+      recipientUserId: owner,
+      content: { type: "channel", id: channelId },
+      restriction: { kind: "service", detail: "suspended", endsAt: null },
+      source: "own_initiative",
+      appeal: { kind: "moderation", subjectType: "moderation_action", subjectId: d.modActionId },
+    });
+    expectNoForbiddenData(s!);
+  });
+
+  test("a dismissal, a channel ban, a removal or a suspension already in force → no statement", async () => {
+    const none = (d: Record<string, unknown>) =>
+      planStatements(row("report.resolve", { reportId: id(), status: "dismissed", ...d }), lookup(world()));
+    expect(await none({ action: "none", suspended: false })).toEqual({ kind: "none", reason: "no_restriction" });
+    expect(await none({ action: "ban_from_channel", suspended: false })).toMatchObject({ kind: "none" });
+    expect(await none({ action: "remove_content", suspended: false })).toMatchObject({ kind: "none" });
+    // An account already suspended: the writer records that nothing changed.
+    expect(await none({ action: "suspend_user", suspended: false })).toMatchObject({ kind: "none" });
+  });
+
+  test("an unsuspend is not allowlisted → no statement", async () => {
+    for (const action of ["user.unsuspend", "channel.unsuspend"])
+      expect(await planStatements(row(action, { userId: target, modActionId: id() }), lookup(world()))).toEqual({
+        kind: "none",
+        reason: "not_allowlisted",
+      });
+  });
+
+  test("drift: a stated row without its citation, an unknown clause or a changed ground is invalid", async () => {
+    const plan = (action: string, d: Record<string, unknown>) => planStatements(row(action, d), lookup(world()));
+    const { clauseId: _c, ...noClause } = resolve("suspend_user");
+    expect(await plan("report.resolve", noClause)).toEqual({ kind: "invalid", reason: "details" });
+    expect(await plan("user.suspend", { userId: target })).toEqual({ kind: "invalid", reason: "details" });
+    expect(await plan("user.suspend", suspend(target, { clauseId: "no.such-clause" }))).toEqual({
+      kind: "invalid",
+      reason: "clause",
+    });
+    expect(await plan("user.suspend", suspend(target, { clauseVersion: 99 }))).toEqual({
+      kind: "invalid",
+      reason: "clause",
+    });
+    expect(await plan("user.suspend", suspend(target, { ground: "illegal" }))).toEqual({
+      kind: "invalid",
+      reason: "clause",
+    });
+    // A channel suspension must name its channel; an unknown channel has no owner to tell.
+    expect(await planStatements(row("channel.suspend", suspend(owner), null), lookup(world()))).toEqual({
+      kind: "invalid",
+      reason: "channel",
+    });
+    expect(await planStatements(row("channel.suspend", suspend(owner), id()), lookup(world()))).toEqual({
+      kind: "invalid",
+      reason: "recipient",
+    });
+  });
+});
+
 describe("drift and failures", () => {
   test("details that do not parse are invalid (skipped and counted by the job), per action", async () => {
     for (const [action, details] of [

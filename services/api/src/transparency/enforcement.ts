@@ -36,7 +36,9 @@ import { and, eq, gte, isNotNull, lt, sql, type SQL } from "drizzle-orm";
 import type { PgColumn } from "drizzle-orm/pg-core";
 import type { Deps } from "../deps.ts";
 
-const { enforcementStatements: st, modActions, appeals, nciiRequests } = schema;
+const { enforcementStatements: st, modActions, appeals, nciiRequests, auditLog } = schema;
+/** Statement sources that state a platform staff action (`mod_actions`); `modActionCells` leaves those out. */
+const STAFF_SOURCES: readonly SourceAction[] = ["report.resolve", "user.suspend", "channel.suspend"];
 const K = ENFORCEMENT_REPORT_RULES.k;
 const DAY_MS = 86_400_000;
 const CACHE_MS = 60_000;
@@ -395,16 +397,38 @@ async function statementCells(deps: Deps, r: Range): Promise<Bucketed<Cell>[]> {
   return rows.map(({ sourceAction, ...row }) => ({ ...row, tier: tierOfSource(sourceAction) }));
 }
 
-/** Platform mod actions citing a clause that have no statement: decided by a person, after a report or not. */
+/**
+ * Platform mod actions citing a clause that have no statement: decided by a person, after a report
+ * or not. A staff suspension's statement (batch 7) names its `mod_actions` row in the source audit
+ * row (`details.modActionId`); once the builder has written it the action is counted there, in
+ * the same cell (no tier, decided by a person, the same transaction time), so moving it changes no
+ * total. The appeals follow the statement only when it names the action as its appeal subject: a
+ * channel suspended over someone else's message is stated to the owner with no appeal, while the
+ * action's target can still appeal it, so those appeals stay counted here.
+ */
 async function modActionCells(deps: Deps, r: Range): Promise<Bucketed<Cell>[]> {
   const bucket = r.split ? bucketOf(modActions.createdAt, r.split) : sql<string>`''`;
+  // Qualified by hand: Drizzle prints a selected expression's columns bare, and a bare `id`
+  // inside these subqueries would name the subquery's own table.
+  const id = sql`${modActions}.${sql.identifier("id")}`;
+  const statedBy = (withAppeal: boolean) => sql`exists (
+    select 1 from ${st} s join ${auditLog} a on a.id = s.source_audit_id
+    where s.source_action in (${sql.join(
+      STAFF_SOURCES.map((x) => sql`${x}`),
+      sql`, `,
+    )})
+      and a.details ->> 'modActionId' = ${id}::text${withAppeal ? sql` and s.appeal_subject_id is not null` : sql``})`;
+  const appealedHere = (overturned: boolean) =>
+    sql<number>`count(*) filter (where not ${statedBy(true)} and exists (select 1 from ${appeals} ap where ap.subject_type = 'moderation_action' and ap.subject_id = ${id}${
+      overturned ? sql` and ap.status = 'overturned'` : sql``
+    }))::int`;
   const rows = await deps.db
     .select({
       ruleRef: modActions.ruleRef,
       bucket,
-      count: sql<number>`count(*)::int`,
-      appealed: appealedSql(sql`'moderation_action'`, modActions.id, false),
-      overturned: appealedSql(sql`'moderation_action'`, modActions.id, true),
+      count: sql<number>`count(*) filter (where not ${statedBy(false)})::int`,
+      appealed: appealedHere(false),
+      overturned: appealedHere(true),
     })
     .from(modActions)
     .where(
@@ -418,7 +442,8 @@ async function modActionCells(deps: Deps, r: Range): Promise<Bucketed<Cell>[]> {
     .groupBy(modActions.ruleRef, ...(r.split ? [bucket] : []));
   return rows.flatMap((row) => {
     const ref = row.ruleRef ? parseRuleRef(row.ruleRef) : null;
-    if (!ref) return [];
+    // Every action stated and none of its appeals left here: the statement cell has it all.
+    if (!ref || (row.count === 0 && row.appealed === 0)) return [];
     return [
       {
         bucket: row.bucket,

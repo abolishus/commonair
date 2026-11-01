@@ -14,8 +14,13 @@
  * Logs carry ids, categories, providers, list versions, distances and qualities only.
  */
 import { and, count, eq, isNull, ne } from "drizzle-orm";
-import type { HashListCategory } from "@commonair/contracts/enums";
-import { KEYS, type ModerationT0Job, type SealedEvidence } from "@commonair/contracts/internal";
+import type { BroadcastKind, HashListCategory } from "@commonair/contracts/enums";
+import {
+  KEYS,
+  REHEARSAL_REPORT_TTL_SECONDS,
+  type ModerationT0Job,
+  type SealedEvidence,
+} from "@commonair/contracts/internal";
 import { schema, uuidv7, type Database } from "@commonair/db";
 import {
   effectiveSampleSeconds,
@@ -44,6 +49,8 @@ export interface LiveTarget {
   channelId: string;
   /** MediaMTX path, `live/<slug>`. */
   path: string;
+  /** `broadcasts.kind` when the caller knows it; otherwise read once per broadcast. */
+  kind?: BroadcastKind;
 }
 
 /** A frame that matched a list, with what the T0 job needs. */
@@ -105,6 +112,7 @@ const SETTING_CACHE_MS = 1_000;
 const WAITING_CACHE_MS = 1_000;
 const LIVE_COUNT_CACHE_MS = 10_000;
 const DROP_WARN_EVERY_MS = 60_000;
+const KIND_CACHE_MAX = 1_000;
 const { PDQ_MIN_QUALITY, CLASSIFIER_BACKLOG_INTERVALS, FRAME_TTL_SECONDS, EVIDENCE_INLINE_MAX_BYTES } =
   MODERATION_CONSTANTS;
 
@@ -126,6 +134,8 @@ export class MediaModeration {
   private waiting: { n: number; at: number } | null = null;
   private live: { n: number; at: number } | null = null;
   private lastDropWarn = 0;
+  /** `broadcasts.kind` per broadcast this process sampled (it never changes after insert). */
+  private readonly kinds = new Map<string, BroadcastKind>();
 
   constructor(private readonly deps: ModerationDeps) {
     this.log = deps.logger.child({ component: "moderation" });
@@ -284,8 +294,19 @@ export class MediaModeration {
    * to the classifier (unless the queue is backed up, which drops the classifier job only).
    */
   async scanLiveFrame(target: LiveTarget, frame: DecodedFrame, capturedAt: Date): Promise<"clean" | "matched"> {
+    this.deps.metrics.frame("sampled");
+    // The rehearsal count (which never throws) runs beside the scan rather than ahead of it, so a
+    // first-frame kind read or the Valkey round trips do not delay matching.
+    const counted = this.countRehearsalSample(target);
+    try {
+      return await this.scanSampled(target, frame, capturedAt);
+    } finally {
+      await counted;
+    }
+  }
+
+  private async scanSampled(target: LiveTarget, frame: DecodedFrame, capturedAt: Date): Promise<"clean" | "matched"> {
     const { metrics } = this.deps;
-    metrics.frame("sampled");
     const { pdq, match } = this.matchFrame(frame);
     if (pdq.quality < PDQ_MIN_QUALITY) metrics.frame("low_quality");
     if (match) {
@@ -320,6 +341,41 @@ export class MediaModeration {
       this.log.warn("could not enqueue a classifier frame", { broadcastId: target.broadcastId, error: errName(err) });
     }
     return "clean";
+  }
+
+  /**
+   * A rehearsal's report shows how many frames moderation sampled (batch 7 follow-up): one `INCR`
+   * per sampled frame of a rehearsal broadcast, never a live one, with the report's 24 h TTL.
+   * Best effort: a failure here never stops the frame's scan.
+   */
+  private async countRehearsalSample(target: LiveTarget): Promise<void> {
+    try {
+      if ((await this.kindOf(target)) !== "rehearsal") return;
+      const key = KEYS.rehearsalModerationSamples(target.broadcastId);
+      await this.deps.valkey.incr(key);
+      await this.deps.valkey.expire(key, REHEARSAL_REPORT_TTL_SECONDS);
+    } catch (err) {
+      this.log.warn("could not count a rehearsal moderation sample", {
+        broadcastId: target.broadcastId,
+        error: errName(err),
+      });
+    }
+  }
+
+  /** The broadcast's kind: the caller's, else read once and kept (a read failure is retried next frame). */
+  private async kindOf(target: LiveTarget): Promise<BroadcastKind | null> {
+    if (target.kind) return target.kind;
+    const known = this.kinds.get(target.broadcastId);
+    if (known) return known;
+    const [row] = await this.deps.db
+      .select({ kind: schema.broadcasts.kind })
+      .from(schema.broadcasts)
+      .where(eq(schema.broadcasts.id, target.broadcastId));
+    if (!row) return null;
+    // Bounded: a long-lived process sees many broadcasts; re-reading an old one is cheap.
+    if (this.kinds.size >= KIND_CACHE_MAX) this.kinds.clear();
+    this.kinds.set(target.broadcastId, row.kind);
+    return row.kind;
   }
 
   /** The waiting count is above CLASSIFIER_BACKLOG_INTERVALS frames per live broadcast. */

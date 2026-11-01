@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * Re-scoring an overturned exclusion group (ADR 0014 decision 4, batch 6 decision (m)). The scorer
- * never revisits an ended session past finalize, and the Valkey evidence has expired by then, so an
- * overturned group is re-scored here **from stored data** (`verdict_reasons`, the session's
- * heartbeat counter and its `integrity_flags` scores):
+ * Re-scoring an overturned exclusion group (ADR 0014 decision 4, batch 6 decision (m), batch 7
+ * decision (g)). The scorer never revisits an ended session past finalize, and the Valkey evidence
+ * has expired by then, so an overturned group is re-scored here **from stored data**
+ * (`verdict_reasons`, the session's heartbeat counter, its `integrity_flags` scores and the
+ * `integrity.thresholds` setting in force):
  *
  *   - covered: ended sessions of the broadcast (a session still open on an ended broadcast ended
  *     with it; on a live broadcast only closed ones), excluded, started at or before the decision, whose
@@ -13,17 +14,23 @@
  *     is read for update or written: not later sessions, not other broadcasts, not sessions whose
  *     first reason is another category (even if they also carry this category's signal);
  *   - the category's signal codes are dropped (for `other`, the codes no current signal knows);
- *   - no exclusion signal left: `verified`, or `pending` while `insufficient_heartbeats` (or too
- *     few heartbeats) or `media_unconfirmed` remains, with `allowed_on_appeal` appended;
- *   - another category's signal left: still `excluded`, with the reduced reasons (the session moves
- *     to that group) and `allowed_on_appeal`.
+ *   - the signals left are weighed as the scorer weighs them: the noisy-OR of their flagged scores
+ *     against `sessionExcludeScore`, with the scorer's own rule (`score > threshold` excludes).
+ *     Still over it: `excluded`, with the reduced reasons (the session moves to that group) and
+ *     `allowed_on_appeal`. At or under it (or nothing left): `verified`, or `pending` while
+ *     `insufficient_heartbeats` (or too few heartbeats) or `media_unconfirmed` remains, with the
+ *     signals left still listed (as the scorer lists what it noticed on a verified session) and
+ *     `allowed_on_appeal` appended;
+ *   - fail closed: a signal left with no flag to weigh it, or a code no current signal knows (an
+ *     admin decision, a retired code) left by another category's overturn, keeps the session
+ *     excluded. Neither is a score this rule can weigh.
  *
  * The flags of the dropped signals get the `allowed` decision (as an admin "clear flag" does), each
- * changed session an `integrity.session.restore` / `integrity.session.rescore` audit row (ids and
- * enums only), and when anything changed the `integrity.sessions.rescored` outbox event, all in the
- * caller's transaction: the worker then re-runs the rollup, whose `analytics.rollup.ready` drives
- * the attestation re-check (a `supersede` entry when the figures moved). A second overturn of the
- * same group finds nothing left in it and changes nothing.
+ * changed session an `integrity.session.restore` / `integrity.session.rescore` audit row (ids,
+ * enums and the threshold only), and when anything changed the `integrity.sessions.rescored`
+ * outbox event, all in the caller's transaction: the worker then re-runs the rollup, whose
+ * `analytics.rollup.ready` drives the attestation re-check (a `supersede` entry when the figures
+ * moved). A second overturn of the same group finds nothing left in it and changes nothing.
  */
 import { and, eq, inArray, isNotNull, lte, ne, notInArray, sql } from "drizzle-orm";
 import type { ExclusionCategory } from "@commonair/contracts/enums";
@@ -32,6 +39,7 @@ import { type Executor, schema, uuidv7 } from "@commonair/db";
 import { categoryOfReason, exclusionCategoryOf, SIGNAL_CATEGORIES } from "./constants.ts";
 import { MIN_HEARTBEATS_TO_VERIFY } from "./score.ts";
 import { noisyOr } from "./signals/combine.ts";
+import { loadThresholds } from "./thresholds.ts";
 import {
   ALLOWED_ON_APPEAL,
   FETCH_UNJUDGED,
@@ -72,42 +80,79 @@ export interface StoredVerdict {
   heartbeats: number;
 }
 
+/** What the signals left are weighed against: the live scorer's threshold and the stored flag scores. */
+export interface RescoreWeights {
+  /** `integrity.thresholds.sessionExcludeScore` in force. */
+  threshold: number;
+  /** The session's strongest flagged score per signal code. */
+  flagScores: ReadonlyMap<string, number>;
+}
+
 export interface Rescored {
   verdict: Verdict;
   reasons: string[];
   /** The reason codes the overturn dropped (their flags get the `allowed` decision). */
   dropped: string[];
+  /** The noisy-OR of the signals left: the session's stored score. */
+  score: number;
+}
+
+/**
+ * The live scorer's exclusion rule (`scoreSession`: a score above `sessionExcludeScore` excludes).
+ * CONTRACT-REQUEST: `score.ts` should export this predicate and use it itself, so the two cannot
+ * drift; until then the parity test in `tests/rescore.test.ts` runs both on the same scores.
+ */
+export const overThreshold = (score: number, threshold: number): boolean => score > threshold;
+
+/**
+ * Whether an overturn of `category` decided at `decidedAt` covers this session: excluded, ended,
+ * started at or before the decision, and in that category.
+ */
+export function coveredBy(s: StoredVerdict, category: ExclusionCategory, decidedAt: Date): boolean {
+  if (s.verdict !== "excluded" || s.endedAt === null) return false;
+  if (s.startedAt.getTime() > decidedAt.getTime()) return false;
+  return exclusionCategoryOf(s.reasons ?? []) === category;
 }
 
 /**
  * The pure re-score of one session for an overturn of `category` decided at `decidedAt`, or null
- * when the overturn does not cover it (not excluded, not ended, started after the decision, or its
- * category is another one).
+ * when the overturn does not cover it (`coveredBy`).
  */
-export function rescoreStoredSession(s: StoredVerdict, category: ExclusionCategory, decidedAt: Date): Rescored | null {
-  if (s.verdict !== "excluded" || s.endedAt === null) return null;
-  if (s.startedAt.getTime() > decidedAt.getTime()) return null;
+export function rescoreStoredSession(
+  s: StoredVerdict,
+  category: ExclusionCategory,
+  decidedAt: Date,
+  weights: RescoreWeights,
+): Rescored | null {
+  if (!coveredBy(s, category, decidedAt)) return null;
   const reasons = s.reasons ?? [];
-  if (exclusionCategoryOf(reasons) !== category) return null;
   const gone = reasons.filter((r) => dropped(r, category));
   const left = reasons.filter((r) => !dropped(r, category));
   const signals = left.filter((r) => !NON_SIGNAL_REASONS.has(r));
+  const score = rescoredScore(signals, weights.flagScores);
+  // Fail closed on what cannot be weighed: a code no current signal knows, or a signal with no flag.
+  const unweighable = signals.some((r) => categoryOfReason(r) === null || !weights.flagScores.has(r));
   // The scorer's order: signals (strongest first), `allowed_on_appeal`, `fetch_unjudged`, then the
   // pending reason.
   const out = [...signals, ALLOWED_ON_APPEAL];
   if (left.includes(FETCH_UNJUDGED)) out.push(FETCH_UNJUDGED);
-  if (signals.length > 0) return { verdict: "excluded", reasons: out, dropped: gone };
+  const result = (verdict: Verdict, pendingReason?: string): Rescored => ({
+    verdict,
+    reasons: pendingReason ? [...out, pendingReason] : out,
+    dropped: gone,
+    score,
+  });
+  if (unweighable || overThreshold(score, weights.threshold)) return result("excluded");
   if (left.includes(INSUFFICIENT_HEARTBEATS) || s.heartbeats < MIN_HEARTBEATS_TO_VERIFY)
-    return { verdict: "pending", reasons: [...out, INSUFFICIENT_HEARTBEATS], dropped: gone };
+    return result("pending", INSUFFICIENT_HEARTBEATS);
   // As in the scorer, an allowed `fetch_pattern` also lifts the media hold.
-  if (left.includes(MEDIA_UNCONFIRMED) && !gone.includes("fetch_pattern"))
-    return { verdict: "pending", reasons: [...out, MEDIA_UNCONFIRMED], dropped: gone };
-  return { verdict: "verified", reasons: out, dropped: gone };
+  if (left.includes(MEDIA_UNCONFIRMED) && !gone.includes("fetch_pattern")) return result("pending", MEDIA_UNCONFIRMED);
+  return result("verified");
 }
 
 /**
- * The stored score after the re-score: the noisy-OR of the strongest flagged score of each signal
- * left (a signal with no flag adds nothing), so a restored session scores 0.
+ * The noisy-OR of the strongest flagged score of each signal left (a signal with no flag adds
+ * nothing), so a session with no signal left scores 0.
  */
 export function rescoredScore(reasons: readonly string[], flagScores: ReadonlyMap<string, number>): number {
   return noisyOr(reasons.flatMap((r) => (flagScores.has(r) ? [flagScores.get(r) as number] : [])));
@@ -127,7 +172,7 @@ export interface RescoreExclusionGroupInput {
 export interface RescoreExclusionGroupResult {
   /** Sessions whose verdict or reasons changed. */
   rescored: number;
-  /** Of those, now verified or pending (no exclusion signal left). */
+  /** Of those, now verified or pending (what is left is at or under the threshold). */
   restored: number;
 }
 
@@ -164,14 +209,13 @@ export async function rescoreExclusionGroup(
     )
     .orderBy(ps.id)
     .for("update");
-  const covered = candidates.flatMap((c) => {
-    // A session still open on an ended broadcast (the stale-session job has not closed it yet)
-    // watches nothing more of it: it ended with the broadcast.
-    const r = rescoreStoredSession({ ...c, endedAt: c.endedAt ?? broadcastEnded }, input.category, input.decidedAt);
-    return r ? [{ id: c.id, ...r }] : [];
-  });
-  if (covered.length === 0) return { rescored: 0, restored: 0 };
-  const ids = covered.map((c) => c.id);
+  // A session still open on an ended broadcast (the stale-session job has not closed it yet)
+  // watches nothing more of it: it ended with the broadcast.
+  const inGroup = candidates
+    .map((c) => ({ ...c, endedAt: c.endedAt ?? broadcastEnded }))
+    .filter((c) => coveredBy(c, input.category, input.decidedAt));
+  if (inGroup.length === 0) return { rescored: 0, restored: 0 };
+  const ids = inGroup.map((c) => c.id);
 
   const flags = schema.integrityFlags;
   const flagRows = await tx
@@ -185,17 +229,22 @@ export async function rescoreExclusionGroup(
     m.set(f.signal, Number(f.score));
     scores.set(f.sessionId, m);
   }
+  // The live scorer's threshold, read where and as the scorer reads it (decision (g)).
+  const { sessionExcludeScore: threshold } = await loadThresholds(tx);
+  const covered = inGroup.flatMap((c) => {
+    const r = rescoreStoredSession(c, input.category, input.decidedAt, {
+      threshold,
+      flagScores: scores.get(c.id) ?? new Map(),
+    });
+    return r ? [{ id: c.id, ...r }] : [];
+  });
 
   let restored = 0;
   for (const c of covered) {
     if (c.verdict !== "excluded") restored++;
     await tx
       .update(ps)
-      .set({
-        verdict: c.verdict,
-        verdictReasons: c.reasons,
-        score: rescoredScore(c.reasons, scores.get(c.id) ?? new Map()),
-      })
+      .set({ verdict: c.verdict, verdictReasons: c.reasons, score: c.score })
       .where(and(eq(ps.id, c.id), eq(ps.verdict, "excluded")));
   }
 
@@ -229,6 +278,8 @@ export async function rescoreExclusionGroup(
         previousVerdict: "excluded",
         verdict: c.verdict,
         reasons: c.reasons,
+        score: c.score,
+        threshold,
       },
     })),
   );

@@ -8,9 +8,13 @@ import {
   groupDropped,
   latestFor,
   newSupersede,
+  noisyOr,
   overturnOutcome,
+  type OverturnWeights,
   pickGroup,
+  pickThresholdGroup,
   stillInGroup,
+  underThreshold,
 } from "../../src/w2/group-appeals.ts";
 
 const B = "01900000-0000-7000-8000-0000000000b1";
@@ -98,6 +102,8 @@ describe("overturnOutcome", () => {
       restorable: 1,
       restored: 1,
       moved: 1,
+      underThreshold: 0,
+      underThresholdRestored: 0,
     });
   });
 
@@ -120,6 +126,8 @@ describe("overturnOutcome", () => {
       restorable: 0,
       restored: 0,
       moved: 3,
+      underThreshold: 0,
+      underThresholdRestored: 0,
     });
   });
 
@@ -170,5 +178,118 @@ describe("attestation chain helpers", () => {
     expect(newSupersede(chain, B, new Set(["h3", "h5"]))).toBeNull();
     expect(latestFor(chain, B)?.seq).toBe(5);
     expect(latestFor(chain, "01900000-0000-7000-8000-0000000000ff")).toBeNull();
+  });
+});
+
+/** Batch 7 decision (g): what is left is weighed against the scorer's threshold (seeded 0.7). */
+describe("the threshold rule", () => {
+  const flags = { device_concurrency: 0.9, headless: 0.8, datacenter_ip: 0.6, fetch_pattern: 0.5 };
+  const w = (threshold = 0.7) => ({ threshold, flags });
+
+  it("noisyOr mirrors the scorer's combination, rounded at 1e-6", () => {
+    expect(noisyOr([])).toBe(0);
+    expect(noisyOr([0.6, 0.5])).toBe(0.8);
+    expect(noisyOr([0.1, 0.2, 0.3])).toBe(0.496);
+    expect(noisyOr([1.5, -1])).toBe(1);
+  });
+
+  it("a remainder at or under the threshold is restored; over it, the session moves", () => {
+    expect(expectedAfterOverturn(["datacenter_ip", "fetch_pattern"], "datacenter", w())).toBeNull();
+    expect(expectedAfterOverturn(["device_concurrency", "datacenter_ip"], "concurrency", w(0.6))).toBeNull();
+    expect(expectedAfterOverturn(["device_concurrency", "datacenter_ip"], "concurrency", w(0.59))).toBe("datacenter");
+    // Two signals left combine: 0.8 > 0.7.
+    expect(expectedAfterOverturn(["device_concurrency", "datacenter_ip", "fetch_pattern"], "concurrency", w())).toBe(
+      "datacenter",
+    );
+    // The seeded viewbots: headless (0.8) left crosses it.
+    expect(expectedAfterOverturn(["device_concurrency", "headless", "fetch_pattern"], "concurrency", w())).toBe(
+      "automation",
+    );
+  });
+
+  it("a signal left with no flag keeps the session excluded (the re-score fails closed)", () => {
+    expect(expectedAfterOverturn(["datacenter_ip", "fetch_pattern"], "datacenter", { threshold: 0.7, flags: {} })).toBe(
+      "playback_pattern",
+    );
+    // Without weights: the batch 6 rule (any other signal keeps it excluded).
+    expect(expectedAfterOverturn(["datacenter_ip", "fetch_pattern"], "datacenter")).toBe("playback_pattern");
+  });
+
+  it("a code no signal knows, left over, keeps the session excluded in `other`; an `other` overturn drops it", () => {
+    expect(expectedAfterOverturn(["datacenter_ip", "admin_decision"], "datacenter", w())).toBe("other");
+    expect(expectedAfterOverturn(["admin_decision", "insufficient_heartbeats"], "other", w())).toBeNull();
+    // Reasons that are not signals never block a restore.
+    expect(
+      expectedAfterOverturn(
+        ["datacenter_ip", "fetch_unjudged", "media_unconfirmed", "allowed_on_appeal"],
+        "datacenter",
+        w(),
+      ),
+    ).toBeNull();
+  });
+
+  it("noisyOr ignores a score that is not finite, as the scorer's clamp does", () => {
+    expect(noisyOr([Number.NaN, 0.5])).toBe(0.5);
+    expect(noisyOr([Number.POSITIVE_INFINITY])).toBe(0);
+  });
+
+  const weights = (byId: Record<string, Record<string, number>>, threshold = 0.7): OverturnWeights => ({
+    threshold,
+    flags: new Map(Object.entries(byId)),
+  });
+  const s = (id: string, verdict: string, reasons: string[]) => ({ id, verdict, reasons });
+
+  it("underThreshold: only sessions the threshold (not the plain rule) restores", () => {
+    const sessions = [
+      s("only", "excluded", ["datacenter_ip"]),
+      s("under", "excluded", ["datacenter_ip", "fetch_pattern"]),
+      s("over", "excluded", ["datacenter_ip", "headless"]),
+    ];
+    const ws = weights({ only: { datacenter_ip: 0.6 }, under: flags, over: flags });
+    expect(underThreshold(sessions, "datacenter", ws)).toEqual(["under"]);
+  });
+
+  it("overturnOutcome by the threshold: restored under it, moved over it, and the sub-threshold ones counted", () => {
+    const before = [
+      s("under", "excluded", ["datacenter_ip", "fetch_pattern"]),
+      s("over", "excluded", ["datacenter_ip", "headless"]),
+    ];
+    const ws = weights({ under: flags, over: flags });
+    const good = [
+      s("under", "verified", ["fetch_pattern", "allowed_on_appeal"]),
+      s("over", "excluded", ["headless", "allowed_on_appeal"]),
+    ];
+    expect(overturnOutcome(before, good, "datacenter", ws)).toEqual({
+      notRestored: [],
+      notMoved: [],
+      restorable: 1,
+      restored: 1,
+      moved: 1,
+      underThreshold: 1,
+      underThresholdRestored: 1,
+    });
+    // The batch 6 behaviour (the sub-threshold session kept excluded) is now a failure.
+    const old = [s("under", "excluded", ["fetch_pattern", "allowed_on_appeal"]), good[1]!];
+    expect(overturnOutcome(before, old, "datacenter", ws)).toMatchObject({
+      notRestored: ["under"],
+      underThreshold: 1,
+      underThresholdRestored: 0,
+    });
+  });
+
+  it("pickThresholdGroup: the shown group the threshold decides most often, else null", () => {
+    const sessions = [
+      s("a", "excluded", ["datacenter_ip", "fetch_pattern"]),
+      s("b", "excluded", ["device_concurrency", "headless"]),
+      s("c", "excluded", ["device_concurrency", "fetch_pattern"]),
+      s("d", "excluded", ["device_concurrency", "datacenter_ip"]),
+    ];
+    const ws = weights({ a: flags, b: flags, c: flags, d: flags });
+    const shown = [{ category: "datacenter" as const }, { category: "concurrency" as const }];
+    expect(pickThresholdGroup(shown, sessions, ws)).toBe("concurrency");
+    expect(pickThresholdGroup([{ category: "datacenter" }], sessions, ws)).toBe("datacenter");
+    // A threshold under every remainder: nothing for the rule to decide.
+    expect(pickThresholdGroup(shown, sessions, weights({ a: flags, b: flags, c: flags, d: flags }, 0.1))).toBeNull();
+    expect(pickThresholdGroup([], sessions, ws)).toBeNull();
   });
 });

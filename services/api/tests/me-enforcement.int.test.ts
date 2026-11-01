@@ -9,7 +9,7 @@
  */
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
-import { en } from "@commonair/email";
+import { en, resolveCatalog } from "@commonair/email";
 import { legalSeedDocuments, schema, uuidv7 } from "@commonair/db";
 import { client, signUpAndSignIn, startApi, type TestApi } from "./harness.ts";
 
@@ -191,6 +191,27 @@ describe("me.enforcement.list", () => {
     expect(seen).not.toContain(bobs);
     expect((await list(bob, undefined, 50)).body.items.map((s) => s.id)).toEqual([bobs]);
     expect((await client(api).call("GET", "/api/me/enforcement")).status).toBe(401);
+  });
+
+  // Batch 5 follow-up: the title is in the member's own locale, as their statement emails are.
+  test("an es member gets Spanish clause titles; an unknown locale falls back to English", async () => {
+    const es = await signUpAndSignIn(api);
+    const mx = await signUpAndSignIn(api);
+    const xx = await signUpAndSignIn(api);
+    await db().update(schema.users).set({ locale: "es" }).where(eq(schema.users.id, es.userId));
+    await db().update(schema.users).set({ locale: "es-MX" }).where(eq(schema.users.id, mx.userId));
+    await db().update(schema.users).set({ locale: "xx" }).where(eq(schema.users.id, xx.userId));
+    const spanish = resolveCatalog("es").catalog.enforcementStatement["clause.safety.weapons"];
+    expect(spanish).toBe("Armas peligrosas");
+    for (const [who, want] of [
+      [es, spanish],
+      [mx, spanish],
+      [xx, en.enforcementStatement["clause.safety.weapons"]],
+    ] as const) {
+      const id = await statement(who.userId, new Date());
+      const s = (await list(who, undefined, 50)).body.items.find((x) => x.id === id)!;
+      expect(s.clauseTitle, who.userId).toBe(want);
+    }
   });
 
   test("the clause title from the catalog and the explanation from the pinned notice", async () => {

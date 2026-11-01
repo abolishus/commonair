@@ -12,6 +12,9 @@ import {
   T2_CELL,
   TIER_SOURCES,
   pickSmall,
+  resolveStatementProblems,
+  SOR_RESOLVE_CLAUSE,
+  type StatementOf,
   refOf,
   rowOf,
   topUpPlan,
@@ -84,5 +87,56 @@ describe("cells", () => {
   test("the test ids it selects by are in docs/testing/w2-selectors.md", () => {
     const doc = readFileSync(new URL("../../../docs/testing/w2-selectors.md", import.meta.url), "utf8");
     for (const id of Object.values(ENFORCEMENT_IDS)) expect(doc).toContain(`\`${id}\``);
+  });
+});
+
+describe("sor-resolve: the statement of a report resolved with a suspension", () => {
+  const target = "01900000-0000-7000-8000-0000000000a1";
+  const modActionId = "01900000-0000-7000-8000-0000000000a2";
+  const at = Date.parse("2026-11-01T12:00:00.000Z");
+  const want = { targetId: target, modActionId, clauseId: SOR_RESOLVE_CLAUSE, endsAtMs: at + 3_600_000 };
+  const good: StatementOf = {
+    recipientUserId: target,
+    source: "notice_art16",
+    restrictionKind: "account",
+    restrictionDetail: "suspended",
+    restrictionEndsAt: "2026-11-01T13:00:00.500Z",
+    clauseId: SOR_RESOLVE_CLAUSE,
+    appealSubjectType: "moderation_action",
+    appealSubjectId: modActionId,
+    factsCode: "moderator_review",
+  };
+
+  test("a matching statement has no problems (the end within clock skew)", () => {
+    expect(resolveStatementProblems(good, want)).toEqual([]);
+  });
+
+  test("each difference is named", () => {
+    expect(
+      resolveStatementProblems(
+        {
+          ...good,
+          recipientUserId: modActionId,
+          source: "own_initiative",
+          restrictionKind: "service",
+          restrictionEndsAt: null,
+          clauseId: "guidelines.general",
+          appealSubjectType: "moderation_case",
+          factsCode: "classifier",
+        },
+        want,
+      ),
+    ).toEqual([
+      "recipient",
+      "source own_initiative",
+      "restriction service/suspended",
+      "ends null",
+      "clause guidelines.general",
+      `appeal moderation_case/${modActionId}`,
+      "facts classifier",
+    ]);
+    expect(resolveStatementProblems({ ...good, restrictionEndsAt: "2026-11-01T14:00:00.000Z" }, want)).toEqual([
+      "ends 2026-11-01T14:00:00.000Z",
+    ]);
   });
 });

@@ -3,8 +3,15 @@
 
 /** The rehearsal driver's wiring: the chat dry-run client, the MediaMTX kick and the config. */
 import { describe, expect, test } from "vite-plus/test";
-import { INTERNAL_ROUTES, INTERNAL_SECRET_HEADER } from "@commonair/contracts/internal";
-import { chatHttpBase, httpChatProbe, mediamtxKick, rehearsalConfig } from "../src/jobs/rehearsal-driver.ts";
+import { INTERNAL_ROUTES, INTERNAL_SECRET_HEADER, KEYS } from "@commonair/contracts/internal";
+import type { ValkeyClient } from "@commonair/service";
+import {
+  chatHttpBase,
+  httpChatProbe,
+  mediamtxKick,
+  moderationSamples,
+  rehearsalConfig,
+} from "../src/jobs/rehearsal-driver.ts";
 
 type Call = { url: string; init: RequestInit | undefined };
 const fakeFetch = (respond: (url: string, init?: RequestInit) => Response) => {
@@ -96,5 +103,41 @@ describe("rehearsalConfig", () => {
       kick: { apiUrl: "http://mediamtx:9997", password: "p" },
     });
     expect(rehearsalConfig({ INTERNAL_API_SECRET: "s" }).chat?.baseUrl).toBe("http://localhost:3002");
+  });
+});
+
+describe("moderationSamples", () => {
+  const B = "0192a1b2-0000-7000-8000-0000000000b1";
+  const valkey = (raw: string | null) => {
+    const keys: string[] = [];
+    const client = {
+      get: async (key: string) => {
+        keys.push(key);
+        return raw;
+      },
+    } as unknown as ValkeyClient;
+    return { client, keys };
+  };
+
+  test("reads media's count for the broadcast", async () => {
+    const v = valkey("12");
+    expect(await moderationSamples(v.client, B, 0)).toBe(12);
+    expect(v.keys).toEqual([KEYS.rehearsalModerationSamples(B)]);
+  });
+
+  test("never below what the report shows: a missing, lower or unreadable count keeps it", async () => {
+    expect(await moderationSamples(valkey(null).client, B, 0)).toBe(0);
+    expect(await moderationSamples(valkey(null).client, B, 5)).toBe(5);
+    expect(await moderationSamples(valkey("3").client, B, 5)).toBe(5);
+    expect(await moderationSamples(valkey("nope").client, B, 5)).toBe(5);
+  });
+
+  test("a failed read keeps the shown count instead of failing the report write", async () => {
+    const down = {
+      get: async () => {
+        throw new Error("valkey down");
+      },
+    } as unknown as ValkeyClient;
+    expect(await moderationSamples(down, B, 7)).toBe(7);
   });
 });

@@ -15,7 +15,7 @@
 import { EnforcementStatement } from "@commonair/contracts/dto";
 import { REPORT_REASONS, type MODERATION_SUBJECTS, type ModerationCategory } from "@commonair/contracts/enums";
 import { schema, uuidv7, type Executor } from "@commonair/db";
-import { groundFor, parseThresholds, type ClauseInput, type Thresholds } from "@commonair/moderation";
+import { findClause, groundFor, parseThresholds, type ClauseInput, type Thresholds } from "@commonair/moderation";
 import { and, asc, desc, eq, gt, gte, isNotNull, lte, notInArray, sql } from "drizzle-orm";
 import type { WorkerContext } from "../context.ts";
 import { moderationMetrics } from "./metrics.ts";
@@ -111,14 +111,15 @@ function statement(
 function common(
   row: AuditRow,
   l: SorLookup,
-  input: ClauseInput,
+  input: ClauseInput | Statement["ground"],
   rest: Pick<Statement, "facts" | "source" | "automatedDetection" | "automatedDecision" | "appeal">,
 ): Base {
   const action = row.action as Statement["sourceAction"];
   return {
     sourceAuditId: row.id,
     sourceAction: action,
-    ground: groundFor(input),
+    // A staff action names its clause; every other action's follows from its facts.
+    ground: "clauseId" in input ? input : groundFor(input),
     documents: l.documents,
     createdAt: iso(row.createdAt),
     ...rest,
@@ -425,12 +426,87 @@ export async function planStatements(row: AuditRow, l: SorLookup): Promise<Plan>
         ],
       };
     }
-    // Batch 7 contract step: allowlisted; B7-followups builds their statements.
     case "report.resolve":
     case "user.suspend":
-    case "channel.suspend":
-      return { kind: "none", reason: "pending_b7" };
+    case "channel.suspend": {
+      const x = d as SorDetails["report.resolve" | "user.suspend" | "channel.suspend"];
+      // A dismissal, a channel ban, a removal or a suspension already in force (`expectsStatement`).
+      if ("suspended" in x && !x.suspended) return { kind: "none", reason: "no_restriction" };
+      const s = x as StaffDetails;
+      const target =
+        row.action === "user.suspend" || ("action" in s && s.action === "suspend_user") ? "account" : "channel";
+      return staffStatement(row, l, s, target);
+    }
   }
+}
+
+type StaffDetails = SorDetails["user.suspend"] | Extract<SorDetails["report.resolve"], { suspended: true }>;
+
+/**
+ * A platform staff suspension (ADR 0019 answer 3): from the report queue (`report.resolve`, an
+ * Art. 16 notice) or the admin suspension (`user.suspend` / `channel.suspend`, own initiative).
+ * The clause is the one the staff member cited, at the version recorded when it applied. These
+ * actions have no moderation case: the facts name the `mod_actions` row (the decision's own
+ * record, which is also its appeal subject) as the reviewed case.
+ */
+async function staffStatement(
+  row: AuditRow,
+  l: SorLookup,
+  s: StaffDetails,
+  target: "account" | "channel",
+): Promise<Plan> {
+  const clause = findClause(s.clauseId, s.clauseVersion);
+  // A clause the catalog no longer has, or one whose ground changed under it, is drift: say so.
+  if (!clause || clause.ground !== s.ground) return { kind: "invalid", reason: "clause" };
+  const base = common(
+    row,
+    l,
+    { kind: clause.ground, clauseId: clause.id, clauseVersion: clause.version, legalBasis: clause.legalBasis ?? null },
+    {
+      facts: { code: "moderator_review", caseId: s.modActionId, caseOrigin: "human", decision: "suspend" },
+      source: row.action === "report.resolve" ? "notice_art16" : "own_initiative",
+      automatedDetection: false,
+      automatedDecision: "not",
+      appeal: null,
+    },
+  );
+  // `appeals.create` takes a `moderation_action` appeal from the action's target only.
+  const appeal = (recipient: string): Statement["appeal"] =>
+    recipient === s.userId ? { kind: "moderation", subjectType: "moderation_action", subjectId: s.modActionId } : null;
+  if (target === "account")
+    return {
+      kind: "statements",
+      statements: [
+        statement(base, {
+          recipientUserId: s.userId,
+          channelId: row.channelId,
+          content: { type: "account", id: s.userId },
+          // The account ban carries the duration (`users.ban_expires`).
+          restriction: {
+            kind: "account",
+            detail: "suspended",
+            endsAt: s.durationSeconds ? iso(new Date(row.createdAt.getTime() + s.durationSeconds * 1000)) : null,
+          },
+          appeal: appeal(s.userId),
+        }),
+      ],
+    };
+  if (!row.channelId) return { kind: "invalid", reason: "channel" };
+  const owner = await l.channelOwner(row.channelId);
+  if (!owner) return { kind: "invalid", reason: "recipient" };
+  return {
+    kind: "statements",
+    statements: [
+      statement(base, {
+        recipientUserId: owner,
+        channelId: row.channelId,
+        content: { type: "channel", id: row.channelId },
+        // A channel suspension has no expiry (`channels.suspended_at` only).
+        restriction: { kind: "service", detail: "suspended", endsAt: null },
+        appeal: appeal(owner),
+      }),
+    ],
+  };
 }
 
 /* ------------------------------------------------------------------------- *

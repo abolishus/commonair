@@ -24,23 +24,23 @@ afterAll(async () => {
 });
 
 let seq = 0;
-async function user(): Promise<string> {
+async function user(db: Database = app): Promise<string> {
   const name = `ru${++seq}`;
-  const [u] = await app
+  const [u] = await db
     .insert(s.users)
     .values({ name, email: `${name}@example.test`, username: name })
     .returning({ id: s.users.id });
   return u!.id;
 }
 
-async function broadcast() {
-  const ownerId = await user();
-  const [c] = await app
+async function broadcast(db: Database = app) {
+  const ownerId = await user(db);
+  const [c] = await db
     .insert(s.channels)
     .values({ ownerId, slug: `rc${seq}`, displayName: `RC${seq}` })
     .returning({ id: s.channels.id });
   const mk = async () => {
-    const [b] = await app
+    const [b] = await db
       .insert(s.broadcasts)
       .values({
         channelId: c!.id,
@@ -61,8 +61,9 @@ async function session(
   ctx: Ctx,
   reasons: string[],
   o: Partial<typeof s.playbackSessions.$inferInsert> = {},
+  db: Database = app,
 ): Promise<string> {
-  const [p] = await app
+  const [p] = await db
     .insert(s.playbackSessions)
     .values({
       channelId: ctx.channelId,
@@ -80,10 +81,17 @@ async function session(
     })
     .returning({ id: s.playbackSessions.id });
   const id = p!.id;
-  const scores: Record<string, number> = { datacenter_ip: 0.6, headless: 0.5, device_concurrency: 0.9 };
+  // As the scorer stores them; the seeded threshold is 0.7.
+  const scores: Record<string, number> = {
+    datacenter_ip: 0.6,
+    headless: 0.8,
+    device_concurrency: 0.9,
+    fetch_pattern: 0.5,
+    heartbeat_inconsistent: 0.45,
+  };
   const signals = reasons.filter((r) => r in scores);
   if (signals.length)
-    await app.insert(s.integrityFlags).values(
+    await db.insert(s.integrityFlags).values(
       signals.map((signal) => ({
         subjectType: "session" as const,
         subjectId: id,
@@ -96,10 +104,10 @@ async function session(
   return id;
 }
 
-const verdicts = async (ids: string[]) =>
+const verdicts = async (ids: string[], db: Database = app) =>
   Object.fromEntries(
     (
-      await app
+      await db
         .select({
           id: s.playbackSessions.id,
           verdict: s.playbackSessions.verdict,
@@ -143,7 +151,7 @@ describe("rescoreExclusionGroup", () => {
 
     const after = await verdicts(all);
     expect(after[only]).toMatchObject({ verdict: "verified", reasons: ["allowed_on_appeal"], score: 0 });
-    expect(after[moves]).toMatchObject({ verdict: "excluded", reasons: ["headless", "allowed_on_appeal"], score: 0.5 });
+    expect(after[moves]).toMatchObject({ verdict: "excluded", reasons: ["headless", "allowed_on_appeal"], score: 0.8 });
     expect(after[unjudged]).toMatchObject({ verdict: "verified", reasons: ["allowed_on_appeal", "fetch_unjudged"] });
     expect(after[few]).toMatchObject({ verdict: "pending", reasons: ["allowed_on_appeal", "insufficient_heartbeats"] });
     // Still open on an ended broadcast: it ended with the broadcast, so it is covered.
@@ -209,8 +217,94 @@ describe("rescoreExclusionGroup", () => {
       expect(after[id]).toMatchObject({
         verdict: "excluded",
         reasons: ["headless", "fetch_pattern", "allowed_on_appeal"],
-        score: 0.5,
+        // 1 − 0.2 · 0.5: still over the 0.7 threshold.
+        score: 0.9,
       });
+  });
+
+  // Batch 7 decision (g): what is left is weighed against the live scorer's threshold.
+  test("an overturn moves the sessions now under the threshold and keeps those still over it", async () => {
+    const ctx = await broadcast();
+    const staff = await user();
+    // 0.5 left: under 0.7.
+    const under = await session(ctx, ["datacenter_ip", "fetch_pattern"]);
+    // 1 − 0.5 · 0.55 = 0.725 left: over 0.7, now a playback-pattern exclusion.
+    const over = await session(ctx, ["datacenter_ip", "fetch_pattern", "heartbeat_inconsistent"]);
+    // 0.8 left: over, now an automation exclusion.
+    const headless = await session(ctx, ["datacenter_ip", "headless"]);
+    // Under the threshold but with too few heartbeats: pending, the signal still listed.
+    const few = await session(ctx, ["datacenter_ip", "fetch_pattern"], { heartbeats: 2 });
+    const r = await app.transaction((tx) =>
+      rescoreExclusionGroup(tx, {
+        broadcastId: ctx.broadcastId,
+        category: "datacenter",
+        decidedAt: NOW,
+        decidedById: staff,
+      }),
+    );
+    expect(r).toEqual({ rescored: 4, restored: 2 });
+    const after = await verdicts([under, over, headless, few]);
+    expect(after[under]).toMatchObject({ verdict: "verified", reasons: ["fetch_pattern", "allowed_on_appeal"] });
+    expect(after[under]?.score).toBeCloseTo(0.5, 6);
+    expect(after[over]).toMatchObject({
+      verdict: "excluded",
+      reasons: ["fetch_pattern", "heartbeat_inconsistent", "allowed_on_appeal"],
+    });
+    expect(after[over]?.score).toBeCloseTo(0.725, 6);
+    expect(after[headless]).toMatchObject({ verdict: "excluded", reasons: ["headless", "allowed_on_appeal"] });
+    expect(after[few]).toMatchObject({
+      verdict: "pending",
+      reasons: ["fetch_pattern", "allowed_on_appeal", "insufficient_heartbeats"],
+    });
+
+    // Only the overturned category's flags are allowed; the remainder's stay as the scorer left them.
+    const flags = await app
+      .select({ subjectId: s.integrityFlags.subjectId, signal: s.integrityFlags.signal, d: s.integrityFlags.decision })
+      .from(s.integrityFlags)
+      .where(inArray(s.integrityFlags.subjectId, [under, over, headless, few]));
+    for (const f of flags) expect(f.d, `${f.signal}`).toBe(f.signal === "datacenter_ip" ? "allowed" : "excluded");
+
+    // The audit rows record what was weighed: the remainder's score and the threshold in force.
+    const audits = await app
+      .select()
+      .from(s.auditLog)
+      .where(inArray(s.auditLog.subjectId, [under, over]));
+    expect(audits.find((a) => a.subjectId === under)).toMatchObject({
+      action: "integrity.session.restore",
+      details: { verdict: "verified", threshold: 0.7, score: 0.5 },
+    });
+    expect(audits.find((a) => a.subjectId === over)).toMatchObject({
+      action: "integrity.session.rescore",
+      details: { verdict: "excluded", threshold: 0.7 },
+    });
+  });
+
+  test("the threshold is the governance setting in force, not a constant", async () => {
+    // Only a passed proposal changes the setting, so the lower threshold is an instance bootstrapped
+    // with it (its own database).
+    const low = await createTestDatabase({ governance: { "integrity.thresholds": { sessionExcludeScore: 0.5 } } });
+    try {
+      const reasons = ["device_concurrency", "datacenter_ip"];
+      const seeded = await broadcast();
+      const kept = await session(seeded, reasons);
+      const lowCtx = await broadcast(low.app.db);
+      const crossed = await session(lowCtx, reasons, {}, low.app.db);
+      const rescore = (db: Database, broadcastId: string) =>
+        db.transaction((tx) => rescoreExclusionGroup(tx, { broadcastId, category: "concurrency", decidedAt: NOW }));
+      // 0.6 left: under the seeded 0.7, over 0.5.
+      expect(await rescore(app, seeded.broadcastId)).toEqual({ rescored: 1, restored: 1 });
+      expect((await verdicts([kept]))[kept]).toMatchObject({
+        verdict: "verified",
+        reasons: ["datacenter_ip", "allowed_on_appeal"],
+      });
+      expect(await rescore(low.app.db, lowCtx.broadcastId)).toEqual({ rescored: 1, restored: 0 });
+      expect((await verdicts([crossed], low.app.db))[crossed]).toMatchObject({
+        verdict: "excluded",
+        reasons: ["datacenter_ip", "allowed_on_appeal"],
+      });
+    } finally {
+      await low.drop();
+    }
   });
 
   test("on a live broadcast only closed sessions are covered", async () => {

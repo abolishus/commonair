@@ -6,14 +6,17 @@
  * 0014 decision 4, batch 6 decision (m)), after `group` and `signed`:
  *
  * - the streamer appeals one of the swarm's shown excluded groups on `/analytics`
- *   (`group-appeal-open` → `group-appeal-submit`), the swarm's `datacenter` group when analytics
- *   shows one (the swarm's sessions take their highest-scoring reason's category, so it can also
- *   be `concurrency` or `automation`);
+ *   (`group-appeal-open` → `group-appeal-submit`): a group where the threshold rule decides some
+ *   session (another category's signal left under the threshold, batch 7 decision (g)) when one is
+ *   shown, else the swarm's `datacenter` group when analytics shows one (the swarm's sessions take
+ *   their highest-scoring reason's category, so it can also be `concurrency` or `automation`);
  * - a second group appeal on the same broadcast is `RATE_LIMITED`;
  * - an admin of its own (signed up here, role granted with the operator CLI) overturns it;
- * - the worker re-runs the rollup: no session of the group is still excluded under it; a session
- *   with no other category's signal counts as verified (or pending) again, one that also carries
- *   another category's signal stays excluded and moves to that group (the swarm's viewbots share
+ * - the worker re-runs the rollup: no session of the group is still excluded under it. What is left
+ *   of each session is weighed against the live scorer's threshold (batch 7 decision (g)): a
+ *   session whose remaining signals' flagged scores combine (noisy-OR) to at most
+ *   `integrity.thresholds.sessionExcludeScore` counts as verified (or pending) again, one whose
+ *   remainder still crosses it stays excluded and moves to that group (the swarm's viewbots share
  *   devices and are headless, so their concurrency group moves to `automation`); the rollup no
  *   longer counts the group, and the verified watch time did not go down;
  * - the channel's attestation chain gains a `supersede` entry for the broadcast that verifies
@@ -62,49 +65,123 @@ export interface StoredSession {
   reasons: string[] | null;
 }
 
+/**
+ * What an overturn weighs what is left against (`packages/integrity/src/rescore.ts`): the live
+ * scorer's threshold and each session's strongest flagged score per signal.
+ */
+export interface OverturnWeights {
+  threshold: number;
+  flags: ReadonlyMap<string, Readonly<Record<string, number>>>;
+}
+
+/** Mirror of the scorer's noisy-OR (`packages/integrity/src/signals/combine.ts`), rounded at 1e-6. */
+export function noisyOr(scores: readonly number[]): number {
+  let keep = 1;
+  for (const x of scores) keep *= 1 - (Number.isFinite(x) ? Math.min(1, Math.max(0, x)) : 0);
+  return Math.round((1 - keep) * 1e6) / 1e6;
+}
+
 /** Sessions that are still excluded under `category` (the rollup's first-reason attribution). */
 export const stillInGroup = (sessions: readonly StoredSession[], category: ExclusionCategory): string[] =>
   sessions.filter((s) => s.verdict === "excluded" && firstReasonCategory(s.reasons) === category).map((s) => s.id);
 
+/** Mirror of `NON_SIGNAL_REASONS` in packages/integrity/src/rescore.ts: reasons that are not signals. */
+const NON_SIGNAL_REASONS: ReadonlySet<string> = new Set([
+  "allowed_on_appeal",
+  "fetch_unjudged",
+  "insufficient_heartbeats",
+  "media_unconfirmed",
+]);
+
 /**
  * Where an overturn of `category` puts a session with these stored reasons (`rescore.ts`): null
- * when no other category's signal is left (verified, or pending), else the group it moves to (the
- * first signal left). Codes the harness does not know are not counted as signals.
+ * when it is verified (or pending) again, else the group it moves to (the first signal left).
+ * Without `weights` (the batch 6 rule): nothing of another category left is null. With `weights`
+ * (decision (g)) the signals left are weighed: at most the threshold is null too, and what cannot
+ * be weighed (a signal left with no flag, or a code no signal knows, which is the `other` group)
+ * keeps the session excluded, as the re-score fails closed.
  */
 export function expectedAfterOverturn(
   reasons: readonly string[] | null,
   category: ExclusionCategory,
+  weights?: { threshold: number; flags: Readonly<Record<string, number>> },
 ): ExclusionCategory | null {
-  const left = (reasons ?? []).filter((r) => firstReasonCategory([r]) !== category);
+  const left = (reasons ?? []).filter((r) => NON_SIGNAL_REASONS.has(r) || firstReasonCategory([r]) !== category);
   const next = firstReasonCategory(left);
-  return next === "other" ? null : next;
+  if (!weights) return next === "other" ? null : next;
+  const signals = left.filter((r) => !NON_SIGNAL_REASONS.has(r));
+  const unweighable = signals.some((r) => firstReasonCategory([r]) === "other" || weights.flags[r] === undefined);
+  if (unweighable) return next;
+  return noisyOr(signals.map((r) => weights.flags[r] ?? 0)) > weights.threshold ? next : null;
+}
+
+/** Sessions another category's signal would keep excluded but the threshold restores. */
+export function underThreshold(
+  sessions: readonly StoredSession[],
+  category: ExclusionCategory,
+  weights: OverturnWeights,
+): string[] {
+  return sessions
+    .filter((s) => {
+      const flags = weights.flags.get(s.id) ?? {};
+      return (
+        expectedAfterOverturn(s.reasons, category) !== null &&
+        expectedAfterOverturn(s.reasons, category, { threshold: weights.threshold, flags }) === null
+      );
+    })
+    .map((s) => s.id);
 }
 
 export interface OverturnOutcome {
-  /** Sessions with no other signal that are not verified or pending after the overturn. */
+  /** Sessions that should be verified or pending again and are not. */
   notRestored: string[];
-  /** Sessions with another category's signal that are not excluded under it after the overturn. */
+  /** Sessions that should stay excluded under another category and are not. */
   notMoved: string[];
   restorable: number;
   restored: number;
   moved: number;
+  /** Of `restorable`, the sessions with another category's signal left under the threshold. */
+  underThreshold: number;
+  /** Of those, the ones verified or pending again. */
+  underThresholdRestored: number;
 }
 
-/** Compares the group's sessions before the overturn with their verdicts after it. */
+/**
+ * Compares the group's sessions before the overturn with their verdicts after it; with `weights`,
+ * by the threshold rule (decision (g)).
+ */
 export function overturnOutcome(
   before: readonly StoredSession[],
   after: readonly StoredSession[],
   category: ExclusionCategory,
+  weights?: OverturnWeights,
 ): OverturnOutcome {
   const now = new Map(after.map((s) => [s.id, s]));
-  const out: OverturnOutcome = { notRestored: [], notMoved: [], restorable: 0, restored: 0, moved: 0 };
+  const out: OverturnOutcome = {
+    notRestored: [],
+    notMoved: [],
+    restorable: 0,
+    restored: 0,
+    moved: 0,
+    underThreshold: 0,
+    underThresholdRestored: 0,
+  };
+  const under = new Set(weights ? underThreshold(before, category, weights) : []);
   for (const s of before) {
-    const want = expectedAfterOverturn(s.reasons, category);
+    const flags = weights?.flags.get(s.id) ?? {};
+    const want = expectedAfterOverturn(
+      s.reasons,
+      category,
+      weights ? { threshold: weights.threshold, flags } : undefined,
+    );
     const got = now.get(s.id);
     if (want === null) {
       out.restorable++;
-      if (got && (got.verdict === "verified" || got.verdict === "pending")) out.restored++;
-      else out.notRestored.push(s.id);
+      if (under.has(s.id)) out.underThreshold++;
+      if (got && (got.verdict === "verified" || got.verdict === "pending")) {
+        out.restored++;
+        if (under.has(s.id)) out.underThresholdRestored++;
+      } else out.notRestored.push(s.id);
     } else if (got?.verdict === "excluded" && firstReasonCategory(got.reasons) === want) out.moved++;
     else out.notMoved.push(s.id);
   }
@@ -178,6 +255,72 @@ export async function readVerdicts(url: string, ids: readonly string[]): Promise
   }
 }
 
+/**
+ * The live scorer's threshold and the sessions' strongest flagged score per signal (what the
+ * re-score weighs; `integrity_flags` keeps the scores whatever the flags' decision).
+ */
+export async function readWeights(url: string, ids: readonly string[]): Promise<OverturnWeights> {
+  const sql = new Bun.SQL(url);
+  try {
+    const [t] = (await sql`
+      select (value ->> 'sessionExcludeScore')::float8 as threshold
+        from governance_settings where key = 'integrity.thresholds'`) as { threshold: number | null }[];
+    const rows = (await sql`
+      select subject_id::text as id, signal, max(score)::float8 as score
+        from integrity_flags
+       where subject_type = 'session' and subject_id = any(${sql.array([...ids], "uuid")})
+       group by subject_id, signal`) as { id: string; signal: string; score: number }[];
+    const flags = new Map<string, Record<string, number>>();
+    for (const r of rows) flags.set(r.id, { ...flags.get(r.id), [r.signal]: Number(r.score) });
+    if (t?.threshold === null || t?.threshold === undefined) throw new Error("integrity.thresholds is missing");
+    return { threshold: Number(t.threshold), flags };
+  } finally {
+    await sql.close();
+  }
+}
+
+/** Every excluded session of the broadcast. */
+export async function readExcluded(url: string, broadcastId: string): Promise<StoredSession[]> {
+  const sql = new Bun.SQL(url);
+  try {
+    // A plain array (Bun.SQL returns its own result array type).
+    return [
+      ...((await sql`
+      select id::text as id, verdict::text as verdict, verdict_reasons as reasons
+        from playback_sessions where broadcast_id = ${broadcastId}::uuid and verdict = 'excluded'
+       order by id`) as StoredSession[]),
+    ];
+  } finally {
+    await sql.close();
+  }
+}
+
+/**
+ * Among the shown groups, the one whose overturn the threshold rule decides for the most sessions
+ * (another category's signal left, under the threshold), or null when no shown group has one.
+ */
+export function pickThresholdGroup(
+  shown: readonly { category: ExclusionCategory }[],
+  sessions: readonly StoredSession[],
+  weights: OverturnWeights,
+): ExclusionCategory | null {
+  let best: { category: ExclusionCategory; n: number } | null = null;
+  for (const g of shown) {
+    const inGroup = sessions.filter((s) => firstReasonCategory(s.reasons) === g.category);
+    const n = underThreshold(inGroup, g.category, weights).length;
+    if (n > 0 && (!best || n > best.n)) best = { category: g.category, n };
+  }
+  return best?.category ?? null;
+}
+
+/** What `group-appeal` found, for `group-appeal-threshold` on the same run. */
+export interface GroupAppealResult {
+  category: ExclusionCategory;
+  weights: OverturnWeights;
+  outcome: OverturnOutcome;
+}
+const appealed = new WeakMap<IntegrityW2Extension, GroupAppealResult>();
+
 interface Entry {
   kind: string;
   broadcastId: string;
@@ -233,8 +376,26 @@ export async function stepGroupAppeal(ext: IntegrityW2Extension): Promise<void> 
   const { swarmCategories } = await ctx.step("read the swarm's categories", () =>
     readRollup(url, broadcastId, ext.swarmSessionIds),
   );
-  const category = pickGroup(view.exclusions, swarmCategories);
-  ctx.data("groupAppeal.groups", { shown: view.exclusions, swarm: swarmCategories, category });
+  // Decision (g): prefer a group whose overturn the threshold rule decides, so the run exercises it.
+  const excluded = await ctx.step("read the broadcast's excluded sessions and their flags", async () => {
+    const sessions = await readExcluded(url, broadcastId);
+    return {
+      sessions,
+      weights: await readWeights(
+        url,
+        sessions.map((s) => s.id),
+      ),
+    };
+  });
+  const category =
+    pickThresholdGroup(view.exclusions, excluded.sessions, excluded.weights) ??
+    pickGroup(view.exclusions, swarmCategories);
+  ctx.data("groupAppeal.groups", {
+    shown: view.exclusions,
+    swarm: swarmCategories,
+    category,
+    threshold: excluded.weights.threshold,
+  });
   ctx.assert("analytics shows an excluded group to appeal", category !== null, view.exclusions);
   if (category === null) return;
   const before = await ctx.step("read the group's sessions and the rollup", () =>
@@ -334,16 +495,17 @@ export async function stepGroupAppeal(ext: IntegrityW2Extension): Promise<void> 
   const left = stillInGroup(verdicts, category);
   ctx.assert("no session of the group is still excluded under it", left.length === 0, { left });
   const verified = verdicts.filter((v) => v.verdict === "verified").length;
-  const outcome = overturnOutcome(before.sessions, verdicts, category);
+  const outcome = overturnOutcome(before.sessions, verdicts, category, excluded.weights);
+  appealed.set(ext, { category, weights: excluded.weights, outcome });
   ctx.data("groupAppeal.verdicts", { sessions: verdicts.length, verified, outcome, rescored: overturned });
   // Which of the two applies depends on the signals the swarm happened to trip (CI run 41305101320:
   // every concurrency session was also headless, so none could be restored).
   ctx.check(
-    "the group's sessions with no other signal count as verified (or pending) again",
+    "the group's sessions left at or under the threshold count as verified (or pending) again",
     outcome.notRestored.length === 0,
     outcome,
   );
-  ctx.check("the group's sessions with another category's signal move to that group", outcome.notMoved.length === 0, {
+  ctx.check("the group's sessions still over the threshold move to their next group", outcome.notMoved.length === 0, {
     ...outcome,
     reasons: verdicts.filter((v) => outcome.notMoved.includes(v.id)).map((v) => v.reasons),
   });
@@ -391,10 +553,34 @@ export async function stepGroupAppeal(ext: IntegrityW2Extension): Promise<void> 
 
 /**
  * `integrity-basic` W3 extension `group-appeal-threshold` (batch 7 decision (g); `src/w3/steps.ts`):
- * after an overturn, a session left with only a sub-threshold signal is verified. Runs after W2's
- * extensions, with `group` and `signed`. Stub entry point from the batch 7 contract step:
- * B7-followups fills it.
+ * after an overturn, a session left with only a sub-threshold signal is verified, and one whose
+ * remainder still crosses the threshold stays excluded. Runs after W2's extensions, with `group`
+ * and `signed`. A broadcast takes one group appeal a week, so it reads what `group-appeal` found
+ * when that ran on this run, and otherwise runs it (it prefers a group the threshold decides).
  */
-export async function stepGroupAppealThreshold(_ext: IntegrityW2Extension): Promise<void> {
-  throw new Error("B7-followups not merged");
+export async function stepGroupAppealThreshold(ext: IntegrityW2Extension): Promise<void> {
+  const { ctx } = ext;
+  if (!appealed.has(ext)) await ctx.step("overturn a group (group-appeal)", () => stepGroupAppeal(ext));
+  const r = appealed.get(ext);
+  ctx.assert("a group appeal was overturned on this run", r !== undefined);
+  if (!r) return;
+  const { outcome } = r;
+  ctx.data("groupAppealThreshold", { category: r.category, threshold: r.weights.threshold, outcome });
+  ctx.assert(
+    "threshold: every session left at or under it is verified (or pending)",
+    outcome.notRestored.length === 0,
+    outcome,
+  );
+  ctx.assert(
+    "threshold: every session whose remainder still crosses it stays excluded, in its next group",
+    outcome.notMoved.length === 0,
+    outcome,
+  );
+  const name = "threshold: a session left with only a sub-threshold signal is verified (or pending)";
+  if (outcome.underThreshold === 0)
+    ctx.skipStep(
+      name,
+      `the ${r.category} group left no session with another signal at or under ${r.weights.threshold}`,
+    );
+  else ctx.assert(name, outcome.underThresholdRestored === outcome.underThreshold, outcome);
 }
