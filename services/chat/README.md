@@ -107,7 +107,7 @@ before any channel lookup. Unknown channel slugs are remembered for only 5 s.
    replace). All filters together get a 25 ms budget per message, checked between filters; past
    it the message is held for moderators rather than passed.
 4. **Hard timeout.** The budget cannot interrupt one `RegExp` call, so filter sets containing a
-   regex run in a pool of Bun workers (`filterWorkers`, default 2; `src/filter-runner.ts`).
+   regex run in a pool of Bun workers (`filterWorkers`, default 2; `packages/chat-filter/src/filter-runner.ts`).
    Literal-only and empty filter sets run inline. Every case below **holds** the message, never
    passes it (`chat.filter.held{reason}`):
    - `timeout`: a worker has not answered 50 ms after the message was dispatched to it. It is

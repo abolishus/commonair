@@ -13,6 +13,8 @@ import {
   exactVersion,
   filesNotAllowingApache,
   rewriteContractImports,
+  rewriteTokensImports,
+  TOKENS_INLINE,
 } from "../scripts/build.ts";
 import { INLINED_CONTRACT_FILES } from "./inlined.ts";
 
@@ -162,6 +164,35 @@ describe("build helpers", () => {
     expect(rewriteContractImports(code, "/s/src", "/s/contracts", exportsMap)).toBe(
       'import { a } from "../contracts/oauth.ts";\nimport type { C } from "../contracts/api/router.ts";\n',
     );
+  });
+
+  test("only the TOKENS_INLINE subpaths of @commonair/tokens are rewritten", () => {
+    const code =
+      'export { verify } from "@commonair/tokens/attestation";\nimport { b64url } from "@commonair/tokens/index";\nimport { x } from "@commonair/tokens";\n';
+    expect(rewriteTokensImports(code, "/s/src/sub", "/s/tokens")).toBe(
+      'export { verify } from "../../tokens/attestation.ts";\nimport { b64url } from "@commonair/tokens/index";\nimport { x } from "@commonair/tokens";\n',
+    );
+  });
+});
+
+describe("inlined tokens files (batch 6 decision (q))", () => {
+  test("every TOKENS_INLINE file exists, is exported by @commonair/tokens and allows Apache-2.0", async () => {
+    const ROOT = path.resolve(PKG_DIR, "../..");
+    const tokensPkg = JSON.parse(await readFile(path.join(ROOT, "packages/tokens/package.json"), "utf8")) as {
+      exports: Record<string, string>;
+    };
+    const texts: Record<string, string> = {};
+    for (const [spec, file] of Object.entries(TOKENS_INLINE)) {
+      expect(tokensPkg.exports[`./${spec.slice("@commonair/tokens/".length)}`]).toBe(`./src/${file}`);
+      texts[file] = await readFile(path.join(ROOT, "packages/tokens/src", file), "utf8");
+    }
+    expect(Object.keys(texts).length).toBeGreaterThan(0);
+    expect(filesNotAllowingApache(texts)).toEqual([]);
+  });
+
+  test("the bundle inlines no tokens file the SDK does not import, and none outside TOKENS_INLINE", () => {
+    const allowed = Object.values(TOKENS_INLINE).map((f) => `packages/tokens/src/${f}`);
+    for (const f of result.inlinedTokens) expect(allowed).toContain(f);
   });
 });
 

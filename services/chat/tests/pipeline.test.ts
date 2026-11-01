@@ -3,7 +3,7 @@
 
 import { describe, expect, test } from "vite-plus/test";
 import { CHAT_LIMITS, type NoticeCode } from "@commonair/contracts";
-import { WorkerFilterRunner } from "../src/filter-runner.ts";
+import { WorkerFilterRunner } from "@commonair/chat-filter";
 import { MemoryLimiter } from "../src/limiter.ts";
 import { ALL_CHANNELS, rateLimitFor } from "../src/rules.ts";
 import { type MessageMiddleware, runSendPipeline } from "../src/pipeline.ts";

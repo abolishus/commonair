@@ -21,7 +21,7 @@ import { ChannelLatency } from "./chat-latency.ts";
 import { WatchGate } from "./watch-gate.ts";
 import { createMetrics } from "./metrics.ts";
 import { MODERATE_SCOPE, Moderation } from "./moderation.ts";
-import { type FilterRunner, inlineFilterRunner, WorkerFilterRunner } from "./filter-runner.ts";
+import { type FilterRunner, inlineFilterRunner, WorkerFilterRunner } from "@commonair/chat-filter";
 import { MessageWriter, type WriterOptions } from "./persistence.ts";
 import { errorFields } from "./errors.ts";
 import { BUS, UserControlMessage, userControlTargets } from "@commonair/contracts";

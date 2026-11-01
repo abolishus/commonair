@@ -3,7 +3,8 @@
 
 /** Internal domain types shared by the chat service modules. */
 import type { ChannelChatSettings, NoticeCode } from "@commonair/contracts";
-import type { ACCOUNT_TYPES, PLATFORM_ROLES, WORD_FILTER_ACTIONS } from "@commonair/contracts/enums";
+import type { WordFilterDef } from "@commonair/chat-filter";
+import type { ACCOUNT_TYPES, PLATFORM_ROLES } from "@commonair/contracts/enums";
 
 export type AccountType = (typeof ACCOUNT_TYPES)[number];
 export type PlatformRole = (typeof PLATFORM_ROLES)[number];
@@ -34,14 +35,6 @@ export interface EmoteDef {
   /** 0 = everyone; 1–3 = subscriber tier required. */
   tier: number;
   channelId: string | null;
-}
-
-export interface WordFilterDef {
-  id: string;
-  pattern: string;
-  isRegex: boolean;
-  action: (typeof WORD_FILTER_ACTIONS)[number];
-  replacement: string | null;
 }
 
 /** A channel as the chat service needs it; cached per instance, invalidated over BUS.chatControl. */

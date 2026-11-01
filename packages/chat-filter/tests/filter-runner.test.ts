@@ -2,9 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { afterEach, describe, expect, test } from "vite-plus/test";
-import { type CompiledFilter, compileFilters } from "../src/content.ts";
+import { type CompiledFilter, compileFilters, type WordFilterDef } from "../src/filter.ts";
 import { type HoldReason, WorkerFilterRunner, type WorkerFilterRunnerOptions } from "../src/filter-runner.ts";
-import type { WordFilterDef } from "../src/types.ts";
 
 const def = (over: Partial<WordFilterDef>): WordFilterDef => ({
   id: "f",

@@ -15,12 +15,12 @@
     "typecheck": "tsc -p ."
   },
   "dependencies": {
+    "@commonair/chat-filter": "workspace:*",
     "@commonair/config": "workspace:*",
     "@commonair/contracts": "workspace:*",
     "@commonair/db": "workspace:*",
     "@commonair/interact": "workspace:*",
     "@commonair/observability": "workspace:*",
-    "@commonair/safe-regex": "workspace:*",
     "@commonair/service": "workspace:*",
     "@commonair/tokens": "workspace:*",
     "@opentelemetry/api": "catalog:",

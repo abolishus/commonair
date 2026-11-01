@@ -19,7 +19,7 @@ import { ChatControlMessage, type ChatFanout, parseJson } from "./control.ts";
 import type { Directory } from "./directory.ts";
 import { chatMessageEvent, isInlineEvent } from "./events.ts";
 import type { Limiter } from "./limiter.ts";
-import type { FilterRunner } from "./filter-runner.ts";
+import type { FilterRunner } from "@commonair/chat-filter";
 import type { Metrics } from "./metrics.ts";
 import { MODERATE_SCOPE, type Moderation } from "./moderation.ts";
 import { canModerate, rankOf } from "./permissions.ts";

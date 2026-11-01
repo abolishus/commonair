@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /** Regenerate vectors.json (`bun run vectors`). Ed25519 is deterministic, so output is stable. */
+import { attestationVectors } from "./attestation-vectors.ts";
 import { importSigningKey, signPlaybackToken, signReceipt } from "./index.ts";
 
 // Test-only key: the PKCS#8 encoding of the RFC 8032 test vector 1 seed. Never use in production.
@@ -47,6 +48,7 @@ process.stdout.write(
       playback: { claims, token: await signPlaybackToken(key, claims) },
       playbackDataMode: { claims: dataModeClaims, token: await signPlaybackToken(key, dataModeClaims) },
       receipt: { payload: receipt, signed: await signReceipt(key, receipt) },
+      attestation: await attestationVectors(),
     },
     null,
     2,
