@@ -127,6 +127,9 @@ async function e2eBasic(ctx: ScenarioContext, sessions: WebSession[], check: Sce
   if (scanner.enabled) {
     const info = await ctx.step("instance info (API)", () => p.api().client.instance.info());
     scanner.userContent(info.name, info.publicUrl, info.sourceUrl, info.version, info.contacts);
+    // Legal documents (titles included) stay in English until counsel decides (batch 5 decision (h)).
+    const legal = await ctx.step("legal documents (API)", () => p.api().client.legal.current());
+    scanner.userContent(legal.map((d) => d.title));
   }
   const streamer = await openSession("streamer", "chromium");
   const signup = await ctx.step("streamer: fill the sign-up form", async () => {

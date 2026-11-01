@@ -114,6 +114,13 @@ describe("untranslatedWords", () => {
     expect(untranslatedWords("e.g.Settings")).toEqual(["Settings"]);
   });
 
+  test("keyboard shortcuts are not words, but English next to them is", () => {
+    expect(untranslatedWords("alt+T")).toEqual([]);
+    expect(untranslatedWords("Ctrl+Shift+K")).toEqual([]);
+    expect(untranslatedWords("Notifications alt+T")).toEqual(["Notifications"]);
+    expect(untranslatedWords("Alternative")).toEqual(["Alternative"]);
+  });
+
   test("dates, times, numbers and language names from Intl are ignored when given", () => {
     const phrases = intlPhrases({ locales: ["en-XA", "en"], languages: ["en", "es"] });
     const relative = new Intl.RelativeTimeFormat("en-XA", { numeric: "auto" });

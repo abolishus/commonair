@@ -5,6 +5,7 @@ import { RelativeTime, formatNumber, useLocale } from "@commonair/ui";
 import { ViewerPredictionCard } from "@commonair/ui/blocks/interact-viewer";
 import * as React from "react";
 import { type MessageKey, t } from "../../i18n/index.ts";
+import { displayPointsName } from "./points-chip.tsx";
 import { type InteractClient, interactErrorKey, isStaffRefusal } from "./client.ts";
 import { MAX_BET_POINTS, betAmount, type LoyaltyBalanceDto, type PredictionViewDto } from "./state.ts";
 
@@ -41,7 +42,7 @@ export function ChatPredictionCard({
   const [refusedStaff, setRefusedStaff] = React.useState(false);
 
   const balance = points?.points ?? 0;
-  const name = points?.pointsName ?? t("chatPoints.defaultName");
+  const name = displayPointsName(points?.pointsName);
   const fmt = (n: number) => formatNumber(n, locale);
   const value = betAmount(amount, balance);
   const isStaff = staff || refusedStaff;

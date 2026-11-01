@@ -12,9 +12,23 @@ import type { LoyaltyBalanceDto } from "./state.ts";
  * The viewer's channel points in the chat header (`chat-points`): signed-in viewers only, and
  * only while the channel's points are on. Points are a loyalty count, never money (ADR 0026).
  */
+/** The contract's default name (`packages/contracts` loyalty settings), stored in English. */
+const DEFAULT_POINTS_NAME = "points";
+
+/**
+ * A channel's points name for display: a streamer's own name as written, the untouched English
+ * default in the viewer's language.
+ */
+export function displayPointsName(name: string | undefined): string {
+  return name === undefined || name === DEFAULT_POINTS_NAME ? t("chatPoints.defaultName") : name;
+}
+
 export function PointsChip({ balance }: { balance: LoyaltyBalanceDto }): React.JSX.Element {
   const { locale } = useLocale();
-  const text = t("chatPoints.balance", { points: formatNumber(balance.points, locale), name: balance.pointsName });
+  const text = t("chatPoints.balance", {
+    points: formatNumber(balance.points, locale),
+    name: displayPointsName(balance.pointsName),
+  });
   return (
     <StatusBadge
       tone="neutral"

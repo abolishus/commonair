@@ -6,6 +6,7 @@ import { RelativeTime, formatNumber, useLocale } from "@commonair/ui";
 import { ViewerPollCard } from "@commonair/ui/blocks/interact-viewer";
 import * as React from "react";
 import { type MessageKey, t } from "../../i18n/index.ts";
+import { displayPointsName } from "./points-chip.tsx";
 import { type InteractClient, interactErrorKey } from "./client.ts";
 import { type LoyaltyBalanceDto, type PollViewDto } from "./state.ts";
 
@@ -103,7 +104,7 @@ export function ChatPollCard({
               costLabel: t("chatPoll.extraCost", {
                 points: formatNumber(extra * poll.pointsPerExtraVote, locale),
                 each: formatNumber(poll.pointsPerExtraVote, locale),
-                name: points.pointsName,
+                name: displayPointsName(points.pointsName),
               }),
             }
           : null

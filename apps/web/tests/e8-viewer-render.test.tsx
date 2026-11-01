@@ -26,7 +26,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 import { ChatPanel } from "../src/chat/chat-panel.tsx";
 import type { ChatDeps, ChatMessageFrame, SocketLike } from "../src/chat/connection.ts";
 import type { InteractClient } from "../src/chat/interact/client.ts";
-import { PointsChip } from "../src/chat/interact/points-chip.tsx";
+import { PointsChip, displayPointsName } from "../src/chat/interact/points-chip.tsx";
 import { ChatPollCard } from "../src/chat/interact/poll-card.tsx";
 import { ChatPredictionCard } from "../src/chat/interact/prediction-card.tsx";
 import { RaidBanner } from "../src/chat/interact/raid-banner.tsx";
@@ -34,7 +34,7 @@ import type { LoyaltyBalanceDto, PollViewDto, PredictionViewDto } from "../src/c
 import { useChatInteract } from "../src/chat/interact/use-chat-interact.ts";
 import { OverlayChatPage, type OverlayChatDeps } from "../src/components/overlay-chat-page.tsx";
 import { OverlayGoalsPage } from "../src/components/overlay-goals-page.tsx";
-import { locale, uiMessages } from "../src/i18n/index.ts";
+import { locale, t, uiMessages } from "../src/i18n/index.ts";
 import type { EventSourceLike, OverlayConnectionDeps, OverlayGoal } from "../src/lib/overlay-connection.ts";
 
 vi.mock("../src/lib/api.ts", async (importOriginal) => {
@@ -412,6 +412,20 @@ describe("points chip and raid banner", () => {
     const chip = byId("chat-points");
     expect([chip.getAttribute("data-points"), chip.getAttribute("data-name")]).toEqual(["1234", "acorns"]);
     expect(chip.textContent).toBe("1,234 acorns");
+  });
+
+  it("chat-points shows the untouched default name from the catalog, keeping the raw name in data-name", () => {
+    render(wrap(<PointsChip balance={balance({ points: 2, pointsName: "points" })} />));
+    const chip = byId("chat-points");
+    expect(chip.getAttribute("data-name")).toBe("points");
+    expect(chip.textContent).toBe(`2 ${t("chatPoints.defaultName")}`);
+  });
+
+  it("displayPointsName: the catalog's name for the default or a missing name, a streamer's own as written", () => {
+    expect(displayPointsName("points")).toBe(t("chatPoints.defaultName"));
+    expect(displayPointsName(undefined)).toBe(t("chatPoints.defaultName"));
+    expect(displayPointsName("Points")).toBe("Points");
+    expect(displayPointsName("acorns")).toBe("acorns");
   });
 
   it("raid-banner: the target, the execute time and a countdown", () => {

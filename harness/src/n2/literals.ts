@@ -129,6 +129,8 @@ const URLISH = [
   /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g,
   /\b(?:[a-z0-9-]+\.)+[a-z]{2,}\b(?::\d+)?(?:\/\S*)?/g,
   /\blocalhost(?::\d+)?(?:\/\S*)?/gi,
+  // Keyboard shortcuts as libraries print them (Sonner's toast region: "Notifications alt+T").
+  /\b(?:alt|ctrl|control|shift|meta|cmd|option)(?:\+[A-Za-z0-9]+)+/gi,
 ];
 
 function escapeRegExp(s: string): string {
