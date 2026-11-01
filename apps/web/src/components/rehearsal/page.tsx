@@ -134,22 +134,47 @@ export function RehearsePage({ channel }: { channel: string }): React.JSX.Elemen
   );
 }
 
-/** An invitee's view of someone else's rehearsal. */
+/**
+ * An invitee's view of someone else's rehearsal. Opened before the streamer publishes (or between
+ * reconnects), it asks again every poll while visible and starts playing when the rehearsal does.
+ * While it waits, the retries' own loading state never replaces the "nothing yet" notice.
+ */
 export function RehearsalWatchView({ channel }: { channel: string }): React.JSX.Element {
   const [state, setState] = React.useState<RehearsalPlayerState>("loading");
-  const unavailable = state === "unavailable";
+  const [waiting, setWaiting] = React.useState(false);
+  const [attempt, setAttempt] = React.useState(0);
+  const onState = React.useCallback((s: RehearsalPlayerState) => {
+    setState(s);
+    if (s === "unavailable") setWaiting(true);
+    else if (s !== "loading") setWaiting(false);
+  }, []);
+  React.useEffect(() => {
+    if (!waiting) return;
+    let first = true;
+    // pollWhileVisible ticks at once; the player just answered, so the first retry waits a poll.
+    return pollWhileVisible(
+      () => {
+        if (first) first = false;
+        else setAttempt((a) => a + 1);
+      },
+      REHEARSAL_POLL_MS,
+      browserPollEnv(),
+    );
+  }, [waiting]);
+  const shown: RehearsalPlayerState = waiting ? "unavailable" : state;
   return (
-    <div data-testid="rehearsal-watch" data-state={state} className="flex min-w-0 flex-col gap-6">
+    <div data-testid="rehearsal-watch" data-state={shown} className="flex min-w-0 flex-col gap-6">
       <PageHeader title={t("rehearsal.watch.title")} description={t("rehearsal.watch.intro", { channel })} />
-      {unavailable ? (
+      {waiting ? (
         <EmptyState
           icon={VideoOffIcon}
           title={t("rehearsal.watch.unavailable")}
           description={t("rehearsal.watch.unavailableHint")}
         />
-      ) : (
-        <RehearsalPlayer channel={channel} onState={setState} />
-      )}
+      ) : null}
+      <div hidden={waiting} className="min-w-0">
+        <RehearsalPlayer key={attempt} channel={channel} onState={onState} />
+      </div>
     </div>
   );
 }

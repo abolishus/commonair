@@ -366,6 +366,85 @@ describe("watch", () => {
   });
 });
 
+const heartbeat = (c: Client, w: RehearsalWatch) =>
+  c.call<{ ok: boolean; token?: string }>("POST", "/api/playback/heartbeat", {
+    sessionId: w.sessionId,
+    token: w.token,
+    rendition: "source",
+    playedSeconds: 0,
+    bufferSeconds: 1,
+    visible: true,
+    muted: false,
+    stalls: 0,
+    bytesHttp: 0,
+    bytesP2p: 0,
+    latencySeconds: null,
+    ttffMs: null,
+  });
+
+describe("watch: removal and reconnects", () => {
+  test("removing an invitee ends their watch: no more heartbeats, no new token", async () => {
+    const st = await streamer();
+    await arm(st);
+    const inv = await follower(st);
+    await invite(st, inv.username);
+    await publish(st);
+    const watch = (c: Client) =>
+      c.call<RehearsalWatch>("POST", `${base(st.username)}/watch`, { deviceId: "device-0123456789abcdef" });
+    const ok = await watch(inv.client);
+    expect(ok.status).toBe(200);
+
+    expect((await invite(st, inv.username, true)).status).toBe(200);
+    const [ps] = await db()
+      .select()
+      .from(schema.playbackSessions)
+      .where(eq(schema.playbackSessions.id, ok.body.sessionId));
+    expect(ps?.endedAt).not.toBeNull();
+    const hb = await heartbeat(inv.client, ok.body);
+    expect(hb.status).toBe(409);
+    expect(hb.body.token).toBeUndefined();
+    expect((await watch(inv.client)).status).toBe(404);
+    // The owner's own watch is untouched by an invitee's removal.
+    expect((await watch(st.client)).status).toBe(200);
+    await disarm(st);
+  });
+
+  test("a reconnect under the same arm keeps the first start's cap (status and watch token)", async () => {
+    const st = await streamer();
+    await arm(st);
+    const inv = await follower(st);
+    await invite(st, inv.username);
+    const firstSource = await publish(st);
+    expect((await hook(INTERNAL_ROUTES.mediaNotReady, st.username, firstSource)).status).toBe(204);
+    await publish(st); // inside the session grace: a second rehearsal under the same arm
+    const rows = await db()
+      .select()
+      .from(schema.broadcasts)
+      .where(eq(schema.broadcasts.channelId, st.channelId))
+      .orderBy(schema.broadcasts.startedAt);
+    expect(rows).toHaveLength(2);
+    const [first, second] = rows;
+    // Make the reconnect visibly later than the first start.
+    const later = new Date(first!.startedAt.getTime() + 600_000);
+    await db().update(schema.broadcasts).set({ startedAt: later }).where(eq(schema.broadcasts.id, second!.id));
+
+    const s = (await status(st)).body;
+    expect(s).toMatchObject({ state: "rehearsing", broadcastId: second!.id });
+    expect(Date.parse(s.endsAt!)).toBe(first!.startedAt.getTime() + REHEARSAL_RULES.maxDurationSeconds * 1000);
+    const w = await inv.client.call<RehearsalWatch>("POST", `${base(st.username)}/watch`, {
+      deviceId: "device-0123456789abcdef",
+    });
+    expect(w.status).toBe(200);
+    const v = await verifyPlaybackToken(api.deps.signingKey.publicKey, w.body.token, Math.floor(Date.now() / 1000));
+    expect(v.ok).toBe(true);
+    if (!v.ok) return;
+    expect(v.value.exp).toBeLessThanOrEqual(
+      Math.floor(first!.startedAt.getTime() / 1000) + REHEARSAL_RULES.maxDurationSeconds,
+    );
+    await disarm(st);
+  });
+});
+
 describe("report", () => {
   test("blank until the driver writes, then the stored report; safety ends say nothing more", async () => {
     const st = await streamer();

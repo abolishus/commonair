@@ -13,10 +13,10 @@
  * while a rehearsal runs. A reconnect inside the arm's TTL or the session's grace rehearses again
  * under the same arm, so the arm's invitees are matched by arm id, not only by broadcast id.
  */
-import { and, count, desc, eq, isNull, or } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, isNull, lte, or } from "drizzle-orm";
 import { REHEARSAL_RULES } from "@commonair/contracts/enums";
 import { KEYS, REHEARSAL_REPORT_TTL_SECONDS, RehearsalArm, mediaPath } from "@commonair/contracts/internal";
-import { PLAYBACK_TOKEN_TTL_SECONDS, type PlaybackClaims } from "@commonair/contracts/tokens";
+import { PLAYBACK_TOKEN_TTL_SECONDS } from "@commonair/contracts/tokens";
 import { RehearsalReport, type RehearsalStatus, type RehearsalWatch } from "@commonair/contracts/dto";
 import { schema, uuidv7 } from "@commonair/db";
 import { hmacHex, signPlaybackToken } from "@commonair/tokens";
@@ -27,10 +27,10 @@ import { isSuspended } from "../lib/caller.ts";
 import { channelBySlug, iso } from "../lib/dto.ts";
 import { apiError, notFound, pgCode, precondition } from "../lib/errors.ts";
 import { afterBroadcastEnded, endBroadcastInTx } from "../moderation/live.ts";
-import { HEARTBEAT_INTERVAL_MS, matureGate, playlistUrl } from "../routes/playback.ts";
+import { HEARTBEAT_INTERVAL_MS, matureGate, playlistUrl, signFor } from "../routes/playback.ts";
 import { confirmedAdult } from "../routes/me.ts";
 
-const { broadcasts, follows, playbackSessions, rehearsalInvitees, users } = schema;
+const { broadcasts, events, follows, playbackSessions, rehearsalInvitees, users } = schema;
 type ChannelRow = typeof schema.channels.$inferSelect;
 type BroadcastRow = typeof schema.broadcasts.$inferSelect;
 
@@ -76,7 +76,10 @@ export function stateOf(f: { rehearsing: boolean; armed: boolean }): RehearsalSt
   return f.armed ? "armed" : "idle";
 }
 
-/** When the 30-minute cap ends a rehearsal that started at `startedAt`. */
+/**
+ * When the 30-minute cap ends a rehearsal whose arm first started one at `startedAt` (a reconnect
+ * under the same arm keeps the first start: `capAnchor`).
+ */
 export const capEndsAt = (startedAt: Date) => new Date(startedAt.getTime() + REHEARSAL_RULES.maxDurationSeconds * 1000);
 
 export type InviteRefusal = "not_follower" | "invitee_limit";
@@ -159,6 +162,40 @@ async function isLive(deps: Deps, channel: ChannelRow): Promise<boolean> {
   return b !== undefined && b.endedAt === null;
 }
 
+/**
+ * The first start of the arm a rehearsal runs under: the channel's earliest rehearsal since its
+ * last arm at or before this one started (a second of clock slack, as the worker's driver uses).
+ * The cap counts from there, so an encoder that drops and reconnects does not get a fresh 30 minutes.
+ */
+export async function capAnchor(deps: Deps, b: BroadcastRow): Promise<Date> {
+  const [arm] = await deps.db
+    .select({ at: events.occurredAt })
+    .from(events)
+    .where(
+      and(
+        eq(events.type, "rehearsal.armed"),
+        eq(events.channelId, b.channelId),
+        lte(events.occurredAt, new Date(b.startedAt.getTime() + 1000)),
+      ),
+    )
+    .orderBy(desc(events.occurredAt))
+    .limit(1);
+  if (!arm) return b.startedAt;
+  const [first] = await deps.db
+    .select({ startedAt: broadcasts.startedAt })
+    .from(broadcasts)
+    .where(
+      and(
+        eq(broadcasts.channelId, b.channelId),
+        eq(broadcasts.kind, "rehearsal"),
+        gte(broadcasts.startedAt, new Date(arm.at.getTime() - 1000)),
+      ),
+    )
+    .orderBy(asc(broadcasts.startedAt))
+    .limit(1);
+  return first && first.startedAt < b.startedAt ? first.startedAt : b.startedAt;
+}
+
 /** The arm a rehearsal broadcast ran under, from the invitees it carried (when no key says so). */
 async function armOfBroadcast(deps: Deps, broadcastId: string): Promise<string | null> {
   const [r] = await deps.db
@@ -201,7 +238,7 @@ async function statusFrom(deps: Deps, c: Current): Promise<RehearsalStatus> {
     armId: state === "idle" ? null : c.armId,
     armExpiresAt: state === "armed" && c.keys.ttlMs !== null ? iso(new Date(now + c.keys.ttlMs)) : null,
     broadcastId: c.open?.id ?? null,
-    endsAt: c.open ? iso(capEndsAt(c.open.startedAt)) : null,
+    endsAt: c.open ? iso(capEndsAt(await capAnchor(deps, c.open))) : null,
     invitees: state === "idle" ? [] : await inviteesOf(deps, c.armId),
   };
 }
@@ -340,16 +377,29 @@ export async function inviteToRehearsal(
           .delete(rehearsalInvitees)
           .where(and(eq(rehearsalInvitees.armId, armId), eq(rehearsalInvitees.userId, user.id)))
           .returning({ userId: rehearsalInvitees.userId });
-        if (gone.length > 0)
-          await audit(tx, {
-            actorType: "user",
-            actorId: a.userId,
-            action: "rehearsal.invitee.remove",
-            subjectType: "user",
-            subjectId: user.id,
-            channelId: channel.id,
-            details: { armId },
-          });
+        if (gone.length === 0) return;
+        // Their open watch ends with the invite: the heartbeat then refreshes no token, and the one
+        // they hold lapses within PLAYBACK_TOKEN_TTL_SECONDS.
+        if (c.open)
+          await tx
+            .update(playbackSessions)
+            .set({ endedAt: deps.now() })
+            .where(
+              and(
+                eq(playbackSessions.broadcastId, c.open.id),
+                eq(playbackSessions.userId, user.id),
+                isNull(playbackSessions.endedAt),
+              ),
+            );
+        await audit(tx, {
+          actorType: "user",
+          actorId: a.userId,
+          action: "rehearsal.invitee.remove",
+          subjectType: "user",
+          subjectId: user.id,
+          channelId: channel.id,
+          details: { armId },
+        });
       });
     return statusFrom(deps, c);
   }
@@ -482,7 +532,7 @@ export async function watchRehearsal(
   const b = await openRehearsal(deps, c.id);
   if (!b) throw nothing();
   const nowSeconds = Math.floor(deps.now().getTime() / 1000);
-  const exp = watchExpiry(nowSeconds, b.startedAt);
+  const exp = watchExpiry(nowSeconds, await capAnchor(deps, b));
   if (exp <= nowSeconds) throw nothing();
   if (userId !== c.ownerId) {
     const sessionArm = parseArm(await deps.valkey.get(KEYS.rehearsalSession(c.id)), c.ownerId);
@@ -521,8 +571,10 @@ export async function watchRehearsal(
     startedAt: deps.now(),
     fingerprint: { rehearsal: true },
   });
-  const claims: PlaybackClaims = { v: 1, sid, cid: c.id, path, src: "origin", rb: b.id, iat: nowSeconds, exp };
-  const token = await signPlaybackToken(deps.signingKey, claims);
+  // The claims `playback.heartbeat` refreshes with, only the expiry lowered to the cap.
+  const minted = await signFor(deps, sid, c.id, path, { source: "origin" }, null, b.id);
+  const token =
+    minted.claims.exp > exp ? await signPlaybackToken(deps.signingKey, { ...minted.claims, exp }) : minted.token;
   return {
     sessionId: sid,
     playlistUrl: playlistUrl(deps.env.PLAYBACK_PUBLIC_URL.replace(/\/+$/, ""), path, token),

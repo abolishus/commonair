@@ -5,7 +5,8 @@
  * The rehearsal driver against Postgres and Valkey with an injected clock (W2-rehearsal): the
  * simulated chat and its burst tallied by rule, ingest dips, the end reasons (publisher, cap,
  * safety, expired, disarmed), the cap's kick and audit row, and a restarted job resuming the same
- * report without re-sending the burst.
+ * report without re-sending the burst; the cap per arm (a reconnect does not restart it), a
+ * rehearsal started after a disarm, and the sweep that holds both without a driver.
  */
 import { and, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
@@ -16,7 +17,7 @@ import { schema, uuidv7 } from "@commonair/db";
 import { createTestDatabase, type TestDatabase } from "@commonair/db/testing";
 import { createValkey, type ValkeyClient } from "@commonair/service";
 import { BURST_BODY } from "@commonair/sim";
-import { driveRehearsal, type ChatProbe, type DriverDeps } from "../src/jobs/rehearsal-driver.ts";
+import { driveRehearsal, sweepRehearsals, type ChatProbe, type DriverDeps } from "../src/jobs/rehearsal-driver.ts";
 import { emit } from "../src/moderation/records.ts";
 import { makeUser, quietLogger, VALKEY_URL } from "./fixtures.ts";
 
@@ -333,6 +334,155 @@ describe("rehearsal driver", () => {
       expired: 0,
     });
     expect(await endedEvents(disarmed.channel.id)).toHaveLength(1);
+  });
+
+  test("a reconnect under the same arm keeps the first rehearsal's cap", async () => {
+    const t0 = Date.parse("2026-11-01T17:00:00Z");
+    const cap = REHEARSAL_RULES.maxDurationSeconds * S;
+    const { channel, arm } = await armed(t0 - 30 * S);
+    await valkey.set(KEYS.rehearsalSession(channel.id), JSON.stringify(arm), "EX", 600);
+    const first = await rehearsal(channel.id, new Date(t0));
+    await endBroadcast(first.id, t0 + 600 * S); // the encoder dropped
+    const second = await rehearsal(channel.id, new Date(t0 + 620 * S)); // and reconnected
+    const r = rig(t0 + cap - 3 * S);
+    const result = await driveRehearsal(r.deps, { armId: arm.armId, channelId: channel.id });
+    expect(result.broadcasts).toBe(2);
+    const [row] = await db().select().from(schema.broadcasts).where(eq(schema.broadcasts.id, second.id));
+    // Capped 30 minutes after the first start, not the reconnect's.
+    expect(row?.endedAt?.getTime()).toBeGreaterThanOrEqual(t0 + cap);
+    expect(row?.endedAt?.getTime()).toBeLessThan(t0 + cap + 10 * S);
+    expect((await report(second.id))?.endReason).toBe("cap");
+    expect(r.kicks).toEqual([second.path]);
+  });
+
+  test("a disarmed and re-armed channel: the old arm's driver never drives the new arm's rehearsal", async () => {
+    const t0 = Date.parse("2026-11-01T18:00:00Z");
+    const old = await armed(t0);
+    await valkey.del(KEYS.rehearsalArmed(old.channel.id));
+    await db().transaction(async (tx) => {
+      await emit(
+        tx,
+        "rehearsal.ended",
+        old.channel.id,
+        { channel_id: old.channel.id, arm_id: old.arm.armId, broadcast_id: null, reason: "disarmed" },
+        new Date(t0 + 2 * S),
+      );
+      await emit(
+        tx,
+        "rehearsal.armed",
+        old.channel.id,
+        { channel_id: old.channel.id, arm_id: uuidv7(t0 + 3 * S), expires_at: new Date(t0 + 603 * S).toISOString() },
+        new Date(t0 + 3 * S),
+      );
+    });
+    const next = await rehearsal(old.channel.id, new Date(t0 + 5 * S));
+    const r = rig(t0 + 6 * S);
+    expect(await driveRehearsal(r.deps, { armId: old.arm.armId, channelId: old.channel.id })).toMatchObject({
+      broadcasts: 0,
+      expired: 0,
+    });
+    expect(r.chat.calls).toEqual([]);
+    const [row] = await db().select().from(schema.broadcasts).where(eq(schema.broadcasts.id, next.id));
+    expect(row?.endedAt).toBeNull();
+    expect(await report(next.id)).toBeNull();
+    await endBroadcast(next.id, t0 + 7 * S);
+  });
+
+  test("a rehearsal that starts after its arm was disarmed is ended at once, audited and kicked", async () => {
+    const t0 = Date.parse("2026-11-01T19:00:00Z");
+    const { channel, arm } = await armed(t0);
+    await valkey.del(KEYS.rehearsalArmed(channel.id));
+    await db().transaction((tx) =>
+      emit(
+        tx,
+        "rehearsal.ended",
+        channel.id,
+        { channel_id: channel.id, arm_id: arm.armId, broadcast_id: null, reason: "disarmed" },
+        new Date(t0 + 5 * S),
+      ),
+    );
+    // A publish authorized just before the disarm reaches ready after it.
+    const late = await rehearsal(channel.id, new Date(t0 + 6 * S));
+    await valkey.set(KEYS.rehearsalSession(channel.id), JSON.stringify(arm), "EX", 600);
+    const r = rig(t0 + 7 * S);
+    expect(await driveRehearsal(r.deps, { armId: arm.armId, channelId: channel.id })).toMatchObject({ broadcasts: 1 });
+    expect(r.chat.calls).toEqual([]);
+    expect(r.kicks).toEqual([late.path]);
+    expect(await valkey.exists(KEYS.rehearsalKicked(channel.id))).toBe(1);
+    expect(await valkey.exists(KEYS.rehearsalSession(channel.id))).toBe(0);
+    expect((await report(late.id))?.endReason).toBe("disarmed");
+    const audits = await db()
+      .select()
+      .from(schema.auditLog)
+      .where(and(eq(schema.auditLog.channelId, channel.id), eq(schema.auditLog.action, "rehearsal.disarm")));
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toMatchObject({ actorType: "system", subjectType: "broadcast", subjectId: late.id });
+  });
+
+  test("the sweep caps an undriven rehearsal from its arm's first start and ends one started after a disarm", async () => {
+    const now = Date.parse("2026-11-01T20:00:00Z");
+    const cap = REHEARSAL_RULES.maxDurationSeconds * S;
+    // Reconnected 20 minutes in; no driver job ran (the queue was full).
+    const capped = await armed(now - cap - 60 * S);
+    const firstStart = now - cap - 30 * S;
+    const first = await rehearsal(capped.channel.id, new Date(firstStart));
+    await endBroadcast(first.id, firstStart + 1200 * S);
+    const reconnect = await rehearsal(capped.channel.id, new Date(firstStart + 1210 * S));
+    // Started after a disarm.
+    const off = await armed(now - 60 * S);
+    await db().transaction((tx) =>
+      emit(
+        tx,
+        "rehearsal.ended",
+        off.channel.id,
+        { channel_id: off.channel.id, arm_id: off.arm.armId, broadcast_id: null, reason: "disarmed" },
+        new Date(now - 50 * S),
+      ),
+    );
+    const late = await rehearsal(off.channel.id, new Date(now - 49 * S));
+    // Within its cap: left alone.
+    const fine = await armed(now - 120 * S);
+    const running = await rehearsal(fine.channel.id, new Date(now - 100 * S));
+
+    const r = rig(now);
+    const out = await sweepRehearsals(r.deps);
+    expect(out.capped).toBeGreaterThanOrEqual(1);
+    expect(out.disarmed).toBeGreaterThanOrEqual(1);
+    const endedAt = async (id: string) =>
+      (await db().select().from(schema.broadcasts).where(eq(schema.broadcasts.id, id)))[0]?.endedAt ?? null;
+    expect(await endedAt(reconnect.id)).not.toBeNull();
+    expect(await endedAt(late.id)).not.toBeNull();
+    expect(await endedAt(running.id)).toBeNull();
+    expect(r.kicks).toEqual(expect.arrayContaining([reconnect.path, late.path]));
+    expect(r.kicks).not.toContain(running.path);
+    expect((await endedEvents(capped.channel.id)).map((e) => (e.payload as { reason: string }).reason)).toEqual([
+      "cap",
+    ]);
+    expect((await endedEvents(off.channel.id)).map((e) => (e.payload as { reason: string }).reason)).toEqual([
+      "disarmed",
+      "disarmed",
+    ]);
+    // Idempotent: a second sweep ends nothing more.
+    expect(await sweepRehearsals(rig(now + S).deps)).toEqual({ capped: 0, disarmed: 0 });
+    await endBroadcast(running.id, now + S);
+  });
+
+  test("a driver that starts 10 minutes late skips the backlog and sends on its first tick", async () => {
+    const now = Date.parse("2026-11-01T21:00:00Z");
+    const { channel, arm } = await armed(now - 620 * S);
+    await valkey.set(KEYS.rehearsalSession(channel.id), JSON.stringify(arm), "EX", 600);
+    const b = await rehearsal(channel.id, new Date(now - 600 * S));
+    const r = rig(now, async (ms) => {
+      if (ms === now + S) {
+        await endBroadcast(b.id, ms);
+        await valkey.del(KEYS.rehearsalArmed(channel.id), KEYS.rehearsalSession(channel.id));
+      }
+    });
+    await driveRehearsal(r.deps, { armId: arm.armId, channelId: channel.id });
+    // Only the last 10 s of the script are due, capped at 20 sends a tick; none of the ~1800 stale ones.
+    expect(r.chat.calls.length).toBeGreaterThan(0);
+    expect(r.chat.calls.length).toBeLessThanOrEqual(20);
+    expect((await report(b.id))?.driver.nextSeq).toBeGreaterThan(1500);
   });
 
   test("an unknown arm does nothing", async () => {

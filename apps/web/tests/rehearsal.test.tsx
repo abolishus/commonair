@@ -9,7 +9,7 @@
  * dark and light. Plus the pure helpers.
  */
 import { LocaleProvider, TooltipProvider } from "@commonair/ui";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import type * as React from "react";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import type { RehearsalReport, RehearsalStatus } from "@commonair/contracts/dto";
@@ -19,10 +19,12 @@ import {
   dips,
   endedBy,
   inviteErrorKey,
+  REHEARSAL_POLL_MS,
   remainingSeconds,
   suggestions,
   viewState,
 } from "../src/components/rehearsal/lib.ts";
+import { RehearsalWatchView } from "../src/components/rehearsal/page.tsx";
 import { RehearsalPanel, type RehearsalPanelProps } from "../src/components/rehearsal/panel.tsx";
 import { playedBetween } from "../src/components/rehearsal/watch-player.tsx";
 import { locale, t, uiMessages } from "../src/i18n/index.ts";
@@ -33,7 +35,17 @@ vi.mock("@tanstack/react-router", () => ({
   ),
 }));
 
-afterEach(cleanup);
+const watchCall = vi.hoisted(() => vi.fn<(input: unknown) => Promise<unknown>>());
+vi.mock("../src/lib/api.ts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/lib/api.ts")>()),
+  api: () => ({ stream: { rehearsal: { watch: watchCall } } }),
+}));
+
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+  watchCall.mockReset();
+});
 
 const NOW = Date.parse("2026-11-01T12:00:00Z");
 const ARM = "01900000-0000-7000-8000-0000000000a1";
@@ -333,5 +345,30 @@ describe("helpers", () => {
     expect(playedBetween(10, 20)).toBe(10);
     expect(playedBetween(20, 10)).toBe(0);
     expect(playedBetween(0, 500)).toBe(120);
+  });
+});
+
+describe("invitee watch view", () => {
+  it("keeps saying nothing to watch yet and asks again every poll while it waits", async () => {
+    vi.useFakeTimers();
+    watchCall.mockRejectedValue(Object.assign(new Error("not found"), { code: "NOT_FOUND" }));
+    const view = render(
+      <LocaleProvider locale={locale} messages={uiMessages}>
+        <TooltipProvider>
+          <RehearsalWatchView channel="somebody" />
+        </TooltipProvider>
+      </LocaleProvider>,
+    );
+    const root = () => view.getByTestId("rehearsal-watch");
+    await act(() => vi.advanceTimersByTimeAsync(10));
+    expect(root().dataset.state).toBe("unavailable");
+    expect(watchCall).toHaveBeenCalledTimes(1);
+    await act(() => vi.advanceTimersByTimeAsync(REHEARSAL_POLL_MS + 10));
+    expect(watchCall).toHaveBeenCalledTimes(2);
+    // The retry's own loading never flickers the notice away.
+    expect(root().dataset.state).toBe("unavailable");
+    expect(view.getByText(t("rehearsal.watch.unavailable"))).toBeTruthy();
+    await act(() => vi.advanceTimersByTimeAsync(REHEARSAL_POLL_MS));
+    expect(watchCall).toHaveBeenCalledTimes(3);
   });
 });

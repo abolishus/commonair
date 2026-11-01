@@ -10,7 +10,9 @@
  *   dry run, which applies the channel's real send pipeline and never posts anything;
  * - reads the ingest health samples the media service writes every 5 s and times the dips;
  * - counts moderation flags on the broadcast (a T0 suspends the channel as live: "safety");
- * - enforces the 30-minute cap (refuse the reconnect, end, `rehearsal.ended`, audit, kick);
+ * - enforces the 30-minute cap per arm, from the arm's first rehearsal (a reconnect does not
+ *   restart it): refuse the reconnect, end, `rehearsal.ended`, audit, kick. `capSweepJob` enforces
+ *   the same cap on a schedule, so it holds when no driver job has a slot or a job died;
  * - writes `KEYS.rehearsalReport` at least every 5 s.
  *
  * A reconnect inside the arm's TTL (or the session grace) rehearses again under the same arm, so
@@ -19,7 +21,7 @@
  * resumes the same report and never re-sends the burst. Nothing here creates a viewer: synthetic
  * senders are presence only, and no playback session or heartbeat is made for them.
  */
-import { and, asc, eq, gte, inArray, isNotNull, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, ne, sql } from "drizzle-orm";
 import { loadEnv } from "@commonair/config";
 import { REHEARSAL_RULES } from "@commonair/contracts/enums";
 import {
@@ -52,6 +54,7 @@ import {
 import { z } from "zod";
 import { audit, emit, endBroadcast, type EndedBroadcast } from "../moderation/records.ts";
 import { publishLiveEnded } from "../moderation/t0.ts";
+import type { WorkerContext } from "../context.ts";
 import { defineJob } from "../runtime/registry.ts";
 
 const { broadcasts, broadcastHealthSamples, channels, events, moderationFlags, playbackSessions, users, wordFilters } =
@@ -185,6 +188,61 @@ async function endedEvent(db: Database, armId: string, broadcastId: string | nul
   return row ? (row.payload as { reason: EndReason }) : null;
 }
 
+/**
+ * The arm's rehearsals: started at or after its arm (a second of clock slack) and before the
+ * channel's next arm. A driver whose arm was disarmed and re-armed never picks up the new arm's
+ * rehearsal.
+ */
+interface ArmWindow {
+  channelId: string;
+  from: Date;
+  until: Date | null;
+}
+
+async function armWindow(db: Database, channelId: string, armedAt: Date): Promise<ArmWindow> {
+  const [next] = await db
+    .select({ occurredAt: events.occurredAt })
+    .from(events)
+    .where(and(eq(events.type, "rehearsal.armed"), eq(events.channelId, channelId), gt(events.occurredAt, armedAt)))
+    .orderBy(asc(events.occurredAt))
+    .limit(1);
+  return { channelId, from: new Date(armedAt.getTime() - 1000), until: next?.occurredAt ?? null };
+}
+
+async function armBroadcasts(db: Database, w: ArmWindow) {
+  return db
+    .select()
+    .from(broadcasts)
+    .where(
+      and(
+        eq(broadcasts.channelId, w.channelId),
+        eq(broadcasts.kind, "rehearsal"),
+        gte(broadcasts.startedAt, w.from),
+        w.until ? lt(broadcasts.startedAt, w.until) : undefined,
+      ),
+    )
+    .orderBy(asc(broadcasts.startedAt));
+}
+
+/** The arm's cap: 30 minutes from its first rehearsal, however often the encoder reconnects. */
+export const capAtOf = (firstStartedAt: Date) => firstStartedAt.getTime() + REHEARSAL_RULES.maxDurationSeconds * 1000;
+
+/** When the owner disarmed this arm, if they did (a publish authorized just before may still start one). */
+async function disarmedAt(db: Database, armId: string): Promise<Date | null> {
+  const [row] = await db
+    .select({ at: events.occurredAt })
+    .from(events)
+    .where(
+      and(
+        eq(events.type, "rehearsal.ended"),
+        sql`${events.payload}->>'arm_id' = ${armId}`,
+        sql`${events.payload}->>'reason' = 'disarmed'`,
+      ),
+    )
+    .limit(1);
+  return row?.at ?? null;
+}
+
 /** Whether the arm (or the session of a rehearsal it started) is still the channel's current one. */
 async function armCurrent(valkey: ValkeyClient, channelId: string, armId: string): Promise<boolean> {
   const [a, s] = await valkey.mget(KEYS.rehearsalArmed(channelId), KEYS.rehearsalSession(channelId));
@@ -198,40 +256,16 @@ async function armCurrent(valkey: ValkeyClient, channelId: string, armId: string
   });
 }
 
-/** The arm's next rehearsal to drive: open, or ended without a final report (a resumed job). */
-async function nextBroadcast(deps: DriverDeps, channelId: string, armedAt: Date) {
-  const rows = await deps.db
-    .select()
-    .from(broadcasts)
-    .where(
-      and(
-        eq(broadcasts.channelId, channelId),
-        eq(broadcasts.kind, "rehearsal"),
-        gte(broadcasts.startedAt, new Date(armedAt.getTime() - 1000)),
-      ),
-    )
-    .orderBy(asc(broadcasts.startedAt));
+/** The arm's next rehearsal to drive (open, or ended without a final report: a resumed job) and its cap. */
+async function nextBroadcast(deps: DriverDeps, w: ArmWindow) {
+  const rows = await armBroadcasts(deps.db, w);
+  const first = rows[0];
+  if (!first) return null;
   for (const b of rows) {
     const stored = await loadStored(deps.valkey, b.id);
-    if (!stored?.driver.done) return b;
+    if (!stored?.driver.done) return { broadcast: b, capAt: capAtOf(first.startedAt) };
   }
   return null;
-}
-
-/** Whether the arm started any rehearsal (then it did not expire unused). */
-async function startedAny(deps: DriverDeps, channelId: string, armedAt: Date): Promise<boolean> {
-  const [b] = await deps.db
-    .select({ id: broadcasts.id })
-    .from(broadcasts)
-    .where(
-      and(
-        eq(broadcasts.channelId, channelId),
-        eq(broadcasts.kind, "rehearsal"),
-        gte(broadcasts.startedAt, new Date(armedAt.getTime() - 1000)),
-      ),
-    )
-    .limit(1);
-  return b !== undefined;
 }
 
 async function filterWords(db: Database, channelId: string): Promise<string[]> {
@@ -328,8 +362,18 @@ async function emitEnded(
   return true;
 }
 
-/** The 30-minute cap: refuse the reconnect, clear the arm, end, event and audit, then kick. */
-async function enforceCap(deps: DriverDeps, armId: string, b: typeof schema.broadcasts.$inferSelect): Promise<void> {
+type ForcedEnd = "cap" | "disarmed";
+
+/**
+ * The cap, or a rehearsal that started after its arm was disarmed (a publish authorized just
+ * before the disarm): refuse the reconnect, clear the arm, end, event and audit, then kick.
+ */
+export async function forceEnd(
+  deps: Pick<DriverDeps, "db" | "valkey" | "logger" | "now" | "kick" | "publishEnded">,
+  armId: string,
+  b: { id: string; channelId: string },
+  reason: ForcedEnd,
+): Promise<boolean> {
   const now = deps.now();
   // Before the kick (decision (f)): the encoder's automatic reconnect neither rehearses nor goes live.
   await deps.valkey.set(KEYS.rehearsalKicked(b.channelId), "1", "EX", REHEARSAL_RULES.kickCooldownSeconds);
@@ -338,24 +382,28 @@ async function enforceCap(deps: DriverDeps, armId: string, b: typeof schema.broa
   const ended = await deps.db.transaction(async (tx) => {
     const e = await endBroadcast(tx, b.id, now);
     if (!e) return null; // ended meanwhile (publisher, disarm): that end stands
-    await emitEnded(tx, b.channelId, armId, b.id, "cap", now);
+    await emitEnded(tx, b.channelId, armId, b.id, reason, now);
     await audit(
       tx,
       {
-        action: "rehearsal.cap",
+        action: reason === "cap" ? "rehearsal.cap" : "rehearsal.disarm",
         subjectType: "broadcast",
         subjectId: b.id,
         channelId: b.channelId,
-        details: { armId, maxDurationSeconds: REHEARSAL_RULES.maxDurationSeconds },
+        details:
+          reason === "cap"
+            ? { armId, maxDurationSeconds: REHEARSAL_RULES.maxDurationSeconds }
+            : { armId, broadcastId: b.id, startedAfterDisarm: true },
       },
       now,
     );
     return e;
   });
-  if (!ended) return;
+  if (!ended) return false;
   await deps.publishEnded(ended, now);
   const kicked = await deps.kick(ended.path).catch(() => false);
-  if (!kicked) deps.logger.warn("rehearsal cap: publisher kick failed", { broadcastId: b.id });
+  if (!kicked) deps.logger.warn("rehearsal end: publisher kick failed", { broadcastId: b.id, reason });
+  return true;
 }
 
 /** Why a rehearsal the driver did not end ended: disarm's event, a suspension (T0), or the encoder. */
@@ -383,10 +431,10 @@ async function driveBroadcast(
   armId: string,
   b: typeof schema.broadcasts.$inferSelect,
   ownerId: string,
+  capAt: number,
 ): Promise<{ sent: number }> {
   const tickMs = deps.tickMs ?? 1000;
   const reportEveryMs = deps.reportEveryMs ?? 5000;
-  const capAt = b.startedAt.getTime() + REHEARSAL_RULES.maxDurationSeconds * 1000;
   const stored = (await loadStored(deps.valkey, b.id)) ?? { report: blank(b, deps.now()), driver: FRESH };
   let { report, driver } = stored;
   // Resuming mid-burst: what was not sent is dropped, never re-sent.
@@ -419,7 +467,10 @@ async function driveBroadcast(
     const [row] = await deps.db.select({ endedAt: broadcasts.endedAt }).from(broadcasts).where(eq(broadcasts.id, b.id));
     let reason: EndReason | null = null;
     if (!row?.endedAt && now.getTime() >= capAt) {
-      await enforceCap(deps, armId, b);
+      await forceEnd(deps, armId, b, "cap");
+      reason = await endReasonOf(deps, armId, b);
+    } else if (!row?.endedAt && (await disarmedAt(deps.db, armId)) !== null) {
+      await forceEnd(deps, armId, b, "disarmed");
       reason = await endReasonOf(deps, armId, b);
     } else if (row?.endedAt) {
       reason = await endReasonOf(deps, armId, b);
@@ -441,11 +492,12 @@ async function driveBroadcast(
 
     if (deps.chat) {
       const elapsed = now.getTime() - b.startedAt.getTime();
+      // Only sends count against the budget: a resumed driver skips its backlog in one tick.
       let budget = MAX_SENDS_PER_TICK;
       for (const m of dueMessages(script, driver.nextSeq, elapsed)) {
-        if (budget-- <= 0) break;
         const skip = elapsed - m.atMs > STALE_MESSAGE_MS || (m.burst && driver.burstDone);
         if (!skip) {
+          if (budget-- <= 0) break;
           if (m.burst && !driver.burstStarted) {
             // Recorded before the first burst message leaves, so a restart cannot send it twice.
             driver = { ...driver, burstStarted: true };
@@ -484,9 +536,11 @@ export async function driveRehearsal(deps: DriverDeps, job: RehearsalDriverJob):
   const pollMs = deps.waitPollMs ?? 2000;
   const waitUntil = arm.armedAt.getTime() + REHEARSAL_RULES.armTtlSeconds * 1000 + WAIT_SLACK_MS;
   for (;;) {
-    const b = await nextBroadcast(deps, job.channelId, arm.armedAt);
-    if (b) {
-      const r = await driveBroadcast(deps, job.armId, b, c.ownerId);
+    // Re-read each round: a later arm closes this one's window.
+    const w = await armWindow(deps.db, job.channelId, arm.armedAt);
+    const next = await nextBroadcast(deps, w);
+    if (next) {
+      const r = await driveBroadcast(deps, job.armId, next.broadcast, c.ownerId, next.capAt);
       result.broadcasts++;
       result.sent += r.sent;
       result.ended++;
@@ -498,9 +552,12 @@ export async function driveRehearsal(deps: DriverDeps, job: RehearsalDriverJob):
     }
     // The arm lapsed (or was disarmed). A publish authorized just before the lapse may still be
     // arriving, so an arm that never started a rehearsal gets a little slack.
-    const started = await startedAny(deps, job.channelId, arm.armedAt);
+    const started = (await armBroadcasts(deps.db, w)).length > 0;
     if (!started && deps.now().getTime() < waitUntil) {
-      if (await endedEvent(deps.db, job.armId, null)) return result; // disarmed before any publish
+      // Disarmed before any publish: wait out a publish authorized just before the disarm (its
+      // rehearsal is ended at once above), then stop.
+      const off = await disarmedAt(deps.db, job.armId);
+      if (off && deps.now().getTime() >= off.getTime() + WAIT_SLACK_MS) return result;
       await deps.sleep(pollMs);
       continue;
     }
@@ -511,6 +568,53 @@ export async function driveRehearsal(deps: DriverDeps, job: RehearsalDriverJob):
     }
     return result;
   }
+}
+
+// ------------------------------------------------------------------ the sweep
+
+/** The arm a rehearsal ran under: the channel's last arm at or before it started (clock slack as above). */
+async function armOf(db: Database, b: { channelId: string; startedAt: Date }) {
+  const [row] = await db
+    .select({ payload: events.payload, occurredAt: events.occurredAt })
+    .from(events)
+    .where(
+      and(
+        eq(events.type, "rehearsal.armed"),
+        eq(events.channelId, b.channelId),
+        lte(events.occurredAt, new Date(b.startedAt.getTime() + 1000)),
+      ),
+    )
+    .orderBy(desc(events.occurredAt))
+    .limit(1);
+  const armId = (row?.payload as { arm_id?: unknown } | undefined)?.arm_id;
+  return row && typeof armId === "string" ? { armId, armedAt: row.occurredAt } : null;
+}
+
+/**
+ * Every open rehearsal past its arm's cap, or started after its arm was disarmed, is ended here
+ * too. The driver does the same each second, but only while its job holds a queue slot: this
+ * holds the cap when the rehearsal queue is full or a driver job died (stalled, failed).
+ */
+export async function sweepRehearsals(
+  deps: Pick<DriverDeps, "db" | "valkey" | "logger" | "now" | "kick" | "publishEnded">,
+): Promise<{ capped: number; disarmed: number }> {
+  const out = { capped: 0, disarmed: 0 };
+  const open = await deps.db
+    .select({ id: broadcasts.id, channelId: broadcasts.channelId, startedAt: broadcasts.startedAt })
+    .from(broadcasts)
+    .where(and(eq(broadcasts.kind, "rehearsal"), isNull(broadcasts.endedAt)));
+  for (const b of open) {
+    const arm = await armOf(deps.db, b);
+    // No arm event cannot happen through the gate; cap it from its own start, under its own id.
+    const armId = arm?.armId ?? b.id;
+    const first = arm ? (await armBroadcasts(deps.db, await armWindow(deps.db, b.channelId, arm.armedAt)))[0] : b;
+    if (deps.now().getTime() >= capAtOf((first ?? b).startedAt)) {
+      if (await forceEnd(deps, armId, b, "cap")) out.capped++;
+    } else if (arm && (await disarmedAt(deps.db, arm.armId)) !== null) {
+      if (await forceEnd(deps, armId, b, "disarmed")) out.disarmed++;
+    }
+  }
+  return out;
 }
 
 // ------------------------------------------------------------------ wiring
@@ -594,9 +698,9 @@ interface RehearsalConfig {
 let cached: RehearsalConfig | undefined;
 
 /**
- * Read once per process. The worker's env schema does not carry these yet (contract request), so
- * a worker without the internal secret or the media password runs the rehearsal without the chat
- * run or the cap kick, and says so in its log; the cap still ends the rehearsal.
+ * Read once per process. `workerEnv` already requires the internal secret; it does not carry the
+ * chat URL or the media credentials yet (contract request), so a worker without the media password
+ * ends a capped rehearsal without the kick, and says so in its log.
  */
 export function rehearsalConfig(source?: Record<string, string | undefined>): RehearsalConfig {
   if (!source && cached) return cached;
@@ -611,6 +715,17 @@ export function rehearsalConfig(source?: Record<string, string | undefined>): Re
   return cfg;
 }
 
+function endDeps(ctx: WorkerContext, cfg: RehearsalConfig) {
+  return {
+    db: ctx.db,
+    valkey: ctx.valkey,
+    logger: ctx.logger,
+    now: () => ctx.now(),
+    kick: cfg.kick ? mediamtxKick(cfg.kick) : async () => false,
+    publishEnded: (ended: EndedBroadcast, now: Date) => publishLiveEnded(ctx, ended, now),
+  };
+}
+
 export const job = defineJob({
   queue: QUEUES.rehearsal,
   name: REHEARSAL_JOBS.driver,
@@ -620,20 +735,27 @@ export const job = defineJob({
     const cfg = rehearsalConfig();
     if (!cfg.chat)
       ctx.logger.warn("rehearsal driver: no internal secret, simulated chat skipped", { armId: data.armId });
-    const kick = cfg.kick ? mediamtxKick(cfg.kick) : async () => false;
     const result = await driveRehearsal(
       {
-        db: ctx.db,
-        valkey: ctx.valkey,
-        logger: ctx.logger,
-        now: () => ctx.now(),
+        ...endDeps(ctx, cfg),
         sleep: (ms) => Bun.sleep(ms),
         chat: cfg.chat ? httpChatProbe(cfg.chat) : null,
-        kick,
-        publishEnded: (ended, now) => publishLiveEnded(ctx, ended, now),
       },
       data,
     );
     return { ...result };
   },
+});
+
+/**
+ * The cap without the driver (`sweepRehearsals`). Not on the rehearsal queue, whose slots the
+ * long driver jobs hold. Registered in `jobs/index.ts` by the orchestrator (contract request).
+ */
+export const capSweepJob = defineJob({
+  queue: QUEUES.integrity,
+  name: "rehearsal-cap-sweep",
+  description: "End rehearsals past their arm's 30-minute cap, or started after a disarm",
+  data: z.object({}),
+  schedule: { every: 30_000 },
+  handler: async (_data, ctx) => sweepRehearsals(endDeps(ctx, rehearsalConfig())),
 });

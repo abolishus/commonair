@@ -31,7 +31,15 @@ import {
   testIdSelector,
   vodExpiresInADay,
 } from "./checks.ts";
-import { broadcastEndedAt, countedFor, directInsertRefusals, downstreamOf, rehearsalAudit, vodOf } from "./db.ts";
+import {
+  broadcastEndedAt,
+  countedFor,
+  directInsertRefusals,
+  downstreamOf,
+  rehearsalAudit,
+  storedChat,
+  vodOf,
+} from "./db.ts";
 
 const UI_TIMEOUT_MS = 30_000;
 /** Ingest, the gate and the driver's first report on a loaded CI runner. */
@@ -274,7 +282,14 @@ async function nothingCounts(run: RehearsalRun): Promise<void> {
 
 async function simulatedChat(run: RehearsalRun): Promise<void> {
   const { ctx, channel } = run;
-  needBroadcast(run, 4);
+  const b = needBroadcast(run, 4);
+  // The invitee sits in the channel's public chat through the burst: nothing simulated may arrive.
+  const listener = await ctx.step(title(4, "the invitee joins the public chat"), async () => {
+    const c = await ctx.platform.chat(run.invitee);
+    ctx.defer(() => c.close());
+    await c.join(channel);
+    return c;
+  });
   const report = await ctx.step(title(4, "the burst lands in the report"), () =>
     waitFor(
       "a report with the burst filtered",
@@ -288,6 +303,21 @@ async function simulatedChat(run: RehearsalRun): Promise<void> {
   const v = judgeChatReport(report.chat);
   ctx.data("rehearsal.chat", report.chat);
   ctx.assert("4. simulated chat filtered or held, burst included", v.ok, v);
+  const delivered = listener.messages(channel);
+  ctx.assert("4. no simulated message reached public chat", delivered.length === 0, {
+    delivered: delivered.length,
+    first: delivered[0]?.message.user.username,
+  });
+  listener.close();
+  const db = needDb(run, 4);
+  if (db) {
+    const stored = await ctx.step(title(4, "stored chat"), () => storedChat(db, run.channelId, b, run.startedAt));
+    ctx.assert(
+      "4. no simulated message stored (public chat or replay)",
+      stored.channel === 0 && stored.broadcast === 0,
+      stored,
+    );
+  }
   ctx.check(
     "4. bitrate and video checks reported",
     report.ingest.some((c) => c.check === "bitrate"),
@@ -398,6 +428,12 @@ async function rehearsalVod(run: RehearsalRun): Promise<void> {
   );
   const listed = await ctx.platform.api().client.vods.list({ channel });
   ctx.assert("6. it is not in the public VOD list", !JSON.stringify(listed).includes(vod.id));
+  const stored = await storedChat(db, run.channelId, b, run.startedAt);
+  ctx.assert("6. the rehearsal's chat replay has nothing to show", stored.broadcast === 0, stored);
+  // The owner may read replay of their private VOD once it is playable; still processing is fine.
+  const replay = await run.streamer.api.client.vods.chat({ id: vod.id }).catch(() => null);
+  if (replay)
+    ctx.assert("6. chat replay of the rehearsal VOD is empty", replay.items.length === 0, replay.items.length);
 }
 
 async function auditRows(run: RehearsalRun): Promise<void> {

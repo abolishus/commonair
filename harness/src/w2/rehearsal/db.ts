@@ -131,6 +131,27 @@ export async function vodOf(databaseUrl: string, broadcastId: string): Promise<R
   });
 }
 
+export interface StoredChat {
+  /** Messages stored for the channel since the run started (this scenario sends none of its own). */
+  channel: number;
+  /** Messages on the rehearsal broadcast: what chat replay of its VOD would show. */
+  broadcast: number;
+}
+
+/** Simulated chat goes through the dry run, which never stores: both counts must stay 0. */
+export async function storedChat(
+  databaseUrl: string,
+  channelId: string,
+  broadcastId: string,
+  since: Date,
+): Promise<StoredChat> {
+  return withDb(databaseUrl, async (sql) => ({
+    channel: await count(sql`select count(*)::text as n from chat_messages
+           where channel_id = ${channelId} and created_at >= ${since}`),
+    broadcast: await count(sql`select count(*)::text as n from chat_messages where broadcast_id = ${broadcastId}`),
+  }));
+}
+
 export async function broadcastEndedAt(databaseUrl: string, broadcastId: string): Promise<Date | null> {
   return withDb(databaseUrl, async (sql) => {
     const [b] = await sql<{ ended_at: Date | null }[]>`select ended_at from broadcasts where id = ${broadcastId}`;
