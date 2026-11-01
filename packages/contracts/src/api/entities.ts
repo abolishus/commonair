@@ -12,6 +12,7 @@ import {
   ChannelDvrSettings,
   ChannelTheme,
   EmoteRange,
+  GiveawayEligibility,
   PatronageLine,
   PatronageWeights,
   TallyBreakdown,
@@ -114,7 +115,19 @@ export const Channel = z.object({
   subTiers: z.array(z.object({ tier: z.number().int(), name: z.string(), price: Money, benefits: z.string() })),
   suspended: z.boolean(),
   /** The signed-in caller's relation to the channel; null or absent for anonymous callers. */
-  viewer: z.object({ following: z.boolean() }).nullable().optional(),
+  viewer: z
+    .object({
+      following: z.boolean(),
+      /** Batch 7 decision (l): the caller asked to be told if the channel moves. Absent = false (W3-portability fills it). */
+      portabilityGrant: z.boolean().optional(),
+    })
+    .nullable()
+    .optional(),
+  /**
+   * Batch 7 decision (l): where the channel says it moved (`channels.moved_to`, an https URL), shown
+   * as a "moved to" notice. Null when it has not moved (W3-portability fills it).
+   */
+  movedTo: z.object({ url: z.string(), at: Timestamp }).nullable().optional(),
 });
 export type Channel = z.infer<typeof Channel>;
 
@@ -580,6 +593,11 @@ export const SurgeState = z.object({
   by: UserPublic.pick({ id: true, username: true }).nullable(),
   /** Valkey could not be read: the gate fails open (ADR 0015 decision 1). */
   unavailable: z.boolean(),
+  /**
+   * Batch 7 decision (w): the raid that opened this surge (the mod banner names the source and its
+   * verified count). Null otherwise (W3-surge-raids fills it).
+   */
+  raid: z.object({ fromChannel: Slug, verifiedCount: z.number().int().nonnegative() }).nullable().optional(),
 });
 export const PaymentFraudFlag = z.object({
   id: Id,
@@ -842,6 +860,22 @@ export const PredictionView = z.object({
   endedAt: Timestamp.nullable(),
   winningOutcomeId: z.string().nullable(),
   myBet: z.object({ outcomeId: z.string(), points: z.number().int(), payout: z.number().int().nullable() }).nullable(),
+  /**
+   * Batch 7 decision (v): the media time (PDT) betting locked at; a bet whose `mediaTs` is at or
+   * after it is refused. Null until locked (W3-fair-predictions fills it).
+   */
+  lockMediaTs: Timestamp.nullable().optional(),
+  /** Who resolved or canceled it; null while open (and for the timer). */
+  resolvedBy: UserPublic.pick({ id: true, username: true }).nullable().optional(),
+  /** The public result card once resolved: the pool, the winners and that the payouts sum to the pool. */
+  result: z
+    .object({
+      pool: z.number().int().nonnegative(),
+      winners: z.number().int().nonnegative(),
+      payoutSum: z.number().int().nonnegative(),
+    })
+    .nullable()
+    .optional(),
 });
 export const RaidView = z.object({
   id: Id,
@@ -1425,6 +1459,12 @@ export const InstanceInfo = z.object({
     surgeGuard: z.boolean(),
     /** DVR_MAX_WINDOW_SECONDS (ADR 0016): the studio offers DVR windows up to this; 0 = DVR off. */
     dvrMaxWindowSeconds: z.number().int().nonnegative(),
+    /** GIVEAWAYS_ENABLED (batch 7 decision (a)): off, the web hides every giveaway surface. */
+    giveaways: z.boolean(),
+    /** FEDERATION_ENABLED (decision (c)): the studio offers per-channel federation only when true. */
+    federation: z.boolean(),
+    /** Twitch import available (decision (b)): `OAUTH_TWITCH_*` set and TWITCH_IMPORT_ENABLED. */
+    twitchImport: z.boolean(),
   }),
   minAge: z.number().int(),
 });
@@ -2024,3 +2064,297 @@ export const EnforcementReport = z.object({
   generatedAt: Timestamp,
 });
 export type EnforcementReport = z.infer<typeof EnforcementReport>;
+
+// Batch 7: W3, N3, N4 (.claude/briefs/w3/contract-step.md §2.4) -----------------------------
+
+/** A person as the batch 7 surfaces show them (`ChannelAvatar` data). */
+const AvatarUser = UserPublic.pick({ id: true, username: true, displayName: true, avatarUrl: true });
+const ChannelBrief = z.object({ id: Id, slug: Slug, displayName: z.string(), avatarUrl: z.string().nullable() });
+
+/** Watch rooms (ADR 0017, decision (q)). Every room is invite-only in v1. */
+export const WatchRoomMember = z.object({ user: AvatarUser, joinedAt: Timestamp, host: z.boolean() });
+export const WatchRoom = z.object({
+  id: Id,
+  channel: ChannelBrief,
+  broadcastId: Id,
+  host: AvatarUser,
+  ageBand: z.enum(E.ROOM_AGE_BANDS),
+  /** The room is on mature content: adults only, each with mature viewing confirmed. */
+  mature: z.boolean(),
+  /** Active members (the database caps them at `ROOM_LIMITS.maxMembers`). */
+  members: z.array(WatchRoomMember).max(E.ROOM_LIMITS.maxMembers),
+  createdAt: Timestamp,
+  endedAt: Timestamp.nullable(),
+  endReason: z.enum(E.ROOM_END_REASONS).nullable(),
+  /** The audience the room's chat token is bound to (`room:<id>`); the chat service checks it. */
+  chatAudience: z.string(),
+});
+export type WatchRoom = z.infer<typeof WatchRoom>;
+/** An invite: the nonce is shown once (stored as its hash); the link carries it. */
+export const WatchRoomInvite = z.object({ nonce: z.string(), url: z.string(), expiresAt: Timestamp.nullable() });
+export const WatchRoomJoined = z.object({
+  room: WatchRoom,
+  /** For `room.join` on the chat WebSocket. */
+  chatToken: z.string(),
+  chatUrl: z.string(),
+  expiresAt: Timestamp,
+});
+/** Why a room create or join was refused (the API's error data and the web's i18n codes). */
+export const WATCH_ROOM_REFUSALS = [
+  "room_age_band",
+  "room_birth_date_unknown",
+  "room_mature_minor",
+  "room_mature_unconfirmed",
+  "room_banned",
+  "room_suspended",
+  "room_blocked",
+  "room_full",
+  "room_closed",
+  "room_invite_invalid",
+  "room_not_live",
+] as const;
+
+/** Move links (decision (k)). */
+export const MoveLink = z.object({
+  id: Id,
+  createdAt: Timestamp,
+  revokedAt: Timestamp.nullable(),
+  expiresAt: Timestamp.nullable(),
+  /** Non-excluded follows made through this link. */
+  conversions: z.number().int().nonnegative(),
+});
+export type MoveLink = z.infer<typeof MoveLink>;
+/** The nonce and URL are returned once, at create. */
+export const MoveLinkCreated = MoveLink.extend({ nonce: z.string(), url: z.string() });
+export const MoveLinkResolution = z.object({
+  state: z.enum(["active", "revoked", "expired", "unknown"]),
+  /** Null when the link is unknown. */
+  channel: ChannelBrief.extend({ title: z.string(), followerCount: z.number().int().nonnegative() }).nullable(),
+});
+export const PortabilityGrant = z.object({ channel: ChannelBrief, createdAt: Timestamp });
+export const ChannelMove = z.object({ movedTo: z.string().nullable(), movedAt: Timestamp.nullable() });
+/** One item of an import's preview or result. Reasons are opaque codes, never upload-matching detail. */
+export const ImportItem = z.object({
+  kind: z.enum(E.IMPORT_ITEM_KINDS),
+  /** The emote code, the panel's position, or `channel` / `schedule`. */
+  ref: z.string(),
+  label: z.string(),
+  outcome: z.enum(E.IMPORT_ITEM_OUTCOMES).nullable(),
+  reason: z.string().max(64).nullable(),
+});
+export const PortabilityImport = z.object({
+  id: Id,
+  source: z.enum(E.PORTABILITY_SOURCES),
+  status: z.enum(E.IMPORT_STATUSES),
+  /** Null for Twitch bundles (no statement); false = "standing not verified" (decision (o)). */
+  standingVerified: z.boolean().nullable(),
+  /** The issuing instance of a verified statement. */
+  standingIssuer: z.string().nullable(),
+  /** Public data only. */
+  preview: z.object({ channel: z.record(z.string(), z.unknown()), items: z.array(ImportItem) }),
+  result: z.array(ImportItem).nullable(),
+  /** Emote art re-hosted on the streamer's assertion (ADR 0031): when and which wording version. */
+  assertedAt: Timestamp.nullable(),
+  createdAt: Timestamp,
+  finishedAt: Timestamp.nullable(),
+});
+export type PortabilityImport = z.infer<typeof PortabilityImport>;
+/** What `imports.start` applies: the channel fields, panels, and the emote codes chosen. */
+export const ImportChoices = z.object({
+  channel: z.boolean(),
+  panels: z.boolean(),
+  emotes: z.array(z.string().regex(/^[A-Za-z0-9]{2,20}$/)).max(100),
+});
+export const PresignedUpload = z.object({
+  key: z.string(),
+  uploadUrl: z.string(),
+  headers: z.record(z.string(), z.string()),
+  expiresAt: Timestamp,
+});
+
+/** Giveaways (decision (t)). Entrants are shown only as pseudonyms. */
+export const Giveaway = z.object({
+  id: Id,
+  channelSlug: Slug,
+  title: z.string(),
+  prize: z.string(),
+  winnerCount: z.number().int().min(1).max(E.GIVEAWAY_RULES.maxWinners),
+  keyword: z.string().nullable(),
+  status: z.enum(E.GIVEAWAY_STATUSES),
+  eligibility: GiveawayEligibility,
+  /** SHA-256 of the seed, published at open, before any entry. */
+  seedCommitment: z.string(),
+  opensAt: Timestamp,
+  closesAt: Timestamp.nullable(),
+  drawnAt: Timestamp.nullable(),
+  entries: z.number().int().nonnegative(),
+  /** The signed-in caller: entered, and if not, whether they may and why not. */
+  me: z
+    .object({
+      entered: z.boolean(),
+      eligible: z.boolean(),
+      reason: z.enum(["account_age", "follow_age", "not_following", "verified_watch", "banned"]).nullable(),
+      won: z.boolean(),
+    })
+    .nullable(),
+  winners: z.array(z.object({ rank: z.number().int().positive(), pseudonym: z.string() })),
+});
+export type Giveaway = z.infer<typeof Giveaway>;
+/** `interact.giveaways.verify` (public): everything needed to re-run the draw. */
+export const GiveawayVerification = z.object({
+  id: Id,
+  channelSlug: Slug,
+  title: z.string(),
+  status: z.enum(E.GIVEAWAY_STATUSES),
+  seedCommitment: z.string(),
+  /** Revealed at the draw; null before. */
+  seed: z.string().nullable(),
+  salt: z.string().nullable(),
+  /** Entry pseudonyms, sorted (the draw's input order). */
+  entries: z.array(z.string()),
+  winnerCount: z.number().int(),
+  winners: z.array(
+    z.object({
+      rank: z.number().int().positive(),
+      /** Index into `entries`. */
+      index: z.number().int().nonnegative(),
+      pseudonym: z.string(),
+      /** Only when the winner allowed it; the pseudonym otherwise. */
+      username: Slug.nullable(),
+    }),
+  ),
+  drawnAt: Timestamp.nullable(),
+});
+export type GiveawayVerification = z.infer<typeof GiveawayVerification>;
+
+/** The advisory jury (decision (u)). */
+export const JuryStatus = z.object({
+  /** The `jury.enabled` governance setting. */
+  enabled: z.boolean(),
+  /** An active, adult member, not staff. */
+  eligible: z.boolean(),
+  optedIn: z.boolean(),
+  optedInAt: Timestamp.nullable(),
+  /** The panel the caller sits on now, if any. */
+  seat: z.object({ panelId: Id, period: z.string() }).nullable(),
+});
+export const JuryPanel = z.object({
+  id: Id,
+  /** `YYYY-MM`. */
+  period: z.string().regex(/^\d{4}-\d{2}$/),
+  seedCommitment: z.string(),
+  seed: z.string().nullable(),
+  openedAt: Timestamp,
+  closedAt: Timestamp.nullable(),
+  seats: z.number().int().nonnegative(),
+  cases: z.number().int().nonnegative(),
+});
+export const JuryEvidence = z.object({
+  kind: z.enum(["text", "image"]),
+  /** Text excerpt, or a short-lived URL of the blurred-by-default image. */
+  value: z.string(),
+  contentWarning: z.boolean(),
+});
+export const JuryCase = z.object({
+  id: Id,
+  subjectKind: z.enum(E.JURY_SUBJECT_KINDS),
+  ruleRef: z.string().nullable(),
+  clauseTitle: z.string().nullable(),
+  tier: z.enum(E.MODERATION_TIERS).nullable(),
+  /** What was decided: the case status or the report resolution. */
+  outcome: z.string(),
+  automated: z.boolean(),
+  /** Stable within the panel; never a username. Reporters are never shown. */
+  subjectPseudonym: z.string(),
+  evidence: z.array(JuryEvidence).max(20),
+  myVote: z.object({ vote: z.enum(E.JURY_VOTES), reasonCode: z.enum(E.JURY_REASON_CODES) }).nullable(),
+});
+export type JuryCase = z.infer<typeof JuryCase>;
+export const JuryResults = z.object({
+  period: z.string(),
+  panelSize: z.number().int(),
+  seedCommitment: z.string().nullable(),
+  seed: z.string().nullable(),
+  rows: z.array(
+    z.object({
+      clauseId: z.string(),
+      clauseTitle: z.string(),
+      tier: z.enum(E.MODERATION_TIERS).nullable(),
+      agree: ReportCount,
+      disagree: ReportCount,
+      unsure: ReportCount,
+    }),
+  ),
+});
+export type JuryResults = z.infer<typeof JuryResults>;
+export const JuryFlag = z.object({
+  id: Id,
+  caseId: Id,
+  panelId: Id,
+  subjectKind: z.enum(E.JURY_SUBJECT_KINDS),
+  subjectId: Id,
+  disagree: z.number().int(),
+  votes: z.number().int(),
+  createdAt: Timestamp,
+  resolvedAt: Timestamp.nullable(),
+});
+
+/** Twitch import (N3, decision (b)). */
+export const TwitchImportStatus = z.object({
+  /** `OAUTH_TWITCH_*` set and `TWITCH_IMPORT_ENABLED`. */
+  available: z.boolean(),
+  /** A Twitch identity is linked for this session's import. */
+  connected: z.boolean(),
+  twitchLogin: z.string().nullable(),
+  /** The latest import of the caller's channel, if any. */
+  latest: PortabilityImport.nullable(),
+});
+
+/** Federation (ADR 0030, decision (c)). */
+export const FederationSettings = z.object({
+  /** The channel's own `federation.enabled`. */
+  enabled: z.boolean(),
+  /** FEDERATION_ENABLED on this instance. */
+  instanceEnabled: z.boolean(),
+  /** `@<slug>@<domain>` while federated. */
+  handle: z.string().nullable(),
+  actorId: z.string().nullable(),
+  followers: z.number().int().nonnegative(),
+});
+export const FederationFollower = z.object({
+  id: Id,
+  /** The remote actor id (a URL). Shown only to the channel owner. */
+  actor: z.string(),
+  handle: z.string().nullable(),
+  domain: z.string(),
+  createdAt: Timestamp,
+});
+export const FederationDomainBlock = z.object({
+  domain: z.string(),
+  createdBy: UserPublic.pick({ id: true, username: true }).nullable(),
+  createdAt: Timestamp,
+});
+
+/**
+ * The relay purge feed (decision (x)): `relays.purges`, long-polled by relays. `payload` is signed
+ * with the origin playback key (`signPurgeBatch` in `packages/tokens`); relays verify it with the
+ * heartbeat's `originPublicKey`.
+ */
+export const RelayPurgeItem = z.object({
+  seq: z.number().int().positive(),
+  /** A path prefix relays evict and stop serving (`dvr/<vodId>/`, `vod/<vodId>/`, `clips/<clipId>/`, `live/<slug>/`). */
+  prefix: z.string().min(1).max(256),
+  reason: z.enum(E.RELAY_PURGE_REASONS),
+});
+export const RelayPurgeBatch = z.object({
+  /** The highest seq this answer covers; the relay passes it as `after` next time. */
+  seq: z.number().int().nonnegative(),
+  items: z.array(RelayPurgeItem).max(E.RELAY_PURGE_RULES.maxItems),
+});
+export type RelayPurgeBatch = z.infer<typeof RelayPurgeBatch>;
+export const RelayPurgeFeed = z.object({
+  payload: RelayPurgeBatch,
+  /** Ed25519 over the canonical JSON of `payload`, base64url. */
+  signature: z.string().regex(/^[A-Za-z0-9_-]{86}$/),
+});
+export type RelayPurgeFeed = z.infer<typeof RelayPurgeFeed>;

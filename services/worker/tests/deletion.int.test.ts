@@ -683,6 +683,65 @@ describe.skipIf(!storage)("account deletion (E6)", () => {
     expect(left.map((r) => [r.userId, r.blockedUserId])).toEqual([[A.user.id, B.user.id]]);
   });
 
+  test("follows lower the trigger-kept count; grants, jury opt-in and imports go; links and giveaways lose their author (batch 7)", async () => {
+    const U = await makeUser(db()); // the deleted member, follower of S and owner of a channel
+    const S = await makeUser(db());
+    const O = await makeUser(db()); // another follower and grant holder
+    await app()
+      .insert(schema.follows)
+      .values([
+        { followerId: U.user.id, channelId: S.channel.id },
+        { followerId: O.user.id, channelId: S.channel.id },
+      ]);
+    const count = async () =>
+      (await db().select().from(schema.channels).where(eq(schema.channels.id, S.channel.id)))[0]!.followerCount;
+    expect(await count()).toBe(2);
+    await app()
+      .insert(schema.followPortabilityGrants)
+      .values([
+        { userId: U.user.id, channelId: S.channel.id },
+        { userId: O.user.id, channelId: S.channel.id },
+      ]);
+    await app().insert(schema.juryOptins).values({ userId: U.user.id });
+    await app()
+      .insert(schema.portabilityImports)
+      .values({ userId: U.user.id, channelId: U.channel.id, source: "commonair" });
+    const [link] = await app()
+      .insert(schema.moveLinks)
+      .values({ channelId: U.channel.id, nonceHash: "a".repeat(64), createdById: U.user.id })
+      .returning();
+    const [g] = await app()
+      .insert(schema.giveaways)
+      .values({
+        channelId: U.channel.id,
+        title: "t",
+        prize: "p",
+        eligibility: { minAccountAgeDays: 0, minFollowDays: null, minVerifiedWatchSeconds: 0 },
+        winnerCount: 1,
+        seedCommitment: "b".repeat(64),
+        sealedSeed: "sealed",
+        salt: "c".repeat(32),
+        createdById: U.user.id,
+      })
+      .returning();
+    await schedule(U.user.id);
+    expect(await runAccountDeletions(ctx())).toMatchObject({ completed: 1, failed: 0 });
+    expect(await count()).toBe(1);
+    const grants = await db()
+      .select()
+      .from(schema.followPortabilityGrants)
+      .where(eq(schema.followPortabilityGrants.channelId, S.channel.id));
+    expect(grants.map((r) => r.userId)).toEqual([O.user.id]);
+    expect(await db().select().from(schema.juryOptins).where(eq(schema.juryOptins.userId, U.user.id))).toEqual([]);
+    expect(
+      await db().select().from(schema.portabilityImports).where(eq(schema.portabilityImports.userId, U.user.id)),
+    ).toEqual([]);
+    const [l] = await db().select().from(schema.moveLinks).where(eq(schema.moveLinks.id, link!.id));
+    expect(l!.createdById).toBeNull();
+    const [gg] = await db().select().from(schema.giveaways).where(eq(schema.giveaways.id, g!.id));
+    expect(gg!.createdById).toBeNull();
+  });
+
   test("caption edits and share links lose their author; rehearsal invitations go (W2)", async () => {
     const U = await makeUser(db()); // the deleted editor and invitee
     const O = await makeUser(db()); // another editor

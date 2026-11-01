@@ -18,6 +18,9 @@ type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 export const UNSUBSCRIBE_LIST_TYPES: Readonly<Record<UnsubscribeList, readonly NotificationType[]>> = {
   go_live: ["go_live"],
   governance: ["proposal", "vote_open"],
+  // Batch 7 decision (l): the one "channel moved" email is not a notification type; unsubscribing
+  // from it withdraws the member's portability grants (W3-portability).
+  moved: [],
 };
 
 /** Longest token accepted (the contract's input bound); real tokens are about 70 characters. */

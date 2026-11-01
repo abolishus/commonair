@@ -316,6 +316,20 @@
       "when": 1793517551130,
       "tag": "0044_w2_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1793552209161,
+      "tag": "0045_b7",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1793552276781,
+      "tag": "0046_b7_protections",
+      "breakpoints": true
     }
   ]
 }

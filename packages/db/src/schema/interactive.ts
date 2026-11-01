@@ -277,6 +277,10 @@ export const predictions = pgTable(
     changedAt: ts(),
     /** Last `channel.prediction.progress`. */
     progressAt: ts(),
+    /** Batch 7 decision (v): the media time (PDT) betting locked at; bets at or after it are refused (0046). */
+    lockMediaTs: ts(),
+    /** Who resolved or canceled it (also in `audit_log`). */
+    resolvedById: uuid().references(() => users.id, { onDelete: "set null" }),
   },
   (t) => [
     index("predictions_channel_idx").on(t.channelId, t.startedAt),
@@ -302,6 +306,8 @@ export const predictionBets = pgTable(
     points: bigint({ mode: "number" }).notNull(),
     payout: bigint({ mode: "number" }),
     placedAt: ts().notNull().defaultNow(),
+    /** Batch 7 decision (v): the bettor's playhead at the bet; null when unknown. */
+    mediaTs: ts(),
   },
   (t) => [primaryKey({ columns: [t.predictionId, t.userId] })],
 );

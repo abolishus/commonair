@@ -164,6 +164,10 @@ export function predictionView(
     endedAt: row.resolvedAt?.toISOString() ?? null,
     winningOutcomeId: row.winningOutcomeId,
     myBet: mine ? { outcomeId: mine.outcomeId, points: mine.points, payout: mine.payout } : null,
+    // Batch 7 contract step: W3-fair-predictions fills the resolver and the result card.
+    lockMediaTs: row.lockMediaTs?.toISOString() ?? null,
+    resolvedBy: null,
+    result: null,
   };
 }
 

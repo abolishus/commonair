@@ -51,6 +51,8 @@ version, condition fields, required scopes, transports and a description. Every 
 | `channel.goal.progress`        | `broadcaster_user_id`            | none                         | webhook, websocket |
 | `channel.goal.end`             | `broadcaster_user_id`            | none                         | webhook, websocket |
 | `channel.points.change`        | `broadcaster_user_id`            | `channel:read:points`        | webhook, websocket |
+| `channel.giveaway.begin`       | `broadcaster_user_id`            | none                         | webhook, websocket |
+| `channel.giveaway.end`         | `broadcaster_user_id`            | none                         | webhook, websocket |
 | `coop.proposal.update`         | none                             | none                         | webhook, websocket |
 
 The catalog endpoint is the source of truth; this table is a snapshot.

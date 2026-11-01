@@ -25,7 +25,7 @@ import {
   withExport,
   type DeletionRequestDto,
   type ExportJobDto,
-  type ExportKind,
+  type RequestableExportKind,
 } from "../lib/privacy.ts";
 import { browserPollEnv, pollWhileVisible, type PollEnv } from "../lib/stream-health.ts";
 import { useLoad } from "./money/use-load.ts";
@@ -148,7 +148,7 @@ export function ExportSection({
     );
 
   const request = async (kind: string): Promise<void> => {
-    const chosen = exportKinds(hasChannel).find((k) => k === kind) as ExportKind | undefined;
+    const chosen = exportKinds(hasChannel).find((k) => k === kind) as RequestableExportKind | undefined;
     if (!chosen) return;
     const job = await api().me.exports.create({ kind: chosen });
     seq.current.minApplied = seq.current.next;

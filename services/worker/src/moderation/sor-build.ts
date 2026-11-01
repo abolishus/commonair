@@ -425,6 +425,11 @@ export async function planStatements(row: AuditRow, l: SorLookup): Promise<Plan>
         ],
       };
     }
+    // Batch 7 contract step: allowlisted; B7-followups builds their statements.
+    case "report.resolve":
+    case "user.suspend":
+    case "channel.suspend":
+      return { kind: "none", reason: "pending_b7" };
   }
 }
 

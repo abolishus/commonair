@@ -169,6 +169,8 @@
   "privacy.export.kind.accountHint": "Perfil, sesiones, canales seguidos, pagos, chat y registros de la cooperativa y de seguridad.",
   "privacy.export.kind.channel": "Datos del canal",
   "privacy.export.kind.channelHint": "Configuración, listas de VOD y clips, ingresos y liquidaciones.",
+  "privacy.export.kind.bundle": "Paquete de portabilidad",
+  "privacy.export.kind.bundleHint": "Configuración del canal, paneles y emotes, para importarlos en otra instancia.",
   "privacy.export.status.queued": "En cola",
   "privacy.export.status.running": "Preparando",
   "privacy.export.status.ready": "Lista",

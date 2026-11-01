@@ -119,6 +119,11 @@ export function expectedStatement(row: AuditRow): Expected | null {
       return d.listCategory === "ncii"
         ? { restrictions: ["account/suspended"], clauseIds: ["illegal.ncii"], appealSubjectType: null }
         : null;
+    // Batch 7 contract step: allowlisted, not built until B7-followups (no statement expected yet).
+    case "report.resolve":
+    case "user.suspend":
+    case "channel.suspend":
+      return null;
   }
 }
 

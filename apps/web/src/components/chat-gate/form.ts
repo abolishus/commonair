@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /** The `/chat` form's draft, validation and `chat.updateSettings` input (ADR 0015 decisions 6, 7). Pure. */
-import type { ChannelChatSettings } from "@commonair/contracts/shapes";
+import type { ChannelChatSettings, ChannelChatSettingsPatch } from "@commonair/contracts/shapes";
 
 export const GATE_PRESETS = [0, 60, 300, 900] as const;
 export const GATE_MIN_SECONDS = 60;
@@ -49,7 +49,7 @@ export const validGateSeconds = (n: number | null): n is number =>
   n !== null && (n === 0 || (n >= GATE_MIN_SECONDS && n <= GATE_MAX_SECONDS));
 
 export type ChatGateInput = Partial<
-  Pick<ChannelChatSettings, "minVerifiedWatchSeconds" | "verifiedWatchExemptSubscribers" | "surgeGuard">
+  Pick<ChannelChatSettingsPatch, "minVerifiedWatchSeconds" | "verifiedWatchExemptSubscribers" | "surgeGuard">
 >;
 
 /** The patch for the features the instance runs (the API refuses the others), or the field errors. */

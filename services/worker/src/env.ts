@@ -25,6 +25,10 @@ import {
   webPushShape,
   attestationEnv,
   costModelEnv,
+  federationEnv,
+  giveawaysEnv,
+  portabilityEnv,
+  twitchImportEnv,
   workerEnv as workerTuningEnv,
 } from "@commonair/config";
 import { QUEUES } from "@commonair/contracts/internal";
@@ -58,8 +62,16 @@ export const workerEnv = z
     ...seedEnv.shape,
     // W1: chat retention, the verified-watch writer and the surge guard (ADR 0012 amendment 1, ADR 0015).
     ...chatEnv.shape,
-    // W1: verified-watch jitter (ADR 0015 decision 4); W2: the rehearsal driver's dry-run chat.
-    ...internalEnv.pick({ INTERNAL_API_SECRET: true, CHAT_INTERNAL_URL: true }).shape,
+    // W1: verified-watch jitter (ADR 0015 decision 4); W2: the rehearsal driver's dry-run chat;
+    // batch 7 decision (p): the worker calls the API's internal upload-commit route.
+    ...internalEnv.pick({ INTERNAL_API_SECRET: true, CHAT_INTERNAL_URL: true, API_INTERNAL_URL: true }).shape,
+    // Batch 7: the feature flags (decisions (a)–(c)), the Twitch endpoints, and the standing-statement
+    // key, worker only (decision (n)).
+    ...giveawaysEnv.shape,
+    ...twitchImportEnv.shape,
+    ...federationEnv.shape,
+    ...portabilityEnv.shape,
+    ...authEnv.pick({ OAUTH_TWITCH_CLIENT_ID: true, OAUTH_TWITCH_CLIENT_SECRET: true }).shape,
     // W2: the rehearsal driver kicks a capped encoder through MediaMTX. Optional: without the
     // password a capped rehearsal still ends, but the encoder is not kicked.
     ...mediaEnv

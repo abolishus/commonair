@@ -17,6 +17,16 @@ const TABLES = [
   "notification_email_queue",
   "push_subscriptions",
   "discord_webhooks",
+  // Batch 7: portability imports and keys, federation.
+  "portability_imports",
+  "portability_signing_keys",
+  "federation_actors",
+  "federation_actor_keys",
+  "federation_followers",
+  "federation_domain_blocks",
+  "federation_inbox_items",
+  "federation_deliveries",
+  "federation_objects",
 ] as const;
 
 export const unit: SeedUnit = {

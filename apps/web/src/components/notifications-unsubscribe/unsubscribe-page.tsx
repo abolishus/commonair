@@ -40,14 +40,17 @@ export function parseUnsubscribeSearch(search: { list?: string; token?: string }
 const TITLE: Record<UnsubscribeList, MessageKey> = {
   go_live: "unsubscribe.title.go_live",
   governance: "unsubscribe.title.governance",
+  moved: "unsubscribe.title.moved",
 };
 const INTRO: Record<UnsubscribeList, MessageKey> = {
   go_live: "unsubscribe.intro.go_live",
   governance: "unsubscribe.intro.governance",
+  moved: "unsubscribe.intro.moved",
 };
 const DONE: Record<UnsubscribeList, MessageKey> = {
   go_live: "unsubscribe.done.go_live",
   governance: "unsubscribe.done.governance",
+  moved: "unsubscribe.done.moved",
 };
 
 const applyViaApi = (input: UnsubscribeInput) => api().notifications.unsubscribe(input);

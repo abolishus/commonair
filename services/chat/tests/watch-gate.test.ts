@@ -114,7 +114,7 @@ describe("WatchGate.load", () => {
 
   test("a saved gate is ignored while CHAT_WATCH_GATE is off", async () => {
     const s = setup({ enabled: { watchGate: false, surgeGuard: true } });
-    const ch = live({ surgeGuard: { enabled: true, triggerUnverifiedRatio: 0.5, cooldownMinutes: 10 } });
+    const ch = live({ surgeGuard: { enabled: true, triggerUnverifiedRatio: 0.5, cooldownMinutes: 10, onRaid: true } });
     expect(await s.gate.load(ch, USER, NOW)).toBeNull();
     s.surge("on");
     s.gate.invalidate(ch.id);
@@ -122,7 +122,7 @@ describe("WatchGate.load", () => {
   });
 
   test("surge mode: max(own gate, 60); suppressed adds nothing", async () => {
-    const guard = { surgeGuard: { enabled: true, triggerUnverifiedRatio: 0.5, cooldownMinutes: 10 } };
+    const guard = { surgeGuard: { enabled: true, triggerUnverifiedRatio: 0.5, cooldownMinutes: 10, onRaid: true } };
     const s = setup();
     s.surge("on");
     expect((await s.gate.load(live({ ...guard, minVerifiedWatchSeconds: 300 }), USER, NOW))?.requiredSeconds).toBe(300);
@@ -167,7 +167,7 @@ describe("WatchGate.load", () => {
     s.valkey.failing = true;
     const ch = live({
       minVerifiedWatchSeconds: 0,
-      surgeGuard: { enabled: true, triggerUnverifiedRatio: 0.5, cooldownMinutes: 10 },
+      surgeGuard: { enabled: true, triggerUnverifiedRatio: 0.5, cooldownMinutes: 10, onRaid: true },
     });
     expect(await s.gate.load(ch, USER, NOW)).toBeNull();
     expect(s.unavailable()).toBe(1);
@@ -175,7 +175,9 @@ describe("WatchGate.load", () => {
 });
 
 describe("WatchGate.surge", () => {
-  const guarded = live({ surgeGuard: { enabled: true, triggerUnverifiedRatio: 0.5, cooldownMinutes: 10 } });
+  const guarded = live({
+    surgeGuard: { enabled: true, triggerUnverifiedRatio: 0.5, cooldownMinutes: 10, onRaid: true },
+  });
 
   test("on, suppressed, absent, flag off, error", async () => {
     const s = setup();

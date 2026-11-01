@@ -6,6 +6,7 @@ import { base } from "./lib/orpc.ts";
 import { admin } from "./routes/admin.ts";
 import { analytics } from "./routes/analytics.ts";
 import { appeals } from "./routes/appeals.ts";
+import { federation, jury, portability, twitchImport, watchRooms } from "./routes/b7-stubs.ts";
 import { bot } from "./routes/bot.ts";
 import { channelsRoutes } from "./routes/channels.ts";
 import { chat } from "./routes/chat.ts";
@@ -60,6 +61,12 @@ export const router = base.router({
   moderation,
   ncii,
   notifications,
+  // Batch 7 (W3, N3, N4): 501 stubs until each unit fills its own route file.
+  watchRooms,
+  portability,
+  jury,
+  twitchImport,
+  federation,
 });
 
 export type Router = typeof router;

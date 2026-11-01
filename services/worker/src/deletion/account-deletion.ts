@@ -282,13 +282,9 @@ export async function completeDeletion(ctx: WorkerContext, deletionId: string): 
       const follows = await tx
         .delete(s.follows)
         .where(eq(s.follows.followerId, userId))
-        .returning({ channelId: s.follows.channelId, excludedAt: s.follows.excludedAt });
+        .returning({ channelId: s.follows.channelId });
+      // The follows trigger lowers each channel's count (decision (aa), migration 0046).
       counts.follows = follows.length;
-      for (const f of follows.filter((x) => x.excludedAt === null))
-        await tx
-          .update(s.channels)
-          .set({ followerCount: sql`greatest(${s.channels.followerCount} - 1, 0)` })
-          .where(eq(s.channels.id, f.channelId));
       await del(
         "channel_roles",
         tx.delete(s.channelRoles).where(eq(s.channelRoles.userId, userId)).returning({ u: s.channelRoles.userId }),
@@ -372,6 +368,36 @@ export async function completeDeletion(ctx: WorkerContext, deletionId: string): 
           .where(eq(s.rehearsalInvitees.userId, userId))
           .returning({ u: s.rehearsalInvitees.userId }),
       );
+      // Batch 7: the member's own portability grants, jury opt-in and imports go; links, giveaways,
+      // prediction resolutions, domain blocks and jury flags lose who made them (ids only).
+      // Giveaway entries and winners (published as salted pseudonyms) and jury seats and votes
+      // stay, referencing the pseudonymized account, so draws and results stay verifiable.
+      await del(
+        "follow_portability_grants",
+        tx
+          .delete(s.followPortabilityGrants)
+          .where(eq(s.followPortabilityGrants.userId, userId))
+          .returning({ u: s.followPortabilityGrants.userId }),
+      );
+      await del(
+        "jury_optins",
+        tx.delete(s.juryOptins).where(eq(s.juryOptins.userId, userId)).returning({ u: s.juryOptins.userId }),
+      );
+      await del(
+        "portability_imports",
+        tx
+          .delete(s.portabilityImports)
+          .where(eq(s.portabilityImports.userId, userId))
+          .returning({ id: s.portabilityImports.id }),
+      );
+      await tx.update(s.moveLinks).set({ createdById: null }).where(eq(s.moveLinks.createdById, userId));
+      await tx.update(s.giveaways).set({ createdById: null }).where(eq(s.giveaways.createdById, userId));
+      await tx.update(s.predictions).set({ resolvedById: null }).where(eq(s.predictions.resolvedById, userId));
+      await tx
+        .update(s.federationDomainBlocks)
+        .set({ createdById: null })
+        .where(eq(s.federationDomainBlocks.createdById, userId));
+      await tx.update(s.juryFlags).set({ resolvedById: null }).where(eq(s.juryFlags.resolvedById, userId));
 
       // The identity as it is now, before pseudonymization below replaces it: the outbox is
       // scrubbed of it last, after every write in this transaction that can emit an event.

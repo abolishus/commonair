@@ -52,6 +52,10 @@ describe("enums", () => {
         "ncii.decide",
         "ncii.auto_hide",
         "moderation.t0.match",
+        // Batch 7: B7-followups builds their statements.
+        "report.resolve",
+        "user.suspend",
+        "channel.suspend",
       ].sort(),
     );
     // Never the non-restricting decisions.

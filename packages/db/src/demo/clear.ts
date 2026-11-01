@@ -13,7 +13,7 @@
  * clear as a whole. The worker's `points-accrue` skips demo channels and viewers so watching the
  * demo never creates one; the accrual tables cascade and need no step here.
  */
-import { and, eq, inArray, isNotNull, isNull, notInArray, or, sql, type SQL } from "drizzle-orm";
+import { and, inArray, isNotNull, notInArray, or, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn, PgTable } from "drizzle-orm/pg-core";
 import type { Database, Executor } from "../client.ts";
 import { accounts, sessions, users } from "../schema/auth.ts";
@@ -229,13 +229,12 @@ export async function clearScope(tx: Executor): Promise<ClearScope> {
 
 /**
  * Delete all demo rows with `tx` (callers own the transaction). Follows by demo users on real
- * channels are removed too, so those channels' follower counts are lowered to match.
+ * channels are removed too; the follows trigger lowers those channels' follower counts (0046).
  */
 export async function clearDemoRows(tx: Executor): Promise<ClearReport> {
   const scope = await clearScope(tx);
   const steps: ClearReport["steps"] = [];
   for (const step of CLEAR_STEPS) {
-    if (step.table === "follows") await fixFollowerCounts(tx, scope);
     const where = step.where(scope);
     const deleted = await tx
       .delete(step.target)
@@ -244,26 +243,6 @@ export async function clearDemoRows(tx: Executor): Promise<ClearReport> {
     steps.push({ table: step.table, what: step.what, rows: deleted.length });
   }
   return { anchoredUsers: scope.anchored.length, steps };
-}
-
-async function fixFollowerCounts(tx: Executor, scope: ClearScope): Promise<void> {
-  if (scope.subjects.length === 0) return;
-  const counted = await tx
-    .select({ channelId: follows.channelId, n: sql<number>`count(*)::int` })
-    .from(follows)
-    .where(
-      and(
-        inArray(follows.followerId, scope.subjects),
-        scope.channels.length ? notInArray(follows.channelId, scope.channels) : undefined,
-        isNull(follows.excludedAt),
-      ),
-    )
-    .groupBy(follows.channelId);
-  for (const { channelId, n } of counted)
-    await tx
-      .update(channels)
-      .set({ followerCount: sql`greatest(0, ${channels.followerCount} - ${n})` })
-      .where(eq(channels.id, channelId));
 }
 
 class DryRun extends Error {

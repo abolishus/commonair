@@ -9,11 +9,29 @@
 import { z } from "zod";
 import { Timestamp } from "./api/common.ts";
 import { ChatMessage } from "./api/entities.ts";
-import { BOT_CONTROL_SCOPES, PLAYBACK_MODES, RAID_STATUSES } from "./enums.ts";
+import {
+  BOT_CONTROL_SCOPES,
+  PLAYBACK_MODES,
+  RAID_STATUSES,
+  ROOM_AGE_BANDS,
+  ROOM_END_REASONS,
+  ROOM_LIMITS,
+} from "./enums.ts";
 import type { EventPayload } from "./events.ts";
 import { ChannelChatSettings, type EmoteRange } from "./shapes.ts";
 
 const channel = z.string().min(3).max(25);
+const nonce = z.string().max(64).optional();
+/** Longest watch-room message (`CHAT_LIMITS.room.maxBodyLength`). */
+const CHAT_ROOM_BODY_MAX = 500;
+/** A watch-room member as frames carry them (`ChannelAvatar` data). */
+export const RoomMember = z.object({
+  id: z.uuid(),
+  username: z.string(),
+  displayName: z.string(),
+  avatarUrl: z.string().nullable(),
+});
+export type RoomMember = z.infer<typeof RoomMember>;
 
 export const ClientFrame = z.discriminatedUnion("op", [
   z.object({ op: z.literal("join"), channel, nonce: z.string().max(64).optional() }),
@@ -39,6 +57,24 @@ export const ClientFrame = z.discriminatedUnion("op", [
     nonce: z.string().max(64).optional(),
   }),
   z.object({ op: z.literal("ping"), nonce: z.string().max(64).optional() }),
+  // Watch rooms (batch 7, ADR 0017, decisions (q) and (r)). `token` is the room chat token
+  // `watchRooms.join` returns; a room is never a channel and never touches channel fan-out.
+  z.object({ op: z.literal("room.join"), roomId: z.uuid(), token: z.string().min(1).max(2048), nonce }),
+  z.object({ op: z.literal("room.part"), roomId: z.uuid(), nonce }),
+  z.object({
+    op: z.literal("room.send"),
+    roomId: z.uuid(),
+    body: z.string().min(1).max(CHAT_ROOM_BODY_MAX),
+    nonce,
+  }),
+  /** The member's playhead (`playheadWallclock()`) and mode; DVR members are left out of the target. */
+  z.object({
+    op: z.literal("room.sync"),
+    roomId: z.uuid(),
+    playheadWallclock: Timestamp,
+    mode: z.enum(PLAYBACK_MODES),
+    nonce,
+  }),
 ]);
 export type ClientFrame = z.infer<typeof ClientFrame>;
 
@@ -73,6 +109,12 @@ export const NOTICE_CODES = [
   "subs_off",
   "emote_only_on",
   "emote_only_off",
+  // Watch rooms (batch 7): why a room join or send was refused, or that the room ended.
+  "room_age_band",
+  "room_blocked",
+  "room_banned",
+  "room_full",
+  "room_closed",
 ] as const;
 export type NoticeCode = (typeof NOTICE_CODES)[number];
 
@@ -158,6 +200,28 @@ export const ServerFrame = z.discriminatedUnion("op", [
     until: z.string().nullable(),
   }),
   z.object({ op: z.literal("pong"), nonce: z.string().optional() }),
+  // Watch rooms (batch 7). Sent to the room's connected members only.
+  z.object({
+    op: z.literal("room.state"),
+    roomId: z.uuid(),
+    hostId: z.uuid(),
+    ageBand: z.enum(ROOM_AGE_BANDS),
+    /** Connected members; `ChannelAvatar` data. */
+    members: z.array(RoomMember).max(ROOM_LIMITS.maxMembers),
+  }),
+  z.object({
+    op: z.literal("room.message"),
+    roomId: z.uuid(),
+    message: z.object({
+      id: z.uuid(),
+      user: RoomMember.pick({ id: true, username: true, displayName: true }),
+      body: z.string(),
+      createdAt: Timestamp,
+    }),
+  }),
+  /** Decision (r): the slowest live member's playhead, capped `ROOM_LIMITS.edgeCapSeconds` behind the edge. */
+  z.object({ op: z.literal("room.sync"), roomId: z.uuid(), target: Timestamp }),
+  z.object({ op: z.literal("room.closed"), roomId: z.uuid(), reason: z.enum(ROOM_END_REASONS) }),
   z.object({
     op: z.literal("error"),
     code: z.string(),
@@ -178,7 +242,25 @@ export const CHAT_LIMITS = {
   botVerified: 7500,
   duplicateWindowMs: 30_000,
   maxBodyLength: 500,
+  /** Watch rooms (batch 7): messages per member per `windowMs`, and the longest message. */
+  room: { perWindow: 20, maxBodyLength: CHAT_ROOM_BODY_MAX },
 } as const;
+
+/**
+ * Messages on `BUS.roomControl` (batch 7): the API or worker ends a room (`room.close`) or removes
+ * one member (`room.kick`, a ban issued during the room, a band change); every chat instance holding
+ * the room acts on it. Ids and enums only.
+ */
+export const RoomControlMessage = z.discriminatedUnion("op", [
+  z.object({ op: z.literal("room.close"), roomId: z.uuid(), reason: z.enum(ROOM_END_REASONS) }),
+  z.object({
+    op: z.literal("room.kick"),
+    roomId: z.uuid(),
+    userId: z.uuid(),
+    reason: z.enum(["banned", "suspended", "blocked", "age_band", "left"]),
+  }),
+]);
+export type RoomControlMessage = z.infer<typeof RoomControlMessage>;
 
 /**
  * Messages on BUS.chatControl(channelId): a client-visible control frame (`ban`, `delete`,

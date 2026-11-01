@@ -122,6 +122,12 @@ export const instance = {
         watchGate: env.CHAT_WATCH_GATE === "on",
         surgeGuard: env.CHAT_SURGE_GUARD === "on",
         dvrMaxWindowSeconds: env.DVR_MAX_WINDOW_SECONDS,
+        // Batch 7 decisions (a)–(c): every one ships off.
+        giveaways: env.GIVEAWAYS_ENABLED,
+        federation: env.FEDERATION_ENABLED,
+        twitchImport: Boolean(
+          env.TWITCH_IMPORT_ENABLED && env.OAUTH_TWITCH_CLIENT_ID && env.OAUTH_TWITCH_CLIENT_SECRET,
+        ),
       },
       minAge: env.AUTH_MIN_AGE,
     };

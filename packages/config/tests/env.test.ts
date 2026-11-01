@@ -15,13 +15,17 @@ import {
   coreEnv,
   evidenceOpenEnv,
   evidenceSealEnv,
+  federationEnv,
+  giveawaysEnv,
   infraEnv,
   instanceSite,
   loadEnv,
   moderationEnv,
   paymentsEnv,
   playbackEnv,
+  portabilityEnv,
   turnEnv,
+  twitchImportEnv,
   webPushEnv,
   webPushPublicEnv,
 } from "../src/env.ts";
@@ -262,5 +266,29 @@ describe("W2 env (contract step §5)", () => {
     };
     const wrong = Buffer.from(await crypto.subtle.exportKey("pkcs8", x25519.privateKey)).toString("base64");
     expect(() => loadEnv(attestationEnv, { INTEGRITY_SIGNING_KEY: wrong })).toThrow(/Ed25519/);
+  });
+
+  test("batch 7 flags ship off, the Twitch endpoints default to Twitch, and the portability key is Ed25519", async () => {
+    expect(loadEnv(giveawaysEnv, {}).GIVEAWAYS_ENABLED).toBe(false);
+    expect(loadEnv(federationEnv, {}).FEDERATION_ENABLED).toBe(false);
+    expect(loadEnv(giveawaysEnv, { GIVEAWAYS_ENABLED: "true" }).GIVEAWAYS_ENABLED).toBe(true);
+    expect(loadEnv(twitchImportEnv, {})).toEqual({
+      TWITCH_IMPORT_ENABLED: false,
+      TWITCH_API_BASE_URL: "https://api.twitch.tv/helix",
+      TWITCH_AUTH_BASE_URL: "https://id.twitch.tv/oauth2",
+      TWITCH_IMAGE_HOSTS: ["static-cdn.jtvnw.net"],
+    });
+    expect(loadEnv(twitchImportEnv, { TWITCH_IMAGE_HOSTS: "a.test, b.test" }).TWITCH_IMAGE_HOSTS).toEqual([
+      "a.test",
+      "b.test",
+    ]);
+    expect(() => loadEnv(twitchImportEnv, { TWITCH_API_BASE_URL: "not a url" })).toThrow(EnvError);
+    const pair = (await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"])) as unknown as {
+      privateKey: CryptoKey;
+    };
+    const pkcs8 = Buffer.from(await crypto.subtle.exportKey("pkcs8", pair.privateKey)).toString("base64");
+    expect(loadEnv(portabilityEnv, { PORTABILITY_SIGNING_KEY: pkcs8 }).PORTABILITY_SIGNING_KEY).toBe(pkcs8);
+    expect(() => loadEnv(portabilityEnv, {})).toThrow(EnvError);
+    expect(() => loadEnv(portabilityEnv, { PORTABILITY_SIGNING_KEY: "AAAA" })).toThrow(/Ed25519/);
   });
 });

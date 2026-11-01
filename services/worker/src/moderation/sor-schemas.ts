@@ -75,6 +75,9 @@ const t0Match = z.object({
   listCategory: z.enum(HASH_LIST_CATEGORIES),
 });
 
+/** Batch 7 contract step placeholder: B7-followups defines these rows' details. */
+const pendingB7 = z.looseObject({});
+
 export const SOR_DETAILS = {
   "moderation.t1.restrict": t1Restrict,
   "moderation.t2.label": t2Label,
@@ -85,6 +88,11 @@ export const SOR_DETAILS = {
   "ncii.decide": nciiDecide,
   "ncii.auto_hide": nciiAutoHide,
   "moderation.t0.match": t0Match,
+  // Batch 7 contract step: allowlisted now, built by B7-followups. Until then `expectsStatement`
+  // excludes them, so neither the builder nor the coverage sweep selects them.
+  "report.resolve": pendingB7,
+  "user.suspend": pendingB7,
+  "channel.suspend": pendingB7,
 } as const satisfies Record<SourceAction, z.ZodType>;
 
 export type SorDetails = { [A in SourceAction]: z.infer<(typeof SOR_DETAILS)[A]> };
@@ -105,7 +113,9 @@ export function expectsStatement(a = schema.auditLog): SQL {
   const i = schema.nciiRequestItems;
   // Compared as text: a malformed id in `details` must not make the whole query fail.
   return sql`not (
-    (${a.action} = 'ncii.decide' and ${a.details} ->> 'decision' is distinct from 'removed')
+    -- Batch 7 contract step: allowlisted, not built yet (B7-followups removes this line).
+    ${a.action} in ('report.resolve', 'user.suspend', 'channel.suspend')
+    or (${a.action} = 'ncii.decide' and ${a.details} ->> 'decision' is distinct from 'removed')
     or (${a.action} = 'moderation.t0.match' and ${a.details} ->> 'listCategory' is distinct from 'ncii')
     or (${a.action} = 'moderation.case.end_stream' and ${a.details} ->> 'streamEnded' = 'false')
     or (${a.action} = 'moderation.case.suspend' and (

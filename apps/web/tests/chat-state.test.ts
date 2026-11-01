@@ -167,7 +167,7 @@ describe("ChatConnection settings and surge frames", () => {
     linksAllowed: true,
     minVerifiedWatchSeconds: 120,
     verifiedWatchExemptSubscribers: true,
-    surgeGuard: { enabled: true, triggerUnverifiedRatio: 0.5, cooldownMinutes: 10 },
+    surgeGuard: { enabled: true, triggerUnverifiedRatio: 0.5, cooldownMinutes: 10, onRaid: true },
   };
 
   function connect() {

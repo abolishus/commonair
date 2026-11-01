@@ -120,6 +120,10 @@ async function subjectInfo(
         evidence: { messages, senders: new Set(rows.map((m) => m.userId)).size },
       };
     }
+    // Batch 7 contract step: the seams part routes this to `watchRoomEvidence` (W3-watch-rooms);
+    // until then a watch-room report finds no subject.
+    case "watch_room":
+      return null;
     case "vod":
     case "clip":
     case "broadcast": {
