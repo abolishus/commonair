@@ -14,6 +14,7 @@ import {
 } from "@commonair/config";
 import { createDb } from "@commonair/db";
 import { createLogger, initTelemetry } from "@commonair/observability";
+import { chatWarmConnections } from "./pool.ts";
 import { startChatService } from "./server.ts";
 
 // Batch 7: GIVEAWAYS_ENABLED gates the giveaway chat plugin (decision (a)).
@@ -35,8 +36,8 @@ const chat = await startChatService({
   valkeyUrl: env.VALKEY_URL,
   internalSecret: env.INTERNAL_API_SECRET,
   logger,
-  // Enough for a join's parallel reads, without holding the whole pool open.
-  warmConnections: Math.min(4, env.DATABASE_POOL_MAX),
+  // The whole pool: a join's parallel reads plus whatever runs beside them never wait on a lookup.
+  warmConnections: chatWarmConnections(env.DATABASE_POOL_MAX),
   // W1: off until their GA criteria are met (ADR 0015).
   watchGate: env.CHAT_WATCH_GATE === "on",
   surgeGuard: env.CHAT_SURGE_GUARD === "on",

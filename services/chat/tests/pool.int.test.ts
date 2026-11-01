@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { afterAll, beforeAll, expect, test, vi } from "vite-plus/test";
-import { createDb } from "@commonair/db";
+import { sql } from "drizzle-orm";
+import { createDb, uuidv7 } from "@commonair/db";
 import { createTestDatabase, type TestDatabase } from "@commonair/db/testing";
-import { warmPool } from "../src/pool.ts";
+import { Directory } from "../src/directory.ts";
+import { chatWarmConnections, warmPool } from "../src/pool.ts";
 import { quietLogger } from "./helpers.ts";
 
 vi.setConfig({ testTimeout: 30_000, hookTimeout: 60_000 });
@@ -30,6 +32,38 @@ test("warm-up opens the requested connections and keeps them", async () => {
   } finally {
     await handle.close();
   }
+});
+
+test("the chat's warm pool serves a join's reads beside other work without opening a connection", async () => {
+  // CI run 41345495956: a join's four parallel standing reads plus other in-flight statements
+  // (a readiness probe, another socket's read) outran the 4 warm connections, so the join waited
+  // on a fresh connection's name lookup through an in-network DNS stall (CONNECT_TIMEOUT, 10 s).
+  const max = 10;
+  const applicationName = `chat-join-${crypto.randomUUID().slice(0, 8)}`;
+  const handle = createDb({ url: t.url, max, applicationName });
+  const open = async () => {
+    const [row] = await t.sql<{ n: number }[]>`
+      select count(*)::int as n from pg_stat_activity where application_name = ${applicationName}`;
+    return row?.n ?? 0;
+  };
+  try {
+    const pool = warmPool(handle.db, chatWarmConnections(max), quietLogger);
+    await pool.done;
+    const warm = await open();
+    // Drizzle queries run when awaited: start these, and let them reach their connections first.
+    const busy = [1, 2].map(async () => handle.db.execute(sql`select pg_sleep(0.3)`));
+    await Bun.sleep(50);
+    await new Directory(handle.db).standing({ id: uuidv7(), ownerId: uuidv7() }, uuidv7());
+    await Promise.all(busy);
+    expect(await open()).toBe(warm);
+  } finally {
+    await handle.close();
+  }
+});
+
+test("chat warms its whole pool", () => {
+  expect(chatWarmConnections(10)).toBe(10);
+  expect(chatWarmConnections(1)).toBe(1);
 });
 
 test("warm-up retries while the database is unreachable, and stops on request", async () => {
