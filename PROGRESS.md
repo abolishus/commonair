@@ -84,6 +84,46 @@ _Batch 6 follow-ups:_
 
 Handoff: `batch7/HANDOFF.md`.
 
+**Batch 7 contract step merged (2026-11-01).** It was built in two parallel parts (A–D: ADRs,
+contracts/db/config, crypto; then reconcile, API seams, event writes, worker and chat, web,
+harness/CI). A four-dimension review and a fix pass followed. Landed:
+
+- ADRs 0037–0039 (proposed), ADR 0016 Amendment 1, ADR 0031 accepted, ADR 0035 confirmation.
+- Migrations `0045_b7.sql` and `0046_b7_protections.sql`, with triggers tested by direct insert
+  as the app role.
+- `packages/{draw,federation}`, `packages/tokens/src/{standing,purge}.ts`, the Go purge mirror, and
+  the `dvr/<vodId>` relay token refine (the API still mints no relay DVR token).
+- `media.{vod,clip}.state` and `channel.suspension` on every path, with grep-backed site tests;
+  `b7JobsFor`; job, route, hook and web stubs; the `w3` shard and overlays; the SDK relicensing.
+
+Differs from the contract-step file:
+
+- The studio pages are `/move` and `/import` (the `_studio` layout is pathless); both are reserved
+  slugs.
+- The giveaway salt is never published (pseudonyms are linkable from public user ids). Entrants see
+  their own pseudonym instead (`Giveaway.me.pseudonym`).
+- The standing statement carries `bundleSha256` and is bound to the bundle's instance.
+- Relay purges are emitted only for a VOD going non-public (including one still recording), a
+  restriction, a suspension and `stream.offline`, per the W3-dvr-relay brief. A signed `reset`
+  covers a relay more than 7 days behind.
+- Jury cases also refuse minor-safety clauses, undecided cases and any party not known to be adult.
+  They can be withdrawn (`withdrawn_at`).
+- The new `ban-expiry` job writes the unsuspension when a timed ban lapses.
+- The verified-watch writer merges, so it never clobbers a raid carry.
+- The flag-off giveaway and Twitch checks live in API integration tests, not scenarios.
+
+Notify shard (full run on `8a562d9a`): 7m48s (live-dvr 4m08s, notifications 2m47s, rehearsal 53s),
+so nothing moved. `interact` is at 11m29s, before W3 adds steps. `rest` is at 16m20s, already over
+the ~12 min cap; split it at the milestone.
+
+Open items:
+
+- Better Auth clears a lapsed ban at sign-in without an event, so the unsuspension can be missed
+  when that sign-in comes before the 5-minute sweep (`services/api/src/auth/index.ts`).
+- The seed (seed-full session) must publish `interact.giveawayId` and `social.moveLinkNonce`.
+- N3 needs a browser-facing authorize base, or a `page.route` rewrite, because the harness host
+  cannot resolve `host.containers.internal`.
+
 **Batch 6 (W2; `.claude/briefs/batch6/README.md`), planned 2026-11-01.** User decisions: ledger
 splits ship enabled (counsel on split recipients is not a blocker; live money stays gated by M1);
 DVR defaults to a 30-minute window per channel under the 2 h cap; the `captions` scenario runs in
