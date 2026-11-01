@@ -25,6 +25,37 @@ export interface WebSessionOptions {
   /** Remove automation tells so integrity treats this session as a person (default true). */
   humanize?: boolean;
   log?: Logger;
+  /**
+   * The language this person asks for. A string (or `cookie`) sets the web app's
+   * `commonair-locale` cookie for the web origin only; `acceptLanguage` makes the browser send
+   * that `Accept-Language` (and report it as `navigator.language`). Absent: today's `en-US`.
+   */
+  locale?: string | WebSessionLocale;
+}
+
+export interface WebSessionLocale {
+  cookie?: string;
+  acceptLanguage?: string;
+}
+
+/** The web app's locale cookie (`apps/web/src/i18n/cookie.ts` `LOCALE_COOKIE`). */
+export const WEB_LOCALE_COOKIE = "commonair-locale";
+const DEFAULT_BROWSER_LOCALE = "en-US";
+
+/** The cookie Playwright should add for `locale`, scoped to the web origin only; null for none. */
+export function localeCookie(
+  webUrl: string,
+  locale: WebSessionOptions["locale"],
+): { name: string; value: string; url: string; sameSite: "Lax" } | null {
+  const tag = typeof locale === "string" ? locale : locale?.cookie;
+  if (!tag) return null;
+  // `url` (not `domain`) makes it a host-only cookie: the API origin never receives it.
+  return { name: WEB_LOCALE_COOKIE, value: encodeURIComponent(tag), url: new URL(webUrl).origin, sameSite: "Lax" };
+}
+
+/** The browser locale (`Accept-Language`, `navigator.language`) for `locale`. */
+export function browserLocale(locale: WebSessionOptions["locale"]): string {
+  return (typeof locale === "object" && locale.acceptLanguage) || DEFAULT_BROWSER_LOCALE;
 }
 
 export class WebSession {
@@ -41,8 +72,13 @@ export class WebSession {
 
   static async open(opts: WebSessionOptions): Promise<WebSession> {
     const browser = await opts.fleet.browser(opts.engine);
-    const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, locale: "en-US" });
+    const context = await browser.newContext({
+      viewport: { width: 1280, height: 800 },
+      locale: browserLocale(opts.locale),
+    });
     try {
+      const cookie = localeCookie(opts.webUrl, opts.locale);
+      if (cookie) await context.addCookies([cookie]);
       await context.addInitScript({ content: opts.probeScript });
       if (opts.humanize !== false) await context.addInitScript({ content: HUMANIZE_SCRIPT });
     } catch (err) {
