@@ -122,8 +122,9 @@ describe("releaseNotes", () => {
           "release/changelog.ts",
           "--version",
           "0.2.0",
+          // CI checks out one commit, so the range cannot reach back past HEAD.
           "--from",
-          "HEAD~1",
+          "HEAD",
           "--to",
           "HEAD",
           "--platforms",
