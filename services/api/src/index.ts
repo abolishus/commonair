@@ -23,7 +23,9 @@ import { closeInteractTickRunner } from "./interact/hooks.ts";
 import { closeGiveawayCloseQueue } from "./interact/giveaways/queue.ts";
 import { closeOverlayHub } from "./overlay/stream.ts";
 import { closeExportQueue } from "./privacy/export-queue.ts";
+import { closeFederationQueue } from "./federation/queue.ts";
 import { closePortabilityQueue } from "./portability/queue.ts";
+import { closeRelayPurgeFeed } from "./relay/purges.ts";
 import { closeClipQueue } from "./media/clip-queue.ts";
 import { closeVodPlacementQueue } from "./media/vod-placement-queue.ts";
 import { closeModeration } from "./moderation/runtime.ts";
@@ -130,6 +132,8 @@ export async function buildDeps(
         ["overlay hub", closeOverlayHub],
         ["export queue", closeExportQueue],
         ["portability queue", closePortabilityQueue],
+        ["federation queue", closeFederationQueue],
+        ["relay purge feed", closeRelayPurgeFeed],
         ["webhook queue", closeWebhookQueue],
         ["notify queue", closeNotifyQueue],
         ["eventsub", closeEventSub],

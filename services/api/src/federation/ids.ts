@@ -12,7 +12,7 @@ import { and, eq, sql } from "drizzle-orm";
 import type { Deps } from "../deps.ts";
 import { actorPath, SHARED_INBOX_PATH } from "../raw-routes.ts";
 
-const { channels, federationActors, users } = schema;
+const { categories, channels, federationActors, users } = schema;
 
 /** Media type of ActivityPub answers (Mastodon sends and expects this one). */
 export const ACTIVITY_JSON = "application/activity+json";
@@ -61,7 +61,7 @@ type ChannelRow = typeof channels.$inferSelect;
 type ActorRow = typeof federationActors.$inferSelect;
 
 export type FederatedChannel =
-  | { state: "ok"; channel: ChannelRow; actor: ActorRow; ownerImage: string | null }
+  | { state: "ok"; channel: ChannelRow; actor: ActorRow; ownerImage: string | null; categoryMature: boolean }
   /** Federated once (an actor row exists), now off or suspended: its actor `Delete` went out. */
   | { state: "gone" }
   /** Unknown, or never federated. */
@@ -85,16 +85,24 @@ export async function federatedChannel(deps: Pick<Deps, "db" | "now">, channelId
       channel: channels,
       actor: federationActors,
       ownerImage: users.image,
+      categoryMature: categories.mature,
       suspended: suspendedSql(deps.now()),
     })
     .from(channels)
     .innerJoin(users, eq(users.id, channels.ownerId))
     .leftJoin(federationActors, eq(federationActors.channelId, channels.id))
+    .leftJoin(categories, eq(categories.id, channels.categoryId))
     .where(eq(channels.id, channelId))
     .limit(1);
   if (!row?.actor) return { state: "missing" };
   if (row.suspended || !row.actor.enabled || !row.channel.federationSettings.enabled) return { state: "gone" };
-  return { state: "ok", channel: row.channel, actor: row.actor, ownerImage: row.ownerImage };
+  return {
+    state: "ok",
+    channel: row.channel,
+    actor: row.actor,
+    ownerImage: row.ownerImage,
+    categoryMature: row.categoryMature ?? false,
+  };
 }
 
 /** The channel id behind a slug, when that channel is federated now (WebFinger). */

@@ -9,7 +9,13 @@
 import { describe, expect, test } from "vite-plus/test";
 import { FEDERATION_RULES } from "@commonair/contracts/enums";
 import { DATE_SKEW_SECONDS } from "@commonair/federation";
-import { buildActorDocument, actorSummary, wantsActivityJson, type ActorInput } from "../src/federation/actor.ts";
+import {
+  actorInputOf,
+  buildActorDocument,
+  actorSummary,
+  wantsActivityJson,
+  type ActorInput,
+} from "../src/federation/actor.ts";
 import { domainSuffixes, isBlockedBy } from "../src/federation/blocks.ts";
 import { outboxCursor, parseOutboxCursor } from "../src/federation/collections.ts";
 import { hostOf } from "../src/federation/ids.ts";
@@ -185,6 +191,26 @@ describe("actor document", () => {
     expect(doc).not.toHaveProperty("icon");
     expect(doc).not.toHaveProperty("image");
     expect(JSON.stringify(doc)).not.toContain("media.streams.example");
+  });
+
+  test("a channel in a mature category is mature, as the worker's loadChannel counts it", () => {
+    const found = {
+      channel: {
+        id: "0190a0a0-0000-7000-8000-000000000002",
+        slug: "alice",
+        displayName: "Alice",
+        description: "",
+        mature: false,
+        theme: {},
+        createdAt: new Date("2026-11-01T00:00:00Z"),
+      },
+      actor: { publicKeyPem: "PEM" },
+      ownerImage: "https://media.streams.example/a.png",
+    };
+    const deps = { env: {} } as unknown as Parameters<typeof actorInputOf>[0];
+    expect(actorInputOf(deps, found).mature).toBe(false);
+    expect(actorInputOf(deps, { ...found, categoryMature: true }).mature).toBe(true);
+    expect(buildActorDocument(site, actorInputOf(deps, { ...found, categoryMature: true }))).not.toHaveProperty("icon");
   });
 
   test("no avatar or banner: the fields are left out, never null", () => {

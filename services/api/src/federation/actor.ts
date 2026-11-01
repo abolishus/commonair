@@ -111,6 +111,8 @@ export function actorInputOf(
     };
     actor: { publicKeyPem: string };
     ownerImage: string | null;
+    /** The channel's category is mature (the worker's `loadChannel` counts it the same way). */
+    categoryMature?: boolean;
   },
 ): ActorInput {
   const theme = channelTheme(found.channel as Parameters<typeof channelTheme>[0]);
@@ -119,7 +121,7 @@ export function actorInputOf(
     slug: found.channel.slug,
     displayName: found.channel.displayName,
     description: found.channel.description,
-    mature: found.channel.mature,
+    mature: found.channel.mature || (found.categoryMature ?? false),
     avatarUrl: mediaUrl(deps, theme.avatarKey ?? found.ownerImage),
     bannerUrl: mediaUrl(deps, theme.bannerKey),
     publicKeyPem: found.actor.publicKeyPem,

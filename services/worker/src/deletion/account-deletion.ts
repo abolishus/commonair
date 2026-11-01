@@ -28,7 +28,8 @@ import { dmcaHiddenKey } from "../dmca/objects.ts";
 import { thumbnailPrefix } from "../moderation/objects.ts";
 import { vodObjectPrefixes } from "../vod/prefixes.ts";
 import { deleteRoomData } from "./watch-rooms.ts";
-import { deleteFederationData } from "./federation.ts";
+import { captureRetiredActor, deleteFederationData, type RetiredActor, sendRetiredActorDelete } from "./federation.ts";
+import { federationConfig } from "../federation/config.ts";
 import { withMediaState } from "../media-state.ts";
 import { audit, endLiveOrRehearsal, safeErrorCode, type EndedBroadcast } from "../moderation/records.ts";
 import { publishLiveEnded } from "../moderation/t0.ts";
@@ -194,6 +195,8 @@ interface Completed {
   notice: Notice | null;
   /** The user's OAuth apps the deletion removed (with every other user's grants of them). */
   deletedAppIds: string[];
+  /** Actor `Delete`s to send after commit (federation, ADR 0030); never before, so a rollback sends nothing. */
+  retiredActors: RetiredActor[];
 }
 
 /** Complete one due deletion. Returns null if it is not due or someone else took it. */
@@ -225,6 +228,7 @@ export async function completeDeletion(ctx: WorkerContext, deletionId: string): 
     const objectPrefixes: string[] = [];
     const exportKeys: string[] = [];
     const deletedAppIds: string[] = [];
+    const retiredActors: RetiredActor[] = [];
     let notice: Notice | null = null;
     let identity: DeletedIdentity | null = null;
     if (user) {
@@ -517,6 +521,8 @@ export async function completeDeletion(ctx: WorkerContext, deletionId: string): 
         // Batch 7: the channel stops federating (actor, key and remote followers go; N4 sends the
         // `Delete`), its move links stop working, and an open giveaway is cancelled: its entrants
         // could never be told they won.
+        const retired = await captureRetiredActor(tx, channel.id, federationConfig(ctx));
+        if (retired) retiredActors.push(retired);
         Object.assign(counts, await deleteFederationData(tx, channel.id));
         counts.move_links_revoked = (
           await tx
@@ -694,6 +700,7 @@ export async function completeDeletion(ctx: WorkerContext, deletionId: string): 
       completedAt: now,
       notice,
       deletedAppIds,
+      retiredActors,
     };
   });
 }
@@ -701,6 +708,17 @@ export async function completeDeletion(ctx: WorkerContext, deletionId: string): 
 /** After commit: media objects (skipped entirely under an active hold), live and user-control messages. */
 async function afterCommit(ctx: WorkerContext, c: Completed) {
   if (c.ended) await publishLiveEnded(ctx, c.ended, ctx.now());
+  // A crash between the commit and this loop loses the `Delete` (accepted: deletion/federation.ts).
+  for (const r of c.retiredActors) {
+    try {
+      await sendRetiredActorDelete(ctx, federationConfig(ctx), r);
+    } catch (err) {
+      ctx.logger.warn("federation actor delete enqueue failed", {
+        channelId: r.channelId,
+        errorCode: safeErrorCode(err),
+      });
+    }
+  }
   try {
     const msg = UserControlMessage.parse({ op: "disconnect", userId: c.userId, reason: "deleted" });
     await ctx.valkey.publish(BUS.userControl, JSON.stringify(msg));
