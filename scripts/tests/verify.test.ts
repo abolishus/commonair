@@ -233,8 +233,9 @@ describe("CI verify jobs", () => {
   test("the captions fetch is a no-op until the weights are pinned", () => {
     const steps = setup.runs.steps as { name?: string; run?: string }[];
     const run = steps.find((s) => s.name === "Captions model")?.run ?? "";
-    expect(run).toContain("captionsModelUrl() === null");
-    expect(run).toContain("bun scripts/fetch-model.ts --model captions");
-    expect(run).toMatch(/else\n\s*echo /);
+    expect(run).toContain('captionsModelUrl() ?? ""');
+    expect(run).toMatch(
+      /if \[ -n "\$url" \]; then\n\s*bun scripts\/fetch-model.ts --model captions\n\s*else\n\s*echo /,
+    );
   });
 });

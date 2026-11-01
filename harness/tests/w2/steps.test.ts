@@ -220,5 +220,6 @@ describe("wiring", () => {
     }
     expect(shardOf(registry.full, "captions").map((s) => s.name)).toEqual(["captions"]);
     expect(FULL_SHARDS.notify).toEqual(["notifications", "live-dvr", "rehearsal"]);
-  });
+    // The first registry load imports every scenario module: over 5 s on CI (see cli.test.ts).
+  }, 120_000);
 });
