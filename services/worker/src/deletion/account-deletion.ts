@@ -28,6 +28,7 @@ import { dmcaHiddenKey } from "../dmca/objects.ts";
 import { thumbnailPrefix } from "../moderation/objects.ts";
 import { vodObjectPrefixes } from "../vod/prefixes.ts";
 import { deleteRoomData } from "./watch-rooms.ts";
+import { withMediaState } from "../media-state.ts";
 import { audit, endLiveOrRehearsal, safeErrorCode, type EndedBroadcast } from "../moderation/records.ts";
 import { publishLiveEnded } from "../moderation/t0.ts";
 
@@ -463,16 +464,25 @@ export async function completeDeletion(ctx: WorkerContext, deletionId: string): 
       const [channel] = await tx.select().from(s.channels).where(eq(s.channels.ownerId, userId)).for("update");
       if (channel) {
         ended = await endLiveOrRehearsal(tx, channel, now);
-        const vods = await tx
-          .update(s.vods)
-          .set({ status: "deleted", removedReason: DELETED_REASON })
-          .where(and(eq(s.vods.channelId, channel.id), ne(s.vods.status, "deleted")))
-          .returning({ id: s.vods.id, storagePrefix: s.vods.storagePrefix });
-        const clips = await tx
-          .update(s.clips)
-          .set({ status: "deleted", removedReason: DELETED_REASON })
-          .where(and(eq(s.clips.channelId, channel.id), ne(s.clips.status, "deleted")))
-          .returning({ id: s.clips.id, storageKey: s.clips.storageKey, thumbnailKey: s.clips.thumbnailKey });
+        // `media.*.state` (decision (z)): the channel's public media stops being public.
+        const { vods, clips } = await withMediaState(
+          tx,
+          { vods: eq(s.vods.channelId, channel.id), clips: eq(s.clips.channelId, channel.id) },
+          "deleted",
+          now,
+          async () => ({
+            vods: await tx
+              .update(s.vods)
+              .set({ status: "deleted", removedReason: DELETED_REASON })
+              .where(and(eq(s.vods.channelId, channel.id), ne(s.vods.status, "deleted")))
+              .returning({ id: s.vods.id, storagePrefix: s.vods.storagePrefix }),
+            clips: await tx
+              .update(s.clips)
+              .set({ status: "deleted", removedReason: DELETED_REASON })
+              .where(and(eq(s.clips.channelId, channel.id), ne(s.clips.status, "deleted")))
+              .returning({ id: s.clips.id, storageKey: s.clips.storageKey, thumbnailKey: s.clips.thumbnailKey }),
+          }),
+        );
         counts.vods = vods.length;
         counts.clips = clips.length;
         // Both of a VOD's own prefixes: a placement move may have been interrupted.

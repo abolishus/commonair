@@ -19,13 +19,7 @@ const ROOT = join(import.meta.dirname, "..");
 type Site = { writes: number; tracked: true } | { writes: number; tracked: false; why: string };
 
 const MEDIA_SITES: Record<string, Site> = {
-  // Contract request (worker part's file): account deletion should run its two removals inside
-  // `withMediaState(…, "deleted", …)`. Until then the deleted channel's media writes no event.
-  "src/deletion/account-deletion.ts": {
-    writes: 3,
-    tracked: false,
-    why: "owned by the worker part; contract request filed (reason deleted)",
-  },
+  "src/deletion/account-deletion.ts": { writes: 3, tracked: true },
   "src/dmca/restore.ts": { writes: 3, tracked: true },
   // Retention (tracked) and the purge of clips already removed by their owner or creator.
   "src/housekeeping.ts": { writes: 2, tracked: true },
