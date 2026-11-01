@@ -22,6 +22,16 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
 
 ## In flight
 
+**Batch 6 (W2; `.claude/briefs/batch6/README.md`), planned 2026-11-01.** User decisions: ledger
+splits ship enabled (counsel on split recipients is not a blocker; live money stays gated by M1);
+DVR defaults to a 30-minute window per channel under the 2 h cap; the `captions` scenario runs in
+its own path-filtered shard plus the nightly run. Orchestrator defaults are decisions (d)–(r).
+Contract step (`w2/contract-step.md`: migrations 0042/0043, contracts, config, the origin route
+registry, media session hooks, the rehearsal gate, `packages/{chat-filter,sim,captions}`, attestation
+crypto and vectors, the DVR player seam, stubs and scaffolding), then wave 1 (W2-splits, W2-captions,
+W2-rollup-analytics, W2-enforcement-report, W2-dvr, W2-rehearsal) and wave 2 (W2b-attestations,
+W2b-group-appeals, W2-vod-watch with the chat replay panel). Handoff: `batch6/HANDOFF.md`.
+
 **Batch 5 (rest of N2; `.claude/briefs/batch5/README.md`), planned 2026-10-31.** User decisions:
 Spanish drafted by agents now against a shared glossary and uploaded to Weblate as "needs
 editing" for human review; Arabic waits for the next batch (N2-rtl still makes `packages/ui`
