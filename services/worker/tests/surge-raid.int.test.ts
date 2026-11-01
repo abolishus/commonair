@@ -29,7 +29,7 @@ import { executeDueRaids } from "../src/interact/raids/execute.ts";
 import { quietLogger, VALKEY_URL, waitFor } from "./fixtures.ts";
 
 const SECRET = "surge-raid-test-secret-0123456789abcdef";
-const ON: ChatGateConfig = { watchGate: true, surgeGuard: true, secret: SECRET };
+const ON: ChatGateConfig = { watchGate: true, surgeGuard: true, giveaways: false, secret: SECRET };
 const valkey = createValkey(VALKEY_URL, { keyPrefix: `test:sr:${crypto.randomUUID()}:`, name: "worker-test-sr" });
 const sub = createValkey(VALKEY_URL, { name: "worker-test-sr-sub" });
 let t: TestDatabase;

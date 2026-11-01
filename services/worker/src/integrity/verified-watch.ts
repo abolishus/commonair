@@ -4,7 +4,10 @@
 /**
  * Verified-watch keys (`KEYS.verifiedWatch`, ADR 0015 decision 1), written after each scoring pass
  * for live channels with the gate on (only while `CHAT_WATCH_GATE` is on) or the surge guard
- * enabled (only while `CHAT_SURGE_GUARD` is on), so keys exist before a surge starts. Sources:
+ * enabled (only while `CHAT_SURGE_GUARD` is on), so keys exist before a surge starts, and for
+ * live channels with an open giveaway that asks for verified watching (only while
+ * `GIVEAWAYS_ENABLED` is on; ADR 0039 decision (t)): the streamer chose that criterion, and giveaway
+ * eligibility reads these keys, so without them nobody could enter. Sources:
  * signed-in `GATE_ELIGIBLE` sessions on the live broadcast; the broadcaster, moderators, VIPs and
  * verified bots are exempt in chat and get no key. One pipelined merge-write per user
  * (`VERIFIED_WATCH_MERGE`), so a raid carry (batch 7 decision (w)) is never clobbered.
@@ -65,14 +68,19 @@ export function verifiedWatchMergeArgs(
 
 /** Live channels the writer covers under the instance flags; ids only. */
 export async function gatedChannels(ctx: Pick<WorkerContext, "db">, cfg: ChatGateConfig): Promise<string[]> {
-  if (!cfg.watchGate && !cfg.surgeGuard) return [];
+  if (!cfg.watchGate && !cfg.surgeGuard && !cfg.giveaways) return [];
   const gate = cfg.watchGate ? sql`coalesce((c.chat_settings->>'minVerifiedWatchSeconds')::int, 0) > 0` : sql`false`;
   const guard = cfg.surgeGuard
     ? sql`coalesce((c.chat_settings->'surgeGuard'->>'enabled')::boolean, false)`
     : sql`false`;
+  const giveaway = cfg.giveaways
+    ? sql`exists (select 1 from giveaways g
+                   where g.channel_id = c.id and g.status = 'open'
+                     and coalesce((g.eligibility->>'minVerifiedWatchSeconds')::int, 0) > 0)`
+    : sql`false`;
   const rows = (await ctx.db.execute(sql`
     select c.id from channels c
-     where c.live_broadcast_id is not null and (${gate} or ${guard})`)) as unknown as Row[];
+     where c.live_broadcast_id is not null and (${gate} or ${guard} or ${giveaway})`)) as unknown as Row[];
   return rows.map((r) => String(r.id));
 }
 

@@ -6,7 +6,9 @@
  * `GIVEAWAYS_ENABLED=true` (harness/compose.w3.yaml):
  *
  * 1. Its own streamer goes live and opens a keyword giveaway that needs verified watching.
- * 2. Two verified viewers (HTTP viewers the integrity scorer verifies) become eligible; one enters
+ * 2. Two verified viewers (HTTP viewers the integrity scorer verifies) become eligible: the open
+ *    giveaway's verified-watch criterion alone makes the worker write `KEYS.verifiedWatch` for the
+ *    channel (ADR 0039 §2; the chat gate and surge guard stay off here). One enters
  *    by typing the keyword in chat, the other with `chat-giveaway-enter` in the web chat panel
  *    (`--set via=api`: through the API).
  * 3. A viewbot (heartbeats only, never verified) is refused with `verified_watch`.
