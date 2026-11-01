@@ -24,11 +24,51 @@ export const RELEASE_IMAGES = [
   "tools",
   "tracker",
   "web",
+  "whisper",
   "worker",
 ] as const;
 export type ReleaseImage = (typeof RELEASE_IMAGES)[number];
 
 export const RELEASE_PLATFORMS = ["linux/amd64", "linux/arm64"] as const;
+export type ReleasePlatform = (typeof RELEASE_PLATFORMS)[number];
+
+type CpuFlags = Partial<Record<ReleaseImage, Partial<Record<ReleasePlatform, string[]>>>>;
+
+/**
+ * CPU features an image's build needs beyond its platform's baseline, named as Linux lists them
+ * in /proc/cpuinfo `flags`. whisper's amd64 build compiles ggml for AVX, AVX2, FMA and F16C
+ * (infra/containers/whisper.Containerfile) with no runtime dispatch, so on a CPU without them
+ * whisper-server dies with SIGILL at start; its arm64 build needs nothing beyond ARMv8 (NEON).
+ * The manifest repeats these (`cpu`), the bundle hands them to selfhost.sh (release.env), which
+ * refuses to turn captions on where one is missing, and the release notes list them.
+ */
+export const CPU_REQUIREMENTS: CpuFlags = {
+  whisper: { "linux/amd64": ["avx", "avx2", "fma", "f16c"] },
+};
+
+/** CPU_REQUIREMENTS for the platforms a release builds; images with none are left out. */
+export function cpuRequirements(platforms: readonly ReleasePlatform[]): CpuFlags {
+  const out: CpuFlags = {};
+  for (const image of RELEASE_IMAGES) {
+    const byPlatform: Partial<Record<ReleasePlatform, string[]>> = {};
+    for (const p of platforms) {
+      const flags = CPU_REQUIREMENTS[image]?.[p];
+      if (flags) byPlatform[p] = [...flags];
+    }
+    if (Object.keys(byPlatform).length > 0) out[image] = byPlatform;
+  }
+  return out;
+}
+
+/** One sentence per image and platform that needs more than its baseline (release notes). */
+export function cpuRequirementLines(cpu: CpuFlags): string[] {
+  return Object.entries(cpu).flatMap(([image, byPlatform]) =>
+    Object.entries(byPlatform ?? {}).map(
+      ([platform, flags]) =>
+        `\`${image}\` on ${platform} needs a CPU with ${flags.map((f) => f.toUpperCase()).join(", ")}`,
+    ),
+  );
+}
 
 /** Relay binary targets: `${os}/${arch}`. */
 export const RELAY_TARGETS = [
@@ -48,6 +88,8 @@ const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z-]+(\.[0-9A
 const DIGEST = /^sha256:[0-9a-f]{64}$/;
 // Lowercase registry host[:port] and path, as OCI references require.
 const REGISTRY = /^[a-z0-9.-]+(:\d+)?(\/[a-z0-9._-]+)*$/;
+// A /proc/cpuinfo flag name (selfhost.sh matches it as one word of that line).
+const CPU_FLAG = /^[a-z0-9_]+$/;
 
 /** `v0.1.0-rc.1` → `0.1.0-rc.1`; throws on anything that is not a `v`-prefixed semver tag. */
 export function versionFromTag(tag: string): string {
@@ -71,6 +113,17 @@ export const releaseManifest = z
     /** Manifest-list (multi-arch index) digest per image. */
     images: z.record(z.enum(RELEASE_IMAGES), z.object({ digest: z.string().regex(DIGEST) })),
     platforms: z.array(z.enum(RELEASE_PLATFORMS)).min(1),
+    /**
+     * CPU features an image needs on a platform beyond its baseline (CPU_REQUIREMENTS), e.g.
+     * `{ "whisper": { "linux/amd64": ["avx", "avx2", "fma", "f16c"] } }`. write-manifest always
+     * writes it; it is optional so that a manifest without it still parses.
+     */
+    cpu: z
+      .partialRecord(
+        z.enum(RELEASE_IMAGES),
+        z.partialRecord(z.enum(RELEASE_PLATFORMS), z.array(z.string().regex(CPU_FLAG)).min(1)),
+      )
+      .optional(),
   })
   .strict()
   .superRefine((m, ctx) => {
@@ -78,6 +131,10 @@ export const releaseManifest = z
     const missing = RELEASE_IMAGES.filter((n) => !m.images[n]);
     if (missing.length > 0)
       ctx.addIssue({ code: "custom", path: ["images"], message: `missing images: ${missing.join(", ")}` });
+    for (const [image, byPlatform] of Object.entries(m.cpu ?? {}))
+      for (const platform of Object.keys(byPlatform ?? {}))
+        if (!(m.platforms as string[]).includes(platform))
+          ctx.addIssue({ code: "custom", path: ["cpu", image, platform], message: "not a platform of this release" });
   });
 export type ReleaseManifest = z.output<typeof releaseManifest>;
 

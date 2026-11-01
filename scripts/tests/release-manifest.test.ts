@@ -1,13 +1,18 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, test } from "vite-plus/test";
 import { ZodError } from "zod";
 import {
+  CPU_REQUIREMENTS,
   DEFAULT_REGISTRY,
   RELAY_TARGETS,
   RELEASE_IMAGES,
   bundleAssetName,
+  cpuRequirementLines,
+  cpuRequirements,
   imageRef,
   isPrerelease,
   parseManifest,
@@ -89,5 +94,49 @@ describe("references and asset names", () => {
       "commonair-relay_0.1.0_windows_arm64.exe",
     ]);
     expect(bundleAssetName("0.1.0")).toBe("commonair-selfhost_0.1.0.tar.gz");
+  });
+});
+
+describe("CPU requirements", () => {
+  test("whisper's amd64 build needs the flags its Containerfile compiles for; nothing else needs any", () => {
+    expect(CPU_REQUIREMENTS).toEqual({ whisper: { "linux/amd64": ["avx", "avx2", "fma", "f16c"] } });
+    const file = readFileSync(join(import.meta.dirname, "../../infra/containers/whisper.Containerfile"), "utf8");
+    const simd = /simd="(-DGGML_[^"]+)"/.exec(file)?.[1] ?? "";
+    const compiled = [...simd.matchAll(/-DGGML_([A-Z0-9]+)=ON/g)].map((m) => m[1]!.toLowerCase());
+    expect(compiled.sort()).toEqual([...(CPU_REQUIREMENTS.whisper?.["linux/amd64"] ?? [])].sort());
+  });
+
+  test("cpuRequirements keeps only the platforms a release builds", () => {
+    expect(cpuRequirements(["linux/amd64", "linux/arm64"])).toEqual({
+      whisper: { "linux/amd64": ["avx", "avx2", "fma", "f16c"] },
+    });
+    expect(cpuRequirements(["linux/arm64"])).toEqual({});
+    expect(cpuRequirements([])).toEqual({});
+  });
+
+  test("cpuRequirementLines says it in one sentence per image and platform", () => {
+    expect(cpuRequirementLines(cpuRequirements(["linux/amd64"]))).toEqual([
+      "`whisper` on linux/amd64 needs a CPU with AVX, AVX2, FMA, F16C",
+    ]);
+    expect(cpuRequirementLines({})).toEqual([]);
+  });
+
+  test("the manifest's cpu field is optional and accepts what write-manifest writes", () => {
+    const cpu = { whisper: { "linux/amd64": ["avx2"] } };
+    expect(parseManifest(JSON.stringify(manifest({ cpu }))).cpu).toEqual(cpu);
+    expect(parseManifest(JSON.stringify(manifest())).cpu).toBeUndefined();
+    expect(parseManifest(JSON.stringify(manifest({ cpu: {} }))).cpu).toEqual({});
+  });
+
+  test.each([
+    ["a platform the release does not build", { whisper: { "linux/arm64": ["neon"] } }, ["linux/amd64"]],
+    ["no flags", { whisper: { "linux/amd64": [] } }, undefined],
+    ["an upper-case flag", { whisper: { "linux/amd64": ["AVX2"] } }, undefined],
+    ["two flags in one string", { whisper: { "linux/amd64": ["avx2 fma"] } }, undefined],
+    ["an unknown image", { nope: { "linux/amd64": ["avx2"] } }, undefined],
+    ["an unknown platform", { whisper: { "linux/s390x": ["vx"] } }, undefined],
+  ])("the cpu field refuses %s", (_, cpu, platforms) => {
+    const over = platforms ? { cpu, platforms } : { cpu };
+    expect(() => parseManifest(JSON.stringify(manifest(over)))).toThrow(ZodError);
   });
 });

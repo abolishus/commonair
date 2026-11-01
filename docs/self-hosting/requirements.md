@@ -42,6 +42,9 @@ VOD and clip on the local disk. With an external object store
 ([object-storage.md](object-storage.md)), the host's disk holds no objects: size it for
 Postgres, the scratch space, the images and the logs.
 
+Live captions are optional and off by default. They add about two busy cores while captioned
+streams are live and, on amd64, need a CPU with AVX2, FMA and F16C ([captions.md](captions.md)).
+
 The E6 load test (`load-plan`: 20 streamers × 200 viewers) is how the project sizes a server.
 Its results are not published yet, so every row above except the last is an estimate. They will
 go into [the capacity runbook](../operators/capacity.md), which also says how to measure a host

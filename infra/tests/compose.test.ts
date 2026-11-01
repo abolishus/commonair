@@ -397,9 +397,9 @@ describe("Quadlet mirror", () => {
   const keys = (unit: string, key: string) => [...unit.matchAll(new RegExp(`^${key}=(.*)$`, "gm"))].map((m) => m[1]!);
   // Compose's garage-init is the units' storage-init, which also checks an external store.
   const unitOf = (service: string) => (service === "garage-init" ? "storage-init" : service);
-  // Dev/test-only services have no production unit. whisper (captions) has none yet either: the
-  // self-host unit and selfhost.sh option are a tracked follow-up (W2-captions).
-  const DEV_ONLY = new Set(["mailpit", "mock-rtmp", "stripe-mock", "whisper"]);
+  // Dev/test-only services have no production unit. whisper (captions) has one, which selfhost.sh
+  // installs only with --captions, as compose runs it only in the `captions` profile.
+  const DEV_ONLY = new Set(["mailpit", "mock-rtmp", "stripe-mock"]);
   // Production-only units with no compose service: the timer-driven IRC certificate sync.
   const QUADLET_ONLY = new Set(["irc-cert"]);
   // A host path bind-mounted by two or more units carries the shared SELinux label `z`: the

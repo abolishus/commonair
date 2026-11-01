@@ -52,7 +52,7 @@ Read the pages in this order. Each step says what "done" looks like before you g
 7. [troubleshooting.md](troubleshooting.md), when something is not right: `status`, the logs and
    the common failures.
 
-[tls.md](tls.md), [scaling.md](scaling.md), [relays.md](relays.md),
+[captions.md](captions.md), [tls.md](tls.md), [scaling.md](scaling.md), [relays.md](relays.md),
 [verifying.md](verifying.md) and [mirroring.md](mirroring.md) are for when you need them.
 
 ## The 10-minute path
@@ -82,6 +82,7 @@ Replace `0.1.0-rc.1` with the latest version on the project's releases page.
 | [install.md](install.md)                 | Download, verify, install, first admin, first stream                  |
 | [configuration.md](configuration.md)     | Every environment variable, and how to change one                     |
 | [object-storage.md](object-storage.md)   | An external S3 store instead of Garage: what it needs, Spaces         |
+| [captions.md](captions.md)               | Live captions (optional): turning them on, CPU cost, AVX2 on amd64    |
 | [tls.md](tls.md)                         | ACME certificates, the internal CA, the IRC certificate               |
 | [upgrades.md](upgrades.md)               | `selfhost.sh upgrade`, rollback, pinning a version, a fork's releases |
 | [backups.md](backups.md)                 | WAL-G, off-host storage, object backups, restore, the restore drill   |

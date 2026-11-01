@@ -13,7 +13,6 @@ import {
   declaredArgs,
   parsePlatforms,
   releaseBuilds,
-  UNRELEASED_IMAGES,
   utcTimestamp,
 } from "../release/images.ts";
 import { RELEASE_IMAGES } from "../release/manifest.ts";
@@ -34,17 +33,34 @@ describe("release builds", () => {
     expect(builds.map((b) => b.image)).toEqual([...RELEASE_IMAGES]);
   });
 
-  test("an unreleased image is built by compose but in no release", () => {
-    for (const n of UNRELEASED_IMAGES) {
-      expect(Object.values(compose.services).some((s) => s.build && s.image?.includes(`/${n}:`))).toBe(true);
-      expect(builds.map((b) => b.image as string)).not.toContain(n);
-    }
+  test("every image compose builds is released, the captions sidecar included", () => {
+    const built = Object.values(compose.services)
+      .filter((s) => s.build)
+      .map((s) => /\/([a-z0-9-]+):\$\{IMAGE_TAG/.exec(s.image ?? "")?.[1]);
+    for (const n of built) expect(builds.map((b) => b.image as string)).toContain(n);
+    expect(builds.find((b) => b.image === "whisper")).toEqual({
+      image: "whisper",
+      context: ".",
+      containerfile: "infra/containers/whisper.Containerfile",
+      args: {},
+    });
+  });
+
+  test("whisper builds natively for both architectures: its Containerfile picks the SIMD flags per arch", () => {
+    const matrix = buildMatrix(releaseBuilds(composeText), parsePlatforms("linux/amd64,linux/arm64"));
+    expect(matrix.filter((m) => m.image === "whisper").map((m) => [m.arch, m.runner])).toEqual([
+      ["amd64", "ubuntu-24.04"],
+      ["arm64", "ubuntu-24.04-arm"],
+    ]);
+    const file = readFileSync(join(root, "infra/containers/whisper.Containerfile"), "utf8");
+    expect(declaredArgs(file).has("TARGETARCH")).toBe(true);
+    // amd64 gets AVX2/FMA/F16C, which CPU_REQUIREMENTS must name (manifest, notes, selfhost.sh).
+    expect(file).toContain('if [ "${TARGETARCH:-amd64}" = "amd64" ]; then simd="-DGGML_AVX=ON -DGGML_AVX2=ON');
+    expect(file).toContain("-DGGML_NATIVE=OFF");
   });
 
   test("build args, context and Containerfile match compose for every built service", () => {
-    const services = Object.entries(compose.services).filter(
-      ([, s]) => s.build && !UNRELEASED_IMAGES.some((n) => s.image?.includes(`/${n}:`)),
-    );
+    const services = Object.entries(compose.services).filter(([, s]) => s.build);
     expect(services.length).toBeGreaterThan(0);
     for (const [name, s] of services) {
       const image = /\/([a-z0-9-]+):\$\{IMAGE_TAG/.exec(s.image ?? "")?.[1];

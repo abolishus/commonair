@@ -28,7 +28,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, expect, vi } from "vite-plus/test";
-import { DEFAULT_REGISTRY, RELEASE_IMAGES } from "../../release/manifest.ts";
+import { DEFAULT_REGISTRY, RELEASE_IMAGES, cpuRequirements } from "../../release/manifest.ts";
 import { buildBundle } from "../../selfhost/bundle.ts";
 import { linkExecutables } from "./exec-cache.ts";
 
@@ -50,6 +50,7 @@ export const manifestJson = (version: string, seed: number) =>
     registry: DEFAULT_REGISTRY,
     images: Object.fromEntries(RELEASE_IMAGES.map((n, i) => [n, { digest: digest(seed, i) }])),
     platforms: ["linux/amd64"],
+    cpu: cpuRequirements(["linux/amd64"]),
   });
 
 export const VERSIONS = ["0.1.0", "0.2.0", "0.3.0", "0.4.0"] as const;
@@ -127,7 +128,7 @@ case "$1" in
     fi
     ;;
   run)
-    tools="" out="" models="" script=""
+    tools="" out="" models="" script="" file=""
     while [ $# -gt 0 ]; do
       case "$1" in
         -v) case "$2" in
@@ -136,6 +137,7 @@ case "$1" in
               *:/models:*) models=\${2%%:/models:*} ;;
             esac; shift ;;
         /tools/init-env.js|/tools/fetch-model.js) script=$1 ;;
+        --out) [ "$script" != /tools/fetch-model.js ] || file=\${2##*/} ;;
       esac
       shift
     done
@@ -143,7 +145,8 @@ case "$1" in
       /tools/init-env.js) cd "$tools" && exec bun init-env.js --out "$out/commonair.env" --merge ;;
       /tools/fetch-model.js)
         [ -z "\${STUB_MODEL_FAIL:-}" ] || exit 1
-        touch "$models/adamcodd-vit-base-nsfw-detector-8587de99-int8.onnx" ;;
+        case "$file" in *.bin) [ -z "\${STUB_CAPTIONS_MODEL_FAIL:-}" ] || exit 1 ;; esac
+        touch "$models/\${file:-adamcodd-vit-base-nsfw-detector-8587de99-int8.onnx}" ;;
     esac
     ;;
   secret)

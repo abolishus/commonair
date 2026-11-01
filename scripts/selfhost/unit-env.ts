@@ -294,8 +294,11 @@ export const STATIC_UNITS: Record<string, StaticList> = {
   },
 };
 
-/** Units without any env file: their images read nothing from the operator's file. */
-export const NO_ENV_UNITS = ["loki", "otel-collector", "prometheus", "tempo"] as const;
+/**
+ * Units without any env file: their images read nothing from the operator's file (whisper takes
+ * its whole configuration as arguments; media holds its URL, WHISPER_URL).
+ */
+export const NO_ENV_UNITS = ["loki", "otel-collector", "prometheus", "tempo", "whisper"] as const;
 
 export const unitName = (unit: string) => `commonair-${unit}`;
 export const keysPath = (unit: string) => `${KEYS_DIR}/${unitName(unit)}.keys`;

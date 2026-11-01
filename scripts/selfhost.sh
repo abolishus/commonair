@@ -100,6 +100,14 @@ install options:
                         browser vendor's push service. Kept in commonair.env until --no-web-push.
   --no-web-push         Turn browser push off. Without either flag the setting is kept (off on
                         a first install).
+  --captions            Run the live captions sidecar, whisper.cpp (docs/self-hosting/captions.md):
+                        about two busy CPU cores while captioned streams are live. On amd64
+                        the CPU needs AVX2, FMA and F16C (checked first). Downloads and
+                        verifies its weights (57 MiB). Kept in commonair.env until --no-captions.
+  --no-captions         Turn live captions off and remove the sidecar. Without either flag the
+                        setting is kept (off on a first install).
+  --captions-model <path>
+                        Use a local copy of the captions weights instead of downloading them.
   --require-signature   Fail unless cosign verifies SHA256SUMS against the release workflow.
   --insecure-no-checksum
                         Offline only: accept a --bundle with no SHA256SUMS. Its integrity is
@@ -131,8 +139,8 @@ never switches store (there is no --migrate-objects; see backups.md for copying 
   They are kept in commonair.env (mode 0600); a --reinstall without them keeps the stored ones.
 
 upgrade options: --version | --bundle, --sha256sums, --registry, --require-signature,
-  --insecure-no-checksum, --turn-relay | --no-turn-relay, --web-push | --no-web-push. The object
-  store stays as installed.
+  --insecure-no-checksum, --turn-relay | --no-turn-relay, --web-push | --no-web-push,
+  --captions | --no-captions, --captions-model. The object store stays as installed.
 
 backup options (no option: --database):
   --database            A WAL-G base backup of Postgres now, then the list of base backups.
@@ -493,6 +501,7 @@ stage_for_service_user() {
     fi
   fi
   if [ -n "$MODEL_SRC" ]; then stage_copy "$MODEL_SRC" "$_st/model.onnx"; fi
+  if [ -n "$CAPTIONS_MODEL_SRC" ]; then stage_copy "$CAPTIONS_MODEL_SRC" "$_st/captions-model.bin"; fi
   chmod 0644 "$_st"/*
   chmod 0755 "$_st"
   printf '%s' "$_st"
@@ -509,6 +518,10 @@ user_args() {
   [ -n "$REGISTRY" ] && _out="$_out --registry $REGISTRY"
   [ -n "$PUBLIC_IP" ] && _out="$_out --public-ip $PUBLIC_IP"
   [ -n "$MODEL_SRC" ] && _out="$_out --model $1/model.onnx"
+  [ -n "$CAPTIONS_MODEL_SRC" ] && _out="$_out --captions-model $1/captions-model.bin"
+  [ -n "$CAPTIONS" ] && _out="$_out --$([ "$CAPTIONS" = on ] || printf 'no-')captions"
+  [ -n "$TURN_RELAY" ] && _out="$_out --$([ "$TURN_RELAY" = on ] || printf 'no-')turn-relay"
+  [ -n "$WEB_PUSH" ] && _out="$_out --$([ "$WEB_PUSH" = on ] || printf 'no-')web-push"
   [ "$REQUIRE_SIGNATURE" = yes ] && _out="$_out --require-signature"
   [ "$INSECURE_NO_CHECKSUM" = yes ] && _out="$_out --insecure-no-checksum"
   [ "$UNSUPPORTED_DISTRO" = yes ] && _out="$_out --unsupported-distro"
@@ -825,6 +838,74 @@ web_push_env() {
   esac
 }
 
+# --- live captions (ADR 0011; docs/self-hosting/captions.md) -------------------------------
+#
+# The switch is WHISPER_URL in commonair.env: this instance's sidecar address means captions are
+# on, so commonair-whisper is installed and its weights fetched; anything else (empty, or an
+# operator's own whisper server) leaves the unit out. --captions sets it, --no-captions empties
+# it, and without either, install and upgrade keep what is there.
+
+WHISPER_INTERNAL_URL="http://whisper:8080"
+WHISPER_UNIT="commonair-whisper.container"
+
+# Whether captions are on, or will be with this run's flags.
+captions_on() {
+  case "${CAPTIONS:-}" in
+    on) return 0 ;;
+    off) return 1 ;;
+  esac
+  [ "$(env_get WHISPER_URL "$ENV_FILE")" = "$WHISPER_INTERNAL_URL" ]
+}
+
+captions_env() {
+  case "${CAPTIONS:-}" in
+    on) env_set WHISPER_URL "$WHISPER_INTERNAL_URL" ;;
+    off) env_set WHISPER_URL "" ;;
+  esac
+  if captions_on && [ "$(env_get CAPTIONS_MAX_STREAMS "$ENV_FILE")" = 0 ]; then
+    warn "captions are on but CAPTIONS_MAX_STREAMS=0 in $ENV_FILE: no stream gets captions until you raise it"
+  fi
+  return 0
+}
+
+# The CPU features the release's whisper build needs on this host's architecture (release.env,
+# from the manifest's `cpu`), space-separated; empty when it needs none.
+whisper_cpu_needs() {
+  case "$(uname -m)" in
+    x86_64 | amd64) _cap_arch=AMD64 ;;
+    aarch64 | arm64) _cap_arch=ARM64 ;;
+    *) _cap_arch=$(uname -m | tr '[:lower:]' '[:upper:]') ;;
+  esac
+  env_get "COMMONAIR_CPU_WHISPER_$_cap_arch" "$1/release.env" | tr ',' ' '
+}
+
+# Before anything changes: captions need a release that ships the sidecar, and on amd64 a CPU
+# with the features its build was compiled for. whisper.cpp's amd64 build has no fallback path:
+# without AVX2 (Intel before Haswell, 2013; AMD before Zen, 2017; some virtual CPUs that hide it)
+# whisper-server stops with SIGILL as it starts, the unit would restart it forever and the
+# install would never become healthy, so this refuses up front instead.
+check_captions() {
+  captions_on || return 0
+  [ -f "$1/quadlet/$WHISPER_UNIT" ] || die "release $(env_get COMMONAIR_VERSION "$1/release.env") has no captions sidecar ($WHISPER_UNIT)" \
+    "fix: re-run with --no-captions, or install a release that ships it"
+  _cap_need=$(whisper_cpu_needs "$1")
+  [ -n "$_cap_need" ] || return 0
+  _cap_flags=$(sed -n 's/^flags[[:space:]]*:[[:space:]]*//p' "$SYSROOT/proc/cpuinfo" 2>/dev/null | head -n 1)
+  [ -n "$_cap_flags" ] || die "cannot read this CPU's flags from /proc/cpuinfo; live captions need $_cap_need here" \
+    "fix: re-run with --no-captions"
+  _cap_missing=""
+  for _cap_f in $_cap_need; do
+    case " $_cap_flags " in
+      *" $_cap_f "*) ;;
+      *) _cap_missing="$_cap_missing $_cap_f" ;;
+    esac
+  done
+  [ -z "$_cap_missing" ] || die "live captions need a CPU with $_cap_need; this one lacks:$_cap_missing" \
+    "whisper.cpp's build would stop with SIGILL at start (docs/self-hosting/captions.md, 'CPU requirements')" \
+    "fix: re-run with --no-captions; everything but captions works on this CPU. On a VM, ask for a CPU model that passes AVX2 through"
+  info "captions: this CPU has $_cap_need"
+}
+
 configure_env() {
   _host=$DOMAIN
   _old_host=$(env_get PUBLIC_HOSTNAME "$ENV_FILE")
@@ -868,6 +949,7 @@ configure_env() {
   fi
   turn_env "$_host" "$_old_host"
   web_push_env
+  captions_env
   # The app-role URL; the services get it as a podman secret as well (create_secrets).
   _app=$(env_get POSTGRES_APP_PASSWORD "$ENV_FILE")
   env_set DATABASE_URL "postgres://commonair_app:$_app@postgres:5432/commonair"
@@ -912,6 +994,7 @@ backfill_env() {
   if [ -n "$_turn_ip" ]; then env_default TURN_EXTERNAL_IP "$_turn_ip"; fi
   turn_env "$_host" "$_host"
   web_push_env
+  captions_env
   # Releases up to rc.2 pinned Garage's endpoint, region and path style in the units, and the
   # env file held init-env's development values for them. The units now read them from here.
   if [ "$STORAGE_MODE" = garage ] && [ "$(env_get S3_ENDPOINT "$ENV_FILE")" != "$GARAGE_S3_ENDPOINT" ]; then
@@ -956,8 +1039,10 @@ read_storage_mode() {
   esac
 }
 
-# Whether a unit file of the release belongs to this instance: Garage's only in Garage mode.
+# Whether a unit file of the release belongs to this instance: Garage's only in Garage mode,
+# whisper's only with captions on.
 unit_in_mode() {
+  case "$1" in commonair-whisper.container) captions_on || return 1 ;; esac
   [ "${STORAGE_MODE:-garage}" = external ] || return 0
   case "$1" in
     commonair-garage.container | commonair-garage-meta.volume | commonair-garage-data.volume) return 1 ;;
@@ -1188,10 +1273,12 @@ create_secrets() {
   info "podman secrets updated"
 }
 
-# Host files the units bind-mount outside the release directory (derived from Volume= lines):
-# hash lists, the moderation model and the IRC certificate directory.
+# Host files the units this instance runs bind-mount outside the release directory (derived from
+# Volume= lines): hash lists, the moderation and captions models and the IRC certificate directory.
 host_mount_sources() {
-  sed -n 's|^Volume=%h/\([^:]*\):.*|\1|p' "$1"/quadlet/*.container | grep -v '^commonair/' | sort -u
+  for _u in "$1"/quadlet/*.container; do
+    if unit_in_mode "$(basename "$_u")"; then sed -n 's|^Volume=%h/\([^:]*\):.*|\1|p' "$_u"; fi
+  done | grep -v '^commonair/' | sort -u
 }
 
 prepare_mounts() {
@@ -1208,27 +1295,30 @@ prepare_mounts() {
           warn "hash list $_path is still EMPTY: known-image matching is OFF"
         fi
         ;;
-      *.onnx) fetch_model "$_rel" "$_path" ;;
+      *.onnx) fetch_model "$_rel" "$_path" moderation "$MODEL_SRC" --model ;;
+      # Only mounted, so only fetched, with captions on (host_mount_sources).
+      *.bin) fetch_model "$_rel" "$_path" captions "$CAPTIONS_MODEL_SRC" --captions-model ;;
       *) mkdir -p "$_path" ;;
     esac
   done
 }
 
-# The classifier weights, verified against the pinned sha256 by fetch-model in the tools image.
+# Model weights ($3: moderation or captions), verified against the pinned sha256 by fetch-model
+# in the tools image. $4: an operator's local copy (passed as $5), used when none is there yet.
 fetch_model() {
   _dir=$(dirname "$2")
   _file=$(basename "$2")
   mkdir -p "$_dir"
-  if [ -n "$MODEL_SRC" ] && [ ! -e "$2" ]; then
-    [ -f "$MODEL_SRC" ] || die "no such model file: $MODEL_SRC"
-    cp "$MODEL_SRC" "$2"
+  if [ -n "$4" ] && [ ! -e "$2" ]; then
+    [ -f "$4" ] || die "no such model file: $4"
+    cp "$4" "$2"
   fi
-  info "checking the moderation model (downloads it if missing)"
+  info "checking the $3 model (downloads it if missing)"
   podman run --rm --user 0:0 --entrypoint bun \
     -v "$1/tools:/tools:ro,Z" -v "$_dir:/models:z" -w /tools \
-    "$(tools_image "$1")" /tools/fetch-model.js --out "/models/$_file" >/dev/null ||
-    die "the moderation model is missing or does not match its pinned sha256" \
-      "fix: re-run with network access, or pass --model <path> with a verified copy"
+    "$(tools_image "$1")" /tools/fetch-model.js --model "$3" --out "/models/$_file" >/dev/null ||
+    die "the $3 model is missing or does not match its pinned sha256" \
+      "fix: re-run with network access, or pass $5 <path> with a verified copy"
 }
 
 install_units() {
@@ -1531,9 +1621,12 @@ parse_flags() {
   TURN_RELAY=""
   # Browser push: on, off, or empty (keep what commonair.env says; off on a first install).
   WEB_PUSH=""
+  # Live captions: on, off, or empty (keep what commonair.env says; off on a first install).
+  CAPTIONS=""
+  CAPTIONS_MODEL_SRC=""
   while [ $# -gt 0 ]; do
     case "$1" in
-      --version | --bundle | --sha256sums | --domain | --email | --tls | --registry | --public-ip | --model)
+      --version | --bundle | --sha256sums | --domain | --email | --tls | --registry | --public-ip | --model | --captions-model)
         [ $# -ge 2 ] || die "$1 needs a value"
         case "$1" in
           --version)
@@ -1548,6 +1641,7 @@ parse_flags() {
           --registry) REGISTRY=$2 ;;
           --public-ip) PUBLIC_IP=$2 ;;
           --model) MODEL_SRC=$2 ;;
+          --captions-model) CAPTIONS_MODEL_SRC=$2 ;;
         esac
         shift 2
         ;;
@@ -1575,6 +1669,9 @@ parse_flags() {
       # Browser push (ADR 0028). Kept in commonair.env, like the TURN relay.
       --web-push) WEB_PUSH=on && shift ;;
       --no-web-push) WEB_PUSH=off && shift ;;
+      # The whisper captions sidecar (docs/self-hosting/captions.md). Kept in commonair.env.
+      --captions) CAPTIONS=on && shift ;;
+      --no-captions) CAPTIONS=off && shift ;;
       --s3-*key* | --s3-*secret*)
         die "S3 keys are never flags: every user on this host can read a command line (ps)" \
           "fix: export S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, S3_EVIDENCE_ACCESS_KEY_ID and S3_EVIDENCE_SECRET_ACCESS_KEY" \
@@ -1613,9 +1710,10 @@ parse_flags() {
       die "not a bucket name: $_b (3-63 lowercase letters, digits, dots and hyphens; no '..')"
     fi
   done
-  for _f in "$BUNDLE" "$SUMS_FILE" "$MODEL_SRC"; do
+  for _f in "$BUNDLE" "$SUMS_FILE" "$MODEL_SRC" "$CAPTIONS_MODEL_SRC"; do
     case "$_f" in *[[:space:]]*) die "paths with spaces are not supported: $_f" ;; esac
   done
+  if [ -n "$CAPTIONS_MODEL_SRC" ] && [ "$CAPTIONS" = off ]; then die "--captions-model and --no-captions contradict each other"; fi
   return 0
 }
 
@@ -1656,6 +1754,7 @@ cmd_install() {
     obtain_bundle
     extract_bundle
   fi
+  check_captions "$RELEASE_DIR"
   apply_registry "$RELEASE_DIR" "$REGISTRY"
   pull_images "$RELEASE_DIR"
   write_env "$RELEASE_DIR"
@@ -1723,6 +1822,7 @@ cmd_upgrade() {
   obtain_bundle
   [ "$BUNDLE_VERSION" != "$_curv" ] || die "version $_curv is already installed"
   extract_bundle
+  check_captions "$RELEASE_DIR"
   apply_registry "$RELEASE_DIR" "$REGISTRY"
   # 2. pull every image by digest (nothing has changed yet if this fails)
   pull_images "$RELEASE_DIR"
@@ -2187,6 +2287,13 @@ cmd_status() {
     _turn_relay="off"
   fi
   say "p2p:       coturn ${_coturn:-?} (STUN 3478/udp), TURN relay $_turn_relay"
+  if captions_on; then
+    _whisper=$(systemctl --user show commonair-whisper.service --property=ActiveState --value 2>/dev/null || true)
+    _cap_max=$(env_get CAPTIONS_MAX_STREAMS "$ENV_FILE")
+    say "captions:  on, commonair-whisper ${_whisper:-?}, up to ${_cap_max:-2} streams (CAPTIONS_MAX_STREAMS)"
+  else
+    say "captions:  off"
+  fi
   say ""
   say "units:"
   for _u in $(all_units); do

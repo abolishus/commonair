@@ -14,7 +14,15 @@
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parsePlatforms } from "./images.ts";
-import { RELEASE_IMAGES, type ReleaseManifest, parseManifest, versionFromTag } from "./manifest.ts";
+import {
+  RELEASE_IMAGES,
+  RELEASE_PLATFORMS,
+  type ReleaseManifest,
+  type ReleasePlatform,
+  cpuRequirements,
+  parseManifest,
+  versionFromTag,
+} from "./manifest.ts";
 
 export interface ManifestInput {
   tag: string;
@@ -46,6 +54,10 @@ export function assembleManifest(input: ManifestInput): ReleaseManifest {
     registry: input.registry,
     images,
     platforms: input.platforms,
+    // An unknown platform fails the parse below; only the known ones carry requirements.
+    cpu: cpuRequirements(
+      input.platforms.filter((p): p is ReleasePlatform => (RELEASE_PLATFORMS as readonly string[]).includes(p)),
+    ),
   };
   return parseManifest(JSON.stringify(manifest));
 }

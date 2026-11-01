@@ -4,7 +4,11 @@
 /**
  * Release notes from Conventional Commits (ADR 0023 §5).
  *
- *   bun scripts/release/changelog.ts --to <ref> --version <x.y.z> [--from <ref>] [--repo <url>] [--out <file>]
+ *   bun scripts/release/changelog.ts --to <ref> --version <x.y.z> [--from <ref>] [--repo <url>]
+ *       [--platforms linux/amd64,linux/arm64] [--out <file>]
+ *
+ * With `--platforms`, the notes end with the CPU features an image needs on those platforms
+ * beyond the baseline (CPU_REQUIREMENTS: whisper's AVX2 on amd64).
  *
  * `--from` defaults to the nearest `v*` tag before `--to` (all history when there is none).
  * Breaking changes (`type!:` or a `BREAKING CHANGE:` footer) come first, then the types in
@@ -12,6 +16,8 @@
  * (Signed-off-by, Co-Authored-By, …) never reach the notes.
  */
 import { writeFileSync } from "node:fs";
+import { parsePlatforms } from "./images.ts";
+import { cpuRequirementLines, cpuRequirements } from "./manifest.ts";
 
 export interface Commit {
   sha: string;
@@ -82,6 +88,18 @@ export interface NotesOptions {
   previousTag: string | null;
   /** Repository web URL, for commit links. */
   repoUrl?: string;
+  /** Images that need more of a CPU than their platform's baseline (cpuRequirementLines). */
+  requirements?: string[];
+}
+
+function requirementsSection(lines: string[] | undefined): string[] {
+  if (!lines || lines.length === 0) return [];
+  return [
+    "",
+    "### Platform requirements",
+    "",
+    ...lines.map((l) => `- ${l}; selfhost.sh checks the host before it runs that image.`),
+  ];
 }
 
 function line(c: ParsedCommit, repoUrl?: string): string {
@@ -98,7 +116,7 @@ export function releaseNotes(commits: Commit[], opts: NotesOptions): string {
   const since = opts.previousTag ? `since ${opts.previousTag}` : "since the first commit";
   out.push(`Changes in ${opts.version}, ${since}.`);
   if (parsed.length === 0) {
-    out.push("", "No changes.");
+    out.push("", "No changes.", ...requirementsSection(opts.requirements));
     return `${out.join("\n")}\n`;
   }
 
@@ -123,6 +141,7 @@ export function releaseNotes(commits: Commit[], opts: NotesOptions): string {
     for (const c of other)
       out.push(line(c.type === null ? c : { ...c, description: `${c.type}: ${c.description}` }, opts.repoUrl));
   }
+  out.push(...requirementsSection(opts.requirements));
   return `${out.join("\n")}\n`;
 }
 
@@ -153,11 +172,19 @@ if (import.meta.main) {
   const to = opt("to") ?? "HEAD";
   const version = opt("version");
   if (!version) {
-    console.error("usage: changelog.ts --version <x.y.z> [--to <ref>] [--from <ref>] [--repo <url>] [--out <file>]");
+    console.error(
+      "usage: changelog.ts --version <x.y.z> [--to <ref>] [--from <ref>] [--repo <url>] [--platforms <list>] [--out <file>]",
+    );
     process.exit(2);
   }
   const from = opt("from") ?? previousTag(to);
-  const notes = releaseNotes(commitsBetween(from, to), { version, previousTag: from, repoUrl: opt("repo") });
+  const platforms = opt("platforms");
+  const notes = releaseNotes(commitsBetween(from, to), {
+    version,
+    previousTag: from,
+    repoUrl: opt("repo"),
+    requirements: platforms ? cpuRequirementLines(cpuRequirements(parsePlatforms(platforms))) : undefined,
+  });
   const out = opt("out");
   if (out) writeFileSync(out, notes);
   else process.stdout.write(notes);

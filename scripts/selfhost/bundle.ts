@@ -40,6 +40,20 @@ const EXEC = 0o755;
 
 export const bundleTopDir = (version: string) => `commonair-selfhost_${version}`;
 
+/**
+ * The CPU features an image needs on an architecture (the manifest's `cpu`), as release.env
+ * lines: `COMMONAIR_CPU_WHISPER_AMD64=avx,avx2,fma,f16c`. selfhost.sh checks them against
+ * /proc/cpuinfo before it installs that image's unit.
+ */
+export function cpuEnvLines(m: ReleaseManifest): string[] {
+  return Object.entries(m.cpu ?? {}).flatMap(([image, byPlatform]) =>
+    Object.entries(byPlatform ?? {}).map(([platform, flags]) => {
+      const key = `${image}_${platform.split("/")[1]}`.toUpperCase().replaceAll("-", "_");
+      return `COMMONAIR_CPU_${key}=${flags.join(",")}`;
+    }),
+  );
+}
+
 /** Facts the shell needs without a JSON parser. */
 export function releaseEnv(m: ReleaseManifest, registry: string): string {
   return [
@@ -48,6 +62,7 @@ export function releaseEnv(m: ReleaseManifest, registry: string): string {
     `COMMONAIR_COMMIT=${m.commit}`,
     `COMMONAIR_REGISTRY=${registry}`,
     `COMMONAIR_REPOSITORY_URL=${SITE.repository.url}`,
+    ...cpuEnvLines(m),
     "",
   ].join("\n");
 }

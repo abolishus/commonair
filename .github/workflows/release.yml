@@ -1,8 +1,10 @@
 # SPDX-FileCopyrightText: 2026 CommonAir contributors
 # SPDX-License-Identifier: CC0-1.0
 #
-# Releases (ADR 0023). A `v*` tag builds and publishes: the 14 images for amd64 and arm64 on
-# native runners, signed keylessly with SBOM and SLSA provenance attestations; the relay
+# Releases (ADR 0023). A `v*` tag builds and publishes: the 15 images for amd64 and arm64 on
+# native runners, signed keylessly with SBOM and SLSA provenance attestations (whisper's amd64
+# image needs AVX2, FMA and F16C at run time: the manifest's `cpu` field and the release notes
+# say so, and selfhost.sh checks the host before it turns captions on); the relay
 # binaries with SBOMs and Sigstore bundles; the release manifest, the self-host bundle and a
 # signed SHA256SUMS; then the GitHub Release.
 #
@@ -122,9 +124,10 @@ jobs:
           VERSION: ${{ steps.plan.outputs.version }}
           COMMIT: ${{ steps.plan.outputs.commit }}
           REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+          PLATFORMS: ${{ steps.plan.outputs.platforms }}
         run: |
           mkdir -p "$RUNNER_TEMP/notes"
-          bun scripts/release/changelog.ts --to "$COMMIT" --version "$VERSION" --repo "$REPO_URL" --out "$RUNNER_TEMP/notes/release-notes.md"
+          bun scripts/release/changelog.ts --to "$COMMIT" --version "$VERSION" --repo "$REPO_URL" --platforms "$PLATFORMS" --out "$RUNNER_TEMP/notes/release-notes.md"
           cat "$RUNNER_TEMP/notes/release-notes.md" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
