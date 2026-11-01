@@ -8,6 +8,7 @@ import {
   BankIcon,
   Chart01Icon,
   CopyrightIcon,
+  Globe02Icon,
   JusticeScale01Icon,
   LegalDocument01Icon,
   Shield01Icon,
@@ -36,7 +37,7 @@ import { adminNav, type AdminEntry } from "../lib/nav.ts";
 /**
  * Platform tools: the treasury (treasurers), the mod queue (moderators, admins, `legal`), the
  * appeals and DMCA queues (moderators, admins), the legal queue (`legal` only), and co-op
- * administration, integrity flags, egress, incidents and OAuth apps (admins). Anyone without the page's
+ * administration, integrity flags, egress, incidents, OAuth apps and federation (admins). Anyone without the page's
  * role, signed out included, gets the not-found page, decided in `beforeLoad` (on the server
  * during SSR) so neither the tools nor their sidebar ever render for them.
  */
@@ -128,6 +129,14 @@ function adminItem(entry: AdminEntry): NavItem {
         current: entry.current,
         icon: icon(AppStoreIcon),
         render: <Link data-testid="admin-apps-link" to="/admin/apps" />,
+      };
+    case "federation":
+      return {
+        id: entry.id,
+        label: t("nav.adminFederation"),
+        current: entry.current,
+        icon: icon(Globe02Icon),
+        render: <Link data-testid="admin-federation-link" to="/admin/federation" />,
       };
   }
 }

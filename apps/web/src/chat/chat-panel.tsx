@@ -11,6 +11,7 @@ import * as React from "react";
 import { LegalDocumentLink, type LegalDoc } from "../components/legal-document-link.tsx";
 import type { ReportClient } from "../components/safety/client.ts";
 import { HeldQueue } from "../components/mod/held-queue.tsx";
+import { WatchRoomDrawer } from "../components/watch-room/drawer.tsx";
 import { EMPTY_HELD, heldReducer } from "../components/mod/held-state.ts";
 import { t } from "../i18n/index.ts";
 import { toastActionError } from "../lib/action-error.ts";
@@ -29,7 +30,8 @@ import { WaveRow } from "./calm/wave-row.tsx";
 import { ChatEventRow } from "./chat-event-row.tsx";
 import { ChatConnection, type ChatMessageFrame, type ChatStatus } from "./connection.ts";
 import { chatEventView } from "./events.ts";
-import { browserInteractClient, type InteractClient } from "./interact/client.ts";
+import { browserInteractClient, withPlayhead, type InteractClient } from "./interact/client.ts";
+import { GiveawayCard } from "./interact/giveaway-card.tsx";
 import { PointsChip } from "./interact/points-chip.tsx";
 import { ChatPollCard } from "./interact/poll-card.tsx";
 import { ChatPredictionCard } from "./interact/prediction-card.tsx";
@@ -48,7 +50,7 @@ export interface ChatPanelProps {
   /** The signed-in viewer's username, so moderation controls skip their own messages. */
   selfUsername?: string | null;
   className?: string;
-  /** Poll, prediction and points calls; tests pass a fake. */
+  /** Poll, prediction, giveaway and points calls; tests pass a fake. */
   interactClient?: InteractClient;
   /** `me.blocks` calls; tests pass a fake. */
   blocksClient?: BlocksClient;
@@ -189,7 +191,9 @@ export function ChatPanel({
   const connection = React.useRef<ChatConnection | null>(null);
   const noticeSeq = React.useRef(0);
   const navigate = useNavigate();
-  const [client] = React.useState(() => interactClient ?? browserInteractClient());
+  const [baseClient] = React.useState(() => interactClient ?? browserInteractClient());
+  // Batch 7 decision (v): bets carry this channel's playhead and playback mode (the player seam).
+  const client = React.useMemo(() => withPlayhead(baseClient, channel), [baseClient, channel]);
   const interact = useChatInteract({
     channel,
     signedIn,
@@ -332,13 +336,13 @@ export function ChatPanel({
   const statusView = chatStatusView(status);
   const inputDisabled = status !== "open" || !canChat;
   const isBroadcaster = self !== null && self === channel.toLowerCase();
-  const { poll, prediction, points, raid } = interact;
+  const { poll, prediction, giveaway, points, raid } = interact;
   // The banner area opens only when there is something to say, so an empty bordered box never shows.
   const surgeActive = surge !== null && surge.state !== "off";
   // The viewer's gate hint (ADR 0015); the banner checks features.watchGate and renders nothing otherwise.
   const gated = !canModerate && (settings?.minVerifiedWatchSeconds ?? 0) > 0;
   const pinned =
-    raid || poll || prediction || surgeActive || gateDenied || gated ? (
+    raid || poll || prediction || giveaway || surgeActive || gateDenied || gated ? (
       <div className="grid gap-3">
         <SurgeBanner
           channel={channel}
@@ -370,6 +374,16 @@ export function ChatPanel({
             client={client}
             onBet={interact.setPrediction}
             onPointsSpent={interact.refreshPoints}
+          />
+        )}
+        {giveaway && (
+          <GiveawayCard
+            key={giveaway.id}
+            channel={channel}
+            giveaway={giveaway}
+            signedIn={signedIn}
+            client={client}
+            onEntered={interact.setGiveaway}
           />
         )}
       </div>
@@ -491,6 +505,8 @@ export function ChatPanel({
           {points && <PointsChip balance={points} />}
           {canModerate && <HeldQueue channel={channel} state={held} dispatch={heldDispatch} />}
           {!canModerate && <CalmControls settings={calmSettings} />}
+          {/* W3-watch-rooms: the room trigger and its drawer (ADR 0017); renders nothing until that unit lands. */}
+          <WatchRoomDrawer channel={channel} signedIn={signedIn} selfUsername={selfUsername} />
           <StatusBadge tone={statusView.tone} aria-live="polite">
             {statusView.label}
           </StatusBadge>

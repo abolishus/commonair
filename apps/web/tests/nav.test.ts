@@ -6,7 +6,16 @@ import { chatStatusView, nameColorIndex } from "../src/chat/view.ts";
 import { en } from "../src/i18n/en.ts";
 import { healthBadge } from "../src/lib/stream-health.ts";
 import { isTreasurer } from "../src/lib/money.ts";
-import { accountMenu, adminNav, clipWatchLink, footerNav, siteNav, studioNav, vodWatchLink } from "../src/lib/nav.ts";
+import {
+  accountMenu,
+  adminNav,
+  clipWatchLink,
+  coopNav,
+  footerNav,
+  siteNav,
+  studioNav,
+  vodWatchLink,
+} from "../src/lib/nav.ts";
 import { adminPageFor, mayOpenAdminPage } from "../src/components/safety/access.ts";
 
 describe("site nav", () => {
@@ -155,7 +164,7 @@ describe("account menu", () => {
 });
 
 describe("studio nav", () => {
-  it("lists stream manager, rehearsal, overlays, polls and raids, the bot, captions, content, analytics, revenue, crew, relays and developer, nothing else", () => {
+  it("lists stream manager, rehearsal, overlays, polls and raids, the bot, captions, content, analytics, revenue, crew, relays, move, import and developer, nothing else", () => {
     expect(studioNav("/dashboard").map((i) => [i.id, i.to])).toEqual([
       ["streamManager", "/dashboard"],
       ["rehearse", "/rehearse"],
@@ -168,6 +177,8 @@ describe("studio nav", () => {
       ["revenue", "/revenue"],
       ["crew", "/crew"],
       ["relays", "/relays"],
+      ["move", "/move"],
+      ["import", "/import"],
       ["developer", "/developer"],
     ]);
   });
@@ -191,6 +202,10 @@ describe("studio nav", () => {
     ["/revenue/", "revenue"],
     ["/relays", "relays"],
     ["/relays/", "relays"],
+    ["/move", "move"],
+    ["/move/", "move"],
+    ["/import", "import"],
+    ["/import/", "import"],
     ["/developer", "developer"],
     ["/developer/", "developer"],
     ["/developer/apps/0193e6a0-0000-7000-8000-000000000001", "developer"],
@@ -215,6 +230,8 @@ describe("studio nav", () => {
       ["revenue", "/revenue"],
       ["crew", "/crew"],
       ["relays", "/relays"],
+      ["move", "/move"],
+      ["import", "/import"],
       ["developer", "/developer"],
     ]);
   });
@@ -241,6 +258,24 @@ describe("studio nav", () => {
     // Channels named like the W2 pages are reserved, but a longer path is still not the page.
     for (const path of ["/crews", "/captions/x", "/analytics2", "/rehearsed", "/rivertide/vods/v1"])
       expect(studioNav(path).some((i) => i.current)).toBe(false);
+    // Batch 7: a move link's landing page and a giveaway's verify page are not the studio pages.
+    for (const path of ["/m/rivertide/abc", "/moves", "/imports", "/import/x", "/rivertide/giveaways/g1"])
+      expect(studioNav(path).some((i) => i.current)).toBe(false);
+  });
+});
+
+describe("co-op tabs", () => {
+  it("list overview, membership, proposals, council, the jury, settings, patronage and transparency", () => {
+    expect(coopNav()).toEqual([
+      { id: "overview", to: "/coop" },
+      { id: "membership", to: "/coop/membership" },
+      { id: "proposals", to: "/coop/proposals" },
+      { id: "council", to: "/coop/council" },
+      { id: "jury", to: "/coop/jury" },
+      { id: "settings", to: "/coop/settings" },
+      { id: "patronage", to: "/coop/patronage" },
+      { id: "transparency", to: "/transparency" },
+    ]);
   });
 });
 
@@ -284,11 +319,12 @@ describe("trust and safety navigation", () => {
       { id: "egress", to: "/admin/egress", current: false },
       { id: "incidents", to: "/admin/incidents", current: false },
       { id: "apps", to: "/admin/apps", current: false },
+      { id: "federation", to: "/admin/federation", current: false },
     ]);
     expect(adminNav("/admin/coop", moderator).map((entry) => entry.id)).not.toContain("coop");
   });
 
-  it("orders the platform tools moderation, appeals, dmca, legal, coop, integrity, egress, incidents, apps", () => {
+  it("orders the platform tools moderation, appeals, dmca, legal, coop, integrity, egress, incidents, apps, federation", () => {
     const everything = { treasurer: false, safetyStaff: true, platformModerator: true, legal: true, admin: true };
     expect(adminNav("/admin/dmca", everything).map((entry) => [entry.id, entry.current])).toEqual([
       ["moderation", false],
@@ -300,9 +336,10 @@ describe("trust and safety navigation", () => {
       ["egress", false],
       ["incidents", false],
       ["apps", false],
+      ["federation", false],
     ]);
     const moderator = { safetyStaff: true, platformModerator: true };
-    for (const id of ["integrity", "egress", "incidents", "coop", "apps"])
+    for (const id of ["integrity", "egress", "incidents", "coop", "apps", "federation"])
       expect(adminNav("/admin/moderation", moderator).map((entry) => entry.id)).not.toContain(id);
   });
 });
@@ -337,6 +374,20 @@ describe("E9 platform tools access", () => {
     for (const role of ["moderator", "legal", "treasurer", "user"])
       expect(mayOpenAdminPage("apps", as(role))).toBe(false);
     expect(mayOpenAdminPage("apps", null)).toBe(false);
+  });
+});
+
+describe("batch 7 platform tools access", () => {
+  const as = (role: string) => ({ id: "u", username: "a", displayName: "A", channelSlug: null, role });
+  it("maps /admin/federation and opens it to admins only", () => {
+    expect(adminPageFor("/admin/federation")).toBe("federation");
+    expect(adminPageFor("/admin/federation/")).toBe("federation");
+    expect(adminPageFor("/admin/federations")).toBeNull();
+    expect(mayOpenAdminPage("federation", as("admin"))).toBe(true);
+    for (const role of ["moderator", "legal", "treasurer", "user"])
+      expect(mayOpenAdminPage("federation", as(role))).toBe(false);
+    expect(mayOpenAdminPage("federation", null)).toBe(false);
+    expect(adminNav("/admin/federation", { admin: true }).find((e) => e.current)?.id).toBe("federation");
   });
 });
 

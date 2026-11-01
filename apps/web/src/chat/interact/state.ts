@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * The chat panel's poll, prediction and raid state (E8). Polls and predictions start from
- * `interact.*.current` and follow the channel's `channel.poll.*` / `channel.prediction.*` event
- * frames (validated against the event catalog; anything that fails is dropped); the outgoing raid
- * follows the source's `raid` control frames. Pure, for unit tests.
+ * The chat panel's poll, prediction, giveaway and raid state (E8; giveaways batch 7). Polls,
+ * predictions and giveaways start from `interact.*.current` and follow the channel's
+ * `channel.poll.*` / `channel.prediction.*` / `channel.giveaway.*` event frames (validated against
+ * the event catalog; anything that fails is dropped); the outgoing raid follows the source's `raid`
+ * control frames. Pure, for unit tests.
  */
 import type * as D from "@commonair/contracts/dto";
 import { EVENTS } from "@commonair/contracts/events";
@@ -14,6 +15,7 @@ import type { z } from "zod";
 export type PollViewDto = z.infer<typeof D.PollView>;
 export type PredictionViewDto = z.infer<typeof D.PredictionView>;
 export type LoyaltyBalanceDto = z.infer<typeof D.LoyaltyBalance>;
+export type GiveawayDto = z.infer<typeof D.Giveaway>;
 
 /** How long an ended poll or prediction stays pinned with its results. */
 export const RESULTS_VISIBLE_MS = 120_000;
@@ -29,21 +31,26 @@ export const PREDICTION_EVENT_TYPES = [
   "channel.prediction.lock",
   "channel.prediction.end",
 ] as const;
+export const GIVEAWAY_EVENT_TYPES = ["channel.giveaway.begin", "channel.giveaway.end"] as const;
 type PollEventType = (typeof POLL_EVENT_TYPES)[number];
 type PredictionEventType = (typeof PREDICTION_EVENT_TYPES)[number];
+type GiveawayEventType = (typeof GIVEAWAY_EVENT_TYPES)[number];
 
 export const isPollEvent = (type: string): type is PollEventType =>
   (POLL_EVENT_TYPES as readonly string[]).includes(type);
 export const isPredictionEvent = (type: string): type is PredictionEventType =>
   (PREDICTION_EVENT_TYPES as readonly string[]).includes(type);
+export const isGiveawayEvent = (type: string): type is GiveawayEventType =>
+  (GIVEAWAY_EVENT_TYPES as readonly string[]).includes(type);
 
 /**
- * Where an event frame goes: the poll or prediction card (a parsed frame), the log (`row`), or
- * nowhere (`drop`: a card frame that failed validation).
+ * Where an event frame goes: the poll, prediction or giveaway card (a parsed frame), the log
+ * (`row`), or nowhere (`drop`: a card frame that failed validation).
  */
 export type InteractFrame =
   | { kind: "poll"; frame: PollFrame }
   | { kind: "prediction"; frame: PredictionFrame }
+  | { kind: "giveaway"; frame: GiveawayFrame }
   | { kind: "row" }
   | { kind: "drop" };
 
@@ -55,6 +62,10 @@ export function routeEventFrame(type: string, data: unknown): InteractFrame {
   if (isPredictionEvent(type)) {
     const frame = parsePredictionFrame(type, data);
     return frame ? { kind: "prediction", frame } : { kind: "drop" };
+  }
+  if (isGiveawayEvent(type)) {
+    const frame = parseGiveawayFrame(type, data);
+    return frame ? { kind: "giveaway", frame } : { kind: "drop" };
   }
   return { kind: "row" };
 }
@@ -253,6 +264,80 @@ export function betAmount(text: string, balance: number): number | null {
   const n = Number(text.trim());
   const max = Math.min(MAX_BET_POINTS, Math.max(0, balance));
   return n >= 1 && n <= max ? n : null;
+}
+
+// ------------------------------------------------------------------ giveaways
+
+/**
+ * A giveaway frame (batch 7 decision (t)). The frames carry neither the prize, the eligibility
+ * rules nor the viewer's own entry, so a `begin` only says "load `current`"; an `end` also moves
+ * the shown giveaway to drawn or cancelled at once.
+ */
+export interface GiveawayFrame {
+  type: GiveawayEventType;
+  id: string;
+  title: string;
+  status: "open" | "drawn" | "cancelled";
+  /** Entry count at the end; null on `begin`. */
+  entries: number | null;
+  startedAt: string;
+  endedAt: string | null;
+}
+
+export function parseGiveawayFrame(type: string, data: unknown): GiveawayFrame | null {
+  if (type === "channel.giveaway.begin") {
+    const p = EVENTS[type].payload.safeParse(data);
+    if (!p.success) return null;
+    return {
+      type,
+      id: p.data.id,
+      title: p.data.title,
+      status: "open",
+      entries: null,
+      startedAt: p.data.started_at,
+      endedAt: null,
+    };
+  }
+  if (type === "channel.giveaway.end") {
+    const p = EVENTS[type].payload.safeParse(data);
+    if (!p.success) return null;
+    return {
+      type,
+      id: p.data.id,
+      title: p.data.title,
+      status: p.data.status,
+      entries: p.data.entries,
+      startedAt: p.data.started_at,
+      endedAt: p.data.ended_at,
+    };
+  }
+  return null;
+}
+
+const GIVEAWAY_ORDER: Record<GiveawayDto["status"], number> = { open: 0, closed: 1, drawn: 2, cancelled: 2 };
+
+/**
+ * Apply a giveaway frame to the shown giveaway. Only an `end` for the shown one changes it (a
+ * frame never moves it back: frames can arrive out of order across instances); anything else
+ * waits for `current`, which the hook reloads on every giveaway frame.
+ */
+export function applyGiveawayFrame(current: GiveawayDto | null, f: GiveawayFrame): GiveawayDto | null {
+  if (!current || current.id !== f.id || f.type !== "channel.giveaway.end") return current;
+  if (GIVEAWAY_ORDER[current.status] > GIVEAWAY_ORDER[f.status]) return current;
+  return {
+    ...current,
+    status: f.status,
+    entries: f.entries ?? current.entries,
+    drawnAt: f.status === "drawn" ? (current.drawnAt ?? f.endedAt) : current.drawnAt,
+  };
+}
+
+/** Pinned while open or closed (awaiting the draw), and for a while after the draw; never once cancelled. */
+export function giveawayVisible(g: GiveawayDto | null, now: number): g is GiveawayDto {
+  if (!g || g.status === "cancelled") return false;
+  if (g.status === "open" || g.status === "closed") return true;
+  const drawn = Date.parse(g.drawnAt ?? "");
+  return Number.isFinite(drawn) && now - drawn < RESULTS_VISIBLE_MS;
 }
 
 // ------------------------------------------------------------------ raids

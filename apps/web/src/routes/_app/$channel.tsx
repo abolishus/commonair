@@ -9,6 +9,7 @@ import { createFileRoute, notFound } from "@tanstack/react-router";
 import * as React from "react";
 import { ChatPanel } from "../../chat/chat-panel.tsx";
 import { FollowButton, FollowerCount, useFollow } from "../../components/channel-follow.tsx";
+import { MovedNotice } from "../../components/portability/moved-notice.tsx";
 import { SupportButton } from "../../components/support/support-dialog.tsx";
 import { isMatureGate, maturityClient } from "../../components/safety/client.ts";
 import { MatureGate, RestrictedStream, useViewerMaturity } from "../../components/safety/mature-gate.tsx";
@@ -77,6 +78,7 @@ function ChannelView({ initial }: { initial: ChannelSummary }): React.JSX.Elemen
         asideWidth="lg"
         main={
           <div className="flex min-w-0 flex-col gap-4">
+            <MovedNotice channelName={channel.displayName} movedTo={channel.movedTo} />
             {stage === "mature-gate" ? (
               <MatureGate
                 signedIn={signedIn}

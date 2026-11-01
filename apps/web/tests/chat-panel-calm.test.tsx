@@ -299,6 +299,8 @@ const interact: InteractClient = {
   vote: vi.fn<InteractClient["vote"]>(),
   bet: vi.fn<InteractClient["bet"]>(),
   balance: async () => ({ enabled: false, balance: 0, name: "points" }) as never,
+  giveawayCurrent: async () => null,
+  giveawayEnter: vi.fn<InteractClient["giveawayEnter"]>(),
 };
 
 const blockAdds = vi.fn<BlocksClient["add"]>(async (username) => ({

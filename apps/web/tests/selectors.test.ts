@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * The web ↔ harness contract (docs/testing/e1-, e2-, e3-, e4b-, e4c-, e5-, e7-, e8-, e9-, n2-, w1-, n1- and w2-selectors.md): every test id in the
+ * The web ↔ harness contract (docs/testing/e1-, e2-, e3-, e4b-, e4c-, e5-, e7-, e8-, e9-, n2-, w1-, n1-, w2- and b7-selectors.md): every test id in the
  * docs' "Test ids" tables must be rendered somewhere in the app (or, for ids the house primitives
  * own, in packages/ui), so renaming one without updating the docs and scenarios fails here.
  */
@@ -477,6 +477,225 @@ describe("w2-selectors.md (batch 6)", () => {
   });
 
   it.each(PENDING_W2_IDS)("%s is still pending (lift it once rendered)", (id) => {
+    expect(rendered(id)).toBe(false);
+  });
+});
+
+/**
+ * Batch 7 (docs/testing/b7-selectors.md): every first-column id of the "Test ids" tables is set in
+ * web or ui source, as for batch 6 (literal ids, `<x>` templates by their literal prefix). Ids whose
+ * unit has not merged wait in PENDING_B7_IDS; a pending id that is already rendered fails, so the
+ * list is emptied as the W3, N3 and N4 units merge (the orchestrator lifts each unit's ids at its
+ * merge).
+ */
+const PENDING_B7_IDS: readonly string[] = [
+  // W3-watch-rooms
+  "watch-room-open",
+  "watch-room-drawer",
+  "watch-room-create",
+  "watch-room-band-notice",
+  "watch-room-mature-notice",
+  "watch-room-invite-link",
+  "watch-room-invite-copy",
+  "watch-room-join",
+  "watch-room-join-refused",
+  "watch-room-member",
+  "watch-room-chat",
+  "watch-room-input",
+  "watch-room-send",
+  "watch-room-message",
+  "watch-room-report",
+  "watch-room-leave",
+  "watch-room-leave-confirm",
+  "watch-room-close",
+  "watch-room-close-confirm",
+  "watch-room-evidence",
+  "watch-room-evidence-message",
+  "watch-room-evidence-member",
+  // W3-portability
+  "move-page",
+  "move-link-create",
+  "move-link-expiry",
+  "move-link-new",
+  "move-link-copy",
+  "move-link",
+  "move-link-revoke",
+  "move-link-revoke-confirm",
+  "move-to-url",
+  "move-to-save",
+  "move-to-confirm",
+  "move-to-current",
+  "move-to-clear",
+  "move-subscriptions-note",
+  "bundle-export",
+  "bundle-import-file",
+  "bundle-import-preview",
+  "bundle-import-standing",
+  "bundle-import-item",
+  "bundle-import-item-toggle",
+  "bundle-import-start",
+  "bundle-import-result",
+  "bundle-import-result-item",
+  "move-landing",
+  "move-landing-follow",
+  "move-landing-gone",
+  "moved-notice",
+  "portability-grants",
+  "portability-grant",
+  "portability-grant-toggle",
+  // W3-giveaways
+  "giveaway-panel",
+  "giveaway-form",
+  "giveaway-title",
+  "giveaway-prize",
+  "giveaway-winner-count",
+  "giveaway-keyword",
+  "giveaway-duration",
+  "giveaway-min-account-age",
+  "giveaway-min-follow-days",
+  "giveaway-min-watch",
+  "giveaway-open",
+  "giveaway-live",
+  "giveaway-commitment",
+  "giveaway-close",
+  "giveaway-draw",
+  "giveaway-cancel",
+  "giveaway-cancel-confirm",
+  "chat-giveaway",
+  "chat-giveaway-enter",
+  "chat-giveaway-entered",
+  "chat-giveaway-ineligible",
+  "chat-giveaway-no-purchase",
+  "chat-giveaway-rules-link",
+  "chat-giveaway-verify-link",
+  "chat-giveaway-won",
+  "giveaway-verify-page",
+  "giveaway-verify-commitment",
+  "giveaway-verify-seed",
+  "giveaway-verify-salt",
+  "giveaway-verify-entry",
+  "giveaway-verify-winner",
+  "giveaway-verify-result",
+  // W3-jury
+  "jury-page",
+  "jury-disabled",
+  "jury-optin",
+  "jury-optin-explainer",
+  "jury-ineligible",
+  "jury-panel",
+  "jury-case",
+  "jury-case-clause",
+  "jury-evidence-text",
+  "jury-evidence-media",
+  "jury-evidence-reveal",
+  "jury-vote-<vote>",
+  "jury-reason",
+  "jury-reason-<code>",
+  "jury-vote-submit",
+  "jury-voted",
+  "jury-flag",
+  "jury-results",
+  "jury-results-row",
+  "jury-results-suppressed",
+  "jury-results-seed",
+  "jury-results-empty",
+  // W3-surge-raids
+  "surge-raid",
+  "surge-guard-on-raid",
+  "surge-guard-on-raid-note",
+  "raid-protection-note",
+  // W3-fair-predictions
+  "chat-prediction-locks-note",
+  "chat-prediction-refused",
+  "chat-prediction-result",
+  "prediction-resolved-by",
+  "prediction-team-note",
+  // N3-import
+  "import-page",
+  "import-unavailable",
+  "import-connect",
+  "import-preview",
+  "import-field",
+  "import-emote",
+  "import-schedule",
+  "import-mature",
+  "import-assertion",
+  "import-start",
+  "import-progress",
+  "import-result-item",
+  "import-panels-paste",
+  "import-panels-preview",
+  "import-panels-save",
+  // N4-web
+  "federation-settings",
+  "federation-enabled",
+  "federation-handle",
+  "federation-followers",
+  "federation-follower",
+  "federation-follower-remove",
+  "federation-admin-page",
+  "federation-block-domain",
+  "federation-block-add",
+  "federation-blocks",
+  "federation-block",
+  "federation-block-remove",
+  "federation-keys-rotate",
+];
+
+/** First-column ids (`<x>` templates kept) of every table in the doc's "## Test ids" section. */
+function b7TestIds(): string[] {
+  const text = readFileSync(join(ROOT, "docs/testing/b7-selectors.md"), "utf8");
+  const section = text.split(/^## Test ids$/m)[1]?.split(/^## /m)[0] ?? "";
+  return [...section.matchAll(/^\|\s*`([a-z0-9-]+(?:<[a-z]+>)?)`\s*\|/gm)].flatMap((m) => (m[1] ? [m[1]] : []));
+}
+
+describe("b7-selectors.md (batch 7)", () => {
+  const ids = b7TestIds();
+  const text = `${appText}\n${uiText}`;
+  const prefixes = templatePrefixes(text);
+  const rendered = (id: string): boolean => {
+    const template = /<[a-z]+>$/.exec(id);
+    if (template) return prefixes.includes(id.slice(0, template.index));
+    return (
+      onElement(id, text) || text.includes(`"${id}"`) || prefixes.some((p) => id.startsWith(p) && id.length > p.length)
+    );
+  };
+
+  it("lists the batch 7 test ids once each, templates included, and only listed ones are pending", () => {
+    for (const id of [
+      "studio-move-link",
+      "studio-import-link",
+      "coop-jury-link",
+      "admin-federation-link",
+      "watch-room-evidence",
+      "move-landing",
+      "portability-grants",
+      "chat-giveaway",
+      "giveaway-verify-result",
+      "jury-vote-<vote>",
+      "jury-results",
+      "surge-raid",
+      "chat-prediction-result",
+      "import-unavailable",
+      // N4-web's ids, named in its brief.
+      "federation-enabled",
+      "federation-handle",
+      "federation-followers",
+      "federation-follower-remove",
+      "federation-block-add",
+      "federation-blocks",
+    ])
+      expect(ids).toContain(id);
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const id of PENDING_B7_IDS) expect(ids).toContain(id);
+    expect(new Set(PENDING_B7_IDS).size).toBe(PENDING_B7_IDS.length);
+  });
+
+  it.each(ids.filter((id) => !PENDING_B7_IDS.includes(id)))("renders %s", (id) => {
+    expect(rendered(id)).toBe(true);
+  });
+
+  it.each(PENDING_B7_IDS)("%s is still pending (lift it once rendered)", (id) => {
     expect(rendered(id)).toBe(false);
   });
 });

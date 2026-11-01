@@ -21,6 +21,8 @@ import type { Key as N1Inbox } from "./n1-inbox.gen.ts";
 import type { Key as N1Pwa } from "./n1-pwa.gen.ts";
 import type { Key as N2Consent } from "./n2-consent.gen.ts";
 import type { Key as N2Switcher } from "./n2-switcher.gen.ts";
+import type { Key as N3Import } from "./n3-import.gen.ts";
+import type { Key as N4Federation } from "./n4-federation.gen.ts";
 import type { Key as Ops } from "./ops.gen.ts";
 import type { Key as P2p } from "./p2p.gen.ts";
 import type { Key as Safety } from "./safety.gen.ts";
@@ -38,6 +40,12 @@ import type { Key as W2Enforcement } from "./w2-enforcement.gen.ts";
 import type { Key as W2Rehearsal } from "./w2-rehearsal.gen.ts";
 import type { Key as W2Replay } from "./w2-replay.gen.ts";
 import type { Key as W2Splits } from "./w2-splits.gen.ts";
+import type { Key as W3Giveaways } from "./w3-giveaways.gen.ts";
+import type { Key as W3Jury } from "./w3-jury.gen.ts";
+import type { Key as W3Portability } from "./w3-portability.gen.ts";
+import type { Key as W3Predictions } from "./w3-predictions.gen.ts";
+import type { Key as W3SurgeRaids } from "./w3-surge-raids.gen.ts";
+import type { Key as W3WatchRooms } from "./w3-watch-rooms.gen.ts";
 
 /** Every message key, typed from the English catalogs. */
 export type MessageKey =
@@ -59,6 +67,8 @@ export type MessageKey =
   | N1Pwa
   | N2Consent
   | N2Switcher
+  | N3Import
+  | N4Federation
   | Ops
   | P2p
   | Safety
@@ -75,7 +85,13 @@ export type MessageKey =
   | W2Enforcement
   | W2Rehearsal
   | W2Replay
-  | W2Splits;
+  | W2Splits
+  | W3Giveaways
+  | W3Jury
+  | W3Portability
+  | W3Predictions
+  | W3SurgeRaids
+  | W3WatchRooms;
 
 export const NAMESPACES = [
   "coop",
@@ -96,6 +112,8 @@ export const NAMESPACES = [
   "n1-pwa",
   "n2-consent",
   "n2-switcher",
+  "n3-import",
+  "n4-federation",
   "ops",
   "p2p",
   "safety",
@@ -113,4 +131,10 @@ export const NAMESPACES = [
   "w2-rehearsal",
   "w2-replay",
   "w2-splits",
+  "w3-giveaways",
+  "w3-jury",
+  "w3-portability",
+  "w3-predictions",
+  "w3-surge-raids",
+  "w3-watch-rooms",
 ] as const;

@@ -28,7 +28,9 @@ import { Route as StudioChatRouteImport } from './routes/_studio/chat'
 import { Route as StudioContentRouteImport } from './routes/_studio/content'
 import { Route as StudioCrewRouteImport } from './routes/_studio/crew'
 import { Route as StudioDashboardRouteImport } from './routes/_studio/dashboard'
+import { Route as StudioImportRouteImport } from './routes/_studio/import'
 import { Route as StudioInteractRouteImport } from './routes/_studio/interact'
+import { Route as StudioMoveRouteImport } from './routes/_studio/move'
 import { Route as StudioOverlaysRouteImport } from './routes/_studio/overlays'
 import { Route as StudioRehearseRouteImport } from './routes/_studio/rehearse'
 import { Route as StudioRelaysRouteImport } from './routes/_studio/relays'
@@ -42,6 +44,7 @@ import { Route as AdminAdminAppsRouteImport } from './routes/_admin/admin.apps'
 import { Route as AdminAdminCoopRouteImport } from './routes/_admin/admin.coop'
 import { Route as AdminAdminDmcaRouteImport } from './routes/_admin/admin.dmca'
 import { Route as AdminAdminEgressRouteImport } from './routes/_admin/admin.egress'
+import { Route as AdminAdminFederationRouteImport } from './routes/_admin/admin.federation'
 import { Route as AdminAdminIncidentsRouteImport } from './routes/_admin/admin.incidents'
 import { Route as AdminAdminIntegrityRouteImport } from './routes/_admin/admin.integrity'
 import { Route as AdminAdminLegalRouteImport } from './routes/_admin/admin.legal'
@@ -49,6 +52,7 @@ import { Route as AdminAdminModerationRouteImport } from './routes/_admin/admin.
 import { Route as AppAttestationsVerifyRouteImport } from './routes/_app/attestations.verify'
 import { Route as AppCoopIndexRouteImport } from './routes/_app/coop.index'
 import { Route as AppCoopCouncilRouteImport } from './routes/_app/coop.council'
+import { Route as AppCoopJuryRouteImport } from './routes/_app/coop.jury'
 import { Route as AppCoopMembershipRouteImport } from './routes/_app/coop.membership'
 import { Route as AppCoopSettingsRouteImport } from './routes/_app/coop.settings'
 import { Route as AppOauth2AuthorizeRouteImport } from './routes/_app/oauth2.authorize'
@@ -61,11 +65,13 @@ import { Route as AppSettingsSubscriptionsRouteImport } from './routes/_app/sett
 import { Route as StudioDeveloperIndexRouteImport } from './routes/_studio/developer.index'
 import { Route as StudioDeveloperBotsRouteImport } from './routes/_studio/developer.bots'
 import { Route as AppChannelClipsClipIdRouteImport } from './routes/_app/$channel_.clips.$clipId'
+import { Route as AppChannelGiveawaysGiveawayIdRouteImport } from './routes/_app/$channel_.giveaways.$giveawayId'
 import { Route as AppChannelVodsVodIdRouteImport } from './routes/_app/$channel_.vods.$vodId'
 import { Route as AppCoopPatronageIndexRouteImport } from './routes/_app/coop.patronage.index'
 import { Route as AppCoopPatronagePeriodIdRouteImport } from './routes/_app/coop.patronage.$periodId'
 import { Route as AppCoopProposalsIndexRouteImport } from './routes/_app/coop.proposals.index'
 import { Route as AppCoopProposalsNewRouteImport } from './routes/_app/coop.proposals.new'
+import { Route as AppMChannelNonceRouteImport } from './routes/_app/m.$channel.$nonce'
 import { Route as AppSettingsNotificationsIndexRouteImport } from './routes/_app/settings.notifications.index'
 import { Route as AppSettingsNotificationsUnsubscribeRouteImport } from './routes/_app/settings.notifications.unsubscribe'
 import { Route as StudioDeveloperAppsAppIdRouteImport } from './routes/_studio/developer.apps.$appId'
@@ -164,9 +170,19 @@ const StudioDashboardRoute = StudioDashboardRouteImport.update({
   path: '/dashboard',
   getParentRoute: () => StudioRoute,
 } as any)
+const StudioImportRoute = StudioImportRouteImport.update({
+  id: '/import',
+  path: '/import',
+  getParentRoute: () => StudioRoute,
+} as any)
 const StudioInteractRoute = StudioInteractRouteImport.update({
   id: '/interact',
   path: '/interact',
+  getParentRoute: () => StudioRoute,
+} as any)
+const StudioMoveRoute = StudioMoveRouteImport.update({
+  id: '/move',
+  path: '/move',
   getParentRoute: () => StudioRoute,
 } as any)
 const StudioOverlaysRoute = StudioOverlaysRouteImport.update({
@@ -234,6 +250,11 @@ const AdminAdminEgressRoute = AdminAdminEgressRouteImport.update({
   path: '/admin/egress',
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminAdminFederationRoute = AdminAdminFederationRouteImport.update({
+  id: '/admin/federation',
+  path: '/admin/federation',
+  getParentRoute: () => AdminRoute,
+} as any)
 const AdminAdminIncidentsRoute = AdminAdminIncidentsRouteImport.update({
   id: '/admin/incidents',
   path: '/admin/incidents',
@@ -267,6 +288,11 @@ const AppCoopIndexRoute = AppCoopIndexRouteImport.update({
 const AppCoopCouncilRoute = AppCoopCouncilRouteImport.update({
   id: '/coop/council',
   path: '/coop/council',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppCoopJuryRoute = AppCoopJuryRouteImport.update({
+  id: '/coop/jury',
+  path: '/coop/jury',
   getParentRoute: () => AppRoute,
 } as any)
 const AppCoopMembershipRoute = AppCoopMembershipRouteImport.update({
@@ -330,6 +356,12 @@ const AppChannelClipsClipIdRoute = AppChannelClipsClipIdRouteImport.update({
   path: '/$channel/clips/$clipId',
   getParentRoute: () => AppRoute,
 } as any)
+const AppChannelGiveawaysGiveawayIdRoute =
+  AppChannelGiveawaysGiveawayIdRouteImport.update({
+    id: '/$channel_/giveaways/$giveawayId',
+    path: '/$channel/giveaways/$giveawayId',
+    getParentRoute: () => AppRoute,
+  } as any)
 const AppChannelVodsVodIdRoute = AppChannelVodsVodIdRouteImport.update({
   id: '/$channel_/vods/$vodId',
   path: '/$channel/vods/$vodId',
@@ -354,6 +386,11 @@ const AppCoopProposalsIndexRoute = AppCoopProposalsIndexRouteImport.update({
 const AppCoopProposalsNewRoute = AppCoopProposalsNewRouteImport.update({
   id: '/coop/proposals/new',
   path: '/coop/proposals/new',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppMChannelNonceRoute = AppMChannelNonceRouteImport.update({
+  id: '/m/$channel/$nonce',
+  path: '/m/$channel/$nonce',
   getParentRoute: () => AppRoute,
 } as any)
 const AppSettingsNotificationsIndexRoute =
@@ -402,7 +439,9 @@ export interface FileRoutesByFullPath {
   '/content': typeof StudioContentRoute
   '/crew': typeof StudioCrewRoute
   '/dashboard': typeof StudioDashboardRoute
+  '/import': typeof StudioImportRoute
   '/interact': typeof StudioInteractRoute
+  '/move': typeof StudioMoveRoute
   '/overlays': typeof StudioOverlaysRoute
   '/rehearse': typeof StudioRehearseRoute
   '/relays': typeof StudioRelaysRoute
@@ -416,12 +455,14 @@ export interface FileRoutesByFullPath {
   '/admin/coop': typeof AdminAdminCoopRoute
   '/admin/dmca': typeof AdminAdminDmcaRoute
   '/admin/egress': typeof AdminAdminEgressRoute
+  '/admin/federation': typeof AdminAdminFederationRoute
   '/admin/incidents': typeof AdminAdminIncidentsRoute
   '/admin/integrity': typeof AdminAdminIntegrityRoute
   '/admin/legal': typeof AdminAdminLegalRoute
   '/admin/moderation': typeof AdminAdminModerationRoute
   '/attestations/verify': typeof AppAttestationsVerifyRoute
   '/coop/council': typeof AppCoopCouncilRoute
+  '/coop/jury': typeof AppCoopJuryRoute
   '/coop/membership': typeof AppCoopMembershipRoute
   '/coop/settings': typeof AppCoopSettingsRoute
   '/oauth2/authorize': typeof AppOauth2AuthorizeRoute
@@ -435,9 +476,11 @@ export interface FileRoutesByFullPath {
   '/coop/': typeof AppCoopIndexRoute
   '/developer/': typeof StudioDeveloperIndexRoute
   '/$channel/clips/$clipId': typeof AppChannelClipsClipIdRoute
+  '/$channel/giveaways/$giveawayId': typeof AppChannelGiveawaysGiveawayIdRoute
   '/$channel/vods/$vodId': typeof AppChannelVodsVodIdRoute
   '/coop/patronage/$periodId': typeof AppCoopPatronagePeriodIdRoute
   '/coop/proposals/new': typeof AppCoopProposalsNewRoute
+  '/m/$channel/$nonce': typeof AppMChannelNonceRoute
   '/settings/notifications/unsubscribe': typeof AppSettingsNotificationsUnsubscribeRoute
   '/developer/apps/$appId': typeof StudioDeveloperAppsAppIdRoute
   '/coop/patronage/': typeof AppCoopPatronageIndexRoute
@@ -463,7 +506,9 @@ export interface FileRoutesByTo {
   '/content': typeof StudioContentRoute
   '/crew': typeof StudioCrewRoute
   '/dashboard': typeof StudioDashboardRoute
+  '/import': typeof StudioImportRoute
   '/interact': typeof StudioInteractRoute
+  '/move': typeof StudioMoveRoute
   '/overlays': typeof StudioOverlaysRoute
   '/rehearse': typeof StudioRehearseRoute
   '/relays': typeof StudioRelaysRoute
@@ -477,12 +522,14 @@ export interface FileRoutesByTo {
   '/admin/coop': typeof AdminAdminCoopRoute
   '/admin/dmca': typeof AdminAdminDmcaRoute
   '/admin/egress': typeof AdminAdminEgressRoute
+  '/admin/federation': typeof AdminAdminFederationRoute
   '/admin/incidents': typeof AdminAdminIncidentsRoute
   '/admin/integrity': typeof AdminAdminIntegrityRoute
   '/admin/legal': typeof AdminAdminLegalRoute
   '/admin/moderation': typeof AdminAdminModerationRoute
   '/attestations/verify': typeof AppAttestationsVerifyRoute
   '/coop/council': typeof AppCoopCouncilRoute
+  '/coop/jury': typeof AppCoopJuryRoute
   '/coop/membership': typeof AppCoopMembershipRoute
   '/coop/settings': typeof AppCoopSettingsRoute
   '/oauth2/authorize': typeof AppOauth2AuthorizeRoute
@@ -496,9 +543,11 @@ export interface FileRoutesByTo {
   '/coop': typeof AppCoopIndexRoute
   '/developer': typeof StudioDeveloperIndexRoute
   '/$channel/clips/$clipId': typeof AppChannelClipsClipIdRoute
+  '/$channel/giveaways/$giveawayId': typeof AppChannelGiveawaysGiveawayIdRoute
   '/$channel/vods/$vodId': typeof AppChannelVodsVodIdRoute
   '/coop/patronage/$periodId': typeof AppCoopPatronagePeriodIdRoute
   '/coop/proposals/new': typeof AppCoopProposalsNewRoute
+  '/m/$channel/$nonce': typeof AppMChannelNonceRoute
   '/settings/notifications/unsubscribe': typeof AppSettingsNotificationsUnsubscribeRoute
   '/developer/apps/$appId': typeof StudioDeveloperAppsAppIdRoute
   '/coop/patronage': typeof AppCoopPatronageIndexRoute
@@ -527,7 +576,9 @@ export interface FileRoutesById {
   '/_studio/content': typeof StudioContentRoute
   '/_studio/crew': typeof StudioCrewRoute
   '/_studio/dashboard': typeof StudioDashboardRoute
+  '/_studio/import': typeof StudioImportRoute
   '/_studio/interact': typeof StudioInteractRoute
+  '/_studio/move': typeof StudioMoveRoute
   '/_studio/overlays': typeof StudioOverlaysRoute
   '/_studio/rehearse': typeof StudioRehearseRoute
   '/_studio/relays': typeof StudioRelaysRoute
@@ -542,12 +593,14 @@ export interface FileRoutesById {
   '/_admin/admin/coop': typeof AdminAdminCoopRoute
   '/_admin/admin/dmca': typeof AdminAdminDmcaRoute
   '/_admin/admin/egress': typeof AdminAdminEgressRoute
+  '/_admin/admin/federation': typeof AdminAdminFederationRoute
   '/_admin/admin/incidents': typeof AdminAdminIncidentsRoute
   '/_admin/admin/integrity': typeof AdminAdminIntegrityRoute
   '/_admin/admin/legal': typeof AdminAdminLegalRoute
   '/_admin/admin/moderation': typeof AdminAdminModerationRoute
   '/_app/attestations/verify': typeof AppAttestationsVerifyRoute
   '/_app/coop/council': typeof AppCoopCouncilRoute
+  '/_app/coop/jury': typeof AppCoopJuryRoute
   '/_app/coop/membership': typeof AppCoopMembershipRoute
   '/_app/coop/settings': typeof AppCoopSettingsRoute
   '/_app/oauth2/authorize': typeof AppOauth2AuthorizeRoute
@@ -561,9 +614,11 @@ export interface FileRoutesById {
   '/_app/coop/': typeof AppCoopIndexRoute
   '/_studio/developer/': typeof StudioDeveloperIndexRoute
   '/_app/$channel_/clips/$clipId': typeof AppChannelClipsClipIdRoute
+  '/_app/$channel_/giveaways/$giveawayId': typeof AppChannelGiveawaysGiveawayIdRoute
   '/_app/$channel_/vods/$vodId': typeof AppChannelVodsVodIdRoute
   '/_app/coop/patronage/$periodId': typeof AppCoopPatronagePeriodIdRoute
   '/_app/coop/proposals/new': typeof AppCoopProposalsNewRoute
+  '/_app/m/$channel/$nonce': typeof AppMChannelNonceRoute
   '/_app/settings/notifications/unsubscribe': typeof AppSettingsNotificationsUnsubscribeRoute
   '/_studio/developer/apps/$appId': typeof StudioDeveloperAppsAppIdRoute
   '/_app/coop/patronage/': typeof AppCoopPatronageIndexRoute
@@ -591,7 +646,9 @@ export interface FileRouteTypes {
     | '/content'
     | '/crew'
     | '/dashboard'
+    | '/import'
     | '/interact'
+    | '/move'
     | '/overlays'
     | '/rehearse'
     | '/relays'
@@ -605,12 +662,14 @@ export interface FileRouteTypes {
     | '/admin/coop'
     | '/admin/dmca'
     | '/admin/egress'
+    | '/admin/federation'
     | '/admin/incidents'
     | '/admin/integrity'
     | '/admin/legal'
     | '/admin/moderation'
     | '/attestations/verify'
     | '/coop/council'
+    | '/coop/jury'
     | '/coop/membership'
     | '/coop/settings'
     | '/oauth2/authorize'
@@ -624,9 +683,11 @@ export interface FileRouteTypes {
     | '/coop/'
     | '/developer/'
     | '/$channel/clips/$clipId'
+    | '/$channel/giveaways/$giveawayId'
     | '/$channel/vods/$vodId'
     | '/coop/patronage/$periodId'
     | '/coop/proposals/new'
+    | '/m/$channel/$nonce'
     | '/settings/notifications/unsubscribe'
     | '/developer/apps/$appId'
     | '/coop/patronage/'
@@ -652,7 +713,9 @@ export interface FileRouteTypes {
     | '/content'
     | '/crew'
     | '/dashboard'
+    | '/import'
     | '/interact'
+    | '/move'
     | '/overlays'
     | '/rehearse'
     | '/relays'
@@ -666,12 +729,14 @@ export interface FileRouteTypes {
     | '/admin/coop'
     | '/admin/dmca'
     | '/admin/egress'
+    | '/admin/federation'
     | '/admin/incidents'
     | '/admin/integrity'
     | '/admin/legal'
     | '/admin/moderation'
     | '/attestations/verify'
     | '/coop/council'
+    | '/coop/jury'
     | '/coop/membership'
     | '/coop/settings'
     | '/oauth2/authorize'
@@ -685,9 +750,11 @@ export interface FileRouteTypes {
     | '/coop'
     | '/developer'
     | '/$channel/clips/$clipId'
+    | '/$channel/giveaways/$giveawayId'
     | '/$channel/vods/$vodId'
     | '/coop/patronage/$periodId'
     | '/coop/proposals/new'
+    | '/m/$channel/$nonce'
     | '/settings/notifications/unsubscribe'
     | '/developer/apps/$appId'
     | '/coop/patronage'
@@ -715,7 +782,9 @@ export interface FileRouteTypes {
     | '/_studio/content'
     | '/_studio/crew'
     | '/_studio/dashboard'
+    | '/_studio/import'
     | '/_studio/interact'
+    | '/_studio/move'
     | '/_studio/overlays'
     | '/_studio/rehearse'
     | '/_studio/relays'
@@ -730,12 +799,14 @@ export interface FileRouteTypes {
     | '/_admin/admin/coop'
     | '/_admin/admin/dmca'
     | '/_admin/admin/egress'
+    | '/_admin/admin/federation'
     | '/_admin/admin/incidents'
     | '/_admin/admin/integrity'
     | '/_admin/admin/legal'
     | '/_admin/admin/moderation'
     | '/_app/attestations/verify'
     | '/_app/coop/council'
+    | '/_app/coop/jury'
     | '/_app/coop/membership'
     | '/_app/coop/settings'
     | '/_app/oauth2/authorize'
@@ -749,9 +820,11 @@ export interface FileRouteTypes {
     | '/_app/coop/'
     | '/_studio/developer/'
     | '/_app/$channel_/clips/$clipId'
+    | '/_app/$channel_/giveaways/$giveawayId'
     | '/_app/$channel_/vods/$vodId'
     | '/_app/coop/patronage/$periodId'
     | '/_app/coop/proposals/new'
+    | '/_app/m/$channel/$nonce'
     | '/_app/settings/notifications/unsubscribe'
     | '/_studio/developer/apps/$appId'
     | '/_app/coop/patronage/'
@@ -906,11 +979,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof StudioDashboardRouteImport
       parentRoute: typeof StudioRoute
     }
+    '/_studio/import': {
+      id: '/_studio/import'
+      path: '/import'
+      fullPath: '/import'
+      preLoaderRoute: typeof StudioImportRouteImport
+      parentRoute: typeof StudioRoute
+    }
     '/_studio/interact': {
       id: '/_studio/interact'
       path: '/interact'
       fullPath: '/interact'
       preLoaderRoute: typeof StudioInteractRouteImport
+      parentRoute: typeof StudioRoute
+    }
+    '/_studio/move': {
+      id: '/_studio/move'
+      path: '/move'
+      fullPath: '/move'
+      preLoaderRoute: typeof StudioMoveRouteImport
       parentRoute: typeof StudioRoute
     }
     '/_studio/overlays': {
@@ -1004,6 +1091,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminAdminEgressRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/_admin/admin/federation': {
+      id: '/_admin/admin/federation'
+      path: '/admin/federation'
+      fullPath: '/admin/federation'
+      preLoaderRoute: typeof AdminAdminFederationRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/_admin/admin/incidents': {
       id: '/_admin/admin/incidents'
       path: '/admin/incidents'
@@ -1051,6 +1145,13 @@ declare module '@tanstack/react-router' {
       path: '/coop/council'
       fullPath: '/coop/council'
       preLoaderRoute: typeof AppCoopCouncilRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/coop/jury': {
+      id: '/_app/coop/jury'
+      path: '/coop/jury'
+      fullPath: '/coop/jury'
+      preLoaderRoute: typeof AppCoopJuryRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/coop/membership': {
@@ -1137,6 +1238,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppChannelClipsClipIdRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/$channel_/giveaways/$giveawayId': {
+      id: '/_app/$channel_/giveaways/$giveawayId'
+      path: '/$channel/giveaways/$giveawayId'
+      fullPath: '/$channel/giveaways/$giveawayId'
+      preLoaderRoute: typeof AppChannelGiveawaysGiveawayIdRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/$channel_/vods/$vodId': {
       id: '/_app/$channel_/vods/$vodId'
       path: '/$channel/vods/$vodId'
@@ -1170,6 +1278,13 @@ declare module '@tanstack/react-router' {
       path: '/coop/proposals/new'
       fullPath: '/coop/proposals/new'
       preLoaderRoute: typeof AppCoopProposalsNewRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/m/$channel/$nonce': {
+      id: '/_app/m/$channel/$nonce'
+      path: '/m/$channel/$nonce'
+      fullPath: '/m/$channel/$nonce'
+      preLoaderRoute: typeof AppMChannelNonceRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/settings/notifications/': {
@@ -1217,6 +1332,7 @@ interface AdminRouteChildren {
   AdminAdminCoopRoute: typeof AdminAdminCoopRoute
   AdminAdminDmcaRoute: typeof AdminAdminDmcaRoute
   AdminAdminEgressRoute: typeof AdminAdminEgressRoute
+  AdminAdminFederationRoute: typeof AdminAdminFederationRoute
   AdminAdminIncidentsRoute: typeof AdminAdminIncidentsRoute
   AdminAdminIntegrityRoute: typeof AdminAdminIntegrityRoute
   AdminAdminLegalRoute: typeof AdminAdminLegalRoute
@@ -1230,6 +1346,7 @@ const AdminRouteChildren: AdminRouteChildren = {
   AdminAdminCoopRoute: AdminAdminCoopRoute,
   AdminAdminDmcaRoute: AdminAdminDmcaRoute,
   AdminAdminEgressRoute: AdminAdminEgressRoute,
+  AdminAdminFederationRoute: AdminAdminFederationRoute,
   AdminAdminIncidentsRoute: AdminAdminIncidentsRoute,
   AdminAdminIntegrityRoute: AdminAdminIntegrityRoute,
   AdminAdminLegalRoute: AdminAdminLegalRoute,
@@ -1249,6 +1366,7 @@ interface AppRouteChildren {
   AppIndexRoute: typeof AppIndexRoute
   AppAttestationsVerifyRoute: typeof AppAttestationsVerifyRoute
   AppCoopCouncilRoute: typeof AppCoopCouncilRoute
+  AppCoopJuryRoute: typeof AppCoopJuryRoute
   AppCoopMembershipRoute: typeof AppCoopMembershipRoute
   AppCoopSettingsRoute: typeof AppCoopSettingsRoute
   AppOauth2AuthorizeRoute: typeof AppOauth2AuthorizeRoute
@@ -1260,9 +1378,11 @@ interface AppRouteChildren {
   AppSettingsSubscriptionsRoute: typeof AppSettingsSubscriptionsRoute
   AppCoopIndexRoute: typeof AppCoopIndexRoute
   AppChannelClipsClipIdRoute: typeof AppChannelClipsClipIdRoute
+  AppChannelGiveawaysGiveawayIdRoute: typeof AppChannelGiveawaysGiveawayIdRoute
   AppChannelVodsVodIdRoute: typeof AppChannelVodsVodIdRoute
   AppCoopPatronagePeriodIdRoute: typeof AppCoopPatronagePeriodIdRoute
   AppCoopProposalsNewRoute: typeof AppCoopProposalsNewRoute
+  AppMChannelNonceRoute: typeof AppMChannelNonceRoute
   AppSettingsNotificationsUnsubscribeRoute: typeof AppSettingsNotificationsUnsubscribeRoute
   AppCoopPatronageIndexRoute: typeof AppCoopPatronageIndexRoute
   AppCoopProposalsIndexRoute: typeof AppCoopProposalsIndexRoute
@@ -1282,6 +1402,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppIndexRoute: AppIndexRoute,
   AppAttestationsVerifyRoute: AppAttestationsVerifyRoute,
   AppCoopCouncilRoute: AppCoopCouncilRoute,
+  AppCoopJuryRoute: AppCoopJuryRoute,
   AppCoopMembershipRoute: AppCoopMembershipRoute,
   AppCoopSettingsRoute: AppCoopSettingsRoute,
   AppOauth2AuthorizeRoute: AppOauth2AuthorizeRoute,
@@ -1293,9 +1414,11 @@ const AppRouteChildren: AppRouteChildren = {
   AppSettingsSubscriptionsRoute: AppSettingsSubscriptionsRoute,
   AppCoopIndexRoute: AppCoopIndexRoute,
   AppChannelClipsClipIdRoute: AppChannelClipsClipIdRoute,
+  AppChannelGiveawaysGiveawayIdRoute: AppChannelGiveawaysGiveawayIdRoute,
   AppChannelVodsVodIdRoute: AppChannelVodsVodIdRoute,
   AppCoopPatronagePeriodIdRoute: AppCoopPatronagePeriodIdRoute,
   AppCoopProposalsNewRoute: AppCoopProposalsNewRoute,
+  AppMChannelNonceRoute: AppMChannelNonceRoute,
   AppSettingsNotificationsUnsubscribeRoute:
     AppSettingsNotificationsUnsubscribeRoute,
   AppCoopPatronageIndexRoute: AppCoopPatronageIndexRoute,
@@ -1315,7 +1438,9 @@ interface StudioRouteChildren {
   StudioContentRoute: typeof StudioContentRoute
   StudioCrewRoute: typeof StudioCrewRoute
   StudioDashboardRoute: typeof StudioDashboardRoute
+  StudioImportRoute: typeof StudioImportRoute
   StudioInteractRoute: typeof StudioInteractRoute
+  StudioMoveRoute: typeof StudioMoveRoute
   StudioOverlaysRoute: typeof StudioOverlaysRoute
   StudioRehearseRoute: typeof StudioRehearseRoute
   StudioRelaysRoute: typeof StudioRelaysRoute
@@ -1333,7 +1458,9 @@ const StudioRouteChildren: StudioRouteChildren = {
   StudioContentRoute: StudioContentRoute,
   StudioCrewRoute: StudioCrewRoute,
   StudioDashboardRoute: StudioDashboardRoute,
+  StudioImportRoute: StudioImportRoute,
   StudioInteractRoute: StudioInteractRoute,
+  StudioMoveRoute: StudioMoveRoute,
   StudioOverlaysRoute: StudioOverlaysRoute,
   StudioRehearseRoute: StudioRehearseRoute,
   StudioRelaysRoute: StudioRelaysRoute,
