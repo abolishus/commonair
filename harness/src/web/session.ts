@@ -42,14 +42,15 @@ export interface WebSessionLocale {
 export const WEB_LOCALE_COOKIE = "commonair-locale";
 const DEFAULT_BROWSER_LOCALE = "en-US";
 
-/** The cookie Playwright should add for `locale`, scoped to the web origin only; null for none. */
+/** The cookie Playwright should add for `locale`, host-only on the web host; null for none. */
 export function localeCookie(
   webUrl: string,
   locale: WebSessionOptions["locale"],
 ): { name: string; value: string; url: string; sameSite: "Lax" } | null {
   const tag = typeof locale === "string" ? locale : locale?.cookie;
   if (!tag) return null;
-  // `url` (not `domain`) makes it a host-only cookie: the API origin never receives it.
+  // `url` (not `domain`) makes it host-only on the web host. Cookies ignore ports, so an API on
+  // the same host (localhost:3001 in `.env.example`) receives it too; nothing there reads it.
   return { name: WEB_LOCALE_COOKIE, value: encodeURIComponent(tag), url: new URL(webUrl).origin, sameSite: "Lax" };
 }
 

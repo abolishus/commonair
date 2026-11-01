@@ -6,7 +6,7 @@
  * `commonair-locale` cookie; under `en-XA` each page the scenario visits is scanned for
  * untranslated text, and a cheap `es` smoke step checks negotiation from `Accept-Language`.
  */
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import type { Page } from "playwright";
 import { PSEUDO_LOCALE, pseudoLocalize } from "../../../packages/i18n/src/pseudo.ts";
 import type { ScenarioContext } from "../scenario.ts";
@@ -102,7 +102,9 @@ export class LiteralScanner {
   async scan(who: string, pageName: string, page: Page): Promise<void> {
     if (!this.enabled) return;
     const name = scanStepName(who, pageName);
-    const { hits, scanned } = await this.ctx.step(name, () => scanPage(page, { userContent: this.content }));
+    const { hits, scanned } = await this.ctx.step(name, () =>
+      scanPage(page, { userContent: this.content, languages: webLocales() }),
+    );
     this.pagesScanned++;
     this.hitsTotal += hits.length;
     if (hits.length > 0) this.ctx.data(hitsDataKey(who, pageName), redactHits(hits, this.secrets));
@@ -128,6 +130,15 @@ function summarizeHits(hits: readonly LiteralHit[], scanned: number) {
     hits: hits.length,
     first: hits.slice(0, DETAIL_HITS).map((h) => ({ words: h.words, kind: h.kind, selector: h.selector })),
   };
+}
+
+/** The web app's catalog languages (`apps/web/src/i18n/locales/<lang>`): what a switcher names. */
+export function webLocales(): string[] {
+  const dir = new URL("../../../apps/web/src/i18n/locales/", import.meta.url);
+  return readdirSync(dir, { withFileTypes: true })
+    .filter((e) => e.isDirectory())
+    .map((e) => e.name)
+    .sort();
 }
 
 /** One message from a web catalog JSON (`apps/web/src/i18n/locales/<lang>/<namespace>.json`). */

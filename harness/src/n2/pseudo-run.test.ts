@@ -14,6 +14,7 @@ import {
   scanStepName,
   stringsIn,
   webCatalogMessage,
+  webLocales,
 } from "./pseudo-run.ts";
 import { untranslatedWords } from "./literals.ts";
 
@@ -99,5 +100,11 @@ describe("catalog strings", () => {
 
   test("a missing key is an error, not undefined", () => {
     expect(() => webCatalogMessage("en", "core", "no.such.key")).toThrow(/no "no.such.key"/);
+  });
+
+  test("webLocales lists the catalog languages, en and es included, never en-XA", () => {
+    const tags = webLocales();
+    expect(tags).toEqual(expect.arrayContaining(["en", "es"]));
+    expect(tags).not.toContain(PSEUDO_LOCALE);
   });
 });

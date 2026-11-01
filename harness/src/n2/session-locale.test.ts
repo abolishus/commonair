@@ -22,7 +22,7 @@ const open = (fleet: BrowserFleet, locale?: Parameters<typeof localeCookie>[1]) 
   WebSession.open({ fleet, engine: "chromium", webUrl: WEB, probeScript: "", label: "t", locale });
 
 describe("localeCookie", () => {
-  test("is scoped to the web origin only (host-only, no domain)", () => {
+  test("is host-only on the web host (url, no domain)", () => {
     expect(localeCookie(WEB, "en-XA")).toEqual({
       name: WEB_LOCALE_COOKIE,
       value: "en-XA",

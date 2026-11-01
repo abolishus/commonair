@@ -8,7 +8,8 @@ import {
   PSEUDO_LETTERS,
   type ScannedNode,
   findLiterals,
-  intlWords,
+  intlPhrases,
+  phrasePattern,
   stripPseudoSegments,
   untranslatedWords,
 } from "./literals.ts";
@@ -55,8 +56,25 @@ describe("untranslatedWords", () => {
     expect(untranslatedWords(outer)).toEqual([]);
   });
 
-  test("ASCII inside a pseudo segment (an interpolated value) is not flagged", () => {
-    expect(untranslatedWords(pseudoLocalize("Welcome back, {name}").replace("{name}", "anything"))).toEqual([]);
+  test("a hard-coded English argument inside a pseudo message is flagged", () => {
+    const welcome = pseudoLocalize("Welcome back, {name}");
+    expect(untranslatedWords(welcome.replace("{name}", "Settings"))).toEqual(["Settings"]);
+    expect(untranslatedWords(pseudoLocalize("Open {page}").replace("{page}", "Settings page"))).toEqual([
+      "Settings",
+      "page",
+    ]);
+  });
+
+  test("a user-content or number argument inside a pseudo message is not flagged", () => {
+    const welcome = pseudoLocalize("Welcome back, {name}");
+    expect(untranslatedWords(welcome.replace("{name}", "e2e_fan_abc"), { userContent: ["e2e_fan_abc"] })).toEqual([]);
+    expect(untranslatedWords(pseudoLocalize("{count} viewers").replace("{count}", "1,234"))).toEqual([]);
+  });
+
+  test("an Intl argument inside a pseudo message is not flagged", () => {
+    const phrases = intlPhrases({ locales: ["en"] });
+    const started = pseudoLocalize("Started {when}").replace("{when}", "5 minutes ago");
+    expect(untranslatedWords(started, { intlPhrases: phrases })).toEqual([]);
   });
 
   test("a bracket that is not pseudo keeps its English", () => {
@@ -90,25 +108,52 @@ describe("untranslatedWords", () => {
     expect(untranslatedWords("localhost:3000/dashboard")).toEqual([]);
   });
 
-  test("dates and times from Intl are ignored when the vocabulary is given", () => {
-    const vocabulary = intlWords(["en-XA", "en"]);
+  test("addresses and hosts do not swallow English next to them", () => {
+    expect(untranslatedWords("alice@example.test Settings")).toEqual(["Settings"]);
+    expect(untranslatedWords("Saved.Next")).toEqual(["Saved", "Next"]);
+    expect(untranslatedWords("e.g.Settings")).toEqual(["Settings"]);
+  });
+
+  test("dates, times, numbers and language names from Intl are ignored when given", () => {
+    const phrases = intlPhrases({ locales: ["en-XA", "en"], languages: ["en", "es"] });
     const relative = new Intl.RelativeTimeFormat("en-XA", { numeric: "auto" });
     const date = new Intl.DateTimeFormat("en-XA", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" });
     for (const text of [
       relative.format(-5, "minute"),
+      relative.format(-17, "minute"),
       relative.format(-1, "day"),
       relative.format(0, "second"),
+      relative.format(1, "week"),
       date.format(new Date(Date.UTC(2026, 9, 31, 15, 4))),
-      new Intl.NumberFormat("en-XA", { notation: "compact" }).format(12_300),
+      new Intl.DateTimeFormat("en", { dateStyle: "long", timeStyle: "short" }).format(
+        new Date(Date.UTC(2026, 4, 9, 9)),
+      ),
+      new Intl.NumberFormat("en-XA", { notation: "compact", maximumFractionDigits: 1 }).format(12_300),
+      new Intl.NumberFormat("en", { notation: "compact", compactDisplay: "long" }).format(1_200_000),
+      new Intl.NumberFormat("en", { style: "currency", currency: "USD", currencyDisplay: "name" }).format(1234.5),
+      "English",
+      "Español",
+      "Spanish",
     ])
-      expect(untranslatedWords(text, { vocabulary })).toEqual([]);
-    // Without it, the English month is caught.
+      expect(untranslatedWords(text, { intlPhrases: phrases }), text).toEqual([]);
+    // Without them, the English month is caught.
     expect(untranslatedWords(date.format(new Date(Date.UTC(2026, 9, 31))))).toContain("Oct");
   });
 
-  test("vocabulary does not hide other words in the same text", () => {
-    const vocabulary = intlWords(["en"]);
-    expect(untranslatedWords("Started 5 minutes ago", { vocabulary })).toEqual(["Started"]);
+  test("Intl words on their own, or in other case, are still flagged", () => {
+    const phrases = intlPhrases({ locales: ["en-XA", "en"], languages: ["en", "es"] });
+    for (const text of ["Next", "Last", "Today", "Now", "This", "Time", "Per"])
+      expect(untranslatedWords(text, { intlPhrases: phrases })).toEqual([text]);
+    expect(untranslatedWords("Next page", { intlPhrases: phrases })).toEqual(["Next", "page"]);
+    // "next week" is an Intl phrase; "Next" alone is a label.
+    expect(untranslatedWords("next week · Next", { intlPhrases: phrases })).toEqual(["Next"]);
+    expect(untranslatedWords("you may continue", { intlPhrases: phrases })).toEqual(["you", "may", "continue"]);
+  });
+
+  test("Intl phrases do not hide other words in the same text", () => {
+    const phrases = intlPhrases({ locales: ["en"] });
+    expect(untranslatedWords("Started 5 minutes ago", { intlPhrases: phrases })).toEqual(["Started"]);
+    expect(untranslatedWords("Octopus", { intlPhrases: phrases })).toEqual(["Octopus"]);
   });
 });
 
@@ -130,13 +175,30 @@ describe("findLiterals", () => {
   });
 });
 
-describe("intlWords", () => {
-  test("covers month, weekday and relative-time words, lowercased", () => {
-    const words = new Set(intlWords(["en"]));
-    for (const w of ["october", "oct", "friday", "ago", "yesterday", "minutes"]) expect(words.has(w)).toBe(true);
+describe("intlPhrases", () => {
+  test("covers month, weekday, relative-time and language phrases", () => {
+    const phrases = new Set(intlPhrases({ locales: ["en"], languages: ["es"] }));
+    for (const p of ["October", "Oct", "Monday", "Wed", "Friday", "yesterday", "next week", "Spanish", "Español"])
+      expect(phrases.has(p), p).toBe(true);
+    expect([...phrases].some((p) => /^\d+ minutes ago$/.test(p))).toBe(true);
   });
 
   test("an unknown locale tag adds nothing and does not throw", () => {
-    expect(() => intlWords(["not a tag!"])).not.toThrow();
+    expect(() => intlPhrases({ locales: ["not a tag!"], languages: ["also not!"] })).not.toThrow();
+  });
+});
+
+describe("phrasePattern", () => {
+  test("generalizes numbers and spaces, and matches whole phrases only", () => {
+    const re = phrasePattern(["5 minutes ago", "1.2K"]);
+    expect(re).not.toBeNull();
+    expect("12 minutes\u00a0ago".replace(re as RegExp, "")).toBe("");
+    expect("3.4K".replace(re as RegExp, "")).toBe("");
+    expect("x5 minutes ago".replace(re as RegExp, "")).toBe("x5 minutes ago");
+  });
+
+  test("no phrases with letters gives no pattern", () => {
+    expect(phrasePattern([])).toBeNull();
+    expect(phrasePattern(["1,234", "  "])).toBeNull();
   });
 });

@@ -96,9 +96,19 @@ function isPseudoSegment(content: string): boolean {
   return false;
 }
 
+/** A pseudo segment's own text (accented letters, padding) blanked; interpolated ASCII kept. */
+function blankPseudo(content: string): string {
+  let out = "";
+  for (const ch of content) out += PSEUDO_LETTERS.has(ch) || ch === "~" ? " " : ch;
+  return out;
+}
+
 /**
- * Remove every pseudo-localized `[…~]` segment, innermost first, so a translated message that
- * nests another (an interpolated label) goes as a whole. Other brackets (`[beta]`) stay.
+ * Blank every pseudo-localized `[…~]` segment's brackets, accented letters and padding, innermost
+ * first, so nested messages unwrap too. Whatever ASCII is left inside was interpolated: user
+ * content, URLs and `Intl` text are removed before this, so English left there is a hard-coded
+ * argument (`t("x", { label: "Settings" })`) and is checked like any other text. Brackets that
+ * are not pseudo (`[beta]`) stay.
  */
 export function stripPseudoSegments(text: string): string {
   let s = text;
@@ -106,18 +116,18 @@ export function stripPseudoSegments(text: string): string {
     let changed = false;
     s = s.replace(INNERMOST, (_m, content: string) => {
       changed = true;
-      return isPseudoSegment(content) ? " " : `${OPEN}${content}${CLOSE}`;
+      return isPseudoSegment(content) ? ` ${blankPseudo(content)} ` : `${OPEN}${content}${CLOSE}`;
     });
     if (!changed) break;
   }
   return s.replaceAll(OPEN, "[").replaceAll(CLOSE, "]");
 }
 
-// URLs of any scheme, e-mail addresses, host names with a TLD, and localhost.
+// URLs of any scheme, e-mail addresses, lower-case host names with a TLD, and localhost.
 const URLISH = [
   /\b[a-z][a-z0-9+.-]*:\/\/\S+/gi,
-  /[^\s@]+@[^\s@]+/g,
-  /\b(?:[a-z0-9-]+\.)+[a-z]{2,}(?::\d+)?(?:\/\S*)?/gi,
+  /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g,
+  /\b(?:[a-z0-9-]+\.)+[a-z]{2,}\b(?::\d+)?(?:\/\S*)?/g,
   /\blocalhost(?::\d+)?(?:\/\S*)?/gi,
 ];
 
@@ -125,17 +135,48 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+const NUMBER = /\d+(?:[.,  ']\d+)*/g;
+const NUMBER_SOURCE = String.raw`\d+(?:[.,  ']\d+)*`;
+
+/**
+ * One regex matching any of `phrases` as a whole phrase (not inside a longer word), with every
+ * number generalized (so "5 minutes ago" also matches "12 minutes ago") and any whitespace run
+ * matching any other (ICU uses no-break spaces). Case-sensitive: `Intl` never renders "Next" or
+ * "Today" on its own, so a hard-coded button label still shows.
+ */
+export function phrasePattern(phrases: Iterable<string>): RegExp | null {
+  const sources = new Map<string, number>();
+  for (const raw of phrases) {
+    const phrase = raw.trim();
+    if (!/\p{L}/u.test(phrase)) continue;
+    const source = phrase
+      .split(NUMBER)
+      .map((part) =>
+        part
+          .split(/\s+/)
+          .map(escapeRegExp)
+          .join(String.raw`\s+`),
+      )
+      .join(NUMBER_SOURCE);
+    sources.set(source, Math.max(sources.get(source) ?? 0, phrase.length));
+  }
+  if (sources.size === 0) return null;
+  // Longest first, so "5 minutes ago" goes whole rather than leaving "ago".
+  const ordered = [...sources].sort((a, b) => b[1] - a[1]).map(([source]) => source);
+  return new RegExp(String.raw`(?<![\p{L}\p{N}])(?:${ordered.join("|")})(?![\p{L}\p{N}])`, "gu");
+}
+
 export interface LiteralOptions {
   /** Values the scenario created or read from the API (usernames, titles, messages, keys…). */
   userContent?: Iterable<string>;
-  /** Words `Intl` produces for the locale (`intlWords`); compared case-insensitively. */
-  vocabulary?: Iterable<string>;
+  /** Phrases `Intl` renders for the locale (`intlPhrases`), removed as whole phrases. */
+  intlPhrases?: Iterable<string>;
   allowlist?: readonly AllowedTerm[];
 }
 
 interface Prepared {
   userContent: RegExp | null;
-  vocabulary: Set<string>;
+  intl: RegExp | null;
   allowed: Set<string>;
 }
 
@@ -146,7 +187,7 @@ function prepare(opts: LiteralOptions): Prepared {
   values.sort((a, b) => b.length - a.length);
   return {
     userContent: values.length > 0 ? new RegExp(values.map(escapeRegExp).join("|"), "gi") : null,
-    vocabulary: new Set([...(opts.vocabulary ?? [])].map((w) => w.toLowerCase())),
+    intl: phrasePattern(opts.intlPhrases ?? []),
     allowed: new Set((opts.allowlist ?? LITERAL_ALLOWLIST).map((a) => a.term)),
   };
 }
@@ -154,9 +195,10 @@ function prepare(opts: LiteralOptions): Prepared {
 function wordsIn(text: string, p: Prepared): string[] {
   let s = p.userContent ? text.replace(p.userContent, " ") : text;
   for (const re of URLISH) s = s.replace(re, " ");
+  if (p.intl) s = s.replace(p.intl, " ");
   s = stripPseudoSegments(s);
   const runs = s.match(/[A-Za-z]{3,}/g) ?? [];
-  return runs.filter((w) => !p.allowed.has(w) && !p.vocabulary.has(w.toLowerCase()));
+  return runs.filter((w) => !p.allowed.has(w));
 }
 
 /** The untranslated runs in one string (empty when it is clean). */
@@ -175,53 +217,76 @@ export function findLiterals(nodes: readonly ScannedNode[], opts: LiteralOptions
   return hits;
 }
 
+export interface IntlPhraseSpec {
+  locales: readonly string[];
+  languages?: readonly string[];
+}
+
 /**
- * Words `Intl` renders for `locales` (month and weekday names, relative times, day periods,
- * compact numbers, units, language names, time zones): locale data from ICU, not catalog text,
- * so `formatRelativeTime` under `en-XA` ("5 minutes ago") is not an untranslated literal.
+ * Phrases `Intl` renders for `locales` (dates in every style the UI uses, month and weekday names,
+ * relative times, compact numbers, currencies, units, time zones), plus the names of `languages`
+ * in each of `locales` and in their own language, first letter upper-cased as the switcher shows
+ * them. Locale data from ICU, not catalog text, so `formatRelativeTime` under `en-XA` ("5 minutes
+ * ago") is not an untranslated literal. Whole phrases, so a lone "Next" or "Today" still is.
  * Self-contained so it also runs in the page (`page.evaluate`), whose ICU rendered the text.
  */
-export function intlWords(locales: readonly string[]): string[] {
+export function intlPhrases({ locales, languages = [] }: IntlPhraseSpec): string[] {
   const out = new Set<string>();
-  const add = (s: string) => {
-    for (const w of s.match(/[A-Za-z]{3,}/g) ?? []) out.add(w.toLowerCase());
-  };
-  const attempt = (fn: () => void) => {
+  const attempt = (fn: () => string | undefined) => {
     try {
-      fn();
+      const s = fn();
+      if (s) out.add(s);
     } catch {
       // A locale or option this ICU does not know: nothing to add.
     }
   };
   const year = 2026;
+  const dateOptions: Intl.DateTimeFormatOptions[] = [
+    { month: "long" },
+    { month: "short" },
+    { month: "long", day: "numeric" },
+    { month: "short", day: "numeric" },
+    { month: "long", year: "numeric" },
+    { month: "short", year: "numeric" },
+    { month: "long", day: "numeric", year: "numeric" },
+    { month: "short", day: "numeric", year: "numeric" },
+    { weekday: "long" },
+    { weekday: "short" },
+    { weekday: "long", month: "long", day: "numeric" },
+    { weekday: "short", month: "short", day: "numeric" },
+    { hour: "numeric" },
+    { hour: "numeric", minute: "2-digit" },
+    { timeZoneName: "short" },
+    { timeZoneName: "long" },
+  ];
+  for (const dateStyle of ["full", "long", "medium", "short", undefined] as const)
+    for (const timeStyle of ["full", "long", "medium", "short", undefined] as const)
+      if (dateStyle || timeStyle) dateOptions.push({ dateStyle, timeStyle });
   for (const locale of locales) {
-    for (let m = 0; m < 12; m++) {
-      const d = new Date(Date.UTC(year, m, 15, 12));
-      for (const month of ["long", "short", "narrow"] as const)
-        attempt(() => add(new Intl.DateTimeFormat(locale, { month, timeZone: "UTC" }).format(d)));
-    }
-    for (let day = 0; day < 7; day++) {
-      const d = new Date(Date.UTC(year, 0, 4 + day, 12));
-      for (const weekday of ["long", "short", "narrow"] as const)
-        attempt(() => add(new Intl.DateTimeFormat(locale, { weekday, timeZone: "UTC" }).format(d)));
-    }
-    for (const hour of [3, 15]) {
-      const d = new Date(Date.UTC(year, 0, 4, hour));
-      attempt(() =>
-        add(new Intl.DateTimeFormat(locale, { dateStyle: "full", timeStyle: "full", timeZone: "UTC" }).format(d)),
-      );
-      attempt(() => add(new Intl.DateTimeFormat(locale, { hour: "numeric", hour12: true, timeZone: "UTC" }).format(d)));
-      attempt(() => add(new Intl.DateTimeFormat(locale, { timeZoneName: "short" }).format(d)));
-    }
+    // Every month (on the 15th) and every weekday (4–10 January), morning and afternoon.
+    const days = [
+      ...Array.from({ length: 12 }, (_, m) => [m, 15] as const),
+      ...Array.from({ length: 7 }, (_, i) => [0, 4 + i] as const),
+    ];
+    for (const [month, day] of days)
+      for (const hour of [3, 15]) {
+        const d = new Date(Date.UTC(year, month, day, hour));
+        for (const o of dateOptions)
+          attempt(() => new Intl.DateTimeFormat(locale, { ...o, timeZone: "UTC" }).format(d));
+      }
     const units = ["second", "minute", "hour", "day", "week", "month", "quarter", "year"] as const;
     for (const style of ["long", "short", "narrow"] as const)
       for (const numeric of ["always", "auto"] as const)
         for (const unit of units)
           for (const n of [-2, -1, 0, 1, 2])
-            attempt(() => add(new Intl.RelativeTimeFormat(locale, { style, numeric }).format(n, unit)));
+            attempt(() => new Intl.RelativeTimeFormat(locale, { style, numeric }).format(n, unit));
     for (const compactDisplay of ["short", "long"] as const)
-      for (const n of [1e3, 1e6, 1e9, 1e12])
-        attempt(() => add(new Intl.NumberFormat(locale, { notation: "compact", compactDisplay }).format(n)));
+      for (const n of [1, 1e3, 1e6, 1e9, 1e12])
+        attempt(() => new Intl.NumberFormat(locale, { notation: "compact", compactDisplay }).format(n));
+    for (const currency of ["USD", "EUR", "GBP", "CAD", "AUD", "JPY", "MXN"])
+      for (const currencyDisplay of ["symbol", "narrowSymbol", "code", "name"] as const)
+        for (const n of [1, 2])
+          attempt(() => new Intl.NumberFormat(locale, { style: "currency", currency, currencyDisplay }).format(n));
     const measures = [
       "bit",
       "byte",
@@ -247,9 +312,17 @@ export function intlWords(locales: readonly string[]): string[] {
     for (const unitDisplay of ["long", "short", "narrow"] as const)
       for (const unit of measures)
         for (const n of [1, 2])
-          attempt(() => add(new Intl.NumberFormat(locale, { style: "unit", unit, unitDisplay }).format(n)));
-    for (const tag of locales) attempt(() => add(new Intl.DisplayNames([locale], { type: "language" }).of(tag) ?? ""));
+          attempt(() => new Intl.NumberFormat(locale, { style: "unit", unit, unitDisplay }).format(n));
   }
+  for (const tag of [...locales, ...languages])
+    for (const display of [...locales, tag])
+      attempt(() => {
+        const name = new Intl.DisplayNames([display], { type: "language" }).of(tag);
+        if (!name) return undefined;
+        out.add(name);
+        const [first = "", ...rest] = Array.from(name);
+        return first.toLocaleUpperCase(display) + rest.join("");
+      });
   return [...out];
 }
 
@@ -298,7 +371,8 @@ function collectInPage(skip: string): ScannedNode[] {
     blocks.set(block, list);
   }
   for (const [block, texts] of blocks) {
-    const text = texts.join("").replace(/\s+/g, " ").trim();
+    // Joined with a space: inline neighbours ("alice@x.test" then "Settings") must not fuse.
+    const text = texts.join(" ").replace(/\s+/g, " ").trim();
     if (text) out.push({ kind: "text", text, selector: pathOf(block) });
   }
   const attrs = [
@@ -327,8 +401,10 @@ function collectInPage(skip: string): ScannedNode[] {
 
 export interface PageScanOptions {
   userContent?: Iterable<string>;
-  /** Locales whose `Intl` words are not literals (default `en-XA` and `en`). */
+  /** Locales whose `Intl` phrases are not literals (default `en-XA` and `en`). */
   intlLocales?: readonly string[];
+  /** Languages a switcher may name, by their `Intl` display names (default `en`, `es`). */
+  languages?: readonly string[];
   allowlist?: readonly AllowedTerm[];
 }
 
@@ -339,17 +415,20 @@ export interface PageScan {
 }
 
 const DEFAULT_INTL_LOCALES = ["en-XA", "en"];
+const DEFAULT_LANGUAGES = ["en", "es"];
 
 /** Scan the page as it is now. */
 export async function scanPage(page: Page, opts: PageScanOptions = {}): Promise<PageScan> {
   const locales = [...(opts.intlLocales ?? DEFAULT_INTL_LOCALES)];
   const nodes = await page.evaluate(collectInPage, SKIP_SELECTORS.join(","));
   // Server-rendered text used the server's ICU, hydrated text the browser's: allow both.
-  const pageWords = await page.evaluate(intlWords, locales);
-  const vocabulary = new Set([...intlWords(locales), ...pageWords]);
+  const languages = [...(opts.languages ?? DEFAULT_LANGUAGES)];
+  // Passed by reference, not wrapped: Playwright serializes the function itself into the page.
+  const pagePhrases = await page.evaluate(intlPhrases, { locales, languages });
+  const phrases = new Set([...intlPhrases({ locales, languages }), ...pagePhrases]);
   const hits = findLiterals(nodes, {
     userContent: opts.userContent ?? [],
-    vocabulary,
+    intlPhrases: phrases,
     allowlist: opts.allowlist ?? LITERAL_ALLOWLIST,
   });
   return { hits, scanned: nodes.length };
