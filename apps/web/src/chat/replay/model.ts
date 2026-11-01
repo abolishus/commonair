@@ -177,12 +177,7 @@ export class ReplayModel {
     const next = us !== null && Number.isFinite(us) ? us : null;
     if (next === this.playhead) return;
     this.playhead = next;
-    if (next !== null && this.fetched && !this.fromIgnored) {
-      const behind = this.spanStart !== null && next < this.spanStart;
-      const end = this.loadedEnd();
-      const far = !this.done && next - end > this.opts.jumpMicros;
-      if (behind || far) this.restart(next - this.opts.backfillMicros);
-    }
+    this.jumpIfAway();
     this.pump();
     this.publish();
   }
@@ -224,6 +219,19 @@ export class ReplayModel {
     this.done = false;
     this.fetched = false;
     this.retained = true;
+  }
+
+  /**
+   * Start again at the playhead when it sits before the loaded span or far past it. Checked on
+   * every playhead move and once the first page lands: a paused video seeked while that page was
+   * in flight sends no further playhead event.
+   */
+  private jumpIfAway(): void {
+    const at = this.playhead;
+    if (at === null || !this.fetched || this.fromIgnored) return;
+    const behind = this.spanStart !== null && at < this.spanStart;
+    const far = !this.done && at - this.loadedEnd() > this.opts.jumpMicros;
+    if (behind || far) this.restart(at - this.opts.backfillMicros);
   }
 
   /** The newest instant up to which every line is loaded. */
@@ -304,10 +312,12 @@ export class ReplayModel {
         break;
       }
     }
-    if (!this.fetched) this.retained = page.retained;
+    const first = !this.fetched;
+    if (first) this.retained = page.retained;
     this.fetched = true;
     this.cursor = page.nextCursor;
     this.done = page.nextCursor === null;
+    if (first) this.jumpIfAway();
   }
 
   private clearRetry(): void {

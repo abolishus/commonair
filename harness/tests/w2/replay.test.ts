@@ -8,6 +8,7 @@
  */
 import { describe, expect, it } from "vite-plus/test";
 import {
+  agedDays,
   atMicros,
   clipPath,
   lineOffsets,
@@ -130,5 +131,13 @@ describe("selectors and paths", () => {
     expect(replaySel("x", { v: 'a"b' })).toBe('[data-testid="x"][data-v="a\\"b"]');
     expect(vodPath("rivertide", "v1")).toBe("/rivertide/vods/v1");
     expect(clipPath("river tide", "c1")).toBe("/river%20tide/clips/c1");
+  });
+});
+
+describe("agedDays", () => {
+  it("seeds past the stack's CHAT_REPLAY_MAX_DAYS, default 60", () => {
+    expect(agedDays({})).toBe(65);
+    expect(agedDays({ CHAT_REPLAY_MAX_DAYS: "" })).toBe(65);
+    expect(agedDays({ CHAT_REPLAY_MAX_DAYS: "120" })).toBe(125);
   });
 });

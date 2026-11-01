@@ -308,6 +308,36 @@ describe("ReplayModel", () => {
     expect(ids(m)).toEqual([lines[9]?.id, lines[10]?.id]);
   });
 
+  it("a far seek made while the first page is in flight starts again at the target once it lands", async () => {
+    const lines = Array.from({ length: 200 }, (_, i) => item(at(i * 60)));
+    const server = new FakeServer(lines, { size: 5 });
+    server.hold = true;
+    const { m } = model(server);
+    // Paused and seeked deep before the first page arrives: no playhead event follows.
+    m.setPlayhead(us(at(150 * 60)));
+    await flush();
+    expect(server.calls).toHaveLength(1);
+    server.hold = false;
+    server.release();
+    await flush();
+    expect(server.calls[1]?.cursor).toBeUndefined();
+    expect(server.calls[1]?.from).toBe(new Date(T0 + (150 * 60 - 60) * 1000).toISOString());
+    expect(ids(m)).toEqual([lines[149]?.id, lines[150]?.id]);
+  });
+
+  it("a first page that reaches the playhead does not start again", async () => {
+    const lines = Array.from({ length: 20 }, (_, i) => item(at(i * 60)));
+    const server = new FakeServer(lines, { size: 50 });
+    server.hold = true;
+    const { m } = model(server);
+    m.setPlayhead(us(at(15 * 60)));
+    server.hold = false;
+    server.release();
+    await flush();
+    expect(server.calls).toHaveLength(1);
+    expect(ids(m)).toHaveLength(16);
+  });
+
   it("pages on from the start when the server ignores from", async () => {
     const lines = Array.from({ length: 200 }, (_, i) => item(at(i * 60)));
     const server = new FakeServer(lines, { size: 50, honourFrom: false });

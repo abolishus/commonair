@@ -20,6 +20,7 @@
  * parameters and read timestamps through `sql-time.ts` `toDate` (`createDb`'s raw client neither
  * takes nor returns Dates).
  */
+import { chatEnv, loadEnv } from "@commonair/config";
 import { createDb, schema, uuidv7, type Database, type DbHandle } from "@commonair/db";
 import type { Page } from "playwright";
 import { playerBundles } from "../player-server.ts";
@@ -298,8 +299,13 @@ const BROADCAST_MS = 40_000;
 /** When the live clip is cut (it ends LIVE_CLIP_LAG_SECONDS behind live). */
 const CLIP_AT_MS = 28_000;
 const CLIP_SECONDS = 10;
-/** Past CHAT_REPLAY_MAX_DAYS (60): the retention run deletes these rows even though the VOD exists. */
-const AGED_DAYS = 65;
+/**
+ * Days back to seed the aged-out VOD: past the stack's CHAT_REPLAY_MAX_DAYS (read from the same env
+ * the stack gets, default 60), so the retention run deletes its rows even though the VOD exists.
+ */
+export function agedDays(source: Record<string, string | undefined>): number {
+  return loadEnv(chatEnv, source).CHAT_REPLAY_MAX_DAYS + 5;
+}
 
 const title = (what: string) => w2ExtensionTitle("replay-panel", what);
 
@@ -564,11 +570,13 @@ export async function stepReplayPanel(run: W1Run): Promise<void> {
 
   // ---- an aged-out VOD
   await ctx.step(title("an aged-out VOD shows the not-retained notice"), async () => {
-    const aged = await seedAgedOutVod(db, { channelId, channel, userId: chatter.id, daysAgo: AGED_DAYS, lines: 3 });
+    const daysAgo = agedDays(process.env);
+    const aged = await seedAgedOutVod(db, { channelId, channel, userId: chatter.id, daysAgo, lines: 3 });
+    // tickRan repeats a tick the run lock skipped, so the assert below follows a run that happened.
     const result = await run.hooks.client.tickRan("chat-retention");
     ctx.data("w2.replay.retention", result);
     const left = await existingLines(sql, aged.lineIds);
-    ctx.assert(title("the retention run deleted the aged rows"), left.length === 0, { left });
+    ctx.assert(title("the retention run deleted the aged rows"), left.length === 0, { left, daysAgo });
     const r = await viewer.api.client.vods.chat({ id: aged.vodId, limit: 10 });
     ctx.assert(title("vods.chat: retained false, no items"), !r.retained && r.items.length === 0, r);
     const pg = await watcher.goto(vodPath(channel, aged.vodId));
