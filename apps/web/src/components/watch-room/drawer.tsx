@@ -125,8 +125,9 @@ export function WatchRoomDrawer({
         cancelled = true;
       };
     }
-    client
-      .mine()
+    // Deferred, so a client that cannot reach the API (a page without it) fails quietly.
+    Promise.resolve()
+      .then(() => client.mine())
       .then((rooms) => {
         const here = rooms.find((r) => r.channel.slug === channel);
         if (!cancelled && here)
