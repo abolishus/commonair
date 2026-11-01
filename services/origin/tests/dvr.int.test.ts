@@ -12,7 +12,7 @@ import { schema, uuidv7 } from "@commonair/db";
 import { createTestDatabase, type TestDatabase } from "@commonair/db/testing";
 import { createValkey, type ValkeyClient } from "@commonair/service";
 import { createS3Storage, type ObjectStorage } from "@commonair/storage";
-import { generateSigningKey, signPlaybackToken, type SigningKey } from "@commonair/tokens";
+import { generateSigningKey, randomSecret, sha256Hex, signPlaybackToken, type SigningKey } from "@commonair/tokens";
 import { eq } from "drizzle-orm";
 import { createOrigin, type Origin } from "../src/origin.ts";
 import { VOD_STATE_TTL_MS } from "../src/vod.ts";
@@ -257,5 +257,112 @@ describe("/dvr/ with real state and storage", () => {
       expect(Date.now() - changed).toBeLessThan(VOD_STATE_TTL_MS + 3_000);
       expect((await get(r, "index.m3u8")).status).toBe(404);
     }
+  });
+});
+
+// Batch 7 decision (x), ADR 0016 Amendment 1 A1.3: relays pull DVR from `/relay-pull/dvr/`.
+describe("/relay-pull/dvr/ with real relay auth, state and storage", () => {
+  const relayToken = randomSecret("relay_");
+  let relayId: string;
+
+  beforeAll(async () => {
+    const owner = uuidv7();
+    await t.db
+      .insert(schema.users)
+      .values({ id: owner, name: "ro", email: `ro-${owner}@test.invalid`, username: `ro${owner.slice(-8)}` });
+    const [row] = await t.db
+      .insert(schema.relayNodes)
+      .values({
+        ownerId: owner,
+        name: "dvr relay",
+        publicUrl: "http://relay.test.invalid",
+        declaredCapacityMbps: 100,
+        publicKey: "k",
+        tokenHash: await sha256Hex(relayToken),
+        status: "active",
+      })
+      .returning({ id: schema.relayNodes.id });
+    relayId = row!.id;
+  });
+
+  const pull = (r: Recording, file: string, bearer: string | null = relayToken, init: RequestInit = {}) =>
+    origin.fetch(
+      new Request(`http://origin.test/relay-pull/dvr/${r.vod}/${file}`, {
+        ...init,
+        headers: bearer === null ? {} : { authorization: `Bearer ${bearer}` },
+      }),
+      "10.1.2.3",
+    );
+
+  test("the window with bare relative URIs; listed segments only; logged as the relay's dvr fetches", async () => {
+    const r = await recording();
+    await origin.segments.flush();
+    await valkey.del(stream);
+    const pl = await pull(r, "index.m3u8");
+    expect(pl.status).toBe(200);
+    const body = await pl.text();
+    expect(uris(body)).toHaveLength(15);
+    expect(uris(body)[0]).toBe("r1_000015.m4s");
+    expect(body).not.toContain("?t=");
+    expect(body).not.toContain("decoy");
+    const seg = await pull(r, "r1_000029.m4s");
+    expect(await seg.text()).toBe("segment-29");
+    expect((await pull(r, "r1_000000.m4s")).status).toBe(404);
+    await origin.segments.flush();
+    const entries = (await valkey.xrange(stream, "-", "+")).map(([, f]) =>
+      Object.fromEntries(f.flatMap((_, i, a) => (i % 2 === 0 ? [[a[i], a[i + 1]]] : []))),
+    );
+    expect(entries.map((e) => [e.sid, e.cid, e.src, e.rid, e.kind, e.obj, e.mode])).toEqual([
+      [relayId, r.channel, "relay", relayId, "playlist", undefined, "dvr"],
+      [relayId, r.channel, "relay", relayId, "segment", `dvr/${r.vod}/r1_000029.m4s`, "dvr"],
+    ]);
+  });
+
+  test("auth: no token, an unknown token, a viewer's DVR token or a suspended relay is 401", async () => {
+    const r = await recording();
+    expect((await pull(r, "index.m3u8", null)).status).toBe(401);
+    expect((await pull(r, "index.m3u8", randomSecret("relay_"))).status).toBe(401);
+    const viewer = await origin.fetch(
+      new Request(`http://origin.test/relay-pull/dvr/${r.vod}/index.m3u8?t=${await token(r)}`),
+      "10.9.9.9",
+    );
+    expect(viewer.status).toBe(401);
+    const suspendedToken = randomSecret("relay_");
+    const [owner] = await t.db.select({ id: schema.users.id }).from(schema.users).limit(1);
+    await t.db.insert(schema.relayNodes).values({
+      ownerId: owner!.id,
+      name: "suspended relay",
+      publicUrl: "http://relay2.test.invalid",
+      declaredCapacityMbps: 100,
+      publicKey: "k",
+      tokenHash: await sha256Hex(suspendedToken),
+      status: "suspended",
+    });
+    expect((await pull(r, "index.m3u8", suspendedToken)).status).toBe(401);
+  });
+
+  test.each<[string, Parameters<typeof recording>[0]]>([
+    ["broadcast ended", { broadcast: { endedAt: new Date() } }],
+    ["T1-restricted", { broadcast: { restrictedAt: new Date() } }],
+    ["channel suspended", { channel: { suspendedAt: new Date() } }],
+    ["DVR off", { channel: { dvrEnabled: false } }],
+    ["VOD removed", { vod: { removedReason: "owner" } }],
+  ])("%s: 404 to the relay too", async (_name, over) => {
+    const r = await recording(over);
+    expect((await pull(r, "index.m3u8")).status).toBe(404);
+    expect((await pull(r, "r1_000029.m4s")).status).toBe(404);
+  });
+
+  test("a removal closes it within the 5 s state cache, so the relay evicts", async () => {
+    const r = await recording();
+    expect((await pull(r, "index.m3u8")).status).toBe(200);
+    await t.db.update(schema.vods).set({ removedReason: "owner" }).where(eq(schema.vods.id, r.vod));
+    const changed = Date.now();
+    let status = 200;
+    while (status === 200 && Date.now() - changed < VOD_STATE_TTL_MS + 3_000) {
+      status = (await pull(r, "index.m3u8")).status;
+      if (status === 200) await Bun.sleep(250);
+    }
+    expect(status).toBe(404);
   });
 });

@@ -92,18 +92,38 @@ func (g *Group) waiters(key string) int {
 	return 0
 }
 
+// forget detaches every in-flight call whose key match accepts: callers already
+// waiting keep their result, later callers start a fresh call.
+func (g *Group) forget(match func(key string) bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for key := range g.calls {
+		if match(key) {
+			delete(g.calls, key)
+		}
+	}
+}
+
 // Store is a pull-through cache: hits come from the LRU, concurrent misses
 // share one fetch, and successful results are cached.
+//
+// Keys are "<kind>:<path>" (for example "m:live/alice/seg1.mp4"); DeletePrefix
+// matches on the path part, so one purge covers every kind of entry for a path.
 type Store struct {
 	LRU   *LRU
 	group Group
+	tombs tombstones
+	// beforePut runs between a fill's tombstone check and its Put (tests).
+	beforePut func(key string)
 }
 
 // NewStore returns a Store with an LRU of capacity bytes.
 func NewStore(capacity int64) *Store { return &Store{LRU: NewLRU(capacity)} }
 
 // Get returns the cached entry for key or fetches it. Errors are not cached.
-// fetch gets a context that ends when no caller is waiting any more.
+// fetch gets a context that ends when no caller is waiting any more. A fill
+// that was in flight when a purge covered its path is dropped: nothing is
+// cached and every waiter gets ErrPurged.
 func (s *Store) Get(ctx context.Context, key string, fetch func(context.Context) (Entry, error)) (Entry, error) {
 	if e, ok := s.LRU.Get(key); ok {
 		return e, nil
@@ -113,11 +133,25 @@ func (s *Store) Get(ctx context.Context, key string, fetch func(context.Context)
 		if e, ok := s.LRU.Get(key); ok {
 			return e, nil
 		}
+		gen := s.tombs.generation()
 		e, err := fetch(cctx)
-		if err == nil {
-			s.LRU.Put(key, e)
+		if err != nil {
+			return e, err
 		}
-		return e, err
+		if s.tombs.coveredSince(PathOf(key), gen) {
+			return Entry{}, ErrPurged
+		}
+		if s.beforePut != nil {
+			s.beforePut(key)
+		}
+		s.LRU.Put(key, e)
+		// A purge that ran wholly between the check above and the Put found
+		// nothing to evict; its tombstone is already up, so look again.
+		if s.tombs.coveredSince(PathOf(key), gen) {
+			s.LRU.Delete(key)
+			return Entry{}, ErrPurged
+		}
+		return e, nil
 	})
 }
 

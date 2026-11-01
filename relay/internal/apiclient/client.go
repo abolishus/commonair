@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package apiclient speaks the relay protocol (relays.register, .heartbeat,
-// .receipt in packages/contracts/src/api/router.ts) served under /api.
+// .receipt, .purges in packages/contracts/src/api/router.ts) served under /api.
 package apiclient
 
 import (
@@ -14,6 +14,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,6 +26,7 @@ type Client struct {
 	base  *url.URL
 	token string
 	http  *http.Client
+	poll  *http.Client
 	agent string
 }
 
@@ -41,7 +43,10 @@ func New(apiURL, token, version string, httpClient *http.Client) (*Client, error
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 15 * time.Second}
 	}
-	return &Client{base: u, token: token, http: httpClient, agent: "commonair-relay/" + version}, nil
+	// The purge long poll shares the transport but not the short-call timeout.
+	poll := *httpClient
+	poll.Timeout = 0
+	return &Client{base: u, token: token, http: httpClient, poll: &poll, agent: "commonair-relay/" + version}, nil
 }
 
 // RegisterRequest is the relays.register input.
@@ -148,6 +153,27 @@ func (c *Client) SubmitReceipt(ctx context.Context, r tokens.SignedReceipt) (Rec
 
 const maxResponse = 1 << 20
 
+// PurgePollTimeout bounds one purge long poll: the API holds it up to 25 s
+// (RELAY_PURGE_RULES.holdSeconds), plus slack for the network.
+const PurgePollTimeout = 40 * time.Second
+
+// Purges long-polls GET /api/relay/purges?after=<after> (batch 7 decision
+// (x)). The answer is the signed envelope; the caller verifies it with the
+// origin key before trusting anything in it. The client's own timeout (sized
+// for the short calls) does not apply; PurgePollTimeout does.
+func (c *Client) Purges(ctx context.Context, after int64) (tokens.SignedPurgeBatch, error) {
+	var out tokens.SignedPurgeBatch
+	pctx, cancel := context.WithTimeout(ctx, PurgePollTimeout)
+	defer cancel()
+	u := c.base.ResolveReference(&url.URL{Path: "api/relay/purges", RawQuery: url.Values{"after": {strconv.FormatInt(after, 10)}}.Encode()})
+	req, err := http.NewRequestWithContext(pctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return out, err
+	}
+	err = c.do(c.poll, req, "api/relay/purges", &out)
+	return out, err
+}
+
 func (c *Client) post(ctx context.Context, path string, in, out any) error {
 	body, err := json.Marshal(in)
 	if err != nil {
@@ -158,11 +184,15 @@ func (c *Client) post(ctx context.Context, path string, in, out any) error {
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Content-Type", "application/json")
+	return c.do(c.http, req, path, out)
+}
+
+func (c *Client) do(hc *http.Client, req *http.Request, path string, out any) error {
+	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", c.agent)
-	resp, err := c.http.Do(req)
+	resp, err := hc.Do(req)
 	if err != nil {
 		return err
 	}

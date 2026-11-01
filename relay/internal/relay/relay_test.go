@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -136,6 +137,13 @@ type fakeAPI struct {
 	heartbeatFail int // non-zero: fail heartbeats with this status
 	allFail       int // non-zero: fail every call with this status
 
+	// purges answers GET /api/relay/purges: the next queued batch, else an
+	// empty one at the request's cursor after a short hold. purgeAfters
+	// records the cursors asked for.
+	purges      []tokens.SignedPurgeBatch
+	purgeAfters []string
+	purgeKey    ed25519.PrivateKey
+
 	// hangPaths: requests to these paths (except draining heartbeats) hang
 	// until the client gives up, like a blackholed API. hanging counts them.
 	hangPaths sync.Map
@@ -150,6 +158,10 @@ func newFakeAPI(t *testing.T, originURL string, originKey ed25519.PublicKey) *fa
 }
 
 func (a *fakeAPI) serve(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet && r.URL.Path == "/api/relay/purges" && r.Header.Get("Authorization") == "Bearer "+relayToken {
+		a.servePurges(w, r)
+		return
+	}
 	if r.Method != http.MethodPost || r.Header.Get("Authorization") != "Bearer "+relayToken {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"code": "UNAUTHORIZED", "message": "bad token"})
 		return
@@ -210,6 +222,35 @@ func (a *fakeAPI) serve(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]any{"code": "NOT_FOUND"})
 	}
+}
+
+func (a *fakeAPI) servePurges(w http.ResponseWriter, r *http.Request) {
+	a.mu.Lock()
+	key := a.purgeKey
+	a.purgeAfters = append(a.purgeAfters, r.URL.Query().Get("after"))
+	var next *tokens.SignedPurgeBatch
+	if len(a.purges) > 0 {
+		next = &a.purges[0]
+		a.purges = a.purges[1:]
+	}
+	a.mu.Unlock()
+	if key == nil {
+		// Purges are not part of this test: the loop backs off.
+		writeJSON(w, http.StatusNotFound, map[string]any{"code": "NOT_FOUND"})
+		return
+	}
+	if next == nil {
+		// A short hold, then nothing new.
+		time.Sleep(20 * time.Millisecond)
+		after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
+		empty, err := tokens.SignPurgeBatch(key, tokens.PurgeBatch{Seq: after})
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"code": "INTERNAL"})
+			return
+		}
+		next = &empty
+	}
+	writeJSON(w, http.StatusOK, next)
 }
 
 func (a *fakeAPI) set(f func(a *fakeAPI)) {
