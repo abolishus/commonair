@@ -1,9 +1,10 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
-import { RENDITIONS } from "@commonair/contracts/enums";
+import { DVR_RULES, DVR_TOKEN_TTL_SECONDS, RENDITIONS } from "@commonair/contracts/enums";
+import { DVR_ROUTE, dvrTokenPath, VOD_PLAYLIST } from "@commonair/contracts/storage";
 import { KEYS, mediaPath, P2P_GRANT_TTL_SECONDS, SurgeOverride } from "@commonair/contracts/internal";
 import { PLAYBACK_TOKEN_TTL_SECONDS, type PlaybackClaims } from "@commonair/contracts/tokens";
 import { schema, uuidv7 } from "@commonair/db";
@@ -15,6 +16,7 @@ import { channelBySlug, iso } from "../lib/dto.ts";
 import { apiError, conflict, notFound, precondition } from "../lib/errors.ts";
 import { os } from "../lib/orpc.ts";
 import { viewerCount } from "../lib/viewers.ts";
+import { viewerAudience, vodShown, type Audience } from "../media/visibility.ts";
 import { assignSource, RelayEntry, type Assignment } from "../playback/delivery.ts";
 import { recordP2PHeartbeat } from "../playback/metrics.ts";
 import { MIN_HEARTBEAT_WALL_SECONDS, nextVerdict, type VerifyState } from "../playback/verify.ts";
@@ -173,6 +175,110 @@ async function surgeActive(deps: Deps, channelId: string): Promise<boolean> {
   }
 }
 
+// ---------------------------------------------------------------------------------------
+// Live DVR (ADR 0016; W2-dvr). A session gets a DVR grant at start when the broadcast records a
+// VOD the caller could watch; the grant (the VOD id) lives beside the verify state, and each live
+// token refresh mints a DVR token for it after re-checking the same rules.
+
+const dvrKey = (sid: string) => `playback-dvr:${sid}`;
+
+type BroadcastRow = typeof broadcasts.$inferSelect;
+
+/** The effective window: `min(channel window, DVR_MAX_WINDOW_SECONDS)`; 0 when the cap is under the column floor (DVR off instance-wide). */
+export function dvrWindowSeconds(channelWindow: number, capSeconds: number): number {
+  if (capSeconds < DVR_RULES.minWindowSeconds) return 0;
+  return Math.max(0, Math.min(channelWindow, capSeconds));
+}
+
+/** The owner, an active subscriber or the public, for a session's user (no caller on a heartbeat). */
+async function audienceOfUser(deps: Deps, userId: string | null, c: ChannelRow): Promise<Audience> {
+  if (userId === null) return "public";
+  if (userId === c.ownerId) return "owner";
+  const [sub] = await deps.db
+    .select({ id: schema.subscriptions.id })
+    .from(schema.subscriptions)
+    .where(
+      and(
+        eq(schema.subscriptions.channelId, c.id),
+        eq(schema.subscriptions.subscriberId, userId),
+        eq(schema.subscriptions.status, "active"),
+      ),
+    )
+    .limit(1);
+  return sub ? "subscriber" : "public";
+}
+
+/**
+ * The VOD a session may rewind, or null (ADR 0016 decisions 1, 2 and 7). DVR exists only while a
+ * `live` broadcast (never a rehearsal) records a VOD on a channel with VODs and DVR on, outside
+ * data mode, and only when the VOD's visibility would admit the viewer once it is ready
+ * (`vodShown`): a `subscribers` VOD rewinds for subscribers, a `private` one for the owner. A T1
+ * restriction refuses (`vodShown` hides restricted broadcasts); the mature gate was passed to get
+ * this far.
+ */
+async function dvrVodFor(
+  deps: Deps,
+  c: ChannelRow,
+  b: BroadcastRow,
+  audience: () => Promise<Audience>,
+  dataMode: number | null,
+): Promise<string | null> {
+  if (dataMode !== null || b.kind !== "live" || b.endedAt !== null) return null;
+  if (!c.vodEnabled || !c.dvrEnabled || c.suspendedAt !== null) return null;
+  if (dvrWindowSeconds(c.dvrWindowSeconds, deps.env.DVR_MAX_WINDOW_SECONDS) === 0) return null;
+  const [v] = await deps.db
+    .select({ id: schema.vods.id, visibility: schema.vods.visibility, removedReason: schema.vods.removedReason })
+    .from(schema.vods)
+    .where(and(eq(schema.vods.broadcastId, b.id), eq(schema.vods.status, "recording")))
+    .orderBy(desc(schema.vods.createdAt))
+    .limit(1);
+  if (!v || v.removedReason !== null) return null;
+  // Judged as the VOD it will be once ready: who could watch it then may rewind it now.
+  const shown = vodShown(await audience(), { ...v, status: "ready" }, c, b.restrictedAt);
+  return shown ? v.id : null;
+}
+
+/** A DVR token: the live session's id, `path = dvr/<vodId>`, origin only, never `dm`, 120 s. */
+async function signDvr(deps: Deps, sid: string, channelId: string, vodId: string): Promise<string> {
+  const iat = Math.floor(deps.now().getTime() / 1000);
+  return signPlaybackToken(deps.signingKey, {
+    v: 1,
+    sid,
+    cid: channelId,
+    path: dvrTokenPath(vodId),
+    src: "origin",
+    iat,
+    exp: iat + DVR_TOKEN_TTL_SECONDS,
+  });
+}
+
+/** The DVR playlist, always on the origin (`PLAYBACK_PUBLIC_URL`): relays and the CDN never serve DVR (decision 5). */
+export const dvrPlaylistUrl = (deps: Deps, vodId: string, token: string) =>
+  `${deps.env.PLAYBACK_PUBLIC_URL.replace(/\/+$/, "")}${DVR_ROUTE}${vodId}/${VOD_PLAYLIST}?t=${encodeURIComponent(token)}`;
+
+/**
+ * A fresh DVR token for a session holding a grant, when the rules still admit it (the VOD still
+ * records, visibility, channel settings, data mode off); undefined otherwise. The origin re-checks
+ * the VOD state on every request; this re-checks who may watch it.
+ */
+async function refreshDvr(
+  deps: Deps,
+  s: typeof playbackSessions.$inferSelect,
+  dataMode: number | null,
+): Promise<string | undefined> {
+  if (dataMode !== null || !s.broadcastId) return undefined;
+  const vodId = await deps.valkey.get(dvrKey(s.id));
+  if (!vodId) return undefined;
+  const [row] = await deps.db
+    .select({ b: broadcasts, c: schema.channels })
+    .from(broadcasts)
+    .innerJoin(schema.channels, eq(schema.channels.id, broadcasts.channelId))
+    .where(eq(broadcasts.id, s.broadcastId));
+  if (!row) return undefined;
+  const allowed = await dvrVodFor(deps, row.c, row.b, () => audienceOfUser(deps, s.userId, row.c), dataMode);
+  return allowed === vodId ? signDvr(deps, s.id, s.channelId, vodId) : undefined;
+}
+
 export const playback = {
   start: os.playback.start.handler(async ({ context, input }) => {
     const { deps, caller, req } = context;
@@ -234,6 +340,16 @@ export const playback = {
     // The grant is what the tracker and `p2p.iceServers` check; the swarm id is the broadcast id.
     if (p2pEnabled) await deps.valkey.set(KEYS.p2pGrant(sid), b.id, "EX", P2P_GRANT_TTL_SECONDS);
     const { token, claims } = await signFor(deps, sid, c.id, path, assignment, input.dataMode);
+    // DVR is origin-only, so a relay or CDN session still gets its DVR playlist on the origin.
+    const dvrVod = await dvrVodFor(deps, c, b, () => viewerAudience(deps, caller, c), input.dataMode);
+    let dvr: { windowSeconds: number; url: string } | null = null;
+    if (dvrVod) {
+      await deps.valkey.set(dvrKey(sid), dvrVod, "EX", VERIFY_STATE_TTL_SECONDS);
+      dvr = {
+        windowSeconds: dvrWindowSeconds(c.dvrWindowSeconds, deps.env.DVR_MAX_WINDOW_SECONDS),
+        url: dvrPlaylistUrl(deps, dvrVod, await signDvr(deps, sid, c.id, dvrVod)),
+      };
+    }
     return {
       sessionId: sid,
       token,
@@ -253,9 +369,8 @@ export const playback = {
       captions: await captionTracksFor(deps, b),
       captionsState: await captionsStateFor(deps, b),
       dataMode: claims.dm ?? null,
-      // W2-dvr owns these (contract step §4): no DVR until it lands.
-      dvrWindowSeconds: 0,
-      dvrPlaylistUrl: null,
+      dvrWindowSeconds: dvr?.windowSeconds ?? 0,
+      dvrPlaylistUrl: dvr?.url ?? null,
     };
   }),
 
@@ -282,11 +397,16 @@ export const playback = {
     });
     // Watch time never exceeds wall-clock time (plus jitter).
     const watched = Math.round(Math.min(input.playedSeconds, wallSeconds + 5));
+    // ADR 0016 decision 6: the mode is recorded as claimed (absent = live). A `dvr` claim without
+    // a grant has no `/dvr/` fetches, so the integrity fetch signal never verifies its seconds.
+    const mode = input.playbackMode ?? "live";
     const updated = await deps.db
       .update(playbackSessions)
       .set({
         heartbeats: sql`${playbackSessions.heartbeats} + 1`,
         watchSeconds: sql`${playbackSessions.watchSeconds} + ${Math.max(0, watched)}`,
+        playbackMode: mode,
+        ...(mode === "dvr" ? { dvrSeconds: sql`${playbackSessions.dvrSeconds} + ${Math.max(0, watched)}` } : {}),
         bytesHttp: sql`${playbackSessions.bytesHttp} + ${input.bytesHttp}`,
         bytesP2p: sql`${playbackSessions.bytesP2p} + ${input.bytesP2p}`,
         stalls: sql`${playbackSessions.stalls} + ${input.stalls}`,
@@ -353,7 +473,9 @@ export const playback = {
       .multi()
       .hset(verifyKey(s.id), { consistent: String(v.state.consistent), engaged: v.state.engaged ? "1" : "0" })
       .expire(verifyKey(s.id), VERIFY_STATE_TTL_SECONDS)
-      .zadd(KEYS.viewers(s.channelId), now.getTime(), s.id);
+      .zadd(KEYS.viewers(s.channelId), now.getTime(), s.id)
+      // The DVR grant lives as long as the session keeps beating.
+      .expire(dvrKey(s.id), VERIFY_STATE_TTL_SECONDS);
     if (granted) {
       // Data mode loses P2P as a gated stream does (ADR 0018 decision 6).
       if (gate || dataMode !== null) tx.del(KEYS.p2pGrant(s.id));
@@ -407,9 +529,12 @@ export const playback = {
     if (gate && !(await confirmedAdult(deps, s.userId ?? undefined)))
       throw apiError("FORBIDDEN", "Confirm you are 18 or older to watch this stream");
     const { token } = await signFor(deps, s.id, s.channelId, claims.path, a, dataMode, claims.rb);
+    // The DVR token is refreshed beside the live one (same lifetime); none in data mode.
+    const dvrToken = await refreshDvr(deps, s, dataMode);
     return {
       ok: true as const,
       token,
+      ...(dvrToken ? { dvrToken } : {}),
       ...(assignment ? { switchTo: playlistUrl(playlistBase(deps, assignment), claims.path, token) } : {}),
     };
   }),
@@ -426,7 +551,7 @@ export const playback = {
       await deps.valkey
         .multi()
         .zrem(KEYS.viewers(s.channelId), input.sessionId)
-        .del(verifyKey(input.sessionId), KEYS.viewerCount(s.channelId))
+        .del(verifyKey(input.sessionId), dvrKey(input.sessionId), KEYS.viewerCount(s.channelId))
         // The tracker closes an ended session's socket at its next re-check.
         .del(KEYS.p2pGrant(input.sessionId))
         .exec();
