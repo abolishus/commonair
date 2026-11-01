@@ -7,6 +7,7 @@ import { schema } from "@commonair/db";
 import type { Deps, StatusProbe } from "../deps.ts";
 import { iso, isoOrNull } from "../lib/dto.ts";
 import { os } from "../lib/orpc.ts";
+import { twitchImportAvailable } from "../raw-routes.ts";
 
 type ComponentStatus = "operational" | "degraded" | "outage";
 const SLOW_MS = 1000;
@@ -125,9 +126,7 @@ export const instance = {
         // Batch 7 decisions (a)–(c): every one ships off.
         giveaways: env.GIVEAWAYS_ENABLED,
         federation: env.FEDERATION_ENABLED,
-        twitchImport: Boolean(
-          env.TWITCH_IMPORT_ENABLED && env.OAUTH_TWITCH_CLIENT_ID && env.OAUTH_TWITCH_CLIENT_SECRET,
-        ),
+        twitchImport: twitchImportAvailable(env),
       },
       minAge: env.AUTH_MIN_AGE,
     };

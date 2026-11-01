@@ -6,7 +6,6 @@ import { base } from "./lib/orpc.ts";
 import { admin } from "./routes/admin.ts";
 import { analytics } from "./routes/analytics.ts";
 import { appeals } from "./routes/appeals.ts";
-import { federation, jury, portability, twitchImport, watchRooms } from "./routes/b7-stubs.ts";
 import { bot } from "./routes/bot.ts";
 import { channelsRoutes } from "./routes/channels.ts";
 import { chat } from "./routes/chat.ts";
@@ -14,9 +13,11 @@ import { clips } from "./routes/clips.ts";
 import { coop } from "./routes/coop.ts";
 import { developer } from "./routes/developer/index.ts";
 import { categoriesRoutes, directory } from "./routes/directory.ts";
+import { federation } from "./routes/federation.ts";
 import { instance } from "./routes/instance.ts";
 import { integrity } from "./routes/integrity.ts";
 import { interact } from "./routes/interact.ts";
+import { jury } from "./routes/jury.ts";
 import { legal } from "./routes/legal.ts";
 import { me } from "./routes/me.ts";
 import { moderation } from "./routes/moderation.ts";
@@ -25,12 +26,15 @@ import { ncii } from "./routes/ncii.ts";
 import { notifications } from "./routes/notifications.ts";
 import { p2p } from "./routes/p2p.ts";
 import { playback } from "./routes/playback.ts";
+import { portability } from "./routes/portability.ts";
 import { relays } from "./routes/relays.ts";
 import { safety } from "./routes/safety.ts";
 import { stream } from "./routes/stream.ts";
 import { transparency } from "./routes/transparency.ts";
+import { twitchImport } from "./routes/twitch-import.ts";
 import { users } from "./routes/users.ts";
 import { vods } from "./routes/vods.ts";
+import { watchRooms } from "./routes/watch-rooms.ts";
 
 export const router = base.router({
   instance,

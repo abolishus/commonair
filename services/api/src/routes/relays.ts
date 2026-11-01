@@ -18,8 +18,8 @@ import { decodeCursor, encodeCursor, isKeyCursor, pageOf } from "../lib/cursor.t
 import { apiError, badRequest, conflict, forbidden, isUniqueViolation, notFound, precondition } from "../lib/errors.ts";
 import { resolveOutbound } from "../lib/outbound.ts";
 import { os, requireCaller } from "../lib/orpc.ts";
-import { relayPurges } from "./b7-stubs.ts";
 import type { RelayEntry } from "../playback/delivery.ts";
+import { relayPurges } from "../relay/purges.ts";
 
 const { relayNodes, relayReceipts } = schema;
 type RelayRow = typeof relayNodes.$inferSelect;

@@ -35,6 +35,11 @@ describe("routing", () => {
       "/overlay/events": "api:3001",
       "/eventsub/ws": "api:3001",
       "/.well-known/commonair-attestation": "api:3001",
+      "/.well-known/commonair-portability": "api:3001",
+      "/.well-known/webfinger": "api:3001",
+      "/.well-known/nodeinfo": "api:3001",
+      "/nodeinfo/*": "api:3001",
+      "/ap/*": "api:3001",
       "/chat": "chat:3002",
       "/hls/*": "origin:3003",
       "/p2p-digest/*": "origin:3003",
@@ -66,6 +71,27 @@ describe("routing", () => {
     expect(site).toMatch(
       /\thandle \/\.well-known\/commonair-attestation \{\n\t\trewrite \* \/api\/\.well-known\/commonair-attestation\n\t\treverse_proxy api:3001\n\t\}/,
     );
+  });
+
+  test("batch 7 discovery documents are rewritten under /api with their query (ADR 0030, ADR 0037)", () => {
+    for (const p of [
+      "/.well-known/commonair-portability",
+      "/.well-known/webfinger",
+      "/.well-known/nodeinfo",
+      "/nodeinfo/*",
+    ]) {
+      const escaped = p.replace(/[.*/]/g, (c) => `\\${c}`);
+      expect(site).toMatch(
+        new RegExp(
+          `\\thandle ${escaped} \\{\\n\\t\\trewrite \\* \\/api\\{uri\\}\\n\\t\\treverse_proxy api:3001\\n\\t\\}`,
+        ),
+      );
+    }
+  });
+
+  test("ActivityPub paths go to the API unrewritten; move links (/m/*) stay with the web app", () => {
+    expect(site).toMatch(/\thandle \/ap\/\* \{\n\t\treverse_proxy api:3001\n\t\}\n/);
+    expect(handles().map(([m]) => m)).not.toContain("/m/*");
   });
 
   test("the chat WebSocket is rewritten to the service's /ws", () => {

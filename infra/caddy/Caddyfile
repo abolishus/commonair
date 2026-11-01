@@ -180,6 +180,31 @@ import http-{$CADDY_LISTEN:ports}
 		rewrite * /api/.well-known/commonair-attestation
 		reverse_proxy api:3001
 	}
+	# Standing-statement signing keys (ADR 0037), served by the API's raw routes under /api.
+	handle /.well-known/commonair-portability {
+		rewrite * /api{uri}
+		reverse_proxy api:3001
+	}
+	# Federation discovery (ADR 0030): WebFinger and NodeInfo under /api, query strings kept.
+	# The API answers 404 while FEDERATION_ENABLED is off.
+	handle /.well-known/webfinger {
+		rewrite * /api{uri}
+		reverse_proxy api:3001
+	}
+	handle /.well-known/nodeinfo {
+		rewrite * /api{uri}
+		reverse_proxy api:3001
+	}
+	handle /nodeinfo/* {
+		rewrite * /api{uri}
+		reverse_proxy api:3001
+	}
+	# ActivityPub actors, collections and inboxes, unrewritten: actor ids are https://<host>/ap/…
+	# and the API does the content negotiation (an HTML Accept is redirected to the channel page).
+	# Move links (/m/*) stay with the web app.
+	handle /ap/* {
+		reverse_proxy api:3001
+	}
 
 	# Chat WebSocket: wss://<host>/chat → chat:3002/ws
 	handle /chat {
