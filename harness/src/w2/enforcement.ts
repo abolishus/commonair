@@ -19,6 +19,7 @@ import { createDb, schema, uuidv7, type DbHandle } from "@commonair/db";
 import type { ApiClient } from "../api/client.ts";
 import { type Run, UI_TIMEOUT_MS } from "../safety-run.ts";
 import { waitFor } from "../wait.ts";
+import { tsParam } from "./sql-time.ts";
 import { ROUTES } from "../web/selectors.ts";
 import type { SafetyW2Extension } from "./kit.ts";
 
@@ -109,7 +110,7 @@ export function pickSmall(counts: readonly number[]): number | null {
   return i < 0 ? null : i;
 }
 
-async function rawCell(h: DbHandle, c: CellSpec, since: Date): Promise<RawCell> {
+export async function rawCell(h: DbHandle, c: CellSpec, since: Date): Promise<RawCell> {
   const [r] = await h.sql<RawCell[]>`
     select count(*)::int as count,
            count(*) filter (where s.automated_decision = 'fully')::int as fully,
@@ -120,7 +121,7 @@ async function rawCell(h: DbHandle, c: CellSpec, since: Date): Promise<RawCell> 
     from enforcement_statements s
     where s.clause_id = ${c.clauseId} and s.clause_version = 1
       and s.source_action in ${h.sql([...TIER_SOURCES[c.tier]])}
-      and s.created_at >= ${since}`;
+      and s.created_at >= ${tsParam(since)}::timestamptz`;
   return { count: r?.count ?? 0, fully: r?.fully ?? 0, overturned: r?.overturned ?? 0 };
 }
 
