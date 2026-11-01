@@ -385,6 +385,24 @@ describe("preview expiry and start", () => {
     expect(twice.status).toBe(409);
   });
 
+  test("the generic portability start refuses a Twitch preview", async () => {
+    const u = await signUpAndSignIn(api);
+    expect(await connectAll(u)).toBe("connected");
+    const p = await u.client.call<ImportDto>("POST", `${base(u)}/preview`, {});
+    const generic = await u.client.call("POST", `/api/channels/${u.username}/imports/${p.body.id}/start`, {
+      choices: { channel: true, panels: true, emotes: [] },
+    });
+    expect(generic.status).toBe(409);
+    const [row] = (await rowsOf(u)).filter((r) => r.id === p.body.id);
+    expect(row?.status).toBe("previewed");
+    expect(enqueued).not.toContain(p.body.id);
+    // The Twitch start still works afterwards: nothing was left queued.
+    const ok = await u.client.call<ImportDto>("POST", `${base(u)}/${p.body.id}/start`, {
+      choices: { channel: true, panels: false, emotes: [] },
+    });
+    expect(ok.status).toBe(200);
+  });
+
   test("channel fields only need no assertion", async () => {
     const u = await signUpAndSignIn(api);
     expect(await connectAll(u)).toBe("connected");

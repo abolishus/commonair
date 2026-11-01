@@ -69,8 +69,13 @@ function requireAvailable(deps: Deps): { clientId: string; clientSecret: string 
 
 // The stored preview ---------------------------------------------------------------------------
 
+/**
+ * `state: "twitch"`, never `"ready"`: the generic `portability.imports.start` accepts only a
+ * `"ready"` preview, so a Twitch preview cannot be started past this module's gates (expiry,
+ * availability, audit, panels off). `twitchImportDto` serves it as `ready` or `expired`.
+ */
 interface StoredPreview {
-  state: "ready";
+  state: "twitch";
   expiresAt: string;
   twitch: TwitchSnapshot;
 }
@@ -357,7 +362,7 @@ export async function completeAuthorization(deps: Deps, input: CallbackInput): P
   if (outcome !== "connected" || !snapshot) return outcome;
 
   const preview: StoredPreview = {
-    state: "ready",
+    state: "twitch",
     expiresAt: new Date(now.getTime() + PREVIEW_TTL_MS).toISOString(),
     twitch: snapshot,
   };

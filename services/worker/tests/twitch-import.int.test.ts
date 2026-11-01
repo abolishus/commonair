@@ -125,7 +125,7 @@ describe.skipIf(!storage)("twitch import (worker)", () => {
         channelId: ch.id,
         source: "twitch",
         status: "queued",
-        preview: { state: "ready", expiresAt: new Date(Date.now() + 3_600_000).toISOString(), twitch: snap },
+        preview: { state: "twitch", expiresAt: new Date(Date.now() + 3_600_000).toISOString(), twitch: snap },
         choices: { channel: choices.channel, panels: false, emotes: choices.emotes },
         ...(choices.emotes.length ? { assertedAt: new Date(), assertionVersion: "test" } : {}),
       });
