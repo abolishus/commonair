@@ -7,6 +7,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./attestation": "./src/attestation.ts",
+    "./standing": "./src/standing.ts",
     "./vectors.json": "./vectors.json"
   },
   "scripts": {

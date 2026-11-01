@@ -1,0 +1,432 @@
+{
+  "note": "Draft-cavage HTTP Signature vectors for packages/federation. Test keys (src/test-keys.json) only.",
+  "publicKeys": {
+    "actor": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvhIfNNAs0FFz0vbjv5fu\nqPPmPl5sbigBbG9Cq3GDaBQkfh/ZW41YP/RaG35AAZlgcqbeu7llGFwgz9UErlJX\nvgz5ISdQCRatW0pDtnBTH7kCaP5O2X3BxsqOut0IOASS+Fd+5Gc87iGqzqmGhPh9\n0OQ+Q6rk02JPMvxpGz7sBKvZQELgWyk7Z+tVdGqWvR3bUMhRTqVmFLhkLqMUaidl\nYDGELljrEYW7BbmrVLyJw763O8fRvAmymUaIVHc02T/wWL/VkEjuQ2PaDTul5YNN\n63hOc/sP6x3Tmg2aJJLIol6jCDj47R0FCnD8K4a7e6uCoCE3RazlHnhgLCOkcGdz\n3QIDAQAB\n-----END PUBLIC KEY-----\n",
+    "other": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxL3VYifXnLm9y7ZjrTkS\np7I+ckfx0onXaGlHTUD1r635idrtBTKjurQsPvlnxYrvctJA/Pi8WbQly5jo55JR\n1DLknYAz2d1sYvxex6QrJaXigKqJv8YDutpbxyuIsneYAdHeQsnjlST2367ujfQg\nquEyeOjIJ7x8xhvZ4/d5yyVqk1yUEN5DEaC3KhvkWG/w1P9SyoThkahi0B3Jl6YT\nFRe4MFLQmSCfepAH0Kjj88XVyyGKkWzoWQxZ1cJBZilOrxBQCffxYHjLsIXPDVcC\nmMgEm8LRhBz0TUTibVF8J0V/fXKCszNnHL4AmJYpVVNyXq/fOARj69j2v33pURL7\nHwIDAQAB\n-----END PUBLIC KEY-----\n"
+  },
+  "date": "Sun, 05 Jan 2025 21:31:40 GMT",
+  "vectors": [
+    {
+      "name": "inbound follow",
+      "request": {
+        "method": "POST",
+        "url": "https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001/inbox",
+        "headers": {
+          "content-type": "application/activity+json; profile=\"https://www.w3.org/ns/activitystreams\"",
+          "host": "instance.example",
+          "date": "Sun, 05 Jan 2025 21:31:40 GMT",
+          "digest": "SHA-256=7TbVnb02+oHsoMFut32eKdD2ItUJiPL4WrZDQZsnHlY=",
+          "signature": "keyId=\"https://mastodon.example/users/alice#main-key\",algorithm=\"rsa-sha256\",headers=\"(request-target) host date digest\",signature=\"hBoMhtn68LyKaomXACveG7zUEcJSv1opFYtZavq2H4iHDbKYnbJ2qVh9VdeYPbIoMA+LiAZd4MW43tXD+RV/bq+fW/s4a7Ho/rQQnskvVxg/8+xtQN0ExkbmqGW+/PU1xEN/X3qz3Oe7riKTyjyYxCldNK99BKHNCtX8F8HIhs5UTejj0oWSSHXwtcbkO3aeD63Fn7G0UoGFocwHd07V0bywz4ZDiZu0dd5K/itYUaw3ke1llITWfL6k0lbg1inhxK0LBktd8uwOLPX7NGtN1iBxBD0TP1UJS7/kNpc06tDsWhehgp4asz2ozAK8pYVqFq5YKT2/AMKX7Fb4GGsIBw==\""
+        },
+        "body": "{\"@context\":\"https://www.w3.org/ns/activitystreams\",\"id\":\"https://mastodon.example/a1b2c3d4\",\"type\":\"Follow\",\"actor\":\"https://mastodon.example/users/alice\",\"object\":\"https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001\"}"
+      },
+      "verify": {
+        "now": "2025-01-05T21:32:40.000Z",
+        "key": "actor"
+      },
+      "expect": "ok",
+      "signingString": "(request-target): post /ap/channels/01890000-0000-7000-8000-00000000c001/inbox\nhost: instance.example\ndate: Sun, 05 Jan 2025 21:31:40 GMT\ndigest: SHA-256=7TbVnb02+oHsoMFut32eKdD2ItUJiPL4WrZDQZsnHlY="
+    },
+    {
+      "name": "shared inbox undo",
+      "request": {
+        "method": "POST",
+        "url": "https://instance.example/ap/inbox",
+        "headers": {
+          "content-type": "application/activity+json; profile=\"https://www.w3.org/ns/activitystreams\"",
+          "host": "instance.example",
+          "date": "Sun, 05 Jan 2025 21:31:40 GMT",
+          "digest": "SHA-256=q5NarMUnFRFoXd5neXpFtLyeDHr7aY2td+nGk//4SZk=",
+          "signature": "keyId=\"https://mastodon.example/users/alice#main-key\",algorithm=\"rsa-sha256\",headers=\"(request-target) host date digest\",signature=\"BBWFGIBM7pQoA2DYE8EDaXI0jc89xFjiOk+5xOLWlwTf4xpXSXmAQY98te0CAWro0/L6CO+kq9O0pZgZqinkfK2ME5EU0EVcpaM8b4NGDM/WZxNXjPWGXFa0u8cCyJz1ekmYVOIbx+GAeCBOm5aSPKyLfagCoDuRPGlfm0uUq8p+lFmVaHWwGcIZnQki/VNN8cK6dF4/q3gO6s6qldMRPqEr8RbwyrVlEqcpFQzf2wAQJvWNwB8NHM03Rq2L7ZK4dGvafC1QK/EHe9p1FCB8SsyxIqjEgGdhv/631T+SZ9owMH3LcVBf8+RicshpbKjYpwOW8tlymUGkW2fgycQLPA==\""
+        },
+        "body": "{\"@context\":\"https://www.w3.org/ns/activitystreams\",\"id\":\"https://mastodon.example/users/alice#follows/1/undo\",\"type\":\"Undo\",\"actor\":\"https://mastodon.example/users/alice\",\"object\":{\"id\":\"https://mastodon.example/a1b2c3d4\",\"type\":\"Follow\",\"actor\":\"https://mastodon.example/users/alice\",\"object\":\"https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001\"}}"
+      },
+      "verify": {
+        "now": "2025-01-05T21:32:40.000Z",
+        "key": "actor"
+      },
+      "expect": "ok",
+      "signingString": "(request-target): post /ap/inbox\nhost: instance.example\ndate: Sun, 05 Jan 2025 21:31:40 GMT\ndigest: SHA-256=q5NarMUnFRFoXd5neXpFtLyeDHr7aY2td+nGk//4SZk="
+    },
+    {
+      "name": "outbound accept",
+      "request": {
+        "method": "POST",
+        "url": "https://mastodon.example/users/alice/inbox",
+        "headers": {
+          "content-type": "application/activity+json; profile=\"https://www.w3.org/ns/activitystreams\"",
+          "host": "mastodon.example",
+          "date": "Sun, 05 Jan 2025 21:31:40 GMT",
+          "digest": "SHA-256=qTa+tNAM7dZ1S6iqeGzp8lVt0aKYky9On6iryVTZ7N8=",
+          "signature": "keyId=\"https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001#main-key\",algorithm=\"rsa-sha256\",headers=\"(request-target) host date digest\",signature=\"I1CEXDh/jOslO3RkXyLTv5KNA0PB7jl+9WaxcOFphn/Sqm6mh1TKUapJhPg2GC8w1jYFqZ1NBA3mlCMprE33U1eqtbhzjDHEZZ2XKsRMDqcWN0GEiPrHft5DlVj4KPhNIuLXJQ75eoocT5Ls3S3rZNdLg8OSGRUfRjlOTBCW+UD0ID4amJ72kqND+n+5/6UXyr4xewwWzxnWvslaC0Z3WWHGlV3z5LtxvvwTKaqT8SPIWIA0DKjDH8+ZSv7Frx4g1cmqYhYkc0yjJunccz0MRpVHuV4/PR5BeRnzB2/xiC4C9dYAfALRACGkcoYjh15AsRAIXHL2M40DIdSgi7a1Cg==\""
+        },
+        "body": "{\"@context\":\"https://www.w3.org/ns/activitystreams\",\"id\":\"https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001#accepts/follows/1\",\"type\":\"Accept\",\"actor\":\"https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001\",\"object\":{\"id\":\"https://mastodon.example/a1b2c3d4\",\"type\":\"Follow\",\"actor\":\"https://mastodon.example/users/alice\",\"object\":\"https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001\"}}"
+      },
+      "verify": {
+        "now": "2025-01-05T21:32:40.000Z",
+        "key": "actor"
+      },
+      "expect": "ok",
+      "signingString": "(request-target): post /users/alice/inbox\nhost: mastodon.example\ndate: Sun, 05 Jan 2025 21:31:40 GMT\ndigest: SHA-256=qTa+tNAM7dZ1S6iqeGzp8lVt0aKYky9On6iryVTZ7N8="
+    },
+    {
+      "name": "actor fetch without body",
+      "request": {
+        "method": "GET",
+        "url": "https://mastodon.example/users/alice",
+        "headers": {
+          "accept": "application/activity+json",
+          "host": "mastodon.example",
+          "date": "Sun, 05 Jan 2025 21:31:40 GMT",
+          "signature": "keyId=\"https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001#main-key\",algorithm=\"rsa-sha256\",headers=\"(request-target) host date\",signature=\"RbdFRSPs6tiVjVoLfOyU3ykpACqRjuO1sTx22lWVMmXwuOp6HUXq+cMjlGZT2AETClk+dCHdfdIb3SzcGWshR/B23LC2qll71TtmdpDQ9Mt1jtsTiwRNpGIEjhiSw0y/OchONjhKRlxtaL2JywC7hyt7TTyjwdnkNb901UIkgsaMSsjByUib7cY9c3OMIRYUWbD37++SUK+lIUyY1EAv/xqCZI7pF1umf+ob/NEdsKS/EXb/Ymtf4Trk6rMNKpogNOvEXyKPPajt8Wgu2IxS3gwsCBTVSTjFg7xV27QaRDtsnHw6MJTP0GKrw4V3kY7gNlWTvbRAa1HW8Wwrhm/e6Q==\""
+        }
+      },
+      "verify": {
+        "now": "2025-01-05T21:32:40.000Z",
+        "key": "actor",
+        "actorId": "https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001"
+      },
+      "expect": "ok",
+      "signingString": "(request-target): get /users/alice\nhost: mastodon.example\ndate: Sun, 05 Jan 2025 21:31:40 GMT"
+    },
+    {
+      "name": "hs2019 algorithm name",
+      "request": {
+        "method": "POST",
+        "url": "https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001/inbox",
+        "headers": {
+          "content-type": "application/activity+json; profile=\"https://www.w3.org/ns/activitystreams\"",
+          "host": "instance.example",
+          "date": "Sun, 05 Jan 2025 21:31:40 GMT",
+          "digest": "SHA-256=7TbVnb02+oHsoMFut32eKdD2ItUJiPL4WrZDQZsnHlY=",
+          "signature": "keyId=\"https://mastodon.example/users/alice#main-key\",algorithm=\"hs2019\",headers=\"(request-target) host date digest\",signature=\"hBoMhtn68LyKaomXACveG7zUEcJSv1opFYtZavq2H4iHDbKYnbJ2qVh9VdeYPbIoMA+LiAZd4MW43tXD+RV/bq+fW/s4a7Ho/rQQnskvVxg/8+xtQN0ExkbmqGW+/PU1xEN/X3qz3Oe7riKTyjyYxCldNK99BKHNCtX8F8HIhs5UTejj0oWSSHXwtcbkO3aeD63Fn7G0UoGFocwHd07V0bywz4ZDiZu0dd5K/itYUaw3ke1llITWfL6k0lbg1inhxK0LBktd8uwOLPX7NGtN1iBxBD0TP1UJS7/kNpc06tDsWhehgp4asz2ozAK8pYVqFq5YKT2/AMKX7Fb4GGsIBw==\""
+        },
+        "body": "{\"@context\":\"https://www.w3.org/ns/activitystreams\",\"id\":\"https://mastodon.example/a1b2c3d4\",\"type\":\"Follow\",\"actor\":\"https://mastodon.example/users/alice\",\"object\":\"https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001\"}"
+      },
+      "verify": {
+        "now": "2025-01-05T21:32:40.000Z",
+        "key": "actor"
+      },
+      "expect": "ok"
+    },
+    {
+      "name": "within the skew window",
+      "request": {
+        "method": "POST",
+        "url": "https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001/inbox",
+        "headers": {
+          "content-type": "application/activity+json; profile=\"https://www.w3.org/ns/activitystreams\"",
+          "host": "instance.example",
+          "date": "Sun, 05 Jan 2025 21:31:40 GMT",
+          "digest": "SHA-256=7TbVnb02+oHsoMFut32eKdD2ItUJiPL4WrZDQZsnHlY=",
+          "signature": "keyId=\"https://mastodon.example/users/alice#main-key\",algorithm=\"rsa-sha256\",headers=\"(request-target) host date digest\",signature=\"hBoMhtn68LyKaomXACveG7zUEcJSv1opFYtZavq2H4iHDbKYnbJ2qVh9VdeYPbIoMA+LiAZd4MW43tXD+RV/bq+fW/s4a7Ho/rQQnskvVxg/8+xtQN0ExkbmqGW+/PU1xEN/X3qz3Oe7riKTyjyYxCldNK99BKHNCtX8F8HIhs5UTejj0oWSSHXwtcbkO3aeD63Fn7G0UoGFocwHd07V0bywz4ZDiZu0dd5K/itYUaw3ke1llITWfL6k0lbg1inhxK0LBktd8uwOLPX7NGtN1iBxBD0TP1UJS7/kNpc06tDsWhehgp4asz2ozAK8pYVqFq5YKT2/AMKX7Fb4GGsIBw==\""
+        },
+        "body": "{\"@context\":\"https://www.w3.org/ns/activitystreams\",\"id\":\"https://mastodon.example/a1b2c3d4\",\"type\":\"Follow\",\"actor\":\"https://mastodon.example/users/alice\",\"object\":\"https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001\"}"
+      },
+      "verify": {
+        "now": "2025-01-06T09:31:39.000Z",
+        "key": "actor"
+      },
+      "expect": "ok"
+    },
+    {
+      "name": "bad digest: body altered",
+      "request": {
+        "method": "POST",
+        "url": "https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001/inbox",
+        "headers": {
+          "content-type": "application/activity+json; profile=\"https://www.w3.org/ns/activitystreams\"",
+          "host": "instance.example",
+          "date": "Sun, 05 Jan 2025 21:31:40 GMT",
+          "digest": "SHA-256=7TbVnb02+oHsoMFut32eKdD2ItUJiPL4WrZDQZsnHlY=",
+          "signature": "keyId=\"https://mastodon.example/users/alice#main-key\",algorithm=\"rsa-sha256\",headers=\"(request-target) host date digest\",signature=\"hBoMhtn68LyKaomXACveG7zUEcJSv1opFYtZavq2H4iHDbKYnbJ2qVh9VdeYPbIoMA+LiAZd4MW43tXD+RV/bq+fW/s4a7Ho/rQQnskvVxg/8+xtQN0ExkbmqGW+/PU1xEN/X3qz3Oe7riKTyjyYxCldNK99BKHNCtX8F8HIhs5UTejj0oWSSHXwtcbkO3aeD63Fn7G0UoGFocwHd07V0bywz4ZDiZu0dd5K/itYUaw3ke1llITWfL6k0lbg1inhxK0LBktd8uwOLPX7NGtN1iBxBD0TP1UJS7/kNpc06tDsWhehgp4asz2ozAK8pYVqFq5YKT2/AMKX7Fb4GGsIBw==\""
+        },
+        "body": "{\"@context\":\"https://www.w3.org/ns/activitystreams\",\"id\":\"https://mastodon.example/a1b2c3d4\",\"type\":\"Block\",\"actor\":\"https://mastodon.example/users/alice\",\"object\":\"https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001\"}"
+      },
+      "verify": {
+        "now": "2025-01-05T21:32:40.000Z",
+        "key": "actor"
+      },
+      "expect": "digest_mismatch"
+    },
+    {
+      "name": "altered header: digest replaced with another body's",
+      "request": {
+        "method": "POST",
+        "url": "https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001/inbox",
+        "headers": {
+          "content-type": "application/activity+json; profile=\"https://www.w3.org/ns/activitystreams\"",
+          "host": "instance.example",
+          "date": "Sun, 05 Jan 2025 21:31:40 GMT",
+          "digest": "SHA-256=q5NarMUnFRFoXd5neXpFtLyeDHr7aY2td+nGk//4SZk=",
+          "signature": "keyId=\"https://mastodon.example/users/alice#main-key\",algorithm=\"rsa-sha256\",headers=\"(request-target) host date digest\",signature=\"hBoMhtn68LyKaomXACveG7zUEcJSv1opFYtZavq2H4iHDbKYnbJ2qVh9VdeYPbIoMA+LiAZd4MW43tXD+RV/bq+fW/s4a7Ho/rQQnskvVxg/8+xtQN0ExkbmqGW+/PU1xEN/X3qz3Oe7riKTyjyYxCldNK99BKHNCtX8F8HIhs5UTejj0oWSSHXwtcbkO3aeD63Fn7G0UoGFocwHd07V0bywz4ZDiZu0dd5K/itYUaw3ke1llITWfL6k0lbg1inhxK0LBktd8uwOLPX7NGtN1iBxBD0TP1UJS7/kNpc06tDsWhehgp4asz2ozAK8pYVqFq5YKT2/AMKX7Fb4GGsIBw==\""
+        },
+        "body": "{\"@context\":\"https://www.w3.org/ns/activitystreams\",\"id\":\"https://mastodon.example/users/alice#follows/1/undo\",\"type\":\"Undo\",\"actor\":\"https://mastodon.example/users/alice\",\"object\":{\"id\":\"https://mastodon.example/a1b2c3d4\",\"type\":\"Follow\",\"actor\":\"https://mastodon.example/users/alice\",\"object\":\"https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001\"}}"
+      },
+      "verify": {
+        "now": "2025-01-05T21:32:40.000Z",
+        "key": "actor",
+        "actorId": "https://mastodon.example/users/alice"
+      },
+      "expect": "bad_signature"
+    },
+    {
+      "name": "altered header: date",
+      "request": {
+        "method": "POST",
+        "url": "https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001/inbox",
+        "headers": {
+          "content-type": "application/activity+json; profile=\"https://www.w3.org/ns/activitystreams\"",
+          "host": "instance.example",
+          "date": "Sun, 05 Jan 2025 21:31:41 GMT",
+          "digest": "SHA-256=7TbVnb02+oHsoMFut32eKdD2ItUJiPL4WrZDQZsnHlY=",
+          "signature": "keyId=\"https://mastodon.example/users/alice#main-key\",algorithm=\"rsa-sha256\",headers=\"(request-target) host date digest\",signature=\"hBoMhtn68LyKaomXACveG7zUEcJSv1opFYtZavq2H4iHDbKYnbJ2qVh9VdeYPbIoMA+LiAZd4MW43tXD+RV/bq+fW/s4a7Ho/rQQnskvVxg/8+xtQN0ExkbmqGW+/PU1xEN/X3qz3Oe7riKTyjyYxCldNK99BKHNCtX8F8HIhs5UTejj0oWSSHXwtcbkO3aeD63Fn7G0UoGFocwHd07V0bywz4ZDiZu0dd5K/itYUaw3ke1llITWfL6k0lbg1inhxK0LBktd8uwOLPX7NGtN1iBxBD0TP1UJS7/kNpc06tDsWhehgp4asz2ozAK8pYVqFq5YKT2/AMKX7Fb4GGsIBw==\""
+        },
+        "body": "{\"@context\":\"https://www.w3.org/ns/activitystreams\",\"id\":\"https://mastodon.example/a1b2c3d4\",\"type\":\"Follow\",\"actor\":\"https://mastodon.example/users/alice\",\"object\":\"https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001\"}"
+      },
+      "verify": {
+        "now": "2025-01-05T21:32:40.000Z",
+        "key": "actor"
+      },
+      "expect": "bad_signature"
+    },
+    {
+      "name": "altered request target",
+      "request": {
+        "method": "POST",
+        "url": "https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001/outbox",
+        "headers": {
+          "content-type": "application/activity+json; profile=\"https://www.w3.org/ns/activitystreams\"",
+          "host": "instance.example",
+          "date": "Sun, 05 Jan 2025 21:31:40 GMT",
+          "digest": "SHA-256=7TbVnb02+oHsoMFut32eKdD2ItUJiPL4WrZDQZsnHlY=",
+          "signature": "keyId=\"https://mastodon.example/users/alice#main-key\",algorithm=\"rsa-sha256\",headers=\"(request-target) host date digest\",signature=\"hBoMhtn68LyKaomXACveG7zUEcJSv1opFYtZavq2H4iHDbKYnbJ2qVh9VdeYPbIoMA+LiAZd4MW43tXD+RV/bq+fW/s4a7Ho/rQQnskvVxg/8+xtQN0ExkbmqGW+/PU1xEN/X3qz3Oe7riKTyjyYxCldNK99BKHNCtX8F8HIhs5UTejj0oWSSHXwtcbkO3aeD63Fn7G0UoGFocwHd07V0bywz4ZDiZu0dd5K/itYUaw3ke1llITWfL6k0lbg1inhxK0LBktd8uwOLPX7NGtN1iBxBD0TP1UJS7/kNpc06tDsWhehgp4asz2ozAK8pYVqFq5YKT2/AMKX7Fb4GGsIBw==\""
+        },
+        "body": "{\"@context\":\"https://www.w3.org/ns/activitystreams\",\"id\":\"https://mastodon.example/a1b2c3d4\",\"type\":\"Follow\",\"actor\":\"https://mastodon.example/users/alice\",\"object\":\"https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001\"}"
+      },
+      "verify": {
+        "now": "2025-01-05T21:32:40.000Z",
+        "key": "actor"
+      },
+      "expect": "bad_signature"
+    },
+    {
+      "name": "host differs from the addressed host",
+      "request": {
+        "method": "POST",
+        "url": "https://other.example/ap/channels/01890000-0000-7000-8000-00000000c001/inbox",
+        "headers": {
+          "content-type": "application/activity+json; profile=\"https://www.w3.org/ns/activitystreams\"",
+          "host": "instance.example",
+          "date": "Sun, 05 Jan 2025 21:31:40 GMT",
+          "digest": "SHA-256=7TbVnb02+oHsoMFut32eKdD2ItUJiPL4WrZDQZsnHlY=",
+          "signature": "keyId=\"https://mastodon.example/users/alice#main-key\",algorithm=\"rsa-sha256\",headers=\"(request-target) host date digest\",signature=\"hBoMhtn68LyKaomXACveG7zUEcJSv1opFYtZavq2H4iHDbKYnbJ2qVh9VdeYPbIoMA+LiAZd4MW43tXD+RV/bq+fW/s4a7Ho/rQQnskvVxg/8+xtQN0ExkbmqGW+/PU1xEN/X3qz3Oe7riKTyjyYxCldNK99BKHNCtX8F8HIhs5UTejj0oWSSHXwtcbkO3aeD63Fn7G0UoGFocwHd07V0bywz4ZDiZu0dd5K/itYUaw3ke1llITWfL6k0lbg1inhxK0LBktd8uwOLPX7NGtN1iBxBD0TP1UJS7/kNpc06tDsWhehgp4asz2ozAK8pYVqFq5YKT2/AMKX7Fb4GGsIBw==\""
+        },
+        "body": "{\"@context\":\"https://www.w3.org/ns/activitystreams\",\"id\":\"https://mastodon.example/a1b2c3d4\",\"type\":\"Follow\",\"actor\":\"https://mastodon.example/users/alice\",\"object\":\"https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001\"}"
+      },
+      "verify": {
+        "now": "2025-01-05T21:32:40.000Z",
+        "key": "actor"
+      },
+      "expect": "host_mismatch"
+    },
+    {
+      "name": "skewed date: too late",
+      "request": {
+        "method": "POST",
+        "url": "https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001/inbox",
+        "headers": {
+          "content-type": "application/activity+json; profile=\"https://www.w3.org/ns/activitystreams\"",
+          "host": "instance.example",
+          "date": "Sun, 05 Jan 2025 21:31:40 GMT",
+          "digest": "SHA-256=7TbVnb02+oHsoMFut32eKdD2ItUJiPL4WrZDQZsnHlY=",
+          "signature": "keyId=\"https://mastodon.example/users/alice#main-key\",algorithm=\"rsa-sha256\",headers=\"(request-target) host date digest\",signature=\"hBoMhtn68LyKaomXACveG7zUEcJSv1opFYtZavq2H4iHDbKYnbJ2qVh9VdeYPbIoMA+LiAZd4MW43tXD+RV/bq+fW/s4a7Ho/rQQnskvVxg/8+xtQN0ExkbmqGW+/PU1xEN/X3qz3Oe7riKTyjyYxCldNK99BKHNCtX8F8HIhs5UTejj0oWSSHXwtcbkO3aeD63Fn7G0UoGFocwHd07V0bywz4ZDiZu0dd5K/itYUaw3ke1llITWfL6k0lbg1inhxK0LBktd8uwOLPX7NGtN1iBxBD0TP1UJS7/kNpc06tDsWhehgp4asz2ozAK8pYVqFq5YKT2/AMKX7Fb4GGsIBw==\""
+        },
+        "body": "{\"@context\":\"https://www.w3.org/ns/activitystreams\",\"id\":\"https://mastodon.example/a1b2c3d4\",\"type\":\"Follow\",\"actor\":\"https://mastodon.example/users/alice\",\"object\":\"https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001\"}"
+      },
+      "verify": {
+        "now": "2025-01-06T09:32:41.000Z",
+        "key": "actor"
+      },
+      "expect": "date_skew"
+    },
+    {
+      "name": "skewed date: too early",
+      "request": {
+        "method": "POST",
+        "url": "https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001/inbox",
+        "headers": {
+          "content-type": "application/activity+json; profile=\"https://www.w3.org/ns/activitystreams\"",
+          "host": "instance.example",
+          "date": "Sun, 05 Jan 2025 21:31:40 GMT",
+          "digest": "SHA-256=7TbVnb02+oHsoMFut32eKdD2ItUJiPL4WrZDQZsnHlY=",
+          "signature": "keyId=\"https://mastodon.example/users/alice#main-key\",algorithm=\"rsa-sha256\",headers=\"(request-target) host date digest\",signature=\"hBoMhtn68LyKaomXACveG7zUEcJSv1opFYtZavq2H4iHDbKYnbJ2qVh9VdeYPbIoMA+LiAZd4MW43tXD+RV/bq+fW/s4a7Ho/rQQnskvVxg/8+xtQN0ExkbmqGW+/PU1xEN/X3qz3Oe7riKTyjyYxCldNK99BKHNCtX8F8HIhs5UTejj0oWSSHXwtcbkO3aeD63Fn7G0UoGFocwHd07V0bywz4ZDiZu0dd5K/itYUaw3ke1llITWfL6k0lbg1inhxK0LBktd8uwOLPX7NGtN1iBxBD0TP1UJS7/kNpc06tDsWhehgp4asz2ozAK8pYVqFq5YKT2/AMKX7Fb4GGsIBw==\""
+        },
+        "body": "{\"@context\":\"https://www.w3.org/ns/activitystreams\",\"id\":\"https://mastodon.example/a1b2c3d4\",\"type\":\"Follow\",\"actor\":\"https://mastodon.example/users/alice\",\"object\":\"https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001\"}"
+      },
+      "verify": {
+        "now": "2025-01-05T09:30:40.000Z",
+        "key": "actor"
+      },
+      "expect": "date_skew"
+    },
+    {
+      "name": "unparseable date",
+      "request": {
+        "method": "POST",
+        "url": "https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001/inbox",
+        "headers": {
+          "content-type": "application/activity+json; profile=\"https://www.w3.org/ns/activitystreams\"",
+          "host": "instance.example",
+          "date": "yesterday",
+          "digest": "SHA-256=7TbVnb02+oHsoMFut32eKdD2ItUJiPL4WrZDQZsnHlY=",
+          "signature": "keyId=\"https://mastodon.example/users/alice#main-key\",algorithm=\"rsa-sha256\",headers=\"(request-target) host date digest\",signature=\"hBoMhtn68LyKaomXACveG7zUEcJSv1opFYtZavq2H4iHDbKYnbJ2qVh9VdeYPbIoMA+LiAZd4MW43tXD+RV/bq+fW/s4a7Ho/rQQnskvVxg/8+xtQN0ExkbmqGW+/PU1xEN/X3qz3Oe7riKTyjyYxCldNK99BKHNCtX8F8HIhs5UTejj0oWSSHXwtcbkO3aeD63Fn7G0UoGFocwHd07V0bywz4ZDiZu0dd5K/itYUaw3ke1llITWfL6k0lbg1inhxK0LBktd8uwOLPX7NGtN1iBxBD0TP1UJS7/kNpc06tDsWhehgp4asz2ozAK8pYVqFq5YKT2/AMKX7Fb4GGsIBw==\""
+        },
+        "body": "{\"@context\":\"https://www.w3.org/ns/activitystreams\",\"id\":\"https://mastodon.example/a1b2c3d4\",\"type\":\"Follow\",\"actor\":\"https://mastodon.example/users/alice\",\"object\":\"https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001\"}"
+      },
+      "verify": {
+        "now": "2025-01-05T21:32:40.000Z",
+        "key": "actor"
+      },
+      "expect": "bad_date"
+    },
+    {
+      "name": "wrong keyId host",
+      "request": {
+        "method": "POST",
+        "url": "https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001/inbox",
+        "headers": {
+          "content-type": "application/activity+json; profile=\"https://www.w3.org/ns/activitystreams\"",
+          "host": "instance.example",
+          "date": "Sun, 05 Jan 2025 21:31:40 GMT",
+          "digest": "SHA-256=7TbVnb02+oHsoMFut32eKdD2ItUJiPL4WrZDQZsnHlY=",
+          "signature": "keyId=\"https://evil.example/users/alice#main-key\",algorithm=\"rsa-sha256\",headers=\"(request-target) host date digest\",signature=\"hBoMhtn68LyKaomXACveG7zUEcJSv1opFYtZavq2H4iHDbKYnbJ2qVh9VdeYPbIoMA+LiAZd4MW43tXD+RV/bq+fW/s4a7Ho/rQQnskvVxg/8+xtQN0ExkbmqGW+/PU1xEN/X3qz3Oe7riKTyjyYxCldNK99BKHNCtX8F8HIhs5UTejj0oWSSHXwtcbkO3aeD63Fn7G0UoGFocwHd07V0bywz4ZDiZu0dd5K/itYUaw3ke1llITWfL6k0lbg1inhxK0LBktd8uwOLPX7NGtN1iBxBD0TP1UJS7/kNpc06tDsWhehgp4asz2ozAK8pYVqFq5YKT2/AMKX7Fb4GGsIBw==\""
+        },
+        "body": "{\"@context\":\"https://www.w3.org/ns/activitystreams\",\"id\":\"https://mastodon.example/a1b2c3d4\",\"type\":\"Follow\",\"actor\":\"https://mastodon.example/users/alice\",\"object\":\"https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001\"}"
+      },
+      "verify": {
+        "now": "2025-01-05T21:32:40.000Z",
+        "key": "actor"
+      },
+      "expect": "key_actor_mismatch"
+    },
+    {
+      "name": "wrong key",
+      "request": {
+        "method": "POST",
+        "url": "https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001/inbox",
+        "headers": {
+          "content-type": "application/activity+json; profile=\"https://www.w3.org/ns/activitystreams\"",
+          "host": "instance.example",
+          "date": "Sun, 05 Jan 2025 21:31:40 GMT",
+          "digest": "SHA-256=7TbVnb02+oHsoMFut32eKdD2ItUJiPL4WrZDQZsnHlY=",
+          "signature": "keyId=\"https://mastodon.example/users/alice#main-key\",algorithm=\"rsa-sha256\",headers=\"(request-target) host date digest\",signature=\"hBoMhtn68LyKaomXACveG7zUEcJSv1opFYtZavq2H4iHDbKYnbJ2qVh9VdeYPbIoMA+LiAZd4MW43tXD+RV/bq+fW/s4a7Ho/rQQnskvVxg/8+xtQN0ExkbmqGW+/PU1xEN/X3qz3Oe7riKTyjyYxCldNK99BKHNCtX8F8HIhs5UTejj0oWSSHXwtcbkO3aeD63Fn7G0UoGFocwHd07V0bywz4ZDiZu0dd5K/itYUaw3ke1llITWfL6k0lbg1inhxK0LBktd8uwOLPX7NGtN1iBxBD0TP1UJS7/kNpc06tDsWhehgp4asz2ozAK8pYVqFq5YKT2/AMKX7Fb4GGsIBw==\""
+        },
+        "body": "{\"@context\":\"https://www.w3.org/ns/activitystreams\",\"id\":\"https://mastodon.example/a1b2c3d4\",\"type\":\"Follow\",\"actor\":\"https://mastodon.example/users/alice\",\"object\":\"https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001\"}"
+      },
+      "verify": {
+        "now": "2025-01-05T21:32:40.000Z",
+        "key": "other"
+      },
+      "expect": "bad_signature"
+    },
+    {
+      "name": "digest not covered",
+      "request": {
+        "method": "POST",
+        "url": "https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001/inbox",
+        "headers": {
+          "content-type": "application/activity+json; profile=\"https://www.w3.org/ns/activitystreams\"",
+          "host": "instance.example",
+          "date": "Sun, 05 Jan 2025 21:31:40 GMT",
+          "digest": "SHA-256=7TbVnb02+oHsoMFut32eKdD2ItUJiPL4WrZDQZsnHlY=",
+          "signature": "keyId=\"https://mastodon.example/users/alice#main-key\",algorithm=\"rsa-sha256\",headers=\"(request-target) host date\",signature=\"rqyXtfRbZCrQRpdoSRLxema2gyJjusELapZYDPu/spqDZbTtiJKQEVA+ITTxRsybYkld+xdzjuiQWuLc8iolmk9QQmVx/zz+iD2ltayvL4SRYuqVyvk5bli0PNthX7sL4ACjTYt5ifOMYf+BEDriM0x08lUQYyvZdqfghV3hMuTDGSJO9Y/Arxs2u4OjEN1FVI6jDdJvNOlZ4+5TrnFg2WUITRgwMxjqPLEHlFONlkp+AXR/RUIaIL6804BjlrYMVSYxhytJSrzniS6nbQO9K7k57lBh1FdrZUiW5kzOjQ7KWWMpNEJi5pKjBL6fZO5KuruJK3FtF9jUIFW18WmySw==\""
+        },
+        "body": "{\"@context\":\"https://www.w3.org/ns/activitystreams\",\"id\":\"https://mastodon.example/a1b2c3d4\",\"type\":\"Follow\",\"actor\":\"https://mastodon.example/users/alice\",\"object\":\"https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001\"}"
+      },
+      "verify": {
+        "now": "2025-01-05T21:32:40.000Z",
+        "key": "actor"
+      },
+      "expect": "missing_header"
+    },
+    {
+      "name": "covered header absent",
+      "request": {
+        "method": "POST",
+        "url": "https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001/inbox",
+        "headers": {
+          "content-type": "application/activity+json; profile=\"https://www.w3.org/ns/activitystreams\"",
+          "host": "instance.example",
+          "date": "Sun, 05 Jan 2025 21:31:40 GMT",
+          "signature": "keyId=\"https://mastodon.example/users/alice#main-key\",algorithm=\"rsa-sha256\",headers=\"(request-target) host date digest\",signature=\"hBoMhtn68LyKaomXACveG7zUEcJSv1opFYtZavq2H4iHDbKYnbJ2qVh9VdeYPbIoMA+LiAZd4MW43tXD+RV/bq+fW/s4a7Ho/rQQnskvVxg/8+xtQN0ExkbmqGW+/PU1xEN/X3qz3Oe7riKTyjyYxCldNK99BKHNCtX8F8HIhs5UTejj0oWSSHXwtcbkO3aeD63Fn7G0UoGFocwHd07V0bywz4ZDiZu0dd5K/itYUaw3ke1llITWfL6k0lbg1inhxK0LBktd8uwOLPX7NGtN1iBxBD0TP1UJS7/kNpc06tDsWhehgp4asz2ozAK8pYVqFq5YKT2/AMKX7Fb4GGsIBw==\""
+        },
+        "body": "{\"@context\":\"https://www.w3.org/ns/activitystreams\",\"id\":\"https://mastodon.example/a1b2c3d4\",\"type\":\"Follow\",\"actor\":\"https://mastodon.example/users/alice\",\"object\":\"https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001\"}"
+      },
+      "verify": {
+        "now": "2025-01-05T21:32:40.000Z",
+        "key": "actor"
+      },
+      "expect": "missing_header"
+    },
+    {
+      "name": "unsupported algorithm",
+      "request": {
+        "method": "POST",
+        "url": "https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001/inbox",
+        "headers": {
+          "content-type": "application/activity+json; profile=\"https://www.w3.org/ns/activitystreams\"",
+          "host": "instance.example",
+          "date": "Sun, 05 Jan 2025 21:31:40 GMT",
+          "digest": "SHA-256=7TbVnb02+oHsoMFut32eKdD2ItUJiPL4WrZDQZsnHlY=",
+          "signature": "keyId=\"https://mastodon.example/users/alice#main-key\",algorithm=\"rsa-sha512\",headers=\"(request-target) host date digest\",signature=\"hBoMhtn68LyKaomXACveG7zUEcJSv1opFYtZavq2H4iHDbKYnbJ2qVh9VdeYPbIoMA+LiAZd4MW43tXD+RV/bq+fW/s4a7Ho/rQQnskvVxg/8+xtQN0ExkbmqGW+/PU1xEN/X3qz3Oe7riKTyjyYxCldNK99BKHNCtX8F8HIhs5UTejj0oWSSHXwtcbkO3aeD63Fn7G0UoGFocwHd07V0bywz4ZDiZu0dd5K/itYUaw3ke1llITWfL6k0lbg1inhxK0LBktd8uwOLPX7NGtN1iBxBD0TP1UJS7/kNpc06tDsWhehgp4asz2ozAK8pYVqFq5YKT2/AMKX7Fb4GGsIBw==\""
+        },
+        "body": "{\"@context\":\"https://www.w3.org/ns/activitystreams\",\"id\":\"https://mastodon.example/a1b2c3d4\",\"type\":\"Follow\",\"actor\":\"https://mastodon.example/users/alice\",\"object\":\"https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001\"}"
+      },
+      "verify": {
+        "now": "2025-01-05T21:32:40.000Z",
+        "key": "actor"
+      },
+      "expect": "unsupported_algorithm"
+    },
+    {
+      "name": "missing signature",
+      "request": {
+        "method": "POST",
+        "url": "https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001/inbox",
+        "headers": {
+          "content-type": "application/activity+json; profile=\"https://www.w3.org/ns/activitystreams\"",
+          "host": "instance.example",
+          "date": "Sun, 05 Jan 2025 21:31:40 GMT",
+          "digest": "SHA-256=7TbVnb02+oHsoMFut32eKdD2ItUJiPL4WrZDQZsnHlY="
+        },
+        "body": "{\"@context\":\"https://www.w3.org/ns/activitystreams\",\"id\":\"https://mastodon.example/a1b2c3d4\",\"type\":\"Follow\",\"actor\":\"https://mastodon.example/users/alice\",\"object\":\"https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001\"}"
+      },
+      "verify": {
+        "now": "2025-01-05T21:32:40.000Z",
+        "key": "actor"
+      },
+      "expect": "missing_signature"
+    },
+    {
+      "name": "garbled signature header",
+      "request": {
+        "method": "POST",
+        "url": "https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001/inbox",
+        "headers": {
+          "content-type": "application/activity+json; profile=\"https://www.w3.org/ns/activitystreams\"",
+          "host": "instance.example",
+          "date": "Sun, 05 Jan 2025 21:31:40 GMT",
+          "digest": "SHA-256=7TbVnb02+oHsoMFut32eKdD2ItUJiPL4WrZDQZsnHlY=",
+          "signature": "keyId=unquoted"
+        },
+        "body": "{\"@context\":\"https://www.w3.org/ns/activitystreams\",\"id\":\"https://mastodon.example/a1b2c3d4\",\"type\":\"Follow\",\"actor\":\"https://mastodon.example/users/alice\",\"object\":\"https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001\"}"
+      },
+      "verify": {
+        "now": "2025-01-05T21:32:40.000Z",
+        "key": "actor"
+      },
+      "expect": "malformed_signature"
+    }
+  ]
+}

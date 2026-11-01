@@ -17,8 +17,10 @@
   "dependencies": {
     "@commonair/config": "workspace:*",
     "@commonair/contracts": "workspace:*",
+    "@commonair/draw": "workspace:*",
     "@commonair/i18n": "workspace:*",
     "@commonair/observability": "workspace:*",
+    "@commonair/twitch": "workspace:*",
     "@commonair/ui": "workspace:*",
     "@hugeicons/core-free-icons": "4.3.5",
     "@hugeicons/react": "1.1.10",
