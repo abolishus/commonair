@@ -101,6 +101,26 @@ describe("legal seed documents", () => {
     expect(PRIVACY_SEED_VERSION > "2026-10-30-notifications-draft").toBe(true);
   });
 
+  test("batch 7: privacy covers giveaways, the jury, watch rooms, moving, the Twitch import and federation; the terms their clauses", () => {
+    const body = (kind: string) => docs.find((d) => d.kind === kind)?.body ?? "";
+    const privacy = body("privacy");
+    expect(privacy).toMatch(/## Watch rooms, moving channels and federation/);
+    for (const p of ["Watch rooms", "Moving a channel", "Twitch import", "Federation"])
+      expect(privacy).toContain(`**${p}.**`);
+    expect(privacy).toMatch(/30\s+days\s+after\s+it\s+ends/);
+    expect(privacy).toMatch(/never\s+stored/);
+    expect(privacy).toMatch(/salt that we never\s+publish/);
+    expect(privacy).toMatch(/Images\s+are\s+blurred/);
+    const terms = body("terms");
+    expect(terms).toMatch(/## 11\. Giveaways/);
+    expect(terms).toMatch(/## 12\. Watch rooms, moving channels and federation/);
+    expect(terms).toMatch(/No purchase necessary/);
+    for (const d of [privacy, terms]) expect(d).toMatch(/Draft: not reviewed by counsel \(none retained\)/);
+    // Versions compare as strings (same publishedAt): both must sort after the last accepted ones.
+    expect(PRIVACY_SEED_VERSION > "2026-11-01-w2-draft").toBe(true);
+    expect(TERMS_SEED_VERSION > "2026-10-29-points-draft").toBe(true);
+  });
+
   test("terms, privacy and guidelines require acceptance; cookies, DMCA and the enforcement notice do not", () => {
     const required = Object.fromEntries(docs.map((d) => [d.kind, d.requiresAcceptance]));
     expect(required).toEqual({
@@ -119,9 +139,10 @@ describe("legal seed documents", () => {
       const words = d.body.split(/\s+/).filter(Boolean).length;
       expect(words, d.kind).toBeGreaterThanOrEqual(300);
       // Privacy grew past 1000 words with chat replay and blocks (W1), then notifications, push
-      // and Discord (N1), then captions, analytics and rehearsals (W2), then giveaways and the
-      // jury (batch 7, with watch rooms, portability and federation still to come); keep it under
-      // 2200. The terms passed 1000 with the giveaway rules (batch 7); keep them under 1400.
+      // and Discord (N1), then captions, analytics and rehearsals (W2), then giveaways, the jury,
+      // watch rooms, portability and federation (batch 7); keep it under 2200. The terms passed
+      // 1000 with the giveaway rules and the batch 7 clauses; keep them under 1400. Both are near
+      // their caps: tighten before raising one.
       const cap = d.kind === "privacy" ? 2200 : d.kind === "terms" ? 1400 : 1000;
       expect(words, d.kind).toBeLessThanOrEqual(cap);
     }

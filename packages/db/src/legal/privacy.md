@@ -137,6 +137,44 @@ closed moderation cases.
   records, linked only to your pseudonymized account.
 - **Authority:** the jury cannot change any decision.
 
+## Watch rooms, moving channels and federation
+
+Draft: not reviewed by counsel (none retained).
+
+**Watch rooms.** Up to 8 people, by invitation, watch a live stream together and chat. We keep who
+hosted and joined, when, and the room's messages. Players report their position to keep the room in
+step; those reports last about a minute. Only members see the messages, not the streamer or channel
+moderators. If a member reports the room, its messages and member list are copied into the report
+for platform moderators and kept with it. Under-18s and adults never share a room, rooms on mature
+streams are for adults, and without a valid birth date you cannot use rooms. We delete a room 30
+days after it ends. Deleting your account deletes your room messages and memberships and ends rooms
+you host.
+
+**Moving a channel.** A follow made through a streamer's move link records the link, so the streamer
+sees how many follows each link brought, not who. If you ask to be told when a channel you follow
+moves, we send you one email when it does and then delete your request; the streamer never sees who
+asked. A streamer can export a bundle of their channel's details, panels, emotes and schedule. It
+holds no followers, chat or viewer data. A bundle from {{instanceName}} carries a signed statement
+of the channel's standing (counts of upheld actions and copyright strikes, and whether it is
+suspended or under a legal hold), with no personal data. An import records what was imported or
+refused, checks every image like any upload, and deletes the uploaded file once applied.
+
+**Twitch import.** Connecting Twitch for an import asks for no permissions. We use Twitch's token
+once to read your public profile, channel details, emotes and schedule, then revoke it; it is never
+stored. We keep what we read with the import record. Importing emotes requires you to confirm you
+made the art or may use it here; we record when you confirmed and the wording shown.
+
+**Federation.** Off unless the operator turns it on, and then off for each channel until its
+streamer does. A federated channel can be followed from Mastodon and other fediverse servers. It
+publishes only what its public page shows: name, description, images, go-live posts and links to
+public VODs and clips. It never publishes the follower list, viewers or who made a clip. For each
+remote follower we store their account address, handle and inbox, so we can deliver posts; the
+streamer sees these and can remove any follower. We delete them when they unfollow, are removed, or
+their server is blocked or unreachable for 7 days, or when the channel stops federating, is
+suspended or is deleted. Requests from other servers are kept up to 7 days. When a post or a channel
+is removed we ask the servers that have it to delete it, best effort: they may keep copies. The
+operator can block servers.
+
 ## How long we keep it
 
 - Playback sessions and integrity signals: only as long as needed to compute verified viewer
