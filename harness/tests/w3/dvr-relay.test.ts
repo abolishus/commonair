@@ -6,7 +6,10 @@ import { describe, expect, test } from "vite-plus/test";
 import {
   captionFixture,
   dvrPurgePrefix,
+  fetchedThrough,
   FIXTURE_CUE_TEXT,
+  RECEIPT_EDGE_SLACK_MS,
+  receiptCoverage,
   receiptTotals,
   servedBy,
   vttCacheControlOk,
@@ -34,6 +37,56 @@ describe("receiptTotals", () => {
     expect(receiptTotals(payloads, SID)).toEqual({ segments: 5, bytes: 500 });
     expect(receiptTotals(payloads, "nobody")).toEqual({ segments: 0, bytes: 0 });
     expect(receiptTotals([], SID)).toEqual({ segments: 0, bytes: 0 });
+  });
+});
+
+describe("receiptCoverage and fetchedThrough", () => {
+  // CI run 41357496846: the viewer started 22:43:18 and fetched 19 segments in its 60 s; the relay
+  // cut at 22:43:32.7 (8 of them) and next at 22:44:32.7, but the step read at 22:44:18 and compared
+  // the 8 with all 19. Compared with the fetches the newest cut covers, the receipts hold.
+  const at = (hms: string) => Date.parse(`2026-11-01T${hms}Z`);
+  const viewerStart = at("22:43:18.300");
+  const doneAt = [
+    0, 0.4, 0.8, 1.2, 4.3, 8.3, 12.3, 13.9, 18.3, 22.3, 26.3, 30.3, 34.3, 38.3, 42.3, 46.3, 50.3, 54.3, 58.3,
+  ].map((s) => viewerStart + s * 1000);
+  const first = {
+    payload: { entries: [{ sessionId: SID, segments: 8, bytes: 3_428_497 }] },
+    endMs: at("22:43:32.707"),
+  };
+  const other = { payload: { entries: [{ sessionId: OTHER, segments: 40, bytes: 1 }] }, endMs: at("22:42:32.700") };
+
+  test("before the next cut: the receipts cover the fetches up to the newest cut, which they credit", () => {
+    const c = receiptCoverage([other, first], SID);
+    expect(c).toEqual({ segments: 8, bytes: 3_428_497, throughMs: first.endMs });
+    expect(fetchedThrough(doneAt, c.throughMs)).toBe(8);
+    expect(doneAt.length).toBe(19);
+  });
+
+  test("after the next cut the bar moves with it", () => {
+    const second = { payload: { entries: [{ sessionId: SID, segments: 13, bytes: 5 }] }, endMs: at("22:44:32.698") };
+    const c = receiptCoverage([first, second, other], SID);
+    expect(c.segments).toBe(21);
+    expect(c.throughMs).toBe(second.endMs);
+    expect(fetchedThrough(doneAt, c.throughMs)).toBe(19);
+  });
+
+  test("a relay that drops a counted fetch fails the comparison", () => {
+    const short = { ...first, payload: { entries: [{ sessionId: SID, segments: 7, bytes: 1 }] } };
+    const c = receiptCoverage([short], SID);
+    expect(c.segments).toBeLessThan(fetchedThrough(doneAt, c.throughMs));
+  });
+
+  test("a fetch finished within the edge slack of a cut is left to the next period", () => {
+    expect(fetchedThrough([1_000, 9_600, 9_400], 10_000)).toBe(2);
+    expect(fetchedThrough([10_000 - RECEIPT_EDGE_SLACK_MS], 10_000)).toBe(1);
+    expect(fetchedThrough([], 10_000)).toBe(0);
+  });
+
+  test("no receipts: nothing credited, through 0, no fetch covered", () => {
+    const c = receiptCoverage([], SID);
+    expect(c).toEqual({ segments: 0, bytes: 0, throughMs: 0 });
+    expect(fetchedThrough(doneAt, c.throughMs)).toBe(0);
+    expect(receiptCoverage([{ payload: null, endMs: Number.NaN }], SID).throughMs).toBe(0);
   });
 });
 

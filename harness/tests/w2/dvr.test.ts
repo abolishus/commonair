@@ -91,6 +91,7 @@ describe("DvrHttpViewer", () => {
       },
     } as unknown as ApiClient;
     const v = new DvrHttpViewer({ api, channel: "alice", behindSeconds: 60, fetch: fakeFetch });
+    const before = Date.now();
     await v.start();
     // The first playlist poll and a forward buffer of segments from ~60 s behind.
     await Bun.sleep(50);
@@ -101,6 +102,10 @@ describe("DvrHttpViewer", () => {
     const report = await v.stop();
     expect(report.segments).toBeGreaterThanOrEqual(4);
     expect(report.playlists).toBe(1);
+    // One finish time per counted fetch, in order (the relay step compares receipts with these).
+    const times = v.segmentTimes();
+    expect(times.length).toBe(report.segments);
+    expect(times.every((t, i) => t >= before && t <= Date.now() && (i === 0 || t >= (times[i - 1] ?? 0)))).toBe(true);
     // No heartbeat within 50 ms; their shape is checked by the scenario against the API.
     expect(beats).toEqual([]);
   });

@@ -31,7 +31,15 @@ import { waitFor } from "../../wait.ts";
 import { subtitleAdvert } from "../../w2/captions/live.ts";
 import { DvrHttpViewer } from "../../w2/dvr/viewer.ts";
 import type { RelayW3Extension } from "../kit.ts";
-import { captionFixture, dvrPurgePrefix, receiptTotals, servedBy, vttCacheControlOk } from "./checks.ts";
+import {
+  captionFixture,
+  dvrPurgePrefix,
+  fetchedThrough,
+  receiptCoverage,
+  receiptTotals,
+  servedBy,
+  vttCacheControlOk,
+} from "./checks.ts";
 
 const LIVE_TIMEOUT_MS = 60_000;
 const RECORDING_TIMEOUT_MS = 90_000;
@@ -43,6 +51,8 @@ export const RELAY_DVR_CLOSE_MS = 5_000;
 export const RELAY_DVR_CLOSE_SLACK_MS = 2_000;
 /** Receipts are cut every 60 s (`RECEIPT_INTERVAL_SECONDS`); wait for two periods and change. */
 const RECEIPT_TIMEOUT_MS = 180_000;
+/** Beats every ~10 s (±15 %, an occasional late one): the refresh beat is due within this after the watch. */
+const DVR_REFRESH_TIMEOUT_MS = 45_000;
 
 const t = (step: string, what: string) => `${step}: ${what}`;
 
@@ -99,6 +109,20 @@ async function liveChannel(
       )
     : null;
   return { user, channel, vodId, encoder };
+}
+
+/**
+ * What the relay's receipts credit a session with so far, and the instant they account through
+ * (read in one query, so no receipt lands between the two).
+ */
+async function relayCoverage(ctx: ScenarioContext, relayId: string, sessionId: string) {
+  const rows = await withDb(ctx, async (sql) => {
+    const r = await sql<{ payload: unknown; ms: string }[]>`
+      select payload, (extract(epoch from period_end) * 1000)::bigint::text as ms
+        from relay_receipts where relay_id = ${relayId}`;
+    return r.map((x) => ({ payload: x.payload, endMs: Number(x.ms) }));
+  });
+  return receiptCoverage(rows, sessionId);
 }
 
 /** What the relay's receipts credit a session with so far. */
@@ -186,22 +210,43 @@ export async function stepDvrRelay(ext: RelayW3Extension): Promise<void> {
   const report = { ...viewer.v.report, errors: viewer.v.report.errors.slice(0, 5) };
   ctx.data("w3.dvrRelay.viewer", report);
   ctx.assert(t(s, "the relay served the rewound segments"), report.segments > 0 && report.errors.length === 0, report);
-  ctx.check(t(s, "heartbeats refreshed the relay DVR token"), report.dvrTokenRefreshes > 0, report);
+  // The first DVR token comes with the live token's refresh, on the first beat with at most 60 s
+  // left on it (120 s tokens): a beat or two after a 60 s watch, never before 60 s.
+  const refreshed = await ctx.step(t(s, "a heartbeat refreshes the DVR token"), () =>
+    waitFor("a DVR token refresh", () => viewer.v.report.dvrTokenRefreshes > 0 || null, {
+      timeoutMs: DVR_REFRESH_TIMEOUT_MS,
+      intervalMs: 250,
+      signal: ctx.signal,
+    }).then(
+      () => true,
+      () => false,
+    ),
+  );
+  ctx.check(t(s, "heartbeats refreshed the relay DVR token"), refreshed, {
+    ...viewer.v.report,
+    errors: viewer.v.report.errors.slice(0, 5),
+  });
 
+  // The viewer keeps fetching, and the relay cuts a receipt every 60 s on its own clock: compare
+  // the receipts with the fetches they account for (finished before the newest cut), not with
+  // fetches a later receipt will carry.
   const credited = await ctx.step(t(s, "the relay's receipts credit the session"), () =>
     waitFor(
       "receipt segments for the DVR session",
       async () => {
-        const c = await relayCredit(ctx, ext.relayId, sessionId);
-        return c.segments > 0 ? c : null;
+        const c = await relayCoverage(ctx, ext.relayId, sessionId);
+        const fetched = fetchedThrough(viewer.v.segmentTimes(), c.throughMs);
+        return c.segments > 0 && fetched > 0 ? { ...c, fetched } : null;
       },
       { timeoutMs: RECEIPT_TIMEOUT_MS, intervalMs: 5_000, signal: ctx.signal },
     ),
   );
   ctx.metric("w3.dvrRelay.receiptSegments", credited.segments);
-  ctx.check(t(s, "receipts count about what the viewer fetched"), credited.segments >= report.segments, {
-    credited,
-    fetched: report.segments,
+  ctx.check(t(s, "receipts count about what the viewer fetched"), credited.segments >= credited.fetched, {
+    credited: { segments: credited.segments, bytes: credited.bytes },
+    through: new Date(credited.throughMs).toISOString(),
+    fetchedByThen: credited.fetched,
+    fetchedInAll: viewer.v.report.segments,
   });
   const origin = await withDb(ctx, async (sql) => {
     const rows = await sql<{ segments: number; source: string }[]>`

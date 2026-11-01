@@ -28,6 +28,43 @@ export function receiptTotals(payloads: readonly unknown[], sessionId: string): 
   return { segments, bytes };
 }
 
+/** One `relay_receipts` row as the dvr-relay step reads it: the payload and its `period_end` (epoch ms). */
+export interface ReceiptRow {
+  payload: unknown;
+  endMs: number;
+}
+
+/**
+ * What one relay's receipts credit a session with, and the instant they account through: the
+ * newest `period_end` of all that relay's receipts (the ledger is cut at that instant, so every
+ * fetch the relay finished before it is in one of these rows). 0 when there is no receipt.
+ */
+export function receiptCoverage(
+  rows: readonly ReceiptRow[],
+  sessionId: string,
+): { segments: number; bytes: number; throughMs: number } {
+  const throughMs = rows.reduce((m, r) => (Number.isFinite(r.endMs) && r.endMs > m ? r.endMs : m), 0);
+  return {
+    ...receiptTotals(
+      rows.map((r) => r.payload),
+      sessionId,
+    ),
+    throughMs,
+  };
+}
+
+/**
+ * The relay counts a segment just after writing its last byte; the viewer notes it once read. A
+ * fetch the viewer finished this close before a cut may still land in the next period.
+ */
+export const RECEIPT_EDGE_SLACK_MS = 500;
+
+/** How many of the viewer's segment fetches (finish times, epoch ms) a cut at `throughMs` must cover. */
+export function fetchedThrough(doneAt: readonly number[], throughMs: number): number {
+  const cut = throughMs - RECEIPT_EDGE_SLACK_MS;
+  return doneAt.filter((t) => t <= cut).length;
+}
+
 /** Decision (y): a relay's `.vtt` is cached briefly, never pinned. */
 export function vttCacheControlOk(header: string | null): boolean {
   if (header === null) return false;

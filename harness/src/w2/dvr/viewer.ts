@@ -88,6 +88,8 @@ export class DvrHttpViewer {
   private firstPdtMs: number | null = null;
   private sentPlayed = 0;
   private sentBytes = 0;
+  /** When each counted segment (or init map) finished downloading, epoch ms. */
+  private readonly segmentDoneAt: number[] = [];
 
   constructor(private readonly opts: DvrViewerOptions) {
     this.fetchFn = opts.fetch ?? fetch;
@@ -152,6 +154,7 @@ export class DvrHttpViewer {
     }
     this.report.bytes += (await res.arrayBuffer()).byteLength;
     this.report.segments++;
+    this.segmentDoneAt.push(Date.now());
     return true;
   }
 
@@ -224,6 +227,11 @@ export class DvrHttpViewer {
         this.report.errors.push(`heartbeat ${String(err).slice(0, 120)}`);
       }
     }
+  }
+
+  /** When each counted segment finished downloading (epoch ms, in order). */
+  segmentTimes(): readonly number[] {
+    return this.segmentDoneAt;
   }
 
   /** The current DVR playlist URL (with the newest DVR token). */
