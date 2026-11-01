@@ -1,1 +1,20 @@
-{}
+{
+  "dvr.scrubber.label": "Retroceder en la transmisión en directo",
+  "dvr.atLive": "En directo",
+  "dvr.behind": "{time} por detrás del directo",
+  "dvr.backToLive": "Volver al directo",
+  "dvr.sourceOnly": "Solo calidad original",
+  "dvr.settings.title": "Retroceso en directo",
+  "dvr.settings.description": "Los espectadores pueden retroceder mientras emites en directo para ponerse al día y luego volver al directo. Gratis para todos los que puedan ver tus grabaciones.",
+  "dvr.settings.enabled": "Permitir retroceder",
+  "dvr.settings.window": "Hasta dónde se puede retroceder",
+  "dvr.settings.windowHint": "Hasta {max} en esta instancia.",
+  "dvr.settings.needsVods": "El retroceso reproduce la grabación de tu transmisión, así que solo funciona con los VOD activados. Al activar los VOD se activa el retroceso.",
+  "dvr.settings.sourceOnly": "El vídeo retrocedido se reproduce solo en calidad original, sin calidades más bajas ni ahorro de datos.",
+  "dvr.settings.originOnly": "El retroceso lo sirve esta instancia directamente, no los relés, así que los espectadores que retroceden le cuestan más.",
+  "dvr.settings.instanceOff": "El retroceso está desactivado en esta instancia.",
+  "dvr.settings.save": "Guardar ajustes de retroceso",
+  "dvr.settings.saved": "Ajustes de retroceso guardados",
+  "dvr.settings.saveFailed": "No se pudieron guardar los ajustes de retroceso. Inténtalo de nuevo.",
+  "dvr.settings.loadFailed": "No se pudieron cargar los ajustes de retroceso."
+}
