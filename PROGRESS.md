@@ -67,6 +67,13 @@ Storybook `dir="rtl"` pass (user). **User:** Hosted Weblate libre-plan applicati
 (runbook section 1–7), allow merge commits for Weblate PRs, visual checks under `es`/`en-XA`, a
 fluent read of the Spanish. **Next:** W2 as batch 6 (`.claude/briefs/next/W2-feature-wave.md`).
 
+**Batch 5 done 2026-11-01: CI green on `63ccab01`, every job including all seven harness shards**
+(`e2e-basic-en-xa` passing live in `rest`). The first live scan found the untranslated default points
+name (fixed: `displayPointsName`), Sonner's `alt+T` shortcut label and the English legal titles
+(instance content, decision (h)); both scanner-side. Flakes seen while landing: the ONNX integration
+test (timeout raised to 30 s) and `services/media` "transcode ladder starts above the viewer
+threshold" (bus event not seen once; passed on rerun, watch for a repeat).
+
 **Batch 4 (W1 + N1; `.claude/briefs/batch4/README.md`), started 2026-10-30, done 2026-10-30 (CI
 green on `8065ce3`, every job including all seven harness shards; self-host e2e last ran green on
 the contract steps).** Milestone checks (batch4 README): no `notImplemented` left in the W1 route
