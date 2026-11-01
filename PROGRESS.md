@@ -160,6 +160,50 @@ Deferred:
 Milestone: bump `TERMS_SEED_VERSION` as well as `PRIVACY_SEED_VERSION`. Privacy text for watch rooms,
 portability grants and federation is still to write.
 
+The wave 1 CI run failed in five scenarios. Fixes:
+
+- the harness jury seed gave no ids to raw inserts;
+- the worker now measures verified watching on live channels with an open giveaway that asks for
+  it (proposed in ADR 0039 §2);
+- the watch-room drawer dropped a `room.state` arriving during a read, and the harness read once;
+- chat warms its whole pool (a join's four parallel reads forced a new connection during a DNS
+  stall);
+- `/crew` priced the example tip at a share of 0 before `money.support` loaded.
+
+CI went green on `ab31bf59`.
+
+**Batch 7 wave 2 merged (2026-11-01).** Each unit was implemented, reviewed and fixed, then merged
+by sha:
+
+| Unit         | Commit     |
+| ------------ | ---------- |
+| N3-import    | `f6f7005d` |
+| N4-api       | `9c9358b8` |
+| N4-delivery  | `30905339` |
+| N4-web       | `a0e5cbf6` |
+| W3-dvr-relay | `d93be987` |
+| B7-followups | `70bb38ba` |
+
+The integration pass:
+
+- applied the `captionsReachable` flip for relay pulls (decision (y));
+- made integrity judge relay DVR on relay receipts;
+- has the API send a deleted account's actor `Delete` after commit;
+- lifted every pending step, extension and test id (all lists are empty).
+
+It also found a real cross-unit bug: N4-api encrypted actor keys under one purpose and N4-delivery
+decrypted under another. Both now share `FEDERATION_KEY_PURPOSE`.
+
+Declined or deferred to batch 8:
+
+- per-field Twitch import choices;
+- showing imported panels on the channel page;
+- `federation.actor.disabled` / `channel.federation` events (delivery is already at least once
+  through the after-commit queue and the daily sweep);
+- relay DVR stopping when a relay leaves mid-session (fails safe);
+- B7 CR6, a staff-action facts variant for statements of reasons. Until then the email reads
+  "reviewed case MA-…".
+
 **Batch 6 (W2; `.claude/briefs/batch6/README.md`), planned 2026-11-01.** User decisions: ledger
 splits ship enabled (counsel on split recipients is not a blocker; live money stays gated by M1);
 DVR defaults to a 30-minute window per channel under the 2 h cap; the `captions` scenario runs in
