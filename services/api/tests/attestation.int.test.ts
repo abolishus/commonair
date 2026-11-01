@@ -90,7 +90,12 @@ async function broadcastEnded(hoursAgo: number) {
 }
 
 /** Append a signed entry at the head of the owner's chain, as the worker would. */
-async function append(b: { id: string; startedAt: Date; endedAt: Date | null }, verified: number) {
+async function append(
+  b: { id: string; startedAt: Date; endedAt: Date | null },
+  verified: number,
+  o: { kind?: "reissue"; signer?: AttestationSigningKey } = {},
+) {
+  const signer = o.signer ?? key;
   const [head] = await db()
     .select()
     .from(schema.integrityAttestations)
@@ -107,9 +112,9 @@ async function append(b: { id: string; startedAt: Date; endedAt: Date | null }, 
   const breakdown = { datacenter: 600 };
   const statement: AttestationStatement = {
     v: 1,
-    kind: latest ? "supersede" : "broadcast",
+    kind: o.kind ?? (latest ? "supersede" : "broadcast"),
     origin,
-    kid: key.kid,
+    kid: signer.kid,
     channelId,
     broadcastId: b.id,
     seq: (head?.seq ?? 0) + 1,
@@ -128,7 +133,7 @@ async function append(b: { id: string; startedAt: Date; endedAt: Date | null }, 
     reasonsCommitment: await reasonsCommitment(salt, breakdown),
     deliveryBytes: { origin: 1, relay: 0, cdn: 0 },
   };
-  const signed = await sign(key, statement);
+  const signed = await sign(signer, statement);
   const [row] = await db()
     .insert(schema.integrityAttestations)
     .values({
@@ -137,7 +142,7 @@ async function append(b: { id: string; startedAt: Date; endedAt: Date | null }, 
       broadcastId: b.id,
       seq: statement.seq,
       kind: statement.kind,
-      kid: key.kid,
+      kid: signer.kid,
       payload: signed.payload,
       signature: signed.signature,
       entryHash: await entryHash(signed),
@@ -381,6 +386,33 @@ describe("keys", () => {
       valid: false,
       problem: "compromised_kid",
     });
+
+    // Re-issued under a new key at the head: a window through the compromised era then verifies,
+    // and fails while one broadcast's latest entry is still the compromised key's.
+    await db()
+      .update(schema.integritySigningKeys)
+      .set({ retiredAt: new Date() })
+      .where(eq(schema.integritySigningKeys.kid, key.kid));
+    const next = await importAttestationSigningKey(
+      generateKeyPairSync("ed25519").privateKey.export({ format: "der", type: "pkcs8" }).toString("base64"),
+    );
+    await db().insert(schema.integritySigningKeys).values({ kid: next.kid, publicKey: next.publicKey });
+    await append(old, 3660, { kind: "reissue", signer: next });
+    const chain = async () =>
+      (
+        await db()
+          .select()
+          .from(schema.integrityAttestations)
+          .where(eq(schema.integrityAttestations.channelId, channelId))
+          .orderBy(schema.integrityAttestations.seq)
+      ).map((e) => ({ payload: e.payload, signature: e.signature }));
+    expect((await verifyCall({ bundle: await chain() })).body).toMatchObject({
+      valid: false,
+      problem: "compromised_kid",
+      statement: null,
+    });
+    await append(recent, 1800, { kind: "reissue", signer: next });
+    expect((await verifyCall({ bundle: await chain() })).body).toMatchObject({ valid: true, problem: null, origin });
   });
 });
 

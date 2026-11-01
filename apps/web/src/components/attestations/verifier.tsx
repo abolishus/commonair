@@ -97,7 +97,9 @@ export function AttestationVerifier({ client: clientProp }: AttestationVerifierP
 
 export function VerifyResult({ result }: { result: AttestationVerifyResult }): React.JSX.Element {
   const { locale } = useLocale();
-  const f = figuresOf(result.statement);
+  // Figures only for a statement that verified (a superseded one did): next to a failure they
+  // would read as the failing entry's.
+  const f = result.valid || result.problem === "superseded" ? figuresOf(result.statement) : null;
   const reason = result.valid ? null : isProblem(result.problem) ? result.problem : "unknown";
   const hours = (s: number) => t("attestations.entry.hours", { hours: hoursOf(s, locale) });
   return (

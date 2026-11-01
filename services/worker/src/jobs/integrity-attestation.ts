@@ -54,7 +54,7 @@ import {
   thresholdsHash,
   verify,
 } from "@commonair/tokens/attestation";
-import { and, desc, eq, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, ne, or, sql } from "drizzle-orm";
 import type { WorkerContext } from "../context.ts";
 import { audit, emit } from "../moderation/records.ts";
 import { defineJob } from "../runtime/registry.ts";
@@ -491,9 +491,10 @@ export async function attestBroadcast(
  * The daily pass (ADR 0014 decision 4). It enqueues, never signs itself:
  *
  * - a re-roll (reason `rescore`) for broadcasts with a session scored after their rollup ran;
- * - an attestation re-check for broadcasts rolled up in the last two days and not attested since
- *   (a lost `analytics.rollup.ready`, a failed job), and for broadcasts whose current entry is
- *   signed by a compromised key (a re-issue).
+ * - an attestation re-check for broadcasts never attested (whenever they were rolled up: a lost
+ *   `analytics.rollup.ready`, jobs that ran out of attempts while the worker was down), for
+ *   broadcasts re-rolled in the last two days and not attested since, and for broadcasts whose
+ *   current entry is signed by a compromised key (a re-issue).
  *
  * Final broadcasts (per-minute rows gone) are only re-checked for a compromised key.
  */
@@ -526,11 +527,20 @@ export async function reconcileAttestations(
       and(
         eq(broadcasts.kind, "live"),
         isNull(t.minutesPurgedAt),
-        sql`${t.rolledUpAt} >= ${cutoff.toISOString()}::timestamptz`,
-        sql`not exists (select 1 from ${integrityAttestations} a
-                         where a.broadcast_id = ${t.broadcastId} and a.signed_at >= ${t.rolledUpAt})`,
+        // Never attested at all: no lookback, so a worker that was down (or had a retired key)
+        // for longer than the window still signs those broadcasts. Signed before the latest
+        // re-roll: only recent ones, since a re-roll that found the same figures appends nothing.
+        or(
+          sql`not exists (select 1 from ${integrityAttestations} a where a.broadcast_id = ${t.broadcastId})`,
+          and(
+            sql`${t.rolledUpAt} >= ${cutoff.toISOString()}::timestamptz`,
+            sql`not exists (select 1 from ${integrityAttestations} a
+                             where a.broadcast_id = ${t.broadcastId} and a.signed_at >= ${t.rolledUpAt})`,
+          ),
+        ),
       ),
     )
+    .orderBy(asc(t.rolledUpAt))
     .limit(batch);
   const a = integrityAttestations;
   const compromised = await ctx.db

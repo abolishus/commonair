@@ -202,6 +202,135 @@ describe("tamper vectors", () => {
   });
 });
 
+describe("chain rules a third party cannot leave to the instance", () => {
+  const signWithFixtureKey = async (st: AttestationStatement) => {
+    const { importAttestationSigningKey, sign } = await import("@commonair/tokens/attestation");
+    return sign(await importAttestationSigningKey(V.privateKeyPkcs8), st);
+  };
+  const last = () => decode(envelopes[2]!.payload);
+  const next = { seq: 4, prevHash: () => bundle.entries[2]!.entryHash };
+
+  test("a second broadcast entry for one broadcast is refused", async () => {
+    const again = await signWithFixtureKey({
+      ...last(),
+      kind: "broadcast",
+      supersedes: null,
+      seq: next.seq,
+      prevHash: next.prevHash(),
+    });
+    expect(await verifyAttestationBundle([...envelopes, again], bundle.keys)).toEqual({
+      ok: false,
+      problem: "bad_supersedes",
+      index: 3,
+    });
+  });
+
+  test("a supersede that skips its broadcast's latest entry in the window is refused", async () => {
+    // Entry 3 already replaced entry 1 of this broadcast; naming entry 1 again forks the history.
+    const fork = await signWithFixtureKey({
+      ...last(),
+      seq: next.seq,
+      prevHash: next.prevHash(),
+      supersedes: bundle.entries[0]!.entryHash,
+    });
+    expect(await verifyAttestationBundle([...envelopes, fork], bundle.keys)).toEqual({
+      ok: false,
+      problem: "bad_supersedes",
+      index: 3,
+    });
+  });
+});
+
+describe("after a key compromise", () => {
+  /** The fixture's key marked compromised, a fresh good key, and a re-issue of each broadcast. */
+  async function reissued() {
+    const { generateKeyPairSync } = await import("node:crypto");
+    const { importAttestationSigningKey, sign, entryHash } = await import("@commonair/tokens/attestation");
+    const good = await importAttestationSigningKey(
+      generateKeyPairSync("ed25519").privateKey.export({ format: "der", type: "pkcs8" }).toString("base64"),
+    );
+    const keys: AttestationKeyHistory = {
+      ...bundle.keys,
+      keys: [
+        ...bundle.keys.keys.map((k) => ({
+          ...k,
+          retiredAt: "2030-01-01T00:00:00.000Z",
+          compromisedAt: "2030-01-02T00:00:00.000Z",
+        })),
+        {
+          kid: good.kid,
+          algorithm: "Ed25519",
+          publicKey: good.publicKey,
+          firstUsedAt: "2030-01-01T00:00:00.000Z",
+          retiredAt: null,
+          compromisedAt: null,
+        },
+      ],
+    };
+    const out = [...envelopes];
+    // Broadcast 2's latest is entry 2, broadcast 1's is entry 3.
+    for (const target of [1, 2]) {
+      const orig = decode(envelopes[target]!.payload);
+      const prev = out.at(-1)!;
+      const env = await sign(good, {
+        ...orig,
+        kind: "reissue",
+        kid: good.kid,
+        seq: out.length + 1,
+        prevHash: await entryHash(prev),
+        supersedes: bundle.entries[target]!.entryHash,
+      });
+      out.push(env);
+    }
+    return { keys, out };
+  }
+
+  test("a single statement signed by the compromised key fails", async () => {
+    const { keys } = await reissued();
+    expect((await verifyAttestation(envelopes[1]!, keys.keys)).ok).toBe(false);
+  });
+
+  test("a window through the compromised era verifies once every broadcast is re-issued", async () => {
+    const { keys, out } = await reissued();
+    const r = await verifyAttestationBundle(out, keys);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.entries.map((e) => [e.statement.seq, e.compromised, e.superseded])).toEqual([
+      [1, true, true],
+      [2, true, true],
+      [3, true, true],
+      [4, false, false],
+      [5, false, false],
+    ]);
+    expect(r.latest.map((e) => e.statement.seq)).toEqual([4, 5]);
+  });
+
+  test("a compromised entry that is still its broadcast's latest fails", async () => {
+    const { keys, out } = await reissued();
+    // Only broadcast 2 re-issued: broadcast 1's latest (entry 3) is still the compromised one.
+    expect(await verifyAttestationBundle(out.slice(0, 4), keys)).toEqual({
+      ok: false,
+      problem: "compromised_kid",
+      index: 2,
+    });
+  });
+
+  test("a compromised entry with no good-key entry after it fails", async () => {
+    const { keys } = await reissued();
+    expect(await verifyAttestationBundle(envelopes, keys)).toEqual({ ok: false, problem: "compromised_kid", index: 0 });
+  });
+
+  test("a forged entry under the compromised key is still refused by its signature", async () => {
+    const { keys, out } = await reissued();
+    const forged = forge(out[1]!, (s) => ({ ...s, verifiedViewerSeconds: s.verifiedViewerSeconds + 1 }));
+    expect(await verifyAttestationBundle([out[0]!, forged, ...out.slice(2)], keys)).toEqual({
+      ok: false,
+      problem: "bad_signature",
+      index: 1,
+    });
+  });
+});
+
 describe("the re-exported single-statement verifier", () => {
   test.each(V.cases)("vectors.json: $name", async (c) => {
     const keys = (c as { keys?: AttestationKey[] }).keys ?? (V.keys as AttestationKey[]);

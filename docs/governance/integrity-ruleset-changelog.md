@@ -18,8 +18,11 @@ says which values were in force. A change to what a signal detects, how signals 
 sessions count as verified, or how a figure is computed does bump it.
 
 To check a statement's `thresholdsHash`, take the `integrity.thresholds` value in force at its
-`signedAt`, and hash the `stableJson` of `{ "rulesetVersion": <v>, "thresholds": <value> }`
-(`thresholdsHash` in `@commonair/tokens/attestation`, re-exported by `@commonair/sdk`).
+`signedAt` _as parsed by `IntegrityThresholds`_ (`packages/integrity/src/thresholds.ts`: unknown
+keys dropped, defaults filled in for keys the stored value leaves out), and hash the `stableJson`
+of `{ "rulesetVersion": <v>, "thresholds": <parsed value> }` (`thresholdsHash` in
+`@commonair/tokens/attestation`, re-exported by `@commonair/sdk`). Hashing the raw stored value
+can give a different hash.
 
 ## Version 1 (2026-11-01)
 

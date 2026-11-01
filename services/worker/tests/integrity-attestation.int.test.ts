@@ -501,4 +501,30 @@ describe("reconcile", () => {
       }),
     );
   });
+
+  test("a broadcast never attested is re-checked however long ago it was rolled up", async () => {
+    const { broadcast: b } = await scenario();
+    const now = new Date();
+    await rollupBroadcast(ctxAt(now), { broadcastId: b.id, reason: "test", settleSeconds: 0 }, { costModel: model });
+    // A worker that was down for a week: the rollup ran long before this reconcile.
+    const later = new Date(now.getTime() + 7 * 86_400_000);
+    const enqueued: Enqueued[] = [];
+    await reconcileAttestations(ctxAt(later, enqueued));
+    expect(enqueued).toContainEqual(
+      expect.objectContaining({
+        name: ANALYTICS_JOBS.integrityAttestation,
+        data: { broadcastId: b.id, reason: "reconcile" },
+      }),
+    );
+
+    // Attested once, then re-rolled outside the window with nothing new: not re-checked forever.
+    await attestBroadcast(ctxAt(now), { broadcastId: b.id, reason: "rollup" }, opts(await newKey()));
+    await env.t.db
+      .update(schema.broadcastAudienceTotals)
+      .set({ rolledUpAt: new Date(now.getTime() + 60_000) })
+      .where(eq(schema.broadcastAudienceTotals.broadcastId, b.id));
+    const none: Enqueued[] = [];
+    await reconcileAttestations(ctxAt(later, none));
+    expect(none.filter((e) => (e.data as { broadcastId: string }).broadcastId === b.id)).toEqual([]);
+  });
 });

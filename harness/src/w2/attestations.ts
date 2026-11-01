@@ -180,15 +180,16 @@ export async function stepSigned(ext: IntegrityW2Extension): Promise<void> {
   await ctx.step("bypass the publication delay", () => bypassDelay(ext));
 
   // The outbox may already have run the job on `analytics.rollup.ready`; then this one finds the
-  // same figures and appends nothing.
+  // same figures and appends nothing, or (when a later re-roll changed them before the outbox's
+  // second job) supersedes. The "one current entry" check below covers correctness either way.
   const tick = await ctx.step("run the attestation job now", async () => {
     const res = await hook(ext, INTERNAL_ROUTES.analyticsTick, "POST", { job: "integrity-attestation", broadcastId });
     return (await res.json()) as Record<string, number>;
   });
   ctx.data("signed.tick", tick);
   ctx.assert(
-    "the job attested the broadcast (or found it attested)",
-    tick.attested === 1 || tick.unchanged === 1,
+    "the job attested the broadcast (or found it attested, or superseded a re-rolled entry)",
+    tick.attested === 1 || tick.unchanged === 1 || tick.superseded === 1,
     tick,
   );
 

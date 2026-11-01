@@ -244,4 +244,14 @@ describe("AttestationVerifier", () => {
     expect(container.textContent).toContain(t(PROBLEM_KEYS[reason]));
     expect(all("attestation-verify-origin", container)).toHaveLength(0);
   });
+
+  it("shows figures for a verified or superseded statement, never next to another failure", () => {
+    const figures = t("attestations.verify.figures");
+    const shown = render(wrap(<VerifyResult result={{ ...valid, valid: false, problem: "superseded" }} />));
+    expect(shown.container.textContent).toContain(figures);
+    shown.unmount();
+    const hidden = render(wrap(<VerifyResult result={{ ...valid, valid: false, problem: "chain_break" }} />));
+    expect(hidden.container.textContent).not.toContain(figures);
+    expect(all("attestation-verify-origin", hidden.container)).toHaveLength(1);
+  });
 });

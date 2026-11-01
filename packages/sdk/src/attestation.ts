@@ -8,11 +8,18 @@
  * The byte-level work (strict base64url, the canonical payload, Ed25519, the derived `kid`,
  * `entryHash`, the reasons commitment) is `@commonair/tokens/attestation`, re-exported here
  * unchanged; this file only adds the chain rules on top. A bundle verifies when every signature
- * verifies against the key history (a compromised `kid` fails whatever its date), each entry's
- * `seq` is the previous one's plus one and its `prevHash` the previous `entryHash`, every entry is
- * of one channel and one origin, and every `supersede`/`reissue` inside the window names an earlier
- * entry of the same broadcast. The current statement for a broadcast is its latest entry; earlier
- * ones still verify and are reported as superseded.
+ * verifies against the key history, each entry's `seq` is the previous one's plus one and its
+ * `prevHash` the previous `entryHash`, every entry is of one channel and one origin, a broadcast
+ * has at most one `broadcast` entry, and every `supersede`/`reissue` whose broadcast has an earlier
+ * entry in the window names that broadcast's latest earlier entry. The current statement for a
+ * broadcast is its latest entry; earlier ones still verify and are reported as superseded.
+ *
+ * A compromised `kid` is never trusted on its own: a single statement it signed fails, whatever its
+ * date. Its entries stay in the append-only chain, though, and the instance re-issues each affected
+ * broadcast at the head. So inside a bundle an entry signed by a compromised key is accepted as a
+ * link (its signature still checks against that key's public half, and a later entry signed by a
+ * good key commits to it through `prevHash`) when it is not the latest entry of its broadcast in
+ * the window and a good-key entry follows it. It is reported `compromised` and never `latest`.
  */
 import {
   type AttestationError,
@@ -64,7 +71,10 @@ export type BundleProblem =
   | "wrong_channel"
   /** An entry signed for another origin than the history's (or the other entries'). */
   | "wrong_origin"
-  /** A supersede or reissue inside the window naming a later entry, or one of another broadcast. */
+  /**
+   * A supersede or reissue that does not name its broadcast's latest earlier entry in the window
+   * (or names a later entry, or one of another broadcast), or a second `broadcast` entry.
+   */
   | "bad_supersedes"
   /** The listed `entryHash`/`seq`/`kind` of a served entry disagree with what was signed. */
   | "listing_mismatch";
@@ -74,6 +84,11 @@ export interface VerifiedEntry {
   entryHash: string;
   /** A later entry in the window is for the same broadcast. */
   superseded: boolean;
+  /**
+   * Signed by a key marked compromised: vouched for only by the good-key entries after it, and
+   * always superseded (by a re-issue or a later supersede).
+   */
+  compromised: boolean;
 }
 
 export type BundleResult =
@@ -107,7 +122,17 @@ export async function verifyAttestationBundle(
   const rows = isKeyRows(keys) ? keys : keys.keys;
   const out: VerifiedEntry[] = [];
   for (const [i, env] of envelopes.entries()) {
-    const r = await verify(env, rows);
+    let r = await verify(env, rows);
+    let compromised = false;
+    if (!r.ok && r.error === "compromised_kid") {
+      // Check the signature against the compromised key's public half; whether the entry is
+      // acceptable as a link is decided once the rest of the window is known.
+      r = await verify(
+        env,
+        rows.map((k) => (k.compromisedAt === null ? k : { ...k, compromisedAt: null })),
+      );
+      compromised = true;
+    }
     if (!r.ok) return fail(r.error, i);
     const s = r.statement;
     const prev = out.at(-1);
@@ -117,23 +142,30 @@ export async function verifyAttestationBundle(
       if (s.seq !== prev.statement.seq + 1 || s.prevHash !== prev.entryHash) return fail("chain_break", i);
     }
     if (history && s.origin !== history.origin) return fail("wrong_origin", i);
-    out.push({ statement: s, entryHash: r.entryHash, superseded: false });
+    out.push({ statement: s, entryHash: r.entryHash, superseded: false, compromised });
   }
   // A replaced entry is only checkable inside the window; before it, the chain vouches for it.
   const indexOf = new Map(out.map((e, i) => [e.entryHash, i]));
-  for (const [i, e] of out.entries()) {
-    if (e.statement.supersedes === null) continue;
-    const target = indexOf.get(e.statement.supersedes);
-    if (target === undefined) continue;
-    if (target >= i || (out[target] as VerifiedEntry).statement.broadcastId !== e.statement.broadcastId)
-      return fail("bad_supersedes", i);
-  }
   const latestByBroadcast = new Map<string, VerifiedEntry>();
-  for (const e of out) {
+  for (const [i, e] of out.entries()) {
     const before = latestByBroadcast.get(e.statement.broadcastId);
-    if (before) before.superseded = true;
+    const target = e.statement.supersedes === null ? undefined : indexOf.get(e.statement.supersedes);
+    if (
+      target !== undefined &&
+      (target >= i || (out[target] as VerifiedEntry).statement.broadcastId !== e.statement.broadcastId)
+    )
+      return fail("bad_supersedes", i);
+    if (before) {
+      // The chain allows one `broadcast` entry per broadcast; every later one replaces the latest.
+      if (e.statement.kind === "broadcast" || e.statement.supersedes !== before.entryHash)
+        return fail("bad_supersedes", i);
+      before.superseded = true;
+    }
     latestByBroadcast.set(e.statement.broadcastId, e);
   }
+  const lastGood = out.findLastIndex((e) => !e.compromised);
+  for (const [i, e] of out.entries())
+    if (e.compromised && (!e.superseded || i > lastGood)) return fail("compromised_kid", i);
   const first = out[0] as VerifiedEntry;
   return {
     ok: true,

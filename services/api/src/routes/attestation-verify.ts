@@ -83,19 +83,34 @@ const result = (
  * this instance stored. A statement for another origin is `wrong_origin`; a single statement
  * replaced by a later entry of its broadcast is `superseded` (it still verified, so the statement
  * is returned). The chain of a window bundle is not judged by what follows it.
+ *
+ * A compromised key fails every statement it signed on its own. In a bundle its entries are
+ * accepted as links (signature checked against its public half) when a later entry of the same
+ * broadcast replaces them in the window and a good-key entry follows, the same rule as the SDK's
+ * `verifyAttestationBundle`: otherwise a window through the compromised era could never verify,
+ * since re-issues are appended at the head. A failing signature returns no statement, so a page
+ * never shows the last good entry's figures next to another entry's failure.
  */
 export async function verifyAttestations(
   deps: Pick<Deps, "db" | "site">,
   input: { envelope?: SignedAttestation | undefined; bundle?: readonly SignedAttestation[] | undefined },
 ): Promise<AttestationVerifyResult> {
   const history: TokensKey[] = await loadKeyHistory(deps.db);
+  const relaxed = history.map((k) => (k.compromisedAt === null ? k : { ...k, compromisedAt: null }));
   const list = input.envelope ? [input.envelope] : (input.bundle ?? []);
   const origin = instanceOrigin(deps);
   let prev: { statement: AttestationStatement; entryHash: string } | null = null;
   const hashes: string[] = [];
-  for (const env of list) {
-    const r = await verify(env, history);
-    if (!r.ok) return result(false, r.error, prev?.statement ?? null);
+  const latest = new Map<string, number>();
+  const compromised: { index: number; broadcastId: string }[] = [];
+  let lastGood = -1;
+  for (const [i, env] of list.entries()) {
+    let r = await verify(env, history);
+    if (!r.ok && r.error === "compromised_kid" && input.bundle) {
+      r = await verify(env, relaxed);
+      if (r.ok) compromised.push({ index: i, broadcastId: r.statement.broadcastId });
+    } else if (r.ok) lastGood = i;
+    if (!r.ok) return result(false, r.error, null);
     if (r.statement.origin !== origin) return result(false, "wrong_origin", r.statement);
     if (
       prev &&
@@ -106,7 +121,10 @@ export async function verifyAttestations(
       return result(false, "chain_break", r.statement);
     prev = r;
     hashes.push(r.entryHash);
+    latest.set(r.statement.broadcastId, i);
   }
+  for (const c of compromised)
+    if (latest.get(c.broadcastId) === c.index || c.index > lastGood) return result(false, "compromised_kid", null);
   if (!prev) return result(false, "malformed", null);
   const last = prev;
   // Signed but never stored (a transaction that rolled back after signing) is not in the chain.
