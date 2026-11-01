@@ -5,6 +5,7 @@
 import { describe, expect, test } from "vite-plus/test";
 import {
   classifySession,
+  costModelFromEnv,
   marginalCostCents,
   minutesOf,
   peakConcurrent,
@@ -214,4 +215,15 @@ describe("peakConcurrent", () => {
   test("order of input does not matter", () => {
     expect(peakConcurrent([w(25, 40), w(15, 30), w(0, 100), w(10, 20)])).toBe(3);
   });
+});
+
+test("costModelFromEnv reads a blank INFRA_COST_MODEL as unset, like startup does", () => {
+  const dflt = { currency: "usd", centsPerGb: {} };
+  expect(costModelFromEnv({ INFRA_COST_MODEL: "" })).toEqual(dflt);
+  expect(costModelFromEnv({})).toEqual(dflt);
+  expect(costModelFromEnv({ INFRA_COST_MODEL: '{"centsPerGb":{"origin":1.5}}' })).toEqual({
+    currency: "usd",
+    centsPerGb: { origin: 1.5 },
+  });
+  expect(() => costModelFromEnv({ INFRA_COST_MODEL: "{" })).toThrow(/INFRA_COST_MODEL/);
 });
