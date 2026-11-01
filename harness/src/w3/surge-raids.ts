@@ -38,6 +38,11 @@ export const CHAT_BOTS = 3;
 export const SWARM = 6;
 /** The scorer runs on its own schedule; a fresh HTTP viewer is gate-eligible within a few passes. */
 export const VERIFIED_TIMEOUT_MS = 180_000;
+/**
+ * A raider carries their source standing, not more (ADR 0039 §4): the surge gate asks for 60 s and
+ * the jitter takes up to 30 s off, so each raider first watches the source this long while eligible.
+ */
+export const RAIDER_SOURCE_SECONDS = 100;
 /** Chat caches the override 3 s and a verified value 5 s: retry a raider's send this long. */
 export const CHAT_SETTLE_MS = 20_000;
 const FRAME_TIMEOUT_MS = 15_000;
@@ -88,11 +93,14 @@ async function chatIn(run: InteractW3Extension, user: SignedInUser, channel: str
   return c;
 }
 
-/** Users among `userIds` with a gate-eligible session on `channelId` and a recent heartbeat. */
+/**
+ * Users among `userIds` with a gate-eligible session on `channelId`, a recent heartbeat, and at least
+ * `RAIDER_SOURCE_SECONDS` of gate-eligible watching there.
+ */
 async function verifiedOn(run: InteractW3Extension, channelId: string, userIds: readonly string[]): Promise<number> {
   const since = new Date(Date.now() - 60_000);
   const rows = await run.db.query.playbackSessions.findMany({
-    columns: { userId: true, verdict: true, verdictReasons: true, scoredAt: true },
+    columns: { userId: true, verdict: true, verdictReasons: true, scoredAt: true, watchSeconds: true },
     where: (ps, { and, eq, gt, inArray, isNull }) =>
       and(
         eq(ps.channelId, channelId),
@@ -101,11 +109,11 @@ async function verifiedOn(run: InteractW3Extension, channelId: string, userIds: 
         gt(ps.lastHeartbeatAt, since),
       ),
   });
-  const ok = new Set<string>();
+  const seconds = new Map<string, number>();
   for (const r of rows)
     if (r.userId && r.scoredAt !== null && gateEligible({ verdict: r.verdict, reasons: r.verdictReasons }))
-      ok.add(r.userId);
-  return ok.size;
+      seconds.set(r.userId, (seconds.get(r.userId) ?? 0) + r.watchSeconds);
+  return [...seconds.values()].filter((n) => n >= RAIDER_SOURCE_SECONDS).length;
 }
 
 async function surgeRows(run: InteractW3Extension, channelId: string) {
@@ -186,7 +194,7 @@ export async function stepSurgeRaid(run: InteractW3Extension): Promise<void> {
     },
   );
   const raiderIds = raiders.map((u) => u.me.id);
-  await ctx.step("surge-raid: the three raiders are gate-eligible on the source", () =>
+  await ctx.step("surge-raid: the three raiders are gate-eligible on the source, with enough watching", () =>
     waitFor(
       `${src.channel}: ${RAIDERS} verified raiders`,
       async () => (await verifiedOn(run, src.channelId, raiderIds)) >= RAIDERS,

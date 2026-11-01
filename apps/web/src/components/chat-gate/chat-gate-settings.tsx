@@ -187,7 +187,12 @@ function ChatGateForm({
             onChange={(v) => set("surgeEnabled", v)}
             data-testid="surge-guard-enabled"
           />
-          <ProtectRaidsField checked={draft.onRaid ?? savedOnRaid} onChange={(v) => set("onRaid", v)} />
+          <ProtectRaidsField
+            checked={draft.onRaid ?? savedOnRaid}
+            onChange={(v) => set("onRaid", v)}
+            // It only acts while the guard is on.
+            disabled={!draft.surgeEnabled}
+          />
           <FieldSeparator />
           <TextField
             label={t("chatGate.surge.ratio")}

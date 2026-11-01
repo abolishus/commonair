@@ -9,6 +9,7 @@
  * panel's note.
  */
 import { LocaleProvider, TooltipProvider } from "@commonair/ui";
+import { RAID_RULES } from "@commonair/contracts/enums";
 import { ChannelChatSettings } from "@commonair/contracts/shapes";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type * as React from "react";
@@ -173,6 +174,25 @@ describe("Protect raids", () => {
     });
     // The saved value stays shown after the save.
     await waitFor(() => expect(screen.getByTestId("surge-guard-on-raid").getAttribute("data-state")).toBe("off"));
+  });
+
+  it("the hint names the surge's length, and the switch is disabled while the guard is off", async () => {
+    const { client } = gateClient(ChannelChatSettings.parse({ surgeGuard: { enabled: false } }));
+    wrap(<ChatGateStudio channel="ann" client={client} />);
+    const sw = await screen.findByTestId("surge-guard-on-raid");
+    expect(
+      screen.getByText(`A raid into your channel turns on watchers-only chat for ${RAID_RULES.surgeMinutes} minutes.`),
+    ).toBeTruthy();
+    expect(
+      sw.hasAttribute("disabled") || sw.getAttribute("aria-disabled") === "true" || sw.hasAttribute("data-disabled"),
+    ).toBe(true);
+    fireEvent.click(screen.getByTestId("surge-guard-enabled"));
+    await waitFor(() => {
+      const on = screen.getByTestId("surge-guard-on-raid");
+      expect(
+        on.hasAttribute("disabled") || on.getAttribute("aria-disabled") === "true" || on.hasAttribute("data-disabled"),
+      ).toBe(false);
+    });
   });
 
   it("a stored off reads off", async () => {

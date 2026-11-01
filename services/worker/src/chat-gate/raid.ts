@@ -12,6 +12,10 @@
  * `decideRaidSurge` is pure. `applyRaidSurge` runs inside the raid's transaction (a savepoint):
  * the outbox and audit rows first, the override compare-and-set last, so a moderator's change in
  * between rolls the surge back and the caller decides again. `carryRaiders` runs after the commit.
+ *
+ * The carry lasts the surge as the raid leaves it. A later guard extension (surge.ts) does not
+ * lengthen it: by then raiders have had the raid's surge to build their own standing on the target,
+ * and the scoring pass's keys take over, as for anyone else.
  */
 import { sql } from "drizzle-orm";
 import { KEYS, type SurgeOverride, VerifiedWatchValue } from "@commonair/contracts/internal";
@@ -120,10 +124,13 @@ export async function applyRaidSurge(
         );
         await audit(tx, surgeAudit(c.targetId, "chat.surge.begin", raidDetails(a.next, c)), c.now);
         break;
-      case "extend":
-        // No begin (surge mode was already on); the audit row ties the longer surge to the raid.
-        await audit(tx, surgeAudit(c.targetId, "chat.surge.extend", raidDetails(a.next, c)), c.now);
+      case "extend": {
+        // No begin (surge mode was already on); the audit row ties the surge to the raid, and says
+        // whether it got longer (a raid into a longer surge only moves the banner).
+        const extended = a.next.until !== current.value?.until;
+        await audit(tx, surgeAudit(c.targetId, "chat.surge.extend", { ...raidDetails(a.next, c), extended }), c.now);
         break;
+      }
     }
   }
   // Last: a moderator's change in between wins and rolls this back.
@@ -143,7 +150,7 @@ function raidDetails(next: RaidSurgeOverride, c: RaidSurgeContext): Record<strin
   };
 }
 
-function surgeAudit(channelId: string, action: string, details: Record<string, string | number>) {
+function surgeAudit(channelId: string, action: string, details: Record<string, string | number | boolean>) {
   return { action, subjectType: "channel", subjectId: channelId, channelId, details };
 }
 
@@ -156,8 +163,6 @@ export interface CarryInput {
   sourceBroadcastId: string;
   targetId: string;
   targetBroadcastId: string;
-  /** The target's own gate (`minVerifiedWatchSeconds`): the carried `s` is at least the surge gate. */
-  targetMinVerifiedWatchSeconds: number;
   /** When the surge ends: the carry lasts until then (plus the override's grace). */
   surgeUntil: Date;
   now: Date;
@@ -171,14 +176,18 @@ export interface SourceWatch extends WatchRow {
   eligible: boolean;
   /** The latest heartbeat (or start) of any of these sessions. */
   lastSeenAt: Date;
+  /** The latest heartbeat (or start) of the gate-eligible ones; null when none is. */
+  lastEligibleAt: Date | null;
 }
 
 /**
- * Who carries, with their source value. A raider carries when they were seen on the source within
- * `RAID_RULES.carryMinutes` and are a verified watcher of its live broadcast: a current source
- * `KEYS.verifiedWatch` value (`stored`), or the scoring pass's own rule worked out now (`unlocks`:
- * gate-eligible sessions under the per-address cap), so a source without the gate or the guard (no
- * keys written) still carries its real audience. Pure.
+ * Who carries, with their source value: verified watchers of the source's live broadcast within
+ * `RAID_RULES.carryMinutes`. Either a current source `KEYS.verifiedWatch` value (`stored`: its 600 s
+ * TTL already means "verified in the last 10 minutes"; the raider must still be seen there in the
+ * window), or the scoring pass's own rule worked out now (`unlocks`: gate-eligible sessions under the
+ * per-address cap) for a raider with a gate-eligible session in the window, so a source without the
+ * gate or the guard (no keys written) still carries its real audience, and someone verified hours
+ * ago who is now only an unverified session does not. Rows must already exclude the exempt roles. Pure.
  */
 export function carriedSources(
   rows: readonly SourceWatch[],
@@ -189,20 +198,28 @@ export function carriedSources(
   secret: string,
 ): Map<string, CarryValue> {
   const seen = new Set<string>();
-  for (const r of rows) if (inCarryWindow(r.lastSeenAt, now)) seen.add(r.userId);
+  const seenVerified = new Set<string>();
+  for (const r of rows) {
+    if (inCarryWindow(r.lastSeenAt, now)) seen.add(r.userId);
+    if (r.lastEligibleAt && inCarryWindow(r.lastEligibleAt, now)) seenVerified.add(r.userId);
+  }
   const out = new Map<string, CarryValue>();
   for (const u of unlocks(
     rows.filter((r) => r.eligible),
     perAddress,
     secret,
   ))
-    if (seen.has(u.userId) && u.value.b === sourceBroadcastId) out.set(u.userId, u.value);
+    if (seenVerified.has(u.userId) && u.value.b === sourceBroadcastId) out.set(u.userId, u.value);
   for (const [userId, v] of stored)
     if (seen.has(userId) && v.b === sourceBroadcastId && !out.has(userId)) out.set(userId, v);
   return out;
 }
 
-/** The source broadcast's signed-in watching, per (user, address), for `carriedSources`. */
+/**
+ * The source broadcast's signed-in watching, per (user, address), for `carriedSources`. Leaves out
+ * whom the scoring pass leaves out (integrity/verified-watch.ts `writeVerifiedWatch`): the owner,
+ * verified bots, the source's moderators and VIPs, so they neither carry nor take a place in the cap.
+ */
 export async function sourceWatching(db: Executor, sourceId: string, broadcastId: string): Promise<SourceWatch[]> {
   const rows = (await db.execute(sql`
     select ps.user_id, ps.ip_hash,
@@ -210,10 +227,16 @@ export async function sourceWatching(db: Executor, sourceId: string, broadcastId
            bool_or(${GATE_ELIGIBLE}) as eligible,
            coalesce(sum(ps.watch_seconds) filter (where ${GATE_ELIGIBLE}), 0)::int as seconds,
            coalesce(min(ps.started_at) filter (where ${GATE_ELIGIBLE}), min(ps.started_at)) as first_at,
-           max(coalesce(ps.last_heartbeat_at, ps.started_at)) as last_seen
-      from playback_sessions ps
-     where ps.channel_id = ${sourceId}::uuid and ps.broadcast_id = ${broadcastId}::uuid
-       and ps.user_id is not null
+           max(coalesce(ps.last_heartbeat_at, ps.started_at)) as last_seen,
+           max(coalesce(ps.last_heartbeat_at, ps.started_at)) filter (where ${GATE_ELIGIBLE}) as last_eligible
+      from channels c
+      join playback_sessions ps on ps.channel_id = c.id
+      join users u on u.id = ps.user_id
+     where c.id = ${sourceId}::uuid and ps.broadcast_id = ${broadcastId}::uuid
+       and ps.user_id <> c.owner_id
+       and not (u.account_type = 'bot' and u.bot_verified)
+       and not exists (select 1 from channel_roles r
+                        where r.channel_id = c.id and r.user_id = ps.user_id and r.role in ('moderator', 'vip'))
      group by ps.user_id, ps.ip_hash, relay`)) as unknown as Row[];
   const date = (v: unknown) => (v instanceof Date ? v : new Date(String(v)));
   return rows.map((r) => ({
@@ -226,6 +249,7 @@ export async function sourceWatching(db: Executor, sourceId: string, broadcastId
     firstAt: date(r.first_at),
     eligible: r.eligible === true,
     lastSeenAt: date(r.last_seen),
+    lastEligibleAt: r.last_eligible === null || r.last_eligible === undefined ? null : date(r.last_eligible),
   }));
 }
 
@@ -272,7 +296,7 @@ export async function carryRaiders(ctx: Pick<WorkerContext, "db" | "valkey">, c:
   const pipe = ctx.valkey.pipeline();
   let n = 0;
   for (const [userId, source] of sources) {
-    const value = raidCarryValue(source, c.sourceBroadcastId, c.targetBroadcastId, c.targetMinVerifiedWatchSeconds);
+    const value = raidCarryValue(source, c.sourceBroadcastId, c.targetBroadcastId);
     if (!value) continue;
     pipe.eval(...verifiedWatchMergeArgs(c.targetId, userId, value, ttl));
     n++;

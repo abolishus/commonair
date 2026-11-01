@@ -1,6 +1,6 @@
 {
   "surgeRaids.protect.label": "Protect raids",
-  "surgeRaids.protect.hint": "A raid into your channel turns on watchers-only chat for 10 minutes.",
+  "surgeRaids.protect.hint": "A raid into your channel turns on watchers-only chat for {minutes, plural, one {# minute} other {# minutes}}.",
   "surgeRaids.protect.note": "Raiders who were really watching the channel that raided you can chat right away. New accounts and bots wait.",
   "surgeRaids.banner.from": "Raid from {channel}: {count, plural, =0 {no verified viewers} one {# verified viewer} other {# verified viewers}}.",
   "surgeRaids.banner.until": "Chat is watchers-only. It reopens {time}.",

@@ -7,10 +7,8 @@ import { RAID_RULES } from "@commonair/contracts/enums";
 import { SurgeState } from "@commonair/contracts/dto";
 import { VerifiedWatchValue } from "@commonair/contracts/internal";
 import {
-  RAID_SURGE_GATE_SECONDS,
   carryWindowStart,
   inCarryWindow,
-  raidCarrySeconds,
   raidCarryTtlSeconds,
   raidCarryValue,
   raidOpensSurge,
@@ -61,38 +59,31 @@ describe("the carry window (RAID_RULES.carryMinutes)", () => {
   });
 });
 
-describe("raidCarrySeconds: the target's surge gate", () => {
-  test.each([
-    [0, 60],
-    [30, 60],
-    [60, 60],
-    [61, 61],
-    [300, 300],
-    [3600, 3600],
-    [-5, 60],
-    [90.7, 90],
-  ])("minVerifiedWatchSeconds %s → %s", (own, s) => {
-    expect(raidCarrySeconds(own)).toBe(s);
-    expect(raidCarrySeconds(own)).toBeGreaterThanOrEqual(RAID_SURGE_GATE_SECONDS);
-  });
-});
-
-describe("raidCarryValue", () => {
-  test("a current source value carries: the target's broadcast, its surge gate, the source's fallback flag", () => {
+describe("raidCarryValue: the raider's standing, never more", () => {
+  test("a current source value carries: the target's broadcast, the source's seconds and fallback flag", () => {
     for (const f of [0, 1] as const) {
-      const v = raidCarryValue({ b: SRC_B, s: 12, f }, SRC_B, DST_B, 0);
-      expect(v).toEqual({ b: DST_B, s: 60, f });
+      const v = raidCarryValue({ b: SRC_B, s: 412, f }, SRC_B, DST_B);
+      expect(v).toEqual({ b: DST_B, s: 412, f });
       expect(VerifiedWatchValue.parse(v)).toEqual(v);
     }
   });
-  test("never below the target's own gate", () => {
-    expect(raidCarryValue({ b: SRC_B, s: 4000, f: 0 }, SRC_B, DST_B, 300)).toEqual({ b: DST_B, s: 300, f: 0 });
+  test.each([0, 1, 12, 59, 60, 61, 599, 600, 4000])("source seconds %s are copied as they are", (secs) => {
+    expect(raidCarryValue({ b: SRC_B, s: secs, f: 0 }, SRC_B, DST_B)?.s).toBe(secs);
+  });
+  test("a short source standing is not raised to the surge gate (60 s) or a stricter target gate", () => {
+    const v = raidCarryValue({ b: SRC_B, s: 0, f: 0 }, SRC_B, DST_B);
+    expect(v?.s).toBe(0);
+    // As chat decides (required = max(own, 60) during a surge): a 600 s target gate refuses a 20 s raider.
+    const passes = (s: number, own: number) => s >= Math.max(own, 60);
+    expect(passes(raidCarryValue({ b: SRC_B, s: 20, f: 0 }, SRC_B, DST_B)?.s ?? 0, 600)).toBe(false);
+    expect(passes(raidCarryValue({ b: SRC_B, s: 20, f: 0 }, SRC_B, DST_B)?.s ?? 0, 0)).toBe(false);
+    expect(passes(raidCarryValue({ b: SRC_B, s: 700, f: 0 }, SRC_B, DST_B)?.s ?? 0, 600)).toBe(true);
   });
   test("an unverified raider (no source value) carries nothing", () => {
-    expect(raidCarryValue(null, SRC_B, DST_B, 0)).toBeNull();
+    expect(raidCarryValue(null, SRC_B, DST_B)).toBeNull();
   });
   test("a value for another source broadcast is stale and carries nothing", () => {
-    expect(raidCarryValue({ b: DST_B, s: 600, f: 0 }, SRC_B, DST_B, 0)).toBeNull();
+    expect(raidCarryValue({ b: DST_B, s: 600, f: 0 }, SRC_B, DST_B)).toBeNull();
   });
 });
 

@@ -55,7 +55,7 @@ export interface RaidsExecuteResult {
 
 /** What the raid did to the target's surge, for the work after the commit. */
 interface SurgeOutcome {
-  target: { id: string; slug: string; liveBroadcastId: string; minVerifiedWatchSeconds: number };
+  target: { id: string; slug: string; liveBroadcastId: string };
   source: { id: string; liveBroadcastId: string };
   /** The override now stored (surge mode on until `next.until`). */
   next: RaidSurgeOverride;
@@ -120,7 +120,6 @@ async function raidSurge(
           id: p.target.id,
           slug: p.target.slug,
           liveBroadcastId: p.target.liveBroadcastId,
-          minVerifiedWatchSeconds: settings.minVerifiedWatchSeconds,
         },
         source: { id: p.source.id, liveBroadcastId: p.source.liveBroadcastId },
         ...done,
@@ -146,7 +145,6 @@ async function afterRaidSurge(ctx: WorkerContext, cfg: ChatGateConfig, s: SurgeO
       sourceBroadcastId: s.source.liveBroadcastId,
       targetId: s.target.id,
       targetBroadcastId: s.target.liveBroadcastId,
-      targetMinVerifiedWatchSeconds: s.target.minVerifiedWatchSeconds,
       surgeUntil: new Date(s.next.until),
       now,
       secret: cfg.secret,

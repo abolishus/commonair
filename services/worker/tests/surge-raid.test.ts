@@ -90,7 +90,7 @@ const SECRET = "surge-raid-test-secret-0123456789abcdef";
 const user = (n: number) => `0190f0aa-0000-7000-8000-${String(n).padStart(12, "0")}`;
 
 function watch(n: number, over: Partial<SourceWatch> = {}): SourceWatch {
-  return {
+  const base: SourceWatch = {
     channelId: SRC,
     broadcastId: SRC_B,
     userId: user(n),
@@ -100,8 +100,12 @@ function watch(n: number, over: Partial<SourceWatch> = {}): SourceWatch {
     firstAt: new Date(NOW.getTime() - 900_000 + n * 1_000),
     eligible: true,
     lastSeenAt: new Date(NOW.getTime() - 5_000),
+    lastEligibleAt: null,
     ...over,
   };
+  // By default the eligible sessions are the ones last seen.
+  if (!("lastEligibleAt" in over)) base.lastEligibleAt = base.eligible ? base.lastSeenAt : null;
+  return base;
 }
 const carried = (rows: SourceWatch[], stored = new Map<string, VerifiedWatchValue>(), perAddress = 5) =>
   carriedSources(rows, stored, SRC_B, NOW, perAddress, SECRET);
@@ -123,12 +127,36 @@ describe("carriedSources", () => {
     expect([...out.keys()]).toEqual([user(1)]);
   });
 
-  test("seen recently on any address counts for the user", () => {
+  test("verified on another address within the window counts for the user", () => {
     const out = carried([
-      watch(1, { ipHash: "a", lastSeenAt: new Date(NOW.getTime() - edge - 60_000) }),
-      watch(1, { ipHash: "b", eligible: false, seconds: 0, lastSeenAt: new Date(NOW.getTime() - 1_000) }),
+      watch(1, { ipHash: "a", eligible: false, seconds: 0, lastSeenAt: new Date(NOW.getTime() - 1_000) }),
+      watch(1, { ipHash: "b", lastSeenAt: new Date(NOW.getTime() - 60_000) }),
     ]);
     expect(out.has(user(1))).toBe(true);
+  });
+
+  test("verified hours ago and only an unverified session now: no carry", () => {
+    const out = carried([
+      watch(1, { ipHash: "a", lastSeenAt: new Date(NOW.getTime() - 2 * 3_600_000) }),
+      watch(1, { ipHash: "b", eligible: false, seconds: 0, lastSeenAt: new Date(NOW.getTime() - 1_000) }),
+    ]);
+    expect(out.has(user(1))).toBe(false);
+  });
+
+  test("an address with old verified watching and a recent unverified heartbeat: only the eligible time counts", () => {
+    const out = carried([
+      watch(1, {
+        lastSeenAt: new Date(NOW.getTime() - 1_000),
+        lastEligibleAt: new Date(NOW.getTime() - edge - 1),
+      }),
+      watch(2, { lastSeenAt: new Date(NOW.getTime() - 1_000), lastEligibleAt: new Date(NOW.getTime() - edge) }),
+    ]);
+    expect([...out.keys()]).toEqual([user(2)]);
+  });
+
+  test("the source seconds are carried as they are (minus the jitter), not raised", () => {
+    const out = carried([watch(1, { seconds: 20 })]);
+    expect(out.get(user(1))?.s).toBeLessThanOrEqual(20);
   });
 
   test("the per-address cap applies: a farm behind one address carries only its first accounts", () => {

@@ -176,12 +176,6 @@ export const toRaidView = (
 
 // ------------------------------------------------------------ surge raids (batch 7 decision (w), ADR 0039 §4)
 
-/**
- * The gate surge mode applies on the target: `max(minVerifiedWatchSeconds, 60)` (ADR 0015 decision
- * 6; `SURGE_GATE_SECONDS` in services/chat/src/watch-gate.ts, which the worker does not import).
- */
-export const RAID_SURGE_GATE_SECONDS = 60;
-
 /** The target's surge-guard settings a raid reads (`ChannelChatSettings.surgeGuard`). */
 export interface RaidSurgeSettings {
   enabled: boolean;
@@ -205,16 +199,6 @@ export const carryWindowStart = (now: Date): Date => new Date(now.getTime() - RA
 export const inCarryWindow = (lastSeenAt: Date, now: Date): boolean =>
   lastSeenAt.getTime() >= carryWindowStart(now).getTime();
 
-/**
- * The `s` a carried `KEYS.verifiedWatch` value holds on the target: the target's surge gate,
- * `max(minVerifiedWatchSeconds, 60)`, so a carried raider passes the gate for the whole surge (the
- * `KEYS.verifiedWatch` doc in packages/contracts/src/internal.ts). The source value's seconds are not
- * copied: a viewer verified on the source for 20 s is a verified watcher of the source, and the
- * surge gate asks for 60.
- */
-export const raidCarrySeconds = (targetMinVerifiedWatchSeconds: number): number =>
-  Math.max(Math.max(0, Math.floor(targetMinVerifiedWatchSeconds)), RAID_SURGE_GATE_SECONDS);
-
 /** A `KEYS.verifiedWatch` value (`VerifiedWatchValue`), structurally. */
 export interface CarryValue {
   b: string;
@@ -224,17 +208,18 @@ export interface CarryValue {
 
 /**
  * The target value one raider carries, or null when they carry nothing: the source value must be
- * for the source's live broadcast (a value for another broadcast is stale, as chat reads it). `f`
- * (the privacy-relay fallback, ADR 0015 decision 5) carries over, so the account-age rule still applies.
+ * for the source's live broadcast (a value for another broadcast is stale, as chat reads it). The
+ * raider carries their standing, never more (ADR 0039 §4): `s` and `f` are the source value's, so a
+ * raider verified for 20 s on the source passes neither the surge gate (60 s) nor a stricter target
+ * gate, and `f` (the privacy-relay fallback, ADR 0015 decision 5) keeps the account-age rule.
  */
 export function raidCarryValue(
   source: CarryValue | null,
   sourceBroadcastId: string,
   targetBroadcastId: string,
-  targetMinVerifiedWatchSeconds: number,
 ): CarryValue | null {
   if (!source || source.b !== sourceBroadcastId) return null;
-  return { b: targetBroadcastId, s: raidCarrySeconds(targetMinVerifiedWatchSeconds), f: source.f };
+  return { b: targetBroadcastId, s: source.s, f: source.f };
 }
 
 /**

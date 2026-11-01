@@ -6,6 +6,7 @@
  * studio "Protect raids" switch under the surge guard, and the moderator banner's raid line, which
  * names the source and its verified count while a raid holds chat watchers-only.
  */
+import { RAID_RULES } from "@commonair/contracts/enums";
 import { RelativeTime } from "@commonair/ui";
 import { SwitchField } from "@commonair/ui/blocks/forms";
 import * as React from "react";
@@ -30,7 +31,7 @@ export function ProtectRaidsField({
     <div className="flex flex-col gap-2">
       <SwitchField
         label={t("surgeRaids.protect.label")}
-        description={t("surgeRaids.protect.hint")}
+        description={t("surgeRaids.protect.hint", { minutes: RAID_RULES.surgeMinutes })}
         checked={checked}
         disabled={disabled}
         onCheckedChange={onChange}

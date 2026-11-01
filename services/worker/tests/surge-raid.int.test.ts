@@ -17,6 +17,7 @@ import { KEYS, SurgeOverride, VerifiedWatchValue } from "@commonair/contracts/in
 import { ChannelChatSettings } from "@commonair/contracts/shapes";
 import { schema as s, uuidv7, type Database } from "@commonair/db";
 import { createTestDatabase, type TestDatabase } from "@commonair/db/testing";
+import { loadThresholds } from "@commonair/integrity";
 import { surgeRaidOf } from "@commonair/interact";
 import { createValkey } from "@commonair/service";
 import type { ChatGateConfig } from "../src/chat-gate/config.ts";
@@ -52,11 +53,11 @@ afterAll(async () => {
 let seq = 0;
 const tag = () => `${++seq}${crypto.randomUUID().replace(/-/g, "").slice(0, 8)}`;
 
-async function user(): Promise<string> {
+async function user(extra: { accountType?: "human" | "bot"; botVerified?: boolean } = {}): Promise<string> {
   const name = `sr${tag()}`;
   const [u] = await owner
     .insert(s.users)
-    .values({ name, username: name, email: `${name}@example.test` })
+    .values({ name, username: name, email: `${name}@example.test`, ...extra })
     .returning({ id: s.users.id });
   if (!u) throw new Error("no user");
   return u.id;
@@ -66,12 +67,17 @@ interface Chan {
   id: string;
   slug: string;
   broadcastId: string;
+  ownerId: string;
 }
 
-async function liveChannel(surgeGuard: Partial<ChannelChatSettings["surgeGuard"]> = {}): Promise<Chan> {
+async function liveChannel(
+  surgeGuard: Partial<ChannelChatSettings["surgeGuard"]> = {},
+  minVerifiedWatchSeconds = 0,
+): Promise<Chan> {
   const ownerId = await user();
   const slug = `ch${tag()}`;
   const settings = ChannelChatSettings.parse({
+    minVerifiedWatchSeconds,
     surgeGuard: { enabled: false, triggerUnverifiedRatio: 0.5, cooldownMinutes: 10, onRaid: true, ...surgeGuard },
   });
   const [c] = await owner
@@ -88,14 +94,21 @@ async function liveChannel(surgeGuard: Partial<ChannelChatSettings["surgeGuard"]
     startedAt: new Date(clock.getTime() - 3_600_000),
   });
   await owner.update(s.channels).set({ liveBroadcastId: broadcastId }).where(eq(s.channels.id, c.id));
-  return { id: c.id, slug, broadcastId };
+  return { id: c.id, slug, broadcastId, ownerId };
 }
 
-const protectedTarget = () => liveChannel({ enabled: true, onRaid: true });
+const protectedTarget = (minVerifiedWatchSeconds = 0) =>
+  liveChannel({ enabled: true, onRaid: true }, minVerifiedWatchSeconds);
 
-/** A signed-in viewer watching `ch` (gate-eligible when `verified`), seen `agoSeconds` before the clock. */
-async function watcher(ch: Chan, verified: boolean, opts: { agoSeconds?: number; ip?: string } = {}) {
-  const userId = await user();
+interface SessionOpts {
+  agoSeconds?: number;
+  ip?: string;
+  watchSeconds?: number;
+  startedAgoSeconds?: number;
+}
+
+/** One playback session of `userId` on `ch` (gate-eligible when `verified`), seen `agoSeconds` before the clock. */
+async function session(ch: Chan, userId: string, verified: boolean, opts: SessionOpts = {}) {
   await owner.insert(s.playbackSessions).values({
     id: uuidv7(),
     channelId: ch.id,
@@ -103,14 +116,28 @@ async function watcher(ch: Chan, verified: boolean, opts: { agoSeconds?: number;
     userId,
     deviceHash: `dev-${tag()}`,
     ipHash: opts.ip ?? `ip-${tag()}`,
-    startedAt: new Date(clock.getTime() - 900_000),
+    startedAt: new Date(clock.getTime() - (opts.startedAgoSeconds ?? 900) * 1000),
     lastHeartbeatAt: new Date(clock.getTime() - (opts.agoSeconds ?? 5) * 1000),
-    watchSeconds: 600,
+    watchSeconds: opts.watchSeconds ?? 600,
     verdict: verified ? "verified" : "excluded",
     verdictReasons: verified ? [] : ["fetch_less"],
     scoredAt: new Date(clock.getTime() - 10_000),
   });
+}
+
+/** A signed-in viewer watching `ch` (gate-eligible when `verified`), seen `agoSeconds` before the clock. */
+async function watcher(ch: Chan, verified: boolean, opts: SessionOpts = {}) {
+  const userId = await user();
+  await session(ch, userId, verified, opts);
   return userId;
+}
+
+/** A carried value: the target's broadcast, the source's seconds (600 minus the 0–30 s jitter), `f: 0`. */
+function expectCarried(v: VerifiedWatchValue | null, ch: Chan, sourceSeconds = 600) {
+  expect(v).not.toBeNull();
+  expect(v).toMatchObject({ b: ch.broadcastId, f: 0 });
+  expect(v?.s).toBeLessThanOrEqual(sourceSeconds);
+  expect(v?.s).toBeGreaterThanOrEqual(Math.max(0, sourceSeconds - 30));
 }
 
 async function raid(from: Chan, to: Chan): Promise<string> {
@@ -195,7 +222,7 @@ describe("a raid into a protected channel", () => {
     ]);
 
     for (const u of raiders) {
-      expect(await verified(dst.id, u)).toEqual({ b: dst.broadcastId, s: 60, f: 0 });
+      expectCarried(await verified(dst.id, u), dst);
       const ttl = await valkey.ttl(KEYS.verifiedWatch(dst.id, u));
       expect(ttl).toBeGreaterThan(RAID_RULES.surgeMinutes * 60);
       expect(ttl).toBeLessThanOrEqual(RAID_RULES.surgeMinutes * 60 + 60);
@@ -251,7 +278,61 @@ describe("a raid into a protected channel", () => {
     await valkey.eval(...verifiedWatchMergeArgs(src.id, u, { b: src.broadcastId, s: 120, f: 0 }, 600));
     await raid(src, dst);
     await executeDueRaids(ctx, 100, ON);
-    expect(await verified(dst.id, u)).toEqual({ b: dst.broadcastId, s: 60, f: 0 });
+    expect(await verified(dst.id, u)).toEqual({ b: dst.broadcastId, s: 120, f: 0 });
+  });
+
+  test("a raider carries their source standing, never more: low source seconds pass neither gate", async () => {
+    clock = new Date();
+    const [src, dst] = [await liveChannel(), await protectedTarget(600)];
+    // Verified and scored on the source, but only 40 s of watching there.
+    const brief = await watcher(src, true, { watchSeconds: 40 });
+    const long = await watcher(src, true, { watchSeconds: 1200 });
+    await raid(src, dst);
+    await executeDueRaids(ctx, 100, ON);
+
+    expectCarried(await verified(dst.id, brief), dst, 40);
+    expect(await gatePasses(dst, brief, 600)).toBe(false);
+    expect(await gatePasses(dst, brief, 0)).toBe(false);
+    expectCarried(await verified(dst.id, long), dst, 1200);
+    expect(await gatePasses(dst, long, 600)).toBe(true);
+  });
+
+  test("verified on the source hours ago and only an unverified session now: no carry", async () => {
+    clock = new Date();
+    const [src, dst] = [await liveChannel(), await protectedTarget()];
+    const u = await watcher(src, true, { agoSeconds: 2 * 3600, startedAgoSeconds: 3 * 3600 });
+    await session(src, u, false, { agoSeconds: 5 });
+    await raid(src, dst);
+    await executeDueRaids(ctx, 100, ON);
+    expect(await verified(dst.id, u)).toBeNull();
+    expect(await gatePasses(dst, u)).toBe(false);
+  });
+
+  test("the source's owner, moderators, VIPs and verified bots neither carry nor take places in the cap", async () => {
+    clock = new Date();
+    const [src, dst] = [await liveChannel(), await protectedTarget()];
+    const { gateUnlocksPerAddress: cap } = await loadThresholds(t.app.db);
+    const ip = `shared-${src.id}`;
+    // The exempt arrive first on the shared address, so they would take the first places.
+    await session(src, src.ownerId, true, { ip, startedAgoSeconds: 1800 });
+    const exempt: string[] = [];
+    for (const role of ["moderator", "vip"] as const) {
+      const id = await watcher(src, true, { ip, startedAgoSeconds: 1700 });
+      await owner.insert(s.channelRoles).values({ channelId: src.id, userId: id, role });
+      exempt.push(id);
+    }
+    exempt.push(await watcher(src, true, { ip, startedAgoSeconds: 1600 }));
+    await owner
+      .update(s.users)
+      .set({ accountType: "bot", botVerified: true })
+      .where(eq(s.users.id, exempt[2] ?? ""));
+    const viewers: string[] = [];
+    for (let i = 0; i < cap; i++) viewers.push(await watcher(src, true, { ip }));
+    await raid(src, dst);
+    await executeDueRaids(ctx, 100, ON);
+
+    for (const id of [src.ownerId, ...exempt]) expect(await verified(dst.id, id)).toBeNull();
+    for (const id of viewers) expectCarried(await verified(dst.id, id), dst);
   });
 
   test("the carry never lowers a larger target value and is not clobbered by a later scoring write", async () => {
@@ -267,7 +348,7 @@ describe("a raid into a protected channel", () => {
 
     // The target's scoring pass then sees v's first few seconds there: the carry stands.
     await valkey.eval(...verifiedWatchMergeArgs(dst.id, v, { b: dst.broadcastId, s: 5, f: 0 }, 600));
-    expect(await verified(dst.id, v)).toEqual({ b: dst.broadcastId, s: 60, f: 0 });
+    expectCarried(await verified(dst.id, v), dst);
     expect(await valkey.ttl(KEYS.verifiedWatch(dst.id, v))).toBeGreaterThan(600);
     expect(await gatePasses(dst, v)).toBe(true);
   });
@@ -349,7 +430,7 @@ describe("an open surge", () => {
     expect(await surgeEvents(dst.id)).toEqual([]);
     const [, audits] = await rows(dst.id);
     expect(audits.map((a) => a.action)).toEqual(["chat.surge.extend"]);
-    expect(audits[0]?.details).toMatchObject({ trigger: "raid", raidId, until });
+    expect(audits[0]?.details).toMatchObject({ trigger: "raid", raidId, until, extended: true });
     expect(await gatePasses(dst, u)).toBe(true);
   });
 
@@ -362,6 +443,10 @@ describe("an open surge", () => {
     await raid(src, dst);
     await executeDueRaids(ctx, 100, ON);
     expect((await override(dst.id))?.until).toBe(later);
+    const [, audits] = await rows(dst.id);
+    expect(audits.map((a) => [a.action, (a.details as { extended?: boolean }).extended])).toEqual([
+      ["chat.surge.extend", false],
+    ]);
     // The carry lasts the whole (longer) surge.
     expect(await valkey.ttl(KEYS.verifiedWatch(dst.id, u))).toBeGreaterThan(40 * 60);
   });
