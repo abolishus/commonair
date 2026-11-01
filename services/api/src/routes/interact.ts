@@ -6,8 +6,8 @@
  * E6's alerts and overlays (docs/testing/e6-selectors.md, ADR 0021), E8's polls, predictions,
  * raids and goals (docs/testing/e8-selectors.md, ADR 0026).
  */
-import { giveaways } from "./b7-stubs.ts";
 import { alerts } from "./interact/alerts.ts";
+import { giveaways } from "./interact/giveaways.ts";
 import { goals } from "./interact/goals.ts";
 import { overlays } from "./interact/overlays.ts";
 import { polls } from "./interact/polls.ts";

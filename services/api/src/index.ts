@@ -18,6 +18,7 @@ import { pinnedGet, resolveHost } from "./lib/outbound.ts";
 import { closeCoopTickRunner } from "./coop/hooks.ts";
 import { closeOpsTickRunner } from "./ops/hooks.ts";
 import { closeAnalyticsTickRunner } from "./ops/analytics-hooks.ts";
+import { closeB7TickRunner } from "./ops/b7-hooks.ts";
 import { closeInteractTickRunner } from "./interact/hooks.ts";
 import { closeOverlayHub } from "./overlay/stream.ts";
 import { closeExportQueue } from "./privacy/export-queue.ts";
@@ -121,6 +122,7 @@ export async function buildDeps(
       for (const [what, close] of [
         ["ops queue", closeOpsTickRunner],
         ["analytics queue", closeAnalyticsTickRunner],
+        ["b7 queues", closeB7TickRunner],
         ["interact queue", closeInteractTickRunner],
         ["overlay hub", closeOverlayHub],
         ["export queue", closeExportQueue],

@@ -33,6 +33,7 @@ import { setSuspension } from "../moderation/suspension.ts";
 import { notifyRoles } from "../moderation/notify.ts";
 import { staffActorType } from "../moderation/review.ts";
 import { reportReasonRuleRef, staffRuleRef } from "../transparency/rule-ref.ts";
+import { watchRoomEvidence } from "../watch-rooms/evidence.ts";
 
 const { reports, users, channels, chatMessages, vods, clips, broadcasts, moderationCases, modActions, auditLog } =
   schema;
@@ -120,10 +121,11 @@ async function subjectInfo(
         evidence: { messages, senders: new Set(rows.map((m) => m.userId)).size },
       };
     }
-    // Batch 7 contract step: the seams part routes this to `watchRoomEvidence` (W3-watch-rooms);
-    // until then a watch-room report finds no subject.
-    case "watch_room":
-      return null;
+    // ADR 0017: platform queue only, so no channel (like message_set); several members, no single target.
+    case "watch_room": {
+      const room = await watchRoomEvidence(db, id);
+      return room ? { channelId: null, userId: null, evidence: room.evidence } : null;
+    }
     case "vod":
     case "clip":
     case "broadcast": {

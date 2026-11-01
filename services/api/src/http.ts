@@ -3,7 +3,8 @@
 
 /**
  * HTTP surface: OpenAPI (REST) under /api, oRPC RPC under /rpc, better-auth under
- * /api/auth, the OpenAPI document, ALTCHA challenges and the internal MediaMTX hooks.
+ * /api/auth, the OpenAPI document, ALTCHA challenges, the internal MediaMTX hooks, and the batch 7
+ * raw routes (federation and discovery, the portability keys, the Twitch import callback).
  */
 import { OpenAPIHandler } from "@orpc/openapi/fetch";
 import { ORPCError } from "@orpc/server";
@@ -35,6 +36,17 @@ import { overlayHub } from "./overlay/stream.ts";
 import { overlayTokenHash, resolveOverlayToken } from "./overlay/tokens.ts";
 import { mediaAuth, mediaNotReady, mediaReady } from "./media/hooks.ts";
 import { isTestHookPath, testHook } from "./moderation/hooks.ts";
+import { internalUploadCommit } from "./moderation/internal-commit.ts";
+import { b7Hook, isB7HookPath } from "./ops/b7-hooks.ts";
+import { federationHttp } from "./federation/http.ts";
+import { portabilityKeyHistory } from "./lib/portability-keys.ts";
+import {
+  matchFederationRoute,
+  TWITCH_IMPORT_CALLBACK_PATH,
+  twitchImportAvailable,
+  WELL_KNOWN_PATHS,
+} from "./raw-routes.ts";
+import { twitchImportCallback } from "./twitch-import/callback.ts";
 import { router } from "./router.ts";
 
 const MAX_INTERNAL_BODY = 64 * 1024;
@@ -185,6 +197,13 @@ export function createApp(deps: Deps): ApiApp {
     return new Request(req, { headers });
   }
 
+  function withoutCookies(req: Request): Request {
+    if (!req.headers.has("cookie")) return req;
+    const headers = new Headers(req.headers);
+    headers.delete("cookie");
+    return new Request(req, { headers });
+  }
+
   /** The overlay alert stream (SSE). Authenticated only by the overlay token; cookies are ignored. */
   async function overlayEvents(raw: Request, url: URL, server?: Pick<Server<unknown>, "requestIP">): Promise<Response> {
     if (raw.method !== "GET") return json({ code: "METHOD_NOT_ALLOWED", message: "Use GET" }, 405);
@@ -219,6 +238,11 @@ export function createApp(deps: Deps): ApiApp {
         path === INTERNAL_ROUTES.mediaReady ? await mediaReady(deps, body) : await mediaNotReady(deps, body);
       return new Response(null, { status });
     }
+    if (path === INTERNAL_ROUTES.uploadCommit) {
+      // Decision (p): the worker's imports reach the user-upload pipeline here (secret only).
+      if (!internalAuthorized(raw)) return new Response(null, { status: 401 });
+      return internalUploadCommit(deps, raw.method, await readJson(raw));
+    }
     if (isTestHookPath(path)) {
       // Disabled hooks answer 404 before the secret check, like any unknown internal path.
       if (!deps.env.MODERATION_TEST_HOOKS) return new Response(null, { status: 404 });
@@ -242,6 +266,12 @@ export function createApp(deps: Deps): ApiApp {
       if (!deps.env.OPS_TEST_HOOKS) return new Response(null, { status: 404 });
       if (!internalAuthorized(raw)) return new Response(null, { status: 401 });
       return analyticsHook(deps, path, raw.method, await readJson(raw));
+    }
+    if (isB7HookPath(path)) {
+      // Batch 7 hooks, behind the same flag; off: 404 before the secret check.
+      if (!deps.env.OPS_TEST_HOOKS) return new Response(null, { status: 404 });
+      if (!internalAuthorized(raw)) return new Response(null, { status: 401 });
+      return b7Hook(deps, path, raw.method, await readJson(raw));
     }
     if (isInteractHookPath(path)) {
       // Off: 404 before the secret check, like any unknown internal path.
@@ -275,6 +305,29 @@ export function createApp(deps: Deps): ApiApp {
     if (path === OAUTH_PATHS.token || path === OAUTH_PATHS.revoke || path === OAUTH_PATHS.device)
       return withCors(await oauthEndpoint(deps, stripCredentials(raw), await requestInfo(raw, url, server)));
     if (path === OVERLAY_EVENTS_PATH) return withCors(await overlayEvents(raw, url, server));
+
+    // Batch 7 raw routes (raw-routes.ts), ahead of the OpenAPI handler.
+    const fed = matchFederationRoute(path);
+    if (fed) {
+      // Off: every federation route is 404, as if it did not exist (ADR 0030).
+      if (!deps.env.FEDERATION_ENABLED) return json({ code: "NOT_FOUND", message: "Not found" }, 404);
+      if (raw.method !== fed.method)
+        return json({ code: "METHOD_NOT_ALLOWED", message: `Use ${fed.method}` }, 405, { allow: fed.method });
+      // Server to server: never a session.
+      const req = withoutCookies(raw);
+      return federationHttp({ deps, auth, req: await requestInfo(req, url, server) }, req, fed.route);
+    }
+    if (path === WELL_KNOWN_PATHS.portability) {
+      if (raw.method !== "GET") return withCors(json({ code: "METHOD_NOT_ALLOWED", message: "Use GET" }, 405));
+      return withCors(json(await portabilityKeyHistory(deps)));
+    }
+    if (path === TWITCH_IMPORT_CALLBACK_PATH) {
+      // Decision (b): without the flag and both credentials the import does not exist.
+      if (!twitchImportAvailable(deps.env)) return withCors(json({ code: "NOT_FOUND", message: "Not found" }, 404));
+      if (raw.method !== "GET") return json({ code: "METHOD_NOT_ALLOWED", message: "Use GET" }, 405);
+      // A top-level redirect from Twitch: first-party cookies stay (the state is session-bound).
+      return twitchImportCallback({ deps, auth, req: await requestInfo(raw, url, server) }, raw, url);
+    }
 
     if (path === "/api/openapi.json" && raw.method === "GET")
       return withCors(json(await openApiDocument(), 200, { "cache-control": "public, max-age=300" }));

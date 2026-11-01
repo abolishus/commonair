@@ -15,6 +15,7 @@ import { os, requireCaller, requireChannel, type Ctx } from "../lib/orpc.ts";
 import { assertCommittedUpload } from "../moderation/committed.ts";
 import { incomingKey, UPLOAD_TYPES } from "../moderation/upload-keys.ts";
 import { commitUpload } from "../moderation/uploads.ts";
+import { attributeFollow } from "../portability/attribution.ts";
 import { restrictedIds, withRestriction } from "../moderation/restriction.ts";
 import { changeRoleInTx } from "../channels/roles.ts";
 import { mediaSettingsOf, updateMediaSettings } from "../channels/media-settings.ts";
@@ -182,6 +183,8 @@ export const channelsRoutes = {
         const [row] = await tx.select({ n: channels.followerCount }).from(channels).where(eq(channels.id, c.id));
         return { following: true as const, followerCount: row?.n ?? c.followerCount };
       }
+      // A new follow only: a link's attribution never rewrites an existing follow (decision (k)).
+      await attributeFollow(tx, { followerId: caller.user.id, channelId: c.id, moveLink: input.moveLink ?? null });
       // The follows trigger keeps the count (decision (aa), migration 0046).
       const [row] = await tx.select({ n: channels.followerCount }).from(channels).where(eq(channels.id, c.id));
       const [u] = await tx
