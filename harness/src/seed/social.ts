@@ -26,10 +26,7 @@ const TABLES = [
   "consent_records",
   "events",
   "audit_log",
-  // Batch 7: watch rooms, move links and portability grants.
-  "watch_rooms",
-  "watch_room_members",
-  "watch_room_messages",
+  // Batch 7: move links and portability grants.
   "move_links",
   "follow_portability_grants",
 ] as const;

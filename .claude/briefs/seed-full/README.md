@@ -105,6 +105,12 @@ first, because the others need its users and channels; units 2–7 then run in p
 goes implement → independent review → fix, as in batch 4. Briefs: [common.md](common.md) (rules for every unit) and
 `seed-<unit>.md` for each unit. Then milestone wiring: the
 `seed-coverage` scenario becomes `inFull`, and a docs page (`docs/testing/seeding.md`).
+Milestone wiring also:
+
+- writes `harness/compose.seed.yaml` (decision e);
+- flips `expectData` to true for `/coop/jury`, `/admin/federation` and `/import` in
+  `harness/src/seed/routes.ts`;
+- adds the selfhost staging reset.
 
 ## Decisions (user, 2026-10-31)
 
@@ -115,3 +121,9 @@ goes implement → independent review → fix, as in batch 4. Briefs: [common.md
 - d. Runs alongside batch 5 (N2). The contract step was built on branch `seed/contract-step` and
   merged to `main` on 2026-10-31, ahead of batch 5's contract step (user's call). Batch 5 rebases
   onto it; the overlap is `packages/config/src/env.ts`, `.env.example` and the generated config doc.
+- e. (2026-11-01) Features that ship off are seeded on. The seed overlay (`harness/compose.seed.yaml`)
+  turns on giveaways, the jury (through a co-op proposal), federation (against the local
+  ActivityPub test peer only), the Twitch import (against the Twitch mock only), live captions, a
+  non-zero cost model, the signing keys and every test hook, so their tables and routes get data.
+  The briefs were brought up to date with batches 5–7 at `fc1fc4ff`; the `watch_room*` tables moved
+  from seed-social to seed-media.

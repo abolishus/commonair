@@ -6,8 +6,13 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # Rules every seed-full unit follows
 
 Read this together with your unit brief, [README.md](README.md) (the approved plan) and
-`.claude/briefs/_done-means.md`. The contract step is on `main` (commit `63e92d54`): branch from
-`main` in your own worktree, on a branch named `seed/<unit>` (for example `seed/money`).
+`.claude/briefs/_done-means.md`. The contract step is on `main` (commit `63e92d54`, brought up to
+date with batches 5–7 at `fc1fc4ff`): branch from current `main` in your own worktree, on a
+branch named `seed/<unit>` (for example `seed/money`).
+
+The briefs were last checked against `main` at `fc1fc4ff` (batch 7 wave 2). If `main` has moved,
+run `git log fc1fc4ff..main -- packages/db/src/schema harness/src/seed` first: a table or route
+added since then is yours if it is in your stub, even if your brief doesn't name it.
 
 ## The contract (read-only for every unit)
 
@@ -17,8 +22,9 @@ Read this together with your unit brief, [README.md](README.md) (the approved pl
   where your brief says otherwise.
 - `harness/tests/seed/{prng,guard,coverage}.test.ts`.
 - `harness/src/*.ts` outside `seed/`: the existing actors and drivers (`users.ts`, `money-actors.ts`,
-  `coop-actors.ts`, `stripe.ts`, `streamer.ts`, `safety-io.ts`, `mailpit.ts`, `api/client.ts`, and so on).
-  Import them, never edit them. If you need a change, send a contract request.
+  `coop-actors.ts`, `stripe.ts`, `streamer.ts`, `safety-io.ts`, `mailpit.ts`, `api/client.ts`, and so on),
+  plus the newer feature drivers: `harness/src/w2/**`, `w3/**`, `n2/**`, `n3/**`, `n4/**` and
+  `mocks/**`. Import them, never edit them. If you need a change, send a contract request.
 - Everything in `packages/**`, `services/**` and `apps/**`.
 
 ## You own
@@ -37,25 +43,53 @@ Read this together with your unit brief, [README.md](README.md) (the approved pl
    `createTestDatabase()` as `TEST_APP_ROLE`.
 2. **Plain tables: direct inserts** through `ctx.db` (Drizzle, app role). Insert in chunks of at
    most 1 000 rows per statement, and check `ctx.signal` between chunks.
-3. **Trigger-protected tables only through the real code path:** the API (signed in as the right
-   seeded user), the worker, or stripe-mock webhooks. Never use raw SQL around a trigger, even
-   where the trigger would allow an insert. The protected tables are:
-   - accounts, audit_log, channels, users
-   - clips, vods
-   - content_labels, account_actions, enforcement_statements, legal_holds, legal_documents, local_hash_list
+3. **Protected tables only through the real code path:** the API (signed in as the right seeded
+   user), the worker (directly, or through a test hook), or stripe-mock webhooks. Never use raw
+   SQL around their triggers, even where a trigger would allow an insert. As of `fc1fc4ff` they
+   are:
+   - clips, vods, relay_purges
+   - content_labels, account_actions, enforcement_statements, legal_holds, local_hash_list
    - moderation_cases, moderation_flags, evidence_objects, evidence_audit_runs
    - dmca_notices, dmca_notice_items, dmca_counter_notices, ncii_requests, ncmec_reports
+   - integrity_signing_keys, integrity_attestations
    - council_members, council_responses, council_terms
-   - governance_applications, governance_settings, governance_settings_history
+   - governance_applications, governance_settings_history
    - memberships, membership_history, membership_shares
    - proposals, proposal_comments, proposal_electorate, votes, vote_history, tallies
    - patronage_periods, patronage_inputs, patronage_allocations
+   - jury_panels, jury_seats, jury_cases, jury_votes
    - ledger_accounts, ledger_transactions, ledger_entries, payouts, payment_fraud_flags
-   - loyalty_balances, loyalty_transactions
+   - revenue_splits, revenue_split_shares, revenue_split_acceptances, revenue_split_postings,
+     split_writeoff_proposals
+   - loyalty_balances, loyalty_transactions, prediction_bets
+   - giveaways, giveaway_entries, giveaway_winners
+   - broadcast_audience_minutes, broadcast_audience_totals, broadcast_costs, rehearsal_invitees
+   - watch_rooms, watch_room_members, move_links
+   - federation_actor_keys, portability_signing_keys
 
-   `users`, `accounts`, `channels` and the `audit_log` rows for social moderation are the one
-   exception: seed-social inserts them directly, the same way the demo seed does
-   (`packages/db/src/demo/seed.ts`), because their triggers only guard later changes.
+   A table missing from this list that has a trigger in `packages/db/drizzle/*.sql` is protected
+   too, unless it is one of the consistency-only tables below. Read its trigger before you write
+   to it.
+
+   **Direct inserts are allowed on tables whose triggers only keep rows consistent.** The rows
+   must satisfy the trigger; never disable it or work around it.
+   - `users`, `accounts`, `channels`: seed-social inserts them as the demo seed does
+     (`packages/db/src/demo/seed.ts`). Their triggers only guard later changes.
+   - `audit_log`: only the rows that go with seed-social's own direct moderation rows.
+   - `follows`: a trigger keeps `channels.follower_count`, so never set the count yourself. Another
+     trigger checks `move_link_id` against the channel, so a follow through a move link goes
+     through the API.
+   - `broadcasts`: `kind` is frozen after insert. `stream_hours`: rehearsal broadcasts are
+     refused.
+   - `governance_settings` and `legal_documents` are filled at migration time. Read them; never
+     insert into them.
+
+   **The harness scenarios aren't a model for this.** Several of them (`w2/splits.ts`, `w3/jury.ts`,
+   `w3/watch-rooms/db.ts`, `w2/rehearsal/db.ts`) write fixtures through the owner connection
+   (`DATABASE_URL` as owner, Bun.SQL). The seed never does: `ctx.db` is the app role, and nothing
+   else is allowed. Where a scenario fakes elapsed time that way (a split hold that has passed,
+   closed cases for the jury), the seed either gets there through the product in real time, or
+   records the gap in `notes`.
 
 4. **Signing in:** use `UserFactory.signIn` (`harness/src/users.ts`) with
    `demo_<handle>@demo-seed.invalid` and `ctx.password`, against the API in `ctx.env`. Sign each
@@ -75,14 +109,36 @@ Read this together with your unit brief, [README.md](README.md) (the approved pl
    brief says otherwise, so demo data never fans out to anything except the local sinks.
 9. **No idempotency:** the guard only allows a database with no users, and a failed run means a
    reset. Fail loudly on the first error, and say which user, step and spec failed.
-10. **Budget:** at `small` your unit should finish in under 2 minutes (seed-media and seed-coop in
-    under 5, because of the real periods and the encodes). At `medium`, under 20. At `large`, do
+10. **Budget:** at `small` your unit should finish in under 2 minutes (seed-coop in under 5 and
+    seed-media in under 8, because of the real periods and the encodes). At `medium`, under 20. At `large`, do
     your best and log progress every 10 s.
-11. **Stack flags:** if your unit needs a stack flag (for example `COOP_TEST_HOOKS`,
-    `MODERATION_TEST_HOOKS`, `INTERACT_TEST_HOOKS`, stripe-mock, or `DEMO_SEED_FULL` on the worker),
-    check for it at the start of `run`. If it is off, throw at once with the exact flag. List every
-    flag in your final message: the orchestrator writes the seed compose overlay at milestone
-    wiring.
+11. **Stack flags:** if your unit needs a stack flag, check for it at the start of `run`. If it is
+    off, throw at once with the exact flag. List every flag in your final message: the
+    orchestrator writes the seed compose overlay (`harness/compose.seed.yaml`) at milestone
+    wiring. The flags the units need:
+    - test hooks: `COOP_TEST_HOOKS`, `MODERATION_TEST_HOOKS`, `INTERACT_TEST_HOOKS`, and
+      `OPS_TEST_HOOKS` (the analytics tick and display bypass, and the batch 7 `b7Tick` jobs such
+      as the jury draw and close);
+    - stripe-mock;
+    - `DEMO_SEED_FULL` on the worker;
+    - features that ship off: `GIVEAWAYS_ENABLED`, `FEDERATION_ENABLED`, and
+      `TWITCH_IMPORT_ENABLED`, with `OAUTH_TWITCH_*` pointed at the Twitch mock;
+    - live captions: the whisper sidecar (profile `captions`), `WHISPER_URL` and
+      `CAPTIONS_MAX_STREAMS`;
+    - a non-zero `INFRA_COST_MODEL`, and the signing keys `INTEGRITY_SIGNING_KEY` and
+      `PORTABILITY_SIGNING_KEY`.
+
+    The seed overlay turns all of these on (decision e in README.md), so every feature has data.
+    11a. **Local peers only:** anything the stack calls out to while a unit runs is a harness peer bound
+    to this machine and reached through `HARNESS_WEBHOOK_HOST`, never a real service:
+    - the e9 webhook receiver;
+    - the ActivityPub test peer (`harness/src/mocks/activitypub/`);
+    - the Twitch mock (`harness/src/mocks/twitch/`);
+    - the RTMP and Discord sinks.
+
+    Start each peer in `run` and stop it before returning. Rows that point at a peer stay behind
+    and fail later, and that is expected. Say so in `notes`.
+
 12. **Store:** read `ctx.store.users`/`channels` (seed-social fills them). Publish only under
     `ctx.store.extra.<your unit>`, and only the keys your brief names plus any your own later steps
     need. Never mutate another unit's entry. If you need a value another unit owns, send a

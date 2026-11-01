@@ -81,12 +81,37 @@ Your branch is `seed/platform`, cut from `main` after seed-social merges. This i
    - If the API only accepts discord.com URLs, insert the row directly. The table is plain, so a
      direct insert is allowed; say so in `notes`. Never point at a real Discord host.
 
+## Batch 5–7 additions (checked at `fc1fc4ff`)
+
+These tables and routes were added to your stub after this brief was first written.
+
+1. **Federation** (ADR 0030, `FEDERATION_ENABLED`). Run the ActivityPub test peer
+   (`harness/src/mocks/activitypub/`) for the life of the unit, the way `harness/src/n4/index.ts`
+   does. The overlay must include `harness/compose.n4.yaml`'s private-address allowance, so ask
+   for it.
+   - streamer1 turns federation on in the studio.
+   - Peer actors follow it, which gives `federation_followers` and `federation_inbox_items`.
+   - Channel activity then produces `federation_objects` and `federation_deliveries`. If that
+     activity needs a broadcast, add `media` to `after`.
+   - `admin` adds a domain block and rotates a key (`federation_actor_keys` is protected, so use the
+     API).
+2. **Portability imports** (ADR 0031 and 0037). `portability_signing_keys` is protected, and the
+   worker writes it with `PORTABILITY_SIGNING_KEY`.
+   - streamer3 imports from the Twitch mock (`harness/src/mocks/twitch/`, `TWITCH_IMPORT_ENABLED`,
+     with `OAUTH_TWITCH_*` pointed at the mock). Follow `harness/src/n3/index.ts`, and never the real
+     Twitch.
+   - One bulk channel's bundle is exported and imported into another, so its standing is verified.
+   - Never add the T0 fixture emote: that refusal is a scenario test, not seed data.
+
 ## Tests you must add
 
 - The tests in common.md.
 - Every published query parses with the route's search schema, or at least has the expected keys.
 - No URL in any row points outside `127.0.0.1`, `localhost`, `.invalid` or `.test`.
 - Delivery states cover delivered, failed and retrying.
+- The test checks:
+  - every peer URL in the plan is local;
+  - the Twitch import is planned only against the mock base URL.
 
 ## Routes you fill
 
@@ -96,6 +121,9 @@ Your branch is `seed/platform`, cut from `main` after seed-social merges. This i
 - `/developer/`, `/developer/bots` and `/developer/apps/$appId`
 - `/admin/apps`
 - viewer1's inbox
+- `/admin/federation`: the domain block and the rotated key
+- `/import`: streamer3's finished import
+- Both of those routes' `expectData` becomes true at milestone wiring.
 
 ## Done means
 

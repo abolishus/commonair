@@ -80,6 +80,45 @@ Do not look outside the repository.
    - Print the watch URLs.
    - Exit codes: 0 clean, 1 failure, 2 refused.
 
+## Batch 5–7 additions (checked at `fc1fc4ff`)
+
+These tables and routes were added to your stub after this brief was first written. The three
+`watch_room*` tables moved here from seed-social, because rooms open on a live broadcast.
+
+1. **Chat inside recordings.** The VOD and clip watch pages have a chat replay panel, so harness
+   chat clients must talk during each recording (`harness/src/chat-client.ts`). Seed-social's
+   backdated chat doesn't cover these windows.
+2. **Watch rooms** (protected).
+   - During streamer1's recording, viewer1 opens a room, invites viewer2 and a bulk viewer, and
+     they chat in it. Then the host closes it.
+   - Don't age the rooms: the retention job would delete them.
+3. **Captions** (ADR 0011).
+   - One recording uses the speaking publisher (`harness/src/w2/captions/publisher.ts`, with its
+     speech fixture) and the whisper sidecar, which gives `broadcast_caption_tracks`.
+   - streamer1 then corrects a cue through the API (`caption_edits`).
+4. **Rehearsal.**
+   - streamer2 arms a rehearsal, invites `chanmod` (`rehearsal_invitees`), publishes briefly and
+     ends it.
+   - Never backdate rehearsals into `stream_hours`; the trigger refuses them.
+   - `/rehearse` stays idle afterwards.
+5. **Audience rollups and costs** (protected).
+   - After each recording ends, run `broadcast-rollup` through the `OPS_TEST_HOOKS` analytics tick
+     (settle override). This gives `broadcast_audience_minutes`, `broadcast_audience_totals` and
+     `broadcast_costs` (a non-zero `INFRA_COST_MODEL`).
+   - Set the display bypass for the fixed channels.
+   - streamer1 creates an `analytics_share_links` row.
+   - Note that `/analytics` only covers the recorded broadcasts, not the backdated history.
+6. **One swarm recording.** Run one recording with a small viewbot swarm (`harness/src/integrity-viewers.ts`)
+   beside real HTTP viewers. That fills the excluded groups on `/analytics` and the
+   `integrity_flags` that seed-safety reads.
+7. **Relay purge.** If a relay runs, streamer1 removes a recording mid-stream (`relay_purges`,
+   signed by the API); `harness/src/w3/dvr-relay/` has the call shapes. If no relay runs, leave it
+   pending with the relay tables.
+8. **Store.** Also publish `store.extra.media.recordedBroadcasts` (`{ channelId, broadcastId }[]`),
+   for seed-safety's attestations.
+9. **Budget.** Your small budget is 8 minutes now. Run recordings 3 at a time and fold the
+   features above into the same recordings wherever they fit.
+
 ## Tests you must add
 
 These come on top of the tests in common.md.
@@ -91,6 +130,10 @@ These come on top of the tests in common.md.
   - its plan picks channels and viewers deterministically;
   - it refuses without a seed or without the flag;
   - abort stops every child process. Test this with a fake process runner.
+- The test checks:
+  - every recording window has planned chat;
+  - the caption, rehearsal, swarm and watch-room plans fit inside the recording plan;
+  - `recordedBroadcasts` covers every recording.
 
 ## Routes you fill
 
@@ -99,6 +142,9 @@ These come on top of the tests in common.md.
 - VODs and clips on `/$channel`.
 - `/embed/$channel` (a VOD, or live during `seed live`).
 - Every live surface while `seed live` runs.
+- `/$channel/vods/$vodId` and `/$channel/clips/$clipId` (`vodId`, `clipId`), with chat replay
+- `/captions` and `/analytics`
+- `/rehearse`: checked for errors only
 
 ## Done means
 
