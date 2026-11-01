@@ -196,7 +196,9 @@ async function joinRoom(
     await member.page.locator(sel(WR.join)).click({ timeout: UI_TIMEOUT_MS });
     const joined = member.page.locator(sel(WR.drawer, { "room-id": room.roomId }));
     const refused = member.page.locator(sel(WR.joinRefused));
-    await Promise.race([joined.waitFor({ timeout: UI_TIMEOUT_MS }), refused.waitFor({ timeout: UI_TIMEOUT_MS })]);
+    // One wait for either outcome: a `Promise.race` of two waits leaves the loser to reject later,
+    // after the scenario, where nobody catches it.
+    await joined.or(refused).first().waitFor({ timeout: UI_TIMEOUT_MS });
     if (await refused.isVisible().catch(() => false)) return (await refused.getAttribute("data-code")) ?? "unknown";
     return null;
   }

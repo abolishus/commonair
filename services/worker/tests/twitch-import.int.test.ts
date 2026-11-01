@@ -164,7 +164,12 @@ describe.skipIf(!storage)("twitch import (worker)", () => {
     expect(outcome(row.result, "emote", "pgBad")).toEqual(["rejected", "upload_rejected"]);
     expect(outcome(row.result, "schedule", "schedule")).toEqual(["skipped", "carried_not_applied"]);
     // The T0 fixture went through the same pipeline as a user upload: the T0 job was enqueued.
-    expect(t0Queue.jobs.filter((j) => j.name === MODERATION_JOBS.t0)).toHaveLength(1);
+    const t0Jobs = t0Queue.jobs.filter((j) => j.name === MODERATION_JOBS.t0);
+    expect(t0Jobs).toHaveLength(1);
+    // The T0 job's subject is the importer and their channel: its automatic action (`suspendForT0`)
+    // bans that account and suspends that channel, so the importer cannot chat afterwards. The
+    // `twitch-import` harness scenario therefore imports the T0 emote with a streamer of its own.
+    expect(t0Jobs[0]?.data).toMatchObject({ userId: u.userId, channelId: ch.id });
 
     const [c] = await db().select().from(schema.channels).where(eq(schema.channels.id, ch.id));
     expect(c).toMatchObject({

@@ -296,6 +296,32 @@ export function preflightFailure(profile: Profile, message: string): ScenarioRes
   };
 }
 
+/**
+ * A promise a scenario created and never awaited (a `Promise.race` loser, a frame wait left behind
+ * when an assertion threw first) can reject after its scenario ended; Bun then exits, taking every
+ * later scenario and the report with it. While the run lasts such rejections are logged and
+ * recorded on the scenario they fired during (`data.strayRejections`; it may have come from an
+ * earlier one) instead. They are harness bugs to fix where they start, never a verdict on a check.
+ */
+export function guardStrayRejections(
+  log: Logger,
+  during: () => string | undefined,
+): { take(): string[]; dispose(): void } {
+  const fired: string[] = [];
+  const onRejection = (reason: unknown) => {
+    const error = errorMessage(reason);
+    fired.push(error);
+    log.error("stray rejection: a promise nobody awaited rejected", { during: during(), error });
+  };
+  process.on("unhandledRejection", onRejection);
+  return {
+    take: () => fired.splice(0),
+    dispose: () => {
+      process.off("unhandledRejection", onRejection);
+    },
+  };
+}
+
 export async function runScenarios(scenarios: readonly Scenario[], opts: RunOptions): Promise<RunReport> {
   const runId = opts.runId ?? newRunId();
   const startedAt = new Date();
@@ -306,13 +332,28 @@ export async function runScenarios(scenarios: readonly Scenario[], opts: RunOpti
     results.push(preflightFailure(opts.profile, refused));
   } else {
     const platform = opts.platform ?? new Platform(opts.env, opts.log, runId);
+    const strays = guardStrayRejections(opts.log, () =>
+      results.length < scenarios.length ? scenarios[results.length]?.name : undefined,
+    );
+    const attachStrays = () => {
+      const last = results.at(-1);
+      const fired = strays.take();
+      if (last && fired.length > 0)
+        last.data = {
+          ...last.data,
+          strayRejections: [...((last.data.strayRejections as string[] | undefined) ?? []), ...fired],
+        };
+    };
     try {
       for (const scenario of scenarios) {
         if (opts.signal?.aborted) break;
         results.push(await runOne(scenario, platform, { ...opts, runId }));
+        attachStrays();
       }
     } finally {
       if (!opts.platform) await platform.close();
+      attachStrays();
+      strays.dispose();
     }
   }
   const ffmpeg = await probeFfmpeg()
