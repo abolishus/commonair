@@ -151,14 +151,15 @@ export interface EndedBroadcast {
 /**
  * End a broadcast if it is still live, as the API's not-ready hook does: `ended_at`, the
  * channel's live pointer, open playback sessions and `stream.offline`. Media already kicked
- * the publisher; a later not-ready hook finds nothing live and does nothing.
+ * the publisher; a later not-ready hook finds nothing live and does nothing. A rehearsal (batch 6
+ * decision (f)) ends the same way without `stream.offline`: it was never announced.
  */
 export async function endBroadcast(tx: Executor, broadcastId: string, now: Date): Promise<EndedBroadcast | null> {
   const [b] = await tx
     .update(broadcasts)
     .set({ endedAt: now })
     .where(and(eq(broadcasts.id, broadcastId), isNull(broadcasts.endedAt)))
-    .returning({ id: broadcasts.id, channelId: broadcasts.channelId, path: broadcasts.path });
+    .returning({ id: broadcasts.id, channelId: broadcasts.channelId, path: broadcasts.path, kind: broadcasts.kind });
   if (!b) return null;
   const [c] = await tx
     .update(channels)
@@ -171,17 +172,18 @@ export async function endBroadcast(tx: Executor, broadcastId: string, now: Date)
     .update(playbackSessions)
     .set({ endedAt: now })
     .where(and(eq(playbackSessions.broadcastId, b.id), isNull(playbackSessions.endedAt)));
-  await emit(
-    tx,
-    "stream.offline",
-    channel.id,
-    {
-      broadcaster_user_id: channel.ownerId,
-      broadcaster_user_login: channel.slug,
-      broadcaster_user_name: channel.displayName,
-    },
-    now,
-  );
+  if (b.kind !== "rehearsal")
+    await emit(
+      tx,
+      "stream.offline",
+      channel.id,
+      {
+        broadcaster_user_id: channel.ownerId,
+        broadcaster_user_login: channel.slug,
+        broadcaster_user_name: channel.displayName,
+      },
+      now,
+    );
   return { broadcastId: b.id, channelId: channel.id, slug: channel.slug, path: b.path };
 }
 

@@ -36,6 +36,8 @@ export async function viewerCounts(deps: Deps, channelIds: readonly string[]): P
         inArray(playbackSessions.channelId, misses),
         isNull(playbackSessions.endedAt),
         eq(playbackSessions.verdict, "verified"),
+        // DVR viewers are catching up, not watching live (ADR 0016 decision 6; worker counters.ts).
+        eq(playbackSessions.playbackMode, "live"),
         gt(playbackSessions.lastHeartbeatAt, since),
       ),
     )

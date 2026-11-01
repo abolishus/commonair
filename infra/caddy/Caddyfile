@@ -175,6 +175,11 @@ import http-{$CADDY_LISTEN:ports}
 	handle /eventsub/ws {
 		reverse_proxy api:3001
 	}
+	# Attestation signing keys and kids (ADR 0014), served by the API under its oRPC /api prefix.
+	handle /.well-known/commonair-attestation {
+		rewrite * /api/.well-known/commonair-attestation
+		reverse_proxy api:3001
+	}
 
 	# Chat WebSocket: wss://<host>/chat → chat:3002/ws
 	handle /chat {
@@ -182,6 +187,7 @@ import http-{$CADDY_LISTEN:ports}
 		reverse_proxy chat:3002
 	}
 
+	# Live HLS, and live captions under it (`live/<slug>/captions/<lang>/…`, ADR 0011).
 	handle /hls/* {
 		reverse_proxy origin:3003
 	}
@@ -196,13 +202,19 @@ import http-{$CADDY_LISTEN:ports}
 	handle /cdn/* {
 		reverse_proxy origin:3003
 	}
-	# Public media objects; the origin serves only the public key prefixes (ADR 0009).
+	# Public media objects; the origin serves only the public key prefixes (ADR 0009). A VOD's
+	# caption tracks (`vods/<id>/captions/<lang>.vtt`, ADR 0011) are objects under its prefix.
 	handle /media/* {
 		reverse_proxy origin:3003
 	}
 	# VODs that are not public: token-checked, read from the private recordings/ prefix
 	# (ADR 0009 amendment 1).
 	handle /vod/* {
+		reverse_proxy origin:3003
+	}
+	# Live DVR (ADR 0016): token-checked rewind of the in-progress recording. Origin only: no
+	# relay or CDN route serves it.
+	handle /dvr/* {
 		reverse_proxy origin:3003
 	}
 

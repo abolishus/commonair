@@ -3,6 +3,7 @@
 
 /** Dependencies shared by every per-broadcast worker. */
 import type { Valkey } from "iovalkey";
+import type { BROADCAST_KINDS } from "@commonair/contracts/enums";
 import type { LiveEvent } from "@commonair/contracts/internal";
 import type { Database } from "@commonair/db";
 import type { Logger } from "@commonair/observability";
@@ -10,6 +11,7 @@ import type { ObjectStorage } from "@commonair/storage";
 import type { MediaClock } from "./clock/anchor.ts";
 import type { DiskBudget } from "./disk.ts";
 import type { Capabilities } from "./ffmpeg/hwaccel.ts";
+import type { MediaSessionHooks } from "./hooks.ts";
 import type { MediaMtxClient } from "./mediamtx.ts";
 import type { MediaModeration } from "./moderation/moderation.ts";
 import type { MediaTimings } from "./settings.ts";
@@ -55,6 +57,8 @@ export interface MediaContext {
   diskBudget: DiskBudget;
   /** Per-host cap on concurrent transcode ladders. */
   transcodeSlots: SlotLimiter;
+  /** Per-broadcast feature work beside the ladder (`hooks.ts`; captions registers here). */
+  sessionHooks: MediaSessionHooks;
   /** Dev/test only: allow simulcast targets on loopback/private addresses. */
   simulcastAllowPrivate: boolean;
   /**
@@ -74,4 +78,6 @@ export interface BroadcastInfo {
   title: string;
   startedAt: Date;
   vodEnabled: boolean;
+  /** `broadcasts.kind` (batch 6 decision (f)). */
+  kind: (typeof BROADCAST_KINDS)[number];
 }

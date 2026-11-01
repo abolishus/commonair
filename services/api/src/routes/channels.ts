@@ -8,7 +8,7 @@ import { broadcasterFields, emit, userFields } from "../events/outbox.ts";
 import { channelBySlug, iso, loadUsersPublic, toChannelDto, toPanelDto, userByUsername } from "../lib/dto.ts";
 import { publishControl } from "../lib/control.ts";
 import { decodeCursor, encodeCursor, isKeyCursor, pageOf } from "../lib/cursor.ts";
-import { badRequest, forbidden, notFound, notImplemented } from "../lib/errors.ts";
+import { badRequest, forbidden, notFound } from "../lib/errors.ts";
 import { redactKeys, scanAndRevoke, type LeakSource } from "../lib/leaks.ts";
 import { instanceMediaBase, isInstanceMediaRef } from "../lib/media-ref.ts";
 import { os, requireCaller, requireChannel, type Ctx } from "../lib/orpc.ts";
@@ -17,6 +17,7 @@ import { incomingKey, UPLOAD_TYPES } from "../moderation/upload-keys.ts";
 import { commitUpload } from "../moderation/uploads.ts";
 import { restrictedIds, withRestriction } from "../moderation/restriction.ts";
 import { changeRoleInTx } from "../channels/roles.ts";
+import { mediaSettingsOf, updateMediaSettings } from "../channels/media-settings.ts";
 
 const { channels, channelPanels, categories, follows, users, channelRoles } = schema;
 
@@ -292,9 +293,17 @@ export const channelsRoutes = {
       return { ok: true as const };
     }),
   },
-  // W2 contract step: stubs the scaffolding implements (the channel settings handler, §4).
-  mediaSettings: os.channels.mediaSettings.handler(notImplemented),
-  updateMediaSettings: os.channels.updateMediaSettings.handler(notImplemented),
+  // W2: captions and DVR settings (services/api/src/channels/media-settings.ts).
+  mediaSettings: os.channels.mediaSettings.handler(async ({ context }) =>
+    mediaSettingsOf(context.deps, requireChannel(context)),
+  ),
+  updateMediaSettings: os.channels.updateMediaSettings.handler(async ({ context, input }) => {
+    const caller = requireCaller(context);
+    return updateMediaSettings(context.deps, caller.user.id, requireChannel(context), {
+      captions: input.captions,
+      dvr: input.dvr,
+    });
+  }),
 };
 
 async function changeRole(

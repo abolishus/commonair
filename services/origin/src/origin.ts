@@ -10,9 +10,11 @@ import type { ValkeyClient } from "@commonair/service";
 import { importSigningKey } from "@commonair/tokens";
 import { MINUTE_MS, SegmentLog } from "./accounting.ts";
 import { cdnAuthValue, RelayAuth } from "./auth.ts";
+import { registerCaptionsRoutes } from "./captions.ts";
 import { ChannelDirectory } from "./channels.ts";
 import { parseCidr, type Cidr } from "./clientip.ts";
 import { ContentStore, type ObjectRef, type MediaObject, type TtlPolicy } from "./content.ts";
+import { registerDvrRoutes } from "./dvr.ts";
 import { createHandler, type OriginFetch } from "./handler.ts";
 import { createMediaHandler, MEDIA_ROUTE, type MediaDeps } from "./media.ts";
 import { IssuanceRunner, runIssuance, type IssuanceRow } from "./issuance.ts";
@@ -21,6 +23,7 @@ import { createP2PDigestHandler, P2P_DIGEST_ROUTE } from "./p2p-digest.ts";
 import { rawPathOf } from "./paths.ts";
 import { ProductionStore } from "./production.ts";
 import { TokenRefresher } from "./refresh.ts";
+import { OriginRouteRegistry, type OriginRouteContext } from "./routes.ts";
 import { MediaUpstream } from "./upstream.ts";
 import { createVodHandler, dbVodStateLookup, VodStateCache } from "./vod.ts";
 
@@ -38,6 +41,8 @@ export interface OriginOptions {
   cdn: { provider: "none" | "origin-pull"; baseUrl?: string };
   /** Serve public media objects at `/media/<key>` (ADR 0009) and non-public VODs at `/vod/` (amendment 1); without it both are 404s. */
   media?: Omit<MediaDeps, "logger">;
+  /** DVR_MAX_WINDOW_SECONDS (ADR 0016; default 7200). */
+  dvrMaxWindowSeconds?: number;
   /** TRUSTED_PROXY_CIDRS. */
   trustedProxyCidrs?: string[];
   /** Stream name for SegmentFetch entries (tests use a unique one). */
@@ -62,6 +67,8 @@ export interface Origin {
   store: ContentStore;
   segments: SegmentLog;
   production: ProductionStore;
+  /** The feature routes registered at startup (`dvr.ts`, `captions.ts`). */
+  routes: OriginRouteRegistry;
   /** Compute and store relay issuance for one minute bucket, without the leader lock. */
   runIssuance(bucketStartMs: number): Promise<IssuanceRow[]>;
   /** One leader-locked issuance tick over the recent closed minutes; null when another replica leads. */
@@ -110,13 +117,14 @@ export async function createOrigin(opts: OriginOptions): Promise<Origin> {
   }) satisfies Cidr[];
   // One directory for /hls/ and /p2p-digest/, so a digest resolves the same source /hls/ serves.
   const channels = new ChannelDirectory({ db: opts.db, valkey: opts.valkey, logger: opts.logger });
+  const refresher = new TokenRefresher({ key: signingKey, db: opts.db, now: () => Math.floor(now() / 1000) });
   const hlsHandler = createHandler({
     publicKey: signingKey.publicKey,
     store,
     channels,
     relays: new RelayAuth({ db: opts.db }),
     segments,
-    refresher: new TokenRefresher({ key: signingKey, db: opts.db, now: () => Math.floor(now() / 1000) }),
+    refresher,
     cdn: {
       enabled: opts.cdn.provider === "origin-pull",
       baseUrl: opts.cdn.baseUrl,
@@ -142,8 +150,34 @@ export async function createOrigin(opts: OriginOptions): Promise<Origin> {
     logger: opts.logger,
     now,
   });
-  const fetchHandler: OriginFetch = (req, peerIp) => {
+  // Feature routes (batch 6 decision (n)): each unit's file registers here; none edits this one.
+  const routes = new OriginRouteRegistry();
+  const routeContext: OriginRouteContext = {
+    db: opts.db,
+    valkey: opts.valkey,
+    publicKey: signingKey.publicKey,
+    store,
+    channels,
+    segments,
+    refresher,
+    vodStates,
+    media: opts.media,
+    dvrMaxWindowSeconds: opts.dvrMaxWindowSeconds ?? 7200,
+    metrics,
+    logger: opts.logger,
+    now,
+  };
+  registerDvrRoutes(routes, routeContext);
+  registerCaptionsRoutes(routes, routeContext);
+
+  const fetchHandler: OriginFetch = async (req, peerIp) => {
     const rawPath = rawPathOf(req.url);
+    const route = routes.find(rawPath);
+    if (route) {
+      const res = await route.handle(req, rawPath, peerIp);
+      if (res.status !== 200 && res.status !== 204) metrics.request(route.name, "other", "unauthenticated", res.status);
+      return res;
+    }
     if (mediaHandler && rawPath.startsWith(MEDIA_ROUTE)) return mediaHandler(req, rawPath);
     if (vodHandler && rawPath.startsWith(VOD_ROUTE)) return vodHandler(req, rawPath);
     if (rawPath.startsWith(P2P_DIGEST_ROUTE)) return digestHandler(req, rawPath);
@@ -178,6 +212,7 @@ export async function createOrigin(opts: OriginOptions): Promise<Origin> {
     store,
     segments,
     production,
+    routes,
     runIssuance: (bucketStartMs) => runIssuance(opts.db, production, bucketStartMs),
     issuanceTick,
     start() {

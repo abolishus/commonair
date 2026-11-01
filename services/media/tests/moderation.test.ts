@@ -1002,6 +1002,7 @@ describe("durable T0 replay", () => {
         title: "synthetic",
         startedAt: new Date(),
         vodEnabled: true,
+        kind: "live",
       },
       "0192a1b2-0000-7000-8000-000000000008",
       "recordings/0192a1b2-0000-7000-8000-000000000008/",

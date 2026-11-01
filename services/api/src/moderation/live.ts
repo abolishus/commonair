@@ -7,6 +7,10 @@
  * event; after commit the publisher is kicked from MediaMTX and the live bus is told. A kick that
  * fails is logged: the broadcast is already over in the database, and a suspended channel's key
  * is refused at the next publish.
+ *
+ * A rehearsal (batch 6 decision (f)) ends the same way, but quietly: it was never the channel's
+ * live broadcast and writes no `stream.offline`. A suspension (T0 included) ends an open rehearsal
+ * as it ends a live broadcast.
  */
 import { and, eq, isNull } from "drizzle-orm";
 import { KEYS, MEDIA_INTERNAL_USER, mediaPath } from "@commonair/contracts/internal";
@@ -24,7 +28,7 @@ export interface EndedBroadcast {
   path: string;
 }
 
-/** End `broadcastId` if it is the channel's live broadcast. Returns null when it was not live. */
+/** End `broadcastId` (live or rehearsal) if it is still open. Returns null when it was not. */
 export async function endBroadcastInTx(
   tx: Executor,
   channelId: string,
@@ -44,14 +48,20 @@ export async function endBroadcastInTx(
     .update(playbackSessions)
     .set({ endedAt: now })
     .where(and(eq(playbackSessions.broadcastId, b.id), isNull(playbackSessions.endedAt)));
-  await emit(tx, "stream.offline", c.id, broadcasterFields(c), now);
+  if (b.kind !== "rehearsal") await emit(tx, "stream.offline", c.id, broadcasterFields(c), now);
   return { channelId: c.id, broadcastId: b.id, slug: c.slug, path: b.path };
 }
 
-/** The channel's live broadcast, ended in the transaction (suspensions). */
+/** The channel's live broadcast, or else its open rehearsal, ended in the transaction (suspensions). */
 export async function endLiveInTx(tx: Executor, channelId: string, now: Date): Promise<EndedBroadcast | null> {
   const [c] = await tx.select({ live: channels.liveBroadcastId }).from(channels).where(eq(channels.id, channelId));
-  return c?.live ? endBroadcastInTx(tx, channelId, c.live, now) : null;
+  if (c?.live) return endBroadcastInTx(tx, channelId, c.live, now);
+  const [rehearsal] = await tx
+    .select({ id: broadcasts.id })
+    .from(broadcasts)
+    .where(and(eq(broadcasts.channelId, channelId), eq(broadcasts.kind, "rehearsal"), isNull(broadcasts.endedAt)))
+    .limit(1);
+  return rehearsal ? endBroadcastInTx(tx, channelId, rehearsal.id, now) : null;
 }
 
 const KICK_ROUTES: Record<string, string> = {
@@ -94,7 +104,12 @@ export async function kickPublisher(deps: Deps, path: string, doFetch: typeof fe
 export async function afterBroadcastEnded(deps: Deps, ended: EndedBroadcast | null): Promise<void> {
   if (!ended) return;
   await deps.valkey
-    .del(KEYS.viewers(ended.channelId), KEYS.viewerCount(ended.channelId), KEYS.renditions(ended.channelId))
+    .del(
+      KEYS.viewers(ended.channelId),
+      KEYS.viewerCount(ended.channelId),
+      KEYS.catchingUpCount(ended.channelId),
+      KEYS.renditions(ended.channelId),
+    )
     .catch(() => 0);
   await publishLive(deps, {
     type: "offline",

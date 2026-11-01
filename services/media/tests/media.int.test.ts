@@ -43,7 +43,7 @@ import { MediaMtxClient } from "../src/mediamtx.ts";
 import { createMediaService, type MediaService } from "../src/service.ts";
 import { finalizeVod } from "../src/vod/finalize.ts";
 import { VOD_PLAYLIST } from "../src/vod/recorder.ts";
-import { vodPrefix } from "@commonair/contracts/storage";
+import { vodCaptionsKey, vodPrefix } from "@commonair/contracts/storage";
 import { moveVodObjects } from "@commonair/storage";
 import {
   hostFfmpegHasSrt,
@@ -124,6 +124,14 @@ let channelId: string;
 let broadcastId: string;
 let startedAt: Date;
 let vodId: string;
+/** Calls the test session hook saw (`hooks.ts`), in order. */
+const hookCalls: {
+  phase: "start" | "end";
+  broadcastId: string;
+  kind: string;
+  vodId: string | null;
+  final?: boolean;
+}[] = [];
 
 async function waitFor<T>(what: string, fn: () => Promise<T | null | undefined | false>, ms = 60_000): Promise<T> {
   const deadline = Date.now() + ms;
@@ -251,6 +259,22 @@ beforeAll(async () => {
       recorderPollMs: 500,
       segmentSeconds: 2,
       reconcileMs: 5_000,
+    },
+  });
+  // A hook that writes a caption track under the recording prefix at the last moment of `onEnd`,
+  // as W2-captions will: finalize must still carry it to the VOD's final prefix.
+  media.ctx.sessionHooks.register({
+    name: "test-captions",
+    onStart: async (s) => {
+      hookCalls.push({ phase: "start", broadcastId: s.broadcastId, kind: s.kind, vodId: s.vodId });
+    },
+    onEnd: async (s, { final }) => {
+      hookCalls.push({ phase: "end", broadcastId: s.broadcastId, kind: s.kind, vodId: s.vodId, final });
+      if (!final || !s.vodId || s.broadcastId !== broadcastId) return;
+      await Bun.sleep(500);
+      await media.ctx.storage.put(BUCKET, vodCaptionsKey(vodPrefix(s.vodId, "private"), "en"), "WEBVTT\n", {
+        contentType: "text/vtt",
+      });
     },
   });
   await media.start();
@@ -555,6 +579,14 @@ describe("media pipeline", () => {
     expect(size).toBe(vod.sizeBytes);
     for await (const o of media.ctx.storage.list(BUCKET, vodPrefix(vodId, "private"))) expect.unreachable(o.key);
     expect(media.coordinator.session(broadcastId)).toBeUndefined();
+    // Session hooks: captions is registered beside the test hook; onStart, then onEnd awaited
+    // before the finalize enqueue, so a caption written last in onEnd moved with the VOD.
+    expect(media.ctx.sessionHooks.names).toEqual(["captions", "test-captions"]);
+    expect(hookCalls.filter((c) => c.broadcastId === broadcastId)).toEqual([
+      { phase: "start", broadcastId, kind: "live", vodId },
+      { phase: "end", broadcastId, kind: "live", vodId, final: true },
+    ]);
+    expect(await media.ctx.storage.head(BUCKET, vodCaptionsKey(vodPrefix(vodId, "public"), "en"))).not.toBeNull();
   }, 90_000);
 
   test("after the broadcast, clips are cut from the VOD in object storage", async () => {
@@ -658,6 +690,16 @@ describe("media pipeline", () => {
     expect(await finalizeVod(stubDeps(storage), id)).toBe("removed");
     expect(await keysUnder(vodPrefix(id, "public"))).toEqual([]);
     expect(await keysUnder(vodPrefix(id, "private"))).toContain(vodPrefix(id, "private") + VOD_PLAYLIST);
+  }, 60_000);
+
+  test("a rehearsal VOD stays private and expires 24 h after it is finalized, whatever the retention", async () => {
+    const { vodId: id } = await parkedPatternVod({ kind: "rehearsal", visibility: "private" });
+    expect(await finalizeVod(stubDeps(), id)).toBe("ready");
+    const [vod] = await tdb.db.select().from(schema.vods).where(eq(schema.vods.id, id));
+    expect(vod?.storagePrefix).toBe(vodPrefix(id, "private"));
+    const hours = ((vod?.expiresAt?.getTime() ?? 0) - Date.now()) / 3_600_000;
+    expect(hours).toBeGreaterThan(23.9);
+    expect(hours).toBeLessThanOrEqual(24);
   }, 60_000);
 
   test("a crash after the source delete and before commit is recovered from the verified copy", async () => {
@@ -981,10 +1023,12 @@ async function keysUnder(prefix: string): Promise<string[]> {
  * A public pattern VOD whose finalize job is parked (delayed an hour under its job id), so the
  * service's stale-VOD reconcile leaves it to the test's own `finalizeVod` call.
  */
-async function parkedPatternVod(): Promise<{ vodId: string; broadcastId: string }> {
+async function parkedPatternVod(
+  extra: { kind?: "live" | "rehearsal"; visibility?: "public" | "private" } = {},
+): Promise<{ vodId: string; broadcastId: string }> {
   const id = uuidv7();
   await finalizeQueue.add("finalize", { vodId: id }, { jobId: id, delay: 3_600_000 });
-  return uploadPatternVod(id);
+  return uploadPatternVod(id, extra);
 }
 
 /** A VOD of the synthetic T0 pattern, recorded as fMP4 HLS and uploaded like the recorder does. */
@@ -1007,7 +1051,10 @@ async function barrierOrResult(barrier: Promise<void>, finalizing: Promise<strin
   ]);
 }
 
-async function uploadPatternVod(id = uuidv7()): Promise<{ vodId: string; broadcastId: string }> {
+async function uploadPatternVod(
+  id = uuidv7(),
+  extra: { kind?: "live" | "rehearsal"; visibility?: "public" | "private" } = {},
+): Promise<{ vodId: string; broadcastId: string }> {
   const bid = uuidv7();
   const at = new Date(Date.now() - 60_000);
   const dir = mkdtempSync(join(tmpdir(), "media-int-vod-"));
@@ -1085,6 +1132,7 @@ async function uploadPatternVod(id = uuidv7()): Promise<{ vodId: string; broadca
     title: "pattern vod",
     startedAt: at,
     endedAt: new Date(at.getTime() + 8_000),
+    ...(extra.kind ? { kind: extra.kind } : {}),
   });
   await tdb.db.insert(schema.vods).values({
     id,
@@ -1093,6 +1141,7 @@ async function uploadPatternVod(id = uuidv7()): Promise<{ vodId: string; broadca
     title: "pattern vod",
     status: "recording",
     storagePrefix: vodPrefix(id, "private"),
+    ...(extra.visibility ? { visibility: extra.visibility } : {}),
   });
   return { vodId: id, broadcastId: bid };
 }

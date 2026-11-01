@@ -7,6 +7,7 @@
  * path list repairs anything missed (service restarts, dropped pub/sub messages).
  */
 import { and, eq, isNull, type SQL } from "drizzle-orm";
+import { REHEARSAL_RULES } from "@commonair/contracts/enums";
 import { LiveEvent } from "@commonair/contracts/internal";
 import { vodPrefix } from "@commonair/contracts/storage";
 import { schema, uuidv7 } from "@commonair/db";
@@ -184,6 +185,7 @@ export class LiveCoordinator {
         title: b.title,
         startedAt: b.startedAt,
         vodEnabled: c.vodEnabled,
+        kind: b.kind,
         suspendedAt: c.suspendedAt,
       })
       .from(b)
@@ -202,6 +204,11 @@ export class LiveCoordinator {
       .limit(1);
     if (existing) return existing.id;
     const id = uuidv7();
+    // A rehearsal's VOD is for its owner only and kept 24 h (batch 6 decisions (f), (g)).
+    const rehearsal =
+      info.kind === "rehearsal"
+        ? { visibility: "private" as const, expiresAt: new Date(Date.now() + REHEARSAL_RULES.vodKeepSeconds * 1000) }
+        : {};
     await this.ctx.db.insert(v).values({
       id,
       broadcastId: info.broadcastId,
@@ -211,6 +218,7 @@ export class LiveCoordinator {
       // Private until finalize publishes it (ADR 0009 amendment 1): a recording, and a VOD that
       // a T0 match stops from ever being published, never has a public object.
       storagePrefix: vodPrefix(id, "private"),
+      ...rehearsal,
     });
     return id;
   }

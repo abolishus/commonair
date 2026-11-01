@@ -5,10 +5,15 @@
  * Live counters (every 10 s): verified viewers per live channel from the
  * heartbeat ZSETs and the integrity verdicts, published to KEYS.viewerCount,
  * folded into the broadcast's peak and viewer-seconds totals.
+ *
+ * Only sessions in `live` playback mode are live viewers (ADR 0016 decision 6): verified DVR
+ * sessions are "catching up", published beside the live count as KEYS.catchingUpCount and never
+ * folded into the peak or the viewer-seconds. Rehearsals are not broadcasts (batch 6 decision
+ * (f)): their invitees are never counted.
  */
 import { KEYS } from "@commonair/contracts/internal";
 import { schema } from "@commonair/db";
-import { and, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import type { WorkerContext } from "./context.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -26,9 +31,12 @@ export interface CounterOptions {
 export interface ChannelCount {
   broadcastId: string;
   channelId: string;
+  /** Live-mode sessions only. */
   verified: number;
   excluded: number;
   pending: number;
+  /** Verified sessions in DVR mode (KEYS.catchingUpCount). */
+  catchingUp: number;
   elapsedSeconds: number;
 }
 
@@ -47,20 +55,30 @@ export function creditSeconds(
   return Math.max(0, Math.min(maxElapsedSeconds, since));
 }
 
-/** Verdicts of a channel's live heartbeat set, publishing the verified count to KEYS.viewerCount. */
+/**
+ * Verdicts of a channel's live heartbeat set, publishing the verified live count to
+ * KEYS.viewerCount and the verified DVR count to KEYS.catchingUpCount.
+ */
 async function countChannel(ctx: WorkerContext, channelId: string, nowMs: number, staleMs: number, ttl: number) {
   const key = KEYS.viewers(channelId);
   await ctx.valkey.zremrangebyscore(key, "-inf", nowMs - staleMs);
   const members = (await ctx.valkey.zrange(key, 0, -1)).filter((m) => UUID.test(m));
-  const counts = { verified: 0, excluded: 0, pending: 0 };
+  const counts = { verified: 0, excluded: 0, pending: 0, catchingUp: 0 };
   if (members.length > 0) {
-    const rows = await ctx.sql<{ verdict: keyof typeof counts; n: number }[]>`
-      select verdict, count(*)::int as n from playback_sessions
+    const rows = await ctx.sql<{ verdict: "verified" | "excluded" | "pending"; mode: "live" | "dvr"; n: number }[]>`
+      select verdict, playback_mode as mode, count(*)::int as n from playback_sessions
        where id = any(${members}::uuid[]) and channel_id = ${channelId} and ended_at is null
-       group by verdict`;
-    for (const r of rows) counts[r.verdict] = r.n;
+       group by verdict, playback_mode`;
+    for (const r of rows) {
+      if (r.mode === "live") counts[r.verdict] += r.n;
+      else if (r.verdict === "verified") counts.catchingUp += r.n;
+    }
   }
-  await ctx.valkey.set(KEYS.viewerCount(channelId), String(counts.verified), "EX", ttl);
+  await ctx.valkey
+    .multi()
+    .set(KEYS.viewerCount(channelId), String(counts.verified), "EX", ttl)
+    .set(KEYS.catchingUpCount(channelId), String(counts.catchingUp), "EX", ttl)
+    .exec();
   return counts;
 }
 
@@ -80,7 +98,7 @@ export async function refreshViewerCounts(
   const live = await ctx.db
     .selectDistinct({ channelId: b.channelId })
     .from(b)
-    .where(and(isNull(b.endedAt), inArray(b.channelId, ids)));
+    .where(and(isNull(b.endedAt), eq(b.kind, "live"), inArray(b.channelId, ids)));
   const nowMs = ctx.now().getTime();
   for (const { channelId } of live)
     await countChannel(ctx, channelId, nowMs, opts.staleMs ?? 30_000, opts.countTtlSeconds ?? 30);
@@ -97,7 +115,7 @@ export async function updateLiveCounters(ctx: WorkerContext, opts: CounterOption
   const live = await ctx.db
     .select({ id: b.id, channelId: b.channelId, startedAt: b.startedAt })
     .from(b)
-    .where(isNull(b.endedAt));
+    .where(and(isNull(b.endedAt), eq(b.kind, "live")));
 
   const out: ChannelCount[] = [];
   for (const bc of live) {

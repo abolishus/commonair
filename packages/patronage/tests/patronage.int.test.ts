@@ -96,10 +96,11 @@ async function session(
   userId: string | null,
   watchSeconds: number,
   verdict: "verified" | "excluded",
-  opts: { scored?: boolean; reasons?: string[] } = {},
+  opts: { scored?: boolean; reasons?: string[]; broadcastId?: string } = {},
 ) {
   await db.insert(s.playbackSessions).values({
     channelId,
+    broadcastId: opts.broadcastId ?? null,
     userId,
     deviceHash: uuidv7(),
     ipHash: uuidv7(),
@@ -289,6 +290,26 @@ describe("inputs", () => {
   test("viewer-hours count gate-eligible verified sessions except self-views; excluded hours are reported", async () => {
     expect(await viewerHours(db, ids.a, period)).toEqual({ verified: 3, excluded: 0.5 });
     expect(await viewerHours(db, ids.b, period)).toEqual({ verified: 1, excluded: 0 });
+  });
+
+  test("a rehearsal's invitee sessions are not viewer-hours; a live broadcast's are", async () => {
+    const owner = await makeUser();
+    const ch = await makeChannel(owner);
+    const [rehearsal] = await db
+      .insert(s.broadcasts)
+      .values({
+        channelId: ch.channel,
+        kind: "rehearsal",
+        ingestProtocol: "rtmp",
+        path: "live/rehearsal",
+        startedAt: new Date(day2),
+      })
+      .returning({ id: s.broadcasts.id });
+    await session(ch.channel, ids.v, 7200, "verified", { broadcastId: rehearsal!.id });
+    await session(ch.channel, ids.v, 1800, "excluded", { broadcastId: rehearsal!.id });
+    expect(await viewerHours(db, owner, period)).toEqual({ verified: 0, excluded: 0 });
+    await session(ch.channel, ids.v, 3600, "verified", { broadcastId: ch.broadcast });
+    expect(await viewerHours(db, owner, period)).toEqual({ verified: 1, excluded: 0 });
   });
 
   test("revenue is gross net of refunds, per channel owner", async () => {

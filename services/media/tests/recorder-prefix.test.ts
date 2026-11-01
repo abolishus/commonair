@@ -48,6 +48,7 @@ const broadcast: BroadcastInfo = {
   title: "t",
   startedAt: new Date(T0),
   vodEnabled: true,
+  kind: "live",
 };
 
 /** A `db` whose single VOD query answers `rows()` (or throws). */

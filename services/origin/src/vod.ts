@@ -21,6 +21,7 @@ import {
   VOD_ROUTE,
   vodPrefix,
   vodTokenPath,
+  type DvrState,
   type VodPlacementState,
 } from "@commonair/contracts/storage";
 import { schema, type Executor } from "@commonair/db";
@@ -45,7 +46,20 @@ export interface VodState {
   channelId: string;
   storagePrefix: string;
   state: VodPlacementState;
+  /** What `/dvr/` checks beyond the placement state (W2-dvr; `dvrStateOf`). */
+  dvr: Pick<DvrState, "broadcastLive" | "broadcastKind" | "dvrEnabled">;
 }
+
+/** The full `DvrState` of a VOD, for `dvrServable`. */
+export const dvrStateOf = (v: VodState): DvrState => ({
+  vodStatus: v.state.status,
+  removedReason: v.state.removedReason,
+  broadcastRestricted: v.state.broadcastRestricted,
+  channelSuspended: v.state.channelSuspended,
+  nciiHidden: v.state.nciiHidden,
+  dmcaHidden: v.state.dmcaHidden,
+  ...v.dvr,
+});
 
 /** One VOD's state, or null when there is no such VOD. Throws on a database error. */
 export type VodStateLookup = (vodId: string) => Promise<VodState | null>;
@@ -62,6 +76,9 @@ export function dbVodStateLookup(db: Executor): VodStateLookup {
         visibility: vods.visibility,
         removedReason: vods.removedReason,
         broadcastRestricted: sql<boolean>`${broadcasts.restrictedAt} is not null`,
+        broadcastLive: sql<boolean>`${broadcasts.endedAt} is null`,
+        broadcastKind: broadcasts.kind,
+        dvrEnabled: channels.dvrEnabled,
         channelSuspended: sql<boolean>`${channels.suspendedAt} is not null`,
         nciiHidden: sql<boolean>`exists (select 1 from ${schema.nciiRequestItems} i where i.subject_type = 'vod' and i.subject_id = ${vods.id} and (i.hidden_at is not null or i.removed_at is not null))`,
         dmcaHidden: sql<boolean>`exists (select 1 from ${schema.dmcaNoticeItems} d where ((d.subject_type = 'vod' and d.subject_id = ${vods.id}) or (d.subject_type = 'broadcast' and d.subject_id = ${vods.broadcastId})) and d.removed_at is not null and d.restored_at is null)`,
@@ -71,8 +88,8 @@ export function dbVodStateLookup(db: Executor): VodStateLookup {
       .innerJoin(channels, eq(channels.id, vods.channelId))
       .where(eq(vods.id, vodId));
     if (!row) return null;
-    const { channelId, storagePrefix, ...state } = row;
-    return { channelId, storagePrefix, state };
+    const { channelId, storagePrefix, broadcastLive, broadcastKind, dvrEnabled, ...state } = row;
+    return { channelId, storagePrefix, state, dvr: { broadcastLive, broadcastKind, dvrEnabled } };
   };
 }
 

@@ -112,6 +112,8 @@ export class HealthSampler {
 
   private async flushHours(): Promise<void> {
     const rows = this.hours.take();
+    // A rehearsal is not a broadcast: no streaming hours (decision (f); 0043 refuses the row too).
+    if (this.b.kind === "rehearsal") return;
     try {
       await addLiveSeconds(this.ctx.db, this.b.broadcastId, this.b.channelId, rows);
     } catch (err) {

@@ -118,7 +118,12 @@ function setup(state: Partial<VodPlacementState> | null, at: "vods" | "recording
   let current: VodState | null =
     state === null
       ? null
-      : { channelId: CHANNEL, storagePrefix: `${at}/${VOD}/`, state: { ...READY_PUBLIC, ...state } };
+      : {
+          channelId: CHANNEL,
+          storagePrefix: `${at}/${VOD}/`,
+          state: { ...READY_PUBLIC, ...state },
+          dvr: { broadcastLive: false, broadcastKind: "live", dvrEnabled: true },
+        };
   let lookups = 0;
   let fail = false;
   let clock = NOW_MS;

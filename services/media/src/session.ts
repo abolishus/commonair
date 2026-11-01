@@ -3,6 +3,7 @@
 
 /** All media work for one live broadcast, started on `online` and stopped on `offline`. */
 import type { BroadcastInfo, MediaContext } from "./context.ts";
+import type { MediaSessionInfo } from "./hooks.ts";
 import { WARNINGS, type Warning } from "./health/rules.ts";
 import { errorCategory } from "./moderation/logging.ts";
 import { HealthSampler } from "./health/sampler.ts";
@@ -24,6 +25,8 @@ export class BroadcastSession {
   /** Moderation frames (PDQ in media, classifier in the worker). Always runs. */
   private readonly frames: LiveSampler;
   private stopped: Promise<void> | null = null;
+  /** The session hooks' `onStart` calls (`hooks.ts`), awaited before their `onEnd`. */
+  private hooksStarted: Promise<void> | null = null;
   private readonly log;
 
   constructor(
@@ -61,17 +64,20 @@ export class BroadcastSession {
     this.frames.start();
     this.sampler.start();
     this.thumbnails.start();
+    // Not awaited: a slow hook (captions waiting on whisper) never delays the ladder.
+    this.hooksStarted = this.ctx.sessionHooks.start(this.hookInfo());
     await Promise.all([
       this.guard("transcode", () => this.transcode.start()),
       this.guard("audio-compat", () => this.audioCompat.start()),
-      this.guard("simulcast", () => this.simulcast.start()),
+      // A rehearsal is seen only by its invitees: never pushed to simulcast targets (decision (g)).
+      ...(this.rehearsal ? [] : [this.guard("simulcast", () => this.simulcast.start())]),
       this.guard("recorder", () => this.recorder.start()),
     ]);
   }
 
   /** The channel's simulcast targets changed while live. */
   reconcileSimulcast(): Promise<void> {
-    if (this.stopped) return Promise.resolve();
+    if (this.stopped || this.rehearsal) return Promise.resolve();
     return this.guard("simulcast", () => this.simulcast.reconcile());
   }
 
@@ -90,6 +96,8 @@ export class BroadcastSession {
           this.guard("simulcast", () => this.simulcast.stop(), strict),
           this.guard("health", () => this.sampler.stop(), strict),
           this.guard("recorder", () => this.recorder.stop(final, strict), strict),
+          // Hooks finish their writes under the VOD prefix (captions) before vod-finalize moves it.
+          this.endHooks(final),
         ]);
         if (finalizeVod && this.vodId) {
           const vodId = this.vodId;
@@ -103,6 +111,22 @@ export class BroadcastSession {
       });
     }
     return this.stopped;
+  }
+
+  private get rehearsal(): boolean {
+    return this.info.kind === "rehearsal";
+  }
+
+  private hookInfo(): MediaSessionInfo {
+    const { broadcastId, channelId, slug, path, kind, startedAt } = this.info;
+    return { broadcastId, channelId, slug, path, kind, startedAt, vodId: this.vodId };
+  }
+
+  /** Never rejects (`MediaSessionHooks` guards each hook). */
+  private async endHooks(final: boolean): Promise<void> {
+    if (!this.hooksStarted) return;
+    await this.hooksStarted;
+    await this.ctx.sessionHooks.end(this.hookInfo(), { final });
   }
 
   serverWarnings(): Warning[] {

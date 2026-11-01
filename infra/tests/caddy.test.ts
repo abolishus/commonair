@@ -34,6 +34,7 @@ describe("routing", () => {
       "/rpc/*": "api:3001",
       "/overlay/events": "api:3001",
       "/eventsub/ws": "api:3001",
+      "/.well-known/commonair-attestation": "api:3001",
       "/chat": "chat:3002",
       "/hls/*": "origin:3003",
       "/p2p-digest/*": "origin:3003",
@@ -41,6 +42,7 @@ describe("routing", () => {
       "/cdn/*": "origin:3003",
       "/media/*": "origin:3003",
       "/vod/*": "origin:3003",
+      "/dvr/*": "origin:3003",
       "@whip": "mediamtx:8889",
       "/tracker*": "tracker:8000",
     });
@@ -58,6 +60,12 @@ describe("routing", () => {
 
   test("the EventSub WebSocket is a plain proxy to the API (no rewrite)", () => {
     expect(site).toMatch(/\thandle \/eventsub\/ws \{\n\t\treverse_proxy api:3001\n\t\}\n/);
+  });
+
+  test("the attestation key document is rewritten under the API's /api prefix (ADR 0014)", () => {
+    expect(site).toMatch(
+      /\thandle \/\.well-known\/commonair-attestation \{\n\t\trewrite \* \/api\/\.well-known\/commonair-attestation\n\t\treverse_proxy api:3001\n\t\}/,
+    );
   });
 
   test("the chat WebSocket is rewritten to the service's /ws", () => {

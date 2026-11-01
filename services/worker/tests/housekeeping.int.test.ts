@@ -111,6 +111,43 @@ describe("live counters", () => {
     expect(await ctx().valkey.get(KEYS.viewerCount(channel.id))).toBe("1");
   });
 
+  test("DVR sessions are catching up, not live viewers; rehearsals are never counted", async () => {
+    const { channel } = await makeUser(env.t.db);
+    const b = await makeBroadcast(env.t.db, channel.id, at(-10 * MIN));
+    const live = await session(channel.id, b.id, { verdict: "verified" });
+    const dvr1 = await session(channel.id, b.id, { verdict: "verified", playbackMode: "dvr" });
+    const dvr2 = await session(channel.id, b.id, { verdict: "verified", playbackMode: "dvr" });
+    const dvrPending = await session(channel.id, b.id, { playbackMode: "dvr" });
+    const now = Date.now();
+    await ctx().valkey.zadd(KEYS.viewers(channel.id), now, live.id, now, dvr1.id, now, dvr2.id, now, dvrPending.id);
+    const [c] = (await updateLiveCounters(ctx())).filter((x) => x.channelId === channel.id);
+    expect(c).toMatchObject({ verified: 1, excluded: 0, pending: 0, catchingUp: 2 });
+    expect(await ctx().valkey.get(KEYS.viewerCount(channel.id))).toBe("1");
+    expect(await ctx().valkey.get(KEYS.catchingUpCount(channel.id))).toBe("2");
+    const [row] = await env.t.db.select().from(schema.broadcasts).where(eq(schema.broadcasts.id, b.id));
+    expect(row).toMatchObject({ peakVerifiedViewers: 1, verifiedViewerSeconds: 10 });
+
+    // A rehearsal's invitees: no count, no peak, no viewer-seconds.
+    const other = await makeUser(env.t.db);
+    const [r] = await env.t.db
+      .insert(schema.broadcasts)
+      .values({
+        id: uuidv7(),
+        channelId: other.channel.id,
+        kind: "rehearsal",
+        ingestProtocol: "rtmp",
+        path: `live/${other.channel.id}`,
+        startedAt: at(-MIN),
+      })
+      .returning();
+    const invitee = await session(other.channel.id, r!.id, { verdict: "verified" });
+    await ctx().valkey.zadd(KEYS.viewers(other.channel.id), now, invitee.id);
+    expect((await updateLiveCounters(ctx())).filter((x) => x.channelId === other.channel.id)).toEqual([]);
+    expect(await ctx().valkey.get(KEYS.viewerCount(other.channel.id))).toBeNull();
+    const [rr] = await env.t.db.select().from(schema.broadcasts).where(eq(schema.broadcasts.id, r!.id));
+    expect(rr).toMatchObject({ peakVerifiedViewers: 0, verifiedViewerSeconds: 0 });
+  });
+
   test("ended broadcasts are left alone; empty channels publish zero", async () => {
     const { channel } = await makeUser(env.t.db);
     const b = await makeBroadcast(env.t.db, channel.id);

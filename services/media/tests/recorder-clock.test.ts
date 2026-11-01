@@ -62,6 +62,7 @@ const broadcast: BroadcastInfo = {
   title: "t",
   startedAt: new Date(T0),
   vodEnabled: true,
+  kind: "live",
 };
 
 function recorder(clock: ClockAnchor | MediaClock, vodId: string | null = VOD) {
