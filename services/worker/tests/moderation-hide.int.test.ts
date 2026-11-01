@@ -9,7 +9,7 @@ import { createTestDatabase, type TestDatabase } from "@commonair/db/testing";
 import { schema, uuidv7 } from "@commonair/db";
 import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, expect, test } from "vite-plus/test";
-import { hideContent } from "../src/moderation/records.ts";
+import { endLiveOrRehearsal, hideContent } from "../src/moderation/records.ts";
 import { makeBroadcast, makeUser } from "./fixtures.ts";
 
 let t: TestDatabase;
@@ -64,4 +64,31 @@ test("hiding a VOD hides its clips and the live-buffer clips of its broadcast, n
   expect(byId.get(unrelated)?.status).toBe("ready");
   const [v] = await t.db.select().from(schema.vods).where(eq(schema.vods.id, vodId));
   expect(v?.status).toBe("deleted");
+});
+
+test("endLiveOrRehearsal ends the live broadcast, else the open rehearsal, quietly", async () => {
+  const { channel } = await makeUser(t.db);
+  const [r] = await t.db
+    .insert(schema.broadcasts)
+    .values({
+      id: uuidv7(),
+      channelId: channel.id,
+      ingestProtocol: "rtmp",
+      path: `live/${channel.slug}`,
+      kind: "rehearsal",
+    })
+    .returning();
+  const ended = await t.db.transaction((tx) => endLiveOrRehearsal(tx, channel, new Date()));
+  expect(ended?.broadcastId).toBe(r!.id);
+  const [after] = await t.db.select().from(schema.broadcasts).where(eq(schema.broadcasts.id, r!.id));
+  expect(after?.endedAt).not.toBeNull();
+  const offline = await t.db.select().from(schema.events).where(eq(schema.events.channelId, channel.id));
+  expect(offline.filter((e) => e.type === "stream.offline")).toEqual([]);
+  // Nothing open any more.
+  expect(await t.db.transaction((tx) => endLiveOrRehearsal(tx, channel, new Date()))).toBeNull();
+  // A live broadcast comes first.
+  const live = await makeBroadcast(t.db, channel.id);
+  await t.db.update(schema.channels).set({ liveBroadcastId: live.id }).where(eq(schema.channels.id, channel.id));
+  const [c] = await t.db.select().from(schema.channels).where(eq(schema.channels.id, channel.id));
+  expect((await t.db.transaction((tx) => endLiveOrRehearsal(tx, c!, new Date())))?.broadcastId).toBe(live.id);
 });

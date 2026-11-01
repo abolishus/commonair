@@ -514,7 +514,8 @@ export class PlayerController {
     if (this.stopped) return;
     this.dataModeWanted = ceiling !== null && Number.isFinite(ceiling) ? Math.round(ceiling) : null;
     // DVR is source-only, so data mode never rewinds (ADR 0016 decision 7).
-    if (this.dataModeWanted !== null && this.mode === "dvr") this.exitDvr();
+    // A DVR load still pending (`dvrUrl` set, mode still `live`) is cancelled the same way.
+    if (this.dataModeWanted !== null && (this.mode === "dvr" || this.dvrUrl !== null)) this.exitDvr();
     // Uploading to peers spends the budget; the server drops the grant with the beat (decision 6).
     if (this.dataModeWanted !== null && this.p2p) this.disableP2P();
     this.applyCapping();

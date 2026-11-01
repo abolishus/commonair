@@ -53,6 +53,23 @@ export async function viewerCounts(deps: Deps, channelIds: readonly string[]): P
   return out;
 }
 
+/**
+ * Verified viewers catching up in DVR mode (ADR 0016 decision 6), beside the live count. The worker's
+ * counters publish `KEYS.catchingUpCount`; an absent or unreadable key is 0 (no DVR viewers, or the
+ * counter has not run yet). A failed read is 0 too: the live count never depends on it.
+ */
+export async function catchingUpCounts(deps: Deps, channelIds: readonly string[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  const ids = [...new Set(channelIds)];
+  if (ids.length === 0) return out;
+  const cached = await deps.valkey.mget(...ids.map((id) => KEYS.catchingUpCount(id))).catch(() => []);
+  ids.forEach((id, i) => {
+    const v = cached[i];
+    out.set(id, v !== null && v !== undefined && /^\d+$/.test(v) ? Number(v) : 0);
+  });
+  return out;
+}
+
 export async function viewerCount(deps: Deps, channelId: string): Promise<number> {
   return (await viewerCounts(deps, [channelId])).get(channelId) ?? 0;
 }

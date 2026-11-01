@@ -1899,7 +1899,7 @@ export const AttestationEnvelope = z.object({
 /** Lowercase hex SHA-256: `entryHash`, `prevHash` and `supersedes` (`@commonair/tokens/attestation`). */
 const AttestationHash = z.string().regex(/^[0-9a-f]{64}$/);
 /** base64url of the first 16 bytes of SHA-256 over the raw public key (`deriveKid`). */
-const AttestationKid = z.string().regex(/^[A-Za-z0-9_-]{22}$/);
+export const AttestationKid = z.string().regex(/^[A-Za-z0-9_-]{22}$/);
 export const AttestationEntry = z.object({
   id: Id,
   channelSlug: Slug,
@@ -1914,7 +1914,8 @@ export const AttestationEntry = z.object({
   envelope: AttestationEnvelope,
   /** A later entry for the same broadcast replaces this one (it still verifies). */
   superseded: z.boolean(),
-  breakdown: z.record(z.enum(E.EXCLUSION_CATEGORIES), z.number().int().nonnegative()).nullable(),
+  /** Owner only: categories with a value above 0 (the committed map, `reasonsCommitment`); null otherwise. */
+  breakdown: z.partialRecord(z.enum(E.EXCLUSION_CATEGORIES), z.number().int().nonnegative()).nullable(),
   salt: z.string().nullable(),
 });
 export type AttestationEntry = z.infer<typeof AttestationEntry>;
@@ -1930,6 +1931,24 @@ export const AttestationKey = z.object({
 export type AttestationKey = z.infer<typeof AttestationKey>;
 /** `/.well-known/commonair-attestation`: the instance origin and its full key history. */
 export const AttestationKeyHistory = z.object({ origin: z.string(), keys: z.array(AttestationKey) });
+export type AttestationKeyHistory = z.infer<typeof AttestationKeyHistory>;
+/**
+ * A public window proof (ADR 0014 decision 6): contiguous entries of one channel, oldest first,
+ * with `breakdown` and `salt` null, plus the key history to verify them offline.
+ */
+export const AttestationBundle = z.object({ entries: z.array(AttestationEntry), keys: AttestationKeyHistory });
+export type AttestationBundle = z.infer<typeof AttestationBundle>;
+/** An attestation share link (the breakdown reveal); the token is stored hashed. */
+export const AttestationShareLink = z.object({
+  id: Id,
+  attestationId: Id,
+  /** The full link, returned once on create; null on reads. */
+  url: z.string().nullable(),
+  expiresAt: Timestamp,
+  revokedAt: Timestamp.nullable(),
+  createdAt: Timestamp,
+});
+export type AttestationShareLink = z.infer<typeof AttestationShareLink>;
 export const AttestationVerifyResult = z.object({
   valid: z.boolean(),
   /** Why not, when `valid` is false. */

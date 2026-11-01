@@ -60,6 +60,8 @@ export class Thumbnailer {
       imageType(caps.imageFormat),
     );
     if (matched) return false;
+    // A rehearsal is seen only by its invitees (decision (f)): the frame is scanned, never published.
+    if (this.b.kind === "rehearsal") return true;
     const ext = imageExt(caps.imageFormat);
     const prefix = thumbnailPrefix(this.b.broadcastId);
     const stamped = `${prefix}${now.getTime()}.${ext}`;

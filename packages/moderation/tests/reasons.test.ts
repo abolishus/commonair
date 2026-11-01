@@ -8,6 +8,7 @@ import {
   MOD_ACTIONS,
   MODERATION_CATEGORIES,
   REPORT_REASONS,
+  RULE_REF_PATTERN,
 } from "@commonair/contracts/enums";
 import { describe, expect, test } from "vite-plus/test";
 import {
@@ -66,6 +67,11 @@ describe("catalog", () => {
       expect(c.guidelinesAnchor).toMatch(/^[a-z0-9-]+$/);
       for (let v = 1; v < c.version; v++) expect(findClause(c.id, v)).toBeDefined();
     }
+  });
+
+  test("every clause ref passes the database's rule_ref CHECK (RULE_REF_PATTERN)", () => {
+    const pattern = new RegExp(RULE_REF_PATTERN);
+    for (const c of CLAUSES) expect(clauseRef(c), c.id).toMatch(pattern);
   });
 
   test("legal bases appear on illegal grounds only, and every one is a known code", () => {

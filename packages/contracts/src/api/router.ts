@@ -2941,7 +2941,46 @@ export const contract = {
           ...tag("Integrity"),
         })
         .input(ChannelRef.extend({ id: Id, expiresInDays: z.number().int().min(1).max(90).default(30) }))
-        .output(z.object({ url: z.string(), expiresAt: Timestamp })),
+        .output(D.AttestationShareLink),
+      shareLinks: {
+        list: owner
+          .route({
+            method: "GET",
+            path: "/channels/{channel}/attestations/share-links",
+            summary: "Your attestation share links",
+            ...tag("Integrity"),
+          })
+          .input(ChannelRef.extend(PageInput.shape))
+          .output(page(D.AttestationShareLink)),
+        revoke: owner
+          .meta({ access: "owner", rateLimit: "write" })
+          .route({
+            method: "DELETE",
+            path: "/channels/{channel}/attestations/share-links/{id}",
+            summary: "Revoke an attestation share link",
+            ...tag("Integrity"),
+          })
+          .input(ChannelRef.extend({ id: Id }))
+          .output(Ok),
+      },
+      /**
+       * The public statement: a window of a channel's published chain from `fromSeq`, oldest first,
+       * with `breakdown`/`salt` null and the key history (ADR 0014 decision 6). Anyone may read it.
+       */
+      bundle: base
+        .route({
+          method: "GET",
+          path: "/channels/{channel}/attestations/bundle",
+          summary: "A public window of a channel's attestation chain",
+          ...tag("Integrity"),
+        })
+        .input(
+          ChannelRef.extend({
+            fromSeq: z.number().int().positive().default(1),
+            limit: z.number().int().min(1).max(2000).default(100),
+          }),
+        )
+        .output(D.AttestationBundle),
       /** What a share link shows: the entry with its breakdown, or NOT_FOUND once expired or revoked. */
       shared: base
         .route({
@@ -2962,11 +3001,15 @@ export const contract = {
           ...tag("Integrity"),
         })
         .input(
-          z.object({
-            envelope: D.AttestationEnvelope.optional(),
-            /** A window proof: contiguous entries of one channel, oldest first (ADR 0014 decision 6). */
-            bundle: z.array(D.AttestationEnvelope).min(1).max(2000).optional(),
-          }),
+          z
+            .object({
+              envelope: D.AttestationEnvelope.optional(),
+              /** A window proof: contiguous entries of one channel, oldest first (ADR 0014 decision 6). */
+              bundle: z.array(D.AttestationEnvelope).min(1).max(2000).optional(),
+            })
+            .refine((i) => (i.envelope === undefined) !== (i.bundle === undefined), {
+              message: "give exactly one of envelope or bundle",
+            }),
         )
         .output(D.AttestationVerifyResult),
     },
@@ -2988,7 +3031,7 @@ export const contract = {
           summary: "Mark an attestation key compromised and re-issue its entries",
           ...tag("Integrity"),
         })
-        .input(z.object({ kid: z.string().min(1).max(64), reason: z.string().min(1).max(1000) }))
+        .input(z.object({ kid: D.AttestationKid, reason: z.string().min(1).max(1000) }))
         .output(D.AttestationKey),
     },
   },

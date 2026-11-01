@@ -23,6 +23,11 @@ export const integrity = {
     list: os.integrity.attestations.list.handler(notImplemented),
     get: os.integrity.attestations.get.handler(notImplemented),
     share: os.integrity.attestations.share.handler(notImplemented),
+    shareLinks: {
+      list: os.integrity.attestations.shareLinks.list.handler(notImplemented),
+      revoke: os.integrity.attestations.shareLinks.revoke.handler(notImplemented),
+    },
+    bundle: os.integrity.attestations.bundle.handler(notImplemented),
     shared: os.integrity.attestations.shared.handler(notImplemented),
     verify: attestationVerify,
   },

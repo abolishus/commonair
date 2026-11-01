@@ -38,6 +38,11 @@ export interface MessageContext {
   readonly replyToId: string | null;
   /** Held messages are visible to moderators only and never reach `onMessage`. */
   readonly held: boolean;
+  /**
+   * A simulated message (`dry-run.ts`, W2-rehearsal): middlewares decide as usual but take no side
+   * effect (no bot timeout, no counters), and it is never sent.
+   */
+  readonly dryRun?: boolean;
   readonly logger: Logger;
 }
 
@@ -87,6 +92,8 @@ export interface PipelineInput {
   body: string;
   isAction: boolean;
   replyToId: string | null;
+  /** See `MessageContext.dryRun`. */
+  dryRun?: boolean;
   logger: Logger;
 }
 
@@ -173,6 +180,7 @@ export async function runSendPipeline(deps: PipelineDeps, input: PipelineInput):
     isAction: input.isAction,
     replyToId: input.replyToId,
     held,
+    ...(input.dryRun ? { dryRun: true } : {}),
     logger: input.logger,
   });
   for (const mw of deps.middlewares) {

@@ -3,7 +3,7 @@
 
 /** All media work for one live broadcast, started on `online` and stopped on `offline`. */
 import type { BroadcastInfo, MediaContext } from "./context.ts";
-import type { MediaSessionInfo } from "./hooks.ts";
+import { MediaSessionHooks, type MediaSessionInfo } from "./hooks.ts";
 import { WARNINGS, type Warning } from "./health/rules.ts";
 import { errorCategory } from "./moderation/logging.ts";
 import { HealthSampler } from "./health/sampler.ts";
@@ -27,6 +27,8 @@ export class BroadcastSession {
   private stopped: Promise<void> | null = null;
   /** The session hooks' `onStart` calls (`hooks.ts`), awaited before their `onEnd`. */
   private hooksStarted: Promise<void> | null = null;
+  /** Aborts the hooks' start work when the session stops. */
+  private readonly hookAbort = new AbortController();
   private readonly log;
 
   constructor(
@@ -65,7 +67,7 @@ export class BroadcastSession {
     this.sampler.start();
     this.thumbnails.start();
     // Not awaited: a slow hook (captions waiting on whisper) never delays the ladder.
-    this.hooksStarted = this.ctx.sessionHooks.start(this.hookInfo());
+    this.hooksStarted = this.ctx.sessionHooks.start(this.hookInfo(), { signal: this.hookAbort.signal });
     await Promise.all([
       this.guard("transcode", () => this.transcode.start()),
       this.guard("audio-compat", () => this.audioCompat.start()),
@@ -122,10 +124,15 @@ export class BroadcastSession {
     return { broadcastId, channelId, slug, path, kind, startedAt, vodId: this.vodId };
   }
 
-  /** Never rejects (`MediaSessionHooks` guards each hook). */
+  /**
+   * Never rejects (`MediaSessionHooks` guards each hook). A start still running is aborted and
+   * given `HOOK_START_SETTLE_MS`, so a stuck hook cannot hold up the stop or the VOD finalize.
+   */
   private async endHooks(final: boolean): Promise<void> {
     if (!this.hooksStarted) return;
-    await this.hooksStarted;
+    this.hookAbort.abort();
+    if (!(await MediaSessionHooks.settled(this.hooksStarted)))
+      this.log.warn("media session hook start did not settle; ending it anyway");
     await this.ctx.sessionHooks.end(this.hookInfo(), { final });
   }
 

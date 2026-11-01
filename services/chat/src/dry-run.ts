@@ -91,6 +91,7 @@ export async function dryRun(deps: DryRunDeps, input: ChatDryRunBody): Promise<C
       body: input.body,
       isAction: false,
       replyToId: null,
+      dryRun: true,
       logger: deps.logger,
     },
   );

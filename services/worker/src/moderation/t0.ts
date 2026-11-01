@@ -29,6 +29,7 @@ import {
   emit,
   endedBroadcastForCase,
   endBroadcast,
+  endLiveOrRehearsal,
   hideContent,
   safeErrorCode,
   type EndedBroadcast,
@@ -114,8 +115,8 @@ export async function endAndHide(
 ): Promise<{ ended: EndedBroadcast | null; hidden: HiddenContent }> {
   let ended: EndedBroadcast | null = null;
   if (subject.subjectType === "broadcast") ended = await endBroadcast(tx, subject.subjectId, now);
-  // Whatever the subject, a channel that is live right now goes off air with the suspension.
-  if (!ended && channel?.liveBroadcastId) ended = await endBroadcast(tx, channel.liveBroadcastId, now);
+  // Whatever the subject, a channel that is live (or rehearsing) right now goes off air with the suspension.
+  if (!ended && channel) ended = await endLiveOrRehearsal(tx, channel, now);
   let hidden: HiddenContent = { vodIds: [], clipIds: [] };
   if (subject.subjectType === "broadcast")
     hidden = await hideContent(tx, { broadcastId: subject.subjectId }, T0_REASON);
@@ -358,7 +359,12 @@ export async function applyT0Once(ctx: WorkerContext, job: ModerationT0Job): Pro
 
 /** After commit: tell media/origin the broadcast ended and drop its live keys; failures retry the job. */
 export async function publishLiveEnded(ctx: WorkerContext, e: EndedBroadcast, now: Date) {
-  await ctx.valkey.del(KEYS.viewers(e.channelId), KEYS.viewerCount(e.channelId), KEYS.renditions(e.channelId));
+  await ctx.valkey.del(
+    KEYS.viewers(e.channelId),
+    KEYS.viewerCount(e.channelId),
+    KEYS.catchingUpCount(e.channelId),
+    KEYS.renditions(e.channelId),
+  );
   const live: LiveEvent = {
     type: "offline",
     channelId: e.channelId,

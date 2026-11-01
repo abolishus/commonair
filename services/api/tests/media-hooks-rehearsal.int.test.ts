@@ -18,7 +18,8 @@ import {
   type RehearsalArm,
 } from "@commonair/contracts/internal";
 import { schema, uuidv7 } from "@commonair/db";
-import { endLiveInTx } from "../src/moderation/live.ts";
+import { REHEARSAL_RULES } from "@commonair/contracts/enums";
+import { afterBroadcastEnded, endLiveInTx } from "../src/moderation/live.ts";
 import { client, signUpAndSignIn, startApi, subscriber, type Client, type TestApi } from "./harness.ts";
 
 let api: TestApi;
@@ -165,7 +166,9 @@ describe("rehearsal gate", () => {
     expect((await broadcastsOf(st.channelId)).map((b) => b.kind)).toEqual(["rehearsal"]);
     await hook(INTERNAL_ROUTES.mediaNotReady, st.username, first);
 
-    // No arm at the next auth: the publish is live, with stream.online and stream.offline.
+    // No arm and no rehearsal session at the next auth (disarm deletes both): the publish is live,
+    // with stream.online and stream.offline.
+    await api.deps.valkey.del(KEYS.rehearsalSession(st.channelId));
     const live = await publish(st);
     const c = await channelOf(st.username);
     expect(c.liveBroadcastId).not.toBeNull();
@@ -192,6 +195,112 @@ describe("rehearsal gate", () => {
     expect((await channelOf(st.username)).liveBroadcastId).not.toBeNull();
     await hook(INTERNAL_ROUTES.mediaNotReady, st.username, s2);
     expect((await broadcastsOf(st.channelId)).every((b) => b.kind === "live")).toBe(true);
+  });
+
+  test("a channel that only rehearsed is never 'recently live' in the directory", async () => {
+    const st = await streamer();
+    await arm(st.channelId, st.ownerId);
+    const sourceId = await publish(st);
+    await hook(INTERNAL_ROUTES.mediaNotReady, st.username, sourceId);
+    const [b] = await broadcastsOf(st.channelId);
+    expect(b).toMatchObject({ kind: "rehearsal" });
+    expect(b?.endedAt).not.toBeNull();
+    const home = await client(api).call<{ recentlyLive: { channel: { slug: string } }[] }>("GET", "/api/directory");
+    expect(home.status).toBe(200);
+    expect(home.body.recentlyLive.map((c) => c.channel.slug)).not.toContain(st.username);
+  });
+
+  test("a reconnect after the arm lapsed still rehearses; after a kick it is refused", async () => {
+    const st = await streamer();
+    await arm(st.channelId, st.ownerId);
+    const first = await publish(st);
+    // The session marker outlives the arm (TTL cap + grace).
+    const ttl = await api.deps.valkey.ttl(KEYS.rehearsalSession(st.channelId));
+    expect(ttl).toBeGreaterThan(REHEARSAL_RULES.maxDurationSeconds);
+    await hook(INTERNAL_ROUTES.mediaNotReady, st.username, first);
+    // Not-ready shrinks it to the reconnect grace: a go-live much later is live, not a rehearsal.
+    const graceTtl = await api.deps.valkey.ttl(KEYS.rehearsalSession(st.channelId));
+    expect(graceTtl).toBeGreaterThan(0);
+    expect(graceTtl).toBeLessThanOrEqual(REHEARSAL_RULES.sessionGraceSeconds);
+    await api.deps.valkey.del(KEYS.rehearsalArmed(st.channelId));
+    // A network drop past the arm's TTL: the encoder reconnects, and it is still a rehearsal.
+    const second = await publish(st);
+    expect((await channelOf(st.username)).liveBroadcastId).toBeNull();
+    expect((await broadcastsOf(st.channelId)).map((b) => b.kind)).toEqual(["rehearsal", "rehearsal"]);
+    // A moderation end kicks the publisher: its automatic reconnect is refused for a while.
+    const ended = await db().transaction((tx) => endLiveInTx(tx, st.channelId, new Date()));
+    expect(ended?.kind).toBe("rehearsal");
+    await afterBroadcastEnded(api.deps, ended);
+    expect(await api.deps.valkey.exists(KEYS.rehearsalKicked(st.channelId))).toBe(1);
+    expect(
+      (await mediaAuth({ action: "publish", path: mediaPath(st.username), query: `key=${st.secret}` })).status,
+    ).toBe(401);
+    await hook(INTERNAL_ROUTES.mediaNotReady, st.username, second);
+    // Disarm (W2-rehearsal) clears the session too; then a publish is live.
+    await api.deps.valkey.del(KEYS.rehearsalKicked(st.channelId), KEYS.rehearsalSession(st.channelId));
+    const live = await publish(st);
+    expect((await channelOf(st.username)).liveBroadcastId).not.toBeNull();
+    await hook(INTERNAL_ROUTES.mediaNotReady, st.username, live);
+    expect(await streamEvents(st.channelId)).toHaveLength(2);
+  });
+
+  test("a stale live pointer neither blocks a rehearsal nor leaves it open", async () => {
+    const st = await streamer();
+    // An ended live broadcast the channel still points at.
+    const [stale] = await db()
+      .insert(schema.broadcasts)
+      .values({
+        channelId: st.channelId,
+        ingestProtocol: "rtmp",
+        path: mediaPath(st.username),
+        startedAt: new Date(Date.now() - 7_200_000),
+        endedAt: new Date(Date.now() - 3_600_000),
+      })
+      .returning();
+    await db().update(schema.channels).set({ liveBroadcastId: stale!.id }).where(eq(schema.channels.id, st.channelId));
+    await arm(st.channelId, st.ownerId);
+    const sourceId = await publish(st);
+    expect((await channelOf(st.username)).liveBroadcastId).toBeNull();
+    // Even if a pointer reappears, not-ready still ends the rehearsal.
+    await db().update(schema.channels).set({ liveBroadcastId: stale!.id }).where(eq(schema.channels.id, st.channelId));
+    await hook(INTERNAL_ROUTES.mediaNotReady, st.username, sourceId);
+    const open = (await broadcastsOf(st.channelId)).filter((b) => b.kind === "rehearsal" && b.endedAt === null);
+    expect(open).toEqual([]);
+    expect((await channelOf(st.username)).liveBroadcastId).toBeNull();
+    expect(await streamEvents(st.channelId)).toEqual([]);
+  });
+
+  test("a rehearsal VOD stays private and is never clipped", async () => {
+    const st = await streamer();
+    await arm(st.channelId, st.ownerId);
+    const sourceId = await publish(st);
+    await hook(INTERNAL_ROUTES.mediaNotReady, st.username, sourceId);
+    const [b] = await broadcastsOf(st.channelId);
+    const [vod] = await db()
+      .insert(schema.vods)
+      .values({
+        channelId: st.channelId,
+        broadcastId: b!.id,
+        title: "rehearsal",
+        status: "ready",
+        visibility: "private",
+        durationSeconds: 120,
+        storagePrefix: `vods/${b!.id}/`,
+      })
+      .returning();
+    const pub = await st.client.call<{ data?: { requirement?: string } }>("PATCH", `/api/vods/${vod!.id}`, {
+      visibility: "public",
+    });
+    expect(pub.status).toBe(412);
+    expect(pub.body.data?.requirement).toBe("rehearsal");
+    expect((await st.client.call("PATCH", `/api/vods/${vod!.id}`, { title: "renamed" })).status).toBe(200);
+    const clip = await st.client.call<{ data?: { requirement?: string } }>(
+      "POST",
+      `/api/channels/${st.username}/clips`,
+      { vodId: vod!.id, startOffset: 0, durationSeconds: 30, title: "nope" },
+    );
+    expect(clip.status).toBe(412);
+    expect(clip.body.data?.requirement).toBe("rehearsal");
   });
 
   test("a suspension (endLiveInTx) ends an open rehearsal without stream.offline", async () => {

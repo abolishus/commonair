@@ -6,7 +6,7 @@
  * channels are cached for 2 s so a player hammering a dead stream never reaches
  * Postgres or MediaMTX more than every couple of seconds.
  */
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { RENDITIONS } from "@commonair/contracts/enums";
 import { KEYS, SOURCE_AAC_STATES } from "@commonair/contracts/internal";
@@ -62,6 +62,38 @@ export class ChannelDirectory {
       const value =
         row?.liveBroadcastId && !row.suspendedAt ? { id: row.id, slug, broadcastId: row.liveBroadcastId } : null;
       this.live.set(slug, value, value ? (this.opts.liveTtlMs ?? 5_000) : (this.opts.offlineTtlMs ?? 2_000));
+      return value;
+    }).promise;
+  }
+
+  /**
+   * The open rehearsal `broadcastId` of `slug` (batch 6 decision (f)), for an invitee's token that
+   * names it (`PlaybackClaims.rb`); null when it is not that channel's, has ended, or the channel is
+   * suspended. Never the live broadcast: a rehearsal is served only to tokens for it.
+   */
+  async lookupRehearsal(slug: string, broadcastId: string): Promise<LiveChannel | null> {
+    const key = `rehearsal:${slug}:${broadcastId}`;
+    const cached = this.live.get(key);
+    if (cached !== undefined) return cached;
+    return this.lookups.run(key, async () => {
+      const c = schema.channels;
+      const b = schema.broadcasts;
+      const [row] = await this.opts.db
+        .select({ id: c.id })
+        .from(c)
+        .innerJoin(b, eq(b.channelId, c.id))
+        .where(
+          and(
+            eq(c.slug, slug),
+            eq(b.id, broadcastId),
+            eq(b.kind, "rehearsal"),
+            isNull(b.endedAt),
+            isNull(c.suspendedAt),
+          ),
+        )
+        .limit(1);
+      const value = row ? { id: row.id, slug, broadcastId } : null;
+      this.live.set(key, value, value ? (this.opts.liveTtlMs ?? 5_000) : (this.opts.offlineTtlMs ?? 2_000));
       return value;
     }).promise;
   }

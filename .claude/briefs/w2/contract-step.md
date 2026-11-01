@@ -243,7 +243,7 @@ and scaffolding the nine units build on, so that no two units ever write the sam
   (`__generate_ed25519__`, worker only, `init-env` handles the placeholder). Regenerate the self-host
   key lists: `bun scripts/selfhost/unit-env.ts`.
 - **Web**: placeholder routes `_studio/{crew,captions,analytics,rehearse}.tsx`,
-  `_app/$channel.vods.$vodId.tsx`, `_app/$channel.clips.$clipId.tsx`; nav entries; empty namespaces
+  `_app/$channel_.vods.$vodId.tsx`, `_app/$channel_.clips.$clipId.tsx` (`$channel_` opts out of nesting under `$channel.tsx`, which renders no `<Outlet/>`; a nested `$channel.vods.…` file would never render; see `docs/testing/w2-selectors.md`); nav entries; empty namespaces
   `w2-splits`, `w2-captions`, `w2-analytics`, `w2-enforcement`, `w2-dvr`, `w2-rehearsal`,
   `w2-attestations`, `w2-replay` (`en` and `es` `{}`, `bun run i18n:gen`); a public attestation
   verifier page placeholder (`_app/attestations.verify.tsx`, with its `SEED_ROUTES` row); stub

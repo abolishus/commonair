@@ -24,8 +24,9 @@ the video, without undoing moderation or blocks, is the point of the Timeline Sp
 
 ## You own (write only these)
 
-- `apps/web/src/routes/_app/$channel.vods.$vodId.tsx` and `$channel.clips.$clipId.tsx` (content of
+- `apps/web/src/routes/_app/$channel_.vods.$vodId.tsx` and `$channel_.clips.$clipId.tsx` (content of
   the contract step's placeholders; keep the route ids, search schema and loader shape it set)
+  (`$channel_` opts out of nesting under `$channel.tsx`, which renders no `<Outlet/>`; a nested `$channel.vods.…` file would never render; see `docs/testing/w2-selectors.md`)
 - `apps/web/src/chat/replay/**`, `apps/web/src/components/vod-watch/**`
 - `apps/web/src/i18n/locales/{en,es}/w2-replay.json`, `apps/web/src/i18n/keys/w2-replay.gen.ts`
 - Tests: `apps/web/tests/{vod-watch,chat-replay}*.test.ts(x)`

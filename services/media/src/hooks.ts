@@ -14,7 +14,10 @@
  *   that writes under the VOD's prefix (captions: `<prefix>captions/<lang>.vtt`) finishes before
  *   `vod-finalize` lists and moves that prefix. A hook must not write under the prefix after its
  *   `onEnd` has resolved. A stop that fails and is retried calls `onEnd` again: keep it idempotent.
- * - `onStart` is not awaited by the ladder: a slow hook delays nothing else.
+ * - `onStart` is not awaited by the ladder: a slow hook delays nothing else. Its `signal` aborts
+ *   when the session stops; the stop then waits at most `HOOK_START_SETTLE_MS` for `onStart` to
+ *   settle before calling `onEnd`, so a hook stuck on an unreachable dependency (whisper) never
+ *   holds up the stop or the VOD finalize. A hook should stop its start work on abort.
  */
 import type { BROADCAST_KINDS } from "@commonair/contracts/enums";
 import type { Logger } from "@commonair/observability";
@@ -34,6 +37,14 @@ export interface MediaSessionInfo {
   vodId: string | null;
 }
 
+export interface SessionStart {
+  /** Aborted when the session stops (the broadcast ended or the service is shutting down). */
+  signal: AbortSignal;
+}
+
+/** How long a stop waits for every `onStart` to settle before running `onEnd` anyway. */
+export const HOOK_START_SETTLE_MS = 10_000;
+
 export interface SessionEnd {
   /** True when the broadcast ended; false when this process is shutting down (the broadcast may resume elsewhere). */
   final: boolean;
@@ -42,7 +53,7 @@ export interface SessionEnd {
 export interface MediaSessionHook {
   /** For logs. */
   name: string;
-  onStart(session: MediaSessionInfo): Promise<void>;
+  onStart(session: MediaSessionInfo, start: SessionStart): Promise<void>;
   onEnd(session: MediaSessionInfo, end: SessionEnd): Promise<void>;
 }
 
@@ -61,8 +72,24 @@ export class MediaSessionHooks {
   }
 
   /** Every hook's `onStart`; resolves once all have settled. Never rejects. */
-  start(session: MediaSessionInfo): Promise<void> {
-    return this.each(session, "onStart", (h) => h.onStart(session));
+  start(session: MediaSessionInfo, start: SessionStart = { signal: new AbortController().signal }): Promise<void> {
+    return this.each(session, "onStart", (h) => h.onStart(session, start));
+  }
+
+  /**
+   * Resolves once `started` (a `start()` result) settles or `timeoutMs` passes, whichever is
+   * first; true when it settled. Never rejects.
+   */
+  static async settled(started: Promise<void>, timeoutMs = HOOK_START_SETTLE_MS): Promise<boolean> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<false>((resolve) => {
+      timer = setTimeout(() => resolve(false), timeoutMs);
+    });
+    try {
+      return await Promise.race([started.then(() => true), timeout]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /** Every hook's `onEnd`; resolves once all have settled. Never rejects. */

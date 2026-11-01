@@ -207,7 +207,12 @@ export function createHandler(deps: HandlerDeps): OriginFetch {
     const p = await authenticate(req, url, mr, peerIp);
     if (p instanceof Response) return p;
 
-    const channel = await deps.channels.lookup(mr.slug);
+    // A rehearsal invitee's token (decision (f)) plays only that rehearsal; relay and CDN pulls,
+    // and every other token, get the channel's live broadcast or nothing.
+    const channel =
+      p.route === "hls" && p.claims.rb !== undefined
+        ? await deps.channels.lookupRehearsal(mr.slug, p.claims.rb)
+        : await deps.channels.lookup(mr.slug);
     if (!channel) return fail(404, "offline", mr);
     if (p.route === "hls" && p.claims.cid !== channel.id) return fail(403, "forbidden: wrong_channel", mr);
 

@@ -151,7 +151,9 @@ runs:
       if: inputs.moderation-model == 'true'
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
-        path: .cache/models
+        # The moderation weights only (packages/moderation/src/model.ts DEFAULT_MODEL_PATH): the
+        # captions weights live in the same folder and have their own cache.
+        path: .cache/models/adamcodd-vit-base-nsfw-detector-8587de99-int8.onnx
         key: moderation-model-${{ hashFiles('packages/moderation/src/model.ts') }}
     - name: Moderation model
       # The classifier's integration test runs the pinned weights; fetch-model checks their sha256.
@@ -170,7 +172,9 @@ runs:
       if: inputs.captions-model == 'true'
       shell: bash
       run: |
-        if bun -e 'import { captionsModelUrl } from "./packages/captions/src/model.ts"; process.exit(captionsModelUrl() === null ? 1 : 0)'; then
+        # A failed import fails the step (set -e via the assignment); only an empty URL skips.
+        url="$(bun -e 'import { captionsModelUrl } from "./packages/captions/src/model.ts"; console.log(captionsModelUrl() ?? "")')"
+        if [ -n "$url" ]; then
           bun scripts/fetch-model.ts --model captions
         else
           echo "captions weights not pinned yet (packages/captions/src/model.ts); nothing to fetch"

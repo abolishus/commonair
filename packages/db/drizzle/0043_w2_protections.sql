@@ -134,15 +134,16 @@ CREATE TRIGGER rehearsal_invitees_guard BEFORE INSERT OR UPDATE ON public.rehear
 --> statement-breakpoint
 
 -- 2. Revenue splits -----------------------------------------------------------------------
--- The crew bps of the channel's accepted (or ended) versions whose window overlaps `s` and whose
--- basis covers payment kind `k` (`tips` or `subs`), `s` included.
+-- The crew bps of the channel's accepted versions (ended ones included, but never a proposal
+-- withdrawn before acceptance) whose window overlaps `s` and whose basis covers payment kind `k`
+-- (`tips` or `subs`), `s` included.
 CREATE FUNCTION commonair_split_bps_covering(s public.revenue_splits, k text) RETURNS bigint
 LANGUAGE sql STABLE SET search_path = pg_catalog, public, pg_temp AS $$
   SELECT coalesce(sum(sh.bps), 0)
     FROM public.revenue_splits o
     JOIN public.revenue_split_shares sh ON sh.split_id = o.id
    WHERE o.channel_id = s.channel_id
-     AND (o.id = s.id OR o.status IN ('accepted', 'ended'))
+     AND (o.id = s.id OR (o.status IN ('accepted', 'ended') AND o.accepted_at IS NOT NULL))
      AND o.basis::text IN (k, 'all')
      AND tstzrange(o.starts_at, o.ends_at) && tstzrange(s.starts_at, s.ends_at)
 $$;
@@ -210,10 +211,11 @@ BEGIN
     RETURN NEW;
   END IF;
   IF OLD.status IN ('proposed', 'accepted') AND NEW.status = 'ended' THEN
-    -- Ending takes effect for payments after the end; it is never backdated (a minute of clock skew allowed).
+    -- Ending takes effect for payments after the end; it is never backdated (a minute of clock skew
+    -- allowed). A fixed window keeps its preset end, even one already past, so it can still be closed.
     IF NEW.ended_at IS NULL OR NEW.ends_at IS NULL OR NEW.accepted_at IS DISTINCT FROM OLD.accepted_at
        OR NEW.rejected_at IS NOT NULL
-       OR NEW.ends_at < now() - interval '1 minute'
+       OR (NEW.ends_at < now() - interval '1 minute' AND NEW.ends_at IS DISTINCT FROM OLD.ends_at)
        OR (OLD.ends_at IS NOT NULL AND NEW.ends_at > OLD.ends_at) THEN
       RAISE EXCEPTION 'an end sets ended_at and an end time not in the past' USING ERRCODE = 'check_violation';
     END IF;
@@ -241,6 +243,11 @@ BEGIN
     FOR SHARE;
   IF sp.status IS DISTINCT FROM 'proposed' THEN
     RAISE EXCEPTION 'split shares are frozen once the version leaves proposed' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  -- An answer is to the shares as they stood: once anyone has answered, changing them means a new version.
+  IF EXISTS (SELECT 1 FROM public.revenue_split_acceptances a WHERE a.split_id = sp.id) THEN
+    RAISE EXCEPTION 'split shares are frozen once a recipient has answered: propose a new version'
+      USING ERRCODE = 'insufficient_privilege';
   END IF;
   IF TG_OP = 'DELETE' THEN
     RETURN OLD;
@@ -292,7 +299,9 @@ BEGIN
                    AND t.metadata->>'splitVersionId' = NEW.split_id::text) THEN
     RAISE EXCEPTION 'a split link names a payment posting whose splitVersionId is the version' USING ERRCODE = 'check_violation';
   END IF;
-  IF NOT EXISTS (SELECT 1 FROM public.revenue_splits WHERE id = NEW.split_id AND status IN ('accepted', 'ended')) THEN
+  -- `proposed -> ended` withdraws a proposal: only a version that was accepted ever applies.
+  IF NOT EXISTS (SELECT 1 FROM public.revenue_splits WHERE id = NEW.split_id AND status IN ('accepted', 'ended')
+                   AND accepted_at IS NOT NULL) THEN
     RAISE EXCEPTION 'only an accepted split version applies to a payment' USING ERRCODE = 'check_violation';
   END IF;
   RETURN NEW;
@@ -324,9 +333,11 @@ BEGIN
     RAISE EXCEPTION 'split suspense is debited only by a release or a forfeit (not %)', k
       USING ERRCODE = 'check_violation';
   END IF;
+  -- ADR 0013 decision 7: a release or a forfeit is a treasurer's or an admin's act.
   IF NOT EXISTS (SELECT 1 FROM public.audit_log l
-                 WHERE l.subject_type = 'ledger_transaction' AND l.subject_id = NEW.transaction_id::text) THEN
-    RAISE EXCEPTION 'a split suspense % needs its audit_log row in the same transaction', k
+                 WHERE l.subject_type = 'ledger_transaction' AND l.subject_id = NEW.transaction_id::text
+                   AND public.commonair_is_finance(l.actor_id)) THEN
+    RAISE EXCEPTION 'a split suspense % needs its audit_log row, by a treasurer or an admin, in the same transaction', k
       USING ERRCODE = 'check_violation';
   END IF;
   RETURN NULL;
@@ -338,10 +349,25 @@ CREATE CONSTRAINT TRIGGER ledger_entries_split_suspense AFTER INSERT ON public.l
 
 CREATE FUNCTION commonair_split_writeoff_posting_check() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp AS $$
+DECLARE
+  p public.split_writeoff_proposals;
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM public.split_writeoff_proposals p
-                 WHERE p.ledger_transaction_id = NEW.id AND p.status = 'approved') THEN
+  SELECT * INTO p FROM public.split_writeoff_proposals
+   WHERE ledger_transaction_id = NEW.id AND status = 'approved';
+  IF p.id IS NULL THEN
     RAISE EXCEPTION 'a split shortfall write-off is posted only for an approved proposal' USING ERRCODE = 'check_violation';
+  END IF;
+  -- Exactly: debit the write-off expense, credit the owner's shortfall receivable, both the
+  -- proposal's amount in its currency.
+  IF (SELECT count(*) FROM public.ledger_entries e WHERE e.transaction_id = NEW.id) <> 2
+     OR NOT EXISTS (SELECT 1 FROM public.ledger_entries e JOIN public.ledger_accounts a ON a.id = e.account_id
+                    WHERE e.transaction_id = NEW.id AND e.amount_cents = p.amount_cents
+                      AND a.code = 'expense:split-shortfall-writeoff@' || p.currency)
+     OR NOT EXISTS (SELECT 1 FROM public.ledger_entries e JOIN public.ledger_accounts a ON a.id = e.account_id
+                    WHERE e.transaction_id = NEW.id AND e.amount_cents = -p.amount_cents
+                      AND a.code = 'asset:receivable:split-shortfall:' || p.owner_user_id::text || '@' || p.currency) THEN
+    RAISE EXCEPTION 'a split shortfall write-off debits the write-off expense and credits the owner''s shortfall receivable by the proposal''s amount'
+      USING ERRCODE = 'check_violation';
   END IF;
   RETURN NULL;
 END $$;
@@ -453,6 +479,8 @@ BEGIN
   IF public.commonair_is_rehearsal(NEW.broadcast_id) THEN
     RAISE EXCEPTION 'a rehearsal broadcast is never attested' USING ERRCODE = 'check_violation';
   END IF;
+  -- FOR SHARE: a retire or compromise in flight either commits first (and is seen) or waits for this insert.
+  PERFORM 1 FROM public.integrity_signing_keys k WHERE k.kid = NEW.kid FOR SHARE;
   IF NOT EXISTS (SELECT 1 FROM public.integrity_signing_keys k
                  WHERE k.kid = NEW.kid AND k.retired_at IS NULL AND k.compromised_at IS NULL) THEN
     RAISE EXCEPTION 'attestations are signed only by the active, uncompromised key' USING ERRCODE = 'check_violation';
