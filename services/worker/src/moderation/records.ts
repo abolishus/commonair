@@ -8,10 +8,11 @@
  * data in append-only columns).
  */
 import { EVENTS, type EventPayload, type EventType } from "@commonair/contracts/events";
-import type { PLATFORM_ROLES } from "@commonair/contracts/enums";
+import type { MediaStateReason, PLATFORM_ROLES } from "@commonair/contracts/enums";
 import { schema, uuidv7, type Executor } from "@commonair/db";
 import { and, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import type { WorkerContext } from "../context.ts";
+import { withMediaState } from "../media-state.ts";
 import { moderationMetrics } from "./metrics.ts";
 
 const { auditLog, events, broadcasts, channels, playbackSessions, vods, clips, notifications, users } = schema;
@@ -215,10 +216,31 @@ export interface HiddenContent {
 }
 
 /**
- * Set VODs and clips `deleted` with `reason`. Rows already deleted keep their status and reason
- * (a T0 removal in particular is never overwritten; the database refuses that anyway).
+ * Set VODs and clips `deleted` with `reason`, with their media-state events. Rows already deleted
+ * keep their status and reason (a T0 removal in particular is never overwritten; the database
+ * refuses that anyway).
  */
 export async function hideContent(
+  tx: Executor,
+  target: { vodIds?: readonly string[]; clipIds?: readonly string[]; broadcastId?: string },
+  reason: string,
+  stateReason: MediaStateReason,
+  now: Date,
+): Promise<HiddenContent> {
+  const vodScope = or(
+    target.vodIds?.length ? inArray(vods.id, [...target.vodIds]) : undefined,
+    target.broadcastId ? eq(vods.broadcastId, target.broadcastId) : undefined,
+  );
+  const clipScope = or(
+    target.clipIds?.length ? inArray(clips.id, [...target.clipIds]) : undefined,
+    target.broadcastId ? eq(clips.broadcastId, target.broadcastId) : undefined,
+  );
+  return withMediaState(tx, { vods: vodScope, clips: clipScope }, stateReason, now, () =>
+    hideContentRows(tx, target, reason),
+  );
+}
+
+async function hideContentRows(
   tx: Executor,
   target: { vodIds?: readonly string[]; clipIds?: readonly string[]; broadcastId?: string },
   reason: string,

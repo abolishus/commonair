@@ -8,6 +8,7 @@
  */
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { schema, type Executor } from "@commonair/db";
+import { suspensionScope, withSuspensionState } from "../events/media-state.ts";
 import { badRequest, forbidden, pgCode } from "../lib/errors.ts";
 import { endLiveInTx, type EndedBroadcast } from "./live.ts";
 
@@ -30,6 +31,21 @@ export async function setSuspension(
   now: Date,
   durationSeconds: number | undefined,
   reason: SuspensionReason = "moderation",
+): Promise<{ changed: boolean; ended: EndedBroadcast | null }> {
+  // `channel.suspension` (decision (z)) for the account's own channel and the target channel.
+  return withSuspensionState(tx, suspensionScope(target), now, () =>
+    writeSuspension(tx, target, kind, suspended, now, durationSeconds, reason),
+  );
+}
+
+async function writeSuspension(
+  tx: Executor,
+  target: { userId: string; channelId: string | null },
+  kind: "user" | "channel",
+  suspended: boolean,
+  now: Date,
+  durationSeconds: number | undefined,
+  reason: SuspensionReason,
 ): Promise<{ changed: boolean; ended: EndedBroadcast | null }> {
   try {
     if (kind === "user") {

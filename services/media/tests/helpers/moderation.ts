@@ -26,7 +26,7 @@ import {
 import { createLogger, type Logger } from "@commonair/observability";
 import { createModerationMetrics } from "../../src/moderation/metrics.ts";
 import { T0Outbox } from "../../src/moderation/t0-outbox.ts";
-import { MediaModeration, type ModerationDeps } from "../../src/moderation/moderation.ts";
+import { MediaModeration, type ModerationDeps, type ModerationValkey } from "../../src/moderation/moderation.ts";
 import type { ModerationQueue } from "../../src/moderation/queue.ts";
 import type { FrameTools } from "../../src/moderation/tools.ts";
 
@@ -132,6 +132,31 @@ export function captureLogger(): { logger: Logger; lines: string[] } {
 }
 
 /** A database stub for code paths that only read settings and counts. */
+/** An in-memory stand-in for the moderation Valkey seam; `over` replaces single commands. */
+export function fakeValkey(over: Partial<ModerationValkey> = {}): ModerationValkey & {
+  counters: Map<string, number>;
+  ttls: Map<string, number>;
+} {
+  const counters = new Map<string, number>();
+  const ttls = new Map<string, number>();
+  return {
+    counters,
+    ttls,
+    set: async () => "OK",
+    incr: async (key) => {
+      const n = (counters.get(key) ?? 0) + 1;
+      counters.set(key, n);
+      return n;
+    },
+    expire: async (key, seconds) => {
+      if (!counters.has(key)) return 0;
+      ttls.set(key, seconds);
+      return 1;
+    },
+    ...over,
+  };
+}
+
 export function stubDb(opts: { setting?: unknown; liveCount?: number; fail?: boolean } = {}): Database {
   const result = (rows: unknown[]) => {
     const p: Promise<unknown[]> = opts.fail ? Promise.reject(new Error("database unavailable")) : Promise.resolve(rows);
@@ -169,7 +194,7 @@ export async function makeModeration(over: Partial<ModerationDeps> = {}): Promis
   const outbox = over.t0Outbox ?? new T0Outbox(join(tmpdir(), `commonair-media-test-outbox-${randomUUID()}`));
   const moderation = new MediaModeration({
     db: stubDb(),
-    valkey: { set: async () => "OK" },
+    valkey: fakeValkey(),
     queue,
     matcher: fakeMatcher({}),
     sealer,

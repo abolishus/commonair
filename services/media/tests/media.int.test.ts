@@ -42,6 +42,7 @@ import { runCommand } from "../src/ffmpeg/run.ts";
 import { MediaMtxClient } from "../src/mediamtx.ts";
 import { createMediaService, type MediaService } from "../src/service.ts";
 import { finalizeVod } from "../src/vod/finalize.ts";
+import { mediaStates } from "./media-state-helpers.ts";
 import { VOD_PLAYLIST } from "../src/vod/recorder.ts";
 import { vodCaptionsKey, vodPrefix } from "@commonair/contracts/storage";
 import { moveVodObjects } from "@commonair/storage";
@@ -569,6 +570,8 @@ describe("media pipeline", () => {
     expect(days).toBeLessThan(14.1);
     // Public and playable: copied to `vods/` before `ready`, the private copy deleted after.
     expect(vod.storagePrefix).toBe(vodPrefix(vodId, "public"));
+    // Decision (z): `media.vod.state` public, written by the ready transaction.
+    expect(await mediaStates(tdb.db, "media.vod.state", vodId)).toEqual([[true, "ready"]]);
     expect(vod.thumbnailKey).toMatch(new RegExp(`^vods/${vodId}/thumbnail\\.(webp|jpg)$`));
     const playlist = await (
       await media.ctx.storage.get(BUCKET, `${vodPrefix(vodId, "public")}${VOD_PLAYLIST}`)
@@ -594,6 +597,7 @@ describe("media pipeline", () => {
     const clip = await waitForClip(id);
     expect(clip.status).toBe("ready");
     expect(clip.vodId).toBe(vodId);
+    expect(await mediaStates(tdb.db, "media.clip.state", id)).toEqual([[true, "ready"]]);
     const duration = await mp4Duration(clip.storageKey ?? "");
     expect(duration).toBeGreaterThan(4.5);
     expect(duration).toBeLessThan(5.6);
@@ -697,6 +701,8 @@ describe("media pipeline", () => {
     expect(await finalizeVod(stubDeps(), id)).toBe("ready");
     const [vod] = await tdb.db.select().from(schema.vods).where(eq(schema.vods.id, id));
     expect(vod?.storagePrefix).toBe(vodPrefix(id, "private"));
+    // Never public, so no media-state event.
+    expect(await mediaStates(tdb.db, "media.vod.state", id)).toEqual([]);
     const hours = ((vod?.expiresAt?.getTime() ?? 0) - Date.now()) / 3_600_000;
     expect(hours).toBeGreaterThan(23.9);
     expect(hours).toBeLessThanOrEqual(24);

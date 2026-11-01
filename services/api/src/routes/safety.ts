@@ -22,6 +22,7 @@ import { MODERATION_CONSTANTS } from "@commonair/moderation";
 import { schema, type Executor } from "@commonair/db";
 import type { Deps } from "../deps.ts";
 import { audit } from "../events/audit.ts";
+import { withMediaState } from "../events/media-state.ts";
 import { publishControl, publishUserControl } from "../lib/control.ts";
 import { decodeCursor, encodeCursor, isKeyCursor, isOffsetCursor, pageOf } from "../lib/cursor.ts";
 import { iso, userByUsername } from "../lib/dto.ts";
@@ -328,10 +329,14 @@ export const safety = {
         case "remove_content":
           if (r.subjectType === "vod" || r.subjectType === "clip") {
             const t = r.subjectType === "vod" ? vods : clips;
-            await tx
-              .update(t)
-              .set({ status: "deleted", removedReason: "moderation" })
-              .where(and(eq(t.id, r.subjectId), sql`${t.status} <> 'deleted'`));
+            const scope =
+              r.subjectType === "vod" ? { vods: eq(vods.id, r.subjectId) } : { clips: eq(clips.id, r.subjectId) };
+            await withMediaState(tx, scope, "moderation", now, () =>
+              tx
+                .update(t)
+                .set({ status: "deleted", removedReason: "moderation" })
+                .where(and(eq(t.id, r.subjectId), sql`${t.status} <> 'deleted'`)),
+            );
           } else if (r.subjectType === "chat_message")
             await tx
               .update(chatMessages)

@@ -139,7 +139,7 @@ async function autoHide(ctx: WorkerContext, r: RequestRow, asOf: Date) {
     const rows = await tx.select().from(items).where(eq(items.requestId, r.id)).for("update");
     const vodIds = rows.filter((i) => i.subjectType === "vod" && i.subjectId).map((i) => i.subjectId as string);
     const clipIds = rows.filter((i) => i.subjectType === "clip" && i.subjectId).map((i) => i.subjectId as string);
-    const hidden = await hideContent(tx, { vodIds, clipIds }, NCII_REASON);
+    const hidden = await hideContent(tx, { vodIds, clipIds }, NCII_REASON, "ncii", asOf);
     const ended: EndedBroadcast[] = [];
     for (const i of rows.filter((x) => x.subjectType === "broadcast" && x.subjectId)) {
       const e = await endBroadcast(tx, i.subjectId as string, asOf);

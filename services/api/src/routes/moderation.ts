@@ -18,6 +18,7 @@ import { dto } from "@commonair/contracts";
 import { MODERATION_CONSTANTS } from "@commonair/moderation";
 import { schema, type Executor } from "@commonair/db";
 import { audit } from "../events/audit.ts";
+import { suspensionScope, withSuspensionState } from "../events/media-state.ts";
 import { emit } from "../events/outbox.ts";
 import { publishUserControl } from "../lib/control.ts";
 import { decodeCursor, encodeCursor, isOffsetCursor } from "../lib/cursor.ts";
@@ -162,51 +163,56 @@ export const moderation = {
       // Whether each update changed a row: an account under a T0 ban and a channel already
       // suspended are left as they are, and the statement of reasons skips what was not applied.
       let suspendedChannel = false;
-      if (plan.suspend) {
-        const target = input.suspendTarget;
-        const expires = input.durationSeconds ? new Date(now.getTime() + input.durationSeconds * 1000) : null;
-        if ((target === "user" || target === "both") && subjectUser) {
-          // A T0 suspension is never overwritten by a shorter one.
-          const rows = await tx
-            .update(users)
-            .set({ banned: true, banReason: "moderation", banExpires: expires })
-            .where(and(eq(users.id, subjectUser), sql`not (${users.banned} and ${users.banReason} = 't0_hash_match')`))
-            .returning({ id: users.id });
-          suspendedUser = rows.length > 0;
-          await tx.insert(modActions).values({
-            scope: "platform",
-            moderatorId: caller.user.id,
-            targetUserId: subjectUser,
-            action: "suspend_user",
-            reason: input.note,
-            durationSeconds: input.durationSeconds ?? null,
-            subjectType: "moderation_case",
-            subjectId: c.id,
-            ruleRef: caseDecisionRuleRef(c, "suspend"),
-          });
-        }
-        if ((target === "channel" || target === "both") && c.channelId) {
-          const rows = await tx
-            .update(channels)
-            .set({ suspendedAt: now, suspendedReason: "moderation" })
-            .where(and(eq(channels.id, c.channelId), isNull(channels.suspendedAt)))
-            .returning({ id: channels.id });
-          suspendedChannel = rows.length > 0;
-          await tx.insert(modActions).values({
-            scope: "platform",
-            channelId: c.channelId,
-            moderatorId: caller.user.id,
-            targetUserId: subjectUser,
-            action: "suspend_channel",
-            reason: input.note,
-            durationSeconds: input.durationSeconds ?? null,
-            subjectType: "moderation_case",
-            subjectId: c.id,
-            ruleRef: caseDecisionRuleRef(c, "suspend"),
-          });
-          ended ??= await endLiveInTx(tx, c.channelId, now);
-        }
-      }
+      // `channel.suspension` (decision (z)) for the subject's channel and its account's channel.
+      const suspensionTarget = suspensionScope({ userId: subjectUser, channelId: c.channelId });
+      if (plan.suspend)
+        await withSuspensionState(tx, suspensionTarget, now, async () => {
+          const target = input.suspendTarget;
+          const expires = input.durationSeconds ? new Date(now.getTime() + input.durationSeconds * 1000) : null;
+          if ((target === "user" || target === "both") && subjectUser) {
+            // A T0 suspension is never overwritten by a shorter one.
+            const rows = await tx
+              .update(users)
+              .set({ banned: true, banReason: "moderation", banExpires: expires })
+              .where(
+                and(eq(users.id, subjectUser), sql`not (${users.banned} and ${users.banReason} = 't0_hash_match')`),
+              )
+              .returning({ id: users.id });
+            suspendedUser = rows.length > 0;
+            await tx.insert(modActions).values({
+              scope: "platform",
+              moderatorId: caller.user.id,
+              targetUserId: subjectUser,
+              action: "suspend_user",
+              reason: input.note,
+              durationSeconds: input.durationSeconds ?? null,
+              subjectType: "moderation_case",
+              subjectId: c.id,
+              ruleRef: caseDecisionRuleRef(c, "suspend"),
+            });
+          }
+          if ((target === "channel" || target === "both") && c.channelId) {
+            const rows = await tx
+              .update(channels)
+              .set({ suspendedAt: now, suspendedReason: "moderation" })
+              .where(and(eq(channels.id, c.channelId), isNull(channels.suspendedAt)))
+              .returning({ id: channels.id });
+            suspendedChannel = rows.length > 0;
+            await tx.insert(modActions).values({
+              scope: "platform",
+              channelId: c.channelId,
+              moderatorId: caller.user.id,
+              targetUserId: subjectUser,
+              action: "suspend_channel",
+              reason: input.note,
+              durationSeconds: input.durationSeconds ?? null,
+              subjectType: "moderation_case",
+              subjectId: c.id,
+              ruleRef: caseDecisionRuleRef(c, "suspend"),
+            });
+            ended ??= await endLiveInTx(tx, c.channelId, now);
+          }
+        });
       if (input.decision === "warn" || input.decision === "end_stream")
         await tx.insert(modActions).values({
           scope: "platform",
@@ -429,17 +435,21 @@ export const moderation = {
           )
           .limit(1);
         if (!other) {
-          const u = await tx
-            .update(users)
-            .set({ banned: false, banReason: null, banExpires: null })
-            .where(and(eq(users.id, c.userId), eq(users.banned, true), eq(users.banReason, "t0_hash_match")))
-            .returning({ id: users.id });
-          const ch = await tx
-            .update(channels)
-            .set({ suspendedAt: null, suspendedReason: null })
-            .where(and(eq(channels.ownerId, c.userId), eq(channels.suspendedReason, "t0_hash_match")))
-            .returning({ id: channels.id });
-          unsuspended = u.length > 0 || ch.length > 0;
+          const userId = c.userId;
+          // `channel.suspension` (decision (z)) for the account's channel.
+          unsuspended = await withSuspensionState(tx, suspensionScope({ userId }), now, async () => {
+            const u = await tx
+              .update(users)
+              .set({ banned: false, banReason: null, banExpires: null })
+              .where(and(eq(users.id, userId), eq(users.banned, true), eq(users.banReason, "t0_hash_match")))
+              .returning({ id: users.id });
+            const ch = await tx
+              .update(channels)
+              .set({ suspendedAt: null, suspendedReason: null })
+              .where(and(eq(channels.ownerId, userId), eq(channels.suspendedReason, "t0_hash_match")))
+              .returning({ id: channels.id });
+            return u.length > 0 || ch.length > 0;
+          });
         }
       }
       const withdrawn = await tx

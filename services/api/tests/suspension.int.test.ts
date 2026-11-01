@@ -7,8 +7,9 @@ import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { liftDmcaSuspensionInTx, schema, type Database } from "@commonair/db";
 import { createTestDatabase, type TestDatabase } from "@commonair/db/testing";
 import { setSuspension } from "../src/moderation/suspension.ts";
+import { suspensions } from "./media-state-helpers.ts";
 
-const { users } = schema;
+const { users, channels } = schema;
 
 let t: TestDatabase;
 let db: Database;
@@ -41,6 +42,42 @@ async function banOf(userId: string) {
 }
 
 const target = (userId: string) => ({ userId, channelId: null });
+
+describe("channel.suspension (decision (z))", () => {
+  async function channelFor(userId: string): Promise<string> {
+    const [c] = await db.select({ id: channels.id }).from(channels).where(eq(channels.ownerId, userId));
+    if (c) return c.id;
+    const [made] = await db
+      .insert(channels)
+      .values({ ownerId: userId, slug: `susp${userId.slice(-8)}`, displayName: "s" })
+      .returning({ id: channels.id });
+    return made!.id;
+  }
+
+  test("an account's DMCA suspension suspends its channel; lifting it unsuspends", async () => {
+    const userId = await makeUser();
+    const channelId = await channelFor(userId);
+    const now = new Date();
+    await setSuspension(db, { userId, channelId }, "user", true, now, undefined, "dmca_repeat_infringer");
+    expect(await suspensions(db, channelId)).toEqual([true]);
+    await liftDmcaSuspensionInTx(db, userId);
+    // Lifted outside a tracked path (the callers wrap it): no event here.
+    expect(await suspensions(db, channelId)).toEqual([true]);
+  });
+
+  test("a channel suspended while its account is suspended writes nothing new; repeats write nothing", async () => {
+    const userId = await makeUser();
+    const channelId = await channelFor(userId);
+    await setSuspension(db, { userId, channelId }, "channel", true, new Date(), undefined);
+    await setSuspension(db, { userId, channelId }, "channel", true, new Date(), undefined);
+    await setSuspension(db, { userId, channelId }, "user", true, new Date(), 3600);
+    expect(await suspensions(db, channelId)).toEqual([true]);
+    await setSuspension(db, { userId, channelId }, "channel", false, new Date(), undefined);
+    expect(await suspensions(db, channelId)).toEqual([true]);
+    await setSuspension(db, { userId, channelId }, "user", false, new Date(), undefined);
+    expect(await suspensions(db, channelId)).toEqual([true, false]);
+  });
+});
 
 describe("setSuspension with the DMCA reason", () => {
   test("a timed moderation suspension survives a DMCA termination and its reversal", async () => {

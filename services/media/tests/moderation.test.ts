@@ -27,6 +27,7 @@ import {
   fakeFrame,
   fakeMatcher,
   fakeTools,
+  fakeValkey,
   FakeQueue,
   makeModeration,
   stubDb,
@@ -182,12 +183,12 @@ describe("live frames", () => {
   test("a clean frame goes to Valkey with the TTL and a scan job; nothing else is stored", async () => {
     const sets: { key: string; ttl: number; size: number }[] = [];
     const { moderation, queue } = await makeModeration({
-      valkey: {
+      valkey: fakeValkey({
         set: async (key, value, _m, ttl) => {
           sets.push({ key, ttl, size: value.byteLength });
           return "OK";
         },
-      },
+      }),
     });
     expect(await moderation.scanLiveFrame(target, fakeFrame("1", 90), new Date())).toBe("clean");
     expect(queue.scans).toHaveLength(1);
@@ -1151,7 +1152,7 @@ describe("startup and list reloads", () => {
           VALKEY_URL: "redis://127.0.0.1:9",
         },
         db: stubDb(),
-        valkey: { set: async () => "OK" },
+        valkey: fakeValkey(),
         logger,
         ffmpeg: "ffmpeg",
         t0OutboxDir: join(tmpdir(), `commonair-setup-outbox-${crypto.randomUUID()}`),
@@ -1177,7 +1178,7 @@ describe("startup and list reloads", () => {
         VALKEY_URL: "redis://127.0.0.1:9",
       },
       db: stubDb(),
-      valkey: { set: async () => "OK" },
+      valkey: fakeValkey(),
       logger: captureLogger().logger,
       ffmpeg: "ffmpeg",
       t0OutboxDir: join(tmpdir(), `commonair-setup-outbox-${crypto.randomUUID()}`),

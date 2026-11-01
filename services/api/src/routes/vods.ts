@@ -36,6 +36,7 @@ import { badRequest, notFound, precondition } from "../lib/errors.ts";
 import { channelAuthority, type Caller, type ChannelRole } from "../lib/access.ts";
 import { os, requireCaller } from "../lib/orpc.ts";
 import { audit } from "../events/audit.ts";
+import { withMediaState } from "../events/media-state.ts";
 import { urlsWithheld, viewerAudience, vodShown, vodVisible } from "../media/visibility.ts";
 import { requestVodPlacement } from "../media/vod-placement-queue.ts";
 import { vodChat } from "../chat-replay/handlers.ts";
@@ -212,13 +213,16 @@ export const vods = {
     if (input.visibility !== undefined) set.visibility = input.visibility;
     const around = surroundings(row.channel, row.restrictedAt);
     if (Object.keys(set).length === 0) return toVod(deps, row.v, row.channel.slug, false, around);
+    const now = deps.now();
     const updated = await deps.db.transaction(async (tx) => {
-      const [v] = await tx
-        .update(vodsT)
-        .set({ ...set, updatedAt: deps.now() })
-        // Compare-and-set: a VOD removed meanwhile stays removed.
-        .where(and(eq(vodsT.id, row.v.id), ne(vodsT.status, "deleted"), isNull(vodsT.removedReason)))
-        .returning();
+      const [v] = await withMediaState(tx, { vods: eq(vodsT.id, row.v.id) }, "visibility", now, () =>
+        tx
+          .update(vodsT)
+          .set({ ...set, updatedAt: now })
+          // Compare-and-set: a VOD removed meanwhile stays removed.
+          .where(and(eq(vodsT.id, row.v.id), ne(vodsT.status, "deleted"), isNull(vodsT.removedReason)))
+          .returning(),
+      );
       if (!v) throw notFound("VOD not found");
       await audit(tx, {
         actorType: "user",
@@ -243,24 +247,33 @@ export const vods = {
     const row = await managedVod(deps, caller, input.id);
     const now = deps.now();
     await deps.db.transaction(async (tx) => {
-      const [v] = await tx
-        .update(vodsT)
-        .set({ removedReason: "owner", expiresAt: now, updatedAt: now })
-        .where(and(eq(vodsT.id, row.v.id), ne(vodsT.status, "deleted"), isNull(vodsT.removedReason)))
-        .returning({ id: vodsT.id, broadcastId: vodsT.broadcastId, channelId: vodsT.channelId });
-      if (!v) throw notFound("VOD not found");
-      // The broadcast's clips go with it (the clip shows the VOD's content).
-      const removedClips = await tx
-        .update(clipsT)
-        .set({ removedReason: "owner" })
-        .where(
-          and(
-            or(eq(clipsT.broadcastId, v.broadcastId), eq(clipsT.vodId, v.id)),
-            ne(clipsT.status, "deleted"),
-            isNull(clipsT.removedReason),
-          ),
-        )
-        .returning({ id: clipsT.id });
+      const { v, removedClips } = await withMediaState(
+        tx,
+        { vods: eq(vodsT.id, row.v.id) },
+        "deleted",
+        now,
+        async () => {
+          const [v] = await tx
+            .update(vodsT)
+            .set({ removedReason: "owner", expiresAt: now, updatedAt: now })
+            .where(and(eq(vodsT.id, row.v.id), ne(vodsT.status, "deleted"), isNull(vodsT.removedReason)))
+            .returning({ id: vodsT.id, broadcastId: vodsT.broadcastId, channelId: vodsT.channelId });
+          if (!v) throw notFound("VOD not found");
+          // The broadcast's clips go with it (the clip shows the VOD's content).
+          const removedClips = await tx
+            .update(clipsT)
+            .set({ removedReason: "owner" })
+            .where(
+              and(
+                or(eq(clipsT.broadcastId, v.broadcastId), eq(clipsT.vodId, v.id)),
+                ne(clipsT.status, "deleted"),
+                isNull(clipsT.removedReason),
+              ),
+            )
+            .returning({ id: clipsT.id });
+          return { v, removedClips };
+        },
+      );
       await audit(tx, {
         actorType: "user",
         actorId: caller.user.id,

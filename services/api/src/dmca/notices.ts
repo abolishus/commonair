@@ -23,6 +23,7 @@ import { schema, type Executor } from "@commonair/db";
 import { verifyAltcha } from "../auth/altcha.ts";
 import type { Deps } from "../deps.ts";
 import { audit } from "../events/audit.ts";
+import { mediaScopeOf, withMediaState } from "../events/media-state.ts";
 import { emit } from "../events/outbox.ts";
 import type { Caller } from "../lib/access.ts";
 import { publishUserControl } from "../lib/control.ts";
@@ -194,6 +195,16 @@ async function staffNotice(deps: Deps, noticeId: string) {
  * while the other still holds it.
  */
 async function disableItemInTx(
+  tx: Executor,
+  item: ItemRow,
+  now: Date,
+): Promise<{ removed: boolean; ended: EndedBroadcast | null }> {
+  const scope = mediaScopeOf(item.subjectType, item.subjectId);
+  if (!scope) return disableItemRows(tx, item, now);
+  return withMediaState(tx, scope, "dmca", now, () => disableItemRows(tx, item, now));
+}
+
+async function disableItemRows(
   tx: Executor,
   item: ItemRow,
   now: Date,
