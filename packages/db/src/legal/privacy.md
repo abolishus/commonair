@@ -111,6 +111,32 @@ what was left out sealed for the streamer and whoever they share it with.
 signed in. We record who was invited or removed, by account. A rehearsal is never counted as a
 broadcast, and its recording is deleted after 24 hours.
 
+## Giveaways and the member jury
+
+Draft: not reviewed by counsel (none retained).
+
+**Giveaways.** When you enter a giveaway we record your account, the giveaway and the time.
+Publicly you appear only as a pseudonym computed from a secret per-giveaway salt that we never
+publish. Only you can see which pseudonym is yours. If you win, you are notified in the app; the
+streamer does not see your account unless you contact them. Entries are kept with the giveaway.
+On account deletion they remain under your pseudonymized account, so published draws stay
+verifiable.
+
+**Member jury.** If you opt in, you may be drawn at random to an advisory panel that reviews
+closed moderation cases.
+
+- **What we keep:** when you opted in or out, your panel seat, and each vote (agree, disagree or
+  unsure, plus a reason chosen from a fixed list).
+- **What votes contain:** no free text. Votes are kept with the panel's records and are never
+  published one by one; only per-rule totals of 10 or more are published.
+- **What jurors see:** people involved in a case appear under a pseudonym that changes each
+  panel; reporters are never shown. Images are blurred until you reveal them. Cases involving
+  minors, intimate images or illegal-content matches are never shown.
+- **Opting out:** you can opt out at any time; it applies from the next panel.
+- **Deleting your account:** removes your opt-in. Your seats and votes stay with the panel's
+  records, linked only to your pseudonymized account.
+- **Authority:** the jury cannot change any decision.
+
 ## How long we keep it
 
 - Playback sessions and integrity signals: only as long as needed to compute verified viewer

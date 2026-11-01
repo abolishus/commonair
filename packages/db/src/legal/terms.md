@@ -94,19 +94,47 @@ remove points (for example to correct an error or abuse), or turn points off; po
 channel turns them off, when your account ends, or when the service ends. Points are not a
 deposit, a currency or property of yours.
 
-## 11. Disclaimers and liability
+## 11. Giveaways
+
+Draft: not reviewed by counsel (none retained).
+
+Streamers on {{instanceName}} may run giveaways when the instance operator has turned them on.
+
+1. **No purchase necessary.** Entering is free. A purchase, payment, subscription or channel
+   points never enters you and never improves your chances; void where prohibited.
+2. **Sponsor.** The streamer running the giveaway is its sponsor and alone provides the prize.
+   {{instanceName}} does not hold, ship or pay for prizes and is not a sponsor.
+3. **Who may enter.** Members in good standing who are not banned or timed out in the channel
+   when they enter. A streamer may also require a minimum account age, a minimum time following
+   the channel, or a minimum time verified as watching the stream. No other requirement is
+   allowed. One entry per account; entries from bots or multiple accounts are void.
+4. **How to enter.** Press Enter on the giveaway card, or type the streamer's keyword in chat
+   while entries are open.
+5. **Draw.** When the giveaway opens, we publish a cryptographic commitment to a random seed.
+   After entries close, we reveal the seed and draw winners from the published list of entrant
+   pseudonyms. Anyone can re-run the draw on the giveaway's public page. An entrant whose account
+   is suspended or deleted, or who is permanently banned from the channel, before the draw is
+   skipped, and the next drawn entrant wins. A temporary timeout does not affect a drawn entry.
+6. **Winners.** Winners are notified in the app and claim the prize by contacting the streamer.
+   Winners must never be asked to pay anything to receive a prize. Odds depend on the number of
+   eligible entries.
+7. **Privacy.** Entrants appear publicly only as pseudonyms that cannot be linked to an account.
+   See the privacy policy.
+8. **Cancellation.** A streamer may cancel a giveaway before the draw; no prize is then owed.
+
+## 12. Disclaimers and liability
 
 The service is provided "as is". Live streaming depends on networks and volunteers we do not
 control, so we cannot promise it will always be available or error-free. To the extent the law
 allows, the co-op is not liable for indirect or consequential losses. Nothing in these terms
 limits rights you have under consumer law that cannot be waived.
 
-## 12. Ending your use
+## 13. Ending your use
 
 You can delete your account at any time from your settings; the privacy policy explains what is
 kept and why. We may suspend or end accounts that seriously or repeatedly break these terms.
 
-## 13. Changes
+## 14. Changes
 
 When we change these terms we publish a new version with a new date. If the change is material,
 we ask you to accept the new version before you continue using features that need an account.

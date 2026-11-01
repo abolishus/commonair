@@ -119,8 +119,11 @@ describe("legal seed documents", () => {
       const words = d.body.split(/\s+/).filter(Boolean).length;
       expect(words, d.kind).toBeGreaterThanOrEqual(300);
       // Privacy grew past 1000 words with chat replay and blocks (W1), then notifications, push
-      // and Discord (N1), then captions, analytics and rehearsals (W2); keep it under 1500.
-      expect(words, d.kind).toBeLessThanOrEqual(d.kind === "privacy" ? 1500 : 1000);
+      // and Discord (N1), then captions, analytics and rehearsals (W2), then giveaways and the
+      // jury (batch 7, with watch rooms, portability and federation still to come); keep it under
+      // 2200. The terms passed 1000 with the giveaway rules (batch 7); keep them under 1400.
+      const cap = d.kind === "privacy" ? 2200 : d.kind === "terms" ? 1400 : 1000;
+      expect(words, d.kind).toBeLessThanOrEqual(cap);
     }
   });
 
