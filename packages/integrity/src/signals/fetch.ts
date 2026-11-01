@@ -32,9 +32,22 @@
  * has at most `maxSessionsPerNetwork` announcers on the channel, and so does a linked network) is
  * judged "too few" / "no media" against the reduced share `P2P_HTTP_SHARE`. "Too many" is always judged against share 1, so an honest lone peer that falls
  * back to HTTP never trips it. Legacy `p2p`-assigned rows are judged like origin sessions.
+ *
+ * **Playback modes** (ADR 0016 decision 6). A session's watch time splits into live seconds and
+ * DVR seconds (`dvrSeconds`, from `playback_sessions.dvr_seconds`; absent = 0, all live), and the
+ * origin's counters split the same way (`dvrFetches`, from `/dvr/` entries marked `mode: "dvr"`;
+ * absent mode = live). Each part is judged against its own fetches: the live part as above with
+ * the live seconds, the DVR part as an origin session (DVR is origin-only: no relay, no CDN, no
+ * P2P share) on the recorder's full segments (`dvrSegmentDurationSeconds`, no parts). A client
+ * that claims `live` while fetching only `/dvr/` shows no live media and fails `no_media_fetched`;
+ * one that claims `dvr` without a DVR grant has no DVR fetches and fails the same way. Once either
+ * mode has origin counters, the other mode's missing counters are zeros, not "no accounting".
+ * DVR seconds that verify still count toward the verified-watch gate (the verdict is one).
  */
+import type { PLAYBACK_MODES } from "@commonair/contracts/enums";
 import {
   type FetchEvidence,
+  type FetchSummary,
   type HeartbeatSample,
   isRelayFetch,
   type P2pEvidence,
@@ -43,6 +56,8 @@ import {
   type Signal,
 } from "../types.ts";
 import { noisyOr, round } from "./combine.ts";
+
+type PlaybackMode = (typeof PLAYBACK_MODES)[number];
 
 export const FETCH_WEIGHTS = {
   no_media_fetched: 0.9,
@@ -76,8 +91,24 @@ export const DB_ONLY_MIN_RATIO = 0.1;
 /** HTTP share a P2P-evidenced session must still fetch over HTTP (the live edge). */
 export const P2P_HTTP_SHARE = 0.1;
 
-type FetchSession = Pick<SessionFacts, "assignedSource" | "watchSeconds">;
-type FetchCtx = Pick<ScoringContext, "segmentDurationSeconds" | "partsPerSegment" | "p2p">;
+/** The recorder's segment length (`services/media/src/settings.ts`): DVR serves those, never parts. */
+export const DVR_SEGMENT_SECONDS = 4;
+/**
+ * Like `TOO_MANY_ALLOWANCE_SECONDS`, for DVR: each seek refills the player's forward buffer
+ * (hls.js keeps ~30 s ahead), so an honest viewer who scrubs fetches more than they watch.
+ */
+export const DVR_TOO_MANY_ALLOWANCE_SECONDS = 120;
+
+type FetchSession = Pick<SessionFacts, "assignedSource" | "watchSeconds"> & {
+  /** Of `watchSeconds`, the seconds credited in `dvr` mode. Absent = 0. */
+  dvrSeconds?: number;
+};
+type FetchCtx = Pick<ScoringContext, "segmentDurationSeconds" | "partsPerSegment" | "p2p"> & {
+  /** Origin counters of the session's `/dvr/` fetches; absent or null = none recorded. */
+  dvrFetches?: FetchSummary | null;
+  /** Default `DVR_SEGMENT_SECONDS`. */
+  dvrSegmentDurationSeconds?: number;
+};
 
 export interface FetchFindings {
   checks: FetchCheck[];
@@ -106,7 +137,51 @@ function p2pMeasures(measures: Record<string, number>, p2p: P2pEvidence | null |
   if (p2p.evidenced) measures.httpShare = P2P_HTTP_SHARE;
 }
 
+const ZERO: FetchSummary = { playlists: 0, segments: 0, parts: 0 };
+const hasCounts = (f: FetchSummary | null | undefined): f is FetchSummary =>
+  f !== null && f !== undefined && (f.playlists ?? 0) + f.segments + (f.parts ?? 0) > 0;
+
+/**
+ * The fetch checks for a session, each playback mode judged against its own fetches (see the
+ * module comment). Without DVR seconds or DVR fetches this is exactly the single-mode judgement.
+ */
 export function fetchChecks(session: FetchSession, fetches: FetchEvidence, ctx: FetchCtx): FetchFindings {
+  const total = Math.max(0, session.watchSeconds);
+  const dvrSeconds = Math.min(total, Math.max(0, session.dvrSeconds ?? 0));
+  const dvrFetches = ctx.dvrFetches ?? null;
+  if (dvrSeconds === 0 && !hasCounts(dvrFetches)) return modeChecks(session, fetches, ctx);
+
+  // Origin counters exist for one mode: the other mode's absence is a zero, not a gap.
+  const origin = session.assignedSource !== "relay" && session.assignedSource !== "cdn";
+  const liveFetches = fetches === null && origin && hasCounts(dvrFetches) ? ZERO : fetches;
+  const live = modeChecks({ ...session, watchSeconds: total - dvrSeconds }, liveFetches, ctx);
+  const dvrDur = ctx.dvrSegmentDurationSeconds ?? DVR_SEGMENT_SECONDS;
+  const dvr = modeChecks(
+    { assignedSource: "origin", watchSeconds: dvrSeconds },
+    // Full segments only, so parts are known to be zero; no counters at all is no DVR media.
+    { playlists: dvrFetches?.playlists ?? 0, segments: dvrFetches?.segments ?? 0, parts: 0 },
+    { segmentDurationSeconds: dvrDur, partsPerSegment: 1, p2p: null },
+    DVR_TOO_MANY_ALLOWANCE_SECONDS,
+  );
+  const measures: Record<string, number> = { ...live.measures, liveSeconds: round(total - dvrSeconds) };
+  for (const [k, v] of Object.entries(dvr.measures)) measures[`dvr${k[0]?.toUpperCase() ?? ""}${k.slice(1)}`] = v;
+  measures.dvrSeconds = round(dvrSeconds);
+  return {
+    checks: [...new Set([...live.checks, ...dvr.checks])],
+    measures,
+    mediaUnconfirmed: live.mediaUnconfirmed || dvr.mediaUnconfirmed,
+    // Unjudged only when the live part was and there is no DVR part to judge instead.
+    skipped: dvrSeconds > 0 ? null : live.skipped,
+  };
+}
+
+/** One playback mode's checks: its claimed seconds (`watchSeconds`) against its fetches. */
+function modeChecks(
+  session: FetchSession,
+  fetches: FetchEvidence,
+  ctx: FetchCtx,
+  tooManyAllowanceSeconds = TOO_MANY_ALLOWANCE_SECONDS,
+): FetchFindings {
   const checks: FetchCheck[] = [];
   const measures: Record<string, number> = {};
   const none = (skipped: FetchFindings["skipped"], mediaUnconfirmed = false): FetchFindings => ({
@@ -177,7 +252,7 @@ export function fetchChecks(session: FetchSession, fetches: FetchEvidence, ctx: 
         }
       }
       if (!mediaUnconfirmed && full >= MIN_EXPECTED_SEGMENTS) {
-        const ceiling = full * TOO_MANY_RATIO + TOO_MANY_ALLOWANCE_SECONDS / segDur;
+        const ceiling = full * TOO_MANY_RATIO + tooManyAllowanceSeconds / segDur;
         measures.tooManyCeiling = round(ceiling);
         if (effectiveSegments > ceiling) checks.push("too_many_segments");
       }
@@ -193,16 +268,23 @@ export function fetchChecks(session: FetchSession, fetches: FetchEvidence, ctx: 
  * over the session's life.
  */
 export function claimedSecondsUntil(
-  beats: readonly HeartbeatSample[],
+  beats: readonly (HeartbeatSample & { mode?: PlaybackMode })[],
   untilMs: number,
-  session: Pick<SessionFacts, "watchSeconds" | "startedAt" | "lastHeartbeatAt">,
+  session: Pick<SessionFacts, "watchSeconds" | "startedAt" | "lastHeartbeatAt"> & { dvrSeconds?: number },
+  opts: { mode?: PlaybackMode } = {},
 ): number {
-  if (beats.length > 0) return round(beats.filter((b) => b.at <= untilMs).reduce((a, b) => a + b.playedSeconds, 0));
+  // With a mode, only that mode's playback counts (a beat without one is live); relay receipts
+  // cover live fetches only, so a relay session's DVR seconds are judged on the origin's counters.
+  const counted = opts.mode === undefined ? beats : beats.filter((b) => (b.mode ?? "live") === opts.mode);
+  if (beats.length > 0) return round(counted.filter((b) => b.at <= untilMs).reduce((a, b) => a + b.playedSeconds, 0));
   const start = session.startedAt.getTime();
   const end = (session.lastHeartbeatAt ?? session.startedAt).getTime();
   if (end <= start) return 0;
   const covered = Math.min(1, Math.max(0, (untilMs - start) / (end - start)));
-  return round(session.watchSeconds * covered);
+  const dvr = Math.min(session.watchSeconds, Math.max(0, session.dvrSeconds ?? 0));
+  const seconds =
+    opts.mode === undefined ? session.watchSeconds : opts.mode === "dvr" ? dvr : session.watchSeconds - dvr;
+  return round(seconds * covered);
 }
 
 export function fetchSignal(session: FetchSession, fetches: FetchEvidence, ctx: FetchCtx): Signal | null {

@@ -3,7 +3,14 @@
 
 import { describe, expect, test } from "vite-plus/test";
 import { mergeAllowances } from "../src/allowance.ts";
-import { findSuperseded, type LiveSession, rankConcurrency, SUPERSEDE_DEFAULTS } from "../src/concurrency.ts";
+import {
+  findSuperseded,
+  liveViewers,
+  type LiveSession,
+  modeOf,
+  rankConcurrency,
+  SUPERSEDE_DEFAULTS,
+} from "../src/concurrency.ts";
 
 const NOW = new Date("2026-03-01T12:00:00Z");
 const ago = (s: number) => new Date(NOW.getTime() - s * 1000);
@@ -14,6 +21,7 @@ const live = (id: string, o: Partial<LiveSession> & { start: number; seen?: numb
   channelId: o.channelId ?? "ch",
   startedAt: ago(o.start),
   lastSeenAt: ago(o.seen ?? Math.min(o.start, 5)),
+  ...(o.mode ? { mode: o.mode } : {}),
 });
 
 describe("findSuperseded (reload overlap)", () => {
@@ -131,5 +139,54 @@ describe("mergeAllowances", () => {
         { at: new Date(3000), codes: [] },
       ]),
     ).toEqual({ since: 5000, codes: ["datacenter_ip", "fetch_pattern", "headless"] });
+  });
+});
+
+describe("catching up (ADR 0016 decision 6)", () => {
+  test("a DVR session takes no live slot; DVR sessions rank among themselves", () => {
+    const sessions = [
+      live("tab-live", { start: 300, userId: "u" }),
+      live("tab-dvr", { start: 100, userId: "u", mode: "dvr" }),
+      live("tab-dvr2", { start: 50, userId: "u", mode: "dvr" }),
+    ];
+    const r = rankConcurrency(sessions);
+    expect(r.get("tab-live")!.device).toEqual({ rank: 1, concurrent: 1 });
+    expect(r.get("tab-live")!.account).toEqual({ rank: 1, concurrent: 1 });
+    expect(r.get("tab-dvr2")!.device).toEqual({ rank: 1, concurrent: 2 });
+    expect(r.get("tab-dvr")!.device).toEqual({ rank: 2, concurrent: 2 });
+    expect(r.get("tab-dvr")!.account).toEqual({ rank: 2, concurrent: 2 });
+  });
+
+  test("absent mode is live", () => {
+    const r = rankConcurrency([live("a", { start: 200 }), live("b", { start: 100, mode: "live" })]);
+    expect(r.get("b")!.device).toEqual({ rank: 1, concurrent: 2 });
+    expect(r.get("a")!.device).toEqual({ rank: 2, concurrent: 2 });
+  });
+
+  test("supersede ignores the mode: a reload into DVR still replaces the old live session", () => {
+    const old = live("old", { start: 600, seen: 200 });
+    const reload = live("new", { start: 199, mode: "dvr" });
+    expect(findSuperseded([old, reload], NOW)).toEqual(new Set(["old"]));
+    expect(
+      findSuperseded(
+        [
+          { ...old, mode: "dvr" },
+          { ...reload, mode: "live" },
+        ],
+        NOW,
+      ),
+    ).toEqual(new Set(["old"]));
+  });
+
+  test("liveViewers keeps only live sessions; modeOf defaults to live", () => {
+    const sessions = [
+      live("a", { start: 1 }),
+      live("b", { start: 1, mode: "dvr" }),
+      live("c", { start: 1, mode: "live" }),
+    ];
+    expect(liveViewers(sessions).map((s) => s.id)).toEqual(["a", "c"]);
+    expect(modeOf({})).toBe("live");
+    expect(modeOf({ mode: "dvr" })).toBe("dvr");
+    expect(liveViewers([])).toEqual([]);
   });
 });

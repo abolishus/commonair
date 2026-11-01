@@ -13,6 +13,13 @@
  * genuinely concurrent.
  *
  * Remaining live sessions are ranked newest first per device and per account.
+ *
+ * **Catching up** (ADR 0016 decision 6): a session in `dvr` mode is not a live viewer. It takes
+ * no place in the live ranking, so a viewer's DVR tab never pushes their live tab down (and the
+ * live viewer count, discovery, transcode thresholds and patronage hours, which count live
+ * sessions only, never see it). DVR sessions are ranked among themselves instead: they still earn
+ * verified watch time for the verified-watch gate, so the per-device and per-account caps still
+ * apply to them. Supersede rules ignore the mode: a reload is a reload in either mode.
  */
 import type { PLAYBACK_MODES } from "@commonair/contracts/enums";
 import type { Concurrency } from "./types.ts";
@@ -27,7 +34,7 @@ export interface LiveSession {
   lastSeenAt: Date;
   /**
    * `playback_sessions.playback_mode` (ADR 0016 decision 6): a `dvr` session is catching up, not a
-   * live viewer. Absent = `live`. Filled by `jobs.ts`; W2-dvr applies it here.
+   * live viewer. Absent = `live`. Filled by `jobs.ts`.
    */
   mode?: (typeof PLAYBACK_MODES)[number];
 }
@@ -44,6 +51,13 @@ export interface SupersedeOptions {
  * between timer runs: a live tab would have beaten by then.
  */
 export const SUPERSEDE_DEFAULTS: SupersedeOptions = { graceMs: 90_000, slackMs: 2_000 };
+
+/** The session's playback mode (absent = live). */
+export const modeOf = (s: Pick<LiveSession, "mode">): (typeof PLAYBACK_MODES)[number] => s.mode ?? "live";
+
+/** Sessions that count as live viewers (ADR 0016 decision 6): not catching up in DVR. */
+export const liveViewers = <T extends Pick<LiveSession, "mode">>(sessions: readonly T[]): T[] =>
+  sessions.filter((s) => modeOf(s) === "live");
 
 const byStart = (a: LiveSession, b: LiveSession) =>
   a.startedAt.getTime() - b.startedAt.getTime() || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
@@ -95,7 +109,10 @@ export interface SessionConcurrency {
   account: Concurrency | null;
 }
 
-/** Newest-first rank per device and per account, over sessions that are not superseded. */
+/**
+ * Newest-first rank per device and per account, over sessions that are not superseded. Live and
+ * DVR sessions are ranked apart (each mode is its own pool): catching up never takes a live slot.
+ */
 export function rankConcurrency(
   live: readonly LiveSession[],
   superseded: ReadonlySet<string> = new Set(),
@@ -110,11 +127,11 @@ export function rankConcurrency(
     }
   };
   rank(
-    groupBy(counted, (s) => s.deviceHash),
+    groupBy(counted, (s) => `${modeOf(s)}\u0000${s.deviceHash}`),
     device,
   );
   rank(
-    groupBy(counted, (s) => s.userId),
+    groupBy(counted, (s) => (s.userId === null ? null : `${modeOf(s)}\u0000${s.userId}`)),
     account,
   );
   const out = new Map<string, SessionConcurrency>();
