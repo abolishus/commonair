@@ -41,6 +41,8 @@ export async function loadBootstrap(cookie: string | undefined): Promise<Bootstr
           sourceUrl: safeHttpUrl(info.sourceUrl),
           p2pDefault: info.features.p2pDefault,
           chatSafety: info.features.watchGate || info.features.surgeGuard,
+          twitchImport: info.features.twitchImport,
+          federation: info.features.federation,
         },
         at: Date.now(),
       };

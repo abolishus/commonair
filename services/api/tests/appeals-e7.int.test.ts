@@ -402,7 +402,10 @@ describe("overturned moderation_action appeals", () => {
     expect(await banOf(v.userId)).toEqual({ banned: true, banReason: "moderation" });
     const suspend = await latestModAction(v.userId, "suspend_user");
     const a = await insertAppeal(v.userId, "moderation", "moderation_action", suspend!.id);
+    const eventsBefore = await suspensions(db(), await channelIdOf(v.userId));
     expect((await resolve(mod2, a.id, "overturned")).status).toBe(200);
+    // Decision (z): handed back, never lifted, so no `channel.suspension {suspended: false}`.
+    expect(await suspensions(db(), await channelIdOf(v.userId))).toEqual(eventsBefore);
     const [u] = await db()
       .select({ banned: schema.users.banned, banReason: schema.users.banReason, banExpires: schema.users.banExpires })
       .from(schema.users)

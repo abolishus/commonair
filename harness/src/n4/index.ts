@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * `federation` steps 1–8 (docs/testing/b7-selectors.md, "Scenarios"; ADR 0030) and their run
+ * `federation` steps 1–9 (docs/testing/b7-selectors.md, "Scenarios"; ADR 0030) and their run
  * state, against the in-harness ActivityPub peer (`src/mocks/activitypub/`). With `via=web` the
  * steps that have a studio or admin page use `src/n4/web.ts` (N4-web). Stub: N4-delivery fills it
  * (and may split it into more modules in this directory, except `web.ts`).
@@ -37,4 +37,5 @@ export const FEDERATION_STEP_RUNNERS: Readonly<Record<FederationStep, (run: Fede
   6: notMerged,
   7: notMerged,
   8: notMerged,
+  9: notMerged,
 };

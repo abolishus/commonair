@@ -57,7 +57,8 @@ export interface VectorRequest {
 export interface Vector {
   name: string;
   request: VectorRequest;
-  verify: { now: string; key: KeyName; actorId?: string };
+  /** `owner`: the actor the fetched key document names (by default the `keyId` without its fragment). */
+  verify: { now: string; key: KeyName; owner: string; actorId?: string };
   /** "ok", or the error `verifyRequest` must return. */
   expect: "ok" | SignatureError;
   /** For the "ok" cases signed here: the exact string that was signed. */
@@ -93,7 +94,7 @@ export async function federationVectors() {
   const shared = await signed("POST", "https://instance.example/ap/inbox", `${remoteActor}#main-key`, undo);
   const outbound = await signed("POST", `${remoteActor}/inbox`, `${channel}#main-key`, accept);
   const fetch = await signed("GET", remoteActor, `${channel}#main-key`);
-  const v = { now: NOW, key: "actor" as const };
+  const v = { now: NOW, key: "actor" as const, owner: remoteActor };
   const sigOf = (r: VectorRequest) => r.headers.signature as string;
   const later = (seconds: number) => new Date(Date.parse(NOW) + seconds * 1000).toISOString();
 
@@ -126,15 +127,24 @@ export async function federationVectors() {
     `keyId="${remoteActor}#main-key",algorithm="rsa-sha256",headers="${short.join(" ")}",signature="${shortSig}"`,
   );
   const evil = await signed("POST", inboxUrl, "https://evil.example/users/alice#main-key", follow);
+  // Same origin, another actor's key: only the key document's owner tells them apart.
+  const eve = await signed("POST", inboxUrl, "https://mastodon.example/users/eve#main-key", follow);
+  const ahead = (seconds: number) => new Date(Date.parse(DATE) - seconds * 1000).toISOString();
 
   const vectors: Vector[] = [
     { name: "inbound follow", request: inbound, verify: v, expect: "ok", signingString: lines(inbound, full) },
     { name: "shared inbox undo", request: shared, verify: v, expect: "ok", signingString: lines(shared, full) },
-    { name: "outbound accept", request: outbound, verify: v, expect: "ok", signingString: lines(outbound, full) },
+    {
+      name: "outbound accept",
+      request: outbound,
+      verify: { ...v, owner: channel },
+      expect: "ok",
+      signingString: lines(outbound, full),
+    },
     {
       name: "actor fetch without body",
       request: fetch,
-      verify: { ...v, actorId: channel },
+      verify: { ...v, owner: channel, actorId: channel },
       expect: "ok",
       signingString: lines(fetch, short),
     },
@@ -187,8 +197,34 @@ export async function federationVectors() {
       verify: { ...v, now: later(-43_200 - 120) },
       expect: "date_skew",
     },
+    // A sender's clock may run ahead by under an hour (Mastodon's margin), not more.
+    { name: "date under an hour ahead", request: inbound, verify: { ...v, now: ahead(3_599) }, expect: "ok" },
+    { name: "date over an hour ahead", request: inbound, verify: { ...v, now: ahead(3_601) }, expect: "date_skew" },
     { name: "unparseable date", request: withHeader(inbound, "date", "yesterday"), verify: v, expect: "bad_date" },
-    { name: "wrong keyId host", request: evil, verify: v, expect: "key_actor_mismatch" },
+    {
+      name: "date not an IMF-fixdate",
+      request: withHeader(inbound, "date", "2025-01-05T21:31:40Z"),
+      verify: v,
+      expect: "bad_date",
+    },
+    {
+      name: "wrong keyId host",
+      request: evil,
+      verify: { ...v, owner: "https://evil.example/users/alice" },
+      expect: "key_actor_mismatch",
+    },
+    {
+      name: "same origin, another actor's key",
+      request: eve,
+      verify: { ...v, owner: "https://mastodon.example/users/eve" },
+      expect: "key_actor_mismatch",
+    },
+    {
+      name: "keyId on the actor's origin, key document owned by another actor",
+      request: inbound,
+      verify: { ...v, owner: "https://mastodon.example/users/eve" },
+      expect: "key_actor_mismatch",
+    },
     { name: "wrong key", request: inbound, verify: { ...v, key: "other" }, expect: "bad_signature" },
     { name: "digest not covered", request: noDigestCovered, verify: v, expect: "missing_header" },
     {

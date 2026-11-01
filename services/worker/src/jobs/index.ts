@@ -8,6 +8,7 @@
  */
 import { integrityJobs } from "../integrity/jobs.ts";
 import { job as giveawayClose } from "../interact/giveaways/close.ts";
+import { job as banExpiry } from "../moderation/ban-expiry.ts";
 import type { JobDefinition } from "../runtime/registry.ts";
 import { job as accountDeletion } from "./account-deletion.ts";
 import { job as broadcastRollup, retentionJob as broadcastRollupRetention } from "./broadcast-rollup.ts";
@@ -151,4 +152,6 @@ export const JOBS = [
   federationSweep,
   relayPurge,
   relayPurgeCleanup,
+  // Decision (z): a lapsed timed ban writes its unsuspension.
+  banExpiry,
 ] as readonly JobDefinition[];

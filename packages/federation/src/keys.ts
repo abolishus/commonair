@@ -68,7 +68,8 @@ export function pkcs1ToSpki(pkcs1: Uint8Array): Uint8Array<ArrayBuffer> {
   return new Uint8Array(der(0x30, seq));
 }
 
-function checkBits(key: CryptoKey): CryptoKey {
+/** Refuse an RSA key outside `MIN_RSA_BITS`..`MAX_RSA_BITS` (also for a caller's own CryptoKey). */
+export function checkKeyBits(key: CryptoKey): CryptoKey {
   const bits = (key.algorithm as RsaHashedKeyAlgorithm).modulusLength;
   if (bits < MIN_RSA_BITS || bits > MAX_RSA_BITS) throw new Error(`RSA key size ${bits} is out of bounds`);
   return key;
@@ -102,14 +103,14 @@ export async function importPublicKeyPem(pem: string): Promise<CryptoKey> {
   if (label === "PUBLIC KEY") spki = bytes;
   else if (label === "RSA PUBLIC KEY") spki = pkcs1ToSpki(bytes);
   else throw new Error(`unsupported public key PEM (${label})`);
-  return checkBits(await crypto.subtle.importKey("spki", spki, RSA_ALGORITHM, true, ["verify"]));
+  return checkKeyBits(await crypto.subtle.importKey("spki", spki, RSA_ALGORITHM, true, ["verify"]));
 }
 
 /** Import a stored PKCS#8 private key for signing. Not extractable once imported. */
 export async function importPrivateKeyPem(pem: string): Promise<CryptoKey> {
   const { label, der: bytes } = fromPem(pem);
   if (label !== "PRIVATE KEY") throw new Error(`unsupported private key PEM (${label})`);
-  return checkBits(await crypto.subtle.importKey("pkcs8", bytes, RSA_ALGORITHM, false, ["sign"]));
+  return checkKeyBits(await crypto.subtle.importKey("pkcs8", bytes, RSA_ALGORITHM, false, ["sign"]));
 }
 
 /** The SPKI PEM of a PKCS#8 private key PEM (to rebuild the actor document from a stored key). */

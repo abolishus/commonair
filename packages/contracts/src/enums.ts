@@ -654,6 +654,9 @@ export const JURY_REASON_CODES = [
 export type JuryReasonCode = (typeof JURY_REASON_CODES)[number];
 /** What a jury case samples (`jury_cases.subject_kind`). */
 export const JURY_SUBJECT_KINDS = ["moderation_case", "report"] as const;
+/** Why a sampled case left its panel (`jury_cases.withdrawn_reason`): it turned ineligible after sampling. */
+export const JURY_WITHDRAW_REASONS = ["legal_hold", "ncii", "appeal", "ineligible"] as const;
+export type JuryWithdrawReason = (typeof JURY_WITHDRAW_REASONS)[number];
 /** Jury defaults (decision (u)); `panelSize` and `casesPerPanel` are also governance settings. Results suppress cells under `k` votes. */
 export const JURY_RULES = { panelSize: 7, casesPerPanel: 20, sampleDays: 30, k: 10 } as const;
 

@@ -42,6 +42,14 @@ async function emit<T extends EventType>(
 export const vodPublic = sql<boolean>`(${vods.status} = 'ready' and ${vods.visibility} = 'public' and ${vods.removedReason} is null)`;
 
 /**
+ * A VOD whose live DVR may be serving (the row's part of `dvrServable`): recording, not removed.
+ * Removing it mid-broadcast changes no "public" state, yet relays must drop `dvr/<vodId>/` at once
+ * (decision (x)), so that removal writes `media.vod.state {public: false}` too.
+ */
+export const vodDvrLive = sql<boolean>`(${vods.status} = 'recording' and ${vods.removedReason} is null)`;
+const vodRemoved = sql<boolean>`(${vods.removedReason} is not null or ${vods.status} = 'deleted')`;
+
+/**
  * A clip everyone may watch: never more visible than its source (the API's `media/visibility.ts`).
  * The outer columns are spelled out: Drizzle leaves them unqualified in a single-table select, and
  * inside the subquery an unqualified `broadcast_id` would mean the VOD's own.
@@ -68,6 +76,10 @@ export function mediaScopeOf(subjectType: string | null, subjectId: string | nul
 interface State {
   channelId: string;
   on: boolean;
+  /** VODs, before the write: DVR may be serving (`vodDvrLive`). */
+  dvr?: boolean;
+  /** VODs, after the write: removed or deleted. */
+  removed?: boolean;
 }
 
 interface Snapshot {
@@ -79,7 +91,13 @@ async function snapshot(tx: Executor, scope: MediaScope): Promise<Snapshot> {
   // Locked in a fixed order (VODs, then clips, by id), as the removal paths write them.
   const vodRows = scope.vods
     ? await tx
-        .select({ id: vods.id, channelId: vods.channelId, broadcastId: vods.broadcastId, on: vodPublic })
+        .select({
+          id: vods.id,
+          channelId: vods.channelId,
+          broadcastId: vods.broadcastId,
+          on: vodPublic,
+          dvr: vodDvrLive,
+        })
         .from(vods)
         .where(scope.vods)
         .orderBy(vods.id)
@@ -104,7 +122,7 @@ async function snapshot(tx: Executor, scope: MediaScope): Promise<Snapshot> {
         .for("update", { of: clips })
     : [];
   return {
-    vods: new Map(vodRows.map((r) => [r.id, { channelId: r.channelId, on: r.on }])),
+    vods: new Map(vodRows.map((r) => [r.id, { channelId: r.channelId, on: r.on, dvr: r.dvr }])),
     clips: new Map(clipRows.map((r) => [r.id, { channelId: r.channelId, on: r.on }])),
   };
 }
@@ -115,7 +133,7 @@ async function reread(tx: Executor, before: Snapshot): Promise<Snapshot> {
   const vodRows =
     vodIds.length > 0
       ? await tx
-          .select({ id: vods.id, channelId: vods.channelId, on: vodPublic })
+          .select({ id: vods.id, channelId: vods.channelId, on: vodPublic, removed: vodRemoved })
           .from(vods)
           .where(inArray(vods.id, vodIds))
       : [];
@@ -127,20 +145,27 @@ async function reread(tx: Executor, before: Snapshot): Promise<Snapshot> {
           .where(inArray(clips.id, clipIds))
       : [];
   return {
-    vods: new Map(vodRows.map((r) => [r.id, { channelId: r.channelId, on: r.on }])),
+    vods: new Map(vodRows.map((r) => [r.id, { channelId: r.channelId, on: r.on, removed: r.removed }])),
     clips: new Map(clipRows.map((r) => [r.id, { channelId: r.channelId, on: r.on }])),
   };
 }
 
-/** Pure: the rows whose state changed (a row gone afterwards counts as off). Sorted by id. */
+/**
+ * Pure: the rows whose state changed (a row gone afterwards counts as off), plus VODs whose DVR a
+ * removal stopped. Sorted by id.
+ */
 export function changedStates(
   before: ReadonlyMap<string, State>,
   after: ReadonlyMap<string, State>,
 ): { id: string; channelId: string; on: boolean }[] {
   const out: { id: string; channelId: string; on: boolean }[] = [];
   for (const [id, b] of [...before].sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0))) {
-    const on = after.get(id)?.on ?? false;
+    const a = after.get(id);
+    const on = a?.on ?? false;
     if (on !== b.on) out.push({ id, channelId: b.channelId, on });
+    // A recording VOD removed mid-broadcast: still not public, but its DVR must stop.
+    else if (b.dvr === true && !on && (a === undefined || a.removed === true))
+      out.push({ id, channelId: b.channelId, on: false });
   }
   return out;
 }
@@ -195,18 +220,21 @@ export function suspensionScope(target: { userId?: string | null; channelId?: st
 
 /**
  * Run `write` (a suspension or unsuspension) and write `channel.suspension` for every channel in
- * `where` whose suspended state it changed, in the same transaction.
+ * `where` whose suspended state it changed, in the same transaction. `beforeAsOf` reads the state
+ * before the write as of an earlier time: a timed ban that lapsed is cleared after the fact, so its
+ * "before" is the moment it was still in force.
  */
 export async function withSuspensionState<T>(
   tx: Executor,
   where: SQL | undefined,
   now: Date,
   write: () => Promise<T>,
+  { beforeAsOf = now }: { beforeAsOf?: Date } = {},
 ): Promise<T> {
   if (!where) return write();
   const read = (lock: boolean) => {
     const q = tx
-      .select({ id: channels.id, channelId: channels.id, on: channelSuspended(now) })
+      .select({ id: channels.id, channelId: channels.id, on: channelSuspended(lock ? beforeAsOf : now) })
       .from(channels)
       .where(where)
       .orderBy(channels.id);

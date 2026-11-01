@@ -17,16 +17,23 @@
 --      change; a member row never re-opens.
 --   3. Draws (decision (s)): `seed_commitment` is immutable on `giveaways` and `jury_panels`;
 --      `seed` is set once, only if it is 16-64 bytes of lowercase hex whose decoded bytes hash
---      (SHA-256) to the commitment, as `packages/draw` `commit()`; a drawn giveaway has its seed. `giveaway_entries` take inserts only
---      while the giveaway is open and before `closes_at`, never change, and are deleted only while
---      it is open; `giveaway_winners` are entrants, append-only. One open giveaway per channel is
---      the 0045 partial unique index.
---   4. Predictions (decision (v)): a bet with `media_ts >= lock_media_ts` is refused, and the
---      channel's owner, moderators and editors cannot bet.
+--      (SHA-256) to the commitment, as `packages/draw` `commit()`; a giveaway's seed is never
+--      revealed while it is open, and a drawn giveaway has its seed. `giveaway_entries` take
+--      inserts only while the giveaway is open, between `opens_at` and `closes_at`, never change,
+--      and are deleted only while it is open; `giveaway_winners` are entrants of a closed or drawn
+--      giveaway whose seed is revealed, append-only. One open giveaway per channel is the 0045
+--      partial unique index.
+--   4. Predictions (decision (v)): once `lock_media_ts` is set, a bet without a media time or at
+--      or after it is refused; a resolved or canceled prediction takes no bets; the channel's
+--      owner, moderators and editors cannot bet.
 --   5. Jury (decision (u)): a seat needs an active membership, no staff role, a known adult age
 --      and a live opt-in; a vote comes only from a seat of the case's panel while the panel is open
---      and is append-only; `jury_cases` refuse T0 and NCII cases, anything under an active legal
---      hold, and `watch_room` or NCII reports.
+--      and the case is not withdrawn, and is append-only. A `jury_cases` insert refuses open cases
+--      and reports, T0, hash-list, NCII and minor-safety cases (by clause) and reports (by
+--      reason), anything under an active legal hold, `watch_room` reports, and anything whose
+--      subject, reporter or channel owner is not a known adult. A case is then only withdrawn
+--      (`withdrawn_at`, once) or has its `pseudonym_map`/`rule_ref` updated, so one that turns
+--      ineligible after sampling (a hold, an NCII request, an appeal) can be taken out.
 --   6. Federation (ADR 0030): `federation_actor_keys` is append-only.
 --   7. Move links (decision (k)): at most `MOVE_LINK_RULES.maxActive` (10) unrevoked, unexpired
 --      links per channel; a revoked link stays revoked. Portability signing keys follow the
@@ -42,6 +49,10 @@
 -- Functions pin search_path and schema-qualify tables (ADR 0004).
 
 -- 1. Follower count ------------------------------------------------------------------------
+-- Held to the end of the migration's transaction, so no follow lands between the recount and the
+-- trigger that keeps it.
+LOCK TABLE public.follows IN SHARE ROW EXCLUSIVE MODE;
+--> statement-breakpoint
 UPDATE public.channels c
    SET follower_count = n.cnt
   FROM (SELECT ch.id, (SELECT count(*) FROM public.follows f WHERE f.channel_id = ch.id AND f.excluded_at IS NULL)::int AS cnt
@@ -260,6 +271,10 @@ BEGIN
        OR (OLD.status = 'closed' AND NEW.status IN ('drawn', 'cancelled'))) THEN
     RAISE EXCEPTION 'giveaway status % cannot become %', OLD.status, NEW.status USING ERRCODE = 'check_violation';
   END IF;
+  -- Entrants could steer the outcome if they saw the seed before entries closed.
+  IF OLD.seed IS NULL AND NEW.seed IS NOT NULL AND NEW.status = 'open' THEN
+    RAISE EXCEPTION 'a giveaway''s seed is revealed only after entries close' USING ERRCODE = 'check_violation';
+  END IF;
   IF NEW.status = 'drawn' AND NEW.seed IS NULL THEN
     RAISE EXCEPTION 'a drawn giveaway has its seed revealed' USING ERRCODE = 'check_violation';
   END IF;
@@ -289,7 +304,8 @@ BEGIN
   END IF;
   -- FOR SHARE: a close in flight either commits first (and is seen) or waits for this entry.
   SELECT * INTO g FROM public.giveaways WHERE id = NEW.giveaway_id FOR SHARE;
-  IF g.status <> 'open' OR (g.closes_at IS NOT NULL AND clock_timestamp() >= g.closes_at) THEN
+  IF g.status <> 'open' OR clock_timestamp() < g.opens_at
+     OR (g.closes_at IS NOT NULL AND clock_timestamp() >= g.closes_at) THEN
     RAISE EXCEPTION 'the giveaway is closed to entries' USING ERRCODE = 'check_violation';
   END IF;
   RETURN NEW;
@@ -316,9 +332,10 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM public.giveaway_entries e WHERE e.giveaway_id = NEW.giveaway_id AND e.user_id = NEW.user_id) THEN
     RAISE EXCEPTION 'a giveaway winner is an entrant' USING ERRCODE = 'check_violation';
   END IF;
+  -- The same transaction can reveal the seed, write the winners and set `drawn`.
   IF NOT EXISTS (SELECT 1 FROM public.giveaways g WHERE g.id = NEW.giveaway_id AND g.status IN ('closed', 'drawn')
-                 AND NEW.rank <= g.winner_count) THEN
-    RAISE EXCEPTION 'winners are drawn after entries close, at most winner_count' USING ERRCODE = 'check_violation';
+                 AND g.seed IS NOT NULL AND NEW.rank <= g.winner_count) THEN
+    RAISE EXCEPTION 'winners are drawn after entries close and the seed is revealed, at most winner_count' USING ERRCODE = 'check_violation';
   END IF;
   RETURN NEW;
 END $$;
@@ -339,8 +356,12 @@ LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE p public.predictions;
 BEGIN
   SELECT * INTO p FROM public.predictions WHERE id = NEW.prediction_id;
-  IF NEW.media_ts IS NOT NULL AND p.lock_media_ts IS NOT NULL AND NEW.media_ts >= p.lock_media_ts THEN
-    RAISE EXCEPTION 'the bet is at or after the media time betting locked at' USING ERRCODE = 'check_violation';
+  IF p.status IN ('resolved', 'canceled') THEN
+    RAISE EXCEPTION 'the prediction is % and takes no bets', p.status USING ERRCODE = 'check_violation';
+  END IF;
+  -- Fail closed: a bet with no media time cannot show it was placed before the lock.
+  IF p.lock_media_ts IS NOT NULL AND (NEW.media_ts IS NULL OR NEW.media_ts >= p.lock_media_ts) THEN
+    RAISE EXCEPTION 'the bet has no media time, or is at or after the media time betting locked at' USING ERRCODE = 'check_violation';
   END IF;
   IF TG_OP = 'INSERT' AND (
        EXISTS (SELECT 1 FROM public.channels c WHERE c.id = p.channel_id AND c.owner_id = NEW.user_id)
@@ -385,27 +406,55 @@ CREATE TRIGGER jury_seats_guard BEFORE INSERT OR UPDATE ON public.jury_seats
   FOR EACH ROW EXECUTE FUNCTION commonair_jury_seat_guard();
 --> statement-breakpoint
 
+-- Not a known adult: a minor, or no valid birth date (fail closed). Null ids are not parties.
+CREATE FUNCTION commonair_not_known_adult(u uuid) RETURNS boolean
+LANGUAGE sql STABLE SET search_path = pg_catalog, public, pg_temp AS $$
+  SELECT u IS NOT NULL AND public.commonair_age_band(u) IS DISTINCT FROM 'adult'
+$$;
+--> statement-breakpoint
+
 CREATE FUNCTION commonair_jury_case_guard() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE
   mc public.moderation_cases;
   rp public.reports;
+  ch_owner uuid;
 BEGIN
-  IF TG_OP = 'UPDATE' AND (NEW.panel_id IS DISTINCT FROM OLD.panel_id OR NEW.subject_kind IS DISTINCT FROM OLD.subject_kind
-                           OR NEW.subject_id IS DISTINCT FROM OLD.subject_id) THEN
-    RAISE EXCEPTION 'a jury case''s subject never changes' USING ERRCODE = 'insufficient_privilege';
+  IF TG_OP = 'UPDATE' THEN
+    -- Eligibility is checked once, at sampling; afterwards a case can only be withdrawn (once)
+    -- or have its pseudonyms and clause reference written.
+    IF NEW.panel_id IS DISTINCT FROM OLD.panel_id OR NEW.subject_kind IS DISTINCT FROM OLD.subject_kind
+       OR NEW.subject_id IS DISTINCT FROM OLD.subject_id OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
+      RAISE EXCEPTION 'a jury case''s subject never changes' USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    IF OLD.withdrawn_at IS NOT NULL AND (NEW.withdrawn_at IS DISTINCT FROM OLD.withdrawn_at
+                                         OR NEW.withdrawn_reason IS DISTINCT FROM OLD.withdrawn_reason) THEN
+      RAISE EXCEPTION 'a jury case is withdrawn once' USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    RETURN NEW;
+  END IF;
+  IF NEW.withdrawn_at IS NOT NULL THEN
+    RAISE EXCEPTION 'a jury case is sampled before it is withdrawn' USING ERRCODE = 'check_violation';
   END IF;
   IF NEW.subject_kind = 'moderation_case' THEN
     SELECT * INTO mc FROM public.moderation_cases WHERE id = NEW.subject_id;
     IF mc.id IS NULL THEN
       RAISE EXCEPTION 'a jury case names a moderation case' USING ERRCODE = 'foreign_key_violation';
     END IF;
-    IF mc.tier = 't0' OR mc.list_category IS NOT NULL OR mc.status = 'dismissal_pending' THEN
-      RAISE EXCEPTION 'T0 and hash-list (CSAM, NCII) cases are never sampled' USING ERRCODE = 'check_violation';
+    -- NCII and minor safety by clause too: a report-origin T1 case carries no list category.
+    IF mc.tier = 't0' OR mc.list_category IS NOT NULL
+       OR split_part(mc.rule_ref, '@', 1) IN ('decency.intimate-images', 'illegal.ncii', 'safety.minors') THEN
+      RAISE EXCEPTION 'T0, hash-list, NCII and minor-safety cases are never sampled' USING ERRCODE = 'check_violation';
+    END IF;
+    IF mc.status NOT IN ('labelled', 'cleared', 'actioned', 'dismissed', 'confirmed') THEN
+      RAISE EXCEPTION 'only decided cases are sampled' USING ERRCODE = 'check_violation';
+    END IF;
+    SELECT c.owner_id INTO ch_owner FROM public.channels c WHERE c.id = mc.channel_id;
+    IF public.commonair_not_known_adult(mc.user_id) OR public.commonair_not_known_adult(ch_owner) THEN
+      RAISE EXCEPTION 'cases involving a minor (or an unknown age) are never sampled' USING ERRCODE = 'check_violation';
     END IF;
     IF EXISTS (SELECT 1 FROM public.legal_holds h WHERE h.released_at IS NULL
-                AND (h.case_id = mc.id OR h.user_id = mc.user_id
-                     OR h.user_id = (SELECT c.owner_id FROM public.channels c WHERE c.id = mc.channel_id))) THEN
+                AND (h.case_id = mc.id OR h.user_id = mc.user_id OR h.user_id = ch_owner)) THEN
       RAISE EXCEPTION 'cases under legal hold are never sampled' USING ERRCODE = 'check_violation';
     END IF;
   ELSE
@@ -413,13 +462,21 @@ BEGIN
     IF rp.id IS NULL THEN
       RAISE EXCEPTION 'a jury case names a report' USING ERRCODE = 'foreign_key_violation';
     END IF;
-    IF rp.subject_type = 'watch_room' OR rp.reason = 'ncii' THEN
-      RAISE EXCEPTION 'watch-room and NCII reports are never sampled' USING ERRCODE = 'check_violation';
+    IF rp.status = 'open' THEN
+      RAISE EXCEPTION 'only resolved reports are sampled' USING ERRCODE = 'check_violation';
+    END IF;
+    IF rp.subject_type = 'watch_room' OR rp.reason IN ('ncii', 'minor_safety') THEN
+      RAISE EXCEPTION 'watch-room, NCII and minor-safety reports are never sampled' USING ERRCODE = 'check_violation';
+    END IF;
+    SELECT c.owner_id INTO ch_owner FROM public.channels c WHERE c.id = rp.channel_id;
+    IF public.commonair_not_known_adult(rp.reporter_id) OR public.commonair_not_known_adult(ch_owner)
+       OR (rp.subject_type = 'user' AND public.commonair_not_known_adult(rp.subject_id)) THEN
+      RAISE EXCEPTION 'reports involving a minor (or an unknown age) are never sampled' USING ERRCODE = 'check_violation';
     END IF;
     IF EXISTS (SELECT 1 FROM public.legal_holds h WHERE h.released_at IS NULL
                 AND (h.user_id = rp.reporter_id
                      OR (rp.subject_type = 'user' AND h.user_id = rp.subject_id)
-                     OR h.user_id = (SELECT c.owner_id FROM public.channels c WHERE c.id = rp.channel_id))) THEN
+                     OR h.user_id = ch_owner)) THEN
       RAISE EXCEPTION 'reports under legal hold are never sampled' USING ERRCODE = 'check_violation';
     END IF;
   END IF;
@@ -436,8 +493,8 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM public.jury_cases jc
                    JOIN public.jury_seats s ON s.panel_id = jc.panel_id
                    JOIN public.jury_panels p ON p.id = jc.panel_id
-                  WHERE jc.id = NEW.case_id AND s.id = NEW.seat_id AND p.closed_at IS NULL) THEN
-    RAISE EXCEPTION 'only a seat of the case''s open panel votes' USING ERRCODE = 'check_violation';
+                  WHERE jc.id = NEW.case_id AND s.id = NEW.seat_id AND p.closed_at IS NULL AND jc.withdrawn_at IS NULL) THEN
+    RAISE EXCEPTION 'only a seat of the case''s open panel votes, on a case not withdrawn' USING ERRCODE = 'check_violation';
   END IF;
   RETURN NEW;
 END $$;

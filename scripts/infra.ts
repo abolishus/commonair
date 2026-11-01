@@ -461,8 +461,10 @@ export const CAPTIONS_OVERRIDE = "harness/compose.w2-captions.yaml";
 /**
  * The batch 7 overrides (W3, N3, N4): giveaways, the Twitch import against the harness mock, and
  * federation. Layered only with `stack --harness --w3` (scripts/verify.ts `w3Stack`: the `w3` and
- * `interact` shards and their scenarios), after the harness overrides, so the other shards keep
- * every batch 7 flag at its shipped default (off) and no OAuth provider.
+ * `interact` shards and their scenarios), after the harness overrides, so the other CI shards keep
+ * every batch 7 flag at its shipped default (off) and no OAuth provider. A local `verify --full`
+ * with no shard runs every scenario on one stack, so it layers these too (`w3Stack("full")`):
+ * there every scenario sees fake Twitch OAuth and federation on.
  */
 export const W3_OVERRIDES = ["harness/compose.w3.yaml", "harness/compose.n3.yaml", "harness/compose.n4.yaml"] as const;
 

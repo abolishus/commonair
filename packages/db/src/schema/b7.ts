@@ -38,6 +38,7 @@ import {
   juryReasonCode,
   jurySubjectKind,
   juryVote,
+  juryWithdrawReason,
   portabilitySource,
   relayPurgeReason,
   roomAgeBand,
@@ -82,6 +83,8 @@ export const watchRooms = pgTable(
     index("watch_rooms_ended_idx").on(t.endedAt),
     check("watch_rooms_end", sql`(${t.endedAt} is null) = (${t.endReason} is null)`),
     check("watch_rooms_invite_hash", sql`${t.inviteHash} is null or ${t.inviteHash} ~ '${sql.raw(HEX64)}'`),
+    // Decision (q): every v1 room is invite-only; the hash is cleared only once the room ends.
+    check("watch_rooms_invite_live", sql`${t.inviteHash} is not null or ${t.endedAt} is not null`),
   ],
 );
 
@@ -213,7 +216,10 @@ export const giveaways = pgTable(
     sealedSeed: text().notNull(),
     /** Revealed at the draw (hex). */
     seed: text(),
-    /** The pseudonym salt (hex); shown only once the seed is revealed. */
+    /**
+     * The pseudonym salt (hex). Never revealed: user ids are public, so the salt would let anyone
+     * map pseudonyms back to accounts. Re-running the draw needs only the seed and the pseudonyms.
+     */
     salt: text().notNull(),
     opensAt: ts().notNull().defaultNow(),
     closesAt: ts(),
@@ -233,7 +239,8 @@ export const giveaways = pgTable(
       .where(sql`${t.status} = 'open'`),
     check("giveaways_winner_count", sql`${t.winnerCount} between 1 and 10`),
     check("giveaways_commitment", sql`${t.seedCommitment} ~ '${sql.raw(HEX64)}'`),
-    check("giveaways_salt", sql`${t.salt} ~ '^[0-9a-f]{32,128}$'`),
+    // Whole bytes (16-64), as packages/draw `newSalt()` and `commonair_seed_matches`.
+    check("giveaways_salt", sql`${t.salt} ~ '^([0-9a-f]{2}){16,64}$'`),
     check("giveaways_text", sql`length(${t.title}) between 1 and 60 and length(${t.prize}) between 1 and 200`),
   ],
 );
@@ -326,7 +333,9 @@ export const jurySeats = pgTable(
 );
 
 /**
- * A sampled case. Never T0, NCII, under legal hold, or a `watch_room` report (0046).
+ * A sampled case. Never open, T0, NCII, minor safety, involving a minor, under legal hold, or a
+ * `watch_room` report (0046, checked at insert). A case that turns ineligible later is withdrawn
+ * (`withdrawn_at`, once), never deleted; withdrawn cases take no votes.
  * `pseudonym_map` (subject and party ids to panel pseudonyms) is server-side only.
  */
 export const juryCases = pgTable(
@@ -341,8 +350,13 @@ export const juryCases = pgTable(
     ruleRef: text(),
     pseudonymMap: jsonb().$type<Record<string, string>>().notNull().default({}),
     createdAt: createdAt(),
+    withdrawnAt: ts(),
+    withdrawnReason: juryWithdrawReason(),
   },
-  (t) => [uniqueIndex("jury_cases_subject_uq").on(t.panelId, t.subjectKind, t.subjectId)],
+  (t) => [
+    uniqueIndex("jury_cases_subject_uq").on(t.panelId, t.subjectKind, t.subjectId),
+    check("jury_cases_withdrawn", sql`(${t.withdrawnAt} is null) = (${t.withdrawnReason} is null)`),
+  ],
 );
 
 /** Append-only. Only a seat of the case's panel votes, once per case; no free text. */

@@ -51,6 +51,10 @@ describe("matchFederationRoute", () => {
       route: { kind: "outbox", channelId: ID },
       method: "GET",
     });
+    expect(matchFederationRoute(`/ap/channels/${ID}/INBOX`)).toEqual({
+      route: { kind: "inbox", channelId: ID },
+      method: "POST",
+    });
     for (const p of [
       "/ap",
       "/ap/",

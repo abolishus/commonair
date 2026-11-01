@@ -110,6 +110,9 @@ Anything else is a **contract request**.
    - **Statement check:**
      - the issuer's key is fetched from `https://<issuer>/.well-known/commonair-portability`
        through `resolveCallback` (SSRF guard) in the worker, never the API;
+     - a statement that verifies but fails `checkStandingBinding` (`@commonair/tokens/standing`:
+       the bundle digest or the issuer does not match the bundle) is treated as unverified
+       ("standing not verified"), never as clean;
      - a verified statement that says `activeSuspension` or `legalHold` refuses the import;
      - an invalid, expired or missing statement imports, marked "standing not verified" in the
        preview and on the import record.

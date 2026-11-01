@@ -142,7 +142,7 @@ function adminItem(entry: AdminEntry): NavItem {
 }
 
 function AdminLayout(): React.JSX.Element {
-  const { me } = useBootstrap();
+  const { me, instance } = useBootstrap();
   const pathname = useLocation({ select: (location) => location.pathname });
   // Client fallback for a session that changed after the guard ran.
   if (!mayOpenAdminPage(adminPageFor(pathname), me)) return <AdminNotFound />;
@@ -152,6 +152,7 @@ function AdminLayout(): React.JSX.Element {
     platformModerator: isPlatformModerator(me),
     legal: isLegal(me),
     admin: isAdmin(me),
+    federation: instance.federation,
   }).map(adminItem);
   return (
     <AdminShell

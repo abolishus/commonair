@@ -86,10 +86,14 @@ jury. Its vectors (`packages/draw/vectors.json`) are normative; the description 
   default empty domain.
 - **Pseudonyms.** `pseudonym(salt, userId)` is the lowercase hex HMAC-SHA256 keyed with the salt's
   raw bytes over `utf8(userId)`. The salt has the seed's format (`newSalt()` gives 32 random
-  bytes), is kept with the seed and is revealed with it.
+  bytes) and is never revealed: user ids are public (chat messages carry them), so anyone with the
+  salt could compute every member's pseudonym and see who entered and who won. Re-running the draw
+  does not need it. Each entrant is shown their own pseudonym, so they can find themselves in the
+  published list.
 - **What it guarantees.** Once the commitment is published, no one can change the seed, so no one
-  can pick winners after seeing the entries; anyone with the revealed seed, salt and published list
-  can re-run the draw. The instance holds the seed between open and close (encrypted at rest with
+  can pick winners after seeing the entries; anyone with the revealed seed and the published list
+  of pseudonyms can re-run the draw. The seed is revealed only after entries close (a trigger), so
+  no entrant can see it while they could still steer the result. The instance holds the seed between open and close (encrypted at rest with
   `encryptSecret`), and a streamer never sees it. An instance operator who reads the seed and
   injects entries could steer a result; eligibility (decision 2) makes injected entries cost real,
   verified accounts. The operator is trusted for that, as for the rest of the platform.
@@ -111,7 +115,7 @@ jury. Its vectors (`packages/draw/vectors.json`) are normative; the description 
   who is ineligible at draw time (banned or deleted) is skipped and the next index is drawn and
   recorded, so the verify page reproduces the skip.
 - **Public verification.** `interact.giveaways.verify` (public) returns the commitment, the
-  revealed seed and salt, the sorted pseudonyms and the winners' indices and pseudonyms. A winner's
+  revealed seed, the sorted pseudonyms and the winners' indices and pseudonyms, never the salt. A winner's
   username appears only if that winner allows it (default: the pseudonym only). The verify page
   re-runs the draw in the browser with `packages/draw` and shows whether it matches.
 - **Records.** Open, close, draw and cancel each write an `audit_log` row; `channel.giveaway.begin`

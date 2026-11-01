@@ -14,8 +14,30 @@ import {
   type StandingKey,
   type StandingStatement,
   signStanding,
+  standingBundleDigest,
   standingExpiry,
 } from "./standing.ts";
+
+/** The bundle the vector statement travels in (`standing` is filled in by the exporter). */
+export const STANDING_TEST_BUNDLE = {
+  v: 1,
+  source: "commonair",
+  exportedAt: "2023-11-14T22:13:20.000Z",
+  instance: { domain: "instance.example", software: "commonair", version: "0.0.0" },
+  channel: {
+    title: "Test channel",
+    description: "",
+    tags: ["test"],
+    language: "en",
+    mature: false,
+    categorySlug: null,
+    categoryName: null,
+  },
+  panels: [],
+  emotes: [],
+  schedule: [],
+  standing: null,
+} as const;
 
 /** PKCS#8 of the RFC 8032 §7.1 test vector 3 seed (c5aa8d…58f7). */
 export const STANDING_TEST_KEY = "MC4CAQAwBQYDK2VwBCIEIMWqjfQ/n4N77bdELzHct7Fm04U1B28JS4XOOi4LRFj3";
@@ -41,6 +63,7 @@ export async function standingVectors() {
     issuer: "https://instance.example",
     kid: key.kid,
     channelId: "01890000-0000-7000-8000-00000000c001",
+    bundleSha256: await standingBundleDigest(STANDING_TEST_BUNDLE),
     issuedAt,
     expiresAt: standingExpiry(issuedAt),
     activeSuspension: false,
@@ -126,6 +149,7 @@ export async function standingVectors() {
     publicKey: key.publicKey,
     kid: key.kid,
     keys,
+    bundle: STANDING_TEST_BUNDLE,
     statement,
     canonical,
     signed,

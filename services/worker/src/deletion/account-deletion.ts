@@ -28,6 +28,7 @@ import { dmcaHiddenKey } from "../dmca/objects.ts";
 import { thumbnailPrefix } from "../moderation/objects.ts";
 import { vodObjectPrefixes } from "../vod/prefixes.ts";
 import { deleteRoomData } from "./watch-rooms.ts";
+import { deleteFederationData } from "./federation.ts";
 import { withMediaState } from "../media-state.ts";
 import { audit, endLiveOrRehearsal, safeErrorCode, type EndedBroadcast } from "../moderation/records.ts";
 import { publishLiveEnded } from "../moderation/t0.ts";
@@ -513,6 +514,24 @@ export async function completeDeletion(ctx: WorkerContext, deletionId: string): 
             objectKeys.push(dmcaHiddenKey(v.thumbnailKey));
         for (const c of everyClip)
           for (const k of [c.storageKey, c.thumbnailKey]) if (k) objectKeys.push(dmcaHiddenKey(k));
+        // Batch 7: the channel stops federating (actor, key and remote followers go; N4 sends the
+        // `Delete`), its move links stop working, and an open giveaway is cancelled: its entrants
+        // could never be told they won.
+        Object.assign(counts, await deleteFederationData(tx, channel.id));
+        counts.move_links_revoked = (
+          await tx
+            .update(s.moveLinks)
+            .set({ revokedAt: now })
+            .where(and(eq(s.moveLinks.channelId, channel.id), isNull(s.moveLinks.revokedAt)))
+            .returning({ id: s.moveLinks.id })
+        ).length;
+        counts.giveaways_cancelled = (
+          await tx
+            .update(s.giveaways)
+            .set({ status: "cancelled", cancelledAt: now })
+            .where(and(eq(s.giveaways.channelId, channel.id), inArray(s.giveaways.status, ["open", "closed"])))
+            .returning({ id: s.giveaways.id })
+        ).length;
         await del(
           "channel_panels",
           tx

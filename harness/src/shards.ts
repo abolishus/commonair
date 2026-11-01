@@ -4,12 +4,14 @@
 // No imports: scripts/ (the gate, CI's tests) read the shard list without the harness's types.
 
 /**
- * Parts of `full` for parallel runners (e2e-relay ~9 min; trust-safety ~6.5 and e5-coop ~3;
- * clock-skew ~20, it holds a broadcast through a ladder restart; the rest ~9.5). `rest` is everything the named shards leave,
- * so a new scenario is always in some shard. Each shard runs in `full`'s order.
+ * Parts of `full` for parallel runners (clock-skew ~20 min holds a broadcast through a ladder
+ * restart; the others as measured below). `rest` is everything the named shards leave, so a new
+ * scenario is always in some shard. Each shard runs in `full`'s order.
  *
  * Scenario time per shard on the full run of 8a562d9a (2026-11-01, run 41309310706): relay 8m09s,
  * long 7m42s (trust-safety 4m36, e5-coop 3m06), interact 11m29s, notify 7m48s, rest 16m20s.
+ * `rest` is over the batch 7 README's ~12 min cap: split it once its per-scenario times are
+ * measured (open follow-up, recorded for the orchestrator).
  */
 export const FULL_SHARDS = {
   relay: ["e2e-relay"],

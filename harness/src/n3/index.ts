@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * `twitch-import` steps 1–9 (docs/testing/b7-selectors.md, "Scenarios"; ADR 0031) and their run
+ * `twitch-import` steps 1–8 (docs/testing/b7-selectors.md, "Scenarios"; ADR 0031) and their run
  * state, against the in-harness Twitch mock (`src/mocks/twitch/`). Stub: N3-import fills it (and
  * may split it into more modules in this directory).
  */
@@ -40,5 +40,4 @@ export const TWITCH_IMPORT_STEP_RUNNERS: Readonly<Record<TwitchImportStep, (run:
   6: notMerged,
   7: notMerged,
   8: notMerged,
-  9: notMerged,
 };

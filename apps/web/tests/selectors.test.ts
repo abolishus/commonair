@@ -572,7 +572,6 @@ const PENDING_B7_IDS: readonly string[] = [
   "giveaway-verify-page",
   "giveaway-verify-commitment",
   "giveaway-verify-seed",
-  "giveaway-verify-salt",
   "giveaway-verify-entry",
   "giveaway-verify-winner",
   "giveaway-verify-result",

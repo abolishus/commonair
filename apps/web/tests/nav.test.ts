@@ -165,7 +165,7 @@ describe("account menu", () => {
 
 describe("studio nav", () => {
   it("lists stream manager, rehearsal, overlays, polls and raids, the bot, captions, content, analytics, revenue, crew, relays, move, import and developer, nothing else", () => {
-    expect(studioNav("/dashboard").map((i) => [i.id, i.to])).toEqual([
+    expect(studioNav("/dashboard", { twitchImport: true }).map((i) => [i.id, i.to])).toEqual([
       ["streamManager", "/dashboard"],
       ["rehearse", "/rehearse"],
       ["overlays", "/overlays"],
@@ -211,13 +211,19 @@ describe("studio nav", () => {
     ["/developer/apps/0193e6a0-0000-7000-8000-000000000001", "developer"],
     ["/developer/bots", "developer"],
   ])("on %s marks %s current (and only it)", (path, id) => {
-    const current = studioNav(path).filter((i) => i.current);
+    const current = studioNav(path, { twitchImport: true }).filter((i) => i.current);
     expect(current.map((i) => i.id)).toEqual([id]);
+  });
+
+  it("shows Import from Twitch only when the instance offers it (flag, credentials, never --no-proprietary)", () => {
+    expect(studioNav("/dashboard").some((i) => i.id === "import")).toBe(false);
+    expect(studioNav("/dashboard", { twitchImport: false }).some((i) => i.id === "import")).toBe(false);
+    expect(studioNav("/import").some((i) => i.current)).toBe(false);
   });
 
   it("adds chat safety after the bot only when the instance runs the watch gate or surge guard", () => {
     expect(studioNav("/dashboard", { chatSafety: false }).some((i) => i.id === "chat")).toBe(false);
-    expect(studioNav("/dashboard", { chatSafety: true }).map((i) => [i.id, i.to])).toEqual([
+    expect(studioNav("/dashboard", { chatSafety: true, twitchImport: true }).map((i) => [i.id, i.to])).toEqual([
       ["streamManager", "/dashboard"],
       ["rehearse", "/rehearse"],
       ["overlays", "/overlays"],
@@ -313,7 +319,8 @@ describe("trust and safety navigation", () => {
     expect(accountMenu(true, legal).map((entry) => entry.id)).toContain("moderation");
     expect(accountMenu(true, moderator).map((entry) => entry.id)).toContain("moderation");
     expect(accountMenu(true, moderator).map((entry) => entry.id)).not.toContain("legal");
-    expect(adminNav("/admin/coop", { admin: true }).map((entry) => entry)).toEqual([
+    expect(adminNav("/admin/coop", { admin: true }).some((entry) => entry.id === "federation")).toBe(false);
+    expect(adminNav("/admin/coop", { admin: true, federation: true }).map((entry) => entry)).toEqual([
       { id: "coop", to: "/admin/coop", current: true },
       { id: "integrity", to: "/admin/integrity", current: false },
       { id: "egress", to: "/admin/egress", current: false },
@@ -325,7 +332,14 @@ describe("trust and safety navigation", () => {
   });
 
   it("orders the platform tools moderation, appeals, dmca, legal, coop, integrity, egress, incidents, apps, federation", () => {
-    const everything = { treasurer: false, safetyStaff: true, platformModerator: true, legal: true, admin: true };
+    const everything = {
+      treasurer: false,
+      safetyStaff: true,
+      platformModerator: true,
+      legal: true,
+      admin: true,
+      federation: true,
+    };
     expect(adminNav("/admin/dmca", everything).map((entry) => [entry.id, entry.current])).toEqual([
       ["moderation", false],
       ["appeals", false],
@@ -387,7 +401,9 @@ describe("batch 7 platform tools access", () => {
     for (const role of ["moderator", "legal", "treasurer", "user"])
       expect(mayOpenAdminPage("federation", as(role))).toBe(false);
     expect(mayOpenAdminPage("federation", null)).toBe(false);
-    expect(adminNav("/admin/federation", { admin: true }).find((e) => e.current)?.id).toBe("federation");
+    expect(adminNav("/admin/federation", { admin: true, federation: true }).find((e) => e.current)?.id).toBe(
+      "federation",
+    );
   });
 });
 

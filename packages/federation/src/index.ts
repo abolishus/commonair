@@ -11,6 +11,7 @@ export { type Body, digest, verifyDigest } from "./digest.ts";
 export {
   ACTOR_KEY_BITS,
   type ActorKeyPair,
+  checkKeyBits,
   exportPrivateKeyPem,
   exportPublicKeyPem,
   generateActorKey,
@@ -25,11 +26,13 @@ export {
 export * from "./objects.ts";
 export {
   DATE_SKEW_SECONDS,
+  FUTURE_SKEW_SECONDS,
   type HeadersLike,
   normalizeHeaders,
   parseSignatureHeader,
   SIGNATURE_ALGORITHM,
   type SignatureError,
+  type SenderKey,
   type SignatureParams,
   type SignRequestInput,
   signingString,

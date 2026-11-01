@@ -51,10 +51,11 @@ export const TWITCH_IMPORT_STEPS = {
   6: "schedule carried",
   7: "panels pasted",
   8: "token revoked",
-  9: "unavailable when off",
 } as const;
 export type TwitchImportStep = keyof typeof TWITCH_IMPORT_STEPS;
-export const TWITCH_IMPORT_STEP_NUMBERS: readonly TwitchImportStep[] = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+// "Unavailable when off" is not a step: the `w3` stack forces the flag on everywhere, so the
+// flag-off page is covered by the API's integration tests and the web unit tests instead.
+export const TWITCH_IMPORT_STEP_NUMBERS: readonly TwitchImportStep[] = [1, 2, 3, 4, 5, 6, 7, 8];
 
 /** `federation` (N4-delivery, N4-web, N4-api; ADR 0030): `src/n4/`, against `src/mocks/activitypub/`. */
 export const FEDERATION_STEPS = {
@@ -66,9 +67,10 @@ export const FEDERATION_STEPS = {
   6: "undo stops delivery",
   7: "blocked domain refused",
   8: "suspension deletes the actor",
+  9: "follower removed",
 } as const;
 export type FederationStep = keyof typeof FEDERATION_STEPS;
-export const FEDERATION_STEP_NUMBERS: readonly FederationStep[] = [1, 2, 3, 4, 5, 6, 7, 8];
+export const FEDERATION_STEP_NUMBERS: readonly FederationStep[] = [1, 2, 3, 4, 5, 6, 7, 8, 9];
 
 /**
  * Steps whose implementing unit has not merged yet: selectable explicitly (`--set steps=1`) but
@@ -76,8 +78,8 @@ export const FEDERATION_STEP_NUMBERS: readonly FederationStep[] = [1, 2, 3, 4, 5
  */
 export const PENDING_WATCH_ROOM_STEPS: readonly WatchRoomStep[] = [1, 2, 3, 4, 5, 6, 7, 8];
 export const PENDING_PORTABILITY_STEPS: readonly PortabilityStep[] = [1, 2, 3, 4, 5];
-export const PENDING_TWITCH_IMPORT_STEPS: readonly TwitchImportStep[] = [1, 2, 3, 4, 5, 6, 7, 8, 9];
-export const PENDING_FEDERATION_STEPS: readonly FederationStep[] = [1, 2, 3, 4, 5, 6, 7, 8];
+export const PENDING_TWITCH_IMPORT_STEPS: readonly TwitchImportStep[] = [1, 2, 3, 4, 5, 6, 7, 8];
+export const PENDING_FEDERATION_STEPS: readonly FederationStep[] = [1, 2, 3, 4, 5, 6, 7, 8, 9];
 
 /** The WebKit member joins the room step 1 opened; every refusal sets up its own room. */
 export const WATCH_ROOM_STEP_PREREQUISITES: Readonly<Record<WatchRoomStep, readonly WatchRoomStep[]>> = {
@@ -112,7 +114,6 @@ export const TWITCH_IMPORT_STEP_PREREQUISITES: Readonly<Record<TwitchImportStep,
   6: [2],
   7: [],
   8: [2],
-  9: [],
 };
 /** Everything after the switch reads the peer's follow; the VOD is the go-live's broadcast. */
 export const FEDERATION_STEP_PREREQUISITES: Readonly<Record<FederationStep, readonly FederationStep[]>> = {
@@ -124,6 +125,7 @@ export const FEDERATION_STEP_PREREQUISITES: Readonly<Record<FederationStep, read
   6: [3],
   7: [1],
   8: [3],
+  9: [3],
 };
 
 export const parseWatchRoomSteps = (value: string): WatchRoomStep[] =>

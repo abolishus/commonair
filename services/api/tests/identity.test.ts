@@ -20,7 +20,8 @@ test("usernames follow slug rules and avoid reserved names", () => {
 
 test("names Caddy routes away from the web app are reserved", () => {
   // /vod/*, /dvr/*, /hls/*, /cdn/*, /media/* and /p2p-digest/* go to the origin; /tracker* to the tracker.
-  for (const r of ["vod", "VOD", "dvr", "hls", "cdn", "media", "p2p", "tracker", "trackerfan", "tracker_1"])
+  // /nodeinfo/* goes to the API (federation).
+  for (const r of ["vod", "VOD", "dvr", "hls", "cdn", "media", "p2p", "tracker", "trackerfan", "tracker_1", "nodeinfo"])
     expect(usernameProblem(r)).toBe("reserved");
   // A hyphenated route segment can never be a username in the first place.
   expect(usernameProblem("p2p-digest")).toBe("format");

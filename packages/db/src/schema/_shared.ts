@@ -137,6 +137,7 @@ export const giveawayStatus = pgEnum("giveaway_status", E.GIVEAWAY_STATUSES);
 export const juryVote = pgEnum("jury_vote", E.JURY_VOTES);
 export const juryReasonCode = pgEnum("jury_reason_code", E.JURY_REASON_CODES);
 export const jurySubjectKind = pgEnum("jury_subject_kind", E.JURY_SUBJECT_KINDS);
+export const juryWithdrawReason = pgEnum("jury_withdraw_reason", E.JURY_WITHDRAW_REASONS);
 export const federationObjectKind = pgEnum("federation_object_kind", E.FEDERATION_OBJECT_KINDS);
 export const federationSubjectKind = pgEnum("federation_subject_kind", E.FEDERATION_SUBJECT_KINDS);
 export const federationInboxOutcome = pgEnum("federation_inbox_outcome", E.FEDERATION_INBOX_OUTCOMES);

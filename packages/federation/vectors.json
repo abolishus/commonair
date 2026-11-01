@@ -22,7 +22,8 @@
       },
       "verify": {
         "now": "2025-01-05T21:32:40.000Z",
-        "key": "actor"
+        "key": "actor",
+        "owner": "https://mastodon.example/users/alice"
       },
       "expect": "ok",
       "signingString": "(request-target): post /ap/channels/01890000-0000-7000-8000-00000000c001/inbox\nhost: instance.example\ndate: Sun, 05 Jan 2025 21:31:40 GMT\ndigest: SHA-256=7TbVnb02+oHsoMFut32eKdD2ItUJiPL4WrZDQZsnHlY="
@@ -43,7 +44,8 @@
       },
       "verify": {
         "now": "2025-01-05T21:32:40.000Z",
-        "key": "actor"
+        "key": "actor",
+        "owner": "https://mastodon.example/users/alice"
       },
       "expect": "ok",
       "signingString": "(request-target): post /ap/inbox\nhost: instance.example\ndate: Sun, 05 Jan 2025 21:31:40 GMT\ndigest: SHA-256=q5NarMUnFRFoXd5neXpFtLyeDHr7aY2td+nGk//4SZk="
@@ -64,7 +66,8 @@
       },
       "verify": {
         "now": "2025-01-05T21:32:40.000Z",
-        "key": "actor"
+        "key": "actor",
+        "owner": "https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001"
       },
       "expect": "ok",
       "signingString": "(request-target): post /users/alice/inbox\nhost: mastodon.example\ndate: Sun, 05 Jan 2025 21:31:40 GMT\ndigest: SHA-256=qTa+tNAM7dZ1S6iqeGzp8lVt0aKYky9On6iryVTZ7N8="
@@ -84,6 +87,7 @@
       "verify": {
         "now": "2025-01-05T21:32:40.000Z",
         "key": "actor",
+        "owner": "https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001",
         "actorId": "https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001"
       },
       "expect": "ok",
@@ -105,7 +109,8 @@
       },
       "verify": {
         "now": "2025-01-05T21:32:40.000Z",
-        "key": "actor"
+        "key": "actor",
+        "owner": "https://mastodon.example/users/alice"
       },
       "expect": "ok"
     },
@@ -125,7 +130,8 @@
       },
       "verify": {
         "now": "2025-01-06T09:31:39.000Z",
-        "key": "actor"
+        "key": "actor",
+        "owner": "https://mastodon.example/users/alice"
       },
       "expect": "ok"
     },
@@ -145,7 +151,8 @@
       },
       "verify": {
         "now": "2025-01-05T21:32:40.000Z",
-        "key": "actor"
+        "key": "actor",
+        "owner": "https://mastodon.example/users/alice"
       },
       "expect": "digest_mismatch"
     },
@@ -166,6 +173,7 @@
       "verify": {
         "now": "2025-01-05T21:32:40.000Z",
         "key": "actor",
+        "owner": "https://mastodon.example/users/alice",
         "actorId": "https://mastodon.example/users/alice"
       },
       "expect": "bad_signature"
@@ -186,7 +194,8 @@
       },
       "verify": {
         "now": "2025-01-05T21:32:40.000Z",
-        "key": "actor"
+        "key": "actor",
+        "owner": "https://mastodon.example/users/alice"
       },
       "expect": "bad_signature"
     },
@@ -206,7 +215,8 @@
       },
       "verify": {
         "now": "2025-01-05T21:32:40.000Z",
-        "key": "actor"
+        "key": "actor",
+        "owner": "https://mastodon.example/users/alice"
       },
       "expect": "bad_signature"
     },
@@ -226,7 +236,8 @@
       },
       "verify": {
         "now": "2025-01-05T21:32:40.000Z",
-        "key": "actor"
+        "key": "actor",
+        "owner": "https://mastodon.example/users/alice"
       },
       "expect": "host_mismatch"
     },
@@ -246,7 +257,8 @@
       },
       "verify": {
         "now": "2025-01-06T09:32:41.000Z",
-        "key": "actor"
+        "key": "actor",
+        "owner": "https://mastodon.example/users/alice"
       },
       "expect": "date_skew"
     },
@@ -266,7 +278,50 @@
       },
       "verify": {
         "now": "2025-01-05T09:30:40.000Z",
-        "key": "actor"
+        "key": "actor",
+        "owner": "https://mastodon.example/users/alice"
+      },
+      "expect": "date_skew"
+    },
+    {
+      "name": "date under an hour ahead",
+      "request": {
+        "method": "POST",
+        "url": "https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001/inbox",
+        "headers": {
+          "content-type": "application/activity+json; profile=\"https://www.w3.org/ns/activitystreams\"",
+          "host": "instance.example",
+          "date": "Sun, 05 Jan 2025 21:31:40 GMT",
+          "digest": "SHA-256=7TbVnb02+oHsoMFut32eKdD2ItUJiPL4WrZDQZsnHlY=",
+          "signature": "keyId=\"https://mastodon.example/users/alice#main-key\",algorithm=\"rsa-sha256\",headers=\"(request-target) host date digest\",signature=\"hBoMhtn68LyKaomXACveG7zUEcJSv1opFYtZavq2H4iHDbKYnbJ2qVh9VdeYPbIoMA+LiAZd4MW43tXD+RV/bq+fW/s4a7Ho/rQQnskvVxg/8+xtQN0ExkbmqGW+/PU1xEN/X3qz3Oe7riKTyjyYxCldNK99BKHNCtX8F8HIhs5UTejj0oWSSHXwtcbkO3aeD63Fn7G0UoGFocwHd07V0bywz4ZDiZu0dd5K/itYUaw3ke1llITWfL6k0lbg1inhxK0LBktd8uwOLPX7NGtN1iBxBD0TP1UJS7/kNpc06tDsWhehgp4asz2ozAK8pYVqFq5YKT2/AMKX7Fb4GGsIBw==\""
+        },
+        "body": "{\"@context\":\"https://www.w3.org/ns/activitystreams\",\"id\":\"https://mastodon.example/a1b2c3d4\",\"type\":\"Follow\",\"actor\":\"https://mastodon.example/users/alice\",\"object\":\"https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001\"}"
+      },
+      "verify": {
+        "now": "2025-01-05T20:31:41.000Z",
+        "key": "actor",
+        "owner": "https://mastodon.example/users/alice"
+      },
+      "expect": "ok"
+    },
+    {
+      "name": "date over an hour ahead",
+      "request": {
+        "method": "POST",
+        "url": "https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001/inbox",
+        "headers": {
+          "content-type": "application/activity+json; profile=\"https://www.w3.org/ns/activitystreams\"",
+          "host": "instance.example",
+          "date": "Sun, 05 Jan 2025 21:31:40 GMT",
+          "digest": "SHA-256=7TbVnb02+oHsoMFut32eKdD2ItUJiPL4WrZDQZsnHlY=",
+          "signature": "keyId=\"https://mastodon.example/users/alice#main-key\",algorithm=\"rsa-sha256\",headers=\"(request-target) host date digest\",signature=\"hBoMhtn68LyKaomXACveG7zUEcJSv1opFYtZavq2H4iHDbKYnbJ2qVh9VdeYPbIoMA+LiAZd4MW43tXD+RV/bq+fW/s4a7Ho/rQQnskvVxg/8+xtQN0ExkbmqGW+/PU1xEN/X3qz3Oe7riKTyjyYxCldNK99BKHNCtX8F8HIhs5UTejj0oWSSHXwtcbkO3aeD63Fn7G0UoGFocwHd07V0bywz4ZDiZu0dd5K/itYUaw3ke1llITWfL6k0lbg1inhxK0LBktd8uwOLPX7NGtN1iBxBD0TP1UJS7/kNpc06tDsWhehgp4asz2ozAK8pYVqFq5YKT2/AMKX7Fb4GGsIBw==\""
+        },
+        "body": "{\"@context\":\"https://www.w3.org/ns/activitystreams\",\"id\":\"https://mastodon.example/a1b2c3d4\",\"type\":\"Follow\",\"actor\":\"https://mastodon.example/users/alice\",\"object\":\"https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001\"}"
+      },
+      "verify": {
+        "now": "2025-01-05T20:31:39.000Z",
+        "key": "actor",
+        "owner": "https://mastodon.example/users/alice"
       },
       "expect": "date_skew"
     },
@@ -286,7 +341,29 @@
       },
       "verify": {
         "now": "2025-01-05T21:32:40.000Z",
-        "key": "actor"
+        "key": "actor",
+        "owner": "https://mastodon.example/users/alice"
+      },
+      "expect": "bad_date"
+    },
+    {
+      "name": "date not an IMF-fixdate",
+      "request": {
+        "method": "POST",
+        "url": "https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001/inbox",
+        "headers": {
+          "content-type": "application/activity+json; profile=\"https://www.w3.org/ns/activitystreams\"",
+          "host": "instance.example",
+          "date": "2025-01-05T21:31:40Z",
+          "digest": "SHA-256=7TbVnb02+oHsoMFut32eKdD2ItUJiPL4WrZDQZsnHlY=",
+          "signature": "keyId=\"https://mastodon.example/users/alice#main-key\",algorithm=\"rsa-sha256\",headers=\"(request-target) host date digest\",signature=\"hBoMhtn68LyKaomXACveG7zUEcJSv1opFYtZavq2H4iHDbKYnbJ2qVh9VdeYPbIoMA+LiAZd4MW43tXD+RV/bq+fW/s4a7Ho/rQQnskvVxg/8+xtQN0ExkbmqGW+/PU1xEN/X3qz3Oe7riKTyjyYxCldNK99BKHNCtX8F8HIhs5UTejj0oWSSHXwtcbkO3aeD63Fn7G0UoGFocwHd07V0bywz4ZDiZu0dd5K/itYUaw3ke1llITWfL6k0lbg1inhxK0LBktd8uwOLPX7NGtN1iBxBD0TP1UJS7/kNpc06tDsWhehgp4asz2ozAK8pYVqFq5YKT2/AMKX7Fb4GGsIBw==\""
+        },
+        "body": "{\"@context\":\"https://www.w3.org/ns/activitystreams\",\"id\":\"https://mastodon.example/a1b2c3d4\",\"type\":\"Follow\",\"actor\":\"https://mastodon.example/users/alice\",\"object\":\"https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001\"}"
+      },
+      "verify": {
+        "now": "2025-01-05T21:32:40.000Z",
+        "key": "actor",
+        "owner": "https://mastodon.example/users/alice"
       },
       "expect": "bad_date"
     },
@@ -306,7 +383,50 @@
       },
       "verify": {
         "now": "2025-01-05T21:32:40.000Z",
-        "key": "actor"
+        "key": "actor",
+        "owner": "https://evil.example/users/alice"
+      },
+      "expect": "key_actor_mismatch"
+    },
+    {
+      "name": "same origin, another actor's key",
+      "request": {
+        "method": "POST",
+        "url": "https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001/inbox",
+        "headers": {
+          "content-type": "application/activity+json; profile=\"https://www.w3.org/ns/activitystreams\"",
+          "host": "instance.example",
+          "date": "Sun, 05 Jan 2025 21:31:40 GMT",
+          "digest": "SHA-256=7TbVnb02+oHsoMFut32eKdD2ItUJiPL4WrZDQZsnHlY=",
+          "signature": "keyId=\"https://mastodon.example/users/eve#main-key\",algorithm=\"rsa-sha256\",headers=\"(request-target) host date digest\",signature=\"hBoMhtn68LyKaomXACveG7zUEcJSv1opFYtZavq2H4iHDbKYnbJ2qVh9VdeYPbIoMA+LiAZd4MW43tXD+RV/bq+fW/s4a7Ho/rQQnskvVxg/8+xtQN0ExkbmqGW+/PU1xEN/X3qz3Oe7riKTyjyYxCldNK99BKHNCtX8F8HIhs5UTejj0oWSSHXwtcbkO3aeD63Fn7G0UoGFocwHd07V0bywz4ZDiZu0dd5K/itYUaw3ke1llITWfL6k0lbg1inhxK0LBktd8uwOLPX7NGtN1iBxBD0TP1UJS7/kNpc06tDsWhehgp4asz2ozAK8pYVqFq5YKT2/AMKX7Fb4GGsIBw==\""
+        },
+        "body": "{\"@context\":\"https://www.w3.org/ns/activitystreams\",\"id\":\"https://mastodon.example/a1b2c3d4\",\"type\":\"Follow\",\"actor\":\"https://mastodon.example/users/alice\",\"object\":\"https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001\"}"
+      },
+      "verify": {
+        "now": "2025-01-05T21:32:40.000Z",
+        "key": "actor",
+        "owner": "https://mastodon.example/users/eve"
+      },
+      "expect": "key_actor_mismatch"
+    },
+    {
+      "name": "keyId on the actor's origin, key document owned by another actor",
+      "request": {
+        "method": "POST",
+        "url": "https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001/inbox",
+        "headers": {
+          "content-type": "application/activity+json; profile=\"https://www.w3.org/ns/activitystreams\"",
+          "host": "instance.example",
+          "date": "Sun, 05 Jan 2025 21:31:40 GMT",
+          "digest": "SHA-256=7TbVnb02+oHsoMFut32eKdD2ItUJiPL4WrZDQZsnHlY=",
+          "signature": "keyId=\"https://mastodon.example/users/alice#main-key\",algorithm=\"rsa-sha256\",headers=\"(request-target) host date digest\",signature=\"hBoMhtn68LyKaomXACveG7zUEcJSv1opFYtZavq2H4iHDbKYnbJ2qVh9VdeYPbIoMA+LiAZd4MW43tXD+RV/bq+fW/s4a7Ho/rQQnskvVxg/8+xtQN0ExkbmqGW+/PU1xEN/X3qz3Oe7riKTyjyYxCldNK99BKHNCtX8F8HIhs5UTejj0oWSSHXwtcbkO3aeD63Fn7G0UoGFocwHd07V0bywz4ZDiZu0dd5K/itYUaw3ke1llITWfL6k0lbg1inhxK0LBktd8uwOLPX7NGtN1iBxBD0TP1UJS7/kNpc06tDsWhehgp4asz2ozAK8pYVqFq5YKT2/AMKX7Fb4GGsIBw==\""
+        },
+        "body": "{\"@context\":\"https://www.w3.org/ns/activitystreams\",\"id\":\"https://mastodon.example/a1b2c3d4\",\"type\":\"Follow\",\"actor\":\"https://mastodon.example/users/alice\",\"object\":\"https://instance.example/ap/channels/01890000-0000-7000-8000-00000000c001\"}"
+      },
+      "verify": {
+        "now": "2025-01-05T21:32:40.000Z",
+        "key": "actor",
+        "owner": "https://mastodon.example/users/eve"
       },
       "expect": "key_actor_mismatch"
     },
@@ -326,7 +446,8 @@
       },
       "verify": {
         "now": "2025-01-05T21:32:40.000Z",
-        "key": "other"
+        "key": "other",
+        "owner": "https://mastodon.example/users/alice"
       },
       "expect": "bad_signature"
     },
@@ -346,7 +467,8 @@
       },
       "verify": {
         "now": "2025-01-05T21:32:40.000Z",
-        "key": "actor"
+        "key": "actor",
+        "owner": "https://mastodon.example/users/alice"
       },
       "expect": "missing_header"
     },
@@ -365,7 +487,8 @@
       },
       "verify": {
         "now": "2025-01-05T21:32:40.000Z",
-        "key": "actor"
+        "key": "actor",
+        "owner": "https://mastodon.example/users/alice"
       },
       "expect": "missing_header"
     },
@@ -385,7 +508,8 @@
       },
       "verify": {
         "now": "2025-01-05T21:32:40.000Z",
-        "key": "actor"
+        "key": "actor",
+        "owner": "https://mastodon.example/users/alice"
       },
       "expect": "unsupported_algorithm"
     },
@@ -404,7 +528,8 @@
       },
       "verify": {
         "now": "2025-01-05T21:32:40.000Z",
-        "key": "actor"
+        "key": "actor",
+        "owner": "https://mastodon.example/users/alice"
       },
       "expect": "missing_signature"
     },
@@ -424,7 +549,8 @@
       },
       "verify": {
         "now": "2025-01-05T21:32:40.000Z",
-        "key": "actor"
+        "key": "actor",
+        "owner": "https://mastodon.example/users/alice"
       },
       "expect": "malformed_signature"
     }

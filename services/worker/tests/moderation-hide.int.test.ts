@@ -78,6 +78,22 @@ test("hiding a VOD hides its clips and the live-buffer clips of its broadcast, n
   expect(await mediaStates(t.db, "media.vod.state", vodId)).toEqual([[false, "ncii"]]);
 });
 
+test("hiding a VOD still recording writes public:false, so relays drop its DVR (decision (x))", async () => {
+  const { channel } = await makeUser(t.db);
+  const b = await makeBroadcast(t.db, channel.id);
+  const vodId = uuidv7();
+  await t.db.insert(schema.vods).values({
+    id: vodId,
+    broadcastId: b.id,
+    channelId: channel.id,
+    title: "v",
+    storagePrefix: `recordings/${vodId}/`,
+    status: "recording",
+  });
+  await t.db.transaction((tx) => hideContent(tx, { vodIds: [vodId] }, "ncii_deadline", "ncii", new Date()));
+  expect(await mediaStates(t.db, "media.vod.state", vodId)).toEqual([[false, "ncii"]]);
+});
+
 test("a T0 broadcast hide writes t0 events; suspendForT0 writes channel.suspension once", async () => {
   const { user, channel } = await makeUser(t.db);
   const b = await makeBroadcast(t.db, channel.id, new Date(Date.now() - 3_600_000));

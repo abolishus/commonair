@@ -146,6 +146,15 @@ format) to an S3 bucket the operator controls, in another region or provider. A 
 into a scratch database (S1-h). The provider's point-in-time recovery is the first line, and the
 dump guarantees that no restore depends on one provider. Our instance keeps 30 daily dumps.
 
+The data restore must not fire the protection triggers (0001 onwards). They guard live writes, not
+a copy of rows that already passed them: with triggers on, a restore would double follower counts
+(channels load before follows, and the follows trigger counts each row again) and refuse members
+of ended watch rooms, entries of closed giveaways and votes of closed jury panels. So the restore
+uses `pg_restore --disable-triggers` (or `SET session_replication_role = replica` for the data
+load), which needs a superuser or, on a managed database, a role granted `SET` on
+`session_replication_role`, and the drill then checks a few counts against the source, for
+example `channels.follower_count` against `follows`.
+
 ### 5. Load balancing keeps real client addresses
 
 At stage 2 the load balancer is a **network (layer 4)** load balancer that passes TCP and UDP

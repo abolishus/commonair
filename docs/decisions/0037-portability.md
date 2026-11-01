@@ -123,7 +123,9 @@ moving is not a way to shed a suspension.
 - **Fields** (`StandingStatement` in `packages/tokens/src/standing.ts`, with vectors in
   `packages/tokens/vectors.json` under `standing`), in this key order, which is the signed byte
   order: `v` (1), `issuer` (the exporting instance's origin, `instanceSite()`, from which the
-  verifier fetches its keys), `kid`, `channelId`, `issuedAt`, `expiresAt` (`standingExpiry`:
+  verifier fetches its keys), `kid`, `channelId`, `bundleSha256` (`standingBundleDigest`: the
+  hex SHA-256 of the UTF-8 JSON of the Zod-parsed bundle, schema key order, with `standing` set to
+  null), `issuedAt`, `expiresAt` (`standingExpiry`:
   `issuedAt` + 30 days; a statement is refused if `expiresAt` is not after `issuedAt` or more than
   30 days later), `activeSuspension` (boolean), `legalHold` (boolean), `upheldActions` (counts of
   upheld platform actions in the 12 months before `issuedAt`, by tier: `t0`, `t1`, `t2`) and
@@ -142,8 +144,12 @@ moving is not a way to shed a suspension.
   `expiresAt` (`expired`). It is
   its own file (`@commonair/tokens/standing`), not part of the attestation code, and the SDK does
   not inline it.
+- **Bound to its bundle.** The importer refuses a statement that verifies but does not belong to
+  the bundle carrying it (`checkStandingBinding`): `bundleSha256` must match the bundle as
+  imported, and the `issuer`'s host must be the bundle's `instance.domain`. Without this, a clean
+  statement from any other channel could be spliced into an evading channel's bundle.
 - **What it proves, and what it does not.** It proves what the issuing instance said about the
-  channel on that instance at `issuedAt`. It does not bind the person importing it, and a hostile
+  channel on that instance at `issuedAt`, about this bundle. It does not bind the person importing it, and a hostile
   instance can sign anything about its own channels; a destination that does not trust the issuer
   treats it as unverified. Destination moderation is unchanged either way.
 

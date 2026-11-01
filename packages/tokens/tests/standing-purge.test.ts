@@ -6,8 +6,12 @@ import { describe, expect, test } from "vite-plus/test";
 import vectors from "../vectors.json" with { type: "json" };
 import { generateSigningKey, importSigningKey, signPlaybackToken, verifyPlaybackToken } from "../src/index.ts";
 import { PURGE_PREFIX, PurgeBatch, signPurgeBatch, verifyPurgeBatch } from "../src/purge.ts";
+import { createHash } from "node:crypto";
+import { PortabilityBundle } from "@commonair/contracts/portability";
 import {
   canonicalizeStanding,
+  checkStandingBinding,
+  standingBundleDigest,
   deriveStandingKid,
   importStandingSigningKey,
   signStanding,
@@ -48,6 +52,29 @@ describe("standing statement vectors", () => {
   });
 });
 
+describe("standing statement binding (ADR 0037 section 4)", () => {
+  const statement = S.statement as StandingStatement;
+  const bundle = PortabilityBundle.parse(S.bundle);
+
+  test("the digest is SHA-256 of the parsed bundle with standing null, whatever standing it carries", async () => {
+    const want = createHash("sha256").update(JSON.stringify(bundle)).digest("hex");
+    expect(await standingBundleDigest(bundle)).toBe(want);
+    expect(statement.bundleSha256).toBe(want);
+    expect(await standingBundleDigest({ ...bundle, standing: S.signed })).toBe(want);
+    // Key order in the file does not matter: the parsed bundle is re-encoded in schema order.
+    const reordered = Object.fromEntries(Object.entries({ ...bundle }).reverse());
+    expect(await standingBundleDigest(reordered)).toBe(want);
+  });
+
+  test("a statement belongs only to its own bundle and issuer", async () => {
+    expect(await checkStandingBinding(statement, { ...bundle, standing: S.signed })).toBeNull();
+    const spliced = { ...bundle, channel: { ...bundle.channel, title: "Evading channel" } };
+    expect(await checkStandingBinding(statement, spliced)).toBe("bundle_mismatch");
+    const elsewhere = { ...bundle, instance: { ...bundle.instance, domain: "other.example" } };
+    expect(await checkStandingBinding(statement, elsewhere)).toBe("issuer_mismatch");
+  });
+});
+
 describe("standing statement rules", () => {
   const base = S.statement as StandingStatement;
 
@@ -68,6 +95,7 @@ describe("standing statement rules", () => {
       { issuedAt: "2023-02-30T00:00:00.000Z", expiresAt: "2023-03-01T00:00:00.000Z" },
       { issuer: "https://instance.example/path" },
       { channelId: "not-a-uuid" },
+      { bundleSha256: "ABC" },
       { activeSuspension: "no" },
     ];
     for (const over of bad) expect(StandingStatement.safeParse({ ...base, ...over }).success).toBe(false);
