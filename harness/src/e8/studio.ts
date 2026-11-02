@@ -277,7 +277,7 @@ async function studioRaid(run: E8Run, src: E8Streamer, dst: E8Streamer, page: Pa
 
   await ctx.step(t("both streamers go live"), () => Promise.all([goLive(run, src), goLive(run, dst)]));
   await ctx.step(t("one HTTP viewer on the source until it is gate-eligible"), async () => {
-    const viewers = await ctx.platform.openViewers(src.channel, { http: 1, httpTiming: STEADY_TIMING });
+    const viewers = await ctx.platform.openViewers(src.channel, { http: 1, timing: STEADY_TIMING });
     for (const v of viewers) ctx.defer(() => v.stop());
     await waitFor(
       `${src.channel}: a gate-eligible viewer`,

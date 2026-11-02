@@ -40,10 +40,11 @@ export interface ViewerMix {
   /** Decode the strip in HTTP viewers every N segments (0 = PDT latency only). */
   httpStripEvery?: number;
   /**
-   * Heartbeat timing of the HTTP viewers (default `HUMAN_TIMING`, which now and then sends a beat
-   * late enough to drop out of the 30 s count window: use `STEADY_TIMING` to hold a count exact).
+   * Heartbeat timing of the HTTP viewers and the harness player's browser viewers (default
+   * `HUMAN_TIMING`, which now and then sends a beat late enough to drop out of the 30 s count
+   * window: use `STEADY_TIMING` to hold a count exact). The web player keeps the product's cadence.
    */
-  httpTiming?: HeartbeatTiming;
+  timing?: HeartbeatTiming;
   /**
    * P1: web Chromium viewers, whatever HARNESS_PLAYER says. `optedIn` chose P2P (storage set
    * before load) and reach the tracker through the harness tracker proxy; `atDefault` have no
@@ -198,6 +199,7 @@ export class Platform {
           webUrl: this.env.HARNESS_WEB_URL,
           probeScript,
           clientIp: () => this.residential.next(),
+          ...(mix.timing ? { timing: mix.timing } : {}),
           log: this.log,
         })),
       );
@@ -210,7 +212,7 @@ export class Platform {
           target: { channel },
           api: this.api().client,
           decodeStripEvery: mix.httpStripEvery ?? 0,
-          ...(mix.httpTiming ? { timing: mix.httpTiming } : {}),
+          ...(mix.timing ? { timing: mix.timing } : {}),
           log: this.log,
         }),
     );

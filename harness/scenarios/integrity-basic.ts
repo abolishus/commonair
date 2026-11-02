@@ -259,12 +259,10 @@ export default defineScenario({
       `open ${PLAIN} honest viewers, a household of ${householdCount}, a hidden tab, ${bots} viewbots and ${fetchlessCount} fetch-less bots together`,
       () =>
         Promise.all([
-          p
-            .openViewers(channel, { chromium: browsers, http: PLAIN - browsers, httpTiming: STEADY_TIMING })
-            .then((vs) => {
-              for (const v of vs) ctx.defer(() => v.stop());
-              return vs;
-            }),
+          p.openViewers(channel, { chromium: browsers, http: PLAIN - browsers, timing: STEADY_TIMING }).then((vs) => {
+            for (const v of vs) ctx.defer(() => v.stop());
+            return vs;
+          }),
           ...household.map((v) => v.start()),
           hidden.start(),
           swarm.start(),

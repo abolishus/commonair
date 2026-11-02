@@ -117,7 +117,7 @@ export async function stepRaid(run: E8Run): Promise<void> {
     Promise.all([chatIn(run, v1, src.channel), chatIn(run, v2, src.channel), chatIn(run, v3, dst.channel)]),
   );
   await ctx.step("raid: one HTTP viewer on the source until it is gate-eligible", async () => {
-    const viewers = await ctx.platform.openViewers(src.channel, { http: 1, httpTiming: STEADY_TIMING });
+    const viewers = await ctx.platform.openViewers(src.channel, { http: 1, timing: STEADY_TIMING });
     for (const v of viewers) ctx.defer(() => v.stop());
     await waitFor(
       `${src.channel}: a gate-eligible viewer`,

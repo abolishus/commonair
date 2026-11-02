@@ -82,6 +82,24 @@ export interface HeartbeatTiming {
 export const HUMAN_TIMING: HeartbeatTiming = { jitter: 0.15, lateProbability: 0.03 };
 export const BOT_TIMING: HeartbeatTiming = { jitter: 0, lateProbability: 0 };
 
+/** A timing as harness player URL parameters (`jitter`, `late`); see timingFromParams. */
+export function timingParams(t: HeartbeatTiming): Record<"jitter" | "late", string> {
+  return { jitter: String(t.jitter), late: String(t.lateProbability) };
+}
+
+/**
+ * The timing a harness player page was opened with: each of `jitter` and `late` that is a number in
+ * [0, 1] overrides HUMAN_TIMING's, so a page opened without them keeps the human default.
+ */
+export function timingFromParams(params: URLSearchParams): HeartbeatTiming {
+  const read = (name: string, fallback: number): number => {
+    const raw = params.get(name);
+    const n = raw === null || raw.trim() === "" ? Number.NaN : Number(raw);
+    return Number.isFinite(n) && n >= 0 && n <= 1 ? n : fallback;
+  };
+  return { jitter: read("jitter", HUMAN_TIMING.jitter), lateProbability: read("late", HUMAN_TIMING.lateProbability) };
+}
+
 /** Delay before the next heartbeat. */
 export function nextHeartbeatDelay(
   intervalMs: number,

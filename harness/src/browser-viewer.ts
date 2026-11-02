@@ -14,6 +14,7 @@ import type { Logger } from "@commonair/observability";
 import { type Browser, type BrowserContext, type Page, chromium, webkit } from "playwright";
 import type { PlayerInfo } from "../player/player.ts";
 import type { ProbeVideoStats } from "../player/probe.ts";
+import { type HeartbeatTiming, timingParams } from "./fingerprint.ts";
 import type { PlayerServer } from "./player-server.ts";
 import { type Viewer, type ViewerReport, type ViewerTarget, emptyReport } from "./viewer.ts";
 import { P2P_NOTICE_KEY, P2P_PREFERENCE_KEY, webEmbedUrl } from "./web/selectors.ts";
@@ -187,6 +188,11 @@ export interface OpenBrowserViewersOptions {
   humanize?: boolean;
   /** Simulated client address per page. */
   clientIp?: (pageIndex: number) => string | undefined;
+  /**
+   * Harness player only: heartbeat timing (default HUMAN_TIMING). The web player beats on the
+   * product's own cadence.
+   */
+  timing?: HeartbeatTiming;
   /** Web player only: P2P viewers (peer-connection counter; `optedIn` also chooses P2P). */
   p2p?: P2PViewerMode;
   log?: Logger;
@@ -195,7 +201,7 @@ export interface OpenBrowserViewersOptions {
 export function harnessPlayerUrl(
   base: string,
   target: ViewerTarget,
-  opts: { count: number; native: string; ip?: string; size?: string },
+  opts: { count: number; native: string; ip?: string; size?: string; timing?: HeartbeatTiming },
 ): string {
   const u = new URL("/", base);
   if ("channel" in target) {
@@ -209,6 +215,7 @@ export function harnessPlayerUrl(
   u.searchParams.set("native", opts.native);
   if (opts.ip) u.searchParams.set("ip", opts.ip);
   if (opts.size) u.searchParams.set("size", opts.size);
+  if (opts.timing) for (const [k, v] of Object.entries(timingParams(opts.timing))) u.searchParams.set(k, v);
   return u.toString();
 }
 
@@ -414,6 +421,7 @@ export async function openBrowserViewers(opts: OpenBrowserViewersOptions): Promi
         native: opts.native ?? "auto",
         ip,
         size: perPage > 1 ? "160x90" : "320x180",
+        ...(opts.timing ? { timing: opts.timing } : {}),
       });
     } else {
       if (!opts.webUrl || !("channel" in opts.target)) throw new Error("web player needs webUrl and a channel target");

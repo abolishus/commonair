@@ -23,7 +23,7 @@ import { RPCLink } from "@orpc/client/fetch";
 import type { ContractRouterClient } from "@orpc/contract";
 import Hls from "hls.js";
 import { SIMULATED_IP_HEADER } from "../src/api/client.ts";
-import { HUMAN_TIMING, newDeviceId, nextHeartbeatDelay } from "../src/fingerprint.ts";
+import { newDeviceId, nextHeartbeatDelay, timingFromParams } from "../src/fingerprint.ts";
 import { withToken } from "../src/hls.ts";
 import { PlaybackSession } from "../src/viewer.ts";
 import { collectFingerprint } from "./fingerprint.ts";
@@ -59,6 +59,7 @@ const count = Math.max(1, Math.min(64, Number(params.get("count") ?? 1)));
 const nativePref = params.get("native") ?? "auto";
 const ip = params.get("ip");
 const [vw, vh] = (params.get("size") ?? "320x180").split("x").map(Number);
+const timing = timingFromParams(params);
 
 const api: Api = createORPCClient(
   new RPCLink({
@@ -219,7 +220,7 @@ class Player {
           if (!this.info.stopped) this.scheduleHeartbeat(intervalMs);
         });
       },
-      nextHeartbeatDelay(intervalMs, HUMAN_TIMING),
+      nextHeartbeatDelay(intervalMs, timing),
     );
   }
 
