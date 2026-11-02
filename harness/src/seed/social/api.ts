@@ -10,6 +10,7 @@
 import { encodePng } from "../../png.ts";
 import { putPresigned } from "../../safety-io.ts";
 import { type SignedInUser, UserFactory } from "../../users.ts";
+import { seedApiFactory } from "../clients.ts";
 import type { HarnessEnv } from "../../env.ts";
 import { DEMO_FIXTURES } from "@commonair/contracts/fixtures";
 import type { AccountSpec, SocialPlan } from "./plan.ts";
@@ -40,6 +41,7 @@ export class SeedSessions implements SessionSource {
       mailpitUrl: env.HARNESS_MAILPIT_URL,
       mailpitAuth: env.HARNESS_MAILPIT_AUTH,
       emailDomain: DEMO_FIXTURES.emailDomain,
+      apiFactory: seedApiFactory(env, "social"),
     });
   }
 

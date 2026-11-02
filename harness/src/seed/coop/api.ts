@@ -22,6 +22,7 @@ import type { HarnessEnv } from "../../env.ts";
 import { ApiTreasurer } from "../../money-actors.ts";
 import { apiError } from "../../safety.ts";
 import { type SignedInUser, UserFactory } from "../../users.ts";
+import { seedApiFactory } from "../clients.ts";
 import { sleep } from "../../wait.ts";
 import { sharedCase } from "../../w3/jury.ts";
 import type { Rng } from "../prng.ts";
@@ -71,6 +72,7 @@ export class CoopSessions {
       mailpitUrl: env.HARNESS_MAILPIT_URL,
       mailpitAuth: env.HARNESS_MAILPIT_AUTH,
       emailDomain: DEMO_FIXTURES.emailDomain,
+      apiFactory: seedApiFactory(env, "coop"),
     });
   }
 

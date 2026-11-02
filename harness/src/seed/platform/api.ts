@@ -17,6 +17,7 @@ import type { HarnessEnv } from "../../env.ts";
 import { newHarnessSubscription } from "../../n1/ece.ts";
 import type { PushReceiver } from "../../n1/push-receiver.ts";
 import { type SignedInUser, UserFactory } from "../../users.ts";
+import { seedApiFactory } from "../clients.ts";
 import { sleep, waitFor } from "../../wait.ts";
 import type { SeededUser } from "../types.ts";
 import { type AppSpec, type PlatformPlan, type SubscriptionSpec, subscriptionCondition } from "./plan.ts";
@@ -73,6 +74,7 @@ export class PlatformSessions {
       mailpitUrl: env.HARNESS_MAILPIT_URL,
       mailpitAuth: env.HARNESS_MAILPIT_AUTH,
       emailDomain: DEMO_FIXTURES.emailDomain,
+      apiFactory: seedApiFactory(env, "platform"),
     });
   }
 

@@ -24,6 +24,7 @@ import {
   subscriptionCheckoutCompleted,
 } from "../../stripe.ts";
 import { AuthError, type SignedInUser, UserFactory } from "../../users.ts";
+import { seedApiFactory } from "../clients.ts";
 import { sleep } from "../../wait.ts";
 import type { SeededUser } from "../types.ts";
 import { expireCheckout, lapseSubscription } from "./db.ts";
@@ -83,6 +84,7 @@ export class MoneySessions {
       mailpitUrl: env.HARNESS_MAILPIT_URL,
       mailpitAuth: env.HARNESS_MAILPIT_AUTH,
       emailDomain: DEMO_FIXTURES.emailDomain,
+      apiFactory: seedApiFactory(env, "money"),
     });
   }
 

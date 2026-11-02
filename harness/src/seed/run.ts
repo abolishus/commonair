@@ -9,6 +9,7 @@ import { createDb } from "@commonair/db";
 import { generatePassword, passwordProblem } from "@commonair/db/demo";
 import type { Logger } from "@commonair/observability";
 import type { HarnessEnv } from "../env.ts";
+import { stopSeedProxy } from "./clients.ts";
 import { pendingTables } from "./coverage.ts";
 import { fullSeedRefusals } from "./guard.ts";
 import { createRng } from "./prng.ts";
@@ -109,6 +110,7 @@ export async function runSeedFull(o: SeedFullOptions): Promise<number> {
     out(given ? "Password: the value of DEMO_SEED_PASSWORD" : `Password for every account: ${password}`);
     return 0;
   } finally {
+    await stopSeedProxy();
     await handle?.close();
   }
 }
