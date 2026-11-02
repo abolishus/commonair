@@ -1,0 +1,49 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# Compose override for the full-coverage seed (`bun harness/src/cli.ts seed full`, docs/testing/
+# seeding.md) and the `seed-coverage` scenario ONLY. Never use it on a public instance. Features
+# that ship off are seeded on (seed-full decision (e)), so every table and route gets data:
+#
+#   bun scripts/infra.ts stack --harness --multi --captions --w3 --seed
+#
+# The harness overrides already turn on every test hook (COOP, MODERATION, OPS, INTERACT), the
+# E5 governance bootstrap, EventSub's insecure callbacks, push and the surge guard; --captions
+# adds the whisper sidecar; --w3 adds giveaways, the Twitch import against the harness mock and
+# federation against the in-harness ActivityPub peer. This file adds the rest:
+#
+# - DEMO_SEED_FULL on the worker: points accrue on demo accounts (seed-interact).
+# - Payments through Stripe's API, served by the local stripe-mock (--seed enables the `stripe`
+#   profile). The key below is stripe-mock's, which accepts any test key; STRIPE_WEBHOOK_SECRET
+#   comes from .env (`bun scripts/init-env.ts --merge --seed` generates it), because the harness
+#   signs the webhook events with it and staging is reachable from outside.
+# - A non-zero INFRA_COST_MODEL, so broadcast costs and the analytics cost panels are not all 0.
+#   The rates are far above real ones on purpose: a seeded recording moves only a few MB, and the
+#   rollup rounds each broadcast's total to whole cents.
+#
+# The signing keys (INTEGRITY_SIGNING_KEY, PORTABILITY_SIGNING_KEY) and the VAPID pair come from
+# .env as on every stack; `stack --seed` refuses while one is empty. Everything here talks only to
+# local peers and mocks.
+#
+# The `multi` replicas get the same values (they share the queues, so a job may run on either);
+# harness/tests/seed/overlay.test.ts keeps them identical.
+
+x-seed-payments: &seed-payments
+  PAYMENTS_PROVIDER: stripe
+  STRIPE_SECRET_KEY: sk_test_harness_seed
+  STRIPE_API_BASE: http://stripe-mock:12111
+  INFRA_COST_MODEL: '{"currency":"usd","centsPerGb":{"origin":5000,"relay":2000,"p2p":0,"cdn":8000}}'
+
+x-seed-worker: &seed-worker
+  <<: *seed-payments
+  DEMO_SEED_FULL: "true"
+
+services:
+  api:
+    environment: *seed-payments
+  worker:
+    environment: *seed-worker
+  api-2:
+    environment: *seed-payments
+  worker-2:
+    environment: *seed-worker

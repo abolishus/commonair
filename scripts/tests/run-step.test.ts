@@ -11,7 +11,10 @@ import {
   podmanDesktopRunning,
   CAPTIONS_OVERRIDE,
   HARNESS_OVERRIDES,
+  SEED_ENV_KEYS,
+  SEED_OVERRIDE,
   W3_OVERRIDES,
+  missingSeedEnv,
   stackFiles,
   stackProfiles,
   staleImageContainers,
@@ -335,6 +338,36 @@ describe("stackFiles", () => {
     expect(() => stackFiles(["--w3"])).toThrow(/--w3 needs --harness/);
     expect(() => stackFiles(["harness/compose.n4.yaml"])).toThrow(/--harness --w3/);
     expect(() => stackFiles(["--harness", "harness/compose.w3.yaml"])).toThrow(/--harness --w3/);
+  });
+
+  // seed-full decision (e): the seed fills every feature's tables, so it needs every override.
+  test("--seed layers the seed override last and stripe-mock, only on the whole harness stack", () => {
+    const tail = (args: string[]) => args.filter((a) => a !== "-f").map((f) => f.slice(f.indexOf("/harness/") + 1));
+    const all = ["--harness", "--multi", "--captions", "--w3", "--seed"];
+    expect(tail(stackFiles(all)).slice(1)).toEqual([
+      ...HARNESS_OVERRIDES,
+      CAPTIONS_OVERRIDE,
+      ...W3_OVERRIDES,
+      SEED_OVERRIDE,
+    ]);
+    expect(stackProfiles(all)).toEqual(["harness", "multi", "captions", "stripe"]);
+    expect(stackFiles(["--harness", "--multi", "--captions", "--w3"]).some((a) => a.endsWith(SEED_OVERRIDE))).toBe(
+      false,
+    );
+    expect(() => stackFiles(["--harness", "--seed"])).toThrow(/--seed needs --harness --captions --w3/);
+    expect(() => stackFiles(["--harness", "--w3", "--seed"])).toThrow(/--seed needs/);
+    expect(() => stackProfiles(["--seed"])).toThrow(/--seed needs --harness/);
+    expect(() => stackFiles(["--harness", SEED_OVERRIDE])).toThrow(/layer it with --seed/);
+  });
+
+  test("missingSeedEnv names the generated keys an env file leaves empty", () => {
+    expect(missingSeedEnv("")).toEqual([...SEED_ENV_KEYS]);
+    const full = SEED_ENV_KEYS.map((k) => `${k}=x`).join("\n");
+    expect(missingSeedEnv(full)).toEqual([]);
+    expect(missingSeedEnv(`${full}\nSTRIPE_WEBHOOK_SECRET=  `)).toEqual(["STRIPE_WEBHOOK_SECRET"]);
+    expect(missingSeedEnv(full.replace("INTEGRITY_SIGNING_KEY=x", "INTEGRITY_SIGNING_KEY="))).toEqual([
+      "INTEGRITY_SIGNING_KEY",
+    ]);
   });
 
   test("refuses a missing file or an option instead of starting the wrong stack", () => {

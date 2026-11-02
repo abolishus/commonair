@@ -14,11 +14,14 @@
  *                               --captions (with --harness) layers harness/compose.w2-captions.yaml
  *                               and the `captions` profile (whisper), for the captions shard only;
  *                               --w3 (with --harness) layers the batch 7 overrides (W3_OVERRIDES),
- *                               for the w3 and interact shards and their scenarios
+ *                               for the w3 and interact shards and their scenarios;
+ *                               --seed (with --harness --captions --w3) layers
+ *                               harness/compose.seed.yaml and the `stripe` profile, for
+ *                               `seed full` and the seed shard (docs/testing/seeding.md)
  *   bun scripts/infra.ts down   stop everything (volumes kept)
  *   bun scripts/infra.ts reset  stop everything and delete volumes
  */
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pidAlive, TEST_OWNER_LABEL, testOwnerPid } from "./test-owner.ts";
 
@@ -468,12 +471,44 @@ export const CAPTIONS_OVERRIDE = "harness/compose.w2-captions.yaml";
  */
 export const W3_OVERRIDES = ["harness/compose.w3.yaml", "harness/compose.n3.yaml", "harness/compose.n4.yaml"] as const;
 
+/**
+ * The full-coverage seed's override (docs/testing/seeding.md, seed-full decision (e)): payments on
+ * stripe-mock, points on demo accounts and a non-zero cost model. Layered last, only with `stack
+ * --harness --captions --w3 --seed`, because the seed fills every feature's tables and so needs
+ * every other override too.
+ */
+export const SEED_OVERRIDE = "harness/compose.seed.yaml";
+
+/**
+ * `.env` keys the seed stack cannot do without: the harness signs stripe-mock's webhook events
+ * with STRIPE_WEBHOOK_SECRET, and the attestation, portability and push keys back rows the units
+ * write. All of them come from `bun scripts/init-env.ts --merge --seed`, never from git.
+ */
+export const SEED_ENV_KEYS = [
+  "STRIPE_WEBHOOK_SECRET",
+  "INTEGRITY_SIGNING_KEY",
+  "PORTABILITY_SIGNING_KEY",
+  "VAPID_PUBLIC_KEY",
+  "VAPID_PRIVATE_KEY",
+] as const;
+
+/** The SEED_ENV_KEYS an env file's text leaves missing or empty. Pure. */
+export function missingSeedEnv(envText: string): string[] {
+  // The last assignment wins, as when compose reads the file.
+  const values = new Map<string, string>();
+  for (const line of envText.replace(/\r\n/g, "\n").split("\n")) {
+    const m = /^([A-Z0-9_]+)=(.*)$/.exec(line);
+    if (m?.[1] !== undefined && m[2] !== undefined) values.set(m[1], m[2].trim());
+  }
+  return SEED_ENV_KEYS.filter((k) => !values.get(k));
+}
+
 /** The `multi` profile's replicas (harness/compose.multi-instance.yaml, scenario `multi-instance`). */
 export const MULTI_REPLICAS = ["api-2", "chat-2", "worker-2", "origin-2"];
 
 /**
- * Compose profiles `stack` enables: `harness` always, `multi` with `--multi` and `captions` with
- * `--captions` (both need `--harness`).
+ * Compose profiles `stack` enables: `harness` always, `multi` with `--multi`, `captions` with
+ * `--captions` and `stripe` (stripe-mock) with `--seed` (all need `--harness`).
  */
 export function stackProfiles(args: readonly string[]): string[] {
   const out = ["harness"];
@@ -485,6 +520,10 @@ export function stackProfiles(args: readonly string[]): string[] {
     if (!args.includes("--harness")) throw new Error("--captions needs --harness (the sidecar is a harness override)");
     out.push("captions");
   }
+  if (args.includes("--seed")) {
+    if (!args.includes("--harness")) throw new Error("--seed needs --harness --captions --w3");
+    out.push("stripe");
+  }
   return out;
 }
 
@@ -492,7 +531,12 @@ export function stackProfiles(args: readonly string[]): string[] {
 export function stackFiles(args: readonly string[]): string[] {
   if (args.includes("--w3") && !args.includes("--harness"))
     throw new Error("--w3 needs --harness (the batch 7 overrides are harness overrides)");
-  const rest = args.filter((a) => a !== "--harness" && a !== "--multi" && a !== "--captions" && a !== "--w3");
+  const seed = args.includes("--seed");
+  if (seed && !(args.includes("--harness") && args.includes("--captions") && args.includes("--w3")))
+    throw new Error("--seed needs --harness --captions --w3 (the seed fills every feature's tables)");
+  const flags = new Set(["--harness", "--multi", "--captions", "--w3", "--seed"]);
+  const rest = args.filter((a) => !flags.has(a));
+  if (rest.includes(SEED_OVERRIDE)) throw new Error(`${SEED_OVERRIDE}: layer it with --seed`);
   // They also set the `multi` replicas' environment, which only the multi override defines.
   const bare = rest.filter((a) => (W3_OVERRIDES as readonly string[]).includes(a));
   if (bare.length > 0) throw new Error(`${bare.join(", ")}: layer the batch 7 overrides with --harness --w3`);
@@ -501,6 +545,7 @@ export function stackFiles(args: readonly string[]): string[] {
         ...HARNESS_OVERRIDES,
         ...(args.includes("--captions") ? [CAPTIONS_OVERRIDE] : []),
         ...(args.includes("--w3") ? W3_OVERRIDES : []),
+        ...(seed ? [SEED_OVERRIDE] : []),
       ]
     : [];
   const overrides = [...harness, ...rest];
@@ -674,6 +719,14 @@ if (import.meta.main) {
       console.log(`infra: ${TEST_SERVICES.join(", ")} healthy`);
     } else if (cmd === "stack") {
       preflight();
+      if (process.argv.includes("--seed")) {
+        const envFile = resolve(ROOT, process.env.COMMONAIR_ENV_FILE ?? ".env");
+        const missing = missingSeedEnv(existsSync(envFile) ? readFileSync(envFile, "utf8") : "");
+        if (missing.length > 0)
+          throw new Error(
+            `--seed: ${missing.join(", ")} empty in ${envFile}; run \`bun scripts/init-env.ts --merge --seed\``,
+          );
+      }
       const files = stackFiles(process.argv.slice(3));
       const profiles = stackProfiles(process.argv.slice(3));
       const profileArgs = profiles.flatMap((p) => ["--profile", p]);
@@ -694,9 +747,11 @@ if (import.meta.main) {
           `still on an old image: ${still.map((r) => r.name).join(", ")}; ` +
             `run \`podman rm -f --depend ${still.map((r) => r.name).join(" ")}\` and \`stack\` again`,
         );
-      const running = profiles.includes("multi")
-        ? [...STACK_HEALTHY_SERVICES, ...MULTI_REPLICAS]
-        : STACK_HEALTHY_SERVICES;
+      const running = [
+        ...STACK_HEALTHY_SERVICES,
+        ...(profiles.includes("multi") ? MULTI_REPLICAS : []),
+        ...(profiles.includes("stripe") ? ["stripe-mock"] : []),
+      ];
       await waitHealthy(running, 300_000);
       waitDnsSettled("api", running);
       console.log("infra: platform healthy");
@@ -708,7 +763,7 @@ if (import.meta.main) {
       compose(["down", "-v"], 5 * 60_000);
     } else {
       console.error(
-        "usage: bun scripts/infra.ts test [--harness] [override.yaml...] | stack [--harness [--multi]] [override.yaml...] | down | reset",
+        "usage: bun scripts/infra.ts test [--harness] [override.yaml...] | stack [--harness [--multi] [--captions] [--w3] [--seed]] [override.yaml...] | down | reset",
       );
       process.exit(2);
     }

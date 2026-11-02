@@ -7,6 +7,9 @@
  * --merge keeps every value already in the target and only fills keys it lacks, so new
  * variables can be added without rotating secrets (an existing Postgres volume keeps its
  * password). VALKEY_PASSWORD is generated with the rest and written into VALKEY_URL as well.
+ * --seed also fills an empty STRIPE_WEBHOOK_SECRET, for the full-coverage seed's stack
+ * (harness/compose.seed.yaml): the harness signs stripe-mock's events with it. A real Stripe
+ * secret is left as it is, and plain stacks keep it empty (it is the operator's from Stripe).
  */
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { generateSigningKey, randomSecret } from "../packages/tokens/src/index.ts";
@@ -14,7 +17,7 @@ import { generateSigningKey, randomSecret } from "../packages/tokens/src/index.t
 const outIdx = process.argv.indexOf("--out");
 const target = outIdx === -1 ? ".env" : process.argv[outIdx + 1];
 if (!target || target.startsWith("--")) {
-  console.error("usage: bun scripts/init-env.ts [--out <path>] [--force | --merge]");
+  console.error("usage: bun scripts/init-env.ts [--out <path>] [--force | --merge] [--seed]");
   process.exit(2);
 }
 const merge = process.argv.includes("--merge");
@@ -96,10 +99,12 @@ function databaseUrl(url: string): string {
   }
 }
 
+const seed = process.argv.includes("--seed");
 const out = exampleText
   .split("\n")
   .map((line) => {
     const [key] = line.split("=");
+    if (seed && key === "STRIPE_WEBHOOK_SECRET" && !existing.get(key)) return `${key}=whsec_${hex(32)}`;
     if (key === "VALKEY_PASSWORD") return `${key}=${valkeyPassword}`;
     if (key === "POSTGRES_PASSWORD") return `${key}=${postgresPassword}`;
     if (key === "DATABASE_URL" && !existing.has(key)) return `${key}=${databaseUrl(line.slice(line.indexOf("=") + 1))}`;

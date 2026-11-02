@@ -31,11 +31,11 @@ test("init-env produces an env that every service schema accepts", () => {
 });
 
 /** Runs init-env into a fresh directory (optionally merging into `before`) and returns the env. */
-function initEnv(before?: string): Record<string, string> {
+function initEnv(before?: string, extra: readonly string[] = []): Record<string, string> {
   const dir = mkdtempSync(join(tmpdir(), "commonair-env-"));
   const out = join(dir, ".env");
   if (before !== undefined) writeFileSync(out, before);
-  const args = ["bun", "scripts/init-env.ts", "--out", out, ...(before === undefined ? [] : ["--merge"])];
+  const args = ["bun", "scripts/init-env.ts", "--out", out, ...(before === undefined ? [] : ["--merge"]), ...extra];
   const proc = Bun.spawnSync(args, { cwd: root });
   expect(proc.exitCode, proc.stderr.toString()).toBe(0);
   return Object.fromEntries(
@@ -224,6 +224,21 @@ describe("portability signing key (batch 7 decision (n))", () => {
     expect(() => loadEnv(portabilityEnv, added)).not.toThrow();
     expect(initEnv(`PORTABILITY_SIGNING_KEY=${env.PORTABILITY_SIGNING_KEY}\n`).PORTABILITY_SIGNING_KEY).toBe(
       env.PORTABILITY_SIGNING_KEY,
+    );
+  });
+});
+
+describe("--seed (the full-coverage seed's stack)", () => {
+  test("fills an empty STRIPE_WEBHOOK_SECRET; without it the secret stays empty", () => {
+    expect(initEnv().STRIPE_WEBHOOK_SECRET).toBe("");
+    const seeded = initEnv(undefined, ["--seed"]).STRIPE_WEBHOOK_SECRET;
+    expect(seeded).toMatch(/^whsec_[0-9a-f]{64}$/);
+    expect(initEnv("STRIPE_WEBHOOK_SECRET=\nAUTH_SECRET=kept\n", ["--seed"]).STRIPE_WEBHOOK_SECRET).toMatch(/^whsec_/);
+  });
+
+  test("a merge keeps a secret already set (a real one from Stripe stays)", () => {
+    expect(initEnv("STRIPE_WEBHOOK_SECRET=whsec_from_stripe\n", ["--seed"]).STRIPE_WEBHOOK_SECRET).toBe(
+      "whsec_from_stripe",
     );
   });
 });
