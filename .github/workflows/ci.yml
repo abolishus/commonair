@@ -239,6 +239,12 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
+      - name: Free disk space
+        # The stack's images, the browsers and the models filled the runner's disk mid-build
+        # (no space left on device) beside the preinstalled SDKs.
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          df -h /
       # `$/` is not understood by actionlint or our pin check (see release-dry-run below).
       - uses: ./.github/actions/setup # zizmor: ignore[self-repository]
         with:
