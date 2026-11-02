@@ -12,6 +12,7 @@ import { TIP_MESSAGES } from "../../src/seed/money/content.ts";
 import {
   BASE,
   CREW,
+  OFFERED_CREW,
   DAY_MS,
   LAPSE_MIN_AGE_DAYS,
   MAX_PAYMENTS_PER_PAYER,
@@ -169,8 +170,25 @@ describe("planMoney: the fixed logins", () => {
   test("streamer1's split with the crew is accepted, streamer2's stays proposed", () => {
     expect(P.splits).toEqual([
       { owner: "streamer1", basis: "all", crew: [{ handle: CREW, bps: 2_000 }], accept: true },
-      { owner: "streamer2", basis: "tips", crew: [{ handle: CREW, bps: 1_500 }], accept: false },
+      {
+        owner: "streamer2",
+        basis: "tips",
+        crew: [
+          { handle: CREW, bps: 1_500 },
+          { handle: OFFERED_CREW, bps: 1_000 },
+        ],
+        accept: false,
+      },
     ]);
+  });
+
+  test("/crew as streamer1: a split of its own and one offered to it, awaiting its answer", () => {
+    expect(P.splits.some((s) => s.owner === OFFERED_CREW)).toBe(true);
+    const offered = P.splits.filter((s) => s.crew.some((c) => c.handle === OFFERED_CREW));
+    expect(offered).toHaveLength(1);
+    expect(offered[0]).toMatchObject({ owner: "streamer2", accept: false });
+    // A channel owner is never crew on its own split (the API refuses it).
+    for (const s of P.splits) expect(s.crew.map((c) => c.handle)).not.toContain(s.owner);
   });
 
   test("the treasurer has pending checkouts to confirm, costs and flags to decide", () => {

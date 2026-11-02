@@ -52,6 +52,11 @@ export const SUPPORTER = "viewer1";
 export const FALLBACK_PAYER = "viewer2";
 /** The crew member on streamer1's (accepted) and streamer2's (proposed) splits. */
 export const CREW = "chanmod";
+/**
+ * Also offered a share of streamer2's proposed split: `/crew` shows the owner's own splits and
+ * the ones offered to them, so streamer1 (the route's login) needs one of each.
+ */
+export const OFFERED_CREW = "streamer1";
 
 /** Bulk payers stay well under the velocity rule (it flags more than `velocityMaxPayments`). */
 export const MAX_PAYMENTS_PER_PAYER = PAYMENT_FRAUD_RULES.velocityMaxPayments - 2;
@@ -513,7 +518,15 @@ export function planMoney(rng: Rng, scale: SeedScale, now: Date, input: MoneyPla
   if (has(CREW) && input.streamers.includes("streamer1"))
     splits.push({ owner: "streamer1", basis: "all", crew: [{ handle: CREW, bps: 2_000 }], accept: true });
   if (has(CREW) && input.streamers.includes("streamer2"))
-    splits.push({ owner: "streamer2", basis: "tips", crew: [{ handle: CREW, bps: 1_500 }], accept: false });
+    splits.push({
+      owner: "streamer2",
+      basis: "tips",
+      crew: [
+        { handle: CREW, bps: 1_500 },
+        ...(input.streamers.includes(OFFERED_CREW) ? [{ handle: OFFERED_CREW, bps: 1_000 }] : []),
+      ],
+      accept: false,
+    });
 
   const keyed = payments.map((p, i) => ({ ...p, key: `m${String(i + 1).padStart(5, "0")}` }));
   const writeOffOwner = splits.find((x) => x.accept && x.basis === "all")?.owner;
