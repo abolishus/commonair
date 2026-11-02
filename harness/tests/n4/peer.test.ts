@@ -12,6 +12,7 @@ import { type ActivityPubPeer, startActivityPubPeer } from "../../src/mocks/acti
 import {
   acctOf,
   anyCreateFrom,
+  arrivedSince,
   isAcceptOf,
   isActorDelete,
   isCreate,
@@ -145,6 +146,19 @@ describe("federation scenario helpers", () => {
     };
     expect(isAcceptOf(accept, actor, "f1")).toBe(true);
     expect(isAcceptOf(accept, actor, "f2")).toBe(false);
+  });
+
+  test("arrivedSince matches what lands after the mark, even before the trigger returns", () => {
+    const received: string[] = ["note", "video-old"];
+    const fresh = arrivedSince(received);
+    const isVideo = fresh((r: string) => r.startsWith("video"));
+    expect(received.find(isVideo)).toBeUndefined();
+    // The delivery lands while the trigger is still running (step 5's goOffline).
+    received.push("video-new");
+    expect(received.find(isVideo)).toBe("video-new");
+    expect(received.find(fresh((r: string) => r === "note"))).toBeUndefined();
+    expect(received.find(arrivedSince(received, 0)((r: string) => r === "note"))).toBe("note");
+    expect(received.find(arrivedSince(received)(() => true))).toBeUndefined();
   });
 
   test("every step has a runner", () => {

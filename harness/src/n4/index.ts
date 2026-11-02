@@ -29,6 +29,7 @@ import { federationTitle } from "../w3/steps.ts";
 import {
   acctOf,
   anyCreateFrom,
+  arrivedSince,
   isAcceptOf,
   isActorDelete,
   isCreate,
@@ -228,10 +229,13 @@ async function step4(run: FederationRun): Promise<void> {
   const ch = await run.channel();
   const peer = await run.peer();
   await ensureFollowing(run, ch);
-  const from = peer.received.length;
+  const fresh = arrivedSince(peer.received);
   await ctx.step(federationTitle(4, "go live"), () => goLive(run, ch));
   const note = await ctx.step(federationTitle(4, "the peer receives a signed Create{Note} that verifies"), () =>
-    peer.waitFor((r) => peer.received.indexOf(r) >= from && isCreate(r, ch.actorId, "Note"), DELIVERY_TIMEOUT_MS),
+    peer.waitFor(
+      fresh((r) => isCreate(r, ch.actorId, "Note")),
+      DELIVERY_TIMEOUT_MS,
+    ),
   );
   const o = note.json?.object as Record<string, unknown>;
   ctx.check("4. the Note links the channel page", typeof o.url === "string" && o.url.endsWith(`/${ch.slug}`));
@@ -243,14 +247,19 @@ async function step5(run: FederationRun): Promise<void> {
   const ch = await run.channel();
   const peer = await run.peer();
   await ensureFollowing(run, ch);
+  // Marked before the broadcast ends: the VOD's Create{Video} can arrive while `goOffline` still
+  // waits for the channel to read offline (CI: VOD ready 0.4 s after the session stopped).
+  const fresh = arrivedSince(peer.received);
   if (!ch.encoder?.running) await ctx.step(federationTitle(5, "go live to record a VOD"), () => goLive(run, ch));
   await ctx.step(federationTitle(5, "record 20 s, then end the broadcast"), async () => {
     await Bun.sleep(20_000);
     await goOffline(run, ch);
   });
-  const from = peer.received.length;
   const video = await ctx.step(federationTitle(5, "the peer receives a signed Create{Video}"), () =>
-    peer.waitFor((r) => peer.received.indexOf(r) >= from && isCreate(r, ch.actorId, "Video"), VOD_TIMEOUT_MS),
+    peer.waitFor(
+      fresh((r) => isCreate(r, ch.actorId, "Video")),
+      VOD_TIMEOUT_MS,
+    ),
   );
   const o = video.json?.object as Record<string, unknown>;
   const text = JSON.stringify(o);
@@ -340,11 +349,14 @@ async function step8(run: FederationRun): Promise<void> {
       reason: "harness federation scenario",
       ...(suspended ? { clauseId: "guidelines.general" } : {}),
     });
-  const from = peer.received.length;
+  const fresh = arrivedSince(peer.received);
   await ctx.step(federationTitle(8, "an admin suspends the channel"), () => suspend(true));
   ctx.defer(() => suspend(false).catch(() => undefined));
   await ctx.step(federationTitle(8, "the peer receives a signed Delete of the actor"), () =>
-    peer.waitFor((r) => peer.received.indexOf(r) >= from && isActorDelete(r, ch.actorId), DELIVERY_TIMEOUT_MS),
+    peer.waitFor(
+      fresh((r) => isActorDelete(r, ch.actorId)),
+      DELIVERY_TIMEOUT_MS,
+    ),
   );
   const left = await followerIds(ch);
   ctx.check("8. the channel's followers are dropped", left.length === 0, { followers: left.length });

@@ -45,5 +45,17 @@ export const isActorDelete = (r: ReceivedActivity, actorId: string) =>
 /** Any `Create` by `actorId`, verified or not (for "nothing delivered" checks). */
 export const anyCreateFrom = (r: ReceivedActivity, actorId: string) => r.type === "Create" && r.json?.actor === actorId;
 
+/**
+ * Match only what arrives from now on. Take the mark **before** the trigger: a delivery can land
+ * before the trigger's own call returns (a short VOD is ready and delivered within a second of
+ * the broadcast ending, while `goOffline` still polls the channel), and a mark taken after it
+ * would skip that delivery.
+ */
+export const arrivedSince =
+  <T>(received: readonly T[], from: number = received.length) =>
+  (predicate: (r: T) => boolean) =>
+  (r: T) =>
+    received.indexOf(r) >= from && predicate(r);
+
 /** `@slug@domain` → `slug@domain`, for `acct:`. */
 export const acctOf = (handle: string) => handle.replace(/^@/, "");
