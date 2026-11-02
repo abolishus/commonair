@@ -22,6 +22,36 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
 
 ## In flight
 
+**Batch 7 done (2026-11-02): W3 + N3 + N4 milestone on `43ae60dc`.** CI is green on the push run
+(41360599768; `ingest-whip` TTFF passed on rerun) and on a full `workflow_dispatch` run (41365937421;
+a chat-filter timing test passed on rerun). All 12 harness shards passed, plus the self-host jobs.
+
+- **Scenarios:** `watch-room`, `portability`, `twitch-import` and `federation` pass with no pending
+  steps, are in `FULL_REQUIRED` and run in the `w3` shard.
+- **Extensions:** `interact` runs its giveaway, surge-raid and fair-prediction steps; `e5-coop` runs
+  jury; `e2e-relay` runs dvr-relay, dvr-purge and relay-vtt. `trust-safety` (sor-resolve),
+  `integrity-basic` (group-appeal-threshold) and `rehearsal` (moderation-samples) pass. Every
+  `PENDING_W3_*` list and `PENDING_B7_IDS` is empty.
+- **Drafts:** privacy and terms drafts are marked "not reviewed by counsel (none retained)", with
+  both seed versions at `2026-11-01-w3-draft`. The privacy draft covers watch rooms, portability and
+  the move, the Twitch import, federation, giveaways and the jury. Terms gain §11 Giveaways and §12
+  rooms/moving/federation.
+- **Shards:** split under the cap. Dispatch-run scenario times:
+  - captions 3m47s, w3 6m21s, bot 7m29s, long 7m43s, notify 8m03s;
+  - core 8m18s, interact 8m32s, rest 8m34s, features 9m15s, surge 9m25s;
+  - relay 12m18s and clock 13m02s are single scenarios. B8-harness splits `e2e-relay` and trims
+    `clock-skew`.
+- **Release:** whisper ships in the release and self-host bundle (`selfhost.sh --captions`, AVX2
+  check).
+
+Open for the user:
+
+- accept ADRs 0037–0039, including the ADR 0039 §2 and §3 "measured only" proposals for giveaway
+  and prediction standing;
+- the visual checks and live scenario runs listed in the wave paragraphs below;
+- a real-Helix smoke test and a real Mastodon follow against staging before either flag goes on;
+- batch 8's open decisions U1–U6 (`.claude/briefs/batch8/README.md`).
+
 **Batch 7 (W3 + N3 + N4; `.claude/briefs/batch7/README.md`), planned 2026-11-01 at `b37203c4`.**
 
 _User decisions:_
