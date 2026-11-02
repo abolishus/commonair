@@ -124,15 +124,10 @@ export async function podmanAvailable(): Promise<boolean> {
   }
 }
 
-export async function startMediaMtx(opts: MediaMtxOptions = {}): Promise<MediaMtxInstance> {
-  const name = `harness-mediamtx-${crypto.randomUUID().slice(0, 8)}`;
-  const udp = await freeUdpPort();
-  // Under podman machine (macOS) only $HOME, /private and /var/folders are shared with the VM;
-  // tmpdir() is under one of them.
-  const dir = mkdtempSync(join(tmpdir(), "harness-mediamtx-"));
-  const configPath = join(dir, "mediamtx.yml");
-  writeFileSync(configPath, mediamtxConfig({ ...opts, webrtcUdpPort: udp }));
-  const started = await run([
+const PORT_ATTEMPTS = 5;
+
+function startContainer(name: string, configPath: string, udp: number, image: string) {
+  return run([
     "podman",
     "run",
     "-d",
@@ -156,8 +151,26 @@ export async function startMediaMtx(opts: MediaMtxOptions = {}): Promise<MediaMt
     `127.0.0.1:${udp}:${udp}/udp`,
     "-p",
     "127.0.0.1::8890/udp",
-    opts.image ?? MEDIAMTX_IMAGE,
+    image,
   ]);
+}
+
+export async function startMediaMtx(opts: MediaMtxOptions = {}): Promise<MediaMtxInstance> {
+  const name = `harness-mediamtx-${crypto.randomUUID().slice(0, 8)}`;
+  // Under podman machine (macOS) only $HOME, /private and /var/folders are shared with the VM;
+  // tmpdir() is under one of them.
+  const dir = mkdtempSync(join(tmpdir(), "harness-mediamtx-"));
+  const configPath = join(dir, "mediamtx.yml");
+  // The free UDP port is released before podman binds it, so a parallel test can take it first:
+  // pick another and try again.
+  let started: Awaited<ReturnType<typeof run>> = { code: 1, stdout: "", stderr: "" };
+  for (let attempt = 1; attempt <= PORT_ATTEMPTS; attempt++) {
+    const udp = await freeUdpPort();
+    writeFileSync(configPath, mediamtxConfig({ ...opts, webrtcUdpPort: udp }));
+    started = await startContainer(name, configPath, udp, opts.image ?? MEDIAMTX_IMAGE);
+    if (started.code === 0 || !started.stderr.includes("address already in use")) break;
+    await run(["podman", "rm", "-f", "-i", name]);
+  }
   if (started.code !== 0) {
     rmSync(dir, { recursive: true, force: true });
     throw new Error(`podman run failed: ${started.stderr.trim()}`);
