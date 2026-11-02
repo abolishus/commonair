@@ -297,6 +297,66 @@ describe("roles, follows, blocks and bans", () => {
   });
 });
 
+describe("backdated rows never predate what they reference", () => {
+  const SEEDS = [1, 2, 3, 4, 5, 6, 7, 8];
+  const createdOf = (p: SocialPlan) => new Map(p.accounts.map((a) => [a.handle, a.createdAt.getTime()]));
+
+  test("sessions, blocks and bans come after every account they reference (small and medium)", () => {
+    for (const scale of [small, SEED_SCALES.medium]) {
+      for (const seed of SEEDS) {
+        const p = plan(seed, scale);
+        const c = createdOf(p);
+        const born = (h: string) => c.get(h) ?? Number.POSITIVE_INFINITY;
+        for (const s of p.sessions)
+          expect(s.createdAt.getTime(), `${seed} session ${s.user}`).toBeGreaterThan(born(s.user));
+        for (const b of p.blocks) {
+          const when = b.createdAt.getTime();
+          expect(when, `${seed} block ${b.user}>${b.blocked}`).toBeGreaterThan(Math.max(born(b.user), born(b.blocked)));
+          expect(when).toBeLessThan(NOW.getTime());
+        }
+        for (const b of p.bans) {
+          const when = b.createdAt.getTime();
+          const refs = [b.channel, b.target, b.moderator].map(born);
+          expect(when, `${seed} ban ${b.channel}>${b.target}`).toBeGreaterThan(Math.max(...refs));
+          expect(when).toBeLessThan(NOW.getTime());
+          expect(b.expiresAt?.getTime() ?? null).toBe(
+            b.durationSeconds === null ? null : when + b.durationSeconds * 1000,
+          );
+        }
+      }
+    }
+  });
+
+  test("chat lines come after the author's account and follow, never inside an active ban", () => {
+    for (const seed of SEEDS) {
+      const p = plan(seed);
+      const c = createdOf(p);
+      const followed = new Map(p.follows.map((f) => [`${f.channel}>${f.follower}`, f.createdAt.getTime()]));
+      for (const l of lines(p, seed)) {
+        const when = l.createdAt.getTime();
+        const at = `${seed} ${l.channel}>${l.author}`;
+        expect(when, at).toBeGreaterThanOrEqual(c.get(l.author) ?? Number.POSITIVE_INFINITY);
+        // Followers from the follow on; owners and non-following role holders have no follow row.
+        expect(when, at).toBeGreaterThanOrEqual(followed.get(`${l.channel}>${l.author}`) ?? 0);
+        for (const b of p.bans.filter((x) => x.channel === l.channel && x.target === l.author)) {
+          const active = when >= b.createdAt.getTime() && (b.expiresAt === null || when < b.expiresAt.getTime());
+          expect(active, at).toBe(false);
+        }
+      }
+    }
+  });
+
+  test("a window nobody else may talk in falls back to the owner", () => {
+    const p = plan();
+    const w = p.chatWindows.find((x) => x.channel === "streamer1" && x.lines > 0);
+    if (!w) throw new Error("no streamer1 window");
+    const late = { ...p, follows: p.follows.map((f) => ({ ...f, createdAt: NOW })), roles: [] };
+    const got = [...chatLines(createRng(1), w, chatPools(late))];
+    expect(got.length).toBe(w.lines);
+    for (const l of got) expect(l.author).toBe("streamer1");
+  });
+});
+
 describe("sessions, 2FA, passkeys and consent", () => {
   test("a session per fixed login (not newbie), an expired one, a few bulk ones", () => {
     const users = new Set(P.sessions.map((s) => s.user));

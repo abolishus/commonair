@@ -479,10 +479,24 @@ function planFollows(
   return out;
 }
 
+/** A span in which a user may not chat in a channel (`to` null: permanent). */
+interface BanSpan {
+  target: string;
+  from: number;
+  to: number | null;
+}
+
 /** Owner and role holders first, then followers: who talks in a channel. */
 interface ChatPools {
   /** Owner handle → chatters (owner, roles, followers), deduplicated. */
   chatters: Map<string, string[]>;
+  /**
+   * Owner handle → chatter → the earliest time (ms) they may talk there: the account's creation for
+   * the owner and role holders, the follow for followers.
+   */
+  since: Map<string, Map<string, number>>;
+  /** Owner handle → chat bans and timeouts on that channel. */
+  bans: Map<string, BanSpan[]>;
   /** Owner handle → chatters the word filters apply to (not the owner, moderators or VIPs). */
   filtered: Map<string, string[]>;
   usernames: Map<string, string>;
@@ -491,26 +505,42 @@ interface ChatPools {
   allEmotes: Map<string, string[]>;
 }
 
-export function chatPools(plan: Pick<SocialPlan, "accounts" | "channels" | "roles" | "follows">): ChatPools {
+export function chatPools(plan: Pick<SocialPlan, "accounts" | "channels" | "roles" | "follows" | "bans">): ChatPools {
   const quiet = new Set(plan.accounts.filter((a) => a.kind === "bot" || a.handle === "newbie").map((a) => a.handle));
+  const createdOf = new Map(plan.accounts.map((a) => [a.handle, a.createdAt.getTime()]));
   const chatters = new Map<string, string[]>();
+  const since = new Map<string, Map<string, number>>();
   const filtered = new Map<string, string[]>();
   const privileged = new Map<string, Set<string>>();
+  const add = (owner: string, h: string, from: number) => {
+    const list = chatters.get(owner);
+    const s = since.get(owner);
+    if (!list || !s || s.has(h) || quiet.has(h)) return;
+    list.push(h);
+    s.set(h, from);
+  };
   for (const c of plan.channels.filter((x) => x.streamer)) {
-    chatters.set(c.ownerHandle, [c.ownerHandle]);
+    chatters.set(c.ownerHandle, []);
+    since.set(c.ownerHandle, new Map());
+    add(c.ownerHandle, c.ownerHandle, c.createdAt.getTime());
     privileged.set(c.ownerHandle, new Set([c.ownerHandle]));
   }
+  // A role holder who also follows talks from the follow on, like any follower.
+  const followedAt = new Map(plan.follows.map((f) => [`${f.channel}\0${f.follower}`, f.createdAt.getTime()]));
   for (const r of plan.roles) {
-    const list = chatters.get(r.channel);
-    if (list && !list.includes(r.user) && !quiet.has(r.user)) list.push(r.user);
+    add(
+      r.channel,
+      r.user,
+      followedAt.get(`${r.channel}\0${r.user}`) ?? createdOf.get(r.user) ?? Number.POSITIVE_INFINITY,
+    );
     if (r.role !== "editor") privileged.get(r.channel)?.add(r.user);
   }
-  const seen = new Map([...chatters].map(([k, v]) => [k, new Set(v)]));
-  for (const f of plan.follows) {
-    const s = seen.get(f.channel);
-    if (!s || s.has(f.follower) || quiet.has(f.follower)) continue;
-    s.add(f.follower);
-    chatters.get(f.channel)?.push(f.follower);
+  for (const f of plan.follows) add(f.channel, f.follower, f.createdAt.getTime());
+  const bans = new Map<string, BanSpan[]>();
+  for (const b of plan.bans) {
+    const list = bans.get(b.channel) ?? [];
+    list.push({ target: b.target, from: b.createdAt.getTime(), to: b.expiresAt?.getTime() ?? null });
+    bans.set(b.channel, list);
   }
   for (const [owner, list] of chatters)
     filtered.set(
@@ -531,6 +561,8 @@ export function chatPools(plan: Pick<SocialPlan, "accounts" | "channels" | "role
   }
   return {
     chatters,
+    since,
+    bans,
     filtered,
     usernames: new Map(plan.accounts.map((a) => [a.handle, a.username])),
     freeEmotes,
@@ -621,8 +653,17 @@ export interface ChatLineSpec {
 export function* chatLines(rng: Rng, w: ChatWindowSpec, pools: ChatPools): Generator<ChatLineSpec> {
   if (w.lines <= 0) return;
   const r = rng.fork(`chat:${w.index}`);
-  const chatters = pools.chatters.get(w.channel) ?? [w.channel];
-  const filtered = pools.filtered.get(w.channel) ?? [];
+  // Per window, not per line: whoever existed (and followed) by its start and has no ban touching
+  // it. Lines all fall inside the window, so every line is then valid for its author.
+  const start = w.start.getTime();
+  const end = w.end.getTime();
+  const since = pools.since.get(w.channel);
+  const bans = pools.bans.get(w.channel) ?? [];
+  const barred = new Set(bans.filter((b) => b.from <= end && (b.to === null || b.to > start)).map((b) => b.target));
+  const eligible = (h: string) => (since?.get(h) ?? Number.POSITIVE_INFINITY) <= start && !barred.has(h);
+  const pool = (pools.chatters.get(w.channel) ?? []).filter(eligible);
+  const chatters = pool.length > 0 ? pool : [w.channel];
+  const filtered = (pools.filtered.get(w.channel) ?? []).filter(eligible);
   const free = pools.freeEmotes.get(w.channel) ?? [];
   const all = pools.allEmotes.get(w.channel) ?? [];
   const nameOf = (h: string) => pools.usernames.get(h) ?? h;
@@ -678,6 +719,10 @@ export function planSocial(rng: Rng, scale: SeedScale, now: Date): SocialPlan {
   const t = now.getTime();
   const accounts = planAccounts(rng.fork("accounts"), scale, now);
   const has = (h: string) => accounts.some((a) => a.handle === h);
+  const createdOf = new Map(accounts.map((a) => [a.handle, a.createdAt.getTime()]));
+  // Backdated rows never predate an account they reference: at least an hour after the newest one.
+  const notBefore = (when: number, ...handles: string[]) =>
+    at(Math.max(when, ...handles.map((h) => (createdOf.get(h) ?? 0) + HOUR_MS)));
   const channels = planChannels(rng.fork("channels"), accounts);
   const bulkViewers = accounts.filter((a) => a.kind === "bulk-viewer").map((a) => a.handle);
   const bulkStreamers = accounts.filter((a) => a.kind === "bulk-streamer").map((a) => a.handle);
@@ -717,7 +762,7 @@ export function planSocial(rng: Rng, scale: SeedScale, now: Date): SocialPlan {
   const blocks: BlockSpec[] = [];
   const block = (user: string, target: string | undefined) => {
     if (target && has(user) && has(target) && user !== target)
-      blocks.push({ user, blocked: target, createdAt: at(t - rb.int(1, 20) * DAY_MS) });
+      blocks.push({ user, blocked: target, createdAt: notBefore(t - rb.int(1, 20) * DAY_MS, user, target) });
   };
   block("viewer1", blocked[0]);
   block("viewer1", blocked[1]);
@@ -728,10 +773,12 @@ export function planSocial(rng: Rng, scale: SeedScale, now: Date): SocialPlan {
   const bans: BanSpec[] = [];
   const ban = (p: Omit<BanSpec, "expiresAt" | "reason">) => {
     if (!has(p.channel) || !has(p.target) || !has(p.moderator)) return;
+    const createdAt = notBefore(p.createdAt.getTime(), p.channel, p.target, p.moderator);
     bans.push({
       ...p,
+      createdAt,
       reason: p.durationSeconds === null ? BAN_REASONS.ban : BAN_REASONS.timeout,
-      expiresAt: p.durationSeconds === null ? null : at(p.createdAt.getTime() + p.durationSeconds * 1000),
+      expiresAt: p.durationSeconds === null ? null : at(createdAt.getTime() + p.durationSeconds * 1000),
     });
   };
   // viewer2's timeout on streamer1 runs the longest the API allows, so it is still on when testers look.
@@ -767,13 +814,15 @@ export function planSocial(rng: Rng, scale: SeedScale, now: Date): SocialPlan {
 
   const rs = rng.fork("sessions");
   const sessions: SessionSpec[] = [];
-  const session = (user: string, createdAt: number) =>
+  const session = (user: string, when: number) => {
+    const createdAt = notBefore(when, user);
     sessions.push({
       user,
-      createdAt: at(createdAt),
-      expiresAt: at(createdAt + SESSION_TTL_MS),
+      createdAt,
+      expiresAt: at(createdAt.getTime() + SESSION_TTL_MS),
       userAgent: rs.pick(USER_AGENTS),
     });
+  };
   const signedIn = accounts.filter((a) => a.kind === "fixed" && a.handle !== "newbie");
   for (const a of signedIn) session(a.handle, t - rs.int(1, 20) * DAY_MS - rs.int(0, 23) * HOUR_MS);
   if (has("viewer1")) {
