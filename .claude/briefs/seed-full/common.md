@@ -186,3 +186,27 @@ added since then is yours if it is in your stub, even if your brief doesn't name
 - Also give the exact command to try it:
   `DEMO_SEED_FULL=true bun harness/src/cli.ts seed full --confirm <db> --scale small`
   against a freshly reset local database, with the flags your unit needs.
+
+## What seed-social left you (merged at `42dcd991`)
+
+- **Store:** `users` holds every account with its `kind`. `channels` holds the streamers only:
+  every human has a channel, as signup's `ensureChannel` makes one, but only the streamers are listed.
+  `store.extra.social` is `{ chatWindows: { channelId, start: Date, end: Date }[], categoryIds,
+  botUserId, moveLinkNonce }`.
+- **Account ages:** fixed logins were created `historyDays` ago, and 80% of bulk accounts are older
+  than 31 days. Half the bulk accounts are adults, all with birth dates. Never let a row of yours
+  predate the account or follow it references: the seed-social review caught exactly that.
+- **Chat:** chat is backdated only into windows from the last 28 days. The worker deletes chat older
+  than 30 days when no VOD keeps it. Every backdated line has `broadcast_id` null. streamer3 has
+  no chat and no windows.
+- **Requests to your unit:**
+  - **seed-media:** when you create a backdated broadcast over a chat window, set `broadcast_id` on
+    the chat lines inside it, so their VOD's chat replay works. This is an update to the plain
+    `chat_messages` table, scoped by `channel_id` and the window.
+  - **seed-safety:** `users.banned` is false on `banned`. Suspend it through the API, so the
+    checked path sets `banned`, `ban_reason` and `ban_expires`.
+  - **seed-interact:** bot1 holds no channel role on streamer1. Make it a moderator through the
+    channel-bot path if the bot needs one.
+- **Not shown:** the 2FA rows for admin and viewer1 are unverified enrollments, so every unit can
+  still sign them in with the shared password. The sessions and passkeys exist, but
+  `/settings/privacy` doesn't render them.
