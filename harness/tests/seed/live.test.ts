@@ -6,6 +6,8 @@ import { bulkStreamerHandle, bulkViewerHandle } from "../../src/seed/accounts.ts
 import {
   CHATTERS_PER_CHANNEL,
   CHAT_GAP_MS,
+  COVERAGE_CHAT_GAP_MS,
+  COVERAGE_LIVE_CHANNELS,
   LIVE_FIXED_ORDER,
   type LiveAvailable,
   type LiveChannel,
@@ -13,6 +15,8 @@ import {
   MAX_START_FAILURES,
   type PublisherHandle,
   REQUIRED_LOGINS,
+  fixedLiveSlugs,
+  liveAvailable,
   liveRefusals,
   nextLine,
   planLive,
@@ -74,6 +78,75 @@ describe("planLive", () => {
       expect(l.gapMs).toBeLessThanOrEqual(CHAT_GAP_MS[1]);
       expect(l.body).not.toContain("{c}");
     }
+  });
+});
+
+describe("liveAvailable", () => {
+  const login = (handle: string, restricted = false, slug: string | null = `demo_${handle}`) => ({
+    handle,
+    slug,
+    restricted,
+  });
+  test("streamers: the fixed ones and bulk streamers with a channel; viewers: bulk viewers only", () => {
+    const a = liveAvailable([
+      login("streamer1"),
+      login("council2"),
+      login("s0001"),
+      login("s0002", false, null),
+      login("viewer1"),
+      login("admin"),
+      login("v00001"),
+      login("v00002"),
+    ]);
+    expect(a.streamers.map((s) => s.handle)).toEqual(["streamer1", "council2", "s0001"]);
+    expect(a.viewers).toEqual(["v00001", "v00002"]);
+  });
+
+  test("a restricted account never chats (suspended, deleting, chat-banned or blocked)", () => {
+    const a = liveAvailable([login("v00001", true), login("v00002"), login("v00003", true)]);
+    expect(a.viewers).toEqual(["v00002"]);
+  });
+
+  test("the restriction is the chatters' only: a fixed streamer still streams", () => {
+    expect(liveAvailable([login("streamer1", true)]).streamers).toEqual([ch("streamer1")]);
+  });
+
+  test("no logins: nothing to stream, nobody to chat", () => {
+    expect(liveAvailable([])).toEqual({ streamers: [], viewers: [] });
+  });
+});
+
+describe("the seed-coverage walk's live streams", () => {
+  const channels = [
+    { ownerHandle: "streamer2", slug: "aurora2" },
+    { ownerHandle: "s0001", slug: "bulk1" },
+    { ownerHandle: "streamer1", slug: "aurora1" },
+    { ownerHandle: "streamer3", slug: "aurora3" },
+  ];
+  test("streamer1 and streamer2, in planLive's order", () => {
+    expect(COVERAGE_LIVE_CHANNELS).toBeGreaterThanOrEqual(2);
+    expect(fixedLiveSlugs(channels, COVERAGE_LIVE_CHANNELS)).toEqual(["aurora1", "aurora2"]);
+    const plan = planLive(createRng(1), AVAILABLE, COVERAGE_LIVE_CHANNELS);
+    expect(plan.channels.map((c) => c.handle)).toEqual(["streamer1", "streamer2"]);
+  });
+
+  test("bounded by what the store has", () => {
+    expect(fixedLiveSlugs(channels, 9)).toEqual(["aurora1", "aurora2", "aurora3"]);
+    expect(fixedLiveSlugs(channels, 0)).toEqual([]);
+    expect(fixedLiveSlugs([], 2)).toEqual([]);
+  });
+
+  test("chat is fast enough that a page judged within seconds sees a line, and still bounded", () => {
+    const r = createRng(3);
+    const gaps = Array.from({ length: 200 }, () => nextLine(r, "streamer1", COVERAGE_CHAT_GAP_MS).gapMs);
+    expect(Math.min(...gaps)).toBeGreaterThanOrEqual(COVERAGE_CHAT_GAP_MS[0]);
+    expect(Math.max(...gaps)).toBeLessThanOrEqual(COVERAGE_CHAT_GAP_MS[1]);
+    // CHATTERS_PER_CHANNEL chatters: on average a line well inside DATA_GRACE_MS (10 s).
+    const mean = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+    expect(mean / CHATTERS_PER_CHANNEL).toBeLessThan(2_000);
+    // At least a second between one chatter's lines (the chat rate limit).
+    expect(COVERAGE_CHAT_GAP_MS[0]).toBeGreaterThanOrEqual(1_000);
+    expect(COVERAGE_CHAT_GAP_MS[1]).toBeLessThan(CHAT_GAP_MS[0]);
   });
 });
 

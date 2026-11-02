@@ -3,9 +3,11 @@
 
 /**
  * `seed live --channels K` (seed-media): keep K seeded channels live (the fixed streamers first,
- * then bulk streamers) with seeded bulk viewers chatting at a bounded rate, until SIGINT or
- * `--duration`. A publisher that dies is restarted. Refuses unless `DEMO_SEED_FULL=true`, the
- * password is given and the database already holds a full seed.
+ * then bulk streamers) with seeded bulk viewers chatting at a bounded rate, until SIGINT, SIGTERM
+ * or `--duration`. A publisher that dies is restarted. Refuses unless `DEMO_SEED_FULL=true`, the
+ * password is given and the database already holds a full seed. The `seed-coverage` scenario runs
+ * it for its walk (streamer1 and streamer2, faster chat); staging seed mode runs it detached after
+ * `seed full` until `seed-mode close` (scripts/selfhost.sh).
  *
  * The plan and the supervisor are pure over injected dependencies (a fake process runner in the
  * tests); `media/live-io.ts` wires them to ffmpeg, the API and chat.
@@ -20,6 +22,13 @@ export const LIVE_FIXED_ORDER = ["streamer1", "streamer2", "streamer3", "council
 export const CHATTERS_PER_CHANNEL = 3;
 /** Each chatter waits this long between lines (ms): about 3–7 lines a minute per channel. */
 export const CHAT_GAP_MS: readonly [number, number] = [25_000, 60_000];
+/**
+ * The `seed-coverage` walk's cadence: chat reaches a page only over its socket (no history on
+ * join), so a channel page judged within seconds of loading needs a line every second or two.
+ */
+export const COVERAGE_CHAT_GAP_MS: readonly [number, number] = [1_500, 4_000];
+/** Channels the `seed-coverage` walk keeps live: streamer1 (/, its page, embed, dashboard) and streamer2. */
+export const COVERAGE_LIVE_CHANNELS = 2;
 /** Wait before restarting a publisher that died. */
 export const RESTART_BACKOFF_MS = 3_000;
 /** Consecutive failed starts after which a channel is given up (the run then exits 1). */
@@ -78,8 +87,47 @@ export function planLive(rng: Rng, available: LiveAvailable, k: number): LivePla
 }
 
 /** The next line and the wait before it, for a chatter's PRNG stream. Pure. */
-export function nextLine(r: Rng, owner: string): { gapMs: number; body: string } {
-  return { gapMs: r.int(CHAT_GAP_MS[0], CHAT_GAP_MS[1]), body: fillLine(r.pick(CHAT_LINES), owner) };
+export function nextLine(
+  r: Rng,
+  owner: string,
+  gapMs: readonly [number, number] = CHAT_GAP_MS,
+): { gapMs: number; body: string } {
+  return { gapMs: r.int(gapMs[0], gapMs[1]), body: fillLine(r.pick(CHAT_LINES), owner) };
+}
+
+/** A seeded login as `seed live` reads it from the database. */
+export interface LiveLogin {
+  /** Without the `demo_` prefix. */
+  handle: string;
+  slug: string | null;
+  /**
+   * Suspended, deleted or scheduled for deletion, banned from a channel's chat, or blocked by a
+   * fixed login: never a chatter (signing in would change its state, or its lines would not show).
+   */
+  restricted: boolean;
+}
+
+const STREAMS = new Set<string>(LIVE_FIXED_ORDER);
+
+/** Who streams (restricted or not: the fixed streamers are never suspended) and who chats. Pure. */
+export function liveAvailable(logins: readonly LiveLogin[]): LiveAvailable {
+  return {
+    streamers: logins.flatMap((l) =>
+      l.slug && (STREAMS.has(l.handle) || /^s\d+$/.test(l.handle)) ? [{ handle: l.handle, slug: l.slug }] : [],
+    ),
+    viewers: logins.filter((l) => !l.restricted && /^v\d+$/.test(l.handle)).map((l) => l.handle),
+  };
+}
+
+/**
+ * The slugs `seed live` streams first (`planLive`'s fixed order), for the `seed-coverage` walk to
+ * wait on. Pure.
+ */
+export function fixedLiveSlugs(channels: readonly { ownerHandle: string; slug: string }[], k: number): string[] {
+  return LIVE_FIXED_ORDER.flatMap((h) => channels.filter((c) => c.ownerHandle === h).map((c) => c.slug)).slice(
+    0,
+    Math.max(0, k),
+  );
 }
 
 export interface LiveRefusalInput {

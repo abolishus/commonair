@@ -8,7 +8,9 @@
  * shard's fresh stack) it runs `seed full --scale small` itself first; on a database a separate
  * `seed full` filled, it reads that run's store file and signs in with DEMO_SEED_PASSWORD. On any
  * other database (an unsharded `full`, whose other scenarios made users) it reports every route as
- * skipped, with the reason: the seed needs a fresh database.
+ * skipped, with the reason: the seed needs a fresh database. During the walk streamer1 and
+ * streamer2 stream with chat (`seed live`, stopped in the teardown), unless a separate `seed live`
+ * already keeps streamer1 live.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -18,6 +20,8 @@ import type { Page, Response } from "playwright";
 import { DEFAULT_REPORT_DIR } from "../src/report.ts";
 import { defineScenario, type ScenarioContext } from "../src/scenario.ts";
 import { describeTarget } from "../src/seed/guard.ts";
+import { COVERAGE_CHAT_GAP_MS, COVERAGE_LIVE_CHANNELS, fixedLiveSlugs } from "../src/seed/live.ts";
+import { runSeedLiveCommand } from "../src/seed/media/live-io.ts";
 import { SEED_ROUTES, type SeedRoute } from "../src/seed/routes.ts";
 import { SEED_STORE_FILE, type SeedStoreFile, runSeedFull } from "../src/seed/run.ts";
 import type { SeedStore } from "../src/seed/types.ts";
@@ -31,6 +35,10 @@ const UI_TIMEOUT_MS = 30_000;
 const SETTLE_MS = 15_000;
 const EMPTY_STATE = '[data-slot="empty-state"]';
 const SKELETON = '[data-slot="skeleton"]';
+/** How long a route that should show data may take to fill an empty state (live chat arriving). */
+const DATA_GRACE_MS = 10_000;
+/** How long the coverage streams may take to show as live. */
+const LIVE_TIMEOUT_MS = 90_000;
 /** TanStack Router's default error component (the app sets no `defaultErrorComponent`). */
 const ERROR_BOUNDARY_TEXT = /Something went wrong!/;
 
@@ -92,8 +100,49 @@ async function seeded(ctx: ScenarioContext): Promise<Seeded | { skip: string }> 
   return { store: fromFile.store, password };
 }
 
+/**
+ * Keep streamer1 and streamer2 live with chat for the walk (/, the channel page, the embed and the
+ * dashboard show a live stream), stopped in the teardown. When streamer1 is already live, a
+ * separate `seed live` runs (staging seed mode starts one after `seed full`), and that one is used.
+ */
+async function keepLive(ctx: ScenarioContext, store: SeedStore, password: string): Promise<void> {
+  const slugs = fixedLiveSlugs(store.channels, COVERAGE_LIVE_CHANNELS);
+  const first = slugs[0];
+  if (!first) throw new Error("seed-coverage: the store has no fixed streamer to keep live");
+  if ((await ctx.platform.api().client.channels.get({ channel: first })).live !== null) {
+    ctx.log.info("seed-coverage: streamer1 is already live; using the running `seed live`");
+    return;
+  }
+  const controller = new AbortController();
+  const running = runSeedLiveCommand({
+    channels: COVERAGE_LIVE_CHANNELS,
+    source: { ...process.env, DEMO_SEED_PASSWORD: password },
+    signal: controller.signal,
+    chatGapMs: COVERAGE_CHAT_GAP_MS,
+    out: (l) => ctx.log.info(l),
+  });
+  ctx.defer(async () => {
+    controller.abort();
+    const code = await running;
+    ctx.log.info("seed-coverage: seed live stopped", { code });
+  });
+  const ended = running.then((code) => {
+    throw new Error(`seed live exited (code ${code}) before ${slugs.join(", ")} went live`);
+  });
+  ended.catch(() => undefined);
+  await ctx.step(`seed live: ${slugs.join(", ")} live with chat`, () =>
+    Promise.race([Promise.all(slugs.map((s) => ctx.platform.waitForLive(s, true, LIVE_TIMEOUT_MS))), ended]),
+  );
+}
+
 /** Load one route and judge it as the page stands once it settles. */
-async function visit(page: Page, url: string, apiUrl: string, webUrl: string): Promise<VisitObservation> {
+async function visit(
+  page: Page,
+  url: string,
+  apiUrl: string,
+  webUrl: string,
+  expectData: boolean,
+): Promise<VisitObservation> {
   const errors: { url: string; status: number }[] = [];
   const origins = [new URL(apiUrl).origin, new URL(webUrl).origin];
   const onResponse = (r: Response) => {
@@ -110,6 +159,15 @@ async function visit(page: Page, url: string, apiUrl: string, webUrl: string): P
       .first()
       .waitFor({ state: "detached", timeout: SETTLE_MS })
       .catch(() => undefined);
+    // Data that arrives after the page settles (live chat comes only over the socket) gets a moment.
+    if (expectData)
+      await page
+        .waitForFunction(
+          (sel) => [...document.querySelectorAll(sel)].every((el) => el.getClientRects().length === 0),
+          EMPTY_STATE,
+          { timeout: DATA_GRACE_MS },
+        )
+        .catch(() => undefined);
     const empties = page.locator(`${EMPTY_STATE}:visible`);
     const emptyStates = await empties.evaluateAll((els) =>
       els.map((el) => el.querySelector('[data-slot="empty-title"]')?.textContent?.trim() ?? ""),
@@ -138,6 +196,7 @@ export default defineScenario({
     }
     const { store, password } = s;
     const p = ctx.platform;
+    await keepLive(ctx, store, password);
     const byLogin = new Map<string, [string, SeedRoute][]>();
     for (const [path, route] of Object.entries(SEED_ROUTES))
       byLogin.set(route.as, [...(byLogin.get(route.as) ?? []), [path, route]]);
@@ -173,7 +232,13 @@ export default defineScenario({
           else ctx.skipStep(`${path} as ${as}`, `no ${resolved.missing}`);
           continue;
         }
-        const seen = await visit(page, resolved.url, ctx.env.HARNESS_API_URL, ctx.env.HARNESS_WEB_URL);
+        const seen = await visit(
+          page,
+          resolved.url,
+          ctx.env.HARNESS_API_URL,
+          ctx.env.HARNESS_WEB_URL,
+          route.expectData,
+        );
         const problems = visitProblems(route, seen);
         const ok = ctx.check(`${path} as ${as}`, problems.length === 0, {
           url: reportUrl(new URL(resolved.url, ctx.env.HARNESS_WEB_URL).toString()),

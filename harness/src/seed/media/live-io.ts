@@ -7,24 +7,26 @@
  * the planned lines. `live.ts` supervises them.
  */
 import { loadEnv, seedEnv } from "@commonair/config";
+import { DEMO_FIXTURES } from "@commonair/contracts/fixtures";
 import { createDb } from "@commonair/db";
 import { createLogger } from "@commonair/observability";
 import { ChatClient } from "../../chat-client.ts";
 import { loadHarnessEnv } from "../../env.ts";
-import { Platform } from "../../platform.ts";
 import { Streamer, rtmpPublishUrl } from "../../streamer.ts";
-import type { SignedInUser } from "../../users.ts";
+import { type SignedInUser, UserFactory } from "../../users.ts";
 import { sleep } from "../../wait.ts";
 import {
+  CHAT_GAP_MS,
   DEFAULT_LIVE_CHANNELS,
-  type LiveChannel,
   type LiveDeps,
   REQUIRED_LOGINS,
+  liveAvailable,
   liveRefusals,
   nextLine,
   planLive,
   runLive,
 } from "../live.ts";
+import { seedApiFactory, stopSeedProxy } from "../clients.ts";
 import { createRng } from "../prng.ts";
 
 /** The PRNG seed of `seed live` (it takes no `--seed`: the same channels and lines every time). */
@@ -35,12 +37,20 @@ export interface SeedLiveCommand {
   durationMs?: number;
   out?: (line: string) => void;
   source?: Record<string, string | undefined>;
+  /**
+   * Stops the run (the `seed-coverage` scenario's teardown). Without it the command stops on
+   * SIGINT or SIGTERM (`selfhost.sh seed-mode close` sends SIGTERM).
+   */
+  signal?: AbortSignal;
+  /** Each chatter's wait between lines; `CHAT_GAP_MS` by default. */
+  chatGapMs?: readonly [number, number];
 }
 
 interface Login {
   username: string;
   email: string;
   slug: string | null;
+  restricted: boolean;
 }
 
 export async function runSeedLiveCommand(o: SeedLiveCommand): Promise<number> {
@@ -55,7 +65,12 @@ export async function runSeedLiveCommand(o: SeedLiveCommand): Promise<number> {
   try {
     if (handle && DEMO_SEED_FULL)
       logins = await handle.sql<Login[]>`
-        select u.username, u.email, c.slug
+        select u.username, u.email, c.slug,
+               (u.banned or u.deleted_at is not null
+                or exists (select 1 from account_deletions d where d.user_id = u.id and d.status = 'scheduled')
+                or exists (select 1 from chat_bans b where b.user_id = u.id)
+                or exists (select 1 from user_blocks k where k.blocked_user_id = u.id)
+               ) as restricted
           from users u left join channels c on c.owner_id = u.id
          where u.username like 'demo\\_%' and u.email like '%@demo-seed.invalid'`;
   } finally {
@@ -74,22 +89,35 @@ export async function runSeedLiveCommand(o: SeedLiveCommand): Promise<number> {
   }
 
   const handleOf = (username: string) => username.replace(/^demo_/, "");
-  const streamers: LiveChannel[] = logins.flatMap((l) => {
-    const h = handleOf(l.username);
-    const streams = /^s\d+$/.test(h) || ["streamer1", "streamer2", "streamer3", "council1", "council2"].includes(h);
-    return streams && l.slug ? [{ handle: h, slug: l.slug }] : [];
-  });
-  const viewers = logins.map((l) => handleOf(l.username)).filter((h) => /^v\d+$/.test(h));
+  const available = liveAvailable(
+    logins.map((l) => ({ handle: handleOf(l.username), slug: l.slug, restricted: l.restricted })),
+  );
   const rng = createRng(LIVE_SEED).fork("live");
-  const plan = planLive(rng, { streamers, viewers }, o.channels > 0 ? o.channels : DEFAULT_LIVE_CHANNELS);
+  const plan = planLive(rng, available, o.channels > 0 ? o.channels : DEFAULT_LIVE_CHANNELS);
+  const gap = o.chatGapMs ?? CHAT_GAP_MS;
 
   const log = createLogger({ service: "harness-seed-live", level: env.LOG_LEVEL });
   const controller = new AbortController();
-  const onSigint = () => controller.abort(new Error("interrupted"));
-  process.once("SIGINT", onSigint);
+  const onSignal = () => controller.abort(new Error("interrupted"));
+  if (o.signal) {
+    if (o.signal.aborted) controller.abort(o.signal.reason);
+    else o.signal.addEventListener("abort", onSignal, { once: true });
+  } else {
+    process.once("SIGINT", onSignal);
+    process.once("SIGTERM", onSignal);
+  }
   const timer =
     o.durationMs === undefined ? undefined : setTimeout(() => controller.abort(new Error("duration")), o.durationMs);
-  const platform = new Platform(env, log, `seedlive${Date.now().toString(16)}`);
+  // Through the seed's forwarding proxy, each account from its own simulated address, as the units
+  // sign in: the auth rate limit is per address, and the coverage walk signs in right after.
+  const users = new UserFactory({
+    apiUrl: env.HARNESS_API_URL,
+    webOrigin: new URL(env.HARNESS_WEB_URL).origin,
+    mailpitUrl: env.HARNESS_MAILPIT_URL,
+    mailpitAuth: env.HARNESS_MAILPIT_AUTH,
+    emailDomain: DEMO_FIXTURES.emailDomain,
+    apiFactory: seedApiFactory(env, "media"),
+  });
   const emailOf = new Map(logins.map((l) => [handleOf(l.username), l.email]));
   const sessions = new Map<string, Promise<SignedInUser>>();
   const signIn = (h: string): Promise<SignedInUser> => {
@@ -97,7 +125,9 @@ export async function runSeedLiveCommand(o: SeedLiveCommand): Promise<number> {
     if (!p) {
       const email = emailOf.get(h);
       if (!email) throw new Error(`no seeded login ${h}`);
-      p = platform.users.signIn({ username: `demo_${h}`, displayName: h, email, password, birthDate: "" });
+      p = users.signIn({ username: `demo_${h}`, displayName: h, email, password, birthDate: "" });
+      // A failed sign-in is not kept: the publisher's restart signs in again.
+      p.catch(() => sessions.delete(h));
       sessions.set(h, p);
     }
     return p;
@@ -131,7 +161,7 @@ export async function runSeedLiveCommand(o: SeedLiveCommand): Promise<number> {
               client = await ChatClient.connectWithApi(u.api.client, log);
               await client.join(ch.channel);
             }
-            const line = nextLine(r, ch.owner);
+            const line = nextLine(r, ch.owner, gap);
             await sleep(line.gapMs, signal);
             // A refused line (slow mode, followers-only) is fine: the next one tries again.
             await client.send(ch.channel, line.body).catch(() => null);
@@ -162,8 +192,10 @@ export async function runSeedLiveCommand(o: SeedLiveCommand): Promise<number> {
     return 1;
   } finally {
     clearTimeout(timer);
-    process.off("SIGINT", onSigint);
+    o.signal?.removeEventListener("abort", onSignal);
+    process.off("SIGINT", onSignal);
+    process.off("SIGTERM", onSignal);
     controller.abort();
-    await platform.close();
+    await stopSeedProxy();
   }
 }
