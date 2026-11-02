@@ -57,15 +57,27 @@ export async function signInViaUi(
     await byTestId(page, T.signinSubmit).click(ui);
     try {
       await waitForOneOf(page, [T.navUser], timeoutMs, signal);
+      await leftSignin(page, timeoutMs);
       return;
     } catch (err) {
       const limited = err instanceof Error && RATE_LIMITED_FORM_ERROR.test(err.message);
       if (!limited || Date.now() + RATE_LIMITED_RETRY_MS > deadline) throw err;
       await sleep(RATE_LIMITED_RETRY_MS, signal);
       // A stale error can outlive a submit that went through: signed in is signed in.
-      if (await byTestId(page, T.navUser).first().isVisible()) return;
+      if (await byTestId(page, T.navUser).first().isVisible()) {
+        await leftSignin(page, timeoutMs);
+        return;
+      }
     }
   }
+}
+
+/**
+ * Signed in, the page leaves /signin with a full load (`window.location.assign`), which can start
+ * after the user menu shows: wait for it, or the caller's next `goto` is interrupted by it.
+ */
+async function leftSignin(page: Page, timeoutMs: number): Promise<void> {
+  await page.waitForURL((u) => u.pathname !== ROUTES.signin, { timeout: timeoutMs, waitUntil: "domcontentloaded" });
 }
 
 /**
