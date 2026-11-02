@@ -14,6 +14,7 @@ import {
   INTERNAL_SECRET_HEADER,
   OpsJobResult,
   type OPS_TICK_JOBS,
+  type OpsTickBody,
 } from "@commonair/contracts/internal";
 import { sleep } from "../wait.ts";
 
@@ -51,15 +52,15 @@ export class OpsHooks {
     private readonly requestTimeoutMs = 75_000,
   ) {}
 
-  /** Run `job` once through the hook. */
-  async tick(job: OpsJob): Promise<OpsJobResult> {
+  /** Run `job` once through the hook; `extra` is the rest of the body (`holdDays` for hold release). */
+  async tick(job: OpsJob, extra: Omit<OpsTickBody, "job"> = {}): Promise<OpsJobResult> {
     const started = performance.now();
     const timeout = AbortSignal.timeout(this.requestTimeoutMs);
     try {
       const res = await fetch(new URL(INTERNAL_ROUTES.opsTick, this.apiUrl), {
         method: "POST",
         headers: { "content-type": "application/json", [INTERNAL_SECRET_HEADER]: this.secret },
-        body: JSON.stringify({ job }),
+        body: JSON.stringify({ ...extra, job }),
         signal: this.signal ? AbortSignal.any([this.signal, timeout]) : timeout,
       });
       if (res.status === 404) throw new OpsHooksOff();
@@ -79,10 +80,15 @@ export class OpsHooks {
   }
 
   /** Tick until the job really ran (not `{ skipped: 1 }`), at most `attempts` times. */
-  async tickRan(job: OpsJob, attempts = 10, pauseMs = 1_000): Promise<OpsJobResult> {
+  async tickRan(
+    job: OpsJob,
+    attempts = 10,
+    pauseMs = 1_000,
+    extra: Omit<OpsTickBody, "job"> = {},
+  ): Promise<OpsJobResult> {
     let last: OpsJobResult = {};
     for (let i = 0; i < attempts; i++) {
-      last = await this.tick(job);
+      last = await this.tick(job, extra);
       if (!isSkipped(last)) return last;
       await sleep(pauseMs, this.signal);
     }

@@ -61,6 +61,8 @@ export interface CreateWorkerOptions {
   webPush?: WebPushSettings;
   /** DEMO_SEED_FULL (local and staging only); see `WorkerContext.demoSeedFull`. */
   demoSeedFull?: boolean;
+  /** OPS_TEST_HOOKS (harness only); see `WorkerContext.opsTestHooks`. */
+  opsTestHooks?: boolean;
   now?: () => Date;
 }
 
@@ -105,6 +107,7 @@ export function createWorker(opts: CreateWorkerOptions): WorkerHandle {
     moderation: opts.moderation ? resolveModeration(opts.moderation, valkey) : undefined,
     ...(opts.webPush ? { webPush: opts.webPush } : {}),
     ...(opts.demoSeedFull ? { demoSeedFull: true } : {}),
+    ...(opts.opsTestHooks ? { opsTestHooks: true } : {}),
     now: opts.now ?? (() => new Date()),
   };
 

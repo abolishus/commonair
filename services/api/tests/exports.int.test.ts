@@ -16,6 +16,7 @@ import {
   EXPORT_TTL_SECONDS,
   INTERNAL_ROUTES,
   INTERNAL_SECRET_HEADER,
+  MODERATION_JOBS,
   QUEUES,
   exportObjectKey,
 } from "@commonair/contracts/internal";
@@ -276,6 +277,50 @@ describe("ops test hook", () => {
         `${QUEUES.retention}:vod-retention`,
       ].sort(),
     );
+  });
+
+  test("a nested job result (the evidence audit) comes back as flat counts", async () => {
+    workers.push(
+      new Worker(
+        QUEUES.moderation,
+        async (job) =>
+          job.name === MODERATION_JOBS.evidenceAudit
+            ? {
+                t0Media: { selected: 1, enqueued: 1 },
+                evidence: { runId: "r", checked: 4, missing: [], mismatched: ["x"], incidentId: null },
+              }
+            : { skipped: true },
+        { connection: connection(), prefix },
+      ),
+    );
+    const r = await tick({ job: "evidence-audit" });
+    expect(r.status).toBe(200);
+    expect(await r.json()).toEqual({
+      "t0Media.selected": 1,
+      "t0Media.enqueued": 1,
+      "evidence.checked": 4,
+      "evidence.missing": 0,
+      "evidence.mismatched": 1,
+    });
+  });
+
+  test("money-release-holds carries holdDays to the worker as job data; other jobs get none", async () => {
+    const data: unknown[] = [];
+    workers.push(
+      new Worker(
+        QUEUES.payments,
+        async (job) => {
+          data.push(job.data);
+          return { released: 1, holdDays: (job.data as { holdDays?: number }).holdDays ?? 7 };
+        },
+        { connection: connection(), prefix },
+      ),
+    );
+    const r = await tick({ job: "money-release-holds", holdDays: 0 });
+    expect(await r.json()).toEqual({ released: 1, holdDays: 0 });
+    expect(await (await tick({ job: "money-release-holds" })).json()).toEqual({ released: 1, holdDays: 7 });
+    expect(data).toEqual([{ holdDays: 0 }, {}]);
+    expect((await tick({ job: "vod-retention", holdDays: 0 })).status).toBe(400);
   });
 
   test("a job that lost its run lock reports skipped", async () => {

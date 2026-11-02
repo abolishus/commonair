@@ -61,13 +61,15 @@ between units: seed-safety publishes `restrictedUserIds` again, and seed-coop no
 The API steps of every unit have only run against fakes. `seed full` against a live stack is the
 first real run.
 
-_Still pending (the user approved test-hook fixes for all four, to be done in their own session):_
+_Still pending:_ nothing. The last four tables are seeded through test hooks:
 
-- money `payouts` and `split_writeoff_proposals`: need an `OPS_TEST_HOOKS` job that ages creator holds.
-- coop `membership_shares`: `buyShare` works on `PAYMENTS_PROVIDER=manual` only, while seed-money
-  wants stripe-mock.
-- safety `evidence_audit_runs`: the evidence audit has no ops-tick hook, and its result isn't
-  count-shaped.
+- safety `evidence_audit_runs`: the `evidence-audit` ops tick (`OPS_TEST_HOOKS`); the ops hook
+  flattens nested job results to counts.
+- money `payouts` and `split_writeoff_proposals`: `money-release-holds` ops tick with a test
+  `holdDays` (`OPS_TEST_HOOKS` on api and worker), then a chargeback after the payout run; the
+  same flag waives the write-off quiet window.
+- coop `membership_shares`: `buyShare` takes a manual share on a Stripe stack under
+  `COOP_TEST_HOOKS`.
 
 _Milestone wiring (2026-11-02)._ Done on `main`; nothing has run against a live stack yet:
 

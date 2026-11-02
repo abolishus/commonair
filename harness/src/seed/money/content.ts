@@ -60,5 +60,7 @@ export const CHARGEBACK_REASON = "seed: chargeback reported by the bank";
 export const FRAUD_NOTE = "seed: payout pattern to review";
 export const FRAUD_REVIEW_NOTE = "seed: first review";
 export const FRAUD_DECISION_NOTE = "seed: second review";
+export const PAYOUT_SENT_REFERENCE = "seed: bank transfer sent";
+export const WRITE_OFF_NOTE = "seed: owner cannot cover the crew's charged-back share";
 /** The treasurer's reference for a manual payout arrangement (never bank details). */
 export const payoutReference = (handle: string): string => `seed-manual-${handle}`;

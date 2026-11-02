@@ -11,6 +11,7 @@
  */
 import { DMCA_RULES } from "@commonair/contracts/enums";
 import type { DbHandle } from "@commonair/db";
+import { OpsHooks } from "../../e6/ops.ts";
 import { FIXTURES, findInPages, fixturePath, isUploadRejected, errorOf, nciiClipUrl } from "../../safety.ts";
 import { ModerationHooks, putPresigned, readFixture } from "../../safety-io.ts";
 import { waitFor } from "../../wait.ts";
@@ -125,6 +126,10 @@ export async function runSafety(ctx: SeedContext, plan: SafetyPlan, secret: stri
   const integrityFlags = await integrityFlagsStep(run);
   await enforcementCells(run);
   const jury = await juryStep(run);
+  // Last, so the audit checks every evidence object this run stored.
+  const audit = await step(ctx.signal, "the test hooks", "tick the evidence audit (OPS_TEST_HOOKS)", () =>
+    new OpsHooks(ctx.env.HARNESS_API_URL, secret, ctx.signal).tickRan("evidence-audit"),
+  );
 
   if (sessions.waitedSeconds > 0)
     run.notes.push(
@@ -137,7 +142,7 @@ export async function runSafety(ctx: SeedContext, plan: SafetyPlan, secret: stri
     `seed-safety: enforcement cells ${CELLS.map((c) => c.clauseId).join(" and ")} are filled by brief (${CELL_SUSPENSION_SECONDS} s) report suspensions of bulk viewers; those bans lapse and clear on the next sign-in`,
     "seed-safety: the analytics display bypass for streamer1 is a Valkey key (1 h TTL): after a Valkey reset or an hour, attestations and their share links wait out the 24 h display delay again",
     "seed-safety: T0 states cover open (first legal dismissal, dismissal_pending) and confirmed; a full dismissal needs a second legal reviewer, which the fixed logins do not have",
-    "seed-safety: evidence_audit_runs stays empty: the evidence audit runs daily at 03:17 UTC and has no test hook",
+    `seed-safety: the evidence audit ran through the ops tick: ${audit["evidence.checked"] ?? 0} objects checked, ${audit["evidence.missing"] ?? 0} missing, ${audit["evidence.mismatched"] ?? 0} mismatched`,
     `seed-safety: integrity flags listed on /admin/integrity: ${integrityFlags}${integrityFlags === 0 ? " (seed-media's swarm recording made none)" : ""}`,
     `seed-safety: attested ${attested} recorded broadcasts${groupAppeal ? `; streamer1's ${groupAppeal} exclusion group was appealed and overturned` : "; no excluded group on streamer1's recordings, so no group appeal"}`,
     `seed-safety: account deletion stays scheduled for ${plan.deletion ?? "nobody (no bulk viewer)"}; restricted accounts: ${plan.restricted.join(", ")}`,

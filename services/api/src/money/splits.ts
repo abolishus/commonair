@@ -746,7 +746,12 @@ export const treasurerSplitHandlers = {
           if (balance <= 0) throw precondition("split_nothing_to_write_off", "This owner has no split shortfall");
           // ADR 0013 decision 6: only after N days without owner earnings, or the owner is gone for good.
           const last = await lastOwnerCredit(tx, u.id, currency);
-          const quiet = !last || last.getTime() <= now.getTime() - payoutRules.splitShortfallWriteOffDays * DAY_MS;
+          // OPS_TEST_HOOKS (harness only, never public): the quiet window cannot pass in real time, so
+          // the seed waives it; the two-person rule and the shortfall itself still hold.
+          const quiet =
+            deps.env.OPS_TEST_HOOKS ||
+            !last ||
+            last.getTime() <= now.getTime() - payoutRules.splitShortfallWriteOffDays * DAY_MS;
           if (!quiet && !(await permanentlyGone(tx, u.id))) {
             throw precondition(
               "split_write_off_not_due",

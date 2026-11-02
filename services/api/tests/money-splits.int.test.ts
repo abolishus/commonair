@@ -455,8 +455,8 @@ describe("treasurer: suspense and write-off", () => {
     gone = crewA;
   });
 
-  test("a split shortfall is written off only when due, by two different finance people", async () => {
-    // A fresh owner whose crew share was released, then the owner is drained and refunds the tip.
+  /** A fresh owner whose crew share was released, then the owner is drained and refunds the tip. */
+  const shortfallOwner = async () => {
     const shortOwner = await signUpAndSignIn(api);
     const c = await channelOf(shortOwner.username);
     const [v] = await db()
@@ -498,6 +498,11 @@ describe("treasurer: suspense and write-off", () => {
     });
     // The owner covered its own 450 from its released earnings; the crew's 450 is split shortfall.
     expect(await creatorBalances(db(), shortOwner.userId, "usd")).toMatchObject({ splitShortfallCents: 450 });
+    return shortOwner;
+  };
+
+  test("a split shortfall is written off only when due, by two different finance people", async () => {
+    const shortOwner = await shortfallOwner();
 
     const notDue = await t1.client.call<ErrorBody>("POST", "/api/treasurer/split-write-offs", {
       username: shortOwner.username,
@@ -528,6 +533,33 @@ describe("treasurer: suspense and write-off", () => {
     ]);
     const listed = await t1.client.call<Page<WriteOff>>("GET", "/api/treasurer/split-write-offs?status=approved");
     expect(listed.body.items.map((w) => w.id)).toContain(writeOff.id);
+  });
+
+  test("OPS_TEST_HOOKS (harness only) waives the quiet window, not the two-person rule", async () => {
+    const shortOwner = await shortfallOwner();
+    const env = api.deps.env as { OPS_TEST_HOOKS: boolean };
+    env.OPS_TEST_HOOKS = true;
+    try {
+      const proposed = await t1.client.call<WriteOff>("POST", "/api/treasurer/split-write-offs", {
+        username: shortOwner.username,
+      });
+      expect(proposed.status).toBe(200);
+      expect(proposed.body).toMatchObject({ status: "proposed", amount: { cents: 450, currency: "usd" } });
+      const own = await t1.client.call<ErrorBody>(
+        "POST",
+        `/api/treasurer/split-write-offs/${proposed.body.id}/approve`,
+        { approve: false },
+      );
+      expect(own.status).toBe(403);
+      const rejected = await t2.client.call<WriteOff>(
+        "POST",
+        `/api/treasurer/split-write-offs/${proposed.body.id}/approve`,
+        { approve: false },
+      );
+      expect(rejected.status).toBe(200);
+    } finally {
+      env.OPS_TEST_HOOKS = false;
+    }
   });
 
   test("transparency shows the write-off as its own cost line and counts the suspense moves", async () => {

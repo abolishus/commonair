@@ -8,6 +8,7 @@ import { and, eq } from "drizzle-orm";
 import { Valkey } from "iovalkey";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { job as expireJob } from "../src/jobs/money-expire-pending.ts";
+import { job as releaseJob } from "../src/jobs/money-release-holds.ts";
 import { job as renewJob } from "../src/jobs/money-renew.ts";
 import { expirePendingPayments } from "../src/money/expire.ts";
 import { releaseHolds } from "../src/money/holds.ts";
@@ -598,6 +599,59 @@ describe("money-release-holds", () => {
     expect(r).toMatchObject({ released: 3, totalCents: expected, batches: 2, exhausted: false });
     const bal = await creatorBalances(db(), creator.user.id, "usd");
     expect(bal).toMatchObject({ liabilityCents: expected, holdCents: 0 });
+  });
+});
+
+describe("money-release-holds with a test hold period (the ops hook)", () => {
+  const tip = (creatorUserId: string, gross: number, at: Date) =>
+    paymentSucceeded({
+      paymentId: uuidv7(),
+      paymentKind: "tip",
+      provider: "manual",
+      creatorUserId,
+      grossCents: gross,
+      taxCents: 0,
+      feeCents: 0,
+      currency: "usd",
+      cut: DEFAULT_PLATFORM_CUT,
+      cutHistoryId: null,
+      occurredAt: at,
+    });
+  const meta = { id: undefined, attemptsMade: 0 };
+
+  test("holdDays 0 releases an hour-old share, dated at its payment, never in the future", async () => {
+    await releaseHolds(ctx());
+    const creator = await makeUser(db());
+    const at = ago(HOUR);
+    await post(db(), tip(creator.user.id, 1000, at));
+    const cents = splitNet(1000, DEFAULT_PLATFORM_CUT).creatorCents;
+    // Earlier tests' younger lots fall due too: only this creator's balance is checked.
+    expect(await releaseHolds(ctx(), { holdDays: 0 })).toMatchObject({ holdDays: 0 });
+    expect(await creatorBalances(db(), creator.user.id, "usd")).toMatchObject({ liabilityCents: cents, holdCents: 0 });
+    const [mine] = await db()
+      .select({ occurredAt: schema.ledgerTransactions.occurredAt })
+      .from(schema.ledgerTransactions)
+      .where(and(eq(schema.ledgerTransactions.kind, "hold_release"), eq(schema.ledgerTransactions.occurredAt, at)));
+    // Dated when it fell due (the payment itself), so every payout run as of now counts it.
+    expect(mine?.occurredAt.getTime()).toBe(at.getTime());
+  });
+
+  test("the job honours holdDays only while the worker runs OPS_TEST_HOOKS", async () => {
+    await releaseHolds(ctx());
+    const creator = await makeUser(db());
+    await post(db(), tip(creator.user.id, 1200, ago(HOUR)));
+    const off = await releaseJob.handler({ holdDays: 0 }, ctx(), meta);
+    expect(off).toMatchObject({ holdDays: 7, released: 0 });
+    expect((await creatorBalances(db(), creator.user.id, "usd")).liabilityCents).toBe(0);
+    ctx().opsTestHooks = true;
+    try {
+      expect(await releaseJob.handler({ holdDays: 0 }, ctx(), meta)).toMatchObject({ holdDays: 0, released: 1 });
+    } finally {
+      delete ctx().opsTestHooks;
+    }
+    expect((await creatorBalances(db(), creator.user.id, "usd")).holdCents).toBe(0);
+    expect(releaseJob.data.safeParse({ holdDays: -1 }).success).toBe(false);
+    expect(releaseJob.data.safeParse({}).success).toBe(true);
   });
 });
 

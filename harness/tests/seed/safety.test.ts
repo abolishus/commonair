@@ -395,9 +395,9 @@ describe("refusals and hygiene", () => {
 });
 
 describe("the unit", () => {
-  test("only the evidence audit table stays pending, and every pending table is owned", () => {
-    expect(unit.pending).toEqual(["evidence_audit_runs"]);
-    for (const t of unit.pending) expect(unit.tables).toContain(t);
+  test("nothing stays pending: the evidence audit table is seeded through the ops tick", () => {
+    expect(unit.pending).toEqual([]);
+    expect(unit.tables).toContain("evidence_audit_runs");
     expect(unit.after).toEqual(["social", "media"]);
   });
 });

@@ -157,6 +157,12 @@ export interface MoneyPlan {
   /** Raised by the treasurer through the API (the velocity flag comes from the worker's scan). */
   flags: FraudFlagSpec[];
   costs: CostSpec[];
+  /**
+   * A paid streamer1 tip under the accepted split, charged back (lost) only after the holds are
+   * released and the payout run reserved streamer1's earnings: the crew's released slice is then
+   * streamer1's split shortfall, which the treasurer proposes to write off.
+   */
+  writeOff: { key: string; owner: string } | null;
 }
 
 // ---------------------------------------------------------------- helpers
@@ -492,15 +498,28 @@ export function planMoney(rng: Rng, scale: SeedScale, now: Date, input: MoneyPla
   if (has(CREW) && input.streamers.includes("streamer2"))
     splits.push({ owner: "streamer2", basis: "tips", crew: [{ handle: CREW, bps: 1_500 }], accept: false });
 
+  const keyed = payments.map((p, i) => ({ ...p, key: `m${String(i + 1).padStart(5, "0")}` }));
+  const writeOffOwner = splits.find((x) => x.accept && x.basis === "all")?.owner;
+  const writeOffTip = keyed.find(
+    (p) =>
+      p.payee === writeOffOwner &&
+      p.kind === "tip" &&
+      p.settle === "paid" &&
+      p.reversal === null &&
+      p.lifecycle === "none" &&
+      !p.velocity,
+  );
+  if (writeOffTip) writeOffTip.reversal = { kind: "chargeback", outcome: "lost", reason: CHARGEBACK_REASON };
   return {
     currency,
     revenuePeriod: utcMonth(now),
     payoutAccounts,
     splits,
-    payments: payments.map((p, i) => ({ ...p, key: `m${String(i + 1).padStart(5, "0")}` })),
+    payments: keyed,
     velocity: velocityPayer && velocityPayee ? { payer: velocityPayer, payee: velocityPayee } : null,
     flags,
     costs: planCosts(rng.fork("costs"), scale, now, byHandle.get("treasurer")?.createdAt ?? null),
+    writeOff: writeOffTip && writeOffOwner ? { key: writeOffTip.key, owner: writeOffOwner } : null,
   };
 }
 
