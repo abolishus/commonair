@@ -54,8 +54,29 @@ Open for the user:
 
 **Full-coverage seed (`.claude/briefs/seed-full/`).** Wave 0 (seed-social) merged 2026-11-02: every
 account, channel, follow, chat line and moderation row, plus move links and grants through the API
-(73 seed tests). Its API steps have only run against fakes; `seed full` against a live stack is the
-first real run. Wave 1 (interact, money, coop, safety, platform, media) is next.
+(73 seed tests). Wave 1 merged 2026-11-02: interact, money, media, safety, coop and platform, each
+implemented, independently reviewed (14 findings, all fixed with tests) and merged in run order.
+There are 269 seed unit tests and 55 seed integration tests. The orchestrator fixed one gap
+between units: seed-safety publishes `restrictedUserIds` again, and seed-coop now honours it.
+The API steps of every unit have only run against fakes. `seed full` against a live stack is the
+first real run.
+
+_Still pending, each needing a contract request:_
+
+- money `payouts` and `split_writeoff_proposals`: need an `OPS_TEST_HOOKS` job that ages creator holds.
+- coop `membership_shares`: `buyShare` works on `PAYMENTS_PROVIDER=manual` only, while seed-money
+  wants stripe-mock.
+- safety `evidence_audit_runs`: the evidence audit has no ops-tick hook, and its result isn't
+  count-shaped.
+
+_Next, milestone wiring:_
+
+- `harness/compose.seed.yaml`;
+- flip `expectData` for `/coop/jury`, `/admin/federation` and `/import`, with `/import` signed in
+  as streamer3;
+- make `seed-coverage` `inFull`;
+- `docs/testing/seeding.md`;
+- the staging reset.
 
 **Batch 7 (W3 + N3 + N4; `.claude/briefs/batch7/README.md`), planned 2026-11-01 at `b37203c4`.**
 
