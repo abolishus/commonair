@@ -82,8 +82,9 @@ export interface PlatformExtra {
 export const unit: SeedUnit = {
   name: "platform",
   // media: the go-live email digest needs a real broadcast (`notification_email_queue.broadcast_id`)
-  // and the federation activity toggles one of streamer1's recorded VODs.
-  after: ["social", "media"],
+  // and the federation activity toggles one of streamer1's recorded VODs. safety: it publishes the
+  // accounts this unit must never sign in as (`restrictedUserIds`).
+  after: ["social", "media", "safety"],
   tables: TABLES,
   pending: [],
   async run(ctx) {

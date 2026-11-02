@@ -19,7 +19,7 @@ import type { PushReceiver } from "../../n1/push-receiver.ts";
 import { type SignedInUser, UserFactory } from "../../users.ts";
 import { sleep, waitFor } from "../../wait.ts";
 import type { SeededUser } from "../types.ts";
-import type { AppSpec, PlatformPlan, SubscriptionSpec } from "./plan.ts";
+import { type AppSpec, type PlatformPlan, type SubscriptionSpec, subscriptionCondition } from "./plan.ts";
 
 /** The `auth` bucket is 10 per minute per address; a wait covers a full window. */
 const RATE_LIMIT_WAIT_MS = 15_000;
@@ -331,7 +331,7 @@ export async function subscribe(
         owner.api.client.developer.events.subscribe({
           type: s.type,
           version: "1",
-          condition: { broadcaster_user_id: broadcaster },
+          condition: subscriptionCondition(s.type, broadcaster),
           transport: { method: "webhook", callback: callbackOf(s, cb), secret: newWebhookSecret() },
           appId: app.id,
         }),

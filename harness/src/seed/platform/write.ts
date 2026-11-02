@@ -87,7 +87,12 @@ export async function readWorld(h: DbHandle, store: SeedStore): Promise<Platform
       order by started_at desc, id limit 500`
   ).map((r) => ({ id: r.id, channelId: r.channel_id, title: r.title, startedAt: new Date(r.started_at) }));
   const proposals = await q<{ id: string }[]>`select id from proposals order by id limit 50`;
-  return { users, channels, follows, broadcasts, proposalIds: proposals.map((p) => p.id) };
+  // seed-safety's restricted accounts, when it ran: the plan never acts as them.
+  const restricted = store.extra.safety?.["restrictedUserIds"];
+  const restrictedUserIds = Array.isArray(restricted)
+    ? restricted.filter((x): x is string => typeof x === "string")
+    : [];
+  return { users, channels, follows, broadcasts, proposalIds: proposals.map((p) => p.id), restrictedUserIds };
 }
 
 /** A public, ready VOD of a channel (the federation activity toggles its visibility), or null. */

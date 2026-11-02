@@ -10,6 +10,7 @@
  * turn it into rows. No row predates the account or follow it references.
  */
 import { NOTIFICATION_TYPES, type APP_SUSPENSION_REASONS, type NOTIFY_MEDIA } from "@commonair/contracts/enums";
+import { EVENTS } from "@commonair/contracts/events";
 import { NOTIFY_RULES } from "@commonair/contracts/notify";
 import { OAUTH_LIMITS } from "@commonair/contracts/oauth";
 import type { Scope } from "@commonair/contracts/scopes";
@@ -60,6 +61,11 @@ export interface PlatformWorld {
   broadcasts: WorldBroadcast[];
   /** Proposals seed-coop made (for `proposal`/`vote_open` links). */
   proposalIds: string[];
+  /**
+   * Accounts seed-safety restricted (`store.extra.safety.restrictedUserIds`: banned, suspended,
+   * scheduled for deletion). The plan never signs in or acts as them.
+   */
+  restrictedUserIds: string[];
 }
 
 // ------------------------------------------------------------------------- apps
@@ -117,6 +123,11 @@ export interface SubscriptionSpec {
   type: "channel.follow" | "channel.update" | "stream.online" | "stream.offline" | "channel.raid";
   broadcaster: string;
   target: SubscriptionTarget;
+}
+
+/** The subscribe condition for a type: its catalog keys (`channel.raid` takes `to_broadcaster_user_id`), all set to the broadcaster. */
+export function subscriptionCondition(type: SubscriptionSpec["type"], broadcasterId: string): Record<string, string> {
+  return Object.fromEntries(EVENTS[type].condition.map((k) => [k, broadcasterId]));
 }
 
 export interface TriggerSpec {
@@ -294,8 +305,12 @@ export function planPlatform(rng: Rng, scale: SeedScale, world: PlatformWorld, n
     );
   const channelOf = (h: string) => world.channels.find((c) => c.ownerHandle === h);
   const s1 = need(channelOf("streamer1"), "streamer1 has no channel");
-  const bulkStreamers = world.users.filter((u) => u.kind === "bulk-streamer").map((u) => u.handle);
-  const bulkViewers = world.users.filter((u) => u.kind === "bulk-viewer").map((u) => u.handle);
+  // Restricted accounts (seed-safety's) never sign in or act; every bulk role is drawn from these lists.
+  const restricted = new Set(world.restrictedUserIds);
+  const bulkOf = (kind: SeedAccountKind) =>
+    world.users.filter((u) => u.kind === kind && !restricted.has(u.id)).map((u) => u.handle);
+  const bulkStreamers = bulkOf("bulk-streamer");
+  const bulkViewers = bulkOf("bulk-viewer");
 
   // Apps ------------------------------------------------------------------------------------
   const ar = rng.fork("apps");
@@ -426,15 +441,28 @@ export function planPlatform(rng: Rng, scale: SeedScale, world: PlatformWorld, n
   const v1 = user("viewer1");
   const notifications: NotificationSpec[] = [];
   const followsOf = (h: string) => world.follows.filter((f) => f.followerHandle === h);
-  const goLivePayload = (r: Rng, h: string) => {
-    const fs = followsOf(h);
-    const f = fs.length > 0 ? r.pick(fs) : null;
-    const ch = (f && world.channels.find((c) => c.id === f.channelId)) ?? s1;
-    const bs = world.broadcasts.filter((b) => b.channelId === ch.id);
+  // Go-live fanout only reaches follows with the bell on (worker notify/fanout/go-live.ts).
+  const bellOf = (h: string) => followsOf(h).filter((f) => f.notify);
+  /** A go-live row for one of `h`'s bell-on follows, dated at or just after the broadcast it names. */
+  const goLive = (r: Rng, h: string, lo: number) => {
+    const fs = bellOf(h);
+    if (fs.length === 0) return null;
+    const f = r.pick(fs);
+    const ch = world.channels.find((c) => c.id === f.channelId);
+    if (!ch) return null;
+    const from = Math.max(lo, f.createdAt.getTime() + MINUTE_MS);
+    const end = t - MINUTE_MS;
+    if (from > end) return null;
+    // Only a broadcast that started after the follow and before now can be the one announced.
+    const bs = world.broadcasts.filter(
+      (b) => b.channelId === ch.id && b.startedAt.getTime() >= from && b.startedAt.getTime() <= end,
+    );
     const b = bs.length > 0 ? r.pick(bs) : null;
+    const s = b?.startedAt.getTime();
+    const createdAt = s === undefined ? between(r, from, end) : between(r, s, Math.min(end, s + 5 * MINUTE_MS));
     return {
       payload: { channelId: ch.id, slug: ch.slug, broadcastId: b?.id ?? rngUuid(r), title: b?.title ?? "Live now" },
-      followedAt: f?.createdAt.getTime() ?? 0,
+      createdAt,
     };
   };
   const otherPayload = (r: Rng, type: NotificationType): Record<string, unknown> => {
@@ -459,9 +487,10 @@ export function planPlatform(rng: Rng, scale: SeedScale, world: PlatformWorld, n
     const lo = Math.max(u.createdAt.getTime() + HOUR_MS, t - INBOX_HORIZON_DAYS * DAY_MS);
     for (const type of types)
       for (let i = 0; i < perType; i++) {
-        const gl = type === "go_live" ? goLivePayload(nr, h) : null;
-        const from = Math.max(lo, (gl?.followedAt ?? 0) + MINUTE_MS);
-        const created = between(nr, from, t - MINUTE_MS);
+        const gl = type === "go_live" ? goLive(nr, h, lo) : null;
+        // No bell-on follow (or none old enough): no go-live row rather than one for a muted channel.
+        if (type === "go_live" && gl === null) continue;
+        const created = gl ? gl.createdAt : between(nr, lo, t - MINUTE_MS);
         // Read go-live rows are pruned after 30 days: keep read ones inside that.
         const readable = type !== "go_live" || created > t - READ_GO_LIVE_HORIZON_DAYS * DAY_MS;
         // The newest of each type stays unread, so the badge and the unread state both show.
@@ -494,7 +523,10 @@ export function planPlatform(rng: Rng, scale: SeedScale, world: PlatformWorld, n
       channelId: f.channelId,
       medium: "push",
       enabled: false,
-      updatedAt: prefAt("viewer1"),
+      // An override configures a follow, so it never predates it.
+      updatedAt: at(
+        between(pr, Math.max(user("viewer1").createdAt.getTime(), f.createdAt.getTime()) + MINUTE_MS, t - MINUTE_MS),
+      ),
     });
   if (world.users.some((u) => u.handle === "viewer2"))
     preferences.push({
@@ -521,12 +553,12 @@ export function planPlatform(rng: Rng, scale: SeedScale, world: PlatformWorld, n
     const lo = Math.max(user(h).createdAt.getTime(), f.createdAt.getTime()) + MINUTE_MS;
     goLiveSends.push({ user: h, channelId: f.channelId, lastSentAt: at(between(gr, lo, t - MINUTE_MS)) });
   };
-  for (const f of v1Follows) sendFor("viewer1", f);
-  for (const h of bulkViewers.slice(0, counts.bulkPreferenceUsers)) for (const f of followsOf(h)) sendFor(h, f);
+  for (const f of bellOf("viewer1")) sendFor("viewer1", f);
+  for (const h of bulkViewers.slice(0, counts.bulkPreferenceUsers)) for (const f of bellOf(h)) sendFor(h, f);
 
   // The digest: viewer1's followed channels that have a recorded broadcast.
   const emailQueue: EmailQueueSpec[] = [];
-  for (const f of v1Follows) {
+  for (const f of bellOf("viewer1")) {
     const b = world.broadcasts.find((x) => x.channelId === f.channelId);
     const ch = world.channels.find((c) => c.id === f.channelId);
     if (b && ch && emailQueue.length < 3)

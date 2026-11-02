@@ -3,6 +3,7 @@
 
 import { readFileSync } from "node:fs";
 import { NOTIFICATION_TYPES } from "@commonair/contracts/enums";
+import { EVENTS } from "@commonair/contracts/events";
 import { GoLiveNotificationPayload } from "@commonair/contracts/notify";
 import { OAUTH_LIMITS, PKCE_CHALLENGE, USER_CODE_ALPHABET, redirectUriProblem } from "@commonair/contracts/oauth";
 import { describe, expect, test } from "vite-plus/test";
@@ -24,6 +25,7 @@ import {
   platformCounts,
   plannedDirectRows,
   rngUuid,
+  subscriptionCondition,
 } from "../../src/seed/platform/plan.ts";
 import { TWITCH_MOCK_PORT, importableEmotes, twitchMockBases } from "../../src/seed/platform/portability.ts";
 import { buildActivateQuery, buildAuthorizeQuery, parseUnsubscribeLink } from "../../src/seed/platform/queries.ts";
@@ -59,26 +61,34 @@ function world(scale: SeedScale): PlatformWorld {
     }));
   const ch = (h: string) => channels.find((c) => c.ownerHandle === h);
   const follows: PlatformWorld["follows"] = [];
-  const follow = (follower: string, owner: string, daysAgo: number) => {
+  const follow = (follower: string, owner: string, daysAgo: number, notify = true) => {
     const c = ch(owner);
     if (c)
       follows.push({
         followerHandle: follower,
         channelId: c.id,
         createdAt: new Date(t - daysAgo * DAY_MS),
-        notify: true,
+        notify,
       });
   };
   for (const owner of ["streamer1", "streamer2", "streamer3"]) follow("viewer1", owner, 30);
+  // Bell off, as seed-social leaves about 15% of follows: never a go-live row.
+  follow("viewer1", "chanmod", 40, false);
   follow("viewer2", "streamer1", 20);
-  for (let i = 1; i <= Math.min(scale.viewers, 30); i += 2) follow(bulkViewerHandle(i), "streamer1", 3);
-  const broadcasts = ["streamer1", "streamer2"].flatMap((h, i) => {
+  for (let i = 1; i <= Math.min(scale.viewers, 30); i += 2) follow(bulkViewerHandle(i), "streamer1", 3, i % 4 !== 3);
+  // Recordings before and after the follows, so a go-live row must pick one it could announce.
+  const broadcasts = ["streamer1", "streamer2", "chanmod"].flatMap((h, i) => {
     const c = ch(h);
     return c
-      ? [{ id: fakeId(9000 + i), channelId: c.id, title: `Recorded ${h}`, startedAt: new Date(t - HOUR_MS) }]
+      ? [60 * DAY_MS, 10 * DAY_MS, HOUR_MS].map((ago, j) => ({
+          id: fakeId(9000 + i * 10 + j),
+          channelId: c.id,
+          title: `Recorded ${h}`,
+          startedAt: new Date(t - ago),
+        }))
       : [];
   });
-  return { users, channels, follows, broadcasts, proposalIds: [fakeId(8000), fakeId(8001)] };
+  return { users, channels, follows, broadcasts, proposalIds: [fakeId(8000), fakeId(8001)], restrictedUserIds: [] };
 }
 
 const small = SEED_SCALES.small;
@@ -102,9 +112,9 @@ const counts = (p: PlatformPlan) => ({
 });
 
 describe("seed-platform unit", () => {
-  test("claims its stub's tables, runs after social and media, and leaves nothing pending", () => {
+  test("claims its stub's tables, runs after social, media and safety, and leaves nothing pending", () => {
     expect(unit.name).toBe("platform");
-    expect(unit.after).toEqual(["social", "media"]);
+    expect(unit.after).toEqual(["social", "media", "safety"]);
     expect(unit.pending).toEqual([]);
     expect(unit.tables).toHaveLength(21);
     expect(unit.tables).toContain("federation_actor_keys");
@@ -226,6 +236,45 @@ describe("planPlatform", () => {
     expect(P.subscriptions.find((s) => s.target === "flaky")?.type).toBe("channel.follow");
   });
 
+  test("every subscription's condition has exactly its catalog keys (channel.raid: to_broadcaster_user_id)", () => {
+    for (const s of P.subscriptions)
+      expect(Object.keys(subscriptionCondition(s.type, "b")).sort(), s.key).toEqual(
+        [...EVENTS[s.type].condition].sort(),
+      );
+    expect(subscriptionCondition("channel.raid", "b")).toEqual({ to_broadcaster_user_id: "b" });
+    expect(P.subscriptions.some((s) => s.type === "channel.raid")).toBe(true);
+  });
+
+  test("go-live rows and sends only for bell-on follows, dated at the broadcast they name", () => {
+    const bellOn = (user: string, channelId: unknown) =>
+      W.follows.find((f) => f.followerHandle === user && f.channelId === channelId)?.notify === true;
+    const gl = P.notifications.filter((n) => n.type === "go_live");
+    expect(gl.length).toBeGreaterThan(0);
+    let named = 0;
+    for (const n of gl) {
+      expect(bellOn(n.user, n.payload.channelId), `${n.user} ${String(n.payload.channelId)}`).toBe(true);
+      const b = W.broadcasts.find((x) => x.id === n.payload.broadcastId);
+      if (!b) continue;
+      named++;
+      expect(b.channelId).toBe(n.payload.channelId);
+      expect(n.createdAt.getTime()).toBeGreaterThanOrEqual(b.startedAt.getTime());
+      expect(n.createdAt.getTime()).toBeLessThanOrEqual(b.startedAt.getTime() + 5 * 60_000);
+    }
+    expect(named).toBeGreaterThan(0);
+    for (const s of P.goLiveSends) expect(bellOn(s.user, s.channelId), `${s.user} ${s.channelId}`).toBe(true);
+    // Bulk viewers with no bell-on follow get no go-live row (never a fallback channel).
+    for (const n of gl) expect(W.follows.some((f) => f.followerHandle === n.user && f.notify)).toBe(true);
+  });
+
+  test("restricted accounts (seed-safety's) are never planned to sign in, act or receive rows", () => {
+    const restricted = [bulkStreamerHandle(1), bulkStreamerHandle(2), bulkViewerHandle(1), bulkViewerHandle(2)];
+    const w = { ...W, restrictedUserIds: restricted.map((h) => userOf(W, h).id) };
+    const p = plan(7, small, w);
+    const json = JSON.stringify(p);
+    for (const h of restricted) expect(json.includes(`"${h}"`), h).toBe(false);
+    expect(new Set(p.apps.filter((a) => a.kind === "bulk").map((a) => a.owner)).size).toBe(BULK_APP_OWNERS);
+  });
+
   test("viewer1's inbox has every type, read and unread, and go-live payloads the web parses", () => {
     const v1 = P.notifications.filter((n) => n.user === "viewer1");
     for (const type of NOTIFICATION_TYPES) {
@@ -265,6 +314,13 @@ describe("planPlatform", () => {
 
   test("preferences, go-live sends and Discord rows never predate their user, follow or channel", () => {
     for (const p of P.preferences) expect(p.updatedAt.getTime()).toBeGreaterThan(userOf(W, p.user).createdAt.getTime());
+    const overrides = P.preferences.filter((p) => p.channelId !== null);
+    expect(overrides.length).toBeGreaterThan(0);
+    for (const p of overrides) {
+      const f = W.follows.find((x) => x.followerHandle === p.user && x.channelId === p.channelId);
+      expect(f, `${p.user} follows ${String(p.channelId)}`).toBeDefined();
+      expect(p.updatedAt.getTime()).toBeGreaterThan(f?.createdAt.getTime() ?? Infinity);
+    }
     expect(P.goLiveSends.some((s) => s.user === "viewer1")).toBe(true);
     for (const s of P.goLiveSends) {
       const f = W.follows.find((x) => x.followerHandle === s.user && x.channelId === s.channelId);

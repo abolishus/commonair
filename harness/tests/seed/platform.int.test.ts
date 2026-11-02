@@ -164,6 +164,10 @@ describe("readWorld", () => {
     expect(world.follows.filter((f) => f.followerHandle === "viewer1")).toHaveLength(2);
     expect(world.broadcasts).toHaveLength(2);
     expect(world.proposalIds).toEqual([]);
+    expect(world.restrictedUserIds).toEqual([]);
+    const banned = store.users[0]?.id ?? "";
+    const withSafety = await readWorld(t.app, { ...store, extra: { safety: { restrictedUserIds: [banned, 7] } } });
+    expect(withSafety.restrictedUserIds).toEqual([banned]);
     expect(await publicVodOf(t.app, store.channels[0]?.id ?? "")).toBeNull();
   });
 });
