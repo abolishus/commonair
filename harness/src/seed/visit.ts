@@ -52,15 +52,18 @@ export interface VisitObservation {
 
 /**
  * Why a visit failed, empty when it passed. Every route fails on an error boundary or a 5xx; a
- * route that should show seeded data also fails on an empty state or any 4xx. Pure.
+ * route that should show seeded data also fails on an empty state (other than its `okEmpty`) or
+ * any 4xx. Pure.
  */
-export function visitProblems(route: Pick<SeedRoute, "expectData">, o: VisitObservation): string[] {
+export function visitProblems(route: Pick<SeedRoute, "expectData" | "okEmpty">, o: VisitObservation): string[] {
   const out: string[] = [];
   if (o.errorBoundary) out.push("error boundary");
   const limit = route.expectData ? 400 : 500;
   if (o.documentStatus !== null && o.documentStatus >= limit) out.push(`document ${o.documentStatus}`);
   for (const r of o.errorResponses) if (r.status >= limit) out.push(`${r.status} ${r.url}`);
-  if (route.expectData) for (const title of o.emptyStates) out.push(title ? `empty state "${title}"` : "empty state");
+  const ok = new Set(route.okEmpty ?? []);
+  if (route.expectData)
+    for (const title of o.emptyStates) if (!ok.has(title)) out.push(title ? `empty state "${title}"` : "empty state");
   return out;
 }
 

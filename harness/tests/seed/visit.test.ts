@@ -80,6 +80,14 @@ describe("visitProblems", () => {
   const data = { expectData: true };
   const form = { expectData: false };
 
+  test("an empty state the route allows is no problem; any other still is", () => {
+    const dash = { expectData: true, okEmpty: ["No problems detected"] };
+    expect(visitProblems(dash, { ...clean, emptyStates: ["No problems detected"] })).toEqual([]);
+    expect(visitProblems(dash, { ...clean, emptyStates: ["You are offline"] })).toEqual([
+      'empty state "You are offline"',
+    ]);
+  });
+
   test("a clean page passes either way", () => {
     expect(visitProblems(data, clean)).toEqual([]);
     expect(visitProblems(form, clean)).toEqual([]);

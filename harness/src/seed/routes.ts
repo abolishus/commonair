@@ -20,6 +20,8 @@ export interface SeedRoute {
   query?: SeedValue;
   /** False for forms and pages that hold no list data (only checked for errors). */
   expectData: boolean;
+  /** Empty-state titles that are a valid result here (an all-clear drawn with the empty state). */
+  okEmpty?: readonly string[];
 }
 
 const ch = (handle: string): SeedValue => ({ channelOf: handle });
@@ -81,7 +83,8 @@ export const SEED_ROUTES: Readonly<Record<string, SeedRoute>> = {
   // W3-jury: opt-in and published results; the jury ships off (no panel after the seed).
   "/coop/jury": { as: "member1", expectData: true },
 
-  "/dashboard": studio,
+  // Live and healthy, the stream-health panel says so with the empty state (dashboard.health.healthy).
+  "/dashboard": { ...studio, okEmpty: ["No problems detected"] },
   "/content": studio,
   "/revenue": studio,
   "/chat": studio,
