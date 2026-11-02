@@ -52,9 +52,10 @@ Open for the user:
 - a real-Helix smoke test and a real Mastodon follow against staging before either flag goes on;
 - batch 8's open decisions U1–U6 (`.claude/briefs/batch8/README.md`).
 
-**Full-coverage seed (`.claude/briefs/seed-full/`), wave 0 started 2026-11-01.** seed-social
-(branch `seed/social`; owns `harness/src/seed/social.ts`, `harness/src/seed/social/**`,
-`harness/tests/seed/social*.test.ts`) runs alone; the other six units start once it merges.
+**Full-coverage seed (`.claude/briefs/seed-full/`).** Wave 0 (seed-social) merged 2026-11-02: every
+account, channel, follow, chat line and moderation row, plus move links and grants through the API
+(73 seed tests). Its API steps have only run against fakes; `seed full` against a live stack is the
+first real run. Wave 1 (interact, money, coop, safety, platform, media) is next.
 
 **Batch 7 (W3 + N3 + N4; `.claude/briefs/batch7/README.md`), planned 2026-11-01 at `b37203c4`.**
 
