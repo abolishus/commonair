@@ -92,6 +92,9 @@ function editEnv(h: Host, edits: Record<string, string | null>): void {
  */
 function staging(opts: { flag?: string | null; captions?: boolean } = {}): Host {
   const h = host();
+  // Captions are on, so an upgrade on an x86_64 runner reads the CPU's flags (check_captions).
+  mkdirSync(join(h.dir, "sys/proc"), { recursive: true });
+  writeFileSync(join(h.dir, "sys/proc/cpuinfo"), "processor\t: 0\nflags\t\t: sse4_2 avx f16c fma avx2\n");
   expectOk(h.run(INSTALL));
   editEnv(h, {
     DEMO_SEED_FULL: opts.flag === undefined ? "true" : opts.flag,
