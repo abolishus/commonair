@@ -12,6 +12,7 @@ import { INTERACT_JOBS } from "@commonair/contracts/internal";
 import type { DbHandle } from "@commonair/db";
 import type { Logger } from "@commonair/observability";
 import { type InteractHooks, InteractHooksOff } from "../../e8/kit.ts";
+import { HOUR_MS, WATCH_LOOKBACK_MS } from "./plan.ts";
 import { SEED_USER_AGENT } from "./write.ts";
 
 /** Pairs the worker handles per run (`ACCRUAL_MAX_VIEWERS`). */
@@ -29,6 +30,24 @@ export interface AccrualOutcome {
 /** How many ticks to try before giving up: enough runs for every pair, plus slack. Pure. */
 export function accrualRuns(sessions: number): number {
   return Math.ceil(sessions / ACCRUAL_PAIRS_PER_RUN) + 3;
+}
+
+/** Room left inside the worker's look-back for the accrual runs themselves. */
+export const WATCH_LOOKBACK_MARGIN_MS = 2 * HOUR_MS;
+
+/**
+ * Throws when the oldest seeded session was scored too long ago for the worker to still read it
+ * (`SCORED_LOOKBACK_MS`, 6 h, less a margin for the accrual runs), so a stale anchor fails with
+ * its real cause instead of the DEMO_SEED_FULL hint. Pure.
+ */
+export function assertWatchInLookback(scoredAt: readonly Date[], nowMs: number): void {
+  if (scoredAt.length === 0) return;
+  const oldest = Math.min(...scoredAt.map((d) => d.getTime()));
+  const age = nowMs - oldest;
+  if (age > WATCH_LOOKBACK_MS - WATCH_LOOKBACK_MARGIN_MS)
+    throw new Error(
+      `seed-interact: the seeded watch sessions were scored ${(age / HOUR_MS).toFixed(1)} h ago, outside the worker's 6 h scoring look-back less ${WATCH_LOOKBACK_MARGIN_MS / HOUR_MS} h for the accrual runs: their timestamps were anchored too long before accrual`,
+    );
 }
 
 export const DEMO_SEED_FULL_HINT =

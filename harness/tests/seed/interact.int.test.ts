@@ -17,6 +17,7 @@ import { accruePoints } from "../../../services/worker/src/interact/points/accru
 import { createRng } from "../../src/seed/prng.ts";
 import type { SeedScale } from "../../src/seed/scale.ts";
 import type { SeedAccountKind, SeedStore } from "../../src/seed/types.ts";
+import { ownedRows } from "../../src/seed/interact.ts";
 import { DAY_MS, type InteractPlan, planCounts, planInteract } from "../../src/seed/interact/plan.ts";
 import { readRoster } from "../../src/seed/interact/roster.ts";
 import { SEED_USER_AGENT, writeInteractDirect } from "../../src/seed/interact/write.ts";
@@ -137,6 +138,14 @@ describe("writeInteractDirect", () => {
     expect(want.poll_votes).toBeGreaterThan(0);
     expect(want.playback_sessions).toBeGreaterThan(0);
     expect(await count("bot_configs")).toBe(1);
+  });
+
+  test("the report counts only owned tables: seed-media's playback_sessions is a cross-unit write, not counted", async () => {
+    const report = await ownedRows(t.app);
+    expect(await count("playback_sessions")).toBe(sessionIds.length);
+    expect(sessionIds.length).toBeGreaterThan(0);
+    expect(report).not.toHaveProperty("playback_sessions");
+    expect(report.polls).toBe(planCounts(plan).polls);
   });
 
   test("streamer1's bot config is linked to bot1 and enabled", async () => {

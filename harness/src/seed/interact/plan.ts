@@ -492,8 +492,13 @@ function planRaids(r: Rng, scale: SeedScale, now: number, roster: Roster, create
   return out.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
 }
 
-/** Watch time for accrual: viewer1 and a share of the bulk viewers on a few channels. */
-function planWatch(r: Rng, now: number, roster: Roster, viewers: readonly RosterUser[]): WatchSpec[] {
+/**
+ * Watch time for accrual: viewer1 and a share of the bulk viewers on a few channels. Who watches
+ * is drawn against the run's `now`; the timestamps hang off `anchor`, the wall clock when the unit
+ * plans, because the worker only reads sessions scored in its last 6 h and the units before this
+ * one can take hours at `large`.
+ */
+function planWatch(r: Rng, now: number, anchor: number, roster: Roster, viewers: readonly RosterUser[]): WatchSpec[] {
   const out: WatchSpec[] = [];
   const has = (h: string) => roster.channels.some((c) => c.ownerHandle === h);
   const bulkChannels = roster.users
@@ -517,7 +522,7 @@ function planWatch(r: Rng, now: number, roster: Roster, viewers: readonly Roster
     const picked = [...v1, ...r.sample(rest, n)];
     for (const u of picked) {
       const watchSeconds = u.handle === "viewer1" ? 90 * 60 : r.int(15, 90) * 60;
-      const endedAt = now - r.int(5, 60) * MINUTE_MS;
+      const endedAt = anchor - r.int(5, 60) * MINUTE_MS;
       const startedAt = endedAt - watchSeconds * 1000;
       out.push({
         owner,
@@ -532,8 +537,11 @@ function planWatch(r: Rng, now: number, roster: Roster, viewers: readonly Roster
   return out;
 }
 
-/** Every planned row and call of seed-interact. Pure. */
-export function planInteract(rng: Rng, scale: SeedScale, now: Date, roster: Roster): InteractPlan {
+/**
+ * Every planned row and call of seed-interact. Pure. `watchAt` (default `now`) anchors the watch
+ * sessions' timestamps only; counts and content do not depend on it.
+ */
+export function planInteract(rng: Rng, scale: SeedScale, now: Date, roster: Roster, watchAt: Date = now): InteractPlan {
   const t = now.getTime();
   const byHandle = new Map(roster.users.map((u) => [u.handle, u]));
   const created = (h: string) => byHandle.get(h)?.createdAt.getTime() ?? t - scale.historyDays * DAY_MS;
@@ -553,7 +561,7 @@ export function planInteract(rng: Rng, scale: SeedScale, now: Date, roster: Rost
   const goals = planGoals(rng.fork("goals"), scale, t, created);
   const alerts = planAlerts();
   const raids = planRaids(rng.fork("raids"), scale, t, roster, created);
-  const watch = planWatch(rng.fork("watch"), t, roster, viewers);
+  const watch = planWatch(rng.fork("watch"), t, Math.max(t, watchAt.getTime()), roster, viewers);
 
   // Signed-in actors: plain bulk viewers who may take part on both fixed channels.
   const ra = rng.fork("actors");

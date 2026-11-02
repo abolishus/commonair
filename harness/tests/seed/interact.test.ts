@@ -21,7 +21,12 @@ import { SEED_ROUTES } from "../../src/seed/routes.ts";
 import { SEED_SCALES, type SeedScale } from "../../src/seed/scale.ts";
 import type { SeedAccountKind, SeedStore } from "../../src/seed/types.ts";
 import { INTERACT_FLAGS, unit } from "../../src/seed/interact.ts";
-import { accrualRuns } from "../../src/seed/interact/accrual.ts";
+import {
+  DEMO_SEED_FULL_HINT,
+  WATCH_LOOKBACK_MARGIN_MS,
+  accrualRuns,
+  assertWatchInLookback,
+} from "../../src/seed/interact/accrual.ts";
 import {
   type ApiDeps,
   type SessionSource,
@@ -391,6 +396,51 @@ describe("time rules", () => {
       expect(T - w.scoredAt.getTime()).toBeLessThan(WATCH_LOOKBACK_MS);
       expect(w.viewer).not.toBe(w.owner);
     }
+  });
+});
+
+describe("watch sessions and the worker's 6 h look-back", () => {
+  // The seed run started at NOW; seed-social at `large` can take hours before interact plans.
+  const late = new Date(T + 5 * HOUR_MS);
+  const anchored = planInteract(createRng(7).fork("interact"), small, NOW, R, late);
+
+  test("watchAt moves only the watch timestamps: same viewers, channels, lengths and other rows", () => {
+    expect(anchored.watch.map((w) => [w.owner, w.viewer, w.watchSeconds])).toEqual(
+      P.watch.map((w) => [w.owner, w.viewer, w.watchSeconds]),
+    );
+    expect(planCounts(anchored)).toEqual(planCounts(P));
+    expect(anchored.polls).toEqual(P.polls);
+    expect(anchored.raids).toEqual(P.raids);
+    for (const w of anchored.watch) {
+      expect(w.scoredAt.getTime()).toBeLessThan(late.getTime());
+      expect(late.getTime() - w.scoredAt.getTime()).toBeLessThan(WATCH_LOOKBACK_MS - WATCH_LOOKBACK_MARGIN_MS);
+    }
+  });
+
+  test("sessions anchored at the run's start are stale 5 h later, and the check says so (not DEMO_SEED_FULL)", () => {
+    const scored = P.watch.map((w) => w.scoredAt);
+    expect(() => assertWatchInLookback(scored, late.getTime())).toThrow(/scoring look-back/);
+    expect(() => assertWatchInLookback(scored, late.getTime())).not.toThrow(DEMO_SEED_FULL_HINT);
+    expect(() =>
+      assertWatchInLookback(
+        anchored.watch.map((w) => w.scoredAt),
+        late.getTime(),
+      ),
+    ).not.toThrow();
+    expect(() => assertWatchInLookback(scored, T)).not.toThrow();
+    expect(() => assertWatchInLookback([], late.getTime())).not.toThrow();
+  });
+
+  test("the boundary: at the look-back less the margin it passes, a millisecond later it fails", () => {
+    const d = new Date(T);
+    const edge = T + WATCH_LOOKBACK_MS - WATCH_LOOKBACK_MARGIN_MS;
+    expect(() => assertWatchInLookback([d], edge)).not.toThrow();
+    expect(() => assertWatchInLookback([d], edge + 1)).toThrow(/scoring look-back/);
+  });
+
+  test("a watchAt earlier than now never moves sessions before the run", () => {
+    const early = planInteract(createRng(7).fork("interact"), small, NOW, R, new Date(T - DAY_MS));
+    expect(early.watch.map((w) => w.scoredAt)).toEqual(P.watch.map((w) => w.scoredAt));
   });
 });
 

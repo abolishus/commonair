@@ -3,9 +3,10 @@
 
 /** seed-interact: bot, polls, predictions, raids, goals, alerts, overlays and channel points. Brief: `.claude/briefs/seed-full/seed-interact.md`. */
 import { INTERACT_JOBS } from "@commonair/contracts/internal";
+import type { DbHandle } from "@commonair/db";
 import { type InteractHooks, InteractHooksOff, interactHooks } from "../e8/kit.ts";
 import { internalSecret } from "../safety-io.ts";
-import { runAccrual } from "./interact/accrual.ts";
+import { assertWatchInLookback, runAccrual } from "./interact/accrual.ts";
 import {
   type ApiDeps,
   type GiveawayResult,
@@ -59,6 +60,20 @@ export const INTERACT_FLAGS = [
   "INTERNAL_API_SECRET (harness: the test hook)",
 ] as const;
 
+/**
+ * The report's row counts: every table the unit owns, which holds only this unit's rows when it
+ * finishes. playback_sessions is seed-media's table, so the synthetic watch sessions are a
+ * cross-unit write named in a note, never counted here (seed-media's report and coverage own it).
+ */
+export async function ownedRows(h: DbHandle): Promise<Record<string, number>> {
+  const rows: Record<string, number> = {};
+  for (const table of TABLES) {
+    const [r] = await h.sql.unsafe<{ n: number }[]>(`select count(*)::int as n from ${table}`);
+    rows[table] = Number(r?.n ?? 0);
+  }
+  return rows;
+}
+
 export const unit: SeedUnit = {
   name: "interact",
   after: ["social"],
@@ -111,7 +126,9 @@ async function seedInteract(
   if (!features.giveaways) throw new Error("seed-interact: giveaways are off: set GIVEAWAYS_ENABLED=true on the api");
 
   const roster = await readRoster(ctx.db, ctx.store, ctx.now);
-  const plan = planInteract(ctx.rng, ctx.scale, ctx.now, roster);
+  // ctx.now is the start of the whole seed run, hours back at `large`; the worker reads only
+  // sessions scored in its last 6 h, so watch time hangs off the clock now.
+  const plan = planInteract(ctx.rng, ctx.scale, ctx.now, roster, new Date());
   const ids = {
     users: new Map(ctx.store.users.map((u) => [u.handle, u.id])),
     channels: new Map(ctx.store.channels.map((c) => [c.ownerHandle, c.id])),
@@ -121,6 +138,10 @@ async function seedInteract(
 
   const bots = await saveBotSettings(d, plan);
   const grants = await grantPoints(d, plan.grants);
+  assertWatchInLookback(
+    plan.watch.map((w) => w.scoredAt),
+    Date.now(),
+  );
   const accrual = await runAccrual(ctx.db, hooks, direct.sessionIds.length, { signal: ctx.signal, log: ctx.log });
   log(`accrual: ${accrual.counted} sessions, ${accrual.points} points in ${(accrual.ms / 1000).toFixed(1)} s`);
   const livePolls = await runLivePolls(d, plan.livePolls);
@@ -156,19 +177,13 @@ async function seedInteract(
   const overlay = await mintOverlayTokens(d, "streamer1", plan.overlayMints);
   ctx.store.extra.interact = { ...interactExtra(overlay, live.giveaways) };
 
-  // Real row counts: every table the unit owns holds only this unit's rows at this point.
-  const rows: Record<string, number> = {};
-  for (const table of TABLES) {
-    const [r] = await ctx.db.sql.unsafe<{ n: number }[]>(`select count(*)::int as n from ${table}`);
-    rows[table] = Number(r?.n ?? 0);
-  }
-  rows.playback_sessions = direct.rows.playback_sessions ?? 0;
+  const rows = await ownedRows(ctx.db);
 
   return {
     rows,
     notes: [
       `seed-interact: points accrual took ${(accrual.ms / 1000).toFixed(1)} s (${accrual.runs} points-accrue runs for ${accrual.counted} sessions, ${accrual.points} watch points)`,
-      "seed-interact: accrual reads playback_sessions (seed-media's table), not loyalty_accrual_sessions: the unit inserts finished, verified, signed-in sessions with synthetic device and address hashes and no broadcast (user agent `CommonAir-demo-seed/1`), and the worker writes loyalty_accruals, loyalty_accrual_sessions and the watch ledger rows",
+      `seed-interact: CROSS-UNIT WRITE (pending a contract request): ${direct.rows.playback_sessions ?? 0} synthetic playback_sessions rows in seed-media's table, finished, verified (score 0.95), signed-in, no broadcast, synthetic device and address hashes, user agent \`CommonAir-demo-seed/1 (seed-interact)\`; not counted in this unit's rows. Accrual reads playback_sessions, not loyalty_accrual_sessions; the worker writes loyalty_accruals, loyalty_accrual_sessions and the watch ledger rows`,
       `seed-interact: points came through bot.points.adjust (${grants} grants and deductions by the owners), the worker's accrual, prediction bets, payouts and refunds, and bought poll votes; every loyalty row is real-time, so the points history shows today only`,
       `seed-interact: ${livePolls.polls} live polls (30 min) end on their own; past polls, raids, goals, song requests and bot rows are backdated`,
       "seed-interact: streamer2's prediction stays open until its 30-minute window locks it; streamer1 has one locked prediction (left locked), one resolved and one canceled, all real-time",
