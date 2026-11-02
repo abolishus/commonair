@@ -213,7 +213,10 @@ describe("shares and memberships", () => {
   });
 
   test("with Stripe configured, shares are refused (manual only in E5)", async () => {
-    const stripe = createApp({ ...api.deps, env: { ...api.deps.env, PAYMENTS_PROVIDER: "stripe" } });
+    const stripe = createApp({
+      ...api.deps,
+      env: { ...api.deps.env, PAYMENTS_PROVIDER: "stripe", COOP_TEST_HOOKS: false },
+    });
     const res = await stripe.fetch(
       new Request(`${api.url}/api/coop/shares`, {
         method: "POST",
@@ -227,6 +230,40 @@ describe("shares and memberships", () => {
     );
     expect(res.status).toBe(412);
     expect(((await res.json()) as Err).data).toEqual({ requirement: "manual_shares" });
+  });
+
+  test("with Stripe configured and COOP_TEST_HOOKS on, a share is still a manual transfer the treasurer confirms", async () => {
+    const env = { ...api.deps.env, PAYMENTS_PROVIDER: "stripe" as const, COOP_TEST_HOOKS: true };
+    const stripe = createApp({ ...api.deps, env });
+    const buyer = await signUpAndSignIn(api);
+    const res = await stripe.fetch(
+      new Request(`${api.url}/api/coop/shares`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "http://localhost:3000",
+          cookie: buyer.client.jar.header(),
+        },
+        body: JSON.stringify({ returnPath: "/coop/membership" }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { kind: string; paymentId: string; reference: string };
+    expect(body.kind).toBe("instructions");
+    expect(body.reference).toMatch(/^CA-/);
+    const [p] = await owner().select().from(schema.payments).where(eq(schema.payments.id, body.paymentId));
+    expect(p?.provider).toBe("manual");
+    const confirmed = await call(t1, "POST", `/api/treasurer/payments/${body.paymentId}/confirm`, {
+      receivedAt: new Date().toISOString(),
+    });
+    expect(confirmed.status).toBe(200);
+    const [s] = await owner()
+      .select()
+      .from(schema.membershipShares)
+      .where(eq(schema.membershipShares.paymentId, body.paymentId));
+    expect(s?.status).toBe("held");
+    // Leave the electorate as the proposal tests below expect it.
+    expect((await call(buyer, "POST", "/api/coop/membership/viewer/exit")).status).toBe(200);
   });
 
   test("the treasurer's confirm makes the share held and the buyer a viewer member, with a balanced posting", async () => {

@@ -234,14 +234,16 @@ export const membershipHandlers = {
   buyShare: os.coop.buyShare.handler(async ({ context }) => {
     const { deps } = context;
     const caller = requireCaller(context);
-    if (deps.env.PAYMENTS_PROVIDER !== "manual")
-      throw precondition("manual_shares", "Member shares are paid by bank transfer on this instance");
+    // COOP_TEST_HOOKS (harness only): a share is still a manual bank transfer when the instance runs
+    // Stripe, so a seeded stripe-mock stack has shares too. Never on a public instance.
+    const manual = deps.env.PAYMENTS_PROVIDER === "manual" || deps.env.COOP_TEST_HOOKS;
+    if (!manual) throw precondition("manual_shares", "Member shares are paid by bank transfer on this instance");
     const settings = await loadSettings(deps.db);
     const shareCents = membershipClassesOf(settings).viewer.shareCents;
     if (shareCents <= 0) throw precondition("share_price", "This co-op has no member share to buy");
     const { payoutRules } = await loadMoneySettings(deps.db);
     const currency = payoutRules.currency;
-    const adapter = createAdapter(deps.env);
+    const adapter = createAdapter({ ...deps.env, PAYMENTS_PROVIDER: "manual" });
     // A manual reference collision (`payments_provider_ref_uq`) mints a new one.
     return withCoopErrorsRetrying("payments_provider_ref_uq", () =>
       deps.db.transaction(async (tx) => {

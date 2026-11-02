@@ -145,11 +145,13 @@ export async function b7Tick(
 // ---------------------------------------------------------------- memberships
 
 export interface MembershipResult {
-  sharesSupported: boolean;
   rows: { appointments: number; sharesBought: number; sharesConfirmed: number; sharesRefunded: number };
 }
 
-/** Appointments, share purchases (manual provider only) and the refunded share's exit. */
+/**
+ * Appointments, share purchases and the refunded share's exit. Shares are manual transfers the
+ * treasurer confirms; on a Stripe stack the API allows that only under COOP_TEST_HOOKS.
+ */
 export async function setupMemberships(
   sessions: CoopSessions,
   plan: MembershipPlan,
@@ -157,7 +159,6 @@ export async function setupMemberships(
 ): Promise<MembershipResult> {
   const admin = await sessions.as("admin");
   const result: MembershipResult = {
-    sharesSupported: true,
     rows: { appointments: 0, sharesBought: 0, sharesConfirmed: 0, sharesRefunded: 0 },
   };
   for (const h of plan.workers) {
@@ -189,10 +190,10 @@ export async function setupMemberships(
       ref = await buy(first);
     } catch (err) {
       const e = apiError(err);
-      if (e.code === "PRECONDITION_FAILED") {
-        result.sharesSupported = false;
-        return result;
-      }
+      if (e.code === "PRECONDITION_FAILED")
+        throw new Error(
+          "seed-coop: coop.buyShare refused a manual share: set COOP_TEST_HOOKS=true on the api (shares on a Stripe stack)",
+        );
       throw new Error(`seed-coop: ${first} buying a share failed: ${describeError(err)}`);
     }
     await treasurer.confirm(ref);

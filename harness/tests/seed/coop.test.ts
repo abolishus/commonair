@@ -15,7 +15,7 @@ import {
   qualifyingTier,
 } from "../../src/coop.ts";
 import { FIXED_ACCOUNTS, bulkStreamerHandle, bulkViewerHandle } from "../../src/seed/accounts.ts";
-import { sharesPossible, subscriptionsFromStore, unit } from "../../src/seed/coop.ts";
+import { subscriptionsFromStore, unit } from "../../src/seed/coop.ts";
 import {
   type CoopFacts,
   type ElectorateMember,
@@ -190,17 +190,9 @@ describe("determinism and scale", () => {
     expect(unit.after).toEqual(["social", "money", "safety"]);
     const order = orderUnits(SEED_UNITS).map((u) => u.name);
     for (const dep of unit.after) expect(order.indexOf(dep)).toBeLessThan(order.indexOf("coop"));
-    // Shares exist only under PAYMENTS_PROVIDER=manual; the seed stack uses stripe-mock.
-    expect(unit.pending).toEqual(["membership_shares"]);
+    // Shares are manual transfers under COOP_TEST_HOOKS, on stripe-mock too: nothing stays pending.
+    expect(unit.pending).toEqual([]);
     expect(unit.tables).toContain("membership_shares");
-  });
-
-  test("shares are bought only on the manual provider", () => {
-    expect(sharesPossible("manual")).toBe(true);
-    expect(sharesPossible("stripe")).toBe(false);
-    expect(sharesPossible("stripe-mock")).toBe(false);
-    // No money facts: try, and let PRECONDITION_FAILED turn shares off.
-    expect(sharesPossible(undefined)).toBe(true);
   });
 });
 
