@@ -34,16 +34,24 @@ Mostly the user's and counsel's work; Claude's part is the checklist, the runboo
    droplet).
 2. E7 done (no 501s in reachable UI apart from 3C/3D, or those pages hidden).
 3. W0-sor done if the instance accepts EU users.
-4. Monitoring: the Grafana dashboards and alerts in `infra/grafana` reviewed; an alert route to
-   a human; a public status page (none exists; PLAN 3I listed one) on the monitoring droplet in a
-   second region (ADR 0025 decision 3).
+4. Monitoring: the Grafana dashboards and alerts in `infra/grafana` reviewed, including the remote
+   Postgres and Valkey metrics from the managed clusters (batch 8 U4); an alert route to a human
+   that pages within minutes against the 99.9% budget; a public status page on the monitoring
+   droplet in a second region (ADR 0025 decision 3) that alerts on its own probes when the app
+   droplet is down.
 5. Moderation staffing: who works the queue, the NCII 48-hour clock, on-call for T0.
-6. Backups: WAL-G to Spaces in another region; Garage objects with `selfhost.sh backup --objects`;
-   a restore drill on a calendar.
-7. Load: `load-plan` at the expected launch size on the chosen droplet (S1-a), with the S1
-   stage-1 triggers and the availability target agreed.
-8. Infrastructure: droplets, cloud firewall, volumes, Spaces buckets and reserved IP in OpenTofu
-   (ADR 0025 decision 4); the agent token scoped by the operator (decision 5).
+6. Backups (stage 1 at launch, batch 8 U4): DigitalOcean's point-in-time recovery (7 days) plus
+   S1-h's nightly logical dump to Spaces in another region, 30 kept; the weekly dump drill on its
+   timer; one timed restore into a fresh managed cluster and one timed app-droplet rebuild from
+   tofu, recorded in ADR 0032. Objects are in Spaces (R0-b), backed up with
+   `selfhost.sh backup --objects`. WAL-G does not run for our instance.
+7. Load: `load-plan` at the expected launch size on the chosen droplet (S1-a), with the S1 stage-2
+   triggers agreed, the 99.9% target from launch, and the managed Postgres node sized for the
+   connection budget (S1-b's preflight). `failover` run against the managed clusters.
+8. Infrastructure: droplets, cloud firewall, volumes, Spaces buckets, reserved IP and the managed
+   Postgres and Valkey clusters (`enable_managed_state = true`) in OpenTofu (ADR 0025 decision 4);
+   the agent token scoped by the operator to a staging-only project with a spending cap (decision
+   5, batch 8 U5).
 9. Security: an external review of the release and the instance's exposed surface.
 
 ## Done means

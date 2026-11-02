@@ -84,8 +84,12 @@ before counsel; L1 is the user's. No P2P claim ships before P1.
   target 99.5%, 99.9% from stage 1; `v0.1.0` waits for R0-g (done) but not for E7 (E7 ships in
   `v0.2.0`).
 - Production region and droplet size (after S1-a).
-- Release cadence after `v0.1.0`: one minor per milestone batch, patch releases for R0-class
-  fixes.
+- Release cadence after `v0.1.0` (decided 2026-11-02, batch 8 U3): a minor every two weeks, cut
+  from the newest commit with a green full `workflow_dispatch` run. The user does the visual
+  checks on that release candidate, not on every batch. Patch releases go out as needed for
+  R0-class fixes.
+- Launch stage (decided 2026-11-02, batch 8 U4): our instance launches at S1 stage 1, on managed
+  Postgres and Valkey, with a 99.9% target from launch. S1-d, S1-b and S1-h are launch-critical.
 - Which counsel questions to fund (DSA statements, Twitch terms, split-recipient status,
   sweepstakes rules, real money movement).
 

@@ -97,8 +97,9 @@ orchestrator's contract step.
 1. With R0: the ADR, S1-a (it needs only a droplet and the existing scenario), S1-c, S1-g for
    stage 0. These are what L1 needs: a launch size, the targets, and IaC.
 2. After R0-b: S1-d first (if the triggers cannot be created by a non-superuser, the external
-   Postgres path needs a different design), then S1-b and S1-h. Stage 1 is then ready, for us
-   and for self-hosters, before its trigger fires.
+   Postgres path needs a different design), then S1-b and S1-h. Changed 2026-11-02 (batch 8 U4):
+   our instance **launches** at stage 1, so these three are launch-critical, not just ready before
+   the trigger.
 3. S1-f when stage 1 is live. S1-e when the stage 2 trigger is in sight; it is the largest unit
    and touches the media path, so it gets its own batch.
 
