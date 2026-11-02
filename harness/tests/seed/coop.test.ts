@@ -514,3 +514,20 @@ describe("settings and patronage", () => {
     expect(w && inRevenuePeriod(w, null)).toBe(true);
   });
 });
+
+describe("seed-safety's restricted accounts", () => {
+  test("no worker, juror or share buyer is an account seed-safety suspended", () => {
+    const { facts } = fixture(SMALL);
+    const free = planMemberships(createRng(5).fork("memberships"), SMALL, facts);
+    const picked = (m: MembershipPlan) => [...m.workers, ...m.shares.held, ...m.shares.pending, ...m.shares.refunded];
+    const idOf = new Map(facts.users.map((u) => [u.handle, u.id]));
+    const restricted = new Set(
+      picked(free)
+        .filter((h) => h !== "member1")
+        .map((h) => idOf.get(h) ?? h),
+    );
+    expect(restricted.size).toBeGreaterThan(0);
+    const m = planMemberships(createRng(5).fork("memberships"), SMALL, { ...facts, restrictedUserIds: restricted });
+    for (const h of picked(m)) expect(restricted.has(idOf.get(h) ?? h)).toBe(false);
+  });
+});

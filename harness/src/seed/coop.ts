@@ -159,6 +159,11 @@ export const unit: SeedUnit = {
       subscriptionsByUser: subscriptionsFromStore(money.subscriptionsByUser),
       tierPrices: await tierPrices(ctx.db),
       minSubscriptionCents: minSubscriptionCents(initial),
+      restrictedUserIds: new Set(
+        Array.isArray(safety["restrictedUserIds"])
+          ? safety["restrictedUserIds"].filter((x): x is string => typeof x === "string")
+          : [],
+      ),
     };
     if (Object.keys(facts.subscriptionsByUser).length === 0)
       notes.push("seed-coop: store.extra.money.subscriptionsByUser is empty, so no viewer joins on a subscription");

@@ -47,6 +47,8 @@ export interface CoopFacts {
   tierPrices: Readonly<Record<string, readonly TierPrice[]>>;
   /** `membership.classes.viewer.minSubscriptionCents`. */
   minSubscriptionCents: number;
+  /** User ids seed-safety suspended or scheduled for deletion (`store.extra.safety.restrictedUserIds`); never signed in as. */
+  restrictedUserIds?: ReadonlySet<string>;
 }
 
 /** Whether one subscription makes its holder eligible for the viewer class (`syncMemberships`' rule, as far as the store can tell). */
@@ -109,8 +111,9 @@ export interface MembershipPlan {
 }
 
 export function planMemberships(rng: Rng, scale: SeedScale, facts: CoopFacts): MembershipPlan {
+  const restricted = facts.restrictedUserIds ?? new Set<string>();
   const bulkViewers = facts.users
-    .filter((u) => u.kind === "bulk-viewer")
+    .filter((u) => u.kind === "bulk-viewer" && !restricted.has(u.id))
     .map((u) => u.handle)
     .sort();
   const adultBulk = bulkViewers.filter((h) => facts.adults.has(h));
