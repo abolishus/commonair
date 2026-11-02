@@ -45,6 +45,9 @@ const LOOP_PAUSE_MS = 1_500;
 const PARALLEL = 8;
 
 /** Run `fn` over `items`, at most `PARALLEL` at a time. */
+/** Tries per vote when the seed's proxy loses the request on its way to the API. */
+const VOTE_ATTEMPTS = 3;
+
 export async function inBatches<T>(items: readonly T[], fn: (item: T) => Promise<unknown>): Promise<void> {
   for (let i = 0; i < items.length; i += PARALLEL) await Promise.all(items.slice(i, i + PARALLEL).map(fn));
 }
@@ -415,10 +418,16 @@ export async function runGovernance(o: GovernanceOptions): Promise<GovernanceRes
     background(st, `votes on ${st.spec.ref}`, async () => {
       await inBatches(st.spec.votes, async (v) => {
         const who = await sessions.as(v.handle);
-        try {
-          await who.api.client.coop.proposals.vote({ id, choice: v.choice });
-        } catch (err) {
-          throw new Error(`${v.handle} voting: ${describeError(err)}`);
+        for (let attempt = 1; ; attempt++) {
+          try {
+            await who.api.client.coop.proposals.vote({ id, choice: v.choice });
+            break;
+          } catch (err) {
+            // A vote is an upsert on (proposal, voter), so resending one the proxy lost on its way
+            // to the API (502) records the same choice at most once.
+            if (apiError(err).code === "BAD_GATEWAY" && attempt < VOTE_ATTEMPTS) continue;
+            throw new Error(`${v.handle} voting: ${describeError(err)}`);
+          }
         }
         counts.votes++;
       });

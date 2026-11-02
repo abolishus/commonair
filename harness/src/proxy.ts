@@ -103,7 +103,13 @@ export async function forward(req: Request, opts: ForwardOptions): Promise<Respo
       headers.append("set-cookie", cookie.replace(/;\s*domain=[^;]*/i, ""));
     return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
   } catch (err) {
-    return new Response(`proxy upstream error: ${(err as Error).message}`, { status: 502 });
+    // The client sees only "Bad Gateway"; say here what failed (a reused connection the API had
+    // closed, a refused connection, the upstream timeout).
+    const message = (err as Error).message;
+    console.warn(
+      JSON.stringify({ level: "warn", msg: "proxy upstream error", path: new URL(req.url).pathname, error: message }),
+    );
+    return new Response(`proxy upstream error: ${message}`, { status: 502 });
   }
 }
 
