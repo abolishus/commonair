@@ -171,12 +171,12 @@ export interface BuildOptions {
  * FFmpeg from Debian (with libx264) is GPL-2.0-or-later; the probe images add BusyBox
  * (GPL-2.0-only); our Postgres adds WAL-G (Apache-2.0); whisper is whisper.cpp's server (MIT)
  * plus our health probe; the seed harness adds Playwright and its browsers (Apache-2.0; Chromium
- * BSD-3-Clause, WebKit LGPL-2.0-or-later, Firefox MPL-2.0), Go (BSD-3-Clause) and Ubuntu's FFmpeg. Base OS packages are in the SBOM; whisper's weights are never in it.
+ * BSD-3-Clause, WebKit LGPL-2.0-or-later, Firefox MPL-2.0), Go (BSD-3-Clause) and BtbN's static FFmpeg 8.1 (GPL-3.0-or-later). Base OS packages are in the SBOM; whisper's weights are never in it.
  */
 export const IMAGE_LICENSES: Record<ReleaseImage, string> = {
   api: "AGPL-3.0-or-later AND GPL-2.0-or-later",
   chat: "AGPL-3.0-or-later",
-  harness: "AGPL-3.0-or-later AND Apache-2.0 AND BSD-3-Clause AND GPL-2.0-or-later AND LGPL-2.0-or-later AND MPL-2.0",
+  harness: "AGPL-3.0-or-later AND Apache-2.0 AND BSD-3-Clause AND GPL-3.0-or-later AND LGPL-2.0-or-later AND MPL-2.0",
   irc: "AGPL-3.0-or-later",
   media: "AGPL-3.0-or-later AND GPL-2.0-or-later",
   origin: "AGPL-3.0-or-later",

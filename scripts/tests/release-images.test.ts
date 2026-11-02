@@ -97,8 +97,15 @@ describe("release builds", () => {
         "m",
       ),
     );
-    // ffmpeg with what harness/src/ffmpeg.ts and seed-media need, checked at build time.
-    expect(file).toContain("apt-get install -y --no-install-recommends ffmpeg");
+    // The static FFmpeg CI uses (same autobuild and amd64 SHA-256), with what harness/src/ffmpeg.ts
+    // and seed-media need, checked at build time. Ubuntu's 6.1 lacks -readrate_catchup.
+    const setup = readFileSync(join(root, ".github/actions/setup/action.yml"), "utf8");
+    const ciUrl = /URL: (\S+)-linux64-gpl-8\.1\.tar\.xz/.exec(setup)?.[1];
+    const ciSum = /SHA256: ([0-9a-f]{64})/.exec(setup)?.[1];
+    expect(ciUrl && file.includes(`ARG FFMPEG_BUILD=${ciUrl}\n`)).toBe(true);
+    expect(ciSum && file.includes(`amd64) arch=linux64; sum=${ciSum} ;;`)).toBe(true);
+    expect(file).toContain("sha256sum -c -");
+    expect(file).toContain("grep -q readrate_catchup");
     expect(file).toContain("for e in libx264 aac libopus;");
     expect(file).toContain("-protocols | grep -qx '  rtmp'");
     // Go with relay/ inside, the relay prebuilt into buildRelay's cache.

@@ -12,8 +12,10 @@
 # - Go, from the pinned Go image: seed-media builds the member relay from relay/ (standard library
 #   only, no module downloads), and its readiness check asks for `go version`. The relay is built
 #   once here, into the cache harness/src/relay.ts buildRelay reads, so a run needs no compiler work;
-# - Ubuntu's FFmpeg, with what harness/src/ffmpeg.ts and the seed use: libx264 and aac to publish,
-#   RTMP to publish to MediaMTX and to listen as the simulcast sink, libopus for the captions audio.
+# - FFmpeg 8.1, the same static BtbN build CI uses (.github/actions/setup), checked against its
+#   SHA-256 per architecture: Ubuntu noble's 6.1 lacks options the harness passes (`-readrate_catchup`,
+#   ffmpeg 7+) and the WHIP muxer. With libx264 and aac to publish, RTMP to publish to MediaMTX and to
+#   listen as the simulcast sink, libopus for the captions audio. GPL-3.0-or-later.
 # The whole repository source goes in, with every workspace's production dependencies: the
 # harness imports across workspaces (packages/i18n, apps/web's locale files, the moderation
 # fixtures). It runs as the container's root, which rootless Podman maps to the instance's user,
@@ -28,12 +30,25 @@ FROM ${GO_IMAGE} AS go
 
 FROM ${BASE_IMAGE}
 ARG SOURCE_COMMIT=unknown
+ARG TARGETARCH
+ARG FFMPEG_BUILD=https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-09-30-13-08/ffmpeg-n8.1.3-9-g29e619e767
 RUN set -eu; \
+    case "${TARGETARCH:-amd64}" in \
+      amd64) arch=linux64; sum=97ce978979194b5cf7e06a5e68020dbdaa7a4f3294c5452b6a1bc347100dbb79 ;; \
+      arm64) arch=linuxarm64; sum=10523d1e0be6b3ce62a9708cc50815c4b5eb5f36ae147fbe2afeecda6f2d6845 ;; \
+      *) echo "no FFmpeg build for ${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
     apt-get update; \
-    apt-get install -y --no-install-recommends ffmpeg; \
+    apt-get install -y --no-install-recommends ca-certificates curl xz-utils; \
+    curl -fsSL --retry 3 --max-time 600 -o /tmp/ffmpeg.tar.xz "${FFMPEG_BUILD}-${arch}-gpl-8.1.tar.xz"; \
+    echo "${sum}  /tmp/ffmpeg.tar.xz" | sha256sum -c -; \
+    tar -xJf /tmp/ffmpeg.tar.xz -C /usr/local/bin --strip-components=2 --wildcards '*/bin/ffmpeg' '*/bin/ffprobe'; \
+    rm /tmp/ffmpeg.tar.xz; \
+    apt-get purge -y xz-utils; \
     rm -rf /var/lib/apt/lists/*; \
     for e in libx264 aac libopus; do ffmpeg -hide_banner -encoders | grep -qE " $e "; done; \
-    ffmpeg -hide_banner -protocols | grep -qx '  rtmp'
+    ffmpeg -hide_banner -protocols | grep -qx '  rtmp'; \
+    ffmpeg -hide_banner -h full | grep -q readrate_catchup
 COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
 COPY --from=go /usr/local/go /usr/local/go
 # onnxruntime-node's postinstall would fetch CUDA from NuGet; --ignore-scripts stops it too.
