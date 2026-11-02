@@ -17,6 +17,7 @@ import type { HarnessEnv } from "../../env.ts";
 import { type ForwardingProxy, startForwardingProxy } from "../../proxy.ts";
 import { type SignedInUser, UserFactory } from "../../users.ts";
 import { rerunDraw } from "../../w3/giveaways.ts";
+import { SEED_CLIENT_TIMEOUT_MS, SEED_RATE_WAIT_MS } from "../clients.ts";
 import type { SeededUser } from "../types.ts";
 import type { GiveawaySpec, GrantSpec, InteractPlan, LivePollSpec, PredictionSpec } from "./plan.ts";
 
@@ -60,12 +61,13 @@ export class SeedSessions implements SessionSource {
   }
 
   private api(): Api {
-    this.proxy ??= startForwardingProxy({ target: this.env.HARNESS_API_URL });
+    this.proxy ??= startForwardingProxy({ target: this.env.HARNESS_API_URL, retryRateLimitedMs: SEED_RATE_WAIT_MS });
     return createApi({
       baseUrl: this.proxy.url,
       origin: new URL(this.env.HARNESS_WEB_URL).origin,
       jar: new CookieJar(),
       clientIp: this.addresses.next(),
+      timeoutMs: SEED_CLIENT_TIMEOUT_MS,
     });
   }
 

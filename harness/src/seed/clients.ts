@@ -19,6 +19,16 @@ import type { SeedUnitName } from "./types.ts";
  */
 export const SEED_CLIENT_CIDR = "100.64.0.0/10";
 
+/**
+ * How long the seed's proxies wait out the API's rate limits per request. A medium seed makes more
+ * of one kind of call (a moderator resolving reports, sign-ins) than a person would; the limits
+ * stay as they are and the seed waits like a patient client.
+ */
+export const SEED_RATE_WAIT_MS = 5 * 60_000;
+
+/** A seed client's own timeout: longer than the proxy may hold a request through a rate limit. */
+export const SEED_CLIENT_TIMEOUT_MS = SEED_RATE_WAIT_MS + 60_000;
+
 let proxy: ForwardingProxy | null = null;
 
 /** A stable per-unit seed, so two units rarely draw the same addresses. Pure. */
@@ -32,8 +42,13 @@ export function unitAddressSeed(unit: SeedUnitName): number {
 export function seedApiFactory(env: HarnessEnv, unit: SeedUnitName): NonNullable<UserFactoryOptions["apiFactory"]> {
   const addresses = new AddressPool([parseCidr(SEED_CLIENT_CIDR)], seededRandom(unitAddressSeed(unit)));
   return (o) => {
-    proxy ??= startForwardingProxy({ target: env.HARNESS_API_URL });
-    return createApi({ ...o, baseUrl: proxy.url, clientIp: o.clientIp ?? addresses.next() });
+    proxy ??= startForwardingProxy({ target: env.HARNESS_API_URL, retryRateLimitedMs: SEED_RATE_WAIT_MS });
+    return createApi({
+      ...o,
+      baseUrl: proxy.url,
+      clientIp: o.clientIp ?? addresses.next(),
+      timeoutMs: o.timeoutMs ?? SEED_CLIENT_TIMEOUT_MS,
+    });
   };
 }
 

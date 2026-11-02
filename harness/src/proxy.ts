@@ -33,10 +33,16 @@ export interface ForwardOptions {
   /** Path prefix to strip before forwarding (e.g. `/api-proxy`). */
   stripPrefix?: string;
   timeoutMs?: number;
+  /**
+   * Resend a request the API refused with 429, after the wait it asks for, for up to this long in
+   * all (the seed's proxies only: a 429 is refused before any work, so resending is safe). Off
+   * when unset, so scenarios that test the limits still see them.
+   */
+  retryRateLimitedMs?: number;
 }
 
 /** Build the upstream request for an incoming one. Exported for unit tests. */
-export function upstreamRequest(req: Request, opts: ForwardOptions): Request {
+export function upstreamRequest(req: Request, opts: ForwardOptions, body?: ArrayBuffer): Request {
   const incoming = new URL(req.url);
   let path = incoming.pathname;
   if (opts.stripPrefix && path.startsWith(opts.stripPrefix)) path = path.slice(opts.stripPrefix.length) || "/";
@@ -52,16 +58,40 @@ export function upstreamRequest(req: Request, opts: ForwardOptions): Request {
   return new Request(url, {
     method: req.method,
     headers,
-    body: hasBody ? req.body : undefined,
+    body: hasBody ? (body ?? req.body) : undefined,
     redirect: "manual",
     signal: AbortSignal.timeout(opts.timeoutMs ?? 30_000),
   });
 }
 
 /** Forward and relay the response, keeping Set-Cookie and redirects intact for the client. */
+/** Milliseconds a 429 asks to wait (`Retry-After`, else `retryAfterSeconds` in its JSON), else 2 s. Pure. */
+export function rateLimitWaitMs(retryAfter: string | null, body: string): number {
+  const header = Number(retryAfter);
+  if (retryAfter !== null && Number.isFinite(header) && header >= 0) return header * 1000 + 250;
+  const m = /"retryAfterSeconds"\s*:\s*(\d+(?:\.\d+)?)/.exec(body);
+  return (m ? Number(m[1]) : 2) * 1000 + 250;
+}
+
+async function fetchRetryingRateLimits(req: Request, opts: ForwardOptions): Promise<Response> {
+  const limit = opts.retryRateLimitedMs ?? 0;
+  if (limit <= 0) return fetch(upstreamRequest(req, opts));
+  const body = req.method !== "GET" && req.method !== "HEAD" ? await req.arrayBuffer() : undefined;
+  const started = Date.now();
+  for (;;) {
+    const res = await fetch(upstreamRequest(req, opts, body));
+    if (res.status !== 429) return res;
+    const text = await res.text();
+    const wait = rateLimitWaitMs(res.headers.get("retry-after"), text);
+    if (Date.now() - started + wait > limit)
+      return new Response(text, { status: 429, statusText: res.statusText, headers: res.headers });
+    await Bun.sleep(wait);
+  }
+}
+
 export async function forward(req: Request, opts: ForwardOptions): Promise<Response> {
   try {
-    const res = await fetch(upstreamRequest(req, opts));
+    const res = await fetchRetryingRateLimits(req, opts);
     const headers = new Headers();
     for (const [k, v] of res.headers) {
       const key = k.toLowerCase();

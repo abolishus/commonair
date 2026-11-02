@@ -20,7 +20,7 @@ import {
   percentile,
   summarize,
 } from "../src/metrics.ts";
-import { startForwardingProxy, upstreamRequest } from "../src/proxy.ts";
+import { rateLimitWaitMs, startForwardingProxy, upstreamRequest } from "../src/proxy.ts";
 import { UsernameFactory } from "../src/users.ts";
 
 describe("cookie jar", () => {
@@ -130,6 +130,39 @@ describe("forwarding proxy", () => {
     const res = await api.fetch(new Request(`${api.baseUrl}/api/thing`));
     expect(((await res.json()) as { xff: string }).xff).toBe("100.64.3.4");
     expect(api.jar.get("csrf")).toBe("2");
+  });
+
+  test("with retryRateLimitedMs, a 429 is waited out and the same body resent; without it, it passes through", async () => {
+    let calls = 0;
+    const limited = Bun.serve({
+      port: 0,
+      async fetch(req) {
+        calls++;
+        if (calls === 1) return Response.json({ data: { retryAfterSeconds: 0 } }, { status: 429 });
+        return new Response(await req.text());
+      },
+    });
+    const patient = startForwardingProxy({ target: `http://127.0.0.1:${limited.port}`, retryRateLimitedMs: 5_000 });
+    const plain = startForwardingProxy({ target: `http://127.0.0.1:${limited.port}` });
+    try {
+      const res = await fetch(`${patient.url}/rpc/x`, { method: "POST", body: "again" });
+      expect(res.status).toBe(200);
+      expect(await res.text()).toBe("again");
+      expect(calls).toBe(2);
+      calls = 0;
+      expect((await fetch(`${plain.url}/rpc/x`, { method: "POST", body: "once" })).status).toBe(429);
+      expect(calls).toBe(1);
+    } finally {
+      await patient.stop();
+      await plain.stop();
+      await limited.stop(true);
+    }
+  });
+
+  test("rateLimitWaitMs: Retry-After first, then the body's retryAfterSeconds, else 2 s", () => {
+    expect(rateLimitWaitMs("3", "")).toBe(3_250);
+    expect(rateLimitWaitMs(null, '{"data":{"retryAfterSeconds":7}}')).toBe(7_250);
+    expect(rateLimitWaitMs(null, "nope")).toBe(2_250);
   });
 
   test("an unreachable upstream is a 502, not a crash", async () => {
