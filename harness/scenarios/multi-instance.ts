@@ -170,6 +170,7 @@ export default defineScenario({
     const api2 = (o: { jar?: CookieJar; clientIp?: string } = {}) =>
       createApi({
         baseUrl: proxy2.url,
+        gate: proxy2.gate,
         origin: webOrigin,
         jar: o.jar ?? new CookieJar(),
         clientIp: o.clientIp ?? ctx.platform.residential.next(),

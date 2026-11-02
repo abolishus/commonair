@@ -20,7 +20,7 @@ import {
   percentile,
   summarize,
 } from "../src/metrics.ts";
-import { rateLimitWaitMs, startForwardingProxy, upstreamRequest } from "../src/proxy.ts";
+import { Gate, PROXY_MAX_IN_FLIGHT, rateLimitWaitMs, startForwardingProxy, upstreamRequest } from "../src/proxy.ts";
 import { UsernameFactory } from "../src/users.ts";
 
 describe("cookie jar", () => {
@@ -165,6 +165,33 @@ describe("forwarding proxy", () => {
     expect(rateLimitWaitMs(null, "nope")).toBe(2_250);
   });
 
+  test("300 clients at once through an in-process proxy all get through (Bun's 256 fetch slots)", async () => {
+    // Ungated, 256 client requests take every fetch slot this process has, the proxy's upstream
+    // requests queue behind them, and all 256 fail on the upstream timeout (seed-coop at medium).
+    const slow = Bun.serve({
+      port: 0,
+      async fetch() {
+        await Bun.sleep(20);
+        return new Response("ok");
+      },
+    });
+    const gated = startForwardingProxy({ target: `http://127.0.0.1:${slow.port}`, timeoutMs: 3_000 });
+    try {
+      const statuses = await Promise.all(
+        Array.from({ length: 300 }, async () => {
+          const api = createApi({ baseUrl: gated.url, gate: gated.gate });
+          return (await api.fetch(new Request(`${api.baseUrl}/x`))).status;
+        }),
+      );
+      expect(statuses.filter((s) => s !== 200)).toEqual([]);
+      expect(gated.gate.size).toBe(PROXY_MAX_IN_FLIGHT);
+      expect(gated.gate.inFlight).toBe(0);
+    } finally {
+      await gated.stop();
+      await slow.stop(true);
+    }
+  });
+
   test("an unreachable upstream is a 502, not a crash", async () => {
     const dead = startForwardingProxy({ target: "http://127.0.0.1:9", timeoutMs: 2_000 });
     try {
@@ -172,6 +199,27 @@ describe("forwarding proxy", () => {
     } finally {
       await dead.stop();
     }
+  });
+});
+
+describe("Gate", () => {
+  test("at most `size` in flight, waiters in arrival order, a slot freed by a throw", async () => {
+    const gate = new Gate(2);
+    const order: number[] = [];
+    let peak = 0;
+    const job = (i: number, fail = false) =>
+      gate.run(async () => {
+        peak = Math.max(peak, gate.inFlight);
+        await Bun.sleep(5);
+        order.push(i);
+        if (fail) throw new Error(`job ${i}`);
+        return i;
+      });
+    const results = await Promise.allSettled([job(1, true), job(2), job(3), job(4), job(5)]);
+    expect(peak).toBe(2);
+    expect(order).toEqual([1, 2, 3, 4, 5]);
+    expect(results.map((r) => r.status)).toEqual(["rejected", "fulfilled", "fulfilled", "fulfilled", "fulfilled"]);
+    expect(gate.inFlight).toBe(0);
   });
 });
 

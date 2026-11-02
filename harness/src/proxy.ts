@@ -118,6 +118,52 @@ export interface ForwardingProxy {
   stop(): Promise<void>;
 }
 
+/** A forwarding proxy for HTTP, with the gate its in-process clients must send through. */
+export interface HttpForwardingProxy extends ForwardingProxy {
+  /** `PROXY_GATE`: pass it to `createApi({ gate })` for every client of this proxy. */
+  gate: Gate;
+}
+
+/**
+ * At most this many client requests in flight through the in-process forwarding proxies, together.
+ * Bun's fetch sends at most 256 requests at once per process (`BUN_CONFIG_MAX_HTTP_REQUESTS`) and
+ * queues the rest, and a client of a proxy in its own process holds two of those slots: its own
+ * request and the proxy's upstream one. With 256 client requests in flight the upstream requests
+ * all queue behind them and none is sent until the proxy's upstream timeout fails them (a medium
+ * seed-coop casting votes on 42 proposals at once stalled for 30 s and lost 256 votes so). Capping
+ * the clients at well under half keeps a slot free for every upstream request, with room left for
+ * direct calls (test hooks, Mailpit).
+ */
+export const PROXY_MAX_IN_FLIGHT = 96;
+
+/** At most `size` calls of `run` in flight; the rest wait in arrival order. */
+export class Gate {
+  private active = 0;
+  private readonly waiting: (() => void)[] = [];
+
+  constructor(readonly size: number) {}
+
+  get inFlight(): number {
+    return this.active;
+  }
+
+  async run<T>(fn: () => Promise<T>): Promise<T> {
+    if (this.active < this.size) this.active++;
+    // The slot passes straight to a waiter on release, so `active` already counts it.
+    else await new Promise<void>((resolve) => this.waiting.push(resolve));
+    try {
+      return await fn();
+    } finally {
+      const next = this.waiting.shift();
+      if (next) next();
+      else this.active--;
+    }
+  }
+}
+
+/** One gate for every in-process forwarding proxy: Bun's fetch slots are per process, not per proxy. */
+export const PROXY_GATE = new Gate(PROXY_MAX_IN_FLIGHT);
+
 // ------------------------------------------------------------------ tracker WebSocket mode
 
 /**
@@ -228,8 +274,8 @@ export function startTrackerProxy(opts: TrackerProxyOptions): ForwardingProxy {
   };
 }
 
-/** Standalone proxy on a random loopback port. */
-export function startForwardingProxy(opts: ForwardOptions): ForwardingProxy {
+/** Standalone proxy on a random loopback port. Its in-process clients send through `gate`. */
+export function startForwardingProxy(opts: ForwardOptions): HttpForwardingProxy {
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -238,6 +284,7 @@ export function startForwardingProxy(opts: ForwardOptions): ForwardingProxy {
   });
   return {
     url: `http://127.0.0.1:${server.port}`,
+    gate: PROXY_GATE,
     stop: async () => {
       await server.stop(true);
     },

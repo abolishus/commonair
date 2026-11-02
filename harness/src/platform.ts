@@ -23,7 +23,7 @@ import { HttpViewer } from "./http-viewer.ts";
 import { Mailpit, mailpitEndpoint } from "./mailpit.ts";
 import { type PlayerServer, startPlayerServer } from "./player-server.ts";
 import { podmanAvailable } from "./testing/mediamtx.ts";
-import { type ForwardingProxy, startForwardingProxy, startTrackerProxy } from "./proxy.ts";
+import { type ForwardingProxy, type HttpForwardingProxy, startForwardingProxy, startTrackerProxy } from "./proxy.ts";
 import { relayReadiness } from "./relay.ts";
 import type { Need } from "./scenario.ts";
 import { type StreamerOptions, Streamer, rtmpPublishUrl, whipPublishTarget } from "./streamer.ts";
@@ -78,7 +78,7 @@ export class Platform {
   readonly datacenter: AddressPool;
   readonly mailpit: Mailpit;
   readonly users: UserFactory;
-  private proxy: ForwardingProxy | null = null;
+  private proxy: HttpForwardingProxy | null = null;
   private trackerProxy: ForwardingProxy | null = null;
   private playerServerPromise: Promise<PlayerServer> | null = null;
   private fleetInstance: BrowserFleet | null = null;
@@ -119,8 +119,10 @@ export class Platform {
 
   /** A fresh API client. Each call is a new simulated client (own jar, own address unless given). */
   api(opts: { clientIp?: string; jar?: CookieJar; bearer?: string; userAgent?: string } = {}): Api {
+    const baseUrl = this.apiBaseUrl();
     return createApi({
-      baseUrl: this.apiBaseUrl(),
+      baseUrl,
+      gate: this.proxy?.gate,
       origin: new URL(this.env.HARNESS_WEB_URL).origin,
       jar: opts.jar ?? new CookieJar(),
       bearer: opts.bearer,

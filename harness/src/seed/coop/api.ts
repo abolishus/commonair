@@ -22,6 +22,7 @@ import type { HarnessEnv } from "../../env.ts";
 import { ApiTreasurer } from "../../money-actors.ts";
 import { apiError } from "../../safety.ts";
 import { type SignedInUser, UserFactory } from "../../users.ts";
+import { Gate } from "../../proxy.ts";
 import { seedApiFactory } from "../clients.ts";
 import { sleep } from "../../wait.ts";
 import { sharedCase } from "../../w3/jury.ts";
@@ -43,11 +44,18 @@ const HOOK_TIMEOUT_MS = 75_000;
 const LONG_WINDOW_MS = 86_400_000;
 const LOOP_PAUSE_MS = 1_500;
 const PARALLEL = 8;
+/**
+ * Votes in flight across every proposal together. Voting opens on most of the plan's proposals in
+ * the same worker run (42 at once at medium scale), so a per-proposal limit alone sent hundreds of
+ * votes at once; this keeps the burst near what the API's database pool serves without queueing,
+ * and leaves room for the council responses and reads whose windows are short.
+ */
+export const VOTES_IN_FLIGHT = 32;
 
-/** Run `fn` over `items`, at most `PARALLEL` at a time. */
 /** Tries per vote when the seed's proxy loses the request on its way to the API. */
 const VOTE_ATTEMPTS = 3;
 
+/** Run `fn` over `items`, at most `PARALLEL` at a time. */
 export async function inBatches<T>(items: readonly T[], fn: (item: T) => Promise<unknown>): Promise<void> {
   for (let i = 0; i < items.length; i += PARALLEL) await Promise.all(items.slice(i, i + PARALLEL).map(fn));
 }
@@ -397,6 +405,8 @@ export async function runGovernance(o: GovernanceOptions): Promise<GovernanceRes
 
   const respond = (st: ProposalState, id: string, stance: NonNullable<ProposalSpec["councilStance"]>) =>
     background(st, `council response to ${st.spec.ref}`, async () => {
+      const started = Date.now();
+      const endsAt = st.view?.timeline.councilReviewEndsAt ?? null;
       let last: unknown = null;
       for (const h of o.responders) {
         try {
@@ -408,29 +418,39 @@ export async function runGovernance(o: GovernanceOptions): Promise<GovernanceRes
           st.responded = true;
           return;
         } catch (err) {
+          // A CONFLICT is final (review over, or already answered): another responder gets the same.
+          if (apiError(err).code === "CONFLICT")
+            throw new Error(
+              `${describeError(err)} (review ends ${endsAt ?? "?"}; refused ${Date.now() - started} ms after it was sent)`,
+            );
           last = err;
         }
       }
       throw last ?? new Error("no seated council member to respond");
     });
 
+  const voteGate = new Gate(VOTES_IN_FLIGHT);
   const castVotes = (st: ProposalState, id: string) =>
     background(st, `votes on ${st.spec.ref}`, async () => {
-      await inBatches(st.spec.votes, async (v) => {
-        const who = await sessions.as(v.handle);
-        for (let attempt = 1; ; attempt++) {
-          try {
-            await who.api.client.coop.proposals.vote({ id, choice: v.choice });
-            break;
-          } catch (err) {
-            // A vote is an upsert on (proposal, voter), so resending one the proxy lost on its way
-            // to the API (502) records the same choice at most once.
-            if (apiError(err).code === "BAD_GATEWAY" && attempt < VOTE_ATTEMPTS) continue;
-            throw new Error(`${v.handle} voting: ${describeError(err)}`);
-          }
-        }
-        counts.votes++;
-      });
+      await Promise.all(
+        st.spec.votes.map((v) =>
+          voteGate.run(async () => {
+            const who = await sessions.as(v.handle);
+            for (let attempt = 1; ; attempt++) {
+              try {
+                await who.api.client.coop.proposals.vote({ id, choice: v.choice });
+                break;
+              } catch (err) {
+                // A vote is an upsert on (proposal, voter), so resending one the proxy lost on its way
+                // to the API (502) records the same choice at most once.
+                if (apiError(err).code === "BAD_GATEWAY" && attempt < VOTE_ATTEMPTS) continue;
+                throw new Error(`${v.handle} voting: ${describeError(err)}`);
+              }
+            }
+            counts.votes++;
+          }),
+        ),
+      );
       st.voted = true;
     });
 

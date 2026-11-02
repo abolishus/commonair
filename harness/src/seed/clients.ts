@@ -9,7 +9,7 @@
 import { createApi } from "../api/client.ts";
 import { AddressPool, parseCidr, seededRandom } from "../cidrs.ts";
 import type { HarnessEnv } from "../env.ts";
-import { type ForwardingProxy, startForwardingProxy } from "../proxy.ts";
+import { type HttpForwardingProxy, startForwardingProxy } from "../proxy.ts";
 import type { UserFactoryOptions } from "../users.ts";
 import type { SeedUnitName } from "./types.ts";
 
@@ -29,7 +29,7 @@ export const SEED_RATE_WAIT_MS = 5 * 60_000;
 /** A seed client's own timeout: longer than the proxy may hold a request through a rate limit. */
 export const SEED_CLIENT_TIMEOUT_MS = SEED_RATE_WAIT_MS + 60_000;
 
-let proxy: ForwardingProxy | null = null;
+let proxy: HttpForwardingProxy | null = null;
 
 /** A stable per-unit seed, so two units rarely draw the same addresses. Pure. */
 export function unitAddressSeed(unit: SeedUnitName): number {
@@ -46,6 +46,7 @@ export function seedApiFactory(env: HarnessEnv, unit: SeedUnitName): NonNullable
     return createApi({
       ...o,
       baseUrl: proxy.url,
+      gate: proxy.gate,
       clientIp: o.clientIp ?? addresses.next(),
       timeoutMs: o.timeoutMs ?? SEED_CLIENT_TIMEOUT_MS,
     });

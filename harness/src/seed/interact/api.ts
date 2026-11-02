@@ -14,7 +14,7 @@ import { type Api, createApi } from "../../api/client.ts";
 import { CookieJar } from "../../api/cookies.ts";
 import { AddressPool, parseCidr, seededRandom } from "../../cidrs.ts";
 import type { HarnessEnv } from "../../env.ts";
-import { type ForwardingProxy, startForwardingProxy } from "../../proxy.ts";
+import { type HttpForwardingProxy, startForwardingProxy } from "../../proxy.ts";
 import { type SignedInUser, UserFactory } from "../../users.ts";
 import { rerunDraw } from "../../w3/giveaways.ts";
 import { SEED_CLIENT_TIMEOUT_MS, SEED_RATE_WAIT_MS } from "../clients.ts";
@@ -44,7 +44,7 @@ export class SeedSessions implements SessionSource {
   private readonly cache = new Map<string, Promise<SignedInUser>>();
   private readonly factory: UserFactory;
   private readonly addresses = new AddressPool([parseCidr(SEED_CLIENT_CIDR)], seededRandom(0x5eed));
-  private proxy: ForwardingProxy | null = null;
+  private proxy: HttpForwardingProxy | null = null;
 
   constructor(
     private readonly env: HarnessEnv,
@@ -64,6 +64,7 @@ export class SeedSessions implements SessionSource {
     this.proxy ??= startForwardingProxy({ target: this.env.HARNESS_API_URL, retryRateLimitedMs: SEED_RATE_WAIT_MS });
     return createApi({
       baseUrl: this.proxy.url,
+      gate: this.proxy.gate,
       origin: new URL(this.env.HARNESS_WEB_URL).origin,
       jar: new CookieJar(),
       clientIp: this.addresses.next(),

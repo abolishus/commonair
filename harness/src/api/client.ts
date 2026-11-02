@@ -10,6 +10,7 @@ import type { Contract } from "@commonair/contracts";
 import { createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
 import type { ContractRouterClient } from "@orpc/contract";
+import type { Gate } from "../proxy.ts";
 import { CookieJar, type FetchLike, jarFetch } from "./cookies.ts";
 
 export type ApiClient = ContractRouterClient<Contract>;
@@ -28,8 +29,13 @@ export interface ApiClientOptions {
   /** Simulated client address, honoured only when `baseUrl` is the forwarding proxy. */
   clientIp?: string;
   userAgent?: string;
-  /** Per-request timeout. */
+  /** Per-request timeout, counted from when the gate lets the request go. */
   timeoutMs?: number;
+  /**
+   * The in-process forwarding proxy's gate (`proxy.gate`): required when `baseUrl` is a proxy in
+   * this process, or enough concurrent requests stall it (see `PROXY_MAX_IN_FLIGHT`).
+   */
+  gate?: Gate;
 }
 
 export interface Api {
@@ -50,7 +56,10 @@ export function createApi(opts: ApiClientOptions): Api {
   if (opts.bearer) headers.authorization = `Bearer ${opts.bearer}`;
   if (opts.clientIp) headers[SIMULATED_IP_HEADER] = opts.clientIp;
   const timeoutMs = opts.timeoutMs ?? 15_000;
-  const timed: FetchLike = (request) => fetch(request, { signal: AbortSignal.timeout(timeoutMs) });
+  const send: FetchLike = (request) => fetch(request, { signal: AbortSignal.timeout(timeoutMs) });
+  // The gate is released once the response head arrives; callers read the (small) body at once.
+  const gate = opts.gate;
+  const timed: FetchLike = gate ? (request) => gate.run(() => send(request)) : send;
   const f = jarFetch(jar, headers, timed);
   const baseUrl = opts.baseUrl.replace(/\/+$/, "");
   const link = new RPCLink({ url: `${baseUrl}/rpc`, fetch: (request) => f(request) });
