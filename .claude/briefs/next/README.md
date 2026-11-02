@@ -60,6 +60,15 @@ Batches, each at most six units at a time (AGENTS.md, PLAN.md "Milestones"):
 5. **W2.**
 6. **W3 + N3 + N4.** W3 portability fixes the bundle shape that N3 imports into and N4
    federates.
+7. **Batch 8** (planned 2026-11-01 at `43ae60dc`, after items 1–6 ran as batches 1–7):
+   - R0's release prep toward `v0.1.0`;
+   - S1 stage 1 (S1-d, S1-b, S1-h);
+   - M1 on stripe-mock;
+   - L1's engineering (observability, the status page);
+   - the batch 6 and batch 7 follow-ups.
+
+   See [`../batch8/README.md`](../batch8/README.md). Its OPEN decisions (U1–U6) are the user's to
+   answer before the contract step.
 
 The rest of S1 follows its own order (S1-b after R0-b; S1-e only near the stage 3 trigger).
 M1 and L1 are not batched: M1 can run on stripe-mock at any time but must not take live keys
