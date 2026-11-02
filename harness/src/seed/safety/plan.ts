@@ -542,7 +542,7 @@ export function planSafety(rng: Rng, scale: SeedScale, input: PlanInput): Safety
     },
     {
       title: "Slow VOD processing (demo seed)",
-      components: ["vods"],
+      components: ["origin"],
       body: "New VODs take longer than usual to appear. Demo seed incident.",
       statuses: ["investigating", "monitoring"],
     },

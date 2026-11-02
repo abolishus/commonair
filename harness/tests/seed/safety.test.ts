@@ -193,6 +193,12 @@ describe("planSafety: every state appears at small", () => {
   test("incidents: one resolved, one ongoing", () => {
     expect(p.incidents.map((i) => i.statuses.at(-1))).toEqual(["resolved", "monitoring"]);
   });
+
+  test("incidents name only components the status page reports on", () => {
+    // statusComponentIds in services/api: postgres, valkey and the probes in statusProbes.
+    const known = ["postgres", "valkey", "mediamtx", "chat", "origin"];
+    for (const i of p.incidents) for (const c of i.components) expect(known, i.title).toContain(c);
+  });
 });
 
 describe("planSafety: enforcement cells (/transparency)", () => {
