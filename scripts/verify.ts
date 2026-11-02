@@ -38,6 +38,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FULL_SHARDS } from "../harness/src/shards.ts";
+import { SEED_ENV_KEYS } from "./infra.ts";
 import { killCurrentStep, runStep, type StepResult } from "./run-step.ts";
 
 const args = process.argv.slice(2);
@@ -140,10 +141,14 @@ export function seedStack(fullName: string, scenarioNames: readonly string[]): s
   return seedRun(fullName, scenarioNames) ? ["--captions", "--w3", "--seed"] : [];
 }
 
-/** The harness command, with the seed's guard opened (DEMO_SEED_FULL) on a seeding run only. */
+/**
+ * The harness command, with the seed's guard opened (DEMO_SEED_FULL) on a seeding run only. The
+ * seed keys are unset for it: verify started before the "seed env" step wrote them to `.env`, and
+ * an inherited (empty) value beats `.env`, so the harness would not see the stack's secrets.
+ */
 export function harnessCmd(name: string, seeding: boolean): string[] {
   const cmd = ["bun", "harness/src/cli.ts", "run", name];
-  return seeding ? ["env", "DEMO_SEED_FULL=true", ...cmd] : cmd;
+  return seeding ? ["env", ...SEED_ENV_KEYS.flatMap((k) => ["-u", k]), "DEMO_SEED_FULL=true", ...cmd] : cmd;
 }
 
 /** The stack flags, each once: several runs can ask for the same override. */

@@ -24,6 +24,7 @@ import {
   steps,
   w3Stack,
 } from "../verify.ts";
+import { SEED_ENV_KEYS } from "../infra.ts";
 
 describe("selectGroups", () => {
   test("every group without --only", () => {
@@ -106,6 +107,7 @@ describe("steps", () => {
   test("the seed's guard is opened for a seeding run only", () => {
     expect(harnessCmd("full:seed", true)).toEqual([
       "env",
+      ...SEED_ENV_KEYS.flatMap((k) => ["-u", k]),
       "DEMO_SEED_FULL=true",
       "bun",
       "harness/src/cli.ts",
