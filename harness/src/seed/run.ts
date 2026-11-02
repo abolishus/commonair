@@ -94,6 +94,7 @@ export interface SeedLiveOptions {
 
 /** `seed live`: seed-media implements it (unit 7). */
 export async function runSeedLive(o: SeedLiveOptions): Promise<number> {
-  (o.out ?? ((l: string) => console.log(l)))("seed live: not implemented yet (seed-media)");
-  return 1;
+  // Loaded on demand: `seed full` never needs the live publishers, chat clients or browser fleet.
+  const { runSeedLiveCommand } = await import("./media/live-io.ts");
+  return runSeedLiveCommand(o);
 }
