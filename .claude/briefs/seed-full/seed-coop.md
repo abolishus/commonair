@@ -46,7 +46,8 @@ direct inserts.
    - Check `COOP_TEST_HOOKS` first.
    - Bootstrap the settings the way the co-op scenario does, so `governance_settings_history` gets
      a few real changes.
-   - `admin` approves the `governance_applications`: some approved, one pending, one rejected.
+   - `governance_applications` fills itself: the settings trigger writes one row per applied
+     (proposal, key), so it holds applied rows only. It cannot have pending or rejected rows.
 2. **Memberships and shares.**
    - member1 holds shares in every class it qualifies for.
    - council1 and council2 are streamer-class members.

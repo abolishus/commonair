@@ -210,3 +210,16 @@ added since then is yours if it is in your stub, even if your brief doesn't name
 - **Not shown:** the 2FA rows for admin and viewer1 are unverified enrollments, so every unit can
   still sign them in with the shared password. The sessions and passkeys exist, but
   `/settings/privacy` doesn't render them.
+
+## Wave 1 cross-unit agreements (merged 2026-11-01)
+
+- **`playback_sessions`** is seed-media's table, but seed-interact also inserts finished, verified,
+  signed-in sessions into it (user agent `CommonAir-demo-seed/1 (seed-interact)`, `broadcast_id`
+  null, scored in the last hour). The worker's points accrual reads its candidates from that table,
+  and `loyalty_accrual_sessions` is only its high-water mark. The table is plain, so the direct
+  insert is allowed. seed-interact counts these rows in its report. seed-media never deletes or
+  re-scores them.
+- **`store.extra.safety.restrictedUserIds`** (`string[]`): the accounts seed-safety suspended or
+  scheduled for deletion. seed-platform and seed-coop never sign in as them.
+- **Run order:** social → interact, money, media → safety (after media) → coop (after money and
+  safety) → platform (after media and safety).
