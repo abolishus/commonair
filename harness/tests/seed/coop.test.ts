@@ -16,6 +16,7 @@ import {
 } from "../../src/coop.ts";
 import { FIXED_ACCOUNTS, bulkStreamerHandle, bulkViewerHandle } from "../../src/seed/accounts.ts";
 import { subscriptionsFromStore, unit } from "../../src/seed/coop.ts";
+import { governanceSignIns } from "../../src/seed/coop/api.ts";
 import {
   type CoopFacts,
   type ElectorateMember,
@@ -521,5 +522,16 @@ describe("seed-safety's restricted accounts", () => {
     expect(restricted.size).toBeGreaterThan(0);
     const m = planMemberships(createRng(5).fork("memberships"), SMALL, { ...facts, restrictedUserIds: restricted });
     for (const h of picked(m)) expect(restricted.has(idOf.get(h) ?? h)).toBe(false);
+  });
+});
+
+describe("governanceSignIns", () => {
+  test("every voter, ballot voter and responder once, so none signs in inside a voting window", () => {
+    const { governance } = plansFor(7, SEED_SCALES.medium);
+    const list = governanceSignIns(governance, ["council1", "council2"]);
+    expect(new Set(list).size).toBe(list.length);
+    for (const p of governance.proposals) for (const v of p.votes) expect(list).toContain(v.handle);
+    for (const e of governance.elections) for (const b of e.ballots) expect(list).toContain(b.voter);
+    expect(list).toEqual(expect.arrayContaining(["council1", "council2"]));
   });
 });

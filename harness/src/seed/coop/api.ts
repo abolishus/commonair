@@ -299,6 +299,17 @@ export interface GovernanceOptions {
 const councilBody = (stance: string) =>
   `The creator council ${stance === "support" ? "supports" : stance === "oppose" ? "opposes" : "has mixed views on"} this proposal after review.`;
 
+/** Everyone governance signs in as (voters, ballot voters, council responders), once each. Pure. */
+export function governanceSignIns(plan: GovernancePlan, responders: readonly string[]): string[] {
+  return [
+    ...new Set([
+      ...plan.proposals.flatMap((p) => p.votes.map((v) => v.handle)),
+      ...plan.elections.flatMap((e) => e.ballots.map((b) => b.voter)),
+      ...responders,
+    ]),
+  ];
+}
+
 export async function runGovernance(o: GovernanceOptions): Promise<GovernanceResult> {
   const { sessions, hooks, plan, signal } = o;
   const started = Date.now();
@@ -329,6 +340,12 @@ export async function runGovernance(o: GovernanceOptions): Promise<GovernanceRes
   const councilBodies: string[] = [];
   const failures: Error[] = [];
   const admin = await sessions.as("admin");
+  // Sign every voter in before the first proposal opens. A sign-in hashes a password: hundreds of
+  // them inside a 45 s voting window (at medium scale, on a small host) let the windows close
+  // before the votes went out (`voting_closed`).
+  const voters = governanceSignIns(plan, o.responders);
+  o.progress(`signing in ${voters.length} voters and council members before the first proposal`);
+  await inBatches(voters, (h) => sessions.as(h));
 
   const background = (st: { busy: boolean }, what: string, fn: () => Promise<void>) => {
     st.busy = true;
