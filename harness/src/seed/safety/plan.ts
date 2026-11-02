@@ -424,6 +424,15 @@ export function planSafety(rng: Rng, scale: SeedScale, input: PlanInput): Safety
       outcome: { status: "dismissed" },
       cell: null,
     });
+  // viewer2 files one report itself (before its suspension below, which refuses reports); it
+  // stays open.
+  report({
+    reporter: "viewer2",
+    subject: { kind: "chat", index: chatReports + 1 },
+    reason: "spam",
+    outcome: { status: "open" },
+    cell: null,
+  });
   // viewer2's lesser action: a brief suspension over one of its chat lines (appealed, upheld
   // below). A suspension, not a removal: only a restriction of the account gets a statement of
   // reasons (services/worker/src/moderation/sor-build.ts, `report.resolve`), and /settings/appeals
@@ -437,14 +446,6 @@ export function planSafety(rng: Rng, scale: SeedScale, input: PlanInput): Safety
       clauseId: REASON_CLAUSES.harassment,
       durationSeconds: CELL_SUSPENSION_SECONDS,
     },
-    cell: null,
-  });
-  // viewer2 files one report itself; it stays open.
-  report({
-    reporter: "viewer2",
-    subject: { kind: "chat", index: chatReports + 1 },
-    reason: "spam",
-    outcome: { status: "open" },
     cell: null,
   });
 
