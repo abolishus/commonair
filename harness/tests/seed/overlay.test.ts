@@ -48,7 +48,8 @@ describe("harness/compose.seed.yaml", () => {
       const e = env(svc);
       expect(e.PAYMENTS_PROVIDER, svc).toBe("stripe");
       expect(e.STRIPE_API_BASE, svc).toBe("http://stripe-mock:12111");
-      expect(e.STRIPE_SECRET_KEY, svc).toMatch(/^sk_test_/);
+      // stripe-mock answers 401 to a key with anything but letters and digits after `sk_test_`.
+      expect(e.STRIPE_SECRET_KEY, svc).toMatch(/^sk_test_[A-Za-z0-9]+$/);
     }
     expect(compose["stripe-mock"]?.profiles).toEqual(["stripe"]);
   });

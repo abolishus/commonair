@@ -30,7 +30,7 @@
 
 x-seed-payments: &seed-payments
   PAYMENTS_PROVIDER: stripe
-  STRIPE_SECRET_KEY: sk_test_harness_seed
+  STRIPE_SECRET_KEY: sk_test_harnessseed
   STRIPE_API_BASE: http://stripe-mock:12111
   INFRA_COST_MODEL: '{"currency":"usd","centsPerGb":{"origin":5000,"relay":2000,"p2p":0,"cdn":8000}}'
 
