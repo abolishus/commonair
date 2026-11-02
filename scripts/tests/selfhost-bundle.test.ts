@@ -10,6 +10,7 @@ import { SITE } from "../../packages/config/src/site.ts";
 import { DEFAULT_REGISTRY, RELEASE_IMAGES, bundleAssetName, imageRef, parseManifest } from "../release/manifest.ts";
 import { buildBundle, cpuEnvLines, releaseEnv } from "../selfhost/bundle.ts";
 import { gzipReproducible, tar } from "../selfhost/tar.ts";
+import { OPTIONAL_BUNDLE_DIR, OPTIONAL_UNITS } from "../selfhost/units.ts";
 
 const ROOT = new URL("../../", import.meta.url).pathname;
 const digest = (n: number) => `sha256:${n.toString(16).padStart(64, "0")}`;
@@ -93,7 +94,10 @@ describe("bundle contents", () => {
   });
 
   test("equals the expected set", () => {
-    const quadlet = readdirSync(join(ROOT, "infra/quadlet")).map((f) => `quadlet/${f}`);
+    const optional = new Set<string>(OPTIONAL_UNITS);
+    const quadlet = readdirSync(join(ROOT, "infra/quadlet")).map(
+      (f) => `${optional.has(f) ? OPTIONAL_BUNDLE_DIR : "quadlet"}/${f}`,
+    );
     const systemd = readdirSync(join(ROOT, "infra/systemd")).map((f) => `systemd/${f}`);
     // Every unit with an env file renders it from its key list at start (unit-env.ts).
     const keyLists = readdirSync(join(ROOT, "infra/selfhost/env")).map((f) => `infra/selfhost/env/${f}`);
@@ -227,7 +231,24 @@ describe("bundle contents", () => {
 
   test("the whisper unit ships rendered; selfhost.sh installs it only with captions on", () => {
     const m = parseManifest(manifestJson());
-    expect(text("quadlet/commonair-whisper.container")).toContain(`Image=${imageRef(m, "whisper")}\n`);
+    expect(text("quadlet-optional/commonair-whisper.container")).toContain(`Image=${imageRef(m, "whisper")}\n`);
+  });
+
+  test("quadlet/ holds only what every instance runs: an rc.2 selfhost.sh installs all of it", () => {
+    // The rc.2 script's upgrade copied every quadlet/* file and waited for each to be healthy,
+    // so rc.3's whisper (no weights) and seed mode's units started on staging.
+    const shipped = [...files.keys()].filter((p) => p.startsWith(`${TOP}/quadlet/`)).map((p) => p.split("/").pop());
+    for (const unit of OPTIONAL_UNITS) {
+      expect(shipped).not.toContain(unit);
+      expect(files.has(`${TOP}/${OPTIONAL_BUNDLE_DIR}/${unit}`), unit).toBe(true);
+    }
+    // selfhost.sh names the same units: whisper and seed mode's.
+    const script = readFileSync(join(ROOT, "scripts/selfhost.sh"), "utf8");
+    expect(script).toContain(`OPTIONAL_UNIT_DIR="${OPTIONAL_BUNDLE_DIR}"`);
+    const seed = /^SEED_UNITS="([^"]+)"$/m.exec(script)?.[1]?.split(" ") ?? [];
+    const whisper = /^WHISPER_UNIT="([^"]+)"$/m.exec(script)?.[1];
+    expect(new Set([whisper, ...seed])).toEqual(new Set(OPTIONAL_UNITS));
+    expect(seed).toHaveLength(OPTIONAL_UNITS.length - 1);
   });
 
   test("bundled tools carry the licenses of the npm code inside them", () => {

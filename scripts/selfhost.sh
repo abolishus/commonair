@@ -42,6 +42,12 @@ ENV_FILE="$CONF_DIR/commonair.env"
 UNIT_ENV_DIR="$CONF_DIR/unit-env"
 SELFHOST_CONF="$CONF_DIR/selfhost.conf"
 QUADLET_DIR="$HOME/.config/containers/systemd"
+# The release's units that only some instances run (whisper with captions on, seed mode's while
+# it is open: unit_in_mode) live in this directory of the bundle, the rest in quadlet/. Every
+# selfhost.sh up to 0.1.0-rc.2 installs all of quadlet/* and waits for each to become healthy, so
+# an upgrade it ran would otherwise start them too (rc.3 on staging: a whisper unit without its
+# weights, and seed mode's mocks with seed mode closed).
+OPTIONAL_UNIT_DIR="quadlet-optional"
 SYSTEMD_DIR="$HOME/.config/systemd/user"
 SERVICE_USER="commonair"
 REQUIRED_PODMAN_MAJOR=5
@@ -711,7 +717,8 @@ apply_registry() {
   [ -n "$_reg" ] || return 0
   _from=$(env_get COMMONAIR_REGISTRY "$_rel/release.env")
   [ "$_from" != "$_reg" ] || return 0
-  for _u in "$_rel"/quadlet/*.container; do
+  for _u in "$_rel"/quadlet/*.container "$_rel/$OPTIONAL_UNIT_DIR"/*.container; do
+    [ -f "$_u" ] || continue
     sed "s|^Image=$_from/|Image=$_reg/|" "$_u" >"$_u.tmp" && mv "$_u.tmp" "$_u"
   done
   env_set_file "$_rel/release.env" COMMONAIR_REGISTRY "$_reg"
@@ -729,9 +736,21 @@ env_set_file() {
 
 # The images of the units this instance runs (an external object store needs no Garage image).
 images_of() {
-  for _u in "$1"/quadlet/*.container; do
+  for _u in "$1"/quadlet/*.container "$1/$OPTIONAL_UNIT_DIR"/*.container; do
+    [ -f "$_u" ] || continue
     if unit_in_mode "$(basename "$_u")"; then sed -n 's/^Image=//p' "$_u"; fi
   done | sort -u
+}
+
+# The path of unit $2 in release $1 (quadlet/ or the optional units' directory), or nothing.
+release_unit_path() {
+  for _rup in "$1/quadlet/$2" "$1/$OPTIONAL_UNIT_DIR/$2"; do
+    if [ -f "$_rup" ]; then
+      printf '%s' "$_rup"
+      return 0
+    fi
+  done
+  return 0
 }
 
 tools_image() {
@@ -931,7 +950,7 @@ whisper_cpu_needs() {
 # install would never become healthy, so this refuses up front instead.
 check_captions() {
   captions_on || return 0
-  [ -f "$1/quadlet/$WHISPER_UNIT" ] || die "release $(env_get COMMONAIR_VERSION "$1/release.env") has no captions sidecar ($WHISPER_UNIT)" \
+  [ -n "$(release_unit_path "$1" "$WHISPER_UNIT")" ] || die "release $(env_get COMMONAIR_VERSION "$1/release.env") has no captions sidecar ($WHISPER_UNIT)" \
     "fix: re-run with --no-captions, or install a release that ships it"
   _cap_need=$(whisper_cpu_needs "$1")
   [ -n "$_cap_need" ] || return 0
@@ -1327,7 +1346,8 @@ create_secrets() {
 # Host files the units this instance runs bind-mount outside the release directory (derived from
 # Volume= lines): hash lists, the moderation and captions models and the IRC certificate directory.
 host_mount_sources() {
-  for _u in "$1"/quadlet/*.container; do
+  for _u in "$1"/quadlet/*.container "$1/$OPTIONAL_UNIT_DIR"/*.container; do
+    [ -f "$_u" ] || continue
     if unit_in_mode "$(basename "$_u")"; then sed -n 's|^Volume=%h/\([^:]*\):.*|\1|p' "$_u"; fi
   done | grep -v '^commonair/' | sort -u
 }
@@ -1360,6 +1380,13 @@ fetch_model() {
   _dir=$(dirname "$2")
   _file=$(basename "$2")
   mkdir -p "$_dir"
+  # selfhost.sh up to 0.1.0-rc.2 made every mount source it did not know a directory, so its
+  # upgrade to rc.3 left an empty one where the captions weights go (whisper then failed with
+  # "invalid model data (bad magic)"). An empty one goes; anything else is the operator's.
+  if [ -d "$2" ] && [ ! -L "$2" ]; then
+    rmdir "$2" 2>/dev/null || die "$2 is a directory, not the $3 model" "fix: move it away, then re-run"
+    info "removed the empty directory $2 (an older selfhost.sh made it where the $3 model goes)"
+  fi
   if [ -n "$4" ] && [ ! -e "$2" ]; then
     [ -f "$4" ] || die "no such model file: $4"
     cp "$4" "$2"
@@ -1394,7 +1421,7 @@ install_units() {
   for _f in "$QUADLET_DIR"/commonair-*.container; do
     [ -f "$_f" ] || continue
     _n=$(basename "$_f")
-    if [ ! -e "$_rel/quadlet/$_n" ] || ! unit_in_mode "$_n"; then
+    if [ -z "$(release_unit_path "$_rel" "$_n")" ] || ! unit_in_mode "$_n"; then
       info "stopping ${_n%.container} (not part of this install)"
       systemctl --user stop "${_n%.container}.service" >/dev/null 2>&1 || true
     fi
@@ -1407,7 +1434,8 @@ install_units() {
     if [ -f "$_f" ] || [ -L "$_f" ]; then rm -f "$_f"; fi
   done
   # With an external object store, Garage and its volumes are not installed at all.
-  for _f in "$_rel"/quadlet/*; do
+  for _f in "$_rel"/quadlet/* "$_rel/$OPTIONAL_UNIT_DIR"/*; do
+    [ -f "$_f" ] || continue
     if unit_in_mode "$(basename "$_f")"; then cp "$_f" "$QUADLET_DIR/"; fi
   done
   # Units in ~/.config/systemd/user shadow Quadlet's generated ones, so a commonair-* unit the
@@ -1429,7 +1457,20 @@ install_units() {
   # stays behind for a unit this release no longer has, or under a key it no longer passes.
   rm -rf "$UNIT_ENV_DIR"
   systemctl --user daemon-reload
+  stop_orphan_units
   info "units installed from $_rel"
+}
+
+# A service whose unit file is gone keeps running as "not-found" until something stops it: the
+# rollback of an rc.2 script's upgrade to rc.3 removed seed mode's units (and coturn's) without
+# stopping them. Nothing else would, and a later start of the same name finds it already active
+# and keeps the old container.
+stop_orphan_units() {
+  for _s in $(systemctl --user list-units --all --plain --no-legend --type=service 'commonair-*' 2>/dev/null |
+    awk '{ if ($1 == "●") { $1 = ""; $0 = $0 } } $2 == "not-found" && $3 != "inactive" { print $1 }'); do
+    info "stopping $_s (its unit file is gone)"
+    systemctl --user stop "$_s" >/dev/null 2>&1 || true
+  done
 }
 
 # Long-running services, from the installed units (one-shots run as their dependencies).
@@ -2825,7 +2866,7 @@ cmd_seed_mode_open() {
       "fix: delete both VAPID_* lines and run sh $CURRENT_LINK/selfhost.sh install --reinstall (it generates a new pair)"
   fi
   for _f in $SEED_UNITS; do
-    [ -f "$CURRENT_LINK/quadlet/$_f" ] ||
+    [ -n "$(release_unit_path "$CURRENT_LINK" "$_f")" ] ||
       die "seed-mode open refused: release $(installed_version) has no seed mode ($_f is missing). Nothing was changed." \
         "fix: upgrade to a release that ships it"
   done
@@ -2835,7 +2876,7 @@ cmd_seed_mode_open() {
   done
 
   # Pull first: a pull that fails leaves the instance as it was.
-  for _f in $SEED_UNITS; do pull_one "$(sed -n 's/^Image=//p' "$CURRENT_LINK/quadlet/$_f" | head -n 1)"; done
+  for _f in $SEED_UNITS; do pull_one "$(sed -n 's/^Image=//p' "$(release_unit_path "$CURRENT_LINK" "$_f")" | head -n 1)"; done
 
   _now=$(date -u +%s)
   _deadline=$((_now + SEED_HOURS * 3600))
@@ -2884,7 +2925,7 @@ cmd_seed_mode_open() {
 
   # 4. Units and drop-ins.
   mkdir -p "$SEED_DATA_DIR/reports"
-  for _f in $SEED_UNITS; do cp "$CURRENT_LINK/quadlet/$_f" "$QUADLET_DIR/"; done
+  for _f in $SEED_UNITS; do cp "$(release_unit_path "$CURRENT_LINK" "$_f")" "$QUADLET_DIR/"; done
   for _u in $SEED_DROPIN_UNITS; do
     mkdir -p "$QUADLET_DIR/commonair-$_u.container.d"
     cp "$CURRENT_LINK/infra/selfhost/seed-mode/commonair-$_u.conf" "$QUADLET_DIR/commonair-$_u.container.d/$SEED_DROPIN"

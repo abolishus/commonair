@@ -310,6 +310,59 @@ function sampleCommonairEnv(): string {
 }
 
 describe("render-env.sh", () => {
+  // An rc.2 install's env file still holds init-env's development S3 values (rc.2's units pinned
+  // Garage's), and an upgrade run by the rc.2 script never rewrote them: rc.3's media then
+  // reached for localhost:3900 and failed its readiness (ECONNREFUSED) on staging.
+  test("with Garage on the host, the S3 endpoint, region and path style are always Garage's", () => {
+    const d = tmp();
+    writeFileSync(join(d, "list.keys"), "S3_ENDPOINT\nS3_REGION\nS3_FORCE_PATH_STYLE\nS3_BUCKET_MEDIA\n");
+    const out = join(d, "out.env");
+    for (const mode of ["", "S3_MODE=\n", "S3_MODE=garage\n", "  S3_MODE=external\nS3_MODE=garage\n"]) {
+      writeFileSync(
+        join(d, "commonair.env"),
+        `${mode}S3_ENDPOINT=http://localhost:3900\nS3_REGION=us-east-1\nS3_FORCE_PATH_STYLE=false\nS3_BUCKET_MEDIA=m\n`,
+      );
+      const r = render(join(d, "list.keys"), join(d, "commonair.env"), out);
+      expect(r.code, r.err).toBe(0);
+      expect(readFileSync(out, "utf8"), mode).toBe(
+        "S3_ENDPOINT=http://garage:3900\nS3_REGION=garage\nS3_FORCE_PATH_STYLE=true\nS3_BUCKET_MEDIA=m\n",
+      );
+    }
+    // Listed but missing: still Garage's (once each, also when the file repeats a key).
+    writeFileSync(join(d, "commonair.env"), "S3_BUCKET_MEDIA=m\nS3_REGION=a\nS3_REGION=b\n");
+    expect(render(join(d, "list.keys"), join(d, "commonair.env"), out).code).toBe(0);
+    expect(readFileSync(out, "utf8").split("\n").sort()).toEqual(
+      [
+        "",
+        "S3_BUCKET_MEDIA=m",
+        "S3_ENDPOINT=http://garage:3900",
+        "S3_FORCE_PATH_STYLE=true",
+        "S3_REGION=garage",
+      ].sort(),
+    );
+    // A unit that does not list them gets none.
+    writeFileSync(join(d, "media.keys"), "S3_BUCKET_MEDIA\n");
+    expect(render(join(d, "media.keys"), join(d, "commonair.env"), out).code).toBe(0);
+    expect(readFileSync(out, "utf8")).toBe("S3_BUCKET_MEDIA=m\n");
+  });
+
+  test("an external store's S3 values are copied as they are", () => {
+    const d = tmp();
+    writeFileSync(join(d, "list.keys"), "S3_ENDPOINT\nS3_REGION\nS3_FORCE_PATH_STYLE\n");
+    const env = "S3_MODE=external\nS3_ENDPOINT=https://s3.example.net\nS3_REGION=eu-1\nS3_FORCE_PATH_STYLE=false\n";
+    writeFileSync(join(d, "commonair.env"), env);
+    const out = join(d, "out.env");
+    expect(render(join(d, "list.keys"), join(d, "commonair.env"), out).code).toBe(0);
+    expect(readFileSync(out, "utf8")).toBe(env.slice(env.indexOf("\n") + 1));
+  });
+
+  test("Garage's pinned endpoint is the one selfhost.sh writes", () => {
+    const script = read("scripts/selfhost.sh");
+    const endpoint = /^GARAGE_S3_ENDPOINT="([^"]+)"$/m.exec(script)?.[1];
+    expect(endpoint).toBe("http://garage:3900");
+    expect(read("scripts/selfhost/render-env.sh")).toContain(`pinned["S3_ENDPOINT"] = "${endpoint}"`);
+  });
+
   test("renders exactly the listed keys, verbatim, mode 0600 in a 0700 directory", () => {
     const d = tmp();
     writeFileSync(join(d, "list.keys"), "# comment\n\nA\nB_*\n  # indented comment\nC\n");

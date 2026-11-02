@@ -462,7 +462,8 @@ Every published port and its fate (tests: `infra/tests/network.test.ts` and `irc
 
 `selfhost.sh` keeps each installed release in `~/.local/share/commonair/releases/<version>/`
 (the unpacked bundle: `selfhost.sh`, `release-manifest.json`, `release.env`, the rendered
-`quadlet/`, `systemd/`, the mounted config files under `infra/`, the env renderer
+`quadlet/`, `quadlet-optional/` (whisper and seed mode's units, which only some instances run:
+an rc.2 `selfhost.sh` installs every file of `quadlet/` on an upgrade), `systemd/`, the mounted config files under `infra/`, the env renderer
 `scripts/selfhost/render-env.sh` with the key lists in `infra/selfhost/env/`, and `tools/`).
 Install removes the per-unit env files in `~/.config/commonair/unit-env/`; each unit writes its
 own again when it starts. `~/commonair` is

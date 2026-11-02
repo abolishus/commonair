@@ -16,6 +16,13 @@
 #
 # Fails closed: the old <out-env> is removed first, so after any error the unit has no env file
 # and does not start (podman refuses a missing --env-file), never with a stale one.
+#
+# One exception to verbatim: with Garage on this host (S3_MODE unset, empty or garage), a listed
+# S3_ENDPOINT, S3_REGION or S3_FORCE_PATH_STYLE is always Garage's in-network value, the one
+# selfhost.sh's storage_env writes (GARAGE_S3_ENDPOINT). Units up to 0.1.0-rc.2 pinned these
+# themselves, so the env file kept init-env's development values (S3_ENDPOINT=localhost:3900),
+# and an upgrade run by the rc.2 script never rewrites them: media then failed its readiness
+# with ECONNREFUSED. An external store's values (S3_MODE=external) are copied as they are.
 set -eu
 
 fail() {
@@ -35,12 +42,32 @@ grep -Eq '^[A-Za-z_]' "$keys" || fail "the key list $keys is empty"
 # An env file without a single assignment is not the operator's file (truncated, wrong path).
 grep -Eq '^[A-Za-z_][A-Za-z0-9_]*=' "$src" || fail "$src has no KEY=value lines"
 
+# The last assignment wins, as in podman's --env-file.
+s3_mode=$(sed -n 's/^[[:blank:]]*S3_MODE=//p' "$src" | tail -n 1 | tr -d '\r')
+case "$s3_mode" in
+  "" | garage) garage=1 ;;
+  *) garage=0 ;;
+esac
+
 (umask 077 && mkdir -p "$(dirname "$out")")
 tmp="$out.tmp.$$"
 trap 'rm -f "$tmp"' EXIT
 (
   umask 077
-  awk '
+  awk -v garage="$garage" '
+    BEGIN {
+      pinned["S3_ENDPOINT"] = "http://garage:3900"
+      pinned["S3_REGION"] = "garage"
+      pinned["S3_FORCE_PATH_STYLE"] = "true"
+    }
+    function emit(k) {
+      if (garage && (k in pinned)) {
+        if (!(k in done)) print k "=" pinned[k]
+        done[k] = 1
+        return
+      }
+      print
+    }
     NR == FNR {
       sub(/\r$/, "")
       if ($0 ~ /^[ \t]*(#|$)/) next
@@ -55,10 +82,14 @@ trap 'rm -f "$tmp"' EXIT
     /^[ \t]*[A-Za-z_][A-Za-z0-9_]*=/ {
       sub(/^[ \t]+/, "")
       k = substr($0, 1, index($0, "=") - 1)
-      if (k in exact) { print; next }
-      for (p in prefix) if (index(k, p) == 1) { print; next }
+      if (k in exact) { emit(k); next }
+      for (p in prefix) if (index(k, p) == 1) { emit(k); next }
     }
-    END { if (bad) exit 2 }
+    END {
+      if (bad) exit 2
+      # Listed but missing from the file: Garage still has its one address.
+      if (garage) for (k in pinned) if ((k in exact) && !(k in done)) print k "=" pinned[k]
+    }
   ' "$keys" "$src" >"$tmp"
 ) || fail "could not render $out"
 chmod 600 "$tmp"

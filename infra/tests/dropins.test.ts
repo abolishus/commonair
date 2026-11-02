@@ -19,6 +19,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -26,6 +27,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vite-plus/test";
+import { OPTIONAL_BUNDLE_DIR, OPTIONAL_UNITS } from "../../scripts/selfhost/units.ts";
 
 const ROOT = new URL("../../", import.meta.url).pathname;
 const SELFHOST = readFileSync(join(ROOT, "scripts/selfhost.sh"), "utf8");
@@ -36,7 +38,18 @@ function shFunction(name: string): string {
   if (!m) throw new Error(`no function ${name} in scripts/selfhost.sh`);
   return m[0];
 }
-const FUNCTIONS = ["say", "die", "info", "env_get", "captions_on", "seed_mode_open", "unit_in_mode", "install_units"]
+const FUNCTIONS = [
+  "say",
+  "die",
+  "info",
+  "env_get",
+  "captions_on",
+  "seed_mode_open",
+  "unit_in_mode",
+  "release_unit_path",
+  "install_units",
+  "stop_orphan_units",
+]
   .map(shFunction)
   .join("");
 
@@ -56,13 +69,19 @@ function host(): Host {
   const log = join(home, "systemctl.log");
   mkdirSync(bin);
   writeFileSync(join(home, "commonair.env"), "WHISPER_URL=http://whisper:8080\n");
-  writeFileSync(join(bin, "systemctl"), `#!/bin/sh\necho "systemctl $*" >> "${log}"\n`, { mode: 0o755 });
+  // list-units prints $HOME/list-units (what systemd still runs), when a test wrote one.
+  writeFileSync(
+    join(bin, "systemctl"),
+    `#!/bin/sh\necho "systemctl $*" >> "${log}"\n` +
+      `if [ "$2" = list-units ] && [ -f "$HOME/list-units" ]; then cat "$HOME/list-units"; fi\n`,
+    { mode: 0o755 },
+  );
   const quadlet = join(home, ".config/containers/systemd");
   const systemd = join(home, ".config/systemd/user");
   const script =
     "set -eu\n" +
     `QUADLET_DIR='${quadlet}'\nSYSTEMD_DIR='${systemd}'\nUNIT_ENV_DIR='${home}/.config/commonair/unit-env'\n` +
-    "STORAGE_MODE=garage\n" +
+    "STORAGE_MODE=garage\nOPTIONAL_UNIT_DIR=quadlet-optional\n" +
     // Captions on (env file below), so every unit of the release but seed mode's is installed.
     `ENV_FILE='${home}/commonair.env'\nWHISPER_INTERNAL_URL=http://whisper:8080\nSEED_STATE='${home}/seed-mode'\n` +
     "SEED_DROPIN=50-seed-mode.conf\n" +
@@ -90,12 +109,17 @@ function host(): Host {
   };
 }
 
-/** A release directory as the bundle lays it out: quadlet/ and systemd/, without `drop`. */
+/** The bundle's directory for a unit file (bundle.ts): the optional ones apart. */
+const unitDir = (f: string) => ((OPTIONAL_UNITS as readonly string[]).includes(f) ? OPTIONAL_BUNDLE_DIR : "quadlet");
+
+/** A release directory as the bundle lays it out: quadlet/, quadlet-optional/ and systemd/, without `drop`. */
 function release(parent: string, name: string, drop: string[] = []): string {
   const dir = join(parent, name);
   cpSync(join(ROOT, "infra/quadlet"), join(dir, "quadlet"), { recursive: true });
+  mkdirSync(join(dir, OPTIONAL_BUNDLE_DIR));
+  for (const f of OPTIONAL_UNITS) renameSync(join(dir, "quadlet", f), join(dir, OPTIONAL_BUNDLE_DIR, f));
   cpSync(join(ROOT, "infra/systemd"), join(dir, "systemd"), { recursive: true });
-  for (const f of drop) rmSync(join(dir, f.endsWith(".container") ? "quadlet" : "systemd", f));
+  for (const f of drop) rmSync(join(dir, f.endsWith(".container") ? unitDir(f) : "systemd", f));
   return dir;
 }
 
@@ -107,7 +131,10 @@ const SEED_UNITS = [
   "commonair-seed-harness.container",
 ];
 /** The release's container units an install puts in place (seed mode closed). */
-const installed = (rel: string) => files(join(rel, "quadlet")).filter((f) => !SEED_UNITS.includes(f));
+const installed = (rel: string) =>
+  [...files(join(rel, "quadlet")), ...files(join(rel, OPTIONAL_BUNDLE_DIR))]
+    .filter((f) => !SEED_UNITS.includes(f))
+    .sort();
 const GPU = "[Container]\nAddDevice=/dev/dri/renderD128\n";
 const BACKUP = "[Service]\nEnvironment=WALG_DELTA_MAX_STEPS=3\n";
 
@@ -214,6 +241,63 @@ describe("install_units keeps operator drop-ins", () => {
       );
       // The hand-made file the links pointed at is left alone.
       expect(existsSync(elsewhere)).toBe(true);
+    },
+    TIMEOUT,
+  );
+});
+
+describe("install_units after an older selfhost.sh", () => {
+  test(
+    "services still running without a unit file (an rc.2 script's rollback from rc.3) are stopped",
+    () => {
+      const h = host();
+      // systemctl list-units --all --plain --no-legend, as systemd 257 printed it on staging.
+      writeFileSync(
+        join(h.home, "list-units"),
+        [
+          "commonair-api.service                    loaded    active   running CommonAir api",
+          "commonair-mailpit.service                not-found active   running commonair-mailpit.service",
+          "commonair-seed-harness.service           not-found active   running commonair-seed-harness.service",
+          "commonair-storage-init.service           not-found active   exited  commonair-storage-init.service",
+          "● commonair-whisper.service              not-found failed   failed  commonair-whisper.service",
+          "commonair-old.service                    not-found inactive dead    commonair-old.service",
+        ].join("\n") + "\n",
+      );
+      const r = h.run(release(h.home, "v1"));
+      expect(r.code, r.err).toBe(0);
+      const stops = h.calls().filter((c) => c.startsWith("systemctl --user stop "));
+      expect(stops).toEqual([
+        "systemctl --user stop commonair-mailpit.service",
+        "systemctl --user stop commonair-seed-harness.service",
+        "systemctl --user stop commonair-storage-init.service",
+        "systemctl --user stop commonair-whisper.service",
+      ]);
+      // After the reload, so systemd no longer has the files that were removed.
+      const calls = h.calls();
+      expect(calls.indexOf("systemctl --user daemon-reload")).toBeLessThan(
+        calls.indexOf("systemctl --user stop commonair-mailpit.service"),
+      );
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "the optional units come from quadlet-optional/; an older release with them in quadlet/ works too",
+    () => {
+      const h = host();
+      const rel = release(h.home, "v1");
+      h.install(rel);
+      // Captions on (the host's env file): whisper is installed, seed mode's units are not.
+      expect(existsSync(join(h.quadlet, "commonair-whisper.container"))).toBe(true);
+      for (const f of SEED_UNITS) expect(existsSync(join(h.quadlet, f)), f).toBe(false);
+
+      // rc.3's layout (everything in quadlet/), e.g. a rollback to it.
+      const old = join(h.home, "old");
+      cpSync(join(ROOT, "infra/quadlet"), join(old, "quadlet"), { recursive: true });
+      cpSync(join(ROOT, "infra/systemd"), join(old, "systemd"), { recursive: true });
+      h.install(old);
+      expect(existsSync(join(h.quadlet, "commonair-whisper.container"))).toBe(true);
+      for (const f of SEED_UNITS) expect(existsSync(join(h.quadlet, f)), f).toBe(false);
     },
     TIMEOUT,
   );

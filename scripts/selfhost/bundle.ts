@@ -12,8 +12,9 @@
  * Layout, under `commonair-selfhost_<version>/` (selfhost.sh extracts that to
  * ~/.local/share/commonair/releases/<version>, and ~/commonair links to it):
  *   selfhost.sh, release-manifest.json, release.env (the manifest's facts for the shell),
- *   quadlet/ (rendered), systemd/, every config file the units mount from %h/commonair/ and
- *   every file their ExecStartPre= and ExecStopPost= lines use from there (the env renderer, key
+ *   quadlet/ (rendered; quadlet-optional/ the units only some instances run), systemd/, every
+ *   config file the units mount from %h/commonair/ and every file their ExecStartPre= and
+ *   ExecStopPost= lines use from there (the env renderer, key
  *   lists and cgroup reset), staging seed mode's drop-ins and the synthetic hash lists they mount,
  *   tools/ (init-env and fetch-model bundled into single files, run with the tools image's Bun,
  *   plus .env.example and the licenses of the npm packages bundled into them), LICENSES/.
@@ -24,7 +25,15 @@ import { SITE } from "../../packages/config/src/site.ts";
 import { bundleAssetName, parseManifest, type ReleaseManifest } from "../release/manifest.ts";
 import { renderUnits } from "./render.ts";
 import { gzipReproducible, tar, type TarEntry } from "./tar.ts";
-import { QUADLET_DIR, SYSTEMD_DIR, readUnitDir, releaseExecFiles, releaseMounts } from "./units.ts";
+import {
+  OPTIONAL_BUNDLE_DIR,
+  OPTIONAL_UNITS,
+  QUADLET_DIR,
+  SYSTEMD_DIR,
+  readUnitDir,
+  releaseExecFiles,
+  releaseMounts,
+} from "./units.ts";
 
 export const REPO_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 
@@ -131,7 +140,9 @@ export async function bundleEntries(opts: BundleOptions): Promise<{ version: str
   add("release.env", releaseEnv(manifest, registry));
 
   const units = readUnitDir(join(root, QUADLET_DIR));
-  for (const [name, text] of renderUnits(units, manifest, registry)) add(`quadlet/${name}`, text);
+  const optional = new Set<string>(OPTIONAL_UNITS);
+  for (const [name, text] of renderUnits(units, manifest, registry))
+    add(`${optional.has(name) ? OPTIONAL_BUNDLE_DIR : "quadlet"}/${name}`, text);
   for (const [name, text] of readUnitDir(join(root, SYSTEMD_DIR))) add(`systemd/${name}`, text);
   for (const path of releaseMounts(units.values()))
     for (const file of filesUnder(root, path)) add(file, readFileSync(join(root, file)));

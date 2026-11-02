@@ -12,6 +12,20 @@ import { join } from "node:path";
 export const QUADLET_DIR = "infra/quadlet";
 export const SYSTEMD_DIR = "infra/systemd";
 
+/**
+ * Units only some instances run: whisper with captions on, seed mode's while it is open
+ * (selfhost.sh `unit_in_mode`). The bundle ships them in their own directory, `quadlet-optional/`
+ * (selfhost.sh `OPTIONAL_UNIT_DIR`), because every selfhost.sh up to 0.1.0-rc.2 installs all of
+ * `quadlet/` on an upgrade and waits for each unit to become healthy.
+ */
+export const OPTIONAL_UNITS = [
+  "commonair-whisper.container",
+  "commonair-stripe-mock.container",
+  "commonair-mailpit.container",
+  "commonair-seed-harness.container",
+] as const;
+export const OPTIONAL_BUNDLE_DIR = "quadlet-optional";
+
 /** Files of a unit directory, by file name, sorted. */
 export function readUnitDir(dir: string): Map<string, string> {
   const names = readdirSync(dir)

@@ -7,7 +7,7 @@
  * across upgrades and reinstalls, and --no-captions removes it. On amd64 the host's CPU flags are
  * checked against the release's `COMMONAIR_CPU_WHISPER_AMD64` before anything changes.
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeAll, describe, expect, test } from "vite-plus/test";
 import { linkExecutables } from "./support/exec-cache.ts";
@@ -67,7 +67,9 @@ describe("captions off by default", () => {
   });
 
   test("the release still ships the unit and says what its amd64 build needs", () => {
-    expect(existsSync(join(current(h), "quadlet", UNIT))).toBe(true);
+    // In quadlet-optional/: an rc.2 selfhost.sh installs all of quadlet/ on an upgrade.
+    expect(existsSync(join(current(h), "quadlet-optional", UNIT))).toBe(true);
+    expect(existsSync(join(current(h), "quadlet", UNIT))).toBe(false);
     expect(releaseEnv(h)).toContain("COMMONAIR_CPU_WHISPER_AMD64=avx,avx2,fma,f16c\n");
   });
 
@@ -155,6 +157,34 @@ describe("turning captions on later", () => {
       expectOk(own.run(["install", "--reinstall"]));
       expect(units(own)).not.toContain(UNIT);
       expect(envOf(own).WHISPER_URL).toBe("http://asr.internal:8080");
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "the empty directory an rc.2 upgrade left where the weights go is replaced by the weights",
+    () => {
+      // Staging after the rc.2 script's upgrade to rc.3 and its rollback: rc.2's prepare_mounts
+      // made the whisper mount source a directory, and whisper read it as the model ("bad magic").
+      const h = host();
+      expectOk(h.run(INSTALL));
+      mkdirSync(join(h.home, WEIGHTS), { recursive: true });
+      const on = h.run(["install", "--reinstall", "--captions"]);
+      expectOk(on);
+      expect(on.err).toContain(`removed the empty directory ${join(h.home, WEIGHTS)}`);
+      expect(statSync(join(h.home, WEIGHTS)).isFile()).toBe(true);
+      expect(units(h)).toContain(UNIT);
+
+      // A directory with something in it is the operator's: refused before any unit changes.
+      const g = host();
+      expectOk(g.run(INSTALL));
+      mkdirSync(join(g.home, WEIGHTS), { recursive: true });
+      writeFileSync(join(g.home, WEIGHTS, "keep"), "x");
+      const r = g.run(["install", "--reinstall", "--captions"]);
+      expect(r.code).toBe(1);
+      expect(r.err).toContain("is a directory, not the captions model");
+      expect(units(g)).not.toContain(UNIT);
+      expect(readFileSync(join(g.home, WEIGHTS, "keep"), "utf8")).toBe("x");
     },
     TIMEOUT,
   );

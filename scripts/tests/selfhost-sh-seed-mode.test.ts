@@ -583,8 +583,12 @@ describe("while seed mode is open", () => {
           image,
         ).toEqual([]);
       for (const u of SEED_UNITS) expect(existsSync(join(quadlet(h), u)), u).toBe(false);
-      // The release ships them all the same, rendered.
-      for (const u of SEED_UNITS) expect(existsSync(join(h.home, "commonair/quadlet", u)), u).toBe(true);
+      // The release ships them all the same, rendered, apart from quadlet/ (an rc.2 selfhost.sh's
+      // upgrade installs all of that; on staging it started them with seed mode closed).
+      for (const u of SEED_UNITS) {
+        expect(existsSync(join(h.home, "commonair/quadlet-optional", u)), u).toBe(true);
+        expect(existsSync(join(h.home, "commonair/quadlet", u)), u).toBe(false);
+      }
     },
     TIMEOUT,
   );
