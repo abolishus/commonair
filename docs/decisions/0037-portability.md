@@ -5,7 +5,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # ADR 0037: Portability: move links, move notices and the channel bundle
 
-- Status: proposed (maintainer to accept; see [Decisions at acceptance](#decisions-at-acceptance))
+- Status: accepted 2026-11-02 (by the maintainer; see [Decisions at acceptance](#decisions-at-acceptance))
 - Date: 2026-11-01 (code checked at `3bb7af9b`)
 - Gates: W3-portability ([batch 7 contract step](../../.claude/briefs/w3/contract-step.md) §2.3,
   §2.4, §3.1, §4.3, §5.1–§5.3; [brief](../../.claude/briefs/w3/W3-portability.md)), and through its
@@ -222,7 +222,8 @@ the contract step.
 
 ## Decisions at acceptance
 
-For the maintainer. Each item is the recommended default; accepting this ADR accepts them.
+The maintainer accepted this ADR on 2026-11-02 (batch 8 decision U6) with every item below as
+written. There is no counsel; items 4 and 5 stay on the post-launch review list.
 
 1. **Bundle (j):** one v1 schema in `@commonair/contracts/portability`, shared with the Twitch
    import; the schedule carried, never applied.

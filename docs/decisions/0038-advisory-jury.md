@@ -5,7 +5,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # ADR 0038: The advisory member jury
 
-- Status: proposed (maintainer to accept; see [Decisions at acceptance](#decisions-at-acceptance))
+- Status: accepted 2026-11-02 (by the maintainer; see [Decisions at acceptance](#decisions-at-acceptance))
 - Date: 2026-11-01 (code checked at `3bb7af9b`)
 - Gates: W3-jury ([batch 7 contract step](../../.claude/briefs/w3/contract-step.md) §2.1, §2.2,
   §2.4, §3.1, §3.2, §4.1; [brief](../../.claude/briefs/w3/W3-jury.md))
@@ -154,7 +154,9 @@ on it (`unsure` counts as cast; a tie is not a majority).
 
 ## Decisions at acceptance
 
-For the maintainer. Each item is the recommended default; accepting this ADR accepts them.
+The maintainer accepted this ADR on 2026-11-02 (batch 8 decision U6) with every item below as
+written. There is no counsel; item 5 stays on the post-launch review list. `jury.enabled` stays
+false until the co-op votes it on.
 
 1. **Advisory (u):** the jury never changes an outcome; a majority disagree only flags the case for
    staff re-review, with an audit row.

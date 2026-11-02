@@ -5,7 +5,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # ADR 0039: Fair draws, fair predictions and surge raids
 
-- Status: proposed (maintainer to accept; see [Decisions at acceptance](#decisions-at-acceptance))
+- Status: accepted 2026-11-02 (by the maintainer; see [Decisions at acceptance](#decisions-at-acceptance))
 - Date: 2026-11-01 (code checked at `3bb7af9b`)
 - Gates: W3-giveaways, W3-fair-predictions and W3-surge-raids, and the jury draw of W3-jury
   ([batch 7 contract step](../../.claude/briefs/w3/contract-step.md) §2.1–§2.4, §3.1, §3.2, §4.1;
@@ -108,7 +108,7 @@ jury. Its vectors (`packages/draw/vectors.json`) are normative; the description 
   other criterion. One entry per account (primary key `(giveaway, user)`), by a button or by a chat
   message equal to the keyword.
 
-  _Proposed at the wave 1 CI fix (maintainer to accept):_ a verified-watch criterion is measured
+  _Decided at acceptance (2026-11-02; added at the wave 1 CI fix):_ a verified-watch criterion is measured
   wherever it is asked for. While `GIVEAWAYS_ENABLED` is on, the integrity worker writes
   `KEYS.verifiedWatch` for every live channel with an open giveaway whose
   `minVerifiedWatchSeconds` is above zero, as it does for a channel minimum under
@@ -141,13 +141,13 @@ Predictions stay points-only (ADR 0026 decision 3). Three rules make them fair:
   `KEYS.verifiedWatch` for the live broadcast) at bet time. The owner, channel moderators and
   editors cannot bet; a trigger on `prediction_bets` refuses them as the backstop.
 
-  _Proposed at wave 1 (maintainer to accept):_ standing is required only where the instance
+  _Decided at acceptance (2026-11-02; added at wave 1):_ standing is required only where the instance
   measures it (`CHAT_WATCH_GATE` with a channel minimum, or `CHAT_SURGE_GUARD` with the channel's
   guard on) and the channel is live. The integrity worker writes `KEYS.verifiedWatch` only there,
   and both flags default off, so requiring it everywhere would make predictions unusable on a
   default instance. Offline predictions keep the wall-clock lock and store no `lock_media_ts`.
-  VIPs keep standing, as in chat. A Valkey error refuses the bet. The alternative is for the worker
-  to also measure every live channel with an open or locked prediction.
+  VIPs keep standing, as in chat. A Valkey error refuses the bet. The rejected alternative was for
+  the worker to also measure every live channel with an open or locked prediction.
 
 - **The lock is by media time.** `lock` (and the auto-lock at `locksAt`) stores `lock_media_ts`, the
   broadcast's media-clock edge at lock time, read as the chat clamp reads it (ADR 0012). A bet
@@ -227,12 +227,16 @@ Predictions stay points-only (ADR 0026 decision 3). Three rules make them fair:
 
 ## Decisions at acceptance
 
-For the maintainer. Each item is the recommended default; accepting this ADR accepts them.
+The maintainer accepted this ADR on 2026-11-02 (batch 8 decision U6) with every item below,
+including the two wave 1 proposals: §2's measured verified-watch criterion for giveaways and §3's
+bettor standing only where the instance measures watching. There is no counsel; item 2's
+sweepstakes review stays on the post-launch review list.
 
 1. **Draw (s):** `packages/draw`, SHA-256 commit-reveal, HMAC-SHA256 with rejection sampling over a
    sorted list; commitment and reveal audited; one draw for giveaways and the jury.
 2. **Giveaways (t):** off by default; free entry; eligibility by account age, follow age and
-   verified watching only; one open per channel; up to 10 winners and 24 hours; salted pseudonyms (the
+   verified watching only, which the worker measures for any live channel whose open giveaway asks
+   for it (§2); one open per channel; up to 10 winners and 24 hours; salted pseudonyms (the
    salt is never published; each entrant sees their own); in-app winner notice; no prize handling. Post-launch review of
    sweepstakes rules and the official-rules draft.
 3. **Predictions (v):** verified bettors only, where the instance measures watching (the wave 1
