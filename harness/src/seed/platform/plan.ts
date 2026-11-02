@@ -408,7 +408,9 @@ export function planPlatform(rng: Rng, scale: SeedScale, world: PlatformWorld, n
   };
   const bot: BotSpec = {
     owner: "developer",
-    username: "demo_devbot",
+    // Not `demo_`: the API reserves that prefix for every account it creates (bots included). A bot
+    // has no email, so it never carries both fixture anchors anyway.
+    username: "seeddevbot",
     displayName: "Dev Bot",
     scopes: ["chat:read", "chat:edit"],
     expiresInDays: 90,

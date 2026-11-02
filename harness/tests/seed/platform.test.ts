@@ -185,7 +185,8 @@ describe("planPlatform", () => {
     expect(dev.find((a) => a.key === "dev-device")?.confidential).toBe(false);
     expect(dev.find((a) => a.key === "dev-web")?.rotate).toBe(true);
     expect(P.bot.owner).toBe("developer");
-    expect(P.bot.username.startsWith("demo_")).toBe(true);
+    // me.bots.create refuses the reserved `demo_` prefix.
+    expect(P.bot.username.startsWith("demo_")).toBe(false);
     expect(P.device.appKey).toBe("dev-device");
     for (const s of P.subscriptions) expect(P.apps.find((a) => a.key === s.appKey)?.owner).toBe("developer");
   });
