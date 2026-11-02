@@ -12,6 +12,7 @@ import {
   CELLS,
   CELL_SUSPENSION_SECONDS,
   DMCA_STATES,
+  STAFF,
   K,
   NCII_STATES,
   type RecordedBroadcast,
@@ -19,6 +20,8 @@ import {
   TEXT,
   appealStatuses,
   cellCounts,
+  countDelta,
+  deciderOf,
   juryInputs,
   mediaInputs,
   ncmecRefusal,
@@ -26,6 +29,7 @@ import {
   planSafety,
   plannedCaseStatuses,
   reportStatuses,
+  safetyStoreExtra,
   signInOrder,
 } from "../../src/seed/safety/plan.ts";
 import { hashMatchRow } from "../../src/seed/safety/write.ts";
@@ -395,5 +399,39 @@ describe("the unit", () => {
     expect(unit.pending).toEqual(["evidence_audit_runs"]);
     for (const t of unit.pending) expect(unit.tables).toContain(t);
     expect(unit.after).toEqual(["social", "media"]);
+  });
+});
+
+describe("review fixes", () => {
+  test("no appeal is resolved by the staff member who decided its subject (appeals.resolve refuses it)", () => {
+    for (const scale of [small, SEED_SCALES.medium]) {
+      const resolved = plan(7, scale).appeals.filter((a) => a.outcome !== "open");
+      expect(resolved.length).toBeGreaterThan(0);
+      for (const a of resolved) expect(deciderOf(a.subject)).not.toBe(STAFF.appeals);
+    }
+    expect(STAFF.appeals).toBe("admin");
+  });
+
+  test("rows are the change across the run, so rows earlier units wrote are not counted", () => {
+    expect(countDelta({ mod_actions: 12, reports: 0 }, { mod_actions: 40, reports: 9, appeals: 3 })).toEqual({
+      mod_actions: 28,
+      reports: 9,
+      appeals: 3,
+    });
+  });
+
+  test("the plan notes the future stamps the test-hook clocks leave", () => {
+    const notes = plan().notes.join("\n");
+    expect(notes).toMatch(/12 weekdays ahead.*\/admin\/dmca.*\/settings\/copyright/);
+    expect(notes).toMatch(/48 h ahead.*\/admin\/moderation/);
+  });
+
+  test("store.extra.safety carries only the brief's jury keys", () => {
+    const extra = safetyStoreExtra({
+      juryCaseIds: ["c"],
+      juryReportIds: ["r"],
+      restrictedUserIds: ["x"],
+    } as Parameters<typeof safetyStoreExtra>[0]);
+    expect(Object.keys(extra).sort()).toEqual(["juryCaseIds", "juryReportIds"]);
   });
 });

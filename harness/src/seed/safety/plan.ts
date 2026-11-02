@@ -185,6 +185,42 @@ export interface AppealSpec {
   outcome: "open" | "upheld" | "overturned";
 }
 
+/**
+ * Fixed staff logins by duty. appeals.resolve refuses an appeal of the caller's own decision, and
+ * `mod` takes every report action, DMCA decision and NCII decision, so `admin` resolves appeals.
+ */
+export const STAFF = { reports: "mod", dmca: "mod", ncii: "mod", appeals: "admin" } as const;
+
+/** Who made the decision an appeal is against (`system` for the classifier's label). */
+export function deciderOf(subject: AppealSubject): string {
+  switch (subject.kind) {
+    case "reportAction":
+      return STAFF.reports;
+    case "strike":
+    case "termination":
+      return STAFF.dmca;
+    case "label":
+      return "system";
+  }
+}
+
+/** The keys this unit publishes under `store.extra.safety` (its brief names only these). */
+export interface SafetyStoreExtra {
+  juryCaseIds: string[];
+  juryReportIds: string[];
+}
+
+export function safetyStoreExtra(jury: SafetyStoreExtra): SafetyStoreExtra {
+  return { juryCaseIds: [...jury.juryCaseIds], juryReportIds: [...jury.juryReportIds] };
+}
+
+/** Rows written by the unit: per-table count after the run less the count before it. */
+export function countDelta(before: Record<string, number>, after: Record<string, number>): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [t, n] of Object.entries(after)) out[t] = Math.max(0, n - (before[t] ?? 0));
+  return out;
+}
+
 export interface IncidentSpec {
   title: string;
   components: string[];
@@ -509,6 +545,15 @@ export function planSafety(rng: Rng, scale: SeedScale, input: PlanInput): Safety
   const groupAppealCandidates = s1 ? input.recorded.filter((b) => b.channelId === s1.id) : [];
   if (attestations.length === 0)
     notes.push("seed-safety: seed-media published no recordedBroadcasts, so nothing was attested");
+  // Only the test-hook clock reaches these states, and the worker stamps rows with that clock.
+  if (dmca.some((d) => d.state === "restored"))
+    notes.push(
+      "seed-safety: the restored DMCA notice's restore (restoredAt on its items and counter-notice) and strike reversal are stamped about 12 weekdays ahead, the dmca-restore tick's clock; /admin/dmca and the aux owner's /settings/copyright show those future times",
+    );
+  if (ncii.some((n) => n.state === "auto_hidden"))
+    notes.push(
+      "seed-safety: the auto-hidden NCII request's 24 h and 36 h escalations and its auto-hide are stamped about 48 h ahead, the NCII clock tick's clock; the NCII queue on /admin/moderation shows those future times",
+    );
 
   return {
     live,

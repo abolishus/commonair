@@ -29,8 +29,11 @@ import {
   type JuryReportCandidate,
   type ReportSpec,
   type SafetyPlan,
+  STAFF,
+  type SafetyStoreExtra,
   TEXT,
   juryInputs,
+  safetyStoreExtra,
   signInOrder,
 } from "./plan.ts";
 import { type HashMatchSpec, writeHashMatches } from "./write.ts";
@@ -41,7 +44,7 @@ const EXPORT_TIMEOUT_MS = 180_000;
 
 export interface SafetyRunResult {
   notes: string[];
-  extra: Record<string, unknown>;
+  extra: SafetyStoreExtra;
 }
 
 interface Run {
@@ -140,16 +143,7 @@ export async function runSafety(ctx: SeedContext, plan: SafetyPlan, secret: stri
     `seed-safety: account deletion stays scheduled for ${plan.deletion ?? "nobody (no bulk viewer)"}; restricted accounts: ${plan.restricted.join(", ")}`,
     `seed-safety: jury inputs: ${jury.juryCaseIds.length} closed T1/T2 cases and ${jury.juryReportIds.length} resolved reports`,
   );
-  const restrictedUserIds = plan.restricted.map((h) => userOf(ctx, h).id);
-  return {
-    notes: run.notes,
-    extra: {
-      juryCaseIds: jury.juryCaseIds,
-      juryReportIds: jury.juryReportIds,
-      restrictedUserIds,
-      deletionUserId: plan.deletion ? userOf(ctx, plan.deletion).id : null,
-    },
-  };
+  return { notes: run.notes, extra: safetyStoreExtra(jury) };
 }
 
 // ---------------------------------------------------------------- T2 label appeal
@@ -179,9 +173,10 @@ async function labelAppeal(run: Run): Promise<void> {
 async function resolveAppeal(run: Run, id: string, spec: AppealSpec): Promise<void> {
   if (spec.outcome === "open") return;
   const status = spec.outcome;
-  const mod = await run.sessions.as("mod");
-  await step(run.ctx.signal, "mod", `${status === "upheld" ? "uphold" : "overturn"} appeal ${spec.key}`, () =>
-    mod.api.client.appeals.resolve({ id, status, resolution: TEXT.appealResolution }),
+  // Never the staff member who decided the subject: appeals.resolve refuses that.
+  const resolver = await run.sessions.as(STAFF.appeals);
+  await step(run.ctx.signal, STAFF.appeals, `${status === "upheld" ? "uphold" : "overturn"} appeal ${spec.key}`, () =>
+    resolver.api.client.appeals.resolve({ id, status, resolution: TEXT.appealResolution }),
   );
 }
 
@@ -281,8 +276,8 @@ async function submitNotice(run: Run, d: DmcaSpec): Promise<string> {
 async function decideNotice(run: Run, d: DmcaSpec, decision: "actioned" | "rejected"): Promise<void> {
   const id = run.noticeIds.get(d.key);
   if (!id) throw new Error(`seed-safety: DMCA notice ${d.key} was not filed`);
-  const mod = await run.sessions.as("mod");
-  await step(run.ctx.signal, "mod", `${decision} DMCA notice ${d.key}`, () =>
+  const mod = await run.sessions.as(STAFF.dmca);
+  await step(run.ctx.signal, STAFF.dmca, `${decision} DMCA notice ${d.key}`, () =>
     mod.api.client.safety.dmca.action({ id, decision, note: TEXT.dmcaNote }),
   );
 }
@@ -366,7 +361,7 @@ async function dmca(run: Run): Promise<void> {
 
 async function ncii(run: Run): Promise<void> {
   const { ctx } = run;
-  const mod = await run.sessions.as("mod");
+  const mod = await run.sessions.as(STAFF.ncii);
   const submit = async (s: SafetyPlan["ncii"][number]) => {
     const { ch, id } = clipOf(run, s.clip);
     const altcha = await run.sessions.altcha();
@@ -393,7 +388,7 @@ async function ncii(run: Run): Promise<void> {
     const r = await submit(s);
     if (s.state === "removed" || s.state === "rejected") {
       const decision = s.state;
-      await step(ctx.signal, "mod", `decide the takedown request ${decision}`, () =>
+      await step(ctx.signal, STAFF.ncii, `decide the takedown request ${decision}`, () =>
         mod.api.client.ncii.decide({ id: r.id, decision, note: TEXT.nciiNote }),
       );
     }
@@ -466,7 +461,7 @@ async function reports(run: Run): Promise<void> {
         return { subjectType: "clip", subjectId: clipOf(run, r.subject.clip).id };
     }
   };
-  const mod = await run.sessions.as("mod");
+  const mod = await run.sessions.as(STAFF.reports);
   let skipped = 0;
   for (const r of plan.reports) {
     let subject = await subjectOf(r);
@@ -496,7 +491,7 @@ async function reports(run: Run): Promise<void> {
     if (outcome.status === "open") continue;
     const resolution = outcome.status === "dismissed" ? TEXT.dismissal : TEXT.resolution;
     const o = outcome;
-    await step(ctx.signal, "mod", `resolve report ${r.key}`, () =>
+    await step(ctx.signal, STAFF.reports, `resolve report ${r.key}`, () =>
       mod.api.client.safety.resolve(
         o.status === "dismissed"
           ? { id: created.id, status: "dismissed", resolution }

@@ -11,6 +11,8 @@
 import { schema, uuidv7 } from "@commonair/db";
 import { createTestDatabase, type TestDatabase } from "@commonair/db/testing";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
+import { tableCounts } from "../../src/seed/safety.ts";
+import { countDelta } from "../../src/seed/safety/plan.ts";
 import { type HashMatchSpec, writeHashMatches } from "../../src/seed/safety/write.ts";
 
 const EMAIL = "demo_v00001@demo-seed.invalid";
@@ -78,5 +80,18 @@ describe("writeHashMatches", () => {
     const ac = new AbortController();
     ac.abort(new Error("stop"));
     await expect(writeHashMatches(t.app, [spec(1)], ac.signal)).rejects.toThrow("stop");
+  });
+});
+
+describe("rows reported", () => {
+  test("count only what changed during the run, not rows already in the owned tables", async () => {
+    await writeHashMatches(t.app, [spec(0), spec(1)]);
+    const before = await tableCounts(t.app);
+    expect(before.hash_match_results).toBeGreaterThanOrEqual(2);
+    await writeHashMatches(t.app, [spec(2), spec(3), spec(4)]);
+    const rows = countDelta(before, await tableCounts(t.app));
+    expect(rows.hash_match_results).toBe(3);
+    expect(rows.mod_actions).toBe(0);
+    expect(rows).not.toHaveProperty("integrity_flags");
   });
 });

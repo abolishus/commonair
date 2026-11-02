@@ -4,7 +4,7 @@
 /** seed-safety: reports, moderation cases, appeals, enforcement, DMCA, NCII, legal holds, incidents and privacy requests. Brief: `.claude/briefs/seed-full/seed-safety.md`. */
 import type { DbHandle } from "@commonair/db";
 import { internalSecret } from "../safety-io.ts";
-import { mediaInputs, ncmecRefusal, planSafety } from "./safety/plan.ts";
+import { countDelta, mediaInputs, ncmecRefusal, planSafety } from "./safety/plan.ts";
 import { runSafety } from "./safety/run.ts";
 import type { SeedUnit } from "./types.ts";
 
@@ -51,8 +51,11 @@ const READ_ONLY: ReadonlySet<string> = new Set(["integrity_flags"]);
  */
 const PENDING = ["evidence_audit_runs"] as const;
 
-/** Rows in each owned table once the unit is done (the database is fresh, so these are its writes). */
-async function tableCounts(h: DbHandle): Promise<Record<string, number>> {
+/**
+ * Rows in each owned table now. The unit reports the change across its run, since earlier units
+ * write some of these tables too (seed-social inserts mod_actions).
+ */
+export async function tableCounts(h: DbHandle): Promise<Record<string, number>> {
   const out: Record<string, number> = {};
   for (const t of TABLES) {
     if (READ_ONLY.has(t)) continue;
@@ -76,11 +79,12 @@ export const unit: SeedUnit = {
       throw new Error(
         "seed-safety: INTERNAL_API_SECRET is not set (HARNESS_INTERNAL_API_SECRET or the repo .env): the test hooks need it",
       );
+    const before = await tableCounts(ctx.db);
     const s1 = ctx.store.channels.find((c) => c.ownerHandle === "streamer1");
     const media = mediaInputs(ctx.store.extra.media, s1?.id ?? null);
     const plan = planSafety(ctx.rng, ctx.scale, { store: ctx.store, ...media });
     const result = await runSafety(ctx, plan, secret);
     ctx.store.extra.safety = { ...result.extra };
-    return { rows: await tableCounts(ctx.db), notes: result.notes };
+    return { rows: countDelta(before, await tableCounts(ctx.db)), notes: result.notes };
   },
 };
