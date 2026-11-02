@@ -370,9 +370,9 @@ export function planGovernance(rng: Rng, scale: SeedScale, input: GovernanceInpu
     );
     return [...first, ...rest];
   };
-  const ordinaryVotes = (label: string, outcome: "pass" | "fail", count = n) => {
+  const ordinaryVotes = (label: string, outcome: "pass" | "fail", count = n, withMember1 = true) => {
     const r = rng.fork(`votes:${label}`);
-    const voters = pickVoters(r, electorate, count);
+    const voters = pickVoters(r, electorate, count, withMember1);
     const choices = choiceMix(r, voters.length, outcome);
     // member1 votes yes on what passes and no on what fails, so its ballot shows both.
     if (voters[0]?.handle === "member1") {
@@ -503,7 +503,9 @@ export function planGovernance(rng: Rng, scale: SeedScale, input: GovernanceInpu
       target: outcome === "pass" ? "applied" : "rejected",
       reason: outcome === "pass" ? "passed" : "member-wide threshold not met",
       gate: { after: "start" },
-      votes: ordinaryVotes(`filler-${i + 1}`, outcome, fillerVoters),
+      // Without member1: its votes on dozens of fillers opening at once trip the API's per-user
+      // limit, and the waited-out ones arrive after the 45 s window (voting_closed).
+      votes: ordinaryVotes(`filler-${i + 1}`, outcome, fillerVoters, false),
     });
   }
 

@@ -535,3 +535,16 @@ describe("governanceSignIns", () => {
     expect(list).toEqual(expect.arrayContaining(["council1", "council2"]));
   });
 });
+
+describe("filler proposals", () => {
+  test("never list member1, so no one voter casts dozens of votes as the fillers open together", () => {
+    const { governance } = plansFor(7, SEED_SCALES.medium);
+    const fillers = governance.proposals.filter((p) => p.ref.startsWith("filler-"));
+    expect(fillers.length).toBeGreaterThan(0);
+    for (const f of fillers) expect(f.votes.map((v) => v.handle)).not.toContain("member1");
+    const perVoter = new Map<string, number>();
+    for (const p of governance.proposals)
+      for (const v of p.votes) perVoter.set(v.handle, (perVoter.get(v.handle) ?? 0) + 1);
+    expect(Math.max(...perVoter.values())).toBeLessThan(fillers.length);
+  });
+});
