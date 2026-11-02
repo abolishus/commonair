@@ -532,7 +532,8 @@ describe("ChatPanel in Calm Chat", () => {
     send(msg(203, "distinct line 203"));
     expect(all("chat-wave").map((w) => [w.dataset.id, w.dataset.count])).toEqual([[UUID(1), "1"]]);
     expect(messageIds()).not.toContain(UUID(202));
-  });
+    // 200 lines rendered one by one: about 6 s on a CI runner, past the 5 s default.
+  }, 30_000);
 
   it("turning Calm Chat off shows every line again (the log was never changed)", async () => {
     writeCalmSettings({ enabled: true });

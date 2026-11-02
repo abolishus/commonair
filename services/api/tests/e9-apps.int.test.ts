@@ -436,8 +436,10 @@ describe("developer.admin", () => {
 
     const byClientId = await search(`q=${b.app.clientId}`);
     expect(byClientId.body.items.map((x) => x.id)).toEqual([b.app.id]);
-    // A client id matches exactly, not as a substring.
-    expect((await search(`q=${b.app.clientId.slice(0, 29)}x`)).body.items).toEqual([]);
+    // A client id matches exactly, not as a substring. The last character is swapped for one it
+    // is not, since the random id can already end in any letter.
+    const near = b.app.clientId.slice(0, 29) + (b.app.clientId.endsWith("x") ? "y" : "x");
+    expect((await search(`q=${near}`)).body.items).toEqual([]);
     // LIKE wildcards are literal.
     expect((await search(`q=${encodeURIComponent("%")}${tag}`)).body.items).toEqual([]);
 
