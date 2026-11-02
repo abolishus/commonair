@@ -61,7 +61,7 @@ between units: seed-safety publishes `restrictedUserIds` again, and seed-coop no
 The API steps of every unit have only run against fakes. `seed full` against a live stack is the
 first real run.
 
-_Still pending, each needing a contract request:_
+_Still pending (the user approved test-hook fixes for all four, to be done in their own session):_
 
 - money `payouts` and `split_writeoff_proposals`: need an `OPS_TEST_HOOKS` job that ages creator holds.
 - coop `membership_shares`: `buyShare` works on `PAYMENTS_PROVIDER=manual` only, while seed-money
@@ -69,14 +69,19 @@ _Still pending, each needing a contract request:_
 - safety `evidence_audit_runs`: the evidence audit has no ops-tick hook, and its result isn't
   count-shaped.
 
-_Next, milestone wiring:_
+_Milestone wiring (2026-11-02)._ Done on `main`; nothing has run against a live stack yet:
 
-- `harness/compose.seed.yaml`;
-- flip `expectData` for `/coop/jury`, `/admin/federation` and `/import`, with `/import` signed in
-  as streamer3;
-- make `seed-coverage` `inFull`;
-- `docs/testing/seeding.md`;
-- the staging reset.
+- **Overlay:** `harness/compose.seed.yaml` puts payments on stripe-mock, sets `DEMO_SEED_FULL` on
+  the worker and a non-zero cost model. It is layered by
+  `bun scripts/infra.ts stack --harness --multi --captions --w3 --seed`.
+- **Keys:** `init-env --merge --seed` fills `STRIPE_WEBHOOK_SECRET`. Generated keys are never
+  committed.
+- **`seed-coverage`:** `inFull` and required, in its own path-filtered `seed` CI shard. It runs
+  `seed full --scale small` on the fresh stack, then visits every `SEED_ROUTES` entry.
+- **Routes:** `/coop/jury`, `/admin/federation` and `/import` (as streamer3) now expect data.
+- **Staging reset:** `selfhost.sh reset-staging --confirm <host>` refuses without
+  `DEMO_SEED_FULL=true`.
+- **Docs:** `docs/testing/seeding.md`.
 
 **Batch 7 (W3 + N3 + N4; `.claude/briefs/batch7/README.md`), planned 2026-11-01 at `b37203c4`.**
 
