@@ -13,6 +13,7 @@ import {
   BASE,
   CREW,
   DAY_MS,
+  LAPSE_MIN_AGE_DAYS,
   MAX_PAYMENTS_PER_PAYER,
   MIN_PAYER_AGE_DAYS,
   PAYER_SLACK,
@@ -308,6 +309,24 @@ describe("planMoney: the fraud floor", () => {
     }
   });
 
+  test("the exposure check counts anonymous tips toward a payer's share, as the scan does", () => {
+    const p = plan();
+    const payee = "s0003";
+    const heavy: PaymentSpec = {
+      ...p.payments[0]!,
+      key: "x",
+      payer: "v00001",
+      payee,
+      kind: "tip",
+      tier: null,
+      cents: PAYMENT_FRAUD_RULES.concentrationMinGrossCents,
+      settle: "paid",
+      anonymous: true,
+      velocity: false,
+    };
+    expect(fraudExposure({ payments: [...p.payments, heavy] }, A, NOW).concentration).toContain(payee);
+  });
+
   test("the exposure check does see a concentrated payee", () => {
     const p = plan();
     const payee = "s0003";
@@ -329,6 +348,43 @@ describe("planMoney: the fraud floor", () => {
 });
 
 describe("planMoney: subscriptions and gifts", () => {
+  test("every lapsing subscriber is older than the month a lapse moves the period back", () => {
+    for (const scale of [small, SEED_SCALES.medium, SEED_SCALES.large])
+      for (const seed of [1, 2, 3, 7, 42]) {
+        const p = plan(seed, scale);
+        const created = new Map(accounts(scale).accounts.map((a) => [a.handle, a.createdAt.getTime()]));
+        const lapsing = of(p, (x) => x.lifecycle === "lapse");
+        expect(lapsing.length).toBeGreaterThan(0);
+        for (const x of lapsing)
+          expect(NOW.getTime() - (created.get(x.payer) ?? NOW.getTime()), x.payer).toBeGreaterThanOrEqual(
+            LAPSE_MIN_AGE_DAYS * DAY_MS,
+          );
+      }
+  });
+
+  test("a young payer pool yields fewer lapses rather than lapses that predate the account", () => {
+    const a = accounts(small);
+    // Every bulk viewer between the payer floor and a month old.
+    const young = a.accounts.map((x) =>
+      x.kind === "bulk-viewer" ? { ...x, createdAt: new Date(NOW.getTime() - (MIN_PAYER_AGE_DAYS + 5) * DAY_MS) } : x,
+    );
+    const p = planMoney(createRng(7).fork("money"), small, NOW, {
+      accounts: young,
+      streamers: a.streamers,
+      tierPrices: PRICES,
+      currency: "usd",
+    });
+    const lapsing = of(p, (x) => x.lifecycle === "lapse");
+    const created = new Map(young.map((x) => [x.handle, x]));
+    expect(lapsing.length).toBeGreaterThan(0);
+    for (const x of lapsing) {
+      expect(created.get(x.payer)?.kind, x.payer).not.toBe("bulk-viewer");
+      expect(NOW.getTime() - (created.get(x.payer)?.createdAt.getTime() ?? NOW.getTime())).toBeGreaterThanOrEqual(
+        LAPSE_MIN_AGE_DAYS * DAY_MS,
+      );
+    }
+  });
+
   test("one subscription per subscriber and channel, gifts never to the gifter or the owner", () => {
     const pairs = new Set<string>();
     for (const x of P.payments) {

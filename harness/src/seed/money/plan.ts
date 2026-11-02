@@ -61,6 +61,11 @@ export const VELOCITY_TIPS = PAYMENT_FRAUD_RULES.velocityMaxPayments + 1;
 export const PAYER_SLACK = 1.25;
 /** Payers must be older than the concentration rule's "new payer" age. */
 export const MIN_PAYER_AGE_DAYS = PAYMENT_FRAUD_RULES.newPayerAccountDays + 1;
+/**
+ * A lapse moves the subscription's period start a month back, so its subscriber must be older
+ * than that (one month plus a day of slack) or the period would predate the account.
+ */
+export const LAPSE_MIN_AGE_DAYS = 32;
 
 /** Base counts at factor 1 (`small`): enough for every list view to paginate. */
 export const BASE = {
@@ -253,6 +258,10 @@ export function planMoney(rng: Rng, scale: SeedScale, now: Date, input: MoneyPla
     return a !== undefined && t - a.createdAt.getTime() >= MIN_PAYER_AGE_DAYS * DAY_MS;
   };
   const eligible = bulkViewers.filter(oldEnough);
+  const oldEnoughToLapse = (h: string) => {
+    const a = byHandle.get(h);
+    return a !== undefined && t - a.createdAt.getTime() >= LAPSE_MIN_AGE_DAYS * DAY_MS;
+  };
 
   // The velocity payer is a bulk viewer kept out of every other payment; its payee a bulk streamer.
   const rv = rng.fork("velocity");
@@ -342,7 +351,7 @@ export function planMoney(rng: Rng, scale: SeedScale, now: Date, input: MoneyPla
     const fixed = (h: string) => input.streamers.includes(h);
     if (fixed("streamer1")) sub(SUPPORTER, "streamer1", 3);
     if (fixed("streamer2")) sub(SUPPORTER, "streamer2", 2);
-    if (fixed("council1")) sub(SUPPORTER, "council1", 1, { lifecycle: "lapse" });
+    if (fixed("council1")) sub(SUPPORTER, "council1", 1, { lifecycle: oldEnoughToLapse(SUPPORTER) ? "lapse" : "none" });
     if (fixed("council2")) sub(SUPPORTER, "council2", 2, { lifecycle: "cancel_at_period_end" });
     if (fixed(NEW_STREAMER)) sub(SUPPORTER, NEW_STREAMER, 1, { settle: "abandoned" });
     if (fixed("streamer1")) {
@@ -367,16 +376,12 @@ export function planMoney(rng: Rng, scale: SeedScale, now: Date, input: MoneyPla
   let lapses = BASE.lapses * factor;
   for (let i = 0; i < BASE.subs * factor && payees.length > 0; i++) {
     const payee = pickPayee(rs);
-    const payer = pool.pick(rs, (p) => freeSlot(p, payee));
+    // Decide the lifecycle first: a lapse needs a payer old enough for its month-back period.
+    const lifecycle: Lifecycle = cancels > 0 ? "cancel_at_period_end" : lapses > 0 ? "lapse" : "none";
+    const payer = pool.pick(rs, (p) => freeSlot(p, payee) && (lifecycle !== "lapse" || oldEnoughToLapse(p)));
     if (!payer) continue;
-    let lifecycle: Lifecycle = "none";
-    if (cancels > 0) {
-      lifecycle = "cancel_at_period_end";
-      cancels--;
-    } else if (lapses > 0) {
-      lifecycle = "lapse";
-      lapses--;
-    }
+    if (lifecycle === "cancel_at_period_end") cancels--;
+    else if (lifecycle === "lapse") lapses--;
     sub(payer, payee, pickTier(rs), { lifecycle });
   }
   const rg = rng.fork("gifts");
@@ -632,7 +637,8 @@ export function fraudExposure(
   for (const p of all) {
     const g = byPayee.get(p.payee) ?? { gross: 0, payers: new Map<string, number>(), fresh: 0 };
     g.gross += p.cents;
-    if (!p.anonymous) g.payers.set(p.payer, (g.payers.get(p.payer) ?? 0) + p.cents);
+    // Anonymity hides the payer from the channel, not from the scan (readFraudPayments).
+    g.payers.set(p.payer, (g.payers.get(p.payer) ?? 0) + p.cents);
     const c = created.get(p.payer);
     if (c !== undefined && now.getTime() - c < rules.newPayerAccountDays * DAY_MS) g.fresh += p.cents;
     byPayee.set(p.payee, g);
