@@ -14,6 +14,7 @@ import {
   HEALTH_STATES,
   HOUR_MS,
   type HistoryInput,
+  MEMBER_HOURS_DAYS,
   RECORDING_CONCURRENCY,
   SWARM_SESSIONS,
   bulkRecordings,
@@ -120,6 +121,52 @@ describe("planHistory", () => {
         expect(s.eligible).toBe(s.verifiedOtherViewers > 0);
       }
     }
+  });
+
+  test("every owner with an hour in the last 90 days has an eligible one with another viewer (seed-coop's members)", () => {
+    const since = +NOW - MEMBER_HOURS_DAYS * DAY_MS;
+    for (let seed = 1; seed <= 40; seed++) {
+      const h = planHistory(createRng(seed).fork("history"), fixture(small, seed), NOW);
+      const owners = new Set(h.broadcasts.map((b) => b.ownerHandle));
+      for (const owner of owners) {
+        const recent = h.streamHours.filter(
+          (s) => h.broadcasts[s.broadcast]?.ownerHandle === owner && +s.hourStart >= since,
+        );
+        if (recent.length === 0) continue;
+        expect(
+          recent.some((s) => s.eligible && s.verifiedOtherViewers >= 1),
+          `${owner} (seed ${seed})`,
+        ).toBe(true);
+      }
+      for (const s of h.streamHours) {
+        expect(s.eligible).toBe(s.verifiedOtherViewers > 0);
+        expect(!s.eligible || (h.broadcasts[s.broadcast]?.peakVerifiedViewers ?? 0) >= 1).toBe(true);
+      }
+    }
+  });
+
+  test("a bulk streamer with one quiet window still gets a member hour", () => {
+    // One short window each: without the guarantee, a broadcast with no other viewer has no eligible hour.
+    const channels: SeededChannel[] = Array.from({ length: 30 }, (_, i) => ({
+      id: `20000000-0000-7000-8000-${String(i).padStart(12, "0")}`,
+      ownerId: `30000000-0000-7000-8000-${String(i).padStart(12, "0")}`,
+      ownerHandle: bulkStreamerHandle(i + 1),
+      slug: `demo_${bulkStreamerHandle(i + 1)}`,
+    }));
+    const windows = channels.map((c) => ({
+      channelId: c.id,
+      start: new Date(+NOW - 2 * DAY_MS - 30 * 60_000),
+      end: new Date(+NOW - 2 * DAY_MS),
+    }));
+    const h = planHistory(createRng(11).fork("history"), { channels, windows, categoryIds: [] }, NOW);
+    for (const c of channels) {
+      const hours = h.streamHours.filter((s) => s.channelId === c.id);
+      expect(
+        hours.some((s) => s.eligible && s.verifiedOtherViewers >= 1),
+        c.ownerHandle,
+      ).toBe(true);
+    }
+    expect(h.broadcasts.every((b) => b.peakVerifiedViewers >= 1)).toBe(true);
   });
 
   test("health samples cover every state, all of them on streamer1's newest broadcast", () => {
@@ -268,6 +315,17 @@ describe("planRecordings", () => {
     expect(watch[0]?.clips.some((c) => !c.remove)).toBe(true);
   });
 
+  test("one bulk recording removes its VOD mid-stream; it has no clips and is none of the special VODs", () => {
+    const purged = R.recordings.filter((r) => r.removeMidStream);
+    expect(purged).toHaveLength(1);
+    const p = purged[0];
+    expect(p?.handle).toMatch(/^s\d+$/);
+    expect(p?.clips).toEqual([]);
+    expect(p?.watchPage || p?.makePrivate || p?.speech || p?.rehearsal).toBe(false);
+    const none = planRecordings(createRng(7).fork("recordings"), small, { bulkStreamers: [], bulkViewers: [] });
+    expect(none.recordings.filter((r) => r.removeMidStream)).toEqual([]);
+  });
+
   test("clips fit inside their recording", () => {
     for (const r of R.recordings)
       for (const c of r.clips) {
@@ -291,7 +349,13 @@ describe("store.extra.media", () => {
   });
 
   test("recordedBroadcasts and recordedWindow cover every recording; vodId/clipId are streamer1's", () => {
-    const results = R.recordings.map((r, i) => outcome(r.handle, i, { private: r.makePrivate }));
+    const results = R.recordings.map((r, i) =>
+      outcome(
+        r.handle,
+        i,
+        r.removeMidStream ? { vodId: null, clipIds: [], private: false } : { private: r.makePrivate },
+      ),
+    );
     const extra = buildMediaExtra(results);
     expect(extra.recordedBroadcasts).toHaveLength(R.recordings.length);
     expect(extra.recordedWindow).toHaveLength(R.recordings.length);
@@ -299,7 +363,12 @@ describe("store.extra.media", () => {
     const s1 = results.find((r) => r.handle === "streamer1");
     expect(extra.vodId).toBe(s1?.vodId);
     expect(extra.clipId).toBe(s1?.clipIds[0]);
-    expect(Object.values(extra.vodsByChannel).flat()).toHaveLength(R.recordings.length);
+    // The VOD removed mid-stream is not listed (seed-safety files DMCA against listed VODs).
+    const removed = R.recordings.filter((r) => r.removeMidStream).length;
+    expect(removed).toBe(1);
+    expect(Object.values(extra.vodsByChannel).flat()).toHaveLength(R.recordings.length - removed);
+    expect(Object.values(extra.vodsByChannel).flat()).not.toContain(null);
+    expect(Object.values(extra.vodsByChannel).every((v) => v.length > 0)).toBe(true);
   });
 
   test("refuses without streamer1's public VOD and clip", () => {

@@ -13,7 +13,7 @@ import { createTestDatabase, type TestDatabase } from "@commonair/db/testing";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { API_TABLES } from "../../src/seed/media.ts";
 import { type HistoryPlan, DAY_MS, MINUTE_MS, historyCounts, planHistory } from "../../src/seed/media/plan.ts";
-import { linkChat, writeHistory } from "../../src/seed/media/write.ts";
+import { channelsWithoutMemberHours, linkChat, writeHistory } from "../../src/seed/media/write.ts";
 import { createRng } from "../../src/seed/prng.ts";
 import type { SeededChannel } from "../../src/seed/types.ts";
 
@@ -22,6 +22,7 @@ let t: TestDatabase;
 let plan: HistoryPlan;
 let rows: Record<string, number>;
 let ids: string[];
+let channelIds: string[];
 let linked = 0;
 /** Lines planted inside windows (to link) and outside them (to leave alone). */
 const inside: string[] = [];
@@ -60,6 +61,7 @@ beforeAll(async () => {
       createdAt: created,
     })),
   );
+  channelIds = channels.map((c) => c.id);
   const windows = channels.flatMap((c, ci) =>
     [3, 9, 20, 40].map((d) => {
       const end = NOW.getTime() - d * DAY_MS - ci * 90 * MINUTE_MS;
@@ -157,6 +159,17 @@ describe("writeHistory", () => {
   test("no personal data: titles carry no email or address", async () => {
     const titles = await t.sql<{ title: string }[]>`select title from broadcasts`;
     for (const r of titles) expect(r.title).not.toMatch(/@|https?:/);
+  });
+});
+
+describe("member hours (seed-coop)", () => {
+  test("every channel with history has an eligible hour with another verified viewer in the last 90 days", async () => {
+    expect(await channelsWithoutMemberHours(t.app, channelIds, NOW)).toEqual([]);
+  });
+
+  test("a channel with no stream hours is reported", async () => {
+    const stranger = uuidv7();
+    expect(await channelsWithoutMemberHours(t.app, [...channelIds, stranger], NOW)).toEqual([stranger]);
   });
 });
 

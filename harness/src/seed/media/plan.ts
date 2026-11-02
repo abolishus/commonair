@@ -30,6 +30,8 @@ export const EGRESS_DAYS = 31;
 export const FIXED_HEALTH_BROADCASTS = 3;
 /** Share of bulk broadcasts with health samples. */
 export const BULK_HEALTH_SHARE = 0.15;
+/** seed-coop seats streamer members from eligible stream hours inside this many days. */
+export const MEMBER_HOURS_DAYS = 90;
 /** Recordings run at most this many at once (brief: "run at most 3 at once"). */
 export const RECORDING_CONCURRENCY = 3;
 
@@ -169,6 +171,7 @@ export function planHistory(rng: Rng, input: HistoryInput, now: Date): HistoryPl
   const plan: HistoryPlan = { broadcasts: [], streamHours: [], health: [], egress: [] };
   const egressFrom = t - EGRESS_DAYS * DAY_MS;
   for (const owner of owners) {
+    const firstHour = plan.streamHours.length;
     const windows = (perOwner.get(owner) ?? []).sort((a, b) => a.start.getTime() - b.start.getTime());
     const fixed = isFixed(owner);
     const r = rng.fork(`history:${owner}`);
@@ -251,8 +254,27 @@ export function planHistory(rng: Rng, input: HistoryInput, now: Date): HistoryPl
         }
       }
     });
+    ensureMemberHour(plan, firstHour, t - MEMBER_HOURS_DAYS * DAY_MS);
   }
   return plan;
+}
+
+/**
+ * seed-coop's membership sync makes streamer members from eligible hours with another verified
+ * viewer inside the last 90 days: an owner with any hour there gets at least one, on its newest.
+ */
+function ensureMemberHour(plan: HistoryPlan, from: number, since: number): void {
+  const mine = plan.streamHours.slice(from).filter((h) => h.hourStart.getTime() >= since);
+  if (mine.length === 0 || mine.some((h) => h.eligible)) return;
+  const newest = mine.reduce((a, b) => (b.hourStart.getTime() > a.hourStart.getTime() ? b : a));
+  newest.verifiedOtherViewers = 1;
+  newest.eligible = true;
+  const b = plan.broadcasts[newest.broadcast];
+  if (b && b.peakVerifiedViewers < 1) {
+    // Keep the broadcast's totals consistent with a viewer having watched.
+    b.peakVerifiedViewers = 1;
+    b.verifiedViewerSeconds = Math.max(b.verifiedViewerSeconds, newest.liveSeconds);
+  }
 }
 
 // ------------------------------------------------------------------ recordings
@@ -296,6 +318,11 @@ export interface RecordingSpec {
   shareLink: boolean;
   /** The VOD and first clip published as `vodId` / `clipId`. */
   watchPage: boolean;
+  /**
+   * The owner removes the in-progress VOD while live, so the relay gets a mid-stream `relay_purges`
+   * row (`vod_hidden`, `dvr/<vodId>/`). One bulk recording; it has no VOD or clips after.
+   */
+  removeMidStream: boolean;
   chat: PlannedLine[];
   clips: ClipSpec[];
 }
@@ -352,6 +379,8 @@ function planChat(r: Rng, seconds: number, owner: string, chatters: readonly str
 export function planRecordings(rng: Rng, scale: SeedScale, input: RecordingInput): RecordingPlan {
   const bulk = rng.fork("recorders").sample(input.bulkStreamers, bulkRecordings(scale, input.bulkStreamers.length));
   const handles = [...FIXED_RECORDERS, ...bulk];
+  // A bulk streamer's recording, so the watch-page, private and clip VODs stay untouched.
+  const purged = bulk[0] ?? null;
   const recordings: RecordingSpec[] = handles.map((handle, index) => {
     const r = rng.fork(`recording:${handle}`);
     const speech = handle === "streamer1";
@@ -359,16 +388,19 @@ export function planRecordings(rng: Rng, scale: SeedScale, input: RecordingInput
     const extra = r.sample(input.bulkViewers, Math.min(input.bulkViewers.length, 4));
     const chatters = [...FIXED_CHATTERS, ...extra];
     const clipBase = r.pick(CLIP_TITLES);
-    const clips: ClipSpec[] = [
-      { by: handle, title: clipBase, startOffset: 2, durationSeconds: 10, remove: false },
-      {
-        by: "viewer1",
-        title: r.pick(CLIP_TITLES.filter((c) => c !== clipBase)),
-        startOffset: Math.max(2, Math.floor(seconds / 2) - 5),
-        durationSeconds: 8,
-        remove: handle === "streamer2",
-      },
-    ];
+    const clips: ClipSpec[] =
+      handle === purged
+        ? []
+        : [
+            { by: handle, title: clipBase, startOffset: 2, durationSeconds: 10, remove: false },
+            {
+              by: "viewer1",
+              title: r.pick(CLIP_TITLES.filter((c) => c !== clipBase)),
+              startOffset: Math.max(2, Math.floor(seconds / 2) - 5),
+              durationSeconds: 8,
+              remove: handle === "streamer2",
+            },
+          ];
     return {
       index,
       batch: Math.floor(index / RECORDING_CONCURRENCY),
@@ -384,6 +416,7 @@ export function planRecordings(rng: Rng, scale: SeedScale, input: RecordingInput
       makePrivate: handle === "council1",
       shareLink: speech,
       watchPage: speech,
+      removeMidStream: handle === purged,
       chat: planChat(r, seconds, handle, chatters),
       clips,
     };

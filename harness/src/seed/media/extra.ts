@@ -10,7 +10,8 @@ export interface RecordedOutcome {
   broadcastId: string;
   start: Date;
   end: Date;
-  vodId: string;
+  /** Null when the owner removed the VOD mid-stream: it is not listed in `vodsByChannel`. */
+  vodId: string | null;
   /** Clips that remain. */
   clipIds: string[];
   private: boolean;
@@ -18,7 +19,7 @@ export interface RecordedOutcome {
 
 /** `store.extra.media`: the keys seed-media's brief names. */
 export interface MediaExtra {
-  /** Channel id → VOD ids (private ones included). */
+  /** Channel id → VOD ids (private ones included; one removed mid-stream is not). */
   vodsByChannel: Record<string, string[]>;
   /** Channel id → clip ids that remain (the deleted one is not listed). */
   clipsByChannel: Record<string, string[]>;
@@ -33,7 +34,7 @@ export interface MediaExtra {
 export function buildMediaExtra(results: readonly RecordedOutcome[]): MediaExtra {
   const s1 = results.find((r) => r.handle === "streamer1" && !r.private);
   const clipId = s1?.clipIds[0];
-  if (!s1 || !clipId)
+  if (!s1?.vodId || !clipId)
     throw new Error("seed-media: streamer1's recording left no public VOD and clip for the watch pages");
   const extra: MediaExtra = {
     vodsByChannel: {},
@@ -44,7 +45,7 @@ export function buildMediaExtra(results: readonly RecordedOutcome[]): MediaExtra
     clipId,
   };
   for (const r of results) {
-    (extra.vodsByChannel[r.channelId] ??= []).push(r.vodId);
+    if (r.vodId) (extra.vodsByChannel[r.channelId] ??= []).push(r.vodId);
     (extra.clipsByChannel[r.channelId] ??= []).push(...r.clipIds);
   }
   return extra;

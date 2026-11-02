@@ -9,7 +9,7 @@
  * not fan out. Inserts are chunked (`CHUNK` rows) and check the abort signal between chunks.
  */
 import { type DbHandle, schema, uuidv7 } from "@commonair/db";
-import type { HistoryPlan } from "./plan.ts";
+import { DAY_MS, type HistoryPlan, MEMBER_HOURS_DAYS } from "./plan.ts";
 
 export const CHUNK = 1_000;
 const PROGRESS_MS = 10_000;
@@ -160,4 +160,22 @@ export async function linkChat(
     linked += res.count;
   }
   return linked;
+}
+
+/**
+ * The channels (of `channelIds`) with no eligible stream hour, with another verified viewer, in the
+ * last `MEMBER_HOURS_DAYS` days: membership-sync will not make their owners streamer members.
+ */
+export async function channelsWithoutMemberHours(
+  db: DbHandle,
+  channelIds: readonly string[],
+  now: Date,
+): Promise<string[]> {
+  const since = new Date(now.getTime() - MEMBER_HOURS_DAYS * DAY_MS);
+  const rows = await db.sql<{ channelId: string }[]>`
+    select distinct channel_id as "channelId" from stream_hours
+     where eligible and verified_other_viewers >= 1 and hour_start >= ${since.toISOString()}::timestamptz
+       and channel_id = any(${[...channelIds]}::uuid[])`;
+  const ok = new Set(rows.map((r) => r.channelId));
+  return channelIds.filter((id) => !ok.has(id));
 }

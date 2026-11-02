@@ -10,9 +10,9 @@ import { internalSecret, mediaBucketConfig } from "../safety-io.ts";
 import { generateSpeechFixture } from "../w2/captions/fixture.ts";
 import { type SeedRelay, type RtmpSink, startRelay, startRtmpSink } from "./media/peers.ts";
 import { buildMediaExtra } from "./media/extra.ts";
-import { type ChatWindowRef, planHistory, planRecordings } from "./media/plan.ts";
+import { type ChatWindowRef, MEMBER_HOURS_DAYS, planHistory, planRecordings } from "./media/plan.ts";
 import { MediaSessions, opsHook, recordAll } from "./media/record.ts";
-import { linkChat, writeHistory } from "./media/write.ts";
+import { channelsWithoutMemberHours, linkChat, writeHistory } from "./media/write.ts";
 import type { SeedContext, SeedUnit } from "./types.ts";
 
 const TABLES = [
@@ -95,6 +95,26 @@ async function countRows(ctx: SeedContext, tables: readonly string[]): Promise<R
   return out;
 }
 
+/** Streamers seed-coop expects to be streamer members after the sync (the bulk streamers too). */
+const MEMBER_STREAMERS = ["streamer1", "streamer2", "streamer3", "council1", "council2"];
+
+async function ownersWithoutMemberHours(ctx: SeedContext): Promise<string[]> {
+  const handles = new Set(
+    ctx.store.users
+      .filter((u) => u.kind === "bulk-streamer" || MEMBER_STREAMERS.includes(u.handle))
+      .map((u) => u.handle),
+  );
+  const channels = ctx.store.channels.filter((c) => handles.has(c.ownerHandle));
+  const missing = new Set(
+    await channelsWithoutMemberHours(
+      ctx.db,
+      channels.map((c) => c.id),
+      ctx.now,
+    ),
+  );
+  return channels.filter((c) => missing.has(c.id)).map((c) => c.ownerHandle);
+}
+
 export const unit: SeedUnit = {
   name: "media",
   after: ["social"],
@@ -169,6 +189,15 @@ export const unit: SeedUnit = {
       await platform.close();
     }
     const after = await countRows(ctx, API_TABLES);
+    const missingHours = await ownersWithoutMemberHours(ctx);
+    if (missingHours.length > 0)
+      notes.push(
+        `seed-media: no eligible stream hour in the last ${MEMBER_HOURS_DAYS} days for ${missingHours.join(", ")}, so membership-sync will not make them streamer members`,
+      );
+    if (!results.some((r) => r.removedVodId))
+      notes.push(
+        "seed-media: no bulk streamer recorded, so nobody removed a recording mid-stream: relay_purges holds only recording_ended and vod_hidden rows",
+      );
 
     const rows: Record<string, number> = {};
     for (const t of API_TABLES) rows[t] = (after[t] ?? 0) - (before[t] ?? 0);
@@ -188,7 +217,7 @@ export const unit: SeedUnit = {
         "seed-media: /analytics shows only the recorded broadcasts (rollups exist only for them), not the backdated history",
         "seed-media: the analytics display bypass for the fixed channels lasts 1 h (ANALYTICS_DISPLAY_BYPASS_TTL_SECONDS); after that, today's rollups wait out the 24 h display delay",
         "seed-media: streamer1's simulcast target points at a local RTMP sink that stops with the seed; it is left disabled so later lives do not retry it",
-        "seed-media: the relay node is offline after the seed (its process stops with the run); its receipts and purges stay",
+        "seed-media: the relay node is offline after the seed (its process stops with the run); its receipts and purges stay. relay_purges also has the worker's recording_ended rows (stream.offline) and council1's private VOD (vod_hidden)",
         "seed-media: store.extra.media.liveWindow is not published: no unit asked for it, and units run one after another",
       ],
     };

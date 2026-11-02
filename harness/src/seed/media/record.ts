@@ -34,6 +34,11 @@ const CLIP_READY_TIMEOUT_MS = 3 * 60_000;
 const CAPTIONS_TIMEOUT_MS = 4 * 60_000;
 const REHEARSAL_TIMEOUT_MS = 60_000;
 const HOOK_TIMEOUT_MS = 90_000;
+const RECORDING_VOD_TIMEOUT_MS = 30_000;
+const PURGE_ROW_TIMEOUT_MS = 60_000;
+
+/** The relay purge prefix of a VOD's DVR (`services/worker/src/relay-purge/emit.ts` `dvrPrefix`). */
+export const dvrPurgePrefix = (vodId: string) => `dvr/${vodId}/`;
 
 /** Signs each seeded account in once (through the forwarding proxy, one address each) and keeps it. */
 export class MediaSessions {
@@ -93,7 +98,10 @@ export interface RecordingResult {
   broadcastId: string;
   start: Date;
   end: Date;
-  vodId: string;
+  /** Null when the owner removed the VOD mid-stream (`removedVodId`). */
+  vodId: string | null;
+  /** The in-progress VOD the owner removed while live (a `relay_purges` row names its DVR prefix). */
+  removedVodId: string | null;
   /** Clips that remain (the removed one is not listed). */
   clipIds: string[];
   removedClipId: string | null;
@@ -304,6 +312,54 @@ export async function rehearse(d: RecordDeps, owner: string, invitee: string, se
   );
 }
 
+/**
+ * The owner removes the broadcast's in-progress VOD while it is live (as `w3/dvr-relay` does): the
+ * API hides it, and the worker writes the `relay_purges` row the relay long-polls. Waits for that row.
+ */
+async function removeMidStream(
+  d: RecordDeps,
+  who: string,
+  api: SignedInUser["api"]["client"],
+  channel: string,
+  since: Date,
+): Promise<string> {
+  const vodId = await step(
+    who,
+    "find the recording VOD",
+    () =>
+      waitFor(
+        `${who}'s recording VOD`,
+        async () =>
+          (await api.vods.list({ channel, limit: 5 })).items.find(
+            (v) => v.status === "recording" && Date.parse(v.createdAt) >= since.getTime() - 5_000,
+          )?.id ?? null,
+        { timeoutMs: RECORDING_VOD_TIMEOUT_MS, intervalMs: 1_000, signal: d.signal },
+      ),
+    d.signal,
+  );
+  await step(who, "remove the recording mid-stream", () => api.vods.remove({ id: vodId }), d.signal);
+  const reason = await step(
+    who,
+    "see the relay purge row",
+    () =>
+      waitFor(
+        `a relay_purges row for ${dvrPurgePrefix(vodId)}`,
+        async () => {
+          const rows = await d.db.sql<{ reason: string }[]>`
+            select reason::text as reason from relay_purges
+             where prefix = ${dvrPurgePrefix(vodId)} order by seq desc limit 1`;
+          return rows[0]?.reason ?? null;
+        },
+        { timeoutMs: PURGE_ROW_TIMEOUT_MS, intervalMs: 1_000, signal: d.signal },
+      ),
+    d.signal,
+  );
+  d.notes.push(
+    `seed-media: ${who} removed its recording mid-stream; relay_purges has ${dvrPurgePrefix(vodId)} (${reason}), and the VOD is left out of vodsByChannel`,
+  );
+  return vodId;
+}
+
 /** One planned recording, start to clips. */
 export async function record(d: RecordDeps, plan: RecordingPlan, spec: RecordingSpec): Promise<RecordingResult> {
   const who = spec.handle;
@@ -360,6 +416,7 @@ export async function record(d: RecordDeps, plan: RecordingPlan, spec: Recording
   let swarm: ViewbotSwarm | null = null;
   let chatSent = 0;
   let roomMessages = 0;
+  let removedVodId: string | null = null;
   let broadcastId: string;
   try {
     if (encoder) await step(who, "publish", () => encoder.start(), d.signal);
@@ -387,9 +444,13 @@ export async function record(d: RecordDeps, plan: RecordingPlan, spec: Recording
     const talk = sayLines(d, channel, spec.chat, liveAt);
     const room = spec.watchRoom ? watchRoom(d, channel, plan.room) : Promise.resolve(0);
     const done = speech ? speech.exited.then(() => undefined) : sleep(spec.seconds * 1000, d.signal);
-    [chatSent, roomMessages] = await Promise.all([
+    const purge = spec.removeMidStream
+      ? removeMidStream(d, who, api, channel, start)
+      : Promise.resolve<string | null>(null);
+    [chatSent, roomMessages, removedVodId] = await Promise.all([
       step(who, "chat during the recording", () => talk, d.signal),
       step(who, "watch-room session", () => room, d.signal),
+      purge,
       done,
     ]);
   } finally {
@@ -406,6 +467,23 @@ export async function record(d: RecordDeps, plan: RecordingPlan, spec: Recording
       () => api.stream.simulcast.update({ channel, id: targetId as string, enabled: false }),
       d.signal,
     );
+
+  await step(
+    who,
+    "run the broadcast rollup",
+    () =>
+      opsHook(
+        d.env,
+        INTERNAL_ROUTES.analyticsTick,
+        "POST",
+        { job: "broadcast-rollup", broadcastId, settleSeconds: 0 },
+        d.signal,
+      ),
+    d.signal,
+  );
+  const base = { handle: who, channelId, broadcastId, start, end, chatSent, roomMessages };
+  // The removed VOD never becomes ready: nothing to clip, hide, caption or share.
+  if (removedVodId) return { ...base, vodId: null, removedVodId, clipIds: [], removedClipId: null, private: false };
 
   const vod = await step(
     who,
@@ -431,19 +509,6 @@ export async function record(d: RecordDeps, plan: RecordingPlan, spec: Recording
     if (keys.length === 0)
       throw new Error(`seed-media: ${who}'s VOD ${vod.id} is ready but has no objects in the media bucket`);
   }
-  await step(
-    who,
-    "run the broadcast rollup",
-    () =>
-      opsHook(
-        d.env,
-        INTERNAL_ROUTES.analyticsTick,
-        "POST",
-        { job: "broadcast-rollup", broadcastId, settleSeconds: 0 },
-        d.signal,
-      ),
-    d.signal,
-  );
 
   const clipIds: string[] = [];
   let removedClipId: string | null = null;
@@ -494,17 +559,12 @@ export async function record(d: RecordDeps, plan: RecordingPlan, spec: Recording
     );
 
   return {
-    handle: who,
-    channelId,
-    broadcastId,
-    start,
-    end,
+    ...base,
     vodId: vod.id,
+    removedVodId: null,
     clipIds,
     removedClipId,
     private: spec.makePrivate,
-    chatSent,
-    roomMessages,
   };
 }
 
