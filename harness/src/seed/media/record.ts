@@ -246,7 +246,7 @@ async function watchRoom(d: RecordDeps, channel: string, room: RoomPlan): Promis
   return said;
 }
 
-/** streamer2 arms a rehearsal, invites chanmod, publishes briefly and ends it; `/rehearse` is idle after. */
+/** streamer2 arms a rehearsal, invites chanmod, publishes briefly, stops and ends it; `/rehearse` is idle after. */
 export async function rehearse(d: RecordDeps, owner: string, invitee: string, seconds: number): Promise<void> {
   const u = await d.sessions.as(owner);
   const guest = await d.sessions.as(invitee);
@@ -295,10 +295,24 @@ export async function rehearse(d: RecordDeps, owner: string, invitee: string, se
       d.signal,
     );
     await sleep(seconds * 1000, d.signal);
-    await step(owner, "end the rehearsal", () => r.disarm({ channel }), d.signal);
   } finally {
+    // The encoder stops first: ending a rehearsal while it still publishes is a kick, which refuses
+    // the channel's next publish (this recording's) for REHEARSAL_RULES.kickCooldownSeconds.
     await encoder.stop();
   }
+  await step(
+    owner,
+    "see the rehearsal stop",
+    () =>
+      waitFor("rehearsal stopped", async () => ((await r.status({ channel })).state !== "rehearsing" ? true : null), {
+        timeoutMs: REHEARSAL_TIMEOUT_MS,
+        intervalMs: 1_000,
+        signal: d.signal,
+      }),
+    d.signal,
+  );
+  // Still armed (its session key outlives the publish): end it, or the next publish rehearses again.
+  await step(owner, "end the rehearsal", () => r.disarm({ channel }), d.signal);
   await step(
     owner,
     "see the rehearsal idle",
