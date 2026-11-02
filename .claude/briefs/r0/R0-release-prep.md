@@ -92,8 +92,10 @@ from-release mode (send the exact diff).
    - **federation and the Twitch import:** both off by default. Say what turning them on needs,
      linking ADRs 0030 and 0031, in `configuration.md`. S1-b also edited that page in wave 1, so
      extend it, do not rewrite it;
-   - **external Postgres and Valkey** (S1-b) and the dumps (S1-h): link `managed-services.md` from
-     `README.md`, `install.md` and `requirements.md`;
+   - **external Postgres and Valkey** (S1-b) and the dumps (S1-h). The bundled Postgres and Valkey
+     stay the default path in every page (the user, 2026-11-02). Present the managed services as
+     an option: link `managed-services.md` from `README.md`, `install.md` and `requirements.md`
+     as "optional: use managed Postgres and Valkey";
    - **verifying a release** with cosign 3.x, and checking that the identity strings match
      `release.yml`;
    - **`upgrades.md`:** the release cadence (U3: a minor every two weeks, patches as needed) and

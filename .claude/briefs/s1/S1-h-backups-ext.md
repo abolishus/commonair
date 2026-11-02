@@ -38,6 +38,10 @@ With an external Postgres, WAL-G cannot run: a managed cluster gives no access t
 `docs/self-hosting/backups.md:349` restores WAL-G only, and `docs/self-hosting/managed-services.md`
 does not exist. It becomes the operator path we use ourselves.
 
+**Both modes stay fully supported** (the user, 2026-11-02). Bundled Postgres is the self-host
+default, and its backups stay WAL-G, with today's restore and a new WAL-G drill timer. External
+Postgres adds `pg_dump` and the dump drill. Never weaken or replace the WAL-G path.
+
 ## You own (write only these)
 
 - **`scripts/selfhost.sh`: the backup section** (`parse_backup_flags` through `cmd_backup`, at
@@ -96,8 +100,15 @@ merge.
    so write it as a procedure, not a survey:
    - the requirements for Postgres, Valkey and S3, from ADR 0032 §3 and S1-b's
      `requirements.md`;
+   - at the top, that the bundled install is the default and this page is the option;
    - provider-neutral steps: create the owner, get the CA, check the connection budget, run
      `selfhost.sh install --database-url … --valkey-url …`;
+   - **moving an existing bundled instance to managed services:** `selfhost.sh` refuses a switch
+     in place (S1-b). Document the manual procedure:
+     1. take a final `backup --dump` in a maintenance window;
+     2. restore it into the managed cluster through the owner-only order;
+     3. reinstall with the external flags;
+     4. check counts.
    - **the DigitalOcean worked example**, matching `infra/tofu/digitalocean/modules/instance/managed_state.tf`:
      - `node_count = 2`, `noeviction` and `rdb`;
      - the trusted-sources tag rule;
@@ -137,13 +148,15 @@ merge.
   doubled `follower_count`, which is the bug a trigger-enabled restore would cause.
 - **`scripts/selfhost/e2e-dump.ts`** (wired by the orchestrator): on the external-state e2e, take a
   dump, run the drill, check the gauge, delete one dump past retention, and check the newest 30
-  stay.
+  stay. On the bundled e2e, run the WAL-G drill timer's service once and check its gauge. The
+  existing WAL-G backup checks (`e2e-backup.ts`) keep passing unchanged.
 
 ## Reviewer focus
 
 - The restore disables only user triggers, and only for the data load, then re-enables them and
   checks counts.
 - The drill never touches the live database.
+- Bundled WAL-G backups and restore are unchanged, and both modes have a drill.
 - Retention is 30, and never deletes below 30.
 - Dumps are checksummed and private, with no row data in logs.
 - `managed-services.md` matches the tofu module and is what production follows.

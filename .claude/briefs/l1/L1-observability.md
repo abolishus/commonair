@@ -57,7 +57,10 @@ is S1-b's.
   - `OBSERVABILITY_STATE_MODE`;
   - the monitor password secrets;
   - the CA secrets, mounted read-only into the collector.
-    One collector config serves bundled and external installs.
+    One collector config serves bundled and external installs. Metrics must work in **both** modes
+    (the user, 2026-11-02, bundled is the self-host default): local receivers against the bundled
+    containers, and remote ones with the monitor role against managed services. The tests cover
+    both.
 - **`commonair_monitor`** may lack `pg_monitor` on a managed database (contract §1.2). Every
   dashboard panel and alert must work with the reduced set, or say "needs pg_monitor" in its
   description.

@@ -25,8 +25,13 @@ names you write (contract §3.7).
 ## Why
 
 U4: our own instance launches on DigitalOcean Managed PostgreSQL and managed Valkey. ADR 0032 §3
-gives every operator the same option, with no provider special-cased. So the path we ship to
-self-hosters is the path production runs on, and it is **launch-critical**. Today the option parser
+gives every operator the same option, with no provider special-cased. So the external path is the
+path production runs on, and it is **launch-critical**.
+
+**The bundled Postgres and Valkey stay the default, with full support** (the user, 2026-11-02).
+U4 is about how we deploy our instance, not about `selfhost.sh`. External state is an added option,
+as `--s3-*` is beside bundled Garage. Every change you make must leave a bundled install, upgrade,
+`status` and rollback working exactly as today, and both modes are tested in CI. Today the option parser
 (`scripts/selfhost.sh:1627-1688`) knows only the `--s3-*` external flags. The Postgres and Valkey
 secrets (`:1257-1276`) and `DATABASE_URL` (`:955`) always point at the bundled containers.
 
@@ -99,15 +104,20 @@ external variant: send it as an exact diff of `.github/workflows/ci.yml:302-352`
    `docs/self-hosting/requirements.md`.
 5. **`upgrade`** keeps the choice from `commonair.env`. It never installs the bundled units, runs
    `migrate` exactly once with the owner URL, and re-runs the role scripts (they are idempotent).
-6. **`status`** checks the remote, through the same tools image:
+6. **`status`** covers both modes. For bundled state it reports the units as today. For external
+   state it checks the remote, through the same tools image:
    - Postgres reachable, TLS verified, the server version;
    - connections used against `max_connections`;
    - Valkey `PING`;
    - each with how long it took.
      It reports "external" instead of a unit state.
-7. **Switching is refused.** Moving an instance from bundled to external, or back, is a data
-   migration, not a flag. Refuse it the way `refuse_repoint` (`:1109`) refuses S3, and point to
-   `docs/self-hosting/managed-services.md` (S1-h writes it in wave 2; link it now).
+7. **Switching is refused (decided).** Moving an existing instance from bundled to external, or
+   back, is a data migration, not a flag.
+   - Refuse it with a clear message, the way `refuse_repoint` (`:1109`) refuses S3. The message
+     names the current mode, the requested one, and the procedure to follow.
+   - Point to the manual dump-and-restore procedure in `docs/self-hosting/managed-services.md`.
+     S1-h writes it in wave 2; link it now.
+   - Supporting a switch in place is out of scope for batch 8.
 8. **The e2e external variant** (`scripts/selfhost/e2e-external.ts`, wired into `e2e.ts` with
    `--state external`). It starts, each outside the instance's network:
    - a Postgres 17 container with TLS and a no-superuser `CREATEROLE` owner, as in contract §1.1;
@@ -120,7 +130,9 @@ external variant: send it as an exact diff of `.github/workflows/ci.yml:302-352`
    - `configuration.md`: the flags, the env, the secrets, and the §3.7 table.
    - `requirements.md`: the external Postgres and Valkey requirements from ADR 0032 §3, plus the
      connection budget.
-   - `scaling.md`: that stage 1 is what our instance runs at launch.
+   - `scaling.md`: that stage 1 is what our instance runs at launch, and that the bundled install
+     is the default for everyone else.
+   - Present bundled first everywhere, and external as an option.
 
 ## Edge cases
 
@@ -146,8 +158,11 @@ external variant: send it as an exact diff of `.github/workflows/ci.yml:302-352`
   - `unit_in_mode` with external state;
   - `upgrade` keeping the mode;
   - the switch refusal.
-- **`infra/tests/selfhost-external.test.ts`:** the rendered units have no dependency on a bundled
-  Postgres or Valkey unit in external mode.
+- **`infra/tests/selfhost-external.test.ts`:**
+  - the rendered units have no dependency on a bundled Postgres or Valkey unit in external mode;
+  - the bundled mode's rendered units are byte-identical to `main`'s, apart from the §3.7 keys.
+- **The bundled e2e** (`--state` absent, the default) must still pass unchanged. CI keeps running
+  it, and your matrix row adds the external variant beside it, not instead of it.
 - **The e2e external variant**, run locally only if it is fast enough to be a targeted check. CI
   runs it once the orchestrator adds your matrix row.
 
@@ -157,6 +172,9 @@ external variant: send it as an exact diff of `.github/workflows/ci.yml:302-352`
   recorded.
 - No bundled unit is installed for an external service, and no unit orders after one.
 - `upgrade` keeps the choice and runs `migrate` once.
+- Bundled stays the default, and a bundled install, upgrade, `status` and rollback behave exactly
+  as before.
+- Switching modes is refused with a clear message.
 - No secret is in a unit file, in a log or on a command line.
 - The connection budget is checked, and the preflight never writes anything.
 

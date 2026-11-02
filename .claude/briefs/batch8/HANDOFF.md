@@ -14,6 +14,8 @@ You are the orchestrator for CommonAir batch 8. It covers:
 - R0's release prep toward `v0.1.0`;
 - S1 stage 1 (S1-d, S1-b, S1-h), which is **launch-critical**: our instance launches on managed
   Postgres and Valkey (U4);
+  - this is a deployment choice for our instance: in `selfhost.sh` the bundled Postgres and Valkey
+    stay the default with full support, and external services are an added option;
 - M1 on stripe-mock;
 - L1's engineering (observability and the status page);
 - the batch 6 and batch 7 follow-ups.
@@ -128,6 +130,9 @@ Change the units, the base sha and the lessons line.
   - (C) the federation events are internal; `verify.me` never carries the salt.
   - (D) production tofu has `enable_managed_state = true`, and `check.sh` passes.
 - **S1-b external:**
+  - bundled Postgres and Valkey stay the default, and the bundled install, upgrade, `status`,
+    rollback and e2e behave exactly as before;
+  - switching modes is refused with a clear message;
   - TLS is really verified (`verify-full`, `rediss://`, the private CA mounted), and the insecure
     flags are explicit and recorded;
   - no bundled unit is installed, or ordered after, for an external service;
@@ -172,6 +177,7 @@ Change the units, the base sha and the lessons line.
   - the replay cap bounds memory;
   - no username on the verify page (decision (n)).
 - **S1-h backups-ext:**
+  - the bundled WAL-G backups and restore are unchanged, and both modes have a drill;
   - the restore disables only user triggers, only for the data load, then checks counts;
   - the drill never touches the live database;
   - retention is 30 and never deletes below 30;
