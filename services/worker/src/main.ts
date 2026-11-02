@@ -82,6 +82,7 @@ const worker = createWorker({
   moderation,
   ...(webPush ? { webPush } : {}),
   demoSeedFull: env.DEMO_SEED_FULL,
+  opsTestHooks: opsHooks,
 });
 if (env.DEMO_SEED_FULL)
   logger.warn("DEMO_SEED_FULL is on: channel points accrue on demo data (local and staging only)");

@@ -3,7 +3,7 @@
 
 /** The ops test hook's job table and how it turns a job's return value into counts. */
 import { describe, expect, test } from "vite-plus/test";
-import { MODERATION_JOBS, OPS_TICK_JOBS, OpsJobResult, QUEUES } from "@commonair/contracts/internal";
+import { MODERATION_JOBS, OPS_TICK_JOBS, OpsJobResult, OpsTickBody, QUEUES } from "@commonair/contracts/internal";
 import { flattenJobResult, OPS_JOB_QUEUES } from "../src/ops/hooks.ts";
 
 describe("OPS_JOB_QUEUES", () => {
@@ -43,5 +43,18 @@ describe("flattenJobResult", () => {
     expect(flattenJobResult(7)).toEqual({});
     expect(flattenJobResult([1, 2])).toEqual({});
     expect(flattenJobResult(undefined)).toEqual({});
+  });
+});
+
+describe("OpsTickBody", () => {
+  test("holdDays goes with money-release-holds only, as a whole number of days", () => {
+    expect(OpsTickBody.safeParse({ job: "money-release-holds", holdDays: 0 }).success).toBe(true);
+    expect(OpsTickBody.safeParse({ job: "money-release-holds" }).success).toBe(true);
+    expect(OpsTickBody.safeParse({ job: "vod-retention", holdDays: 0 }).success).toBe(false);
+    expect(OpsTickBody.safeParse({ job: "money-release-holds", holdDays: -1 }).success).toBe(false);
+    expect(OpsTickBody.safeParse({ job: "money-release-holds", holdDays: 0.5 }).success).toBe(false);
+  });
+  test("hold release runs on the payments queue", () => {
+    expect(OPS_JOB_QUEUES["money-release-holds"]).toEqual({ queue: QUEUES.payments, name: "money-release-holds" });
   });
 });

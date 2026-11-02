@@ -322,8 +322,10 @@ export const coopEnv = z.object({
 
 /**
  * Operations (E6, ADR 0021). Harness only, never on a public instance: serves
- * `POST /internal/ops/tick` (run account deletion, export cleanup or VOD retention now).
- * Services log a warning at every start while it is on.
+ * `POST /internal/ops/tick` (run account deletion, export cleanup or VOD retention now), lets
+ * that tick give `money-release-holds` a test hold period (the worker honours it only with the
+ * flag on), and waives the split write-off quiet window. Services log a warning at every start
+ * while it is on.
  */
 export const opsEnv = z.object({
   /** Harness only: serves `POST /internal/ops/tick`. Never on a public instance. */

@@ -65,5 +65,7 @@ export interface WorkerContext {
   webPush?: WebPushSettings;
   /** DEMO_SEED_FULL: demo data is disposable (local and staging), so jobs need not skip it. */
   demoSeedFull?: boolean;
+  /** OPS_TEST_HOOKS (harness only): jobs may honour test-only job data (`MoneyReleaseHoldsJob`). */
+  opsTestHooks?: boolean;
   now(): Date;
 }

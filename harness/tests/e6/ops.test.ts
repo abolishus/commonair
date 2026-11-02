@@ -8,7 +8,7 @@ import { OpsHooks, OpsHooksOff, isSkipped, sumCounter } from "../../src/e6/ops.t
 
 describe("OpsHooks", () => {
   let server: ReturnType<typeof Bun.serve>;
-  const seen: { job: string; secret: string | null }[] = [];
+  const seen: { job: string; secret: string | null; holdDays?: number }[] = [];
   let skipFirst = 0;
   let status = 200;
   let result: Record<string, number> = { deleted: 1 };
@@ -21,8 +21,12 @@ describe("OpsHooks", () => {
         if (url.pathname !== INTERNAL_ROUTES.opsTick || req.method !== "POST")
           return new Response(null, { status: 404 });
         if (status !== 200) return new Response(null, { status });
-        const body = (await req.json()) as { job: string };
-        seen.push({ job: body.job, secret: req.headers.get(INTERNAL_SECRET_HEADER) });
+        const body = (await req.json()) as { job: string; holdDays?: number };
+        seen.push({
+          job: body.job,
+          secret: req.headers.get(INTERNAL_SECRET_HEADER),
+          ...(body.holdDays === undefined ? {} : { holdDays: body.holdDays }),
+        });
         if (skipFirst > 0) {
           skipFirst--;
           return Response.json({ skipped: 1 });
@@ -47,6 +51,15 @@ describe("OpsHooks", () => {
     expect(seen).toEqual([{ job: "vod-retention", secret: "s3cret" }]);
     expect(h.ticks).toHaveLength(1);
     expect(h.ticks[0]?.result).toEqual({ deleted: 1 });
+  });
+
+  test("tick and tickRan send the extra body fields (a test hold period)", async () => {
+    skipFirst = 1;
+    expect(await hooks().tickRan("money-release-holds", 3, 1, { holdDays: 0 })).toEqual({ deleted: 1 });
+    expect(seen).toEqual([
+      { job: "money-release-holds", secret: "s3cret", holdDays: 0 },
+      { job: "money-release-holds", secret: "s3cret", holdDays: 0 },
+    ]);
   });
 
   test("tickRan retries skipped runs", async () => {

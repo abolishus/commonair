@@ -9,7 +9,14 @@ import { internalSecret } from "../safety-io.ts";
 import { stripeWebhookSecret } from "../stripe.ts";
 import { sleep } from "../wait.ts";
 import { MoneySessions, ManualRail, type Paid, type Rail, StripeRail, call, pool } from "./money/api.ts";
-import { FRAUD_DECISION_NOTE, FRAUD_NOTE, FRAUD_REVIEW_NOTE, payoutReference } from "./money/content.ts";
+import {
+  FRAUD_DECISION_NOTE,
+  FRAUD_NOTE,
+  FRAUD_REVIEW_NOTE,
+  PAYOUT_SENT_REFERENCE,
+  WRITE_OFF_NOTE,
+  payoutReference,
+} from "./money/content.ts";
 import { accountAges, activeBans, ledgerReport, paymentSideCounts, splitCounts } from "./money/db.ts";
 import {
   FIXED_PAYEES,
@@ -43,11 +50,10 @@ const TABLES = [
 ] as const;
 
 /**
- * Still empty, both because creator money is held `payout.rules.holdDays` (7) after it posts and the
- * seed's payments are all real-time: no payout run has anything available to pay, and a write-off
- * needs a chargeback on a split share that was already released. Contract request in the notes.
+ * Every table is seeded. Payouts and the split write-off need the holds released in real time: the
+ * `money-release-holds` ops tick with a test hold period (OPS_TEST_HOOKS) does that.
  */
-const PENDING = ["payouts", "split_writeoff_proposals"] as const;
+const PENDING = [] as const;
 
 /** Payers checked out at once (sign-ins are rate limited per address; payments per user). */
 const PAYER_CONCURRENCY = 4;
@@ -198,6 +204,7 @@ async function runMoney(ctx: SeedContext) {
   // 3. Checkouts, settlement and what follows, payer by payer.
   const paymentIds: string[] = [];
   const skipped: string[] = [];
+  let writeOffPaid: { spec: PaymentSpec; paid: Paid } | null = null;
   let done = 0;
   let lastProgress = Date.now();
   const byPayer = new Map<string, PaymentSpec[]>();
@@ -262,7 +269,9 @@ async function runMoney(ctx: SeedContext) {
       if (!s) throw new Error(`seed-money: ${spec.key}: no active subscription to cancel`);
       await call(`${spec.payer} cancels ${spec.key}`, () => client.money.cancelSubscription({ id: s.id }), ctx.signal);
     } else if (spec.lifecycle === "lapse") await rail.lapse(spec, paid);
-    if (spec.reversal?.kind === "refund") await rail.refund(spec, paid, spec.reversal.cents, spec.reversal.reason);
+    // Charged back only after the payout run (step 5).
+    if (spec.key === plan.writeOff?.key) writeOffPaid = { spec, paid };
+    else if (spec.reversal?.kind === "refund") await rail.refund(spec, paid, spec.reversal.cents, spec.reversal.reason);
     else if (spec.reversal?.kind === "chargeback") {
       const ran = await rail.chargeback(spec, paid, spec.reversal.outcome, spec.reversal.reason);
       if (!ran) skipped.push(spec.reversal.outcome);
@@ -292,8 +301,23 @@ async function runMoney(ctx: SeedContext) {
       ctx.signal,
     );
   rows.infra_costs = plan.costs.length;
-  const payoutRun = await call("treasurer runs payouts", () => new ApiTreasurer(treasurer).runPayouts(), ctx.signal);
-  rows.payouts = payoutRun.created;
+  // Every hold released now (a test hold period of 0 days; each release is dated at its payment),
+  // so the run pays the ready payees and holds streamer2 (no payout account) and the new crew payee.
+  const release = await ops.tickRan("money-release-holds", 10, 1_000, { holdDays: 0 });
+  const treasury = new ApiTreasurer(treasurer);
+  const payoutRun = await call("treasurer runs payouts", () => treasury.runPayouts(), ctx.signal);
+  const writeOff = await seedWriteOff(ctx, plan, writeOffPaid, rail, sessions, users);
+  const payouts = await call("treasurer lists payouts", () => treasury.payouts(), ctx.signal);
+  const pending = payouts.filter((p) => p.status === "pending");
+  // One paid, the rest left pending, so /treasury shows every state.
+  const paid = pending.length >= 2 ? pending[0] : undefined;
+  if (paid)
+    await call(
+      `treasurer marks ${paid.username}'s payout paid`,
+      () => treasurer.money.treasurer.markPaid({ id: paid.id, reference: PAYOUT_SENT_REFERENCE }),
+      ctx.signal,
+    );
+  rows.payouts = payouts.length;
 
   // 6. Checks: every transaction balances, every dispute reached the ledger, revenue rows add up.
   const ledger = await ledgerReport(ctx.db, paymentIds, user("treasurer").id, ctx.signal);
@@ -321,7 +345,7 @@ async function runMoney(ctx: SeedContext) {
     return c ? [c.id] : [];
   });
   Object.assign(rows, await splitCounts(ctx.db, splitChannels));
-  rows.split_writeoff_proposals = 0;
+  rows.split_writeoff_proposals = writeOff ? 1 : 0;
 
   const extra: MoneyExtra = {
     provider,
@@ -334,8 +358,10 @@ async function runMoney(ctx: SeedContext) {
   notes.push(
     `seed-money: provider ${provider}${provider === "manual" ? " (PAYMENTS_PROVIDER=manual; run with the stripe-mock profile and PAYMENTS_PROVIDER=stripe for payment_events and open/won disputes)" : " (stripe-mock; every payment settled by signed webhooks)"}`,
     "seed-money: every payment, posting, dispute and flag is real-time (the API stamps them now): /revenue, /transparency and the dashboard tiles show the current month's revenue only; infra_costs alone span the history (recordCost books each in its own period)",
-    `seed-money: payouts stay empty: creator money is held payout.rules.holdDays (7 days) after it posts, so today's run (${payoutRun.created} created, ${payoutRun.held} held) finds nothing available; streamer1's split shares are held too, so revenue_split_postings are all in hold and split_writeoff_proposals (a chargeback on a released share) cannot happen in real time`,
-    "seed-money: contract request: an OPS_TEST_HOOKS job that ages creator holds (e.g. a b7Tick/ops tick `money-age-holds` moving a payment's posting occurred_at back by holdDays + 1, or a test-hook asOf for releaseDueHolds) would let a payout run produce paid, pending and held payouts and a split write-off",
+    `seed-money: the money-release-holds ops tick ran with a 0-day test hold period (OPS_TEST_HOOKS; ${release.released ?? 0} lots released, each dated at its payment), so the payout run had money to pay: ${payoutRun.created} pending and ${payoutRun.held} held, ${paid ? `${paid.username}'s marked paid` : "none marked paid (fewer than two pending)"}`,
+    writeOff
+      ? `seed-money: ${writeOff.owner}'s tip ${writeOff.key} was charged back after the payout run reserved its earnings, so the crew's released slice became split shortfall; the treasurer proposed writing off ${writeOff.cents} cents (OPS_TEST_HOOKS waives the quiet window), left for a second finance person on /treasury`
+      : "seed-money: no split write-off: the plan has no accepted all-revenue split with a paid tip",
   );
   if (provider === "manual")
     notes.push(
@@ -410,4 +436,33 @@ async function seedFraud(
   if (stray.length > 0)
     throw new Error(`seed-money: the fraud scan flagged payees the plan did not mean to: ${JSON.stringify(stray)}`);
   return listed.length;
+}
+
+/**
+ * The split write-off: charge back the planned tip (its crew slice was released and its owner's
+ * earnings reserved by the payout run, so the crew's slice is the owner's split shortfall), then
+ * the treasurer proposes writing the shortfall off. Returns null when the plan has none.
+ */
+async function seedWriteOff(
+  ctx: SeedContext,
+  plan: MoneyPlan,
+  target: { spec: PaymentSpec; paid: Paid } | null,
+  rail: Rail,
+  sessions: MoneySessions,
+  users: ReadonlyMap<string, SeededUser>,
+): Promise<{ owner: string; key: string; cents: number } | null> {
+  if (!plan.writeOff) return null;
+  if (!target) throw new Error(`seed-money: the write-off tip ${plan.writeOff.key} was never paid`);
+  const { spec, paid } = target;
+  if (spec.reversal?.kind !== "chargeback") throw new Error(`seed-money: ${spec.key} is not planned as a chargeback`);
+  await rail.chargeback(spec, paid, spec.reversal.outcome, spec.reversal.reason);
+  const owner = users.get(plan.writeOff.owner);
+  if (!owner) throw new Error(`seed-money: no seeded user "${plan.writeOff.owner}"`);
+  const treasurer = await sessions.client("treasurer");
+  const proposed = await call(
+    `treasurer proposes writing off ${plan.writeOff.owner}'s split shortfall`,
+    () => treasurer.money.treasurer.splits.proposeWriteOff({ username: owner.username, note: WRITE_OFF_NOTE }),
+    ctx.signal,
+  );
+  return { owner: plan.writeOff.owner, key: spec.key, cents: proposed.amount.cents };
 }

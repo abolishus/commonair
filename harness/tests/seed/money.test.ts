@@ -77,11 +77,12 @@ const A = accounts(small).accounts;
 const of = (p: MoneyPlan, f: (x: MoneyPlan["payments"][number]) => boolean) => p.payments.filter(f);
 
 describe("seed-money unit", () => {
-  test("claims its stub's tables, runs after social, and only payouts and write-offs stay pending", () => {
+  test("claims its stub's tables, runs after social, and leaves nothing pending", () => {
     expect(unit.name).toBe("money");
     expect(unit.after).toEqual(["social"]);
-    expect([...unit.pending].sort()).toEqual(["payouts", "split_writeoff_proposals"]);
-    for (const t of unit.pending) expect(unit.tables).toContain(t);
+    // Payouts and the write-off come from the hold-release ops tick (OPS_TEST_HOOKS).
+    expect(unit.pending).toEqual([]);
+    expect(unit.tables).toEqual(expect.arrayContaining(["payouts", "split_writeoff_proposals"]));
     expect(unit.tables).toContain("revenue_split_postings");
   });
 });
@@ -194,6 +195,49 @@ describe("planMoney: states", () => {
     const outcomes = r.flatMap(({ r: v }) => (v.kind === "chargeback" ? [v.outcome] : []));
     expect(new Set(outcomes)).toEqual(new Set(["open", "won", "lost"]));
     for (const { x } of r) expect(x.settle).toBe("paid");
+  });
+});
+
+describe("planMoney: the split write-off", () => {
+  test("a paid streamer1 tip under the accepted all-revenue split is charged back (lost) for the write-off", () => {
+    expect(P.writeOff).not.toBeNull();
+    const w = P.writeOff!;
+    expect(w.owner).toBe("streamer1");
+    const spec = P.payments.find((x) => x.key === w.key)!;
+    expect(spec).toMatchObject({ payee: "streamer1", kind: "tip", settle: "paid", lifecycle: "none", velocity: false });
+    expect(spec.reversal).toEqual({ kind: "chargeback", outcome: "lost", reason: expect.any(String) });
+    const split = P.splits.find((x) => x.owner === w.owner)!;
+    expect(split).toMatchObject({ accept: true, basis: "all" });
+    // The crew's slice is what the owner cannot cover once its earnings are reserved: never zero.
+    const fig = paymentFigures(P, CUT).find((f) => f.key === w.key)!;
+    expect(fig.shares.find((x) => x.role === "crew")!.creatorCents).toBeGreaterThan(0);
+    // The owner clears the payout minimum (2500 by default), so the run reserves its earnings
+    // before the chargeback and the crew's slice cannot come out of them.
+    const keep = new Set(P.payments.filter((x) => x.payee === w.owner && x.reversal === null).map((x) => x.key));
+    const owned = paymentFigures(P, CUT)
+      .filter((f) => keep.has(f.key))
+      .reduce((n, f) => n + (f.shares.find((x) => x.role === "owner")?.creatorCents ?? 0), 0);
+    expect(owned).toBeGreaterThanOrEqual(2_500);
+  });
+
+  test("exactly one write-off chargeback, counted among the disputes", () => {
+    for (const seed of [1, 2, 3]) {
+      const p = plan(seed);
+      expect(p.writeOff).not.toBeNull();
+      expect(plannedCounts(p).disputes).toBe(p.payments.filter((x) => x.reversal !== null).length);
+    }
+  });
+
+  test("no accepted split (no crew account), no write-off", () => {
+    const a = accounts(small);
+    const p = planMoney(createRng(7).fork("money"), small, NOW, {
+      accounts: a.accounts.filter((x) => x.handle !== CREW),
+      streamers: a.streamers,
+      tierPrices: PRICES,
+      currency: "usd",
+    });
+    expect(p.splits).toEqual([]);
+    expect(p.writeOff).toBeNull();
   });
 });
 

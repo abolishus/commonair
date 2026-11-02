@@ -795,9 +795,25 @@ export const OPS_TICK_JOBS = [
   "notify-prune",
   // Seed-full: the daily evidence audit, so seed-safety can write an evidence_audit_runs row now.
   "evidence-audit",
+  // Seed-full: hold release, with a test-only hold period so a payout run has money to pay.
+  "money-release-holds",
 ] as const;
+/**
+ * Data of the `money-release-holds` job. `holdDays` (ops test hook only; the worker ignores it
+ * unless `OPS_TEST_HOOKS=true`) replaces `payout.rules.holdDays` and the new-recipient extra for
+ * this run: every lot is due `holdDays` after its payment. It only moves the cutoff the run
+ * compares against; each release is still dated when it fell due, never in the future, and no
+ * existing row changes (ADR 0004).
+ */
+export const MoneyReleaseHoldsJob = z.object({ holdDays: z.number().int().min(0).max(365).optional() });
+export type MoneyReleaseHoldsJob = z.infer<typeof MoneyReleaseHoldsJob>;
 /** Body of `INTERNAL_ROUTES.opsTick`; the response is the job's result (counts only). */
-export const OpsTickBody = z.object({ job: z.enum(OPS_TICK_JOBS) });
+export const OpsTickBody = z
+  .object({ job: z.enum(OPS_TICK_JOBS), holdDays: MoneyReleaseHoldsJob.shape.holdDays })
+  .refine((b) => b.holdDays === undefined || b.job === "money-release-holds", {
+    message: "holdDays applies to money-release-holds only",
+    path: ["holdDays"],
+  });
 export type OpsTickBody = z.infer<typeof OpsTickBody>;
 export const OpsJobResult = z.record(z.string(), z.number().int());
 export type OpsJobResult = z.infer<typeof OpsJobResult>;

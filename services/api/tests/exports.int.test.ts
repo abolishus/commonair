@@ -304,6 +304,25 @@ describe("ops test hook", () => {
     });
   });
 
+  test("money-release-holds carries holdDays to the worker as job data; other jobs get none", async () => {
+    const data: unknown[] = [];
+    workers.push(
+      new Worker(
+        QUEUES.payments,
+        async (job) => {
+          data.push(job.data);
+          return { released: 1, holdDays: (job.data as { holdDays?: number }).holdDays ?? 7 };
+        },
+        { connection: connection(), prefix },
+      ),
+    );
+    const r = await tick({ job: "money-release-holds", holdDays: 0 });
+    expect(await r.json()).toEqual({ released: 1, holdDays: 0 });
+    expect(await (await tick({ job: "money-release-holds" })).json()).toEqual({ released: 1, holdDays: 7 });
+    expect(data).toEqual([{ holdDays: 0 }, {}]);
+    expect((await tick({ job: "vod-retention", holdDays: 0 })).status).toBe(400);
+  });
+
   test("a job that lost its run lock reports skipped", async () => {
     const lockedPrefix = `${prefix}-locked`;
     const runner = createOpsTickRunner(VALKEY_URL, lockedPrefix);

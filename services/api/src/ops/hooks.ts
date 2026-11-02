@@ -38,6 +38,7 @@ export const OPS_JOB_QUEUES: Record<OpsJobName, { queue: string; name: string }>
   "money-reconcile": { queue: QUEUES.payments, name: "money-reconcile" },
   "notify-prune": { queue: QUEUES.retention, name: NOTIFY_JOBS.prune },
   "evidence-audit": { queue: QUEUES.moderation, name: MODERATION_JOBS.evidenceAudit },
+  "money-release-holds": { queue: QUEUES.payments, name: "money-release-holds" },
 };
 
 /**
@@ -59,7 +60,8 @@ export function flattenJobResult(value: unknown, prefix = "", out: OpsJobResult 
 }
 
 export interface OpsTickRunner {
-  run(job: OpsJobName, timeoutMs?: number): Promise<OpsJobResult>;
+  /** `data` is the job's payload (`{}` for every job but a `money-release-holds` with `holdDays`). */
+  run(job: OpsJobName, data?: Record<string, unknown>, timeoutMs?: number): Promise<OpsJobResult>;
   close(): Promise<void>;
 }
 
@@ -88,10 +90,10 @@ export function createOpsTickRunner(valkeyUrl: string, prefix: string): OpsTickR
     return e.ev;
   };
   return {
-    async run(job, timeoutMs = TICK_TIMEOUT_MS) {
+    async run(job, data = {}, timeoutMs = TICK_TIMEOUT_MS) {
       const { queue, name } = OPS_JOB_QUEUES[job];
       const ev = await eventsOf(queue);
-      const added = await queueOf(queue).add(name, {}, { removeOnComplete: 100, removeOnFail: 100 });
+      const added = await queueOf(queue).add(name, data, { removeOnComplete: 100, removeOnFail: 100 });
       return OpsJobResult.parse(flattenJobResult(await added.waitUntilFinished(ev, timeoutMs)));
     },
     async close() {
@@ -145,7 +147,8 @@ export async function opsHook(deps: Deps, method: string, body: unknown): Promis
   if (!parsed.success) return new Response(null, { status: 400 });
   const headers = { "cache-control": "no-store" };
   try {
-    return Response.json(await opsTickRunner(deps).run(parsed.data.job), { headers });
+    const { job, holdDays } = parsed.data;
+    return Response.json(await opsTickRunner(deps).run(job, holdDays === undefined ? {} : { holdDays }), { headers });
   } catch (err) {
     if (BUSY.test((err as Error).message ?? "")) return Response.json({ skipped: 1 }, { headers });
     deps.logger.warn("ops tick test hook failed", { job: parsed.data.job, err: (err as Error).name });

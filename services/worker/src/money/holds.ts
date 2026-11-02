@@ -22,6 +22,11 @@ export interface HoldReleaseOptions {
   limit?: number;
   budgetMs?: number;
   clock?: () => number;
+  /**
+   * Test only (the ops hook, `MoneyReleaseHoldsJob`): this run's hold period in place of
+   * `payout.rules.holdDays`, with no extra wait for a new crew recipient.
+   */
+  holdDays?: number;
 }
 
 export async function releaseHolds(
@@ -30,6 +35,8 @@ export async function releaseHolds(
 ): Promise<ReleaseResult & { holdDays: number; batches: number; exhausted: boolean }> {
   const { payoutRules } = await loadMoneySettings(ctx.db);
   const asOf = ctx.now();
+  const holdDays = opts.holdDays ?? payoutRules.holdDays;
+  const newRecipientHoldDays = opts.holdDays === undefined ? payoutRules.splitNewRecipientHoldDays : 0;
   let released = 0;
   let totalCents = 0;
   let withheld = 0;
@@ -43,8 +50,8 @@ export async function releaseHolds(
     async (limit) => {
       const r = await releaseDueHolds(ctx.db, {
         asOf,
-        holdDays: payoutRules.holdDays,
-        newRecipientHoldDays: payoutRules.splitNewRecipientHoldDays,
+        holdDays,
+        newRecipientHoldDays,
         currency: payoutRules.currency,
         limit,
       });
@@ -62,7 +69,7 @@ export async function releaseHolds(
     released,
     totalCents,
     withheld,
-    holdDays: payoutRules.holdDays,
+    holdDays,
     batches: loop.batches,
     exhausted: loop.exhausted,
   };
