@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /** `seed full` and `seed live`: the guard, then every unit in dependency order. */
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { loadEnv, seedEnv } from "@commonair/config";
 import { createDb } from "@commonair/db";
 import { generatePassword, passwordProblem } from "@commonair/db/demo";
@@ -24,6 +26,24 @@ export interface SeedFullOptions {
   out?: (line: string) => void;
   /** Defaults to process.env (DEMO_SEED_FULL, DEMO_SEED_PASSWORD). */
   source?: Record<string, string | undefined>;
+  /**
+   * Where to write the store once every unit ran (`SeedStoreFile`): the `seed-coverage` scenario
+   * reads it to sign in and fill route params after a separate `seed full`.
+   */
+  storeFile?: string;
+  /** Receives the store once every unit ran (the scenario's own seed). */
+  onStore?: (store: SeedStore) => void;
+}
+
+/** The store file's name in the harness report directory. */
+export const SEED_STORE_FILE = "seed-store.json";
+
+/** What `storeFile` holds. No password: sign in with DEMO_SEED_PASSWORD. */
+export interface SeedStoreFile {
+  scale: SeedScaleName;
+  seed: number;
+  seededAt: string;
+  store: SeedStore;
 }
 
 /** Exit code: 0 seeded, 1 a unit failed, 2 refused. */
@@ -73,6 +93,13 @@ export async function runSeedFull(o: SeedFullOptions): Promise<number> {
       const rows = Object.values(report.rows).reduce((a, b) => a + b, 0);
       out(`seed-${unit.name}: ${rows} rows in ${((Date.now() - started) / 1000).toFixed(1)} s`);
       for (const n of report.notes ?? []) out(`  note: ${n}`);
+    }
+    o.onStore?.(store);
+    if (o.storeFile) {
+      const file: SeedStoreFile = { scale: o.scale, seed: o.seed, seededAt: now.toISOString(), store };
+      mkdirSync(dirname(o.storeFile), { recursive: true });
+      writeFileSync(o.storeFile, `${JSON.stringify(file, null, 2)}\n`);
+      out(`Store written to ${o.storeFile}`);
     }
     const pending = pendingTables(SEED_UNITS);
     if (Object.keys(pending).length > 0) {

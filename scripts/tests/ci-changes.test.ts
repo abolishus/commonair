@@ -132,7 +132,8 @@ describe("the real harness graph", () => {
   test("a batch 7 scenario module selects its scenario and the w3 shard, which is never filtered", () => {
     expect(scenariosReaching("harness/src/n3/index.ts", graph)).toEqual(["twitch-import"]);
     expect(scenariosReaching("harness/src/w3/watch-rooms/index.ts", graph)).toEqual(["watch-room"]);
-    expect(scenariosReaching("harness/src/w3/giveaways.ts", graph)).toEqual(["interact"]);
+    // seed-coverage runs seed full, whose seed-interact drives giveaways through this module.
+    expect(scenariosReaching("harness/src/w3/giveaways.ts", graph)).toEqual(["interact", "seed-coverage"]);
     expect(shardsFor(selectScenarios(["harness/src/n4/web.ts"], graph))).toEqual(["w3"]);
     expect(matrixShards({ scenarios: ALL, deploy: false, filteredShards: [] })).toContain("w3");
     expect(outputs({ scenarios: ["portability"], deploy: false, filteredShards: [] })).toContain('shards=["w3"]');
@@ -164,12 +165,14 @@ describe("shardsFor and outputs", () => {
 // Batch 6 decision (c): the captions shard (whisper and its weights) runs on pushes that reach
 // captions, media or origin code, and on every nightly run and dispatch.
 describe("path-filtered shards", () => {
-  const without = Object.keys(FULL_SHARDS).filter((s) => s !== "captions");
+  const filtered = Object.keys(PATH_FILTERED_SHARDS);
+  const without = Object.keys(FULL_SHARDS).filter((s) => !filtered.includes(s));
 
-  test("every path-filtered shard is a full shard, and captions is one", () => {
-    for (const s of Object.keys(PATH_FILTERED_SHARDS)) expect(Object.keys(FULL_SHARDS)).toContain(s);
-    expect(Object.keys(PATH_FILTERED_SHARDS)).toEqual(["captions"]);
+  test("every path-filtered shard is a full shard: captions and seed", () => {
+    for (const s of filtered) expect(Object.keys(FULL_SHARDS)).toContain(s);
+    expect(filtered).toEqual(["captions", "seed"]);
     expect(FULL_SHARDS.captions).toEqual(["captions"]);
+    expect(FULL_SHARDS.seed).toEqual(["seed-coverage"]);
   });
 
   test.each([
@@ -190,7 +193,23 @@ describe("path-filtered shards", () => {
     "harness/src/w2/captions/index.ts",
     "harness/fixtures/captions/speech.wav",
     "compose.yaml",
-  ])("%s reaches captions", (f) => expect(filteredShardsReached([f])).toEqual(["captions"]));
+  ])("%s reaches captions", (f) => expect(filteredShardsReached([f])).toContain("captions"));
+
+  test.each([
+    "harness/src/seed/money.ts",
+    "harness/src/seed/routes.ts",
+    "harness/scenarios/seed-coverage.ts",
+    "harness/compose.seed.yaml",
+    "packages/db/src/schema/users.ts",
+    "packages/db/drizzle/0001_protections.sql",
+    "apps/web/src/routes/_app/index.tsx",
+    "compose.yaml",
+  ])("%s reaches seed", (f) => expect(filteredShardsReached([f])).toContain("seed"));
+
+  test.each(["harness/tests/seed/money.test.ts", "services/api/src/routes/playback.ts", "harness/compose.w3.yaml"])(
+    "%s does not reach seed",
+    (f) => expect(filteredShardsReached([f])).not.toContain("seed"),
+  );
 
   test.each([
     "services/api/src/routes/playback.ts",
@@ -207,8 +226,9 @@ describe("path-filtered shards", () => {
   test("a push selecting every scenario drops captions unless it reaches captions paths", () => {
     expect(matrixShards({ scenarios: ALL, deploy: false, filteredShards: [] })).toEqual(without);
     expect(matrixShards({ scenarios: ALL, deploy: false, filteredShards: ["captions"] })).toEqual(
-      Object.keys(FULL_SHARDS),
+      Object.keys(FULL_SHARDS).filter((s) => s !== "seed"),
     );
+    expect(matrixShards({ scenarios: ALL, deploy: false, filteredShards: filtered })).toEqual(Object.keys(FULL_SHARDS));
     expect(outputs({ scenarios: ALL, deploy: false, filteredShards: [] })).toContain(
       `shards=${JSON.stringify(without)}\n`,
     );
@@ -224,10 +244,10 @@ describe("path-filtered shards", () => {
     ]);
   });
 
-  test("the nightly run, a dispatch and an unreadable diff run captions", () => {
-    expect(EVERYTHING.filteredShards).toEqual(["captions"]);
+  test("the nightly run, a dispatch and an unreadable diff run captions and seed", () => {
+    expect(EVERYTHING.filteredShards).toEqual(filtered);
     expect(matrixShards(EVERYTHING)).toEqual(Object.keys(FULL_SHARDS));
-    expect(changesFor({ EVENT_NAME: "schedule", BASE: "a", SHA: "b" }, ROOT).filteredShards).toEqual(["captions"]);
+    expect(changesFor({ EVENT_NAME: "schedule", BASE: "a", SHA: "b" }, ROOT).filteredShards).toEqual(filtered);
   });
 
   test("classify: product code outside the filters selects everything but captions", () => {
@@ -277,7 +297,7 @@ describe("changesFor", () => {
     expect(classify(["packages/db/drizzle/0037_x.sql"], GRAPH)).toEqual({
       scenarios: ALL,
       deploy: true,
-      filteredShards: [],
+      filteredShards: ["seed"],
     });
   });
 });

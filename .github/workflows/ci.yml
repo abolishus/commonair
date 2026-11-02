@@ -249,8 +249,9 @@ jobs:
           playwright-deps: "true"
           browsers: "true"
           moderation-model: "true"
-          # Only the captions shard runs whisper (batch 6 decision (c)).
-          captions-model: ${{ matrix.shard == 'captions' && 'true' || 'false' }}
+          # Only the captions shard runs whisper (batch 6 decision (c)), and the seed shard, whose
+          # stack carries every override (docs/testing/seeding.md).
+          captions-model: ${{ (matrix.shard == 'captions' || matrix.shard == 'seed') && 'true' || 'false' }}
       - name: Verify
         # Above verify's own limits (platform up 25 + browsers 10 + scenario 45), so a hung
         # scenario is stopped by verify and still leaves its report and summary.

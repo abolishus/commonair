@@ -79,6 +79,8 @@ export const FULL_REQUIRED = [
   "portability",
   "twitch-import",
   "federation",
+  // seed-full milestone wiring: every web route as its role after `seed full` (the `seed` shard).
+  "seed-coverage",
 ] as const;
 
 /** `full`'s scenarios that one shard runs, in `full`'s order. Pure. */

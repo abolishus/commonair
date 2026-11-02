@@ -38,6 +38,10 @@ export const FULL_SHARDS = {
   // The longest of `rest` (8a562d9a: integrity-basic 2m52, viewers 2m04, e4b-money 1m34,
   // multi-instance 1m28), so `rest` drops from ~16 min to ~8.
   core: ["integrity-basic", "viewers", "e4b-money", "multi-instance"],
+  // seed-full milestone wiring: `seed full --scale small` on a fresh stack with every override
+  // (`stack --seed`), then every web route as its role (docs/testing/seeding.md). It needs a
+  // database with no users, so it runs alone; path-filtered on pushes, always on the nightly run.
+  seed: ["seed-coverage"],
   rest: null,
 } as const satisfies Record<string, readonly string[] | null>;
 export type FullShard = keyof typeof FULL_SHARDS;
@@ -58,6 +62,17 @@ export const PATH_FILTERED_SHARDS: Readonly<Partial<Record<FullShard, readonly s
     "^infra/containers/whisper",
     "^scripts/fetch-model\\.ts$",
     "^harness/compose\\.w2-captions\\.yaml$",
+    "^compose\\.yaml$",
+  ],
+  // What the seed writes and what the coverage scenario visits: the seed itself, the schema,
+  // the web routes and the overrides the seed stack layers.
+  seed: [
+    "^harness/src/seed/",
+    "^harness/scenarios/seed-coverage\\.ts$",
+    "^harness/compose\\.seed\\.yaml$",
+    "^packages/db/src/schema/",
+    "^packages/db/drizzle/",
+    "^apps/web/src/routes/",
     "^compose\\.yaml$",
   ],
 };

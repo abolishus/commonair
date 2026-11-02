@@ -125,6 +125,32 @@ export function w3Stack(fullName: string, scenarioNames: readonly string[]): str
   return shardRun || scenarioNames.some((n) => names.includes(n)) ? ["--w3"] : [];
 }
 
+/**
+ * Whether the run seeds a database (`full:seed`, or `--scenario seed-coverage`): the
+ * `seed-coverage` scenario runs `seed full` on the fresh stack before it visits every route
+ * (docs/testing/seeding.md). An unsharded `full` does not: its database has the other scenarios'
+ * users, so the scenario only reports why it skipped.
+ */
+export function seedRun(fullName: string, scenarioNames: readonly string[]): boolean {
+  return fullName === "full:seed" || scenarioNames.includes("seed-coverage");
+}
+
+/** The seed's stack: every override (`stack --harness --captions --w3 --seed`), stripe-mock included. */
+export function seedStack(fullName: string, scenarioNames: readonly string[]): string[] {
+  return seedRun(fullName, scenarioNames) ? ["--captions", "--w3", "--seed"] : [];
+}
+
+/** The harness command, with the seed's guard opened (DEMO_SEED_FULL) on a seeding run only. */
+export function harnessCmd(name: string, seeding: boolean): string[] {
+  const cmd = ["bun", "harness/src/cli.ts", "run", name];
+  return seeding ? ["env", "DEMO_SEED_FULL=true", ...cmd] : cmd;
+}
+
+/** The stack flags, each once: several runs can ask for the same override. */
+export function stackFlags(...lists: readonly (readonly string[])[]): string[] {
+  return [...new Set(lists.flat())];
+}
+
 /** One CI harness shard. */
 export const SHARD_TIMEOUT_MIN = 45;
 /** Every scenario in one run, serially: about an hour since clock-skew (13-18 min) joined. */
@@ -195,6 +221,19 @@ export const steps: Step[] = [
     when: () => existsSync("relay/go.mod"),
   },
   {
+    // The seed stack's generated keys (STRIPE_WEBHOOK_SECRET for stripe-mock's signed events);
+    // `--merge` keeps every other value, so an existing Postgres volume keeps its password.
+    name: "seed env",
+    group: "harness",
+    phase: 4,
+    timeoutMin: 2,
+    cmd: ["bun", "scripts/init-env.ts", "--merge", "--seed"],
+    when: () =>
+      seedRun(full ? shard : "", scenarios) &&
+      (full || scenarios.length > 0) &&
+      process.env.VERIFY_INFRA !== "external",
+  },
+  {
     // Harness scenarios drive the whole platform in real browsers. They need the harness
     // overrides (test hooks, short governance periods, private-network outbound): the plain
     // stack fails half of `full`.
@@ -205,15 +244,18 @@ export const steps: Step[] = [
     // --multi: the second api/chat/worker/origin the `multi-instance` scenario needs (S1-c).
     // --captions: the whisper sidecar, for the captions shard only (batch 6 decision (c)).
     // --w3: the batch 7 flags and mocks, for the w3 and interact shards (batch 7 decision (d)).
+    // --seed: every override plus stripe-mock, for the seed shard (docs/testing/seeding.md).
     cmd: [
       "bun",
       "scripts/infra.ts",
       "stack",
-      "--harness",
-      "--multi",
-      ...captionsStack(shard, scenarios),
-      // Without --full, `shard` is still "full": only the named scenarios count then.
-      ...w3Stack(full ? shard : "", scenarios),
+      ...stackFlags(
+        ["--harness", "--multi"],
+        captionsStack(shard, scenarios),
+        // Without --full, `shard` is still "full": only the named scenarios count then.
+        w3Stack(full ? shard : "", scenarios),
+        seedStack(full ? shard : "", scenarios),
+      ),
     ],
     when: () => (full || scenarios.length > 0) && process.env.VERIFY_INFRA !== "external",
   },
@@ -230,14 +272,14 @@ export const steps: Step[] = [
     group: "harness" as const,
     phase: 4,
     timeoutMin: 30,
-    cmd: ["bun", "harness/src/cli.ts", "run", s],
+    cmd: harnessCmd(s, seedRun("", [s])),
   })),
   {
     name: shard === "full" ? "harness: full scenario" : `harness: ${shard}`,
     group: "harness",
     phase: 4,
     timeoutMin: shard === "full" ? FULL_SCENARIO_TIMEOUT_MIN : SHARD_TIMEOUT_MIN,
-    cmd: ["bun", "harness/src/cli.ts", "run", shard],
+    cmd: harnessCmd(shard, seedRun(shard, [])),
     when: () => full,
   },
 ];

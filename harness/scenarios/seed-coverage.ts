@@ -2,21 +2,188 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * After `seed full --scale small`, every web route as its role (`SEED_ROUTES`) must render seeded
- * data: no empty state, no error boundary, no error response. Not in `full`: it needs a database
- * the full seed just filled, and `full` shares one with users in it. The milestone wiring builds
- * the visits; until then every route is reported as a pending step.
+ * After `seed full`, every web route as its role (`SEED_ROUTES`) renders: no error boundary or
+ * error response anywhere, and no empty state or 4xx where the route should show seeded data
+ * (docs/testing/seeding.md). On a database with no users and `DEMO_SEED_FULL=true` (the `seed`
+ * shard's fresh stack) it runs `seed full --scale small` itself first; on a database a separate
+ * `seed full` filled, it reads that run's store file and signs in with DEMO_SEED_PASSWORD. On any
+ * other database (an unsharded `full`, whose other scenarios made users) it reports every route as
+ * skipped, with the reason: the seed needs a fresh database.
  */
-import { defineScenario } from "../src/scenario.ts";
-import { SEED_ROUTES } from "../src/seed/routes.ts";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { createDb } from "@commonair/db";
+import { generatePassword } from "@commonair/db/demo";
+import type { Page, Response } from "playwright";
+import { DEFAULT_REPORT_DIR } from "../src/report.ts";
+import { defineScenario, type ScenarioContext } from "../src/scenario.ts";
+import { describeTarget } from "../src/seed/guard.ts";
+import { SEED_ROUTES, type SeedRoute } from "../src/seed/routes.ts";
+import { SEED_STORE_FILE, type SeedStoreFile, runSeedFull } from "../src/seed/run.ts";
+import type { SeedStore } from "../src/seed/types.ts";
+import { type VisitObservation, loginsOf, reportUrl, resolveSeedRoute, visitProblems } from "../src/seed/visit.ts";
+import { signInViaUi } from "../src/web/flows.ts";
+import { ROUTES, TEST_IDS as T } from "../src/web/selectors.ts";
+import { WebSession, byTestId, waitForHydration } from "../src/web/session.ts";
+
+const UI_TIMEOUT_MS = 30_000;
+/** How long a page may keep fetching before it is judged as it stands. */
+const SETTLE_MS = 15_000;
+const EMPTY_STATE = '[data-slot="empty-state"]';
+const SKELETON = '[data-slot="skeleton"]';
+/** TanStack Router's default error component (the app sets no `defaultErrorComponent`). */
+const ERROR_BOUNDARY_TEXT = /Something went wrong!/;
+
+type Seeded = { store: SeedStore; password: string };
+
+/** Seed the empty database, or read a separate run's store, or say why neither applies. */
+async function seeded(ctx: ScenarioContext): Promise<Seeded | { skip: string }> {
+  const url = ctx.env.DATABASE_URL;
+  if (!url) return { skip: "DATABASE_URL is not set" };
+  const db = createDb({ url, max: 1, applicationName: "harness-seed-coverage" });
+  let users: number;
+  try {
+    users = (await db.sql<{ n: number }[]>`select count(*)::int as n from users`)[0]?.n ?? 0;
+  } finally {
+    await db.close();
+  }
+
+  if (users === 0) {
+    if (process.env.DEMO_SEED_FULL !== "true")
+      return { skip: "the database is empty but DEMO_SEED_FULL is not true, so it cannot be seeded" };
+    const password = process.env.DEMO_SEED_PASSWORD || generatePassword();
+    const scale = ctx.param("scale", "small");
+    if (scale !== "small" && scale !== "medium" && scale !== "large")
+      throw new Error(`--set scale=${scale}: small, medium or large`);
+    let store: SeedStore | null = null;
+    const lines: string[] = [];
+    const code = await ctx.step(`seed full --scale ${scale}`, () =>
+      runSeedFull({
+        scale,
+        seed: ctx.intParam("seed", 1),
+        confirm: describeTarget(url),
+        env: ctx.env,
+        log: ctx.log.child({ seed: "full" }),
+        signal: ctx.signal,
+        source: { ...process.env, DEMO_SEED_PASSWORD: password },
+        storeFile: join(ctx.env.HARNESS_REPORT_DIR ?? DEFAULT_REPORT_DIR, SEED_STORE_FILE),
+        onStore: (s) => (store = s),
+        out: (l) => {
+          // The generated password never reaches the report.
+          if (!l.startsWith("Password")) lines.push(l);
+          ctx.log.info(l);
+        },
+      }),
+    );
+    ctx.data("seed.output", lines);
+    ctx.assert("seed full succeeded", code === 0, { code, last: lines.slice(-5) });
+    if (!store) throw new Error("seed full returned no store");
+    return { store, password };
+  }
+
+  const file = join(ctx.env.HARNESS_REPORT_DIR ?? DEFAULT_REPORT_DIR, SEED_STORE_FILE);
+  const fromFile = existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as SeedStoreFile) : null;
+  if (!fromFile?.store.users.some((u) => u.handle === "admin"))
+    return {
+      skip: `the database has ${users} user(s) but no full seed (${file} missing); seed-coverage needs a fresh database (the seed shard) or a separate \`seed full\``,
+    };
+  const password = process.env.DEMO_SEED_PASSWORD;
+  if (!password) return { skip: "a separate `seed full` filled the database: set DEMO_SEED_PASSWORD to its password" };
+  return { store: fromFile.store, password };
+}
+
+/** Load one route and judge it as the page stands once it settles. */
+async function visit(page: Page, url: string, apiUrl: string, webUrl: string): Promise<VisitObservation> {
+  const errors: { url: string; status: number }[] = [];
+  const origins = [new URL(apiUrl).origin, new URL(webUrl).origin];
+  const onResponse = (r: Response) => {
+    if (r.status() >= 400 && origins.some((o) => r.url().startsWith(o)))
+      errors.push({ url: reportUrl(r.url()), status: r.status() });
+  };
+  page.on("response", onResponse);
+  try {
+    const doc = await page.goto(new URL(url, webUrl).toString(), { waitUntil: "domcontentloaded", timeout: 30_000 });
+    await waitForHydration(page);
+    await page.waitForLoadState("networkidle", { timeout: SETTLE_MS }).catch(() => undefined);
+    await page
+      .locator(SKELETON)
+      .first()
+      .waitFor({ state: "detached", timeout: SETTLE_MS })
+      .catch(() => undefined);
+    const empties = page.locator(`${EMPTY_STATE}:visible`);
+    const emptyStates = await empties.evaluateAll((els) =>
+      els.map((el) => el.querySelector('[data-slot="empty-title"]')?.textContent?.trim() ?? ""),
+    );
+    const errorBoundary = ERROR_BOUNDARY_TEXT.test((await page.locator("body").textContent()) ?? "");
+    return { documentStatus: doc?.status() ?? null, errorResponses: errors, emptyStates, errorBoundary };
+  } finally {
+    page.off("response", onResponse);
+  }
+}
 
 export default defineScenario({
   name: "seed-coverage",
   description: "after `seed full`: every web route as its role shows seeded data (no empty state, no error)",
-  needs: ["api", "web", "browser"],
-  inFull: false,
-  timeoutMs: 20 * 60_000,
+  needs: ["api", "web", "worker", "media", "mail", "ffmpeg", "browser"],
+  // Its own CI shard (`seed`, harness/src/shards.ts): `seed full` needs a database with no users.
+  inFull: true,
+  // seed full at small (about 25 min with every unit's live work), then about 65 page loads.
+  timeoutMs: 45 * 60_000,
   async run(ctx) {
-    for (const path of Object.keys(SEED_ROUTES)) ctx.skipStep(path, "pending: seed-full milestone wiring");
+    const s = await seeded(ctx);
+    if ("skip" in s) {
+      ctx.log.info("seed-coverage: skipped", { reason: s.skip });
+      for (const path of Object.keys(SEED_ROUTES)) ctx.skipStep(path, s.skip);
+      return;
+    }
+    const { store, password } = s;
+    const p = ctx.platform;
+    const byLogin = new Map<string, [string, SeedRoute][]>();
+    for (const [path, route] of Object.entries(SEED_ROUTES))
+      byLogin.set(route.as, [...(byLogin.get(route.as) ?? []), [path, route]]);
+    ctx.metric("seed-coverage.logins", loginsOf(SEED_ROUTES).length);
+
+    let failed = 0;
+    for (const [as, routes] of byLogin) {
+      const session = await WebSession.open({
+        fleet: p.fleet,
+        engine: "chromium",
+        webUrl: ctx.env.HARNESS_WEB_URL,
+        probeScript: "",
+        label: `seed-${as}`,
+        log: ctx.log,
+      });
+      ctx.defer(() => session.close());
+      if (as !== "anonymous") {
+        const user = store.users.find((u) => u.handle === as);
+        ctx.assert(`the seed made ${as}`, user !== undefined);
+        if (!user) continue;
+        await ctx.step(`${as}: sign in through the web UI`, async () => {
+          const page = await session.goto(ROUTES.signin);
+          await signInViaUi(page, { email: user.email, password }, UI_TIMEOUT_MS, ctx.signal);
+          await byTestId(page, T.navUser).first().waitFor({ timeout: UI_TIMEOUT_MS });
+        });
+      }
+      const page = await session.page();
+      for (const [path, route] of routes) {
+        const resolved = resolveSeedRoute(path, route, store);
+        if (!resolved.ok) {
+          // A route that should show data and has no value to visit with is a seed gap.
+          if (route.expectData) failed += ctx.check(`${path} as ${as}`, false, { missing: resolved.missing }) ? 0 : 1;
+          else ctx.skipStep(`${path} as ${as}`, `no ${resolved.missing}`);
+          continue;
+        }
+        const seen = await visit(page, resolved.url, ctx.env.HARNESS_API_URL, ctx.env.HARNESS_WEB_URL);
+        const problems = visitProblems(route, seen);
+        const ok = ctx.check(`${path} as ${as}`, problems.length === 0, {
+          url: reportUrl(new URL(resolved.url, ctx.env.HARNESS_WEB_URL).toString()),
+          expectData: route.expectData,
+          problems,
+        });
+        if (!ok) failed++;
+      }
+    }
+    ctx.metric("seed-coverage.routes", Object.keys(SEED_ROUTES).length);
+    ctx.metric("seed-coverage.failed", failed);
   },
 });

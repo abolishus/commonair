@@ -13,10 +13,14 @@ import {
   W3_STACK_SHARDS,
   SHARD_TIMEOUT_MIN,
   fullScenarioArg,
+  harnessCmd,
   infraUpCmd,
   phases,
+  seedRun,
+  seedStack,
   selectGroups,
   shardError,
+  stackFlags,
   steps,
   w3Stack,
 } from "../verify.ts";
@@ -83,6 +87,34 @@ describe("steps", () => {
     for (const shard of ["full:relay", "full:long", "full:notify", "full:captions", "full:rest", "full:bot", ""])
       expect(w3Stack(shard, [])).toEqual([]);
     expect(w3Stack("", ["trust-safety", "e2e-relay", "channel-bot"])).toEqual([]);
+  });
+
+  // seed-full milestone wiring: the seed fills every feature's tables, so its stack has every override.
+  test("only the seed shard (or the seed-coverage scenario) seeds, on the whole override stack", () => {
+    expect(Object.keys(FULL_SHARDS)).toContain("seed");
+    expect(seedRun("full:seed", [])).toBe(true);
+    expect(seedRun("", ["seed-coverage"])).toBe(true);
+    for (const shard of ["full", "full:rest", "full:w3", "full:captions", ""])
+      expect(seedRun(shard, []), shard).toBe(false);
+    expect(seedStack("full:seed", [])).toEqual(["--captions", "--w3", "--seed"]);
+    expect(seedStack("full", [])).toEqual([]);
+    expect(
+      stackFlags(["--harness", "--multi"], ["--captions"], ["--w3"], seedStack("", ["seed-coverage", "captions"])),
+    ).toEqual(["--harness", "--multi", "--captions", "--w3", "--seed"]);
+  });
+
+  test("the seed's guard is opened for a seeding run only", () => {
+    expect(harnessCmd("full:seed", true)).toEqual([
+      "env",
+      "DEMO_SEED_FULL=true",
+      "bun",
+      "harness/src/cli.ts",
+      "run",
+      "full:seed",
+    ]);
+    expect(harnessCmd("full:rest", false)).toEqual(["bun", "harness/src/cli.ts", "run", "full:rest"]);
+    // This test runs without --full or --scenario: no seed env step.
+    expect(steps.find((s) => s.name === "seed env")?.when?.()).toBe(false);
   });
 
   // Review of that fix (HIGH): on a fresh volume, infra up's migrate seeded default governance
@@ -216,11 +248,15 @@ describe("CI verify jobs", () => {
       ]);
   });
 
-  // Batch 6 decision (c): only the captions shard runs whisper, so only it fetches the weights.
-  test("only the captions shard fetches the captions weights", () => {
+  // Batch 6 decision (c): only the captions shard runs whisper, so only it fetches the weights;
+  // the seed shard's stack carries every override, whisper included (docs/testing/seeding.md).
+  test("only the captions and seed shards fetch the captions weights", () => {
     const harnessSetup = ci.jobs.harness.steps.find((s: { uses?: string }) => s.uses?.includes("actions/setup")).with;
-    expect(harnessSetup["captions-model"]).toBe("${{ matrix.shard == 'captions' && 'true' || 'false' }}");
+    expect(harnessSetup["captions-model"]).toBe(
+      "${{ (matrix.shard == 'captions' || matrix.shard == 'seed') && 'true' || 'false' }}",
+    );
     expect(Object.keys(FULL_SHARDS)).toContain("captions");
+    expect(Object.keys(FULL_SHARDS)).toContain("seed");
     for (const g of groups) expect(g["captions-model"] ?? "false").toBe("false");
     expect(setup.inputs["captions-model"].default).toBe("false");
   });
