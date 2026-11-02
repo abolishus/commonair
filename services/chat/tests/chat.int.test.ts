@@ -236,6 +236,16 @@ describe("rules across instances", () => {
   });
 
   test("regex filters run in the filter worker; stored patterns the validator refuses are skipped", async () => {
+    // Warm the filter workers first, in another room with its own set: a cold worker on a slow
+    // runner holds the message (time budget or queue wait), and a timeout quarantines its set.
+    const warm = await room();
+    await t.db
+      .insert(schema.wordFilters)
+      .values({ channelId: warm.ch.id, pattern: "\\bwarm\\b", isRegex: true, action: "block" });
+    const warmer = await connect(a, warm.viewer.id);
+    await warmer.join(warm.ch.slug);
+    await eventually(async () => (await warmer.say(warm.ch.slug, `ready ${Math.random()}`)).notice === null);
+
     const { viewer, ch } = await room();
     await t.db.insert(schema.wordFilters).values([
       { channelId: ch.id, pattern: "\\bspam\\d+\\b", isRegex: true, action: "block" },
