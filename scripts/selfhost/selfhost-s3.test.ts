@@ -288,10 +288,17 @@ const envOf = (h: Host) =>
       .map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1)]),
   );
 const installedUnits = (h: Host) => readdirSync(join(h.home, ".config/containers/systemd")).sort();
-// Captions are off here, so the release's whisper unit is never installed (selfhost-sh-captions).
+// Captions are off here, so the release's whisper unit is never installed (selfhost-sh-captions),
+// and seed mode is closed, so neither are its units (selfhost-sh-seed-mode).
+const NOT_INSTALLED = new Set([
+  "commonair-whisper.container",
+  "commonair-stripe-mock.container",
+  "commonair-mailpit.container",
+  "commonair-seed-harness.container",
+]);
 const releaseUnits = (h: Host) =>
   readdirSync(join(h.home, "commonair/quadlet"))
-    .filter((f) => f !== "commonair-whisper.container")
+    .filter((f) => !NOT_INSTALLED.has(f))
     .sort();
 const expectOk = (r: { code: number; out: string; err: string }) => expect(r.code, `${r.out}\n${r.err}`).toBe(0);
 const exampleKeys = readFileSync(join(ROOT, ".env.example"), "utf8")

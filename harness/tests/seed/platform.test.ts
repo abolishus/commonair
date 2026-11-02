@@ -408,6 +408,24 @@ describe("local peers only", () => {
     expect(TWITCH_MOCK_PORT).toBe(4791);
   });
 
+  test("staging seed mode points the stack at the mock by the harness container's name (ADR 0040)", () => {
+    const sh = readFileSync(new URL("../../../scripts/selfhost.sh", import.meta.url), "utf8");
+    const host = /^SEED_HARNESS_HOST=(\S+)$/m.exec(sh)?.[1];
+    expect(host).toBe("seed-harness");
+    const unit = readFileSync(
+      new URL("../../../infra/quadlet/commonair-seed-harness.container", import.meta.url),
+      "utf8",
+    );
+    // The mock's public host is HARNESS_WEBHOOK_HOST, which the harness unit sets to that name.
+    expect(unit).toContain(`\nEnvironment=HARNESS_WEBHOOK_HOST=${host}\n`);
+    const bases = twitchMockBases(host!);
+    const line = (k: string) => new RegExp(`^${k}=(.*)$`, "m").exec(sh)?.[1]?.replaceAll("$SEED_HARNESS_HOST", host!);
+    expect(line("TWITCH_API_BASE_URL")).toBe(bases.api);
+    expect(line("TWITCH_AUTH_BASE_URL")).toBe(bases.auth);
+    expect(line("TWITCH_IMAGE_HOSTS")).toBe(host);
+    for (const u of Object.values(bases)) expect(isLocalUrl(u, [host!])).toBe(true);
+  });
+
   test("the T0 fixture emote is never imported", () => {
     const offered = Object.keys(TWITCH_FIXTURE.emotes);
     const chosen = importableEmotes(offered);

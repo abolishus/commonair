@@ -97,7 +97,10 @@ describe("bundle contents", () => {
     const systemd = readdirSync(join(ROOT, "infra/systemd")).map((f) => `systemd/${f}`);
     // Every unit with an env file renders it from its key list at start (unit-env.ts).
     const keyLists = readdirSync(join(ROOT, "infra/selfhost/env")).map((f) => `infra/selfhost/env/${f}`);
-    expect(keyLists).toHaveLength(18);
+    expect(keyLists).toHaveLength(19);
+    // Staging seed mode's drop-ins (selfhost.sh seed-mode open copies them next to the units).
+    const seedMode = readdirSync(join(ROOT, "infra/selfhost/seed-mode")).map((f) => `infra/selfhost/seed-mode/${f}`);
+    expect(seedMode).toHaveLength(3);
     const expected = [
       "selfhost.sh",
       "release-manifest.json",
@@ -121,6 +124,10 @@ describe("bundle contents", () => {
       "scripts/selfhost/cgroup-reset.sh",
       "scripts/selfhost/render-env.sh",
       ...keyLists,
+      ...seedMode,
+      // The synthetic hash lists those drop-ins mount (never an instance's real ones).
+      "packages/moderation/fixtures/csam.pdq",
+      "packages/moderation/fixtures/ncii.pdq",
       "tools/init-env.js",
       "tools/fetch-model.js",
       "tools/.env.example",
@@ -160,8 +167,11 @@ describe("bundle contents", () => {
         "%h/.local/share/commonair/models/adamcodd-vit-base-nsfw-detector-8587de99-int8.onnx",
         "%h/.local/share/commonair/models/whisper-ggml-base-q5_1.bin",
         "%h/.config/commonair/irc-tls",
+        // Seed mode's harness (selfhost.sh seed-mode open creates it).
+        "%h/.local/share/commonair/seed-mode/reports",
       ]),
     );
+    expect(sh).toContain('mkdir -p "$SEED_DATA_DIR/reports"');
     // prepare_mounts: *.pdq → empty file, *.onnx and *.bin → fetch-model (moderation, captions),
     // anything else → directory.
     expect(sh).toMatch(/\*\.pdq\)/);

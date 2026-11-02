@@ -232,14 +232,14 @@ In order, it:
 Object storage is not reset: VODs and clips stay in the media bucket. They are harmless, and the
 next seed writes new ones.
 
-Then fill it with the full seed from a repository checkout whose `DATABASE_URL` reaches the
-instance's database (Postgres is not published on the host: run the harness on the `commonair`
-network, or forward a port) and whose `HARNESS_*_URL` point at the instance:
+Then fill it with the full seed. The seed needs test hooks, mocks and peers that a normal install
+does not have, so it runs in **staging seed mode**, from a harness container on the instance's
+own network. The commands, in order, are in [Seeding staging](../testing/seeding.md#seeding-staging):
+upgrade, `seed-mode open`, `reset-staging`, `seed-mode run`, `seed-mode coverage`, `seed-mode close`.
+Open seed mode before the reset: the reset's migrations apply seed mode's governance bootstrap.
 
-```sh
-DEMO_SEED_FULL=true bun harness/src/cli.ts seed full --confirm postgres:5432/commonair --scale medium
-```
+While seed mode is open, `upgrade` and `install --reinstall` refuse and name `seed-mode close`.
+Seed mode closes itself 6 hours after it opens at the latest (ADR 0040).
 
-`--confirm` is `DATABASE_URL`'s `host:port/database`, exactly. The full seed refuses a database
-that has any users, so skip `--base-seed` when you mean to run it: `--base-seed` is for a staging
-instance that only needs the basic demo accounts.
+The full seed refuses a database that has any users, so skip `--base-seed` when you mean to run it:
+`--base-seed` is for a staging instance that only needs the basic demo accounts.

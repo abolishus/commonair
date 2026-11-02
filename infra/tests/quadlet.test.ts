@@ -78,7 +78,8 @@ function seconds(span: string): number {
 describe("every container unit", () => {
   test("the expected set: services, one-shot jobs and the timer-driven certificate sync", () => {
     expect(oneShots.map(([n]) => n)).toEqual(["commonair-irc-cert", "commonair-migrate", "commonair-storage-init"]);
-    expect(longRunning.length).toBe(20);
+    // 20, plus staging seed mode's stripe-mock, Mailpit and seed harness (ADR 0040).
+    expect(longRunning.length).toBe(23);
   });
 
   // No exceptions: catatonit is bind-mounted from the host and static, so it runs in every
@@ -199,13 +200,14 @@ describe("one-shot jobs", () => {
 });
 
 describe("migrations run before anything that reads the schema", () => {
-  test("the schema users are the app services", () => {
+  test("the schema users are the app services (and seed mode's harness, which seeds as the app role)", () => {
     expect(schemaUsers.map(([n]) => n.replace(/^commonair-/, ""))).toEqual([
       "api",
       "chat",
       "irc",
       "media",
       "origin",
+      "seed-harness",
       "tracker",
       "web",
       "worker",

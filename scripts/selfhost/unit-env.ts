@@ -273,6 +273,20 @@ export const STATIC_UNITS: Record<string, StaticList> = {
     why: "packages/db/src/migrate.ts and infra/postgres/apply-app-role.ts (DATABASE_URL is a Podman secret)",
     keys: ["GOVERNANCE_BOOTSTRAP_JSON", "POSTGRES_APP_PASSWORD"],
   },
+  "seed-harness": {
+    why: "what `seed full` reads from the instance (harness/src/env.ts, and the instance values safety-io.ts, stripe.ts and seed/platform.ts fall back to); staging seed mode only",
+    keys: [
+      "AUTH_SECRET",
+      "DEMO_SEED_FULL",
+      "INTERNAL_API_SECRET",
+      "S3_ACCESS_KEY_ID",
+      "S3_BUCKET_MEDIA",
+      "S3_ENDPOINT",
+      "S3_REGION",
+      "S3_SECRET_ACCESS_KEY",
+      "STRIPE_WEBHOOK_SECRET",
+    ],
+  },
   valkey: {
     why: "the server's password, which its Exec= hands to valkey-server on stdin (VALKEY_URL is a Podman secret)",
     keys: ["VALKEY_PASSWORD"],
@@ -296,9 +310,18 @@ export const STATIC_UNITS: Record<string, StaticList> = {
 
 /**
  * Units without any env file: their images read nothing from the operator's file (whisper takes
- * its whole configuration as arguments; media holds its URL, WHISPER_URL).
+ * its whole configuration as arguments; media holds its URL, WHISPER_URL; seed mode's Mailpit and
+ * stripe-mock need no setting of the instance's).
  */
-export const NO_ENV_UNITS = ["loki", "otel-collector", "prometheus", "tempo", "whisper"] as const;
+export const NO_ENV_UNITS = [
+  "loki",
+  "mailpit",
+  "otel-collector",
+  "prometheus",
+  "stripe-mock",
+  "tempo",
+  "whisper",
+] as const;
 
 export const unitName = (unit: string) => `commonair-${unit}`;
 export const keysPath = (unit: string) => `${KEYS_DIR}/${unitName(unit)}.keys`;

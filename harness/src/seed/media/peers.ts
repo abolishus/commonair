@@ -62,10 +62,22 @@ export interface SeedRelay {
   stop(): Promise<void>;
 }
 
+/**
+ * The host the relay advertises (pure but for the interface lookup): `HARNESS_RELAY_HOST` when
+ * set, which staging seed mode sets to the harness container's name on the instance's network,
+ * else this machine's LAN IPv4, which the API container reaches on a local stack.
+ */
+export function seedRelayHost(
+  env: Pick<HarnessEnv, "HARNESS_RELAY_HOST">,
+  interfaces?: Parameters<typeof relayHost>[1],
+): string {
+  return relayHost(env.HARNESS_RELAY_HOST, interfaces);
+}
+
 /** streamer1 creates a relay, the harness runs it on the LAN address, and it registers as active. */
 export async function startRelay(
   owner: SignedInUser,
-  env: Pick<HarnessEnv, "HARNESS_API_URL">,
+  env: Pick<HarnessEnv, "HARNESS_API_URL" | "HARNESS_RELAY_HOST">,
   log: Logger,
   signal: AbortSignal,
 ): Promise<SeedRelay> {
@@ -76,7 +88,7 @@ export async function startRelay(
     {
       binary,
       api: env.HARNESS_API_URL,
-      host: relayHost(undefined),
+      host: seedRelayHost(env),
       port: await freePort(),
       dataDir,
       capacityMbps: 1000,

@@ -460,6 +460,16 @@ describe("render-env.sh", () => {
     "irc-cert": [],
     mediamtx: ["INTERNAL_API_SECRET"],
     migrate: ["POSTGRES_APP_PASSWORD"],
+    // Staging seed mode's harness (ADR 0040): the stack's session and internal secrets (it signs
+    // in, encrypts the Discord sink URLs and calls the test hooks), the seed's own webhook secret,
+    // and the media bucket's key (seed-media lists what it recorded). Never the evidence key.
+    "seed-harness": [
+      "AUTH_SECRET",
+      "INTERNAL_API_SECRET",
+      "S3_ACCESS_KEY_ID",
+      "S3_SECRET_ACCESS_KEY",
+      "STRIPE_WEBHOOK_SECRET",
+    ],
     valkey: ["VALKEY_PASSWORD"],
     postgres: [
       "AWS_ACCESS_KEY_ID",

@@ -230,3 +230,77 @@ Revenue charts, broadcast history, chat and song requests do spread across the h
   - `--base-seed` adds the `basic` seed instead, but `seed full` then refuses that database.
   - Media objects stay in the bucket. They are harmless, and the next seed writes new ones.
   - The steps are in `docs/self-hosting/upgrades.md`, "Resetting a staging instance".
+
+## Seeding staging
+
+Staging (`staging-stream.abolish.us`, the droplet `commonair-rc-test`) is a normal self-host install
+from signed releases. It has none of what the seed needs: test hooks, mocks, Mailpit, and peers the
+stack calls back. **Seed mode** turns them on for a few hours, runs the seed from a harness
+container on the instance's own network, and closes again (ADR 0040). The commands run on the
+droplet, as the `commonair` user.
+
+The instance must have `DEMO_SEED_FULL=true` in `~/.config/commonair/commonair.env` and live
+captions on (`install --captions`). Every command below that takes `--confirm` refuses, and
+changes nothing, unless it equals the instance's `PUBLIC_HOSTNAME` exactly.
+
+In order:
+
+```sh
+# 1. The release whose harness image matches the code you want to seed with.
+sh ~/commonair/selfhost.sh upgrade --version vX.Y.Z
+
+# 2. Open seed mode (6 hours at most; --hours shortens it).
+sh ~/commonair/selfhost.sh seed-mode open --confirm staging-stream.abolish.us
+
+# 3. A fresh database. Its migrations apply seed mode's governance bootstrap.
+sh ~/commonair/selfhost.sh reset-staging --confirm staging-stream.abolish.us
+
+# 4. The full seed, in the harness container.
+DEMO_SEED_PASSWORD='<at least 12 characters>' \
+  sh ~/commonair/selfhost.sh seed-mode run --confirm staging-stream.abolish.us --scale medium
+
+# 5. Optional: every route as its role.
+DEMO_SEED_PASSWORD='<the same password>' \
+  sh ~/commonair/selfhost.sh seed-mode coverage --confirm staging-stream.abolish.us
+
+# 6. Close seed mode. The seeded data stays.
+sh ~/commonair/selfhost.sh seed-mode close
+```
+
+- **Order:** open comes before the reset, because `GOVERNANCE_BOOTSTRAP_JSON` takes effect only at
+  a database's first migration, and seed-coop checks it (`preflightGovernance`).
+- **While it is open:**
+  - The API and the worker run every test hook, the scripted classifier with the synthetic hash
+    lists, and private-network outbound.
+  - Payments go to stripe-mock and all email goes to a Mailpit container. No demo address reaches
+    the real SMTP relay.
+  - Federation and the Twitch import talk only to the harness's own peers.
+  - `upgrade` and `install --reinstall` refuse, and say to run `seed-mode close` first.
+  - `selfhost.sh status` shows `seed mode: OPEN until <deadline>` and the seed-mode units.
+- **Its deadline:** a timer, `commonair-seed-mode-close.timer`, runs `seed-mode close` at the
+  deadline. `open` arms it before it changes anything, and stops, changing nothing, if it cannot.
+  It fires at boot if the host was down then. While it (or any close) runs, a second `close`
+  changes nothing, and `status` says seed mode is being closed. A run still going at the deadline stops
+  with the harness, and needs a reset before the next run.
+- **`run`:** runs `bun harness/src/cli.ts seed full` in `commonair-seed-harness`. It writes as the
+  app role, against `postgres:5432/commonair`. Its output streams to your terminal.
+  - Without `DEMO_SEED_PASSWORD`, the run makes up a password and prints it once at the end.
+  - The store report is `~/.local/share/commonair/seed-mode/reports/seed-store.json`, next to
+    `seed-coverage`'s reports.
+- **`close`:**
+  - It removes the block from `commonair.env` and restores exactly the values the block replaced:
+    federation, the Twitch import, payments and Stripe, SMTP, the cost model and the bootstrap.
+  - It removes stripe-mock, Mailpit, the harness, the drop-ins and the timer, then restarts.
+  - Giveaways, the watch gate, the surge guard and push stay on.
+  - Running it again does nothing.
+
+What `open` changes, so you can check it by hand:
+
+- **`commonair.env`:** one block between `# >>> staging seed mode` and `# <<< staging seed mode`.
+  The values it replaces are saved in `~/.local/state/commonair/seed-mode` (mode 0600).
+- **Drop-ins:** `~/.config/containers/systemd/commonair-{api,worker,media,seed-harness}.container.d/50-seed-mode.conf`.
+  They carry the synthetic hash lists, and for the API the harness's fixed address `10.89.42.12/32`
+  as a trusted proxy, so each simulated client gets its own rate-limit subject.
+- **Units:** `commonair-stripe-mock`, `commonair-mailpit` and `commonair-seed-harness`. They
+  publish nothing on the host.
+- **The timer:** `commonair-seed-mode-close.timer` and its service.

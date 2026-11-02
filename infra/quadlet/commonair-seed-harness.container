@@ -1,0 +1,88 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# The seed harness (staging seed mode only, ADR 0040): our harness image, idle until
+# `selfhost.sh seed-mode run` (or `coverage`) runs `seed full` in it with podman exec. selfhost.sh
+# installs this unit only while seed mode is open, and `seed-mode close` stops and removes it.
+#
+# It sits on the commonair network, so it reaches the API, Postgres (as the app role), MediaMTX,
+# Mailpit and stripe-mock by name, and the stack reaches the peers the seed starts (webhook and push
+# sinks, the ActivityPub peer, the Twitch mock on 4791, the RTMP sink, the member relay) at
+# `seed-harness`. It publishes nothing. Its fixed address 10.89.42.12, in the network's reserved
+# lower half, is the one the API's seed-mode drop-in adds to TRUSTED_PROXY_CIDRS, so the harness's
+# forwarding proxy can give each simulated client its own address (the auth rate limit is per
+# address). `seed-mode open` adds a drop-in that maps PUBLIC_HOSTNAME to this host (presigned
+# uploads, playback and the web app go through Caddy, as a browser's would) and sets HARNESS_WEB_URL.
+[Unit]
+Description=CommonAir seed harness (seed mode)
+# Never give up on a crash loop: RestartSteps below throttles it instead (ADR 0023 §10).
+StartLimitIntervalSec=0
+# The seed reads and writes the schema: never against one a failed migration left behind.
+Requires=commonair-migrate.service
+After=commonair-migrate.service
+Wants=commonair-api.service
+After=commonair-api.service
+Wants=commonair-stripe-mock.service
+After=commonair-stripe-mock.service
+Wants=commonair-mailpit.service
+After=commonair-mailpit.service
+
+[Container]
+Image=localhost/commonair/harness:latest
+ContainerName=commonair-seed-harness
+# catatonit as PID 1 reaps orphans and forwards signals (ADR 0023 §10).
+RunInit=true
+Network=commonair.network
+NetworkAlias=seed-harness
+IP=10.89.42.12
+# Only the keys of commonair.env the seed needs (see the ExecStartPre=): the session and
+# internal secrets, the webhook secret it signs stripe-mock's events with, the media bucket's key.
+EnvironmentFile=%h/.config/commonair/unit-env/commonair-seed-harness.env
+Environment=HARNESS_API_URL=http://api:3001
+Environment=HARNESS_ORIGIN_URL=http://origin:3003
+Environment=HARNESS_MAILPIT_URL=http://mailpit:8025
+Environment=HARNESS_RTMP_URL=rtmp://mediamtx:1935
+Environment=HARNESS_WHIP_URL=http://mediamtx:8889
+Environment=HARNESS_IRC_WS_URL=ws://irc:6680
+Environment=HARNESS_CHAT_HEALTH_URL=http://chat:3002/healthz
+Environment=HARNESS_IRC_HEALTH_URL=http://irc:6681/healthz
+Environment=HARNESS_WORKER_HEALTH_URL=http://worker:3005/healthz
+Environment=HARNESS_STRIPE_MOCK_URL=http://stripe-mock:12111
+Environment=HARNESS_TRACKER_URL=ws://tracker:8000
+# How the stack's containers reach the peers the seed starts in here, and the relay's address.
+Environment=HARNESS_WEBHOOK_HOST=seed-harness
+Environment=HARNESS_RELAY_HOST=seed-harness
+Environment=HARNESS_REPORT_DIR=/reports
+# The app role, as the services connect (ADR 0004), never the owner.
+Secret=commonair-database-url,type=env,target=DATABASE_URL
+# The store report (seed-store.json) and the coverage reports, for the operator.
+Volume=%h/.local/share/commonair/seed-mode/reports:/reports:Z
+Exec=sleep infinity
+HealthCmd=CMD bun --version
+HealthInterval=30s
+HealthTimeout=5s
+HealthRetries=3
+HealthStartPeriod=10s
+# An unhealthy container is killed, and Restart= below starts a fresh one.
+HealthOnFailure=kill
+# Dependents start only once this container reports healthy.
+Notify=healthy
+
+[Service]
+# Leaves the cgroup as the next start needs it: RestartMode=direct skips systemd's own cleanup
+# (scripts/selfhost/cgroup-reset.sh says why).
+ExecStopPost=-/bin/sh %h/commonair/scripts/selfhost/cgroup-reset.sh
+# Renders that env file from commonair.env, so an edit there applies on the next restart. It
+# fails closed: an unreadable commonair.env leaves no env file, and the unit does not start.
+ExecStartPre=/bin/sh %h/commonair/scripts/selfhost/render-env.sh %h/commonair/infra/selfhost/env/commonair-seed-harness.keys %h/.config/commonair/commonair.env %h/.config/commonair/unit-env/commonair-seed-harness.env
+Restart=always
+RestartMode=direct
+RestartSec=5
+# Back off 5 s → 5 min over ten consecutive restarts, so a crash loop is throttled.
+RestartSteps=10
+RestartMaxDelaySec=5min
+# The image is large (browsers, Go, ffmpeg); a first start may still be unpacking it.
+TimeoutStartSec=600
+
+[Install]
+WantedBy=default.target

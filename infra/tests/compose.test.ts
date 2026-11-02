@@ -150,6 +150,7 @@ describe("compose.yaml: images", () => {
       "infra/containers/service.Containerfile",
       "infra/containers/probe.Containerfile",
       "infra/containers/whisper.Containerfile",
+      "infra/containers/harness.Containerfile",
     ]) {
       for (const m of read(file).matchAll(/^ARG [A-Z_]+_IMAGE=(\S+)$/gm)) assertPinned(m[1]!, file);
       for (const m of read(file).matchAll(/^FROM (\S+)/gm))
@@ -398,10 +399,12 @@ describe("Quadlet mirror", () => {
   // Compose's garage-init is the units' storage-init, which also checks an external store.
   const unitOf = (service: string) => (service === "garage-init" ? "storage-init" : service);
   // Dev/test-only services have no production unit. whisper (captions) has one, which selfhost.sh
-  // installs only with --captions, as compose runs it only in the `captions` profile.
-  const DEV_ONLY = new Set(["mailpit", "mock-rtmp", "stripe-mock"]);
-  // Production-only units with no compose service: the timer-driven IRC certificate sync.
-  const QUADLET_ONLY = new Set(["irc-cert"]);
+  // installs only with --captions, as compose runs it only in the `captions` profile; Mailpit and
+  // stripe-mock have one, which selfhost.sh installs only while staging seed mode is open (ADR 0040).
+  const DEV_ONLY = new Set(["mock-rtmp"]);
+  // Production-only units with no compose service: the timer-driven IRC certificate sync, and seed
+  // mode's harness (compose runs the harness on the host instead).
+  const QUADLET_ONLY = new Set(["irc-cert", "seed-harness"]);
   // A host path bind-mounted by two or more units carries the shared SELinux label `z`: the
   // private `Z` relabels it per container, so the last one to start locks the others out.
   const bindSources = Object.values(units).flatMap((u) =>

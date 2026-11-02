@@ -153,7 +153,8 @@ describe("the services believe X-Forwarded-For only from Caddy (and the API also
 
   test("Caddy and web have fixed addresses, outside the range Podman hands out", () => {
     expect(subnet).toBe("10.89.42.0/24");
-    expect(fixed).toEqual({ caddy: "10.89.42.10", web: "10.89.42.11" });
+    // And staging seed mode's harness (ADR 0040), which only the API's seed-mode drop-in trusts.
+    expect(fixed).toEqual({ caddy: "10.89.42.10", web: "10.89.42.11", "seed-harness": "10.89.42.12" });
     for (const [name, ip] of Object.entries(fixed)) {
       expect(inRange(ip, subnet), name).toBe(true);
       expect(inRange(ip, dynamic), name).toBe(false);
@@ -172,6 +173,18 @@ describe("the services believe X-Forwarded-For only from Caddy (and the API also
       expect(cidrs).toEqual(want);
     },
   );
+
+  test("seed mode adds exactly the harness's /32 to the API's list, nothing else trusts it", () => {
+    const dropin = read("infra/selfhost/seed-mode/commonair-api.conf");
+    expect(values(dropin, "Environment").filter((e) => e.startsWith("TRUSTED_PROXY_CIDRS="))).toEqual([
+      `TRUSTED_PROXY_CIDRS=${fixed.caddy}/32,${fixed.web}/32,${fixed["seed-harness"]}/32`,
+    ]);
+    for (const u of ["worker", "media"])
+      expect(read(`infra/selfhost/seed-mode/commonair-${u}.conf`)).not.toContain("TRUSTED_PROXY_CIDRS");
+    // The harness publishes nothing and has no route through Caddy.
+    expect(values(unit("seed-harness"), "PublishPort")).toEqual([]);
+    expect(caddyfile).not.toContain("seed-harness");
+  });
 });
 
 describe("Valkey requires a password", () => {

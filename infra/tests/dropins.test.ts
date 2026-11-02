@@ -9,7 +9,8 @@
  * install_units in scripts/selfhost.sh replaces every unit file on each install and upgrade; these
  * tests run that real function (cut out of the script, with systemctl stubbed) twice, as an install
  * and an upgrade to a release that dropped a unit, and check that the drop-ins stay and only the
- * dropped unit goes.
+ * dropped unit goes. While staging seed mode is open it refuses (it would drop the close timer);
+ * closed, it removes a seed-mode drop-in left behind (ADR 0040).
  */
 import {
   cpSync,
@@ -35,14 +36,18 @@ function shFunction(name: string): string {
   if (!m) throw new Error(`no function ${name} in scripts/selfhost.sh`);
   return m[0];
 }
-const FUNCTIONS = ["info", "env_get", "captions_on", "unit_in_mode", "install_units"].map(shFunction).join("");
+const FUNCTIONS = ["say", "die", "info", "env_get", "captions_on", "seed_mode_open", "unit_in_mode", "install_units"]
+  .map(shFunction)
+  .join("");
 
 interface Host {
   home: string;
   quadlet: string;
   systemd: string;
+  seedState: string;
   calls: () => string[];
   install: (release: string) => void;
+  run: (release: string) => { code: number; err: string };
 }
 
 function host(): Host {
@@ -58,22 +63,29 @@ function host(): Host {
     "set -eu\n" +
     `QUADLET_DIR='${quadlet}'\nSYSTEMD_DIR='${systemd}'\nUNIT_ENV_DIR='${home}/.config/commonair/unit-env'\n` +
     "STORAGE_MODE=garage\n" +
-    // Captions on (env file below), so every unit of the release is installed.
-    `ENV_FILE='${home}/commonair.env'\nWHISPER_INTERNAL_URL=http://whisper:8080\n` +
+    // Captions on (env file below), so every unit of the release but seed mode's is installed.
+    `ENV_FILE='${home}/commonair.env'\nWHISPER_INTERNAL_URL=http://whisper:8080\nSEED_STATE='${home}/seed-mode'\n` +
+    "SEED_DROPIN=50-seed-mode.conf\n" +
     FUNCTIONS +
     'install_units "$1"\n';
+  const run = (release: string) => {
+    const r = Bun.spawnSync(["sh", "-c", script, "sh", release], {
+      env: { HOME: home, PATH: `${bin}:${process.env.PATH ?? ""}` },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    return { code: r.exitCode, err: r.stderr.toString() };
+  };
   return {
     home,
     quadlet,
     systemd,
+    seedState: join(home, "seed-mode"),
     calls: () => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : []),
+    run,
     install: (release) => {
-      const r = Bun.spawnSync(["sh", "-c", script, "sh", release], {
-        env: { HOME: home, PATH: `${bin}:${process.env.PATH ?? ""}` },
-        stdout: "pipe",
-        stderr: "pipe",
-      });
-      expect(r.exitCode, r.stderr.toString()).toBe(0);
+      const r = run(release);
+      expect(r.code, r.err).toBe(0);
     },
   };
 }
@@ -88,6 +100,14 @@ function release(parent: string, name: string, drop: string[] = []): string {
 }
 
 const files = (dir: string) => readdirSync(dir).sort();
+/** Staging seed mode's units, installed only by seed-mode open. */
+const SEED_UNITS = [
+  "commonair-stripe-mock.container",
+  "commonair-mailpit.container",
+  "commonair-seed-harness.container",
+];
+/** The release's container units an install puts in place (seed mode closed). */
+const installed = (rel: string) => files(join(rel, "quadlet")).filter((f) => !SEED_UNITS.includes(f));
 const GPU = "[Container]\nAddDevice=/dev/dri/renderD128\n";
 const BACKUP = "[Service]\nEnvironment=WALG_DELTA_MAX_STEPS=3\n";
 
@@ -101,7 +121,7 @@ describe("install_units keeps operator drop-ins", () => {
       const h = host();
       const v1 = release(h.home, "v1");
       h.install(v1);
-      expect(files(h.quadlet)).toEqual(files(join(v1, "quadlet")));
+      expect(files(h.quadlet)).toEqual(installed(v1));
       expect(files(h.systemd)).toEqual(files(join(v1, "systemd")));
 
       // The operator's customisations, after the install.
@@ -117,7 +137,7 @@ describe("install_units keeps operator drop-ins", () => {
       expect(readFileSync(join(gpu, "gpu.conf"), "utf8")).toBe(GPU);
       expect(readFileSync(join(backup, "override.conf"), "utf8")).toBe(BACKUP);
       // Exactly the new release's units plus the drop-ins: the dropped ones are gone.
-      expect(files(h.quadlet)).toEqual([...files(join(v2, "quadlet")), "commonair-media.container.d"].sort());
+      expect(files(h.quadlet)).toEqual([...installed(v2), "commonair-media.container.d"].sort());
       expect(files(h.systemd)).toEqual([...files(join(v2, "systemd")), "commonair-backup.service.d"].sort());
       expect(existsSync(join(h.quadlet, "commonair-tracker.container"))).toBe(false);
       expect(existsSync(join(h.systemd, "commonair-irc-cert.timer"))).toBe(false);
@@ -171,7 +191,7 @@ describe("install_units keeps operator drop-ins", () => {
       symlinkSync(gone, join(h.quadlet, "commonair-media.container.d"));
       symlinkSync(gone, join(h.systemd, "commonair-backup.service.d"));
       h.install(v1);
-      expect(files(h.quadlet)).toEqual(files(join(v1, "quadlet")));
+      expect(files(h.quadlet)).toEqual(installed(v1));
       expect(files(h.systemd)).toEqual(files(join(v1, "systemd")));
     },
     TIMEOUT,
@@ -188,12 +208,57 @@ describe("install_units keeps operator drop-ins", () => {
       symlinkSync(elsewhere, join(h.quadlet, "commonair-old.container"));
       const v1 = release(h.home, "v1");
       h.install(v1);
-      expect(files(h.quadlet)).toEqual(files(join(v1, "quadlet")));
+      expect(files(h.quadlet)).toEqual(installed(v1));
       expect(readFileSync(join(h.quadlet, "commonair-media.container"), "utf8")).toBe(
         readFileSync(join(v1, "quadlet/commonair-media.container"), "utf8"),
       );
       // The hand-made file the links pointed at is left alone.
       expect(existsSync(elsewhere)).toBe(true);
+    },
+    TIMEOUT,
+  );
+});
+
+describe("install_units and staging seed mode", () => {
+  test(
+    "refuses while seed mode is open, changing nothing (its close timer would go)",
+    () => {
+      const h = host();
+      const v1 = release(h.home, "v1");
+      h.install(v1);
+      const timer = join(h.systemd, "commonair-seed-mode-close.timer");
+      writeFileSync(timer, "[Timer]\n");
+      writeFileSync(h.seedState, "DEADLINE=0\n");
+      const before = files(h.systemd);
+      writeFileSync(join(h.home, "systemctl.log"), "");
+      const r = h.run(v1);
+      expect(r.code).toBe(1);
+      expect(r.err).toContain("install_units refused: staging seed mode is open");
+      expect(r.err).toContain("seed-mode close");
+      expect(files(h.systemd)).toEqual(before);
+      expect(existsSync(timer)).toBe(true);
+      expect(h.calls().filter((c) => c !== "")).toEqual([]);
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "closed, a seed-mode drop-in left behind goes; an operator's drop-in next to it stays",
+    () => {
+      const h = host();
+      const v1 = release(h.home, "v1");
+      h.install(v1);
+      const api = join(h.quadlet, "commonair-api.container.d");
+      const media = join(h.quadlet, "commonair-media.container.d");
+      mkdirSync(api);
+      mkdirSync(media);
+      writeFileSync(join(api, "50-seed-mode.conf"), "[Container]\nEnvironment=TRUSTED_PROXY_CIDRS=10.89.42.12/32\n");
+      writeFileSync(join(media, "50-seed-mode.conf"), "[Container]\n");
+      writeFileSync(join(media, "gpu.conf"), GPU);
+      h.install(v1);
+      expect(existsSync(api)).toBe(false);
+      expect(files(media)).toEqual(["gpu.conf"]);
+      expect(files(h.quadlet)).toEqual([...installed(v1), "commonair-media.container.d"].sort());
     },
     TIMEOUT,
   );
