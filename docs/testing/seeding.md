@@ -1,0 +1,231 @@
+<!--
+SPDX-FileCopyrightText: 2026 CommonAir contributors
+SPDX-License-Identifier: CC-BY-SA-4.0
+-->
+
+# Seeding demo data
+
+CommonAir has two demo seeds. The full one fills every table and every web route for every
+role, at a volume that exercises pagination, search and long chat logs. It writes rows the
+database never lets anyone delete, so the only way to remove it is to reset the database.
+
+| Tier    | Command                                                       | Where                  | Removed by                     |
+| ------- | ------------------------------------------------------------- | ---------------------- | ------------------------------ |
+| `basic` | `bun run --filter @commonair/db demo:seed`                    | any instance           | `demo:clear` (row by row)      |
+| `full`  | `bun harness/src/cli.ts seed full --confirm <db> --scale <s>` | local and staging only | a database reset (see "Reset") |
+
+The plan and its decisions are in `.claude/briefs/seed-full/README.md`. Each unit's brief is next to it.
+
+## The guard
+
+`seed full` refuses unless all three of these hold:
+
+1. **`DEMO_SEED_FULL=true`** in the shell that runs it. The worker needs it too, so that points
+   accrue on demo accounts; the seed overlay sets it there.
+2. **`--confirm host:port/db`** names the target database exactly, without credentials. For the
+   local stack that is `localhost:5432/commonair`.
+3. **The database has no users at all**, demo users included.
+
+The seed writes ledger postings, votes, moderation cases, audit rows and other append-only rows
+(ADR 0004), so a second run, or a run on top of the `basic` seed, is refused. If a run fails
+halfway, reset the database and start again.
+
+## The seed stack
+
+Features that ship off are seeded on (decision e), so the seed needs every harness override plus
+its own:
+
+```bash
+bun scripts/init-env.ts --merge --seed
+bun scripts/fetch-model.ts --model captions
+bun scripts/infra.ts stack --harness --multi --captions --w3 --seed
+```
+
+- **`init-env --merge --seed`** keeps every existing value and fills an empty
+  `STRIPE_WEBHOOK_SECRET`. The harness signs stripe-mock's webhook events with that secret.
+  `stack --seed` refuses while it, `INTEGRITY_SIGNING_KEY`, `PORTABILITY_SIGNING_KEY` or the
+  VAPID pair is empty. None of them is ever committed.
+- **`--seed`** layers `harness/compose.seed.yaml` last and starts stripe-mock (the `stripe`
+  profile). The overlay sets:
+  - `PAYMENTS_PROVIDER=stripe` against stripe-mock;
+  - `DEMO_SEED_FULL=true` on the worker;
+  - a non-zero `INFRA_COST_MODEL`. Its rates are far above real ones, so the few MB a seeded
+    recording moves still cost whole cents.
+- The other overrides it needs:
+  - **the harness overrides:** every test hook (`COOP_`, `MODERATION_`, `OPS_` and
+    `INTERACT_TEST_HOOKS`), the E5 governance bootstrap, the scripted classifier with the
+    synthetic hash lists, EventSub's insecure callbacks, push, and the surge guard;
+  - **`--captions`:** the whisper sidecar;
+  - **`--w3`:** giveaways, the Twitch import against the harness mock, and federation against the
+    in-harness ActivityPub peer.
+
+Everything the stack calls while the seed runs is a local peer or a mock. Rows that point at a peer
+(webhook deliveries, federation followers, Discord sinks) stay behind after the seed stops that
+peer, and fail later. That is expected.
+
+The harness host needs `ffmpeg` (libx264, aac, RTMP listen), the Go toolchain (seed-media builds
+the relay from `relay/`) and the Playwright browsers (`bun run --filter @commonair/harness browsers`).
+
+## Running it
+
+On a freshly reset local database:
+
+```bash
+DEMO_SEED_FULL=true DEMO_SEED_PASSWORD='<at least 12 characters>' bun harness/src/cli.ts seed full --confirm localhost:5432/commonair --scale small
+```
+
+- **Password:** without `DEMO_SEED_PASSWORD`, the run makes one up and prints it at the end.
+- **`--seed <n>`:** picks the content (default 1). The same seed and scale give the same names,
+  counts and states; ids and real-time timestamps differ.
+- **Output:** each unit prints its row count, its time and its notes. At the end the run writes
+  the store (every account, channel and published key) to `harness/reports/seed-store.json`.
+  Nothing personal or secret goes into that file.
+
+| Scale    | Streamers | Viewers | Chat lines | History  | Use                              |
+| -------- | --------- | ------- | ---------- | -------- | -------------------------------- |
+| `small`  | 10        | 50      | 5 k        | 90 days  | local click-through (default)    |
+| `medium` | 100       | 2 k     | 200 k      | 365 days | staging                          |
+| `large`  | 1 k       | 20 k    | 2 M        | 730 days | pagination and query-plan checks |
+
+At `small` the whole run takes roughly 20–25 minutes. Several units really go live, record, encode
+and wait for the worker; the slowest are seed-media at about 8 minutes and seed-coop at about 5.
+The run order is: social, then interact, money and media, then safety, then coop, then platform.
+
+### `seed live`
+
+```bash
+DEMO_SEED_FULL=true DEMO_SEED_PASSWORD='…' bun harness/src/cli.ts seed live --channels 3 --duration 30m
+```
+
+After `seed full`, this keeps K seeded channels streaming a test pattern while harness chat
+clients talk. That gives the live surfaces something to show: home, Calm Chat, surge guard, data
+mode, embeds and overlays. Stop it with Ctrl-C, or let `--duration` run out.
+
+## Checking it: `seed-coverage`
+
+The `seed-coverage` scenario signs in as each route's login and visits every route in
+`harness/src/seed/routes.ts` (`SEED_ROUTES`). A unit test keeps that list equal to the generated
+route tree.
+
+- **Every route fails** on the router's error boundary or any 5xx.
+- **A route marked `expectData` also fails** on any `<EmptyState>` or any 4xx, from the document or
+  from the API.
+
+It runs in one of three ways:
+
+- **On a database with no users and `DEMO_SEED_FULL=true`:** it runs `seed full --scale small`
+  itself, then visits every route. CI does this in its own `seed` shard, on a fresh stack with
+  every override. The shard is path-filtered on pushes and runs every night.
+- **After a separate `seed full`:** it reads `harness/reports/seed-store.json` and signs in with
+  `DEMO_SEED_PASSWORD`:
+  ```bash
+  DEMO_SEED_PASSWORD='…' bun harness/src/cli.ts run seed-coverage
+  ```
+- **On any other database** (an unsharded `full`, whose other scenarios made users): it skips
+  every route and says why.
+
+To run the shard as CI does:
+
+```bash
+bun run verify --full --only harness --shard seed
+```
+
+## Fixed logins
+
+Every account is `demo_<handle>@demo-seed.invalid` with the shared password. Bulk accounts are
+`demo_s<n>` (streamers) and `demo_v<n>` (viewers).
+
+| Login       | Role      | What it shows                                                                                                    |
+| ----------- | --------- | ---------------------------------------------------------------------------------------------------------------- |
+| `admin`     | admin     | Every `/admin` queue has items: moderation, appeals, integrity, DMCA, egress, incidents, apps, co-op, federation |
+| `treasurer` | treasurer | `/treasury`: fraud flags, costs, reconciliation, treasury postings                                               |
+| `legal`     | legal     | `/admin/legal`: T0 cases and evidence, NCMEC drafts, a legal hold, DMCA                                          |
+| `mod`       | moderator | The platform moderation queue and the appeals to decide                                                          |
+| `streamer1` | user      | The full studio: every panel, the bot, overlays, relays, revenue, captions, analytics, crew, move                |
+| `streamer2` | user      | A mid-size channel: subscriptions and tips, polls, raids received, a live prediction                             |
+| `streamer3` | user      | A new channel: first broadcast, few followers, a finished Twitch import on `/import`                             |
+| `chanmod`   | user      | Channel moderator and VIP on streamer1, editor on streamer2                                                      |
+| `viewer1`   | user      | Follows, subscriptions, tips, points, inbox, push, connected apps, a data export                                 |
+| `viewer2`   | user      | A timeout, a report filed, an appeal pending, a copyright notice                                                 |
+| `banned`    | user      | Suspended through the API, with an enforcement statement and an appeal                                           |
+| `member1`   | user      | Co-op member: votes cast, a drafted proposal, a patronage allocation, opted in to the jury                       |
+| `council1`  | user      | Creator council member: council responses, an election candidacy                                                 |
+| `council2`  | user      | The second council member, for quorum and tallies                                                                |
+| `developer` | user      | OAuth apps, EventSub subscriptions, webhook deliveries, a bot app                                                |
+| `newbie`    | user      | A fresh account: every empty state stays visible for comparison                                                  |
+| `bot1`      | user      | streamer1's chat bot (a channel moderator through the channel-bot path)                                          |
+
+## Known gaps
+
+**Tables still empty.** Each unit lists these in `pending`, and the run prints them at the end.
+Each needs a test hook first:
+
+- **seed-money: `payouts` and `split_writeoff_proposals`.** Creator holds last 7 days, and nothing
+  can age them yet. So `/treasury` has no paid or pending payouts, and no split write-off exists.
+- **seed-coop: `membership_shares`.** `buyShare` works only with `PAYMENTS_PROVIDER=manual`, and the
+  seed stack runs stripe-mock.
+- **seed-safety: `evidence_audit_runs`.** The evidence audit runs daily at 03:17 UTC and has no
+  ops-tick hook yet.
+
+**Today-only history.** Protected rows keep the real time they were written: the ledger, votes,
+moderation, giveaways and predictions. Only plain tables are backdated. So these screens show
+today's history only:
+
+- the admin queues and `/transparency`;
+- `/settings/appeals`;
+- the points history;
+- predictions.
+
+Revenue charts, broadcast history, chat and song requests do spread across the history window.
+
+**Other notes the units report:**
+
+- **seed-interact:** points come from real worker accrual over verified `playback_sessions` that
+  seed-interact inserts (user agent `CommonAir-demo-seed/1 (seed-interact)`). Its live window
+  rotates streamer1's and streamer2's stream keys.
+- **seed-money:**
+  - every payment settles through signed stripe-mock webhooks;
+  - a lapsed subscription's `current_period_start` comes before the row's own `created_at`;
+  - on the manual adapter, `past_due` and `expired` land up to 5 minutes after the seed.
+- **seed-coop:**
+  - `governance_applications` holds applied rows only, because the settings trigger writes it;
+  - every qualifying subscriber becomes a member, because membership sync enrols them all.
+- **seed-safety:**
+  - a fully dismissed T0 case needs a second legal reviewer, and the fixed logins have only one;
+  - the restored DMCA notice and the escalated NCII request carry times stamped ahead by the test
+    clock;
+  - the analytics display bypass lasts 1 hour.
+- **seed-platform:** the Twitch import's category is not matched. Webhook, Discord and federation
+  rows point at peers that stopped with the run.
+- **seed-media:**
+  - the mid-stream VOD removal is on a bulk streamer, so streamer1's VOD and clip stay intact;
+  - streamer3 has no backdated history.
+- **Sign-in rate limit:** the API's auth limit is 10 sign-ins a minute per address. Units that
+  sign in many accounts wait it out, so seed-safety and seed-platform take longer than their
+  2-minute budget at `small`.
+
+## Reset
+
+- **Local:** stop the stack, delete its volumes and start it again. Migrate runs on the fresh
+  volume with the E5 bootstrap.
+
+  ```bash
+  bun scripts/infra.ts reset
+  ```
+
+  Then start the seed stack again, as in "The seed stack" above.
+
+- **Staging, by hand only (decision b):** `selfhost.sh reset-staging` drops and recreates the
+  database, flushes Valkey, migrates, and starts the instance again. It refuses unless both of
+  these hold:
+  - `commonair.env` has `DEMO_SEED_FULL=true`;
+  - `--confirm` equals the instance's `PUBLIC_HOSTNAME` exactly.
+
+  ```bash
+  sh ~/commonair/selfhost.sh reset-staging --confirm <PUBLIC_HOSTNAME>
+  ```
+
+  It leaves an empty, migrated database, so `seed full --scale medium` can run next.
+  - `--base-seed` adds the `basic` seed instead, but `seed full` then refuses that database.
+  - Media objects stay in the bucket. They are harmless, and the next seed writes new ones.
+  - The steps are in `docs/self-hosting/upgrades.md`, "Resetting a staging instance".
