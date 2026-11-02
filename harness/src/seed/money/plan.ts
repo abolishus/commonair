@@ -207,6 +207,23 @@ export function monthStart(at: Date, offset = 0): Date {
   return new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth() + offset, 1));
 }
 
+/** How far back `ApiTreasurer.runPayouts` dates the run's `periodEnd` (its `justNow()`). */
+export const PAYOUT_PERIOD_END_LAG_MS = 5_000;
+/** Clock skew between the harness and the API, and the API's own processing time. */
+export const PAYOUT_CLOCK_MARGIN_MS = 2_000;
+
+/**
+ * How long to wait before the payout run so it counts every posting made by `lastSettledAt`.
+ * A run reserves only postings dated at or before its `periodEnd` (and releases are dated at their
+ * payment). The manual rail dates a confirmation `receivedAt` = now − 5 s, so it always falls in;
+ * Stripe dates it at the webhook's event time (now), so a run within 5 s of the last checkout
+ * reserves none of those earnings and a later chargeback draws on them instead of becoming split
+ * shortfall.
+ */
+export function payoutRunWaitMs(lastSettledAt: number, now: number): number {
+  return Math.max(0, lastSettledAt + PAYOUT_PERIOD_END_LAG_MS + PAYOUT_CLOCK_MARGIN_MS - now);
+}
+
 const pairKey = (a: string, b: string) => `${a}\0${b}`;
 
 /** Payers with room for more payments; picks are random among them, honouring a per-pick filter. */

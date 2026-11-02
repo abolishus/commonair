@@ -23,6 +23,7 @@ import {
   type MoneyPlan,
   type PaymentSpec,
   paidCreators,
+  payoutRunWaitMs,
   planMoney,
   subscriptionsByUser,
 } from "./money/plan.ts";
@@ -280,6 +281,8 @@ async function runMoney(ctx: SeedContext) {
   };
   await pool(groups, PAYER_CONCURRENCY, runGroup);
   if (velocityPayer) await runGroup([velocityPayer, byPayer.get(velocityPayer) ?? []]);
+  // Every confirmation, refund and chargeback above is posted (and dated) by now.
+  const settledAt = Date.now();
   rows.payments = paymentIds.length;
   log(`${paymentIds.length} checkouts in ${((Date.now() - started) / 1000).toFixed(1)} s`);
 
@@ -305,6 +308,14 @@ async function runMoney(ctx: SeedContext) {
   // so the run pays the ready payees and holds streamer2 (no payout account) and the new crew payee.
   const release = await ops.tickRan("money-release-holds", 10, 1_000, { holdDays: 0 });
   const treasury = new ApiTreasurer(treasurer);
+  // The run counts postings dated up to its periodEnd (now − 5 s); Stripe dates them at the webhook,
+  // so wait until the last checkout falls inside, or nothing is reserved and the write-off has no
+  // shortfall to write off.
+  const wait = payoutRunWaitMs(settledAt, Date.now());
+  if (wait > 0) {
+    log(`waiting ${(wait / 1000).toFixed(1)} s so the payout run's period covers the last checkout`);
+    await sleep(wait, ctx.signal);
+  }
   const payoutRun = await call("treasurer runs payouts", () => treasury.runPayouts(), ctx.signal);
   const writeOff = await seedWriteOff(ctx, plan, writeOffPaid, rail, sessions, users);
   const payouts = await call("treasurer lists payouts", () => treasury.payouts(), ctx.signal);

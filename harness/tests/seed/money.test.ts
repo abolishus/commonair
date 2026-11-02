@@ -17,6 +17,8 @@ import {
   MAX_PAYMENTS_PER_PAYER,
   MIN_PAYER_AGE_DAYS,
   PAYER_SLACK,
+  PAYOUT_CLOCK_MARGIN_MS,
+  PAYOUT_PERIOD_END_LAG_MS,
   type MoneyAccount,
   type MoneyPlan,
   type PaymentSpec,
@@ -26,6 +28,7 @@ import {
   monthStart,
   paidCreators,
   paymentFigures,
+  payoutRunWaitMs,
   planCosts,
   planMoney,
   plannedCounts,
@@ -238,6 +241,23 @@ describe("planMoney: the split write-off", () => {
     });
     expect(p.splits).toEqual([]);
     expect(p.writeOff).toBeNull();
+  });
+});
+
+describe("payoutRunWaitMs", () => {
+  const lag = PAYOUT_PERIOD_END_LAG_MS + PAYOUT_CLOCK_MARGIN_MS;
+  test("right after the last checkout, waits until the run's periodEnd (now - 5 s) is past it, with a margin", () => {
+    const settled = 1_000_000;
+    expect(payoutRunWaitMs(settled, settled)).toBe(lag);
+    expect(payoutRunWaitMs(settled, settled + 1_200)).toBe(lag - 1_200);
+    // After the wait the run's periodEnd is after the last posting.
+    const runAt = settled + payoutRunWaitMs(settled, settled);
+    expect(runAt - PAYOUT_PERIOD_END_LAG_MS).toBeGreaterThan(settled);
+  });
+
+  test("no wait once enough time has passed", () => {
+    expect(payoutRunWaitMs(0, lag)).toBe(0);
+    expect(payoutRunWaitMs(0, lag + 60_000)).toBe(0);
   });
 });
 
