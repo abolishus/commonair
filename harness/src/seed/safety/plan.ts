@@ -204,14 +204,22 @@ export function deciderOf(subject: AppealSubject): string {
   }
 }
 
-/** The keys this unit publishes under `store.extra.safety` (its brief names only these). */
+/**
+ * The keys this unit publishes under `store.extra.safety`: the brief's jury keys, plus
+ * `restrictedUserIds`, which seed-platform reads so it never signs in as a suspended account.
+ */
 export interface SafetyStoreExtra {
   juryCaseIds: string[];
   juryReportIds: string[];
+  restrictedUserIds: string[];
 }
 
-export function safetyStoreExtra(jury: SafetyStoreExtra): SafetyStoreExtra {
-  return { juryCaseIds: [...jury.juryCaseIds], juryReportIds: [...jury.juryReportIds] };
+export function safetyStoreExtra(e: SafetyStoreExtra): SafetyStoreExtra {
+  return {
+    juryCaseIds: [...e.juryCaseIds],
+    juryReportIds: [...e.juryReportIds],
+    restrictedUserIds: [...e.restrictedUserIds],
+  };
 }
 
 /** Rows written by the unit: per-table count after the run less the count before it. */

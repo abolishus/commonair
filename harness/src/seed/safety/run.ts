@@ -143,7 +143,10 @@ export async function runSafety(ctx: SeedContext, plan: SafetyPlan, secret: stri
     `seed-safety: account deletion stays scheduled for ${plan.deletion ?? "nobody (no bulk viewer)"}; restricted accounts: ${plan.restricted.join(", ")}`,
     `seed-safety: jury inputs: ${jury.juryCaseIds.length} closed T1/T2 cases and ${jury.juryReportIds.length} resolved reports`,
   );
-  return { notes: run.notes, extra: safetyStoreExtra(jury) };
+  return {
+    notes: run.notes,
+    extra: safetyStoreExtra({ ...jury, restrictedUserIds: plan.restricted.map((h) => userOf(ctx, h).id) }),
+  };
 }
 
 // ---------------------------------------------------------------- T2 label appeal

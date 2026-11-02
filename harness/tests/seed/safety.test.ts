@@ -426,12 +426,13 @@ describe("review fixes", () => {
     expect(notes).toMatch(/48 h ahead.*\/admin\/moderation/);
   });
 
-  test("store.extra.safety carries only the brief's jury keys", () => {
+  test("store.extra.safety carries the jury keys and the restricted ids seed-platform avoids", () => {
     const extra = safetyStoreExtra({
       juryCaseIds: ["c"],
       juryReportIds: ["r"],
       restrictedUserIds: ["x"],
+      extraKey: 1,
     } as Parameters<typeof safetyStoreExtra>[0]);
-    expect(Object.keys(extra).sort()).toEqual(["juryCaseIds", "juryReportIds"]);
+    expect(extra).toEqual({ juryCaseIds: ["c"], juryReportIds: ["r"], restrictedUserIds: ["x"] });
   });
 });
