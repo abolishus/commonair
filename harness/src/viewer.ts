@@ -80,6 +80,31 @@ export function emptyReport(id: string, kind: ViewerKind, engine: ViewerEngine):
   };
 }
 
+/** A viewer that never started playback, and why (its first-frame wait's rejection). */
+export interface NotStarted {
+  viewer: string;
+  kind: string;
+  reason: string;
+}
+
+/**
+ * The viewers whose `waitForFirstFrame` rejected, with the rejection's message, so a scenario's
+ * "every viewer started" failure names which viewer it was and how far it got. `kindOf` labels a
+ * viewer more finely than `Viewer.kind` (e.g. a P2P web viewer). Pure.
+ */
+export function notStarted(
+  viewers: readonly Pick<Viewer, "id" | "kind">[],
+  results: readonly PromiseSettledResult<unknown>[],
+  kindOf: (i: number) => string | undefined = () => undefined,
+): NotStarted[] {
+  return results.flatMap((r, i) => {
+    if (r.status === "fulfilled") return [];
+    const v = viewers[i];
+    const reason = r.reason instanceof Error ? r.reason.message : String(r.reason);
+    return [{ viewer: v?.id ?? `#${i}`, kind: kindOf(i) ?? v?.kind ?? "unknown", reason: reason.slice(0, 600) }];
+  });
+}
+
 /** Aggregate many viewer reports (load test and scenario metrics). */
 export interface ViewerAggregate {
   viewers: number;

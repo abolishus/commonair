@@ -27,6 +27,11 @@ export interface ProbeVideoStats {
   bytesHttp: number;
   bytesP2p: number;
   errors: string[];
+  /**
+   * Whether the element is still in the document. A page that replaces its <video> (a React
+   * remount) leaves the old one tracked, detached and never playing.
+   */
+  connected: boolean;
 }
 
 interface Tracked {
@@ -85,6 +90,7 @@ function install(): void {
         bytesHttp: 0,
         bytesP2p: 0,
         errors: [],
+        connected: true,
       },
       firstFrameAt: null,
       stallStartedAt: null,
@@ -167,6 +173,7 @@ function install(): void {
           bytesHttp: bytes?.http ?? 0,
           bytesP2p: bytes?.p2p ?? 0,
           errors: [...t.stats.errors],
+          connected: t.video.isConnected,
         };
       });
     },

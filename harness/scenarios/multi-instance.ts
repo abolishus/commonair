@@ -32,6 +32,7 @@ import { CookieJar } from "../src/api/cookies.ts";
 import { ChatClient } from "../src/chat-client.ts";
 import { HUMAN_TIMING } from "../src/fingerprint.ts";
 import { HttpViewer } from "../src/http-viewer.ts";
+import { notStarted } from "../src/viewer.ts";
 import { percentile } from "../src/metrics.ts";
 import { ClaimBudget } from "../src/multi/budget.ts";
 import { chatUrlFor, connectOn, sendClassified, sendUntilRejected } from "../src/multi/chat.ts";
@@ -692,7 +693,12 @@ async function viewerCounts(kit: Kit, channel: string, streamer: SignedInUser): 
   const firstFrameMs = kit.budget.cap(30_000, 5_000);
   const first = await Promise.allSettled(viewers.map((v) => v.waitForFirstFrame(firstFrameMs)));
   const started = first.filter((r) => r.status === "fulfilled").length;
-  ctx.check("every viewer started playback", started === total, { started, total });
+  const missing = notStarted(viewers, first);
+  ctx.check("every viewer started playback", started === total, {
+    started,
+    total,
+    ...(missing.length > 0 ? { notStarted: missing } : {}),
+  });
 
   const read1 = p.api().client;
   const read2 = kit.api2().client;

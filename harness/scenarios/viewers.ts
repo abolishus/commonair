@@ -28,7 +28,7 @@ import {
   unverified,
 } from "../src/p2p.ts";
 import { defineScenario, type ScenarioContext } from "../src/scenario.ts";
-import { aggregateReports, type Viewer } from "../src/viewer.ts";
+import { aggregateReports, notStarted, type Viewer } from "../src/viewer.ts";
 import { waitFor } from "../src/wait.ts";
 
 export default defineScenario({
@@ -81,7 +81,19 @@ export default defineScenario({
     );
     const started = firstFrames.filter((r) => r.status === "fulfilled").length;
     ctx.metric("viewers.started", started);
-    ctx.assert("every viewer started playback", started === total, { started, total });
+    // Which viewer, of which kind, and how far it got (its first-frame timeout names the state).
+    const p2pKind = (i: number) =>
+      i < firstP2P || i >= firstP2P + p2p.optedIn + p2p.atDefault
+        ? undefined
+        : i < firstP2P + p2p.optedIn
+          ? "p2p-opted-in"
+          : "p2p-default";
+    const missing = notStarted(viewers, firstFrames, p2pKind);
+    ctx.assert("every viewer started playback", started === total, {
+      started,
+      total,
+      ...(missing.length > 0 ? { notStarted: missing } : {}),
+    });
 
     let maxSeen = 0;
     const converging = ctx.step(`verified count converges to ${total}`, async () => {

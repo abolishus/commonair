@@ -36,13 +36,35 @@ export function expectedPlaybackPath(engine: BrowserEngine, canPlayHls: boolean)
  * last errors, or else where it was (no session, a session but no bytes, bytes but no frame).
  * Pure.
  */
-export function playerState(r: ViewerReport): string {
+export function playerState(r: ViewerReport, page?: WebPageState | null): string {
   const seen = r.errors.slice(-3);
-  if (seen.length > 0) return `player errors: ${seen.join(" | ").slice(0, 400)}`;
+  // The web page's own view: the player's data-state (missing = no player rendered, e.g. the
+  // route's error page) and how many <video> elements the probe tracks (more than one = remounted).
+  const web = page ? `; player=${page.player ?? "missing"} videos=${page.videos} connected=${page.connected}` : "";
+  if (seen.length > 0) return `player errors: ${seen.join(" | ").slice(0, 400)}${web}`;
   return (
     `no player errors; path=${r.playbackPath ?? "none"} session=${r.sessionId ? "yes" : "none"} ` +
-    `source=${r.source ?? "none"} bytes=${r.bytesHttp} stalls=${r.stalls} heartbeats=${r.heartbeats}`
+    `source=${r.source ?? "none"} bytes=${r.bytesHttp} stalls=${r.stalls} heartbeats=${r.heartbeats}${web}`
   );
+}
+
+/** What a web viewer's page shows besides the probe: the player's `data-state` and the videos. */
+export interface WebPageState {
+  /** `data-state` of `[data-testid="player"]`; null when the page has no player. */
+  player: string | null;
+  /** <video> elements the probe tracks, and how many of them are still in the document. */
+  videos: number;
+  connected: number;
+}
+
+/**
+ * The probe entry for a web page's player. The embed has one <video>, but a remount (React
+ * replacing the subtree) leaves the first, detached element tracked as `v0`, which never plays:
+ * prefer the element still in the document, and of those one that showed a frame. Pure.
+ */
+export function webProbe(probes: readonly ProbeVideoStats[]): ProbeVideoStats | undefined {
+  const live = probes.filter((p) => p.connected);
+  return live.find((p) => p.ttffMs !== null) ?? live.at(-1) ?? probes[0];
 }
 
 /** Init script for well-behaved viewers: hide the webdriver flag and give headless a language list. */
@@ -232,11 +254,12 @@ class ViewerPage {
     readonly harnessPlayer: boolean,
   ) {}
 
-  async snapshot(): Promise<{ probe: ProbeVideoStats[]; players: PlayerInfo[] }> {
-    if (this.closed) return { probe: [], players: [] };
+  async snapshot(): Promise<{ probe: ProbeVideoStats[]; players: PlayerInfo[]; player: string | null }> {
+    if (this.closed) return { probe: [], players: [], player: null };
     return this.page.evaluate(() => ({
       probe: window.__harnessProbe?.snapshot() ?? [],
       players: (window.__harness?.players ?? []).map((p) => ({ ...p, errors: [...p.errors] })),
+      player: document.querySelector('[data-testid="player"]')?.getAttribute("data-state") ?? null,
     }));
   }
 
@@ -292,6 +315,8 @@ class BrowserViewer implements Viewer {
   readonly kind = "browser" as const;
   private last: ViewerReport;
   private stopped = false;
+  /** Web pages only: the page as of the last snapshot, for a first-frame timeout's message. */
+  private page: WebPageState | null = null;
 
   constructor(
     readonly id: string,
@@ -313,8 +338,14 @@ class BrowserViewer implements Viewer {
       return null;
     });
     if (!snap) return this.last;
-    const probe =
-      snap.probe.find((p) => p.id === this.playerId) ?? (this.host.harnessPlayer ? undefined : snap.probe[0]);
+    const probe = this.host.harnessPlayer ? snap.probe.find((p) => p.id === this.playerId) : webProbe(snap.probe);
+    if (!this.host.harnessPlayer) {
+      this.page = {
+        player: snap.player,
+        videos: snap.probe.length,
+        connected: snap.probe.filter((p) => p.connected).length,
+      };
+    }
     const info = snap.players.find((p) => p.id === this.playerId);
     this.last = {
       ...this.last,
@@ -359,7 +390,7 @@ class BrowserViewer implements Viewer {
     } catch (err) {
       if (err instanceof TimeoutError && err.lastError instanceof Error) throw err.lastError;
       // Name what the player saw: a bare timeout says nothing about why playback never started.
-      if (err instanceof TimeoutError) throw new Error(`${err.message} (${playerState(this.last)})`);
+      if (err instanceof TimeoutError) throw new Error(`${err.message} (${playerState(this.last, this.page)})`);
       throw err;
     }
   }
