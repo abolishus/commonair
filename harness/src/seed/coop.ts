@@ -96,6 +96,15 @@ export function subscriptionsFromStore(v: unknown): Record<string, SubscriptionF
   return out;
 }
 
+/**
+ * Whether member shares can be bought on this stack. `coop.buyShare` only accepts the manual
+ * provider (bank transfer), so with seed-money on stripe-mock no share can exist. With no money
+ * facts the run tries, and a PRECONDITION_FAILED answer still turns shares off.
+ */
+export function sharesPossible(provider: unknown): boolean {
+  return typeof provider !== "string" || provider === "manual";
+}
+
 export const unit: SeedUnit = {
   name: "coop",
   // money: viewer members by subscription, and the revenue patronage distributes. safety: the
@@ -103,7 +112,10 @@ export const unit: SeedUnit = {
   // hours make the streamer members and seat the council).
   after: ["social", "money", "safety"],
   tables: TABLES,
-  pending: [],
+  // membership_shares is filled only when the API runs PAYMENTS_PROVIDER=manual: buyShare refuses
+  // every other provider, and the seed stack runs money against stripe-mock. It stays pending
+  // until coop.buyShare can start a checkout through the Stripe adapter.
+  pending: ["membership_shares"],
   async run(ctx) {
     const started = Date.now();
     const unitStart = new Date();
@@ -153,10 +165,16 @@ export const unit: SeedUnit = {
     const memberPlan = planMemberships(ctx.rng.fork("memberships"), ctx.scale, facts);
     await sessions.warm(["admin", "treasurer", ...memberPlan.workers]);
     progress(`appointing ${memberPlan.workers.length} workers and buying shares`);
-    const membership = await setupMemberships(sessions, memberPlan, ctx.signal);
+    const sharesOn = sharesPossible(money.provider);
+    const membership = await setupMemberships(
+      sessions,
+      sharesOn ? memberPlan : { ...memberPlan, shares: { held: [], pending: [], refunded: [] } },
+      ctx.signal,
+    );
+    if (!sharesOn) membership.sharesSupported = false;
     if (!membership.sharesSupported)
       notes.push(
-        "seed-coop: membership_shares is empty: member shares are paid by bank transfer only (PAYMENTS_PROVIDER=manual), and this stack uses another provider; member1 is a worker member (and a viewer member if it subscribes)",
+        `seed-coop: membership_shares is empty: coop.buyShare accepts only PAYMENTS_PROVIDER=manual and this stack uses ${typeof money.provider === "string" ? money.provider : "another provider"}; member1 is a worker member (and a viewer member if it subscribes)`,
       );
     await hooks.tickRan("membership-sync");
     const byId = new Map(ctx.store.users.map((u) => [u.id, u.handle]));
