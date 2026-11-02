@@ -138,7 +138,7 @@ Every account is `demo_<handle>@demo-seed.invalid` with the shared password. Bul
 | Login       | Role      | What it shows                                                                                                    |
 | ----------- | --------- | ---------------------------------------------------------------------------------------------------------------- |
 | `admin`     | admin     | Every `/admin` queue has items: moderation, appeals, integrity, DMCA, egress, incidents, apps, co-op, federation |
-| `treasurer` | treasurer | `/treasury`: fraud flags, costs, reconciliation, treasury postings                                               |
+| `treasurer` | treasurer | `/treasury`: payouts, fraud flags, costs, reconciliation, treasury postings                                      |
 | `legal`     | legal     | `/admin/legal`: T0 cases and evidence, NCMEC drafts, a legal hold, DMCA                                          |
 | `mod`       | moderator | The platform moderation queue and the appeals to decide                                                          |
 | `streamer1` | user      | The full studio: every panel, the bot, overlays, relays, revenue, captions, analytics, crew, move                |
@@ -157,15 +157,16 @@ Every account is `demo_<handle>@demo-seed.invalid` with the shared password. Bul
 
 ## Known gaps
 
-**Tables still empty.** Each unit lists these in `pending`, and the run prints them at the end.
-Each needs a test hook first:
+**No empty tables.** Every unit's `pending` list is empty. Four tables are reached only through
+test hooks, which the seed stack turns on:
 
-- **seed-money: `payouts` and `split_writeoff_proposals`.** Creator holds last 7 days, and nothing
-  can age them yet. So `/treasury` has no paid or pending payouts, and no split write-off exists.
-- **seed-coop: `membership_shares`.** `buyShare` works only with `PAYMENTS_PROVIDER=manual`, and the
-  seed stack runs stripe-mock.
-- **seed-safety: `evidence_audit_runs`.** The evidence audit runs daily at 03:17 UTC and has no
-  ops-tick hook yet.
+- **seed-money: `payouts` and `split_writeoff_proposals`.** The `money-release-holds` ops tick
+  takes a test hold period (`OPS_TEST_HOOKS`), so holds release during the seed. Then a payout
+  run, and a chargeback on a released split share. The same flag waives the write-off quiet
+  window.
+- **seed-coop: `membership_shares`.** `buyShare` takes a manual share on the Stripe stack under
+  `COOP_TEST_HOOKS`.
+- **seed-safety: `evidence_audit_runs`.** The `evidence-audit` ops tick runs the daily audit now.
 
 **Today-only history.** Protected rows keep the real time they were written: the ledger, votes,
 moderation, giveaways and predictions. Only plain tables are backdated. So these screens show
