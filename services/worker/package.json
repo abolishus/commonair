@@ -33,7 +33,7 @@
     "@commonair/tokens": "workspace:*",
     "@commonair/twitch": "workspace:*",
     "@opentelemetry/api": "catalog:",
-    "bullmq": "6.3.16",
+    "bullmq": "6.4.2",
     "drizzle-orm": "catalog:",
     "fflate": "catalog:",
     "iovalkey": "catalog:",

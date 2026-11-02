@@ -24,7 +24,7 @@
     "@commonair/service": "workspace:*",
     "@commonair/storage": "workspace:*",
     "@commonair/tokens": "workspace:*",
-    "bullmq": "6.3.16",
+    "bullmq": "6.4.2",
     "drizzle-orm": "catalog:",
     "iovalkey": "catalog:",
     "zod": "catalog:"
