@@ -79,7 +79,7 @@ export const SEED_ROUTES: Readonly<Record<string, SeedRoute>> = {
   "/coop/patronage/": member,
   "/coop/patronage/$periodId": { ...member, params: { periodId: ex("coop", "patronagePeriodId") } },
   // W3-jury: opt-in and published results; the jury ships off (no panel after the seed).
-  "/coop/jury": { as: "member1", expectData: false },
+  "/coop/jury": { as: "member1", expectData: true },
 
   "/dashboard": studio,
   "/content": studio,
@@ -98,7 +98,7 @@ export const SEED_ROUTES: Readonly<Record<string, SeedRoute>> = {
   // Batch 7 studio pages: streamer1's move links (the seeded one), and the Twitch import, which
   // shows its unavailable state on the default stack (TWITCH_IMPORT_ENABLED off).
   "/move": studio,
-  "/import": { as: "streamer1", expectData: false },
+  "/import": { as: "streamer3", expectData: true },
   "/developer/": { as: "developer", expectData: true },
   "/developer/bots": { as: "developer", expectData: true },
   "/developer/apps/$appId": { as: "developer", params: { appId: ex("platform", "appId") }, expectData: true },
@@ -116,7 +116,7 @@ export const SEED_ROUTES: Readonly<Record<string, SeedRoute>> = {
   "/admin/apps": admin,
   "/admin/coop": admin,
   // N4-web: domain blocks and key rotation; federation ships off, so no data after the seed.
-  "/admin/federation": { as: "admin", expectData: false },
+  "/admin/federation": { as: "admin", expectData: true },
   "/treasury": { as: "treasurer", expectData: true },
 };
 
