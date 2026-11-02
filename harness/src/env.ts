@@ -55,6 +55,12 @@ export const harnessEnvSchema = z.object({
    * webhook receiver on this machine (Podman resolves `host.containers.internal`).
    */
   HARNESS_WEBHOOK_HOST: z.string().default("host.containers.internal"),
+  /**
+   * The host in the member relay's `--public-url` (seed-media, which the API health-checks).
+   * Unset: this machine's first LAN IPv4 (a harness on the host). Staging seed mode runs the
+   * harness on the instance's network and sets it to the container's name (`seed-harness`).
+   */
+  HARNESS_RELAY_HOST: optionalString,
   /** `harness` = the harness player page; `web` = the web app's `/embed/<channel>` route. */
   HARNESS_PLAYER: z.enum(["harness", "web"]).default("harness"),
   /** Prometheus HTTP API for load-test metrics; unset = skip Prometheus queries. */

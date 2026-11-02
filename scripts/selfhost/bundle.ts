@@ -14,7 +14,7 @@
  *   selfhost.sh, release-manifest.json, release.env (the manifest's facts for the shell),
  *   quadlet/ (rendered), systemd/, every config file the units mount from %h/commonair/ and
  *   every file their ExecStartPre= and ExecStopPost= lines use from there (the env renderer, key
- *   lists and cgroup reset),
+ *   lists and cgroup reset), staging seed mode's drop-ins and the synthetic hash lists they mount,
  *   tools/ (init-env and fetch-model bundled into single files, run with the tools image's Bun,
  *   plus .env.example and the licenses of the npm packages bundled into them), LICENSES/.
  */
@@ -30,6 +30,9 @@ export const REPO_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/
 
 /** Bun scripts the host runs inside the tools image, bundled so the image needs only Bun. */
 export const TOOL_SCRIPTS = { "init-env.js": "scripts/init-env.ts", "fetch-model.js": "scripts/fetch-model.ts" };
+
+/** Seed mode's unit drop-ins (ADR 0040), shipped as they are. */
+export const SEED_MODE_DIR = "infra/selfhost/seed-mode";
 
 /** Licenses the bundle's own files carry (scripts, units, config, docs). */
 const LICENSE_FILES = ["LICENSES/AGPL-3.0-or-later.txt", "LICENSES/CC0-1.0.txt", "LICENSES/CC-BY-SA-4.0.txt"];
@@ -138,6 +141,13 @@ export async function bundleEntries(opts: BundleOptions): Promise<{ version: str
     if (!existsSync(join(root, file))) throw new Error(`a unit runs or reads ${file}, which does not exist`);
     add(file, readFileSync(join(root, file)));
   }
+
+  // Staging seed mode's drop-ins (selfhost.sh seed-mode open copies them next to the units) and
+  // the synthetic hash lists they mount from the release (ADR 0040).
+  const seedDropins = readUnitDir(join(root, SEED_MODE_DIR));
+  for (const [name, text] of seedDropins) add(`${SEED_MODE_DIR}/${name}`, text);
+  for (const path of releaseMounts(seedDropins.values()))
+    for (const file of filesUnder(root, path)) add(file, readFileSync(join(root, file)));
 
   const notices: string[] = [];
   for (const [name, entry] of Object.entries(TOOL_SCRIPTS)) {

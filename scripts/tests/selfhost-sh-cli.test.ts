@@ -37,6 +37,14 @@ import {
 
 useReleases();
 
+/** Units the release ships that a plain install leaves out (captions off, seed mode closed). */
+const OPTIONAL_UNITS = new Set([
+  "commonair-whisper.container",
+  "commonair-stripe-mock.container",
+  "commonair-mailpit.container",
+  "commonair-seed-harness.container",
+]);
+
 describe("arguments", () => {
   test("--help prints the commands and every install flag", () => {
     const r = host().run(["--help"]);
@@ -330,9 +338,10 @@ describe("install", () => {
 
   test("pulls every image of the release by digest", () => {
     const pulls = h.calls().filter((c) => c.startsWith("podman pull"));
-    // Every unit this install runs: the whisper sidecar only with --captions (selfhost-sh-captions).
+    // Every unit this install runs: the whisper sidecar only with --captions (selfhost-sh-captions),
+    // the seed-mode units only while staging seed mode is open (selfhost-sh-seed-mode).
     const units = readdirSync(join(h.home, "commonair/quadlet")).filter(
-      (f) => f.endsWith(".container") && f !== "commonair-whisper.container",
+      (f) => f.endsWith(".container") && !OPTIONAL_UNITS.has(f),
     );
     const images = new Set(
       units.flatMap((f) =>
@@ -356,7 +365,7 @@ describe("install", () => {
   test("installs the units and timers, reloads, migrates first, then starts the stack", () => {
     expect(readdirSync(join(h.home, ".config/containers/systemd")).sort()).toEqual(
       readdirSync(join(h.home, "commonair/quadlet"))
-        .filter((f) => f !== "commonair-whisper.container")
+        .filter((f) => !OPTIONAL_UNITS.has(f))
         .sort(),
     );
     expect(readdirSync(join(h.home, ".config/systemd/user")).sort()).toEqual(

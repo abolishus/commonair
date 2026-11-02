@@ -10,6 +10,7 @@ import {
   AUTH_LIMIT,
   AUTH_PROBE_PATH,
   CADDY_FORBIDDEN,
+  E2E_STAND_INS,
   EXPORT_FILENAME,
   HOST_IMAGES,
   type Presigned,
@@ -54,6 +55,13 @@ describe("e2e build specs", () => {
     expect(specs.postgres.file).toBe("infra/postgres/Containerfile");
     expect(specs.loki.args.BASE_IMAGE).toMatch(PINNED);
     expect(specs.relay).toEqual({ file: "relay/Containerfile", context: "relay", args: {} });
+    expect(specs.harness).toEqual({ file: "infra/containers/harness.Containerfile", context: ".", args: {} });
+  });
+
+  test("the seed harness gets a stand-in, never its real build: no e2e opens seed mode", () => {
+    expect(E2E_STAND_INS).toEqual({ harness: "tools" });
+    const source = readFileSync(join(ROOT, "scripts/selfhost/e2e.ts"), "utf8");
+    expect(source).toContain("if (E2E_STAND_INS[name]) continue;");
   });
 });
 

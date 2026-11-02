@@ -35,7 +35,9 @@ function shFunction(name: string): string {
   if (!m) throw new Error(`no function ${name} in scripts/selfhost.sh`);
   return m[0];
 }
-const FUNCTIONS = ["info", "env_get", "captions_on", "unit_in_mode", "install_units"].map(shFunction).join("");
+const FUNCTIONS = ["info", "env_get", "captions_on", "seed_mode_open", "unit_in_mode", "install_units"]
+  .map(shFunction)
+  .join("");
 
 interface Host {
   home: string;
@@ -51,6 +53,8 @@ function host(): Host {
   const log = join(home, "systemctl.log");
   mkdirSync(bin);
   writeFileSync(join(home, "commonair.env"), "WHISPER_URL=http://whisper:8080\n");
+  // Staging seed mode's state (ADR 0040), so its units are installed too.
+  writeFileSync(join(home, "seed-mode"), "DEADLINE=0\n");
   writeFileSync(join(bin, "systemctl"), `#!/bin/sh\necho "systemctl $*" >> "${log}"\n`, { mode: 0o755 });
   const quadlet = join(home, ".config/containers/systemd");
   const systemd = join(home, ".config/systemd/user");
@@ -58,8 +62,8 @@ function host(): Host {
     "set -eu\n" +
     `QUADLET_DIR='${quadlet}'\nSYSTEMD_DIR='${systemd}'\nUNIT_ENV_DIR='${home}/.config/commonair/unit-env'\n` +
     "STORAGE_MODE=garage\n" +
-    // Captions on (env file below), so every unit of the release is installed.
-    `ENV_FILE='${home}/commonair.env'\nWHISPER_INTERNAL_URL=http://whisper:8080\n` +
+    // Captions on (env file below) and seed mode open, so every unit of the release is installed.
+    `ENV_FILE='${home}/commonair.env'\nWHISPER_INTERNAL_URL=http://whisper:8080\nSEED_STATE='${home}/seed-mode'\n` +
     FUNCTIONS +
     'install_units "$1"\n';
   return {

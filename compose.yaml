@@ -624,18 +624,14 @@ services:
     image: docker.io/stripe/stripe-mock:v0.206.0@sha256:aeb96b83e87a893d2ac005e363ac01ffa6e59a5ad85b49c155dfc9129de02e78
     restart: unless-stopped
     ports: ["${BIND_ADDRESS:-127.0.0.1}:${STRIPE_MOCK_PORT:-12111}:12111"]
+    # Shell form: the header holds spaces, which Podman's exec form splits (seed mode's Quadlet unit
+    # infra/quadlet/commonair-stripe-mock.container carries the same check).
     healthcheck:
       <<: *healthcheck
       test:
         [
-          "CMD",
-          "wget",
-          "-q",
-          "-O",
-          "/dev/null",
-          "--header",
-          "Authorization: Bearer sk_test_123",
-          "http://127.0.0.1:12111/v1/customers",
+          "CMD-SHELL",
+          "wget -q -O /dev/null --header 'Authorization: Bearer sk_test_123' http://127.0.0.1:12111/v1/customers",
         ]
 
 # A fixed subnet so services can trust forwarded client addresses from in-stack proxies

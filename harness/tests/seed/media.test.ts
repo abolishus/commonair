@@ -6,7 +6,9 @@ import { describe, expect, test } from "vite-plus/test";
 import { bulkStreamerHandle, bulkViewerHandle } from "../../src/seed/accounts.ts";
 import { unit } from "../../src/seed/media.ts";
 import { buildMediaExtra, type RecordedOutcome } from "../../src/seed/media/extra.ts";
-import { SINK_STREAM_KEY, sinkArgs } from "../../src/seed/media/peers.ts";
+import { loadHarnessEnv } from "../../src/env.ts";
+import { relayArgv } from "../../src/relay.ts";
+import { SINK_STREAM_KEY, seedRelayHost, sinkArgs } from "../../src/seed/media/peers.ts";
 import {
   DAY_MS,
   EGRESS_DAYS,
@@ -384,5 +386,34 @@ describe("peers", () => {
     expect(args).toContain("-listen");
     expect(args).toContain(`rtmp://0.0.0.0:19350/live/${SINK_STREAM_KEY}`);
     expect(args.slice(-3)).toEqual(["-f", "null", "-"]);
+  });
+
+  const lan = {
+    lo: [{ address: "127.0.0.1", family: "IPv4", internal: true }],
+    eth0: [{ address: "192.168.1.20", family: "IPv4", internal: false }],
+  } as unknown as Parameters<typeof seedRelayHost>[1];
+
+  test("the relay advertises HARNESS_RELAY_HOST when set (seed mode: the harness container on the instance's network)", () => {
+    expect(seedRelayHost({ HARNESS_RELAY_HOST: "seed-harness" }, lan)).toBe("seed-harness");
+    expect(
+      relayArgv({
+        binary: "r",
+        api: "http://api:3001",
+        host: seedRelayHost({ HARNESS_RELAY_HOST: "seed-harness" }, lan),
+        port: 4100,
+        dataDir: "/d",
+      }),
+    ).toContain("http://seed-harness:4100");
+  });
+
+  test("without it, the LAN address (a harness on the host of a local stack)", () => {
+    expect(seedRelayHost({ HARNESS_RELAY_HOST: undefined }, lan)).toBe("192.168.1.20");
+    expect(() => seedRelayHost({ HARNESS_RELAY_HOST: undefined }, { lo: lan?.lo })).toThrow(/no LAN IPv4/);
+  });
+
+  test("the harness env reads HARNESS_RELAY_HOST, empty meaning unset", () => {
+    expect(loadHarnessEnv({ HARNESS_RELAY_HOST: "seed-harness" }).HARNESS_RELAY_HOST).toBe("seed-harness");
+    expect(loadHarnessEnv({ HARNESS_RELAY_HOST: " " }).HARNESS_RELAY_HOST).toBeUndefined();
+    expect(loadHarnessEnv({}).HARNESS_RELAY_HOST).toBeUndefined();
   });
 });

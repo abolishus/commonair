@@ -1,0 +1,48 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# Mailpit, an SMTP sink (staging seed mode only, ADR 0040). selfhost.sh installs this unit only
+# while `selfhost.sh seed-mode open` is in effect, and `seed-mode close` removes it. Meanwhile the
+# services send every email here (SMTP_HOST=mailpit, port 1025, no TLS), so no demo address ever
+# reaches the instance's real relay, and the seed harness reads the messages through Mailpit's API
+# (http://mailpit:8025). It publishes no port. The messages live in the container only and are
+# gone once it stops.
+[Unit]
+Description=CommonAir mailpit (seed mode)
+# Never give up on a crash loop: RestartSteps below throttles it instead (ADR 0023 §10).
+StartLimitIntervalSec=0
+
+[Container]
+Image=ghcr.io/axllent/mailpit:v1.31.6@sha256:23fe39e81bde596a918000b3135c0f85dc8bb4c9ea6be274b051143f3e300387
+ContainerName=commonair-mailpit
+# catatonit as PID 1 reaps orphans and forwards signals (ADR 0023 §10).
+RunInit=true
+Network=commonair.network
+NetworkAlias=mailpit
+# A medium seed signs up a few thousand accounts; Mailpit's default keeps only the last 500
+# messages, and the harness looks each verification mail up.
+Environment=MP_MAX_MESSAGES=20000
+HealthCmd=CMD /mailpit readyz
+HealthInterval=10s
+HealthTimeout=3s
+HealthRetries=10
+HealthStartPeriod=30s
+# An unhealthy container is killed, and Restart= below starts a fresh one.
+HealthOnFailure=kill
+# Dependents start only once this container reports healthy.
+Notify=healthy
+
+[Service]
+# Leaves the cgroup as the next start needs it: RestartMode=direct skips systemd's own cleanup
+# (scripts/selfhost/cgroup-reset.sh says why).
+ExecStopPost=-/bin/sh %h/commonair/scripts/selfhost/cgroup-reset.sh
+Restart=always
+RestartMode=direct
+RestartSec=5
+# Back off 5 s → 5 min over ten consecutive restarts, so a crash loop is throttled.
+RestartSteps=10
+RestartMaxDelaySec=5min
+TimeoutStartSec=300
+
+[Install]
+WantedBy=default.target

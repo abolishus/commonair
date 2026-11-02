@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { describe, expect, test } from "vite-plus/test";
 import {
   IMAGE_LICENSES,
+  HARNESS_BUILD,
   RELAY_BUILD,
   buildArgv,
   buildMatrix,
@@ -80,6 +81,31 @@ describe("release builds", () => {
     expect(builds.find((b) => b.image === "relay")).toEqual(RELAY_BUILD);
     expect(RELAY_BUILD).toMatchObject({ context: "relay", containerfile: "relay/Containerfile" });
     expect(declaredArgs(readFileSync(join(root, "relay/Containerfile"), "utf8")).has("VERSION")).toBe(true);
+  });
+
+  test("the seed harness is included (staging seed mode, ADR 0040), with what the seed probes for", () => {
+    expect(builds.find((b) => b.image === "harness")).toEqual(HARNESS_BUILD);
+    expect(HARNESS_BUILD).toMatchObject({ context: ".", containerfile: "infra/containers/harness.Containerfile" });
+    const file = readFileSync(join(root, HARNESS_BUILD.containerfile), "utf8");
+    // Playwright's image at the version the harness's playwright package pins (its browsers match).
+    const pw = (
+      JSON.parse(readFileSync(join(root, "harness/package.json"), "utf8")) as { dependencies: Record<string, string> }
+    ).dependencies.playwright;
+    expect(file).toMatch(
+      new RegExp(
+        `^ARG BASE_IMAGE=mcr\\.microsoft\\.com/playwright:v${pw!.replaceAll(".", "\\.")}-noble@sha256:[0-9a-f]{64}$`,
+        "m",
+      ),
+    );
+    // ffmpeg with what harness/src/ffmpeg.ts and seed-media need, checked at build time.
+    expect(file).toContain("apt-get install -y --no-install-recommends ffmpeg");
+    expect(file).toContain("for e in libx264 aac libopus;");
+    expect(file).toContain("-protocols | grep -qx '  rtmp'");
+    // Go with relay/ inside, the relay prebuilt into buildRelay's cache.
+    expect(file).toContain("COPY --from=go /usr/local/go /usr/local/go");
+    expect(file).toContain('await import("./harness/src/relay.ts")');
+    expect(file).toContain("bun install --frozen-lockfile --production --ignore-scripts");
+    expect(IMAGE_LICENSES.harness).toContain("AGPL-3.0-or-later");
   });
 
   // JSON is YAML, so variants of compose can be built as objects.

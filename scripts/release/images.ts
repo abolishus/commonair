@@ -93,9 +93,21 @@ export const RELAY_BUILD: ImageBuild = {
   args: {},
 };
 
+/**
+ * The seed harness is not in compose either: compose runs the harness on the host. The image
+ * carries it, its fixtures, ffmpeg, Go with relay/, and Playwright's browsers, so staging seed
+ * mode runs `seed full` from inside the instance (ADR 0040).
+ */
+export const HARNESS_BUILD: ImageBuild = {
+  image: "harness",
+  context: ".",
+  containerfile: "infra/containers/harness.Containerfile",
+  args: {},
+};
+
 /** All release builds, in RELEASE_IMAGES order. Throws unless they cover it exactly. */
 export function releaseBuilds(composeYaml: string): ImageBuild[] {
-  const builds = [...composeBuilds(composeYaml), RELAY_BUILD];
+  const builds = [...composeBuilds(composeYaml), RELAY_BUILD, HARNESS_BUILD];
   const names = builds.map((b) => b.image);
   const missing = RELEASE_IMAGES.filter((n) => !names.includes(n));
   if (missing.length > 0) throw new Error(`no build for release images: ${missing.join(", ")}`);
@@ -158,11 +170,13 @@ export interface BuildOptions {
  * `org.opencontainers.image.licenses` per image (SPDX): the main work plus what we add on top.
  * FFmpeg from Debian (with libx264) is GPL-2.0-or-later; the probe images add BusyBox
  * (GPL-2.0-only); our Postgres adds WAL-G (Apache-2.0); whisper is whisper.cpp's server (MIT)
- * plus our health probe. Base OS packages are in the SBOM; whisper's weights are never in it.
+ * plus our health probe; the seed harness adds Playwright and its browsers (Apache-2.0; Chromium
+ * BSD-3-Clause, WebKit LGPL-2.0-or-later, Firefox MPL-2.0), Go (BSD-3-Clause) and Ubuntu's FFmpeg. Base OS packages are in the SBOM; whisper's weights are never in it.
  */
 export const IMAGE_LICENSES: Record<ReleaseImage, string> = {
   api: "AGPL-3.0-or-later AND GPL-2.0-or-later",
   chat: "AGPL-3.0-or-later",
+  harness: "AGPL-3.0-or-later AND Apache-2.0 AND BSD-3-Clause AND GPL-2.0-or-later AND LGPL-2.0-or-later AND MPL-2.0",
   irc: "AGPL-3.0-or-later",
   media: "AGPL-3.0-or-later AND GPL-2.0-or-later",
   origin: "AGPL-3.0-or-later",

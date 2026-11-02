@@ -9,10 +9,14 @@
 import { z } from "zod";
 import { SITE } from "../../packages/config/src/site.ts";
 
-/** Our own images, one per Containerfile build in compose.yaml plus the relay. */
+/**
+ * Our own images, one per Containerfile build in compose.yaml plus the relay and the seed harness
+ * (staging seed mode only, ADR 0040; no instance runs it otherwise).
+ */
 export const RELEASE_IMAGES = [
   "api",
   "chat",
+  "harness",
   "irc",
   "media",
   "origin",

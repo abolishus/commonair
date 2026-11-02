@@ -242,6 +242,7 @@ export function buildSpecs(): Record<ReleaseImage, BuildSpec> {
     };
   }
   specs.relay = { file: "relay/Containerfile", context: "relay", args: {} };
+  specs.harness = { file: "infra/containers/harness.Containerfile", context: ".", args: {} };
   const missing = RELEASE_IMAGES.filter((n) => !specs[n]);
   if (missing.length) throw new Error(`no build for ${missing.join(", ")} in compose.yaml`);
   return specs as Record<ReleaseImage, BuildSpec>;
@@ -285,9 +286,17 @@ function build(args: string[]): void {
   }
 }
 
+/**
+ * Release images the e2e never runs, built as a tag of another image instead: the seed harness
+ * runs only in staging seed mode (ADR 0040), which the e2e does not open, and its real build
+ * (Playwright's browsers, Go, FFmpeg) would cost gigabytes. The manifest still lists a digest.
+ */
+export const E2E_STAND_INS: Partial<Record<ReleaseImage, ReleaseImage>> = { harness: "tools" };
+
 function buildImages(commit: string): void {
   const specs = buildSpecs();
   for (const name of RELEASE_IMAGES) {
+    if (E2E_STAND_INS[name]) continue;
     const tag = `${LOCAL}/${name}:${commit.slice(0, 12)}`;
     const label = podman(["image", "inspect", "--format", `{{index .Labels "${REVISION_LABEL}"}}`, tag], {
       allowFail: true,
@@ -304,6 +313,8 @@ function buildImages(commit: string): void {
     ]);
     build(["-f", file, ...buildArgs, "--label", `${REVISION_LABEL}=${commit}`, "-t", tag, context]);
   }
+  for (const [name, source] of Object.entries(E2E_STAND_INS))
+    podman(["tag", `${LOCAL}/${source}:${commit.slice(0, 12)}`, `${LOCAL}/${name}:${commit.slice(0, 12)}`]);
 }
 
 /** Re-labels every image of `fromTag` so each digest changes (a new release of the same code). */

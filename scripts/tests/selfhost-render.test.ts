@@ -46,8 +46,9 @@ describe("renderUnits", () => {
       expect(images(rendered).get(file)).toMatch(/^ghcr\.io\/abolishus\/commonair\/[a-z-]+:0\.1\.0-rc\.1@sha256:/);
     }
     // api chat irc media origin web worker tracker + migrate garage-init irc-cert (tools)
-    // + postgres loki tempo otel-collector + whisper (installed only with captions on).
-    expect(own).toBe(16);
+    // + postgres loki tempo otel-collector + whisper (installed only with captions on)
+    // + harness (the seed harness, installed only while staging seed mode is open).
+    expect(own).toBe(17);
     expect([...rendered.values()].join("\n")).not.toContain("localhost/");
   });
 
