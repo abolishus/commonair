@@ -104,7 +104,16 @@ export class WebSession {
   /** Navigate a page to a web app path (or absolute URL). */
   async goto(path: string, name = "main"): Promise<Page> {
     const page = await this.page(name);
-    await page.goto(new URL(path, this.webUrl).toString(), { waitUntil: "domcontentloaded", timeout: 30_000 });
+    const url = new URL(path, this.webUrl).toString();
+    try {
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
+    } catch (err) {
+      // A navigation the page started itself (the redirect after sign-in, in WebKit after the
+      // sign-in flow has already seen it land) can interrupt this one: let it finish, then go again.
+      if (!(err instanceof Error && err.message.includes("is interrupted by another navigation"))) throw err;
+      await page.waitForLoadState("domcontentloaded", { timeout: 30_000 });
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
+    }
     await waitForHydration(page);
     return page;
   }
