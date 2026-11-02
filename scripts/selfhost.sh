@@ -78,10 +78,11 @@ Commands:
              Staging only: drop the database, flush Valkey, migrate, restart, so that
              `seed full` can fill it again (docs/self-hosting/upgrades.md, "Resetting a
              staging instance"). Every row is gone afterwards; there is no backup first.
-  seed-mode open|run|coverage|close
+  seed-mode open|run|live|coverage|close
              Staging only: open a time-limited seed mode (test hooks, mocks, Mailpit, the seed
-             harness on this host), run `seed full` (and `seed-coverage`) in it, close it again
-             (docs/testing/seeding.md, "Seeding staging"; ADR 0040).
+             harness on this host), run `seed full` (and `seed-coverage`) in it with live
+             streams kept running, close it again (docs/testing/seeding.md, "Seeding staging";
+             ADR 0040).
   --help     Show this help.
 
 install options:
@@ -176,8 +177,8 @@ and staging instances set):
                         `seed full` refuse, so use it only for a staging that stays basic.
   Object storage (VODs, clips) is not wiped: stale objects are harmless.
 
-seed-mode (refused unless commonair.env has DEMO_SEED_FULL=true; open, run and coverage need
---confirm with this instance's PUBLIC_HOSTNAME):
+seed-mode (refused unless commonair.env has DEMO_SEED_FULL=true; open, run, live and coverage
+need --confirm with this instance's PUBLIC_HOSTNAME):
   open --confirm <host> [--hours N]
                         Save the values it changes, write the seed-mode block into commonair.env
                         (every test hook, the scripted classifier and synthetic hash lists,
@@ -189,15 +190,18 @@ seed-mode (refused unless commonair.env has DEMO_SEED_FULL=true; open, run and c
                         and most: 6). Refuses while seed mode is open.
   run --confirm <host> [--scale small|medium] [--seed n]
                         Run `seed full` (default --scale medium) in the harness container, after
-                        reset-staging. DEMO_SEED_PASSWORD, if set, is the accounts' password;
-                        otherwise the run prints the one it made up. The store report goes to
-                        ~/.local/share/commonair/seed-mode/reports/seed-store.json.
+                        reset-staging, then start `seed live` there: three seeded channels stream
+                        with chat until close. DEMO_SEED_PASSWORD, if set, is the accounts'
+                        password; otherwise the run makes one up and prints it. The store report
+                        goes to ~/.local/share/commonair/seed-mode/reports/seed-store.json.
+  live --confirm <host> (Re)start `seed live` there (needs DEMO_SEED_PASSWORD), e.g. after the
+                        harness restarted.
   coverage --confirm <host>
                         Run the seed-coverage scenario there (needs DEMO_SEED_PASSWORD).
-  close                 Remove the block and restore exactly the values it replaced, remove the
-                        mocks, Mailpit, the harness and the drop-ins, restart. Giveaways, the watch
-                        gate, the surge guard and push stay on; the seeded data stays. Safe to run
-                        again; the close timer runs it at the deadline.
+  close                 Stop `seed live`, remove the block and restore exactly the values it
+                        replaced, remove the mocks, Mailpit, the harness and the drop-ins, restart.
+                        Giveaways, the watch gate, the surge guard and push stay on; the seeded data
+                        stays. Safe to run again; the close timer runs it at the deadline.
   upgrade and install --reinstall are refused while seed mode is open.
 
 A fork's releases: set COMMONAIR_REPOSITORY_URL=https://… for the first install; later
@@ -2549,6 +2553,8 @@ cmd_reset_staging() {
 #   installs the stripe-mock, Mailpit and seed-harness units (unit_in_mode lets them in only while
 #   SEED_STATE exists), and restarts what reads the changed keys.
 # - `run` and `coverage` run the harness in the seed-harness container, on the commonair network.
+#   After `seed full`, `run` starts `seed live` there detached (`podman exec -d`): a few seeded
+#   channels stream with chat until `close` stops it (SIGTERM), before the container stops.
 # - `close` removes the block, restores exactly the saved values, removes the units, the drop-ins
 #   and the timer, and restarts. The features above stay on; the seeded data stays.
 # - One open or close runs at a time (SEED_LOCK); a close while another holds it changes nothing.
@@ -2569,6 +2575,11 @@ SEED_TIMER=commonair-seed-mode-close.timer
 # One open or close at a time (the timer's close and one by hand): a symlink to the holder's pid.
 SEED_LOCK="$OBJECT_STATE_DIR/seed-mode.lock"
 SEED_CLOSE_SERVICE=commonair-seed-mode-close.service
+# `seed live` in the harness container: how many channels, and its pid and log in the reports
+# volume (the pid is the container's; only commands run in the container use it).
+SEED_LIVE_CHANNELS=3
+SEED_LIVE_PID=/reports/seed-live.pid
+SEED_LIVE_LOG=seed-live.log
 SEED_BLOCK_BEGIN="# >>> staging seed mode: selfhost.sh seed-mode close removes this block and restores the values it replaced >>>"
 SEED_BLOCK_END="# <<< staging seed mode <<<"
 # Turned on by open and left on by close (decision 2).
@@ -2922,6 +2933,35 @@ seed_exec() {
   podman exec ${_pw_env:+"$_pw_env"} commonair-seed-harness "$@"
 }
 
+# `seed live` runs detached in the harness container until seed-mode close. It needs the password
+# `seed full` used (DEMO_SEED_PASSWORD, by name). The single-quoted scripts run in the container.
+seed_live_running() {
+  # shellcheck disable=SC2016
+  podman exec commonair-seed-harness sh -c 'p=$(cat "$1" 2>/dev/null) && [ -n "$p" ] && kill -0 "$p" 2>/dev/null' \
+    sh "$SEED_LIVE_PID" >/dev/null 2>&1
+}
+
+seed_live_start() {
+  # shellcheck disable=SC2016
+  podman exec -d --env=DEMO_SEED_PASSWORD commonair-seed-harness sh -c \
+    'echo $$ >"$1"; exec bun harness/src/cli.ts seed live --channels "$2" >>"/reports/$3" 2>&1' \
+    sh "$SEED_LIVE_PID" "$SEED_LIVE_CHANNELS" "$SEED_LIVE_LOG" >/dev/null ||
+    die "seed live did not start in commonair-seed-harness" "see: journalctl --user -u commonair-seed-harness"
+  sleep 5
+  if seed_live_running; then
+    info "seed live: $SEED_LIVE_CHANNELS seeded channels stream with chat until seed-mode close (log: $SEED_DATA_DIR/reports/$SEED_LIVE_LOG)"
+  else
+    warn "seed live exited at once; see $SEED_DATA_DIR/reports/$SEED_LIVE_LOG, then: selfhost.sh seed-mode live --confirm <host>"
+  fi
+}
+
+# SIGTERM, then up to 30 s for its encoders to stop. Best effort: stopping the container ends it too.
+seed_live_stop() {
+  # shellcheck disable=SC2016
+  podman exec commonair-seed-harness sh -c 'p=$(cat "$1" 2>/dev/null) || exit 0; kill -TERM "$p" 2>/dev/null; i=0; while kill -0 "$p" 2>/dev/null && [ "$i" -lt 30 ]; do sleep 1; i=$((i + 1)); done; rm -f "$1"' \
+    sh "$SEED_LIVE_PID" >/dev/null 2>&1 || true
+}
+
 cmd_seed_mode_run() {
   parse_seed_flags "$@"
   require_instance "seed-mode run"
@@ -2931,6 +2971,13 @@ cmd_seed_mode_run() {
   _left=$(( (${_dl:-0} - $(date -u +%s)) / 60 ))
   info "running seed full --scale $SEED_SCALE --seed $SEED_N in commonair-seed-harness ($_left minutes left before seed mode closes)"
   [ "$_left" -ge 120 ] || warn "less than 2 hours left: a medium seed may not finish before the timer closes seed mode"
+  # seed live signs the accounts in after the run, so the password is made here when none is given.
+  if [ -z "${DEMO_SEED_PASSWORD:-}" ]; then
+    DEMO_SEED_PASSWORD=$(seed_random_hex)
+    export DEMO_SEED_PASSWORD
+    say "Password for every account: $DEMO_SEED_PASSWORD"
+    say "(export DEMO_SEED_PASSWORD with it for seed-mode live and coverage)"
+  fi
   _rc=0
   seed_exec bun harness/src/cli.ts seed full --confirm "$SEED_DB_TARGET" --scale "$SEED_SCALE" --seed "$SEED_N" || _rc=$?
   say ""
@@ -2938,6 +2985,18 @@ cmd_seed_mode_run() {
   if [ "$_rc" -ne 0 ]; then
     die "seed full exited with $_rc" "a run that stopped halfway needs a reset before the next: reset-staging, then run again"
   fi
+  seed_live_start
+}
+
+cmd_seed_mode_live() {
+  parse_seed_flags "$@"
+  require_instance "seed-mode live"
+  staging_guard "seed-mode live" "$SEED_CONFIRM"
+  seed_require_open "seed-mode live"
+  [ -n "${DEMO_SEED_PASSWORD:-}" ] || die "seed-mode live refused: DEMO_SEED_PASSWORD is not set" \
+    "export the password seed-mode run used (it printed it, or you gave it), then re-run"
+  seed_live_stop
+  seed_live_start
 }
 
 cmd_seed_mode_coverage() {
@@ -2973,7 +3032,8 @@ cmd_seed_mode_close() {
   _host=$(env_get PUBLIC_HOSTNAME "$ENV_FILE")
   info "closing seed mode on $_host"
 
-  # 1. The timer and the seed-mode units down.
+  # 1. seed live first (its encoders end their broadcasts), then the timer and the seed-mode units.
+  seed_live_stop
   systemctl --user disable --now "$SEED_TIMER" >/dev/null 2>&1 || true
   # shellcheck disable=SC2046 # unit names have no spaces
   systemctl --user stop $(seed_services) 2>/dev/null || true
@@ -3030,15 +3090,21 @@ seed_mode_status() {
     _state=$(systemctl --user show "$_s" --property=ActiveState --value 2>/dev/null || true)
     say "           ${_s%.service} ${_state:-?}"
   done
+  if seed_live_running; then
+    say "           seed live: running (live streams with chat; log $SEED_DATA_DIR/reports/$SEED_LIVE_LOG)"
+  else
+    say "           seed live: not running (selfhost.sh seed-mode live --confirm <host> starts it)"
+  fi
 }
 
 cmd_seed_mode() {
-  [ $# -gt 0 ] || die "seed-mode needs a subcommand: open, run, coverage or close" "see: selfhost.sh --help"
+  [ $# -gt 0 ] || die "seed-mode needs a subcommand: open, run, live, coverage or close" "see: selfhost.sh --help"
   _sub=$1
   shift
   case "$_sub" in
     open) cmd_seed_mode_open "$@" ;;
     run) cmd_seed_mode_run "$@" ;;
+    live) cmd_seed_mode_live "$@" ;;
     coverage) cmd_seed_mode_coverage "$@" ;;
     close) cmd_seed_mode_close "$@" ;;
     -h | --help) usage ;;

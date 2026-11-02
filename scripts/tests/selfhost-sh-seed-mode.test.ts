@@ -395,6 +395,16 @@ describe("seed-mode close", () => {
       writeFileSync(h.log, "");
       const r = h.run(["seed-mode", "close"]);
       expectOk(r);
+      // seed live is stopped (SIGTERM in the container) before the harness container stops.
+      const order = h.calls();
+      const termAt = order.findIndex(
+        (c) => c.startsWith("podman exec commonair-seed-harness") && c.includes("kill -TERM"),
+      );
+      const stopAt = order.findIndex(
+        (c) => c.startsWith("systemctl --user stop") && c.includes("commonair-seed-harness"),
+      );
+      expect(termAt).toBeGreaterThanOrEqual(0);
+      expect(termAt).toBeLessThan(stopAt);
       expect(existsSync(harnessEnv(h))).toBe(false);
       expect(existsSync(`${harnessEnv(h)}.tmp.123`)).toBe(false);
       expect(existsSync(lockPath(h))).toBe(false);
@@ -554,6 +564,8 @@ describe("while seed mode is open", () => {
       expect(out).toMatch(new RegExp(`seed mode: OPEN until ${deadline} \\((179|180) min left`));
       for (const u of ["stripe-mock", "mailpit", "seed-harness"]) expect(out).toContain(`commonair-${u} active`);
       expect(out).toMatch(/commonair-seed-harness\s+active/);
+      expect(out).toContain("seed live: running");
+      expect(h.run(["status"], { STUB_SEED_LIVE_DOWN: "1" }).out).toContain("seed live: not running");
     },
     TIMEOUT,
   );
@@ -605,17 +617,71 @@ describe("seed-mode run and coverage", () => {
       });
       expectOk(r);
       const exec = h.calls().filter((c) => c.startsWith("podman exec"));
-      expect(exec).toEqual([
+      expect(exec[0]).toBe(
         "podman exec --env=DEMO_SEED_PASSWORD commonair-seed-harness bun harness/src/cli.ts seed full --confirm postgres:5432/commonair --scale small --seed 7",
-      ]);
+      );
+      // Then seed live, detached, with the same password by name, its pid and log in the reports volume.
+      expect(exec[1]).toMatch(
+        /^podman exec -d --env=DEMO_SEED_PASSWORD commonair-seed-harness sh -c .*exec bun harness\/src\/cli\.ts seed live --channels "\$2".* sh \/reports\/seed-live\.pid 3 seed-live\.log$/,
+      );
+      expect(exec[2]).toContain("kill -0");
+      expect(exec).toHaveLength(3);
       expect(h.calls().join("\n")).not.toContain("staging-demo-pass-123");
       expect(r.out).toContain(join(h.home, ".local/share/commonair/seed-mode/reports/seed-store.json"));
-      // Without a password, none is passed: the run makes one up and prints it once.
+      expect(r.err + r.out).toContain("seed live: 3 seeded channels stream with chat until seed-mode close");
+      // Without a password the run makes one up (seed live signs in with it), passes it by name and
+      // prints it once.
       writeFileSync(h.log, "");
-      expectOk(h.run(["seed-mode", "run", "--confirm", HOSTNAME]));
-      expect(h.calls().filter((c) => c.startsWith("podman exec"))).toEqual([
-        "podman exec commonair-seed-harness bun harness/src/cli.ts seed full --confirm postgres:5432/commonair --scale medium --seed 1",
-      ]);
+      const made = h.run(["seed-mode", "run", "--confirm", HOSTNAME]);
+      expectOk(made);
+      const pw = /^Password for every account: ([0-9a-f]{64})$/m.exec(made.out)?.[1];
+      expect(pw).toBeDefined();
+      const calls = h.calls().filter((c) => c.startsWith("podman exec"));
+      expect(calls[0]).toBe(
+        "podman exec --env=DEMO_SEED_PASSWORD commonair-seed-harness bun harness/src/cli.ts seed full --confirm postgres:5432/commonair --scale medium --seed 1",
+      );
+      expect(calls[1]).toMatch(/^podman exec -d --env=DEMO_SEED_PASSWORD commonair-seed-harness sh -c /);
+      expect(h.calls().join("\n")).not.toContain(pw!);
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "run warns when seed live exits at once, and does not fail the seeded run",
+    () => {
+      const h = staging();
+      expectOk(open(h));
+      const r = h.run(["seed-mode", "run", "--confirm", HOSTNAME], {
+        DEMO_SEED_PASSWORD: "staging-demo-pass-123",
+        STUB_SEED_LIVE_DOWN: "1",
+      });
+      expectOk(r);
+      expect(r.err + r.out).toContain("seed live exited at once");
+      expect(h.run(["status"], { STUB_SEED_LIVE_DOWN: "1" }).out).toContain("seed live: not running");
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "live restarts seed live (stop, then start), and needs DEMO_SEED_PASSWORD",
+    () => {
+      const h = staging();
+      expectOk(open(h));
+      writeFileSync(h.log, "");
+      const none = h.run(["seed-mode", "live", "--confirm", HOSTNAME]);
+      expect(none.code).toBe(1);
+      expect(none.err).toContain("seed-mode live refused: DEMO_SEED_PASSWORD is not set");
+      expect(h.calls().filter((c) => c.startsWith("podman exec"))).toEqual([]);
+      const wrong = h.run(["seed-mode", "live", "--confirm", "prod.example.org"], {
+        DEMO_SEED_PASSWORD: "staging-demo-pass-123",
+      });
+      expect(wrong.code).toBe(1);
+      expect(h.calls().filter((c) => c.startsWith("podman exec"))).toEqual([]);
+      expectOk(h.run(["seed-mode", "live", "--confirm", HOSTNAME], { DEMO_SEED_PASSWORD: "staging-demo-pass-123" }));
+      const exec = h.calls().filter((c) => c.startsWith("podman exec"));
+      expect(exec[0]).toContain("kill -TERM");
+      expect(exec[1]).toMatch(/^podman exec -d --env=DEMO_SEED_PASSWORD commonair-seed-harness sh -c .*seed live/);
+      expect(h.calls().join("\n")).not.toContain("staging-demo-pass-123");
     },
     TIMEOUT,
   );
@@ -680,7 +746,7 @@ describe("seed-mode help", () => {
   test("--help lists the command and its subcommands", () => {
     const r = host().run(["--help"]);
     expect(r.code).toBe(0);
-    for (const s of ["seed-mode open|run|coverage|close", "open --confirm <host> [--hours N]", "close  "])
+    for (const s of ["seed-mode open|run|live|coverage|close", "open --confirm <host> [--hours N]", "close  "])
       expect(r.out).toContain(s);
     expect(r.out).toContain("upgrade and install --reinstall are refused while seed mode is open");
   });

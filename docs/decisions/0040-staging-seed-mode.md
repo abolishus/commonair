@@ -30,7 +30,7 @@ resets it, guarded by `DEMO_SEED_FULL=true` and `--confirm <PUBLIC_HOSTNAME>`.
 
 ## Decision
 
-`selfhost.sh seed-mode open|run|coverage|close` puts a staging instance into a time-limited
+`selfhost.sh seed-mode open|run|live|coverage|close` puts a staging instance into a time-limited
 **seed mode** that has all of that, runs the seed from inside the instance, and closes again.
 `docs/testing/seeding.md` ("Seeding staging") has the operator's steps.
 
@@ -62,6 +62,15 @@ resets it, guarded by `DEMO_SEED_FULL=true` and `--confirm <PUBLIC_HOSTNAME>`.
    deadline, and `run` refuses once it has passed.
 4. **All email goes to a Mailpit container** while seed mode is open (`SMTP_HOST=mailpit`, no TLS,
    no credentials). The harness reads Mailpit's API. No demo address reaches the real SMTP relay.
+5. **Live streams stay up while seed mode is open** (amended 2026-11-02). After `seed full`
+   succeeds, `run` starts `seed live --channels 3` detached in the harness container
+   (`podman exec -d`): streamer1, streamer2 and streamer3 publish a test pattern through the
+   stack's normal ingest, and bulk viewers chat, so home, the channel pages, embeds and the
+   dashboard show live streams. Its pid (the container's) is in the reports volume.
+   - `close` stops it first (SIGTERM, then up to 30 s), before it stops the harness container.
+   - `status` says whether it is running; `seed-mode live` restarts it (after a harness restart).
+   - `run` needs the accounts' password afterwards, so without `DEMO_SEED_PASSWORD` it makes one
+     up (instead of the harness) and prints it.
 
 How the pieces fit:
 
@@ -133,6 +142,8 @@ of decision 2 to its previous value.
 - The seeded data outlives seed mode. Webhook, Discord and federation rows point at peers that
   went away with the harness, and fail later, as on the local stack.
 - If the seed is still running at the deadline, the timer stops it, and the database needs a reset.
+- Until close, three encoders and their chat run on the droplet (640x360 at 800 kbps each), and the
+  live chat lines accumulate as ordinary seeded chat.
 
 ## Open points
 

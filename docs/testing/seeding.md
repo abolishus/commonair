@@ -99,7 +99,14 @@ DEMO_SEED_FULL=true DEMO_SEED_PASSWORD='…' bun harness/src/cli.ts seed live --
 
 After `seed full`, this keeps K seeded channels streaming a test pattern while harness chat
 clients talk. That gives the live surfaces something to show: home, Calm Chat, surge guard, data
-mode, embeds and overlays. Stop it with Ctrl-C, or let `--duration` run out.
+mode, embeds and overlays. Stop it with Ctrl-C or SIGTERM, or let `--duration` run out.
+
+The fixed streamers go first (streamer1, streamer2, streamer3, council1, council2), then bulk
+streamers. Each channel gets three bulk viewers as chatters, never one that is suspended, being
+deleted, banned from a chat or blocked by anyone. Chat reaches a page only over its socket (there
+is no history on join), so a page shows lines that arrive while it is open: each chatter says one
+every 25–60 s. `seed-coverage` runs it itself with faster chat (below), and staging seed mode runs
+it after `seed full` until `seed-mode close`.
 
 ## Checking it: `seed-coverage`
 
@@ -123,6 +130,12 @@ It runs in one of three ways:
   ```
 - **On any other database** (an unsharded `full`, whose other scenarios made users): it skips
   every route and says why.
+
+During the walk, streamer1 and streamer2 are live: the scenario runs `seed live` with a chat line
+every 1.5–4 s per chatter, waits until both channels show as live, and stops it in its teardown.
+That fills `/`, the channel page and its chat, the embed and the dashboard. If streamer1 is already
+live, a separate `seed live` is running (staging's), and the scenario uses it. A route marked
+`expectData` gets up to 10 s for an empty state to fill before it is judged.
 
 To run the shard as CI does:
 
@@ -255,7 +268,7 @@ sh ~/commonair/selfhost.sh seed-mode open --confirm staging-stream.abolish.us
 # 3. A fresh database. Its migrations apply seed mode's governance bootstrap.
 sh ~/commonair/selfhost.sh reset-staging --confirm staging-stream.abolish.us
 
-# 4. The full seed, in the harness container.
+# 4. The full seed, in the harness container; then three channels stay live with chat.
 DEMO_SEED_PASSWORD='<at least 12 characters>' \
   sh ~/commonair/selfhost.sh seed-mode run --confirm staging-stream.abolish.us --scale medium
 
@@ -263,7 +276,7 @@ DEMO_SEED_PASSWORD='<at least 12 characters>' \
 DEMO_SEED_PASSWORD='<the same password>' \
   sh ~/commonair/selfhost.sh seed-mode coverage --confirm staging-stream.abolish.us
 
-# 6. Close seed mode. The seeded data stays.
+# 6. Close seed mode. It stops the live streams first; the seeded data stays.
 sh ~/commonair/selfhost.sh seed-mode close
 ```
 
@@ -276,7 +289,8 @@ sh ~/commonair/selfhost.sh seed-mode close
     the real SMTP relay.
   - Federation and the Twitch import talk only to the harness's own peers.
   - `upgrade` and `install --reinstall` refuse, and say to run `seed-mode close` first.
-  - `selfhost.sh status` shows `seed mode: OPEN until <deadline>` and the seed-mode units.
+  - `selfhost.sh status` shows `seed mode: OPEN until <deadline>`, the seed-mode units, and
+    whether `seed live` is running.
 - **Its deadline:** a timer, `commonair-seed-mode-close.timer`, runs `seed-mode close` at the
   deadline. `open` arms it before it changes anything, and stops, changing nothing, if it cannot.
   It fires at boot if the host was down then. While it (or any close) runs, a second `close`
@@ -284,10 +298,19 @@ sh ~/commonair/selfhost.sh seed-mode close
   with the harness, and needs a reset before the next run.
 - **`run`:** runs `bun harness/src/cli.ts seed full` in `commonair-seed-harness`. It writes as the
   app role, against `postgres:5432/commonair`. Its output streams to your terminal.
-  - Without `DEMO_SEED_PASSWORD`, the run makes up a password and prints it once at the end.
+  - Without `DEMO_SEED_PASSWORD`, the run makes up a password and prints it once, before the seed.
   - The store report is `~/.local/share/commonair/seed-mode/reports/seed-store.json`, next to
     `seed-coverage`'s reports.
+  - Once the seed succeeds, it starts `seed live --channels 3` in the same container, detached
+    (`podman exec -d`): streamer1, streamer2 and streamer3 publish a test pattern through the
+    stack's ingest, with bulk viewers chatting. It keeps running until `close` or the deadline.
+    Its pid (the container's) is `/reports/seed-live.pid`, and its log is `seed-live.log` in the
+    reports directory.
+- **`live`:** restarts `seed live` (stop, then start), for example after the harness container
+  restarted. It needs `DEMO_SEED_PASSWORD`, the password the run used.
 - **`close`:**
+  - It first stops `seed live` (SIGTERM, then up to 30 s for its encoders), before the harness
+    container stops.
   - It removes the block from `commonair.env` and restores exactly the values the block replaced:
     federation, the Twitch import, payments and Stripe, SMTP, the cost model and the bootstrap.
   - It removes stripe-mock, Mailpit, the harness, the drop-ins and the timer, then restarts.

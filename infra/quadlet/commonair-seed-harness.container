@@ -2,8 +2,10 @@
 # SPDX-License-Identifier: CC0-1.0
 #
 # The seed harness (staging seed mode only, ADR 0040): our harness image, idle until
-# `selfhost.sh seed-mode run` (or `coverage`) runs `seed full` in it with podman exec. selfhost.sh
-# installs this unit only while seed mode is open, and `seed-mode close` stops and removes it.
+# `selfhost.sh seed-mode run` (or `coverage`) runs `seed full` in it with podman exec; `run` then
+# leaves `seed live` running in it detached (live streams with chat) until `seed-mode close`
+# stops it. selfhost.sh installs this unit only while seed mode is open, and `seed-mode close`
+# stops and removes it.
 #
 # It sits on the commonair network, so it reaches the API, Postgres (as the app role), MediaMTX,
 # Mailpit and stripe-mock by name, and the stack reaches the peers the seed starts (webhook and push

@@ -166,7 +166,10 @@ case "$1" in
     esac ;;
   volume)
     case "$2" in inspect) echo "$STUB_STATE/caddy-data" ;; esac ;;
-  exec) echo "backup-list: base_000000010000000000000003" ;;
+  exec)
+    # Seed mode's check that \`seed live\` runs in the harness container (STUB_SEED_LIVE_DOWN: it does not).
+    case "$*" in *"kill -0"*) [ -z "\${STUB_SEED_LIVE_DOWN:-}" ] || exit 1 ;; esac
+    echo "backup-list: base_000000010000000000000003" ;;
   unshare) echo "1.0M	x" ;;
 esac
 exit 0
