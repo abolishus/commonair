@@ -14,7 +14,7 @@ import type { DbHandle } from "@commonair/db";
 import { OpsHooks } from "../../e6/ops.ts";
 import { FIXTURES, findInPages, fixturePath, isUploadRejected, errorOf, nciiClipUrl } from "../../safety.ts";
 import { ModerationHooks, putPresigned, readFixture } from "../../safety-io.ts";
-import { waitFor } from "../../wait.ts";
+import { sleep, waitFor } from "../../wait.ts";
 import type { SeedContext, SeededUser } from "../types.ts";
 import { AnalyticsHooks, SafetySessions, step } from "./api.ts";
 import { type LiveChannel, type LiveResult, runLive } from "./live.ts";
@@ -118,6 +118,8 @@ export async function runSafety(ctx: SeedContext, plan: SafetyPlan, secret: stri
   progress("NCII done");
   await reports(run);
   progress("reports done");
+  // The cell suspensions are made in the reports step; they must lapse before the unit ends.
+  const suspendedAt = Date.now();
   await appeals(run);
   await legalAndIncidents(run);
   await privacy(run);
@@ -130,6 +132,14 @@ export async function runSafety(ctx: SeedContext, plan: SafetyPlan, secret: stri
   const audit = await step(ctx.signal, "the test hooks", "tick the evidence audit (OPS_TEST_HOOKS)", () =>
     new OpsHooks(ctx.env.HARNESS_API_URL, secret, ctx.signal).tickRan("evidence-audit"),
   );
+
+  // Later units (coop, platform) sign bulk viewers in, the cell targets among them: wait out the
+  // brief suspensions (and a margin for clock skew) so none of them is still banned.
+  const lapse = suspendedAt + (CELL_SUSPENSION_SECONDS + 2) * 1000 - Date.now();
+  if (lapse > 0) {
+    progress(`waiting ${Math.ceil(lapse / 1000)} s for the cell suspensions to lapse`);
+    await sleep(lapse, ctx.signal);
+  }
 
   if (sessions.waitedSeconds > 0)
     run.notes.push(
