@@ -492,6 +492,14 @@ export const SEED_ENV_KEYS = [
   "VAPID_PRIVATE_KEY",
 ] as const;
 
+/**
+ * The env file `stack --seed` checks. Bun loads `.env`, whose `COMMONAIR_ENV_FILE=` is empty, so
+ * an empty value means unset (resolving "" gives the repository root, a directory).
+ */
+export function seedEnvFile(value: string | undefined): string {
+  return resolve(ROOT, value || ".env");
+}
+
 /** The SEED_ENV_KEYS an env file's text leaves missing or empty. Pure. */
 export function missingSeedEnv(envText: string): string[] {
   // The last assignment wins, as when compose reads the file.
@@ -720,7 +728,7 @@ if (import.meta.main) {
     } else if (cmd === "stack") {
       preflight();
       if (process.argv.includes("--seed")) {
-        const envFile = resolve(ROOT, process.env.COMMONAIR_ENV_FILE ?? ".env");
+        const envFile = seedEnvFile(process.env.COMMONAIR_ENV_FILE);
         const missing = missingSeedEnv(existsSync(envFile) ? readFileSync(envFile, "utf8") : "");
         if (missing.length > 0)
           throw new Error(

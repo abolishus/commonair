@@ -15,6 +15,7 @@ import {
   SEED_OVERRIDE,
   W3_OVERRIDES,
   missingSeedEnv,
+  seedEnvFile,
   stackFiles,
   stackProfiles,
   staleImageContainers,
@@ -368,6 +369,12 @@ describe("stackFiles", () => {
     expect(missingSeedEnv(full.replace("INTEGRITY_SIGNING_KEY=x", "INTEGRITY_SIGNING_KEY="))).toEqual([
       "INTEGRITY_SIGNING_KEY",
     ]);
+  });
+
+  test("seedEnvFile reads .env when COMMONAIR_ENV_FILE is unset or empty", () => {
+    expect(seedEnvFile(undefined)).toMatch(/\/\.env$/);
+    expect(seedEnvFile("")).toMatch(/\/\.env$/);
+    expect(seedEnvFile("other.env")).toMatch(/\/other\.env$/);
   });
 
   test("refuses a missing file or an option instead of starting the wrong stack", () => {

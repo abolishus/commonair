@@ -536,6 +536,7 @@ describe("scale and edge cases", () => {
     expect(z.bans.find((b) => b.target === "viewer2")).toBeDefined();
   });
 
+  // Plans the whole large preset (2 M chat lines, 21 k accounts): seconds on a CI runner.
   test("the largest preset's counts, computed without writing", () => {
     const g = plan(7, SEED_SCALES.large);
     const c = planCounts(g);
@@ -543,7 +544,7 @@ describe("scale and edge cases", () => {
     expect(c.chat_messages).toBe(SEED_SCALES.large.chatLines);
     expect(c.streamerChannels).toBe(SEED_SCALES.large.streamers + FIXED_ACCOUNTS.filter((a) => a.streamer).length);
     expect(g.api.moveLinkFollowers).toHaveLength(20);
-  });
+  }, 60_000);
 
   test("apportion sums exactly and handles zero weights", () => {
     expect(apportion(10, [1, 1, 1])).toEqual([4, 3, 3]);

@@ -154,6 +154,7 @@ describe("planInteract determinism and scale", () => {
     expect(double.actors.length).toBeGreaterThan(P.actors.length);
   });
 
+  // Plans the whole large preset (2 M chat lines, 21 k accounts): seconds on a CI runner.
   test("the largest preset is computed without writing, within its caps", () => {
     const large = SEED_SCALES.large;
     const p = plan(7, large, roster(large));
@@ -165,7 +166,7 @@ describe("planInteract determinism and scale", () => {
     for (const w of p.watch) perChannel.set(w.owner, (perChannel.get(w.owner) ?? 0) + 1);
     for (const n of perChannel.values()) expect(n).toBeLessThanOrEqual(WATCH_SESSIONS_PER_CHANNEL_MAX + 1);
     expect(accrualRuns(p.watch.length)).toBeLessThan(10);
-  });
+  }, 60_000);
 
   test("zero bulk accounts: viewer1 alone still bets, votes and wins", () => {
     const empty = { ...small, streamers: 0, viewers: 0 };
