@@ -793,6 +793,8 @@ export const OPS_TICK_JOBS = [
   "money-reconcile",
   // N1: notifications retention (ADR 0028), run now by the unit's test and the harness.
   "notify-prune",
+  // Seed-full: the daily evidence audit, so seed-safety can write an evidence_audit_runs row now.
+  "evidence-audit",
 ] as const;
 /** Body of `INTERNAL_ROUTES.opsTick`; the response is the job's result (counts only). */
 export const OpsTickBody = z.object({ job: z.enum(OPS_TICK_JOBS) });

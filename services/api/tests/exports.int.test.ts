@@ -16,6 +16,7 @@ import {
   EXPORT_TTL_SECONDS,
   INTERNAL_ROUTES,
   INTERNAL_SECRET_HEADER,
+  MODERATION_JOBS,
   QUEUES,
   exportObjectKey,
 } from "@commonair/contracts/internal";
@@ -276,6 +277,31 @@ describe("ops test hook", () => {
         `${QUEUES.retention}:vod-retention`,
       ].sort(),
     );
+  });
+
+  test("a nested job result (the evidence audit) comes back as flat counts", async () => {
+    workers.push(
+      new Worker(
+        QUEUES.moderation,
+        async (job) =>
+          job.name === MODERATION_JOBS.evidenceAudit
+            ? {
+                t0Media: { selected: 1, enqueued: 1 },
+                evidence: { runId: "r", checked: 4, missing: [], mismatched: ["x"], incidentId: null },
+              }
+            : { skipped: true },
+        { connection: connection(), prefix },
+      ),
+    );
+    const r = await tick({ job: "evidence-audit" });
+    expect(r.status).toBe(200);
+    expect(await r.json()).toEqual({
+      "t0Media.selected": 1,
+      "t0Media.enqueued": 1,
+      "evidence.checked": 4,
+      "evidence.missing": 0,
+      "evidence.mismatched": 1,
+    });
   });
 
   test("a job that lost its run lock reports skipped", async () => {

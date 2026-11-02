@@ -21,6 +21,7 @@ describe("operations jobs (E6)", () => {
       "money-fraud-scan": QUEUES.payments,
       "money-reconcile": QUEUES.payments,
       "notify-prune": QUEUES.retention,
+      "evidence-audit": QUEUES.moderation,
     };
     for (const name of OPS_TICK_JOBS) {
       const def = reg.get(queueOf[name])?.get(name);

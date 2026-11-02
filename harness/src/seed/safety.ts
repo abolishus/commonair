@@ -45,11 +45,8 @@ const TABLES = [
  */
 const READ_ONLY: ReadonlySet<string> = new Set(["integrity_flags"]);
 
-/**
- * `evidence_audit_runs`: the worker writes it from the daily evidence audit (03:17 UTC), which has
- * no test hook. Contract request: add `MODERATION_JOBS.evidenceAudit` to the ops tick jobs.
- */
-const PENDING = ["evidence_audit_runs"] as const;
+/** Every table is seeded: `evidence_audit_runs` comes from the evidence-audit ops tick. */
+const PENDING = [] as const;
 
 /**
  * Rows in each owned table now. The unit reports the change across its run, since earlier units

@@ -13,6 +13,7 @@ import { Valkey } from "iovalkey";
 import {
   EXPORT_JOBS,
   INTERNAL_ROUTES,
+  MODERATION_JOBS,
   NOTIFY_JOBS,
   OpsJobResult,
   OpsTickBody,
@@ -36,7 +37,26 @@ export const OPS_JOB_QUEUES: Record<OpsJobName, { queue: string; name: string }>
   "money-fraud-scan": { queue: QUEUES.payments, name: "money-fraud-scan" },
   "money-reconcile": { queue: QUEUES.payments, name: "money-reconcile" },
   "notify-prune": { queue: QUEUES.retention, name: NOTIFY_JOBS.prune },
+  "evidence-audit": { queue: QUEUES.moderation, name: MODERATION_JOBS.evidenceAudit },
 };
+
+/**
+ * A job's return value as the hook's counts. Some jobs return nested summaries (the evidence
+ * audit's `{ t0Media, evidence }`) or `{ skipped: true }`: nested keys are joined with dots,
+ * booleans count 1/0 and arrays count their length. Ids, strings and nulls are dropped, so only
+ * counts ever leave the hook.
+ */
+export function flattenJobResult(value: unknown, prefix = "", out: OpsJobResult = {}): OpsJobResult {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return out;
+  for (const [k, v] of Object.entries(value)) {
+    const key = prefix ? `${prefix}.${k}` : k;
+    if (typeof v === "number" && Number.isInteger(v)) out[key] = v;
+    else if (typeof v === "boolean") out[key] = v ? 1 : 0;
+    else if (Array.isArray(v)) out[key] = v.length;
+    else if (v !== null && typeof v === "object") flattenJobResult(v, key, out);
+  }
+  return out;
+}
 
 export interface OpsTickRunner {
   run(job: OpsJobName, timeoutMs?: number): Promise<OpsJobResult>;
@@ -72,7 +92,7 @@ export function createOpsTickRunner(valkeyUrl: string, prefix: string): OpsTickR
       const { queue, name } = OPS_JOB_QUEUES[job];
       const ev = await eventsOf(queue);
       const added = await queueOf(queue).add(name, {}, { removeOnComplete: 100, removeOnFail: 100 });
-      return OpsJobResult.parse(await added.waitUntilFinished(ev, timeoutMs));
+      return OpsJobResult.parse(flattenJobResult(await added.waitUntilFinished(ev, timeoutMs)));
     },
     async close() {
       for (const q of queues.values()) await q.close();
