@@ -278,7 +278,9 @@ sh ~/commonair/selfhost.sh seed-mode close
   - `upgrade` and `install --reinstall` refuse, and say to run `seed-mode close` first.
   - `selfhost.sh status` shows `seed mode: OPEN until <deadline>` and the seed-mode units.
 - **Its deadline:** a timer, `commonair-seed-mode-close.timer`, runs `seed-mode close` at the
-  deadline. It fires at boot if the host was down then. A run still going at the deadline stops
+  deadline. `open` arms it before it changes anything, and stops, changing nothing, if it cannot.
+  It fires at boot if the host was down then. While it (or any close) runs, a second `close`
+  changes nothing, and `status` says seed mode is being closed. A run still going at the deadline stops
   with the harness, and needs a reset before the next run.
 - **`run`:** runs `bun harness/src/cli.ts seed full` in `commonair-seed-harness`. It writes as the
   app role, against `postgres:5432/commonair`. Its output streams to your terminal.

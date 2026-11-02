@@ -7,7 +7,17 @@
  * close restores exactly those and keeps the features that stay on; close is idempotent; the timer
  * closes it within 6 hours; upgrade and reinstall refuse while it is open; status shows it.
  */
-import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  rmSync,
+  readFileSync,
+  readdirSync,
+  readlinkSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vite-plus/test";
 import { type Host, TIMEOUT, envOf, expectOk, host, INSTALL, useReleases } from "./support/selfhost-host.ts";
@@ -62,6 +72,8 @@ const statePath = (h: Host) => join(h.home, ".local/state/commonair/seed-mode");
 const quadlet = (h: Host) => join(h.home, ".config/containers/systemd");
 const systemdDir = (h: Host) => join(h.home, ".config/systemd/user");
 const timerPath = (h: Host) => join(systemdDir(h), "commonair-seed-mode-close.timer");
+const lockPath = (h: Host) => join(h.home, ".local/state/commonair/seed-mode.lock");
+const harnessEnv = (h: Host) => join(h.home, ".config/commonair/unit-env/commonair-seed-harness.env");
 
 /** Sets (string) or removes (null) lines of commonair.env. */
 function editEnv(h: Host, edits: Record<string, string | null>): void {
@@ -112,6 +124,8 @@ function block(h: Host): string[] | null {
   if (a === -1) return null;
   return lines.slice(a + 1, lines.indexOf(END));
 }
+
+const rmLock = (h: Host) => rmSync(lockPath(h), { force: true });
 
 const outside = (h: Host) => {
   const lines = readFileSync(envPath(h), "utf8").split("\n");
@@ -172,6 +186,30 @@ describe("seed-mode open refuses, touching nothing", () => {
       expect(r.code).toBe(1);
       expect(r.err).toContain("has a seed-mode block but seed mode is not open");
       expect(changes(h)).toEqual([]);
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "when the close timer does not arm: nothing would close it",
+    () => {
+      const h = staging();
+      const before = readFileSync(envPath(h), "utf8");
+      const r = open(h, [], { STUB_SEED_TIMER_FAIL: "1" });
+      expect(r.code, r.err).toBe(1);
+      expect(r.err).toContain("could not arm commonair-seed-mode-close.timer");
+      expect(r.err).toContain("Nothing was changed.");
+      expect(readFileSync(envPath(h), "utf8")).toBe(before);
+      expect(existsSync(statePath(h))).toBe(false);
+      for (const u of SEED_UNITS) expect(existsSync(join(quadlet(h), u)), u).toBe(false);
+      for (const u of [...DROPIN_UNITS, "seed-harness"])
+        expect(existsSync(join(quadlet(h), `commonair-${u}.container.d`)), u).toBe(false);
+      expect(readdirSync(systemdDir(h)).filter((f) => f.startsWith("commonair-seed-mode"))).toEqual([]);
+      expect(h.calls().filter((c) => /systemctl --user (start|restart) /.test(c))).toEqual([]);
+      expect(existsSync(lockPath(h))).toBe(false);
+      // Nothing left to close, and the next open goes ahead.
+      expect(h.run(["seed-mode", "close"]).out).toContain("nothing to close");
+      expectOk(open(h));
     },
     TIMEOUT,
   );
@@ -280,6 +318,11 @@ describe("seed-mode open", () => {
         expect.stringMatching(/\/commonair\/harness:0\.1\.0@sha256:[0-9a-f]{64}$/),
       ]);
       expect(calls).toContain("systemctl --user enable --now commonair-seed-mode-close.timer");
+      // Armed before commonair.env changed: the first restart comes after it.
+      expect(calls.indexOf("systemctl --user enable --now commonair-seed-mode-close.timer")).toBeLessThan(
+        calls.findIndex((c) => c.startsWith("systemctl --user restart")),
+      );
+      expect(existsSync(lockPath(h))).toBe(false);
       const restart = calls.find((c) => c.startsWith("systemctl --user restart"))!;
       for (const u of ["api", "worker", "media", "chat"]) expect(restart).toContain(`commonair-${u}.service`);
       for (const u of ["postgres", "valkey", "migrate", "seed-harness"])
@@ -342,9 +385,16 @@ describe("seed-mode close", () => {
       const h = staging();
       const before = envOf(h);
       expectOk(open(h));
+      // As the harness's ExecStartPre= renders it: a copy of the instance's secrets.
+      mkdirSync(join(harnessEnv(h), ".."), { recursive: true });
+      writeFileSync(harnessEnv(h), "AUTH_SECRET=x\n");
+      writeFileSync(`${harnessEnv(h)}.tmp.123`, "AUTH_SECRET=x\n");
       writeFileSync(h.log, "");
       const r = h.run(["seed-mode", "close"]);
       expectOk(r);
+      expect(existsSync(harnessEnv(h))).toBe(false);
+      expect(existsSync(`${harnessEnv(h)}.tmp.123`)).toBe(false);
+      expect(existsSync(lockPath(h))).toBe(false);
 
       expect(block(h)).toBeNull();
       expect(readFileSync(envPath(h), "utf8")).not.toContain("seed mode");
@@ -408,6 +458,42 @@ describe("seed-mode close", () => {
       expectOk(h.run(["seed-mode", "close"]));
       expect(envOf(h)).toEqual({ ...before, ...KEEP_ON });
       expect(existsSync(statePath(h))).toBe(false);
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "while another close holds the lock (the timer's), changes nothing; a stale lock is taken over",
+    () => {
+      const h = staging();
+      expectOk(open(h));
+      const env = readFileSync(envPath(h), "utf8");
+      const state = readFileSync(statePath(h), "utf8");
+      // A live holder: this test's own process.
+      symlinkSync(String(process.pid), lockPath(h));
+      writeFileSync(h.log, "");
+      const r = h.run(["seed-mode", "close"]);
+      expectOk(r);
+      expect(r.out).toContain(`another seed-mode open or close is running (pid ${process.pid}`);
+      expect(changes(h)).toEqual([]);
+      expect(readFileSync(envPath(h), "utf8")).toBe(env);
+      expect(readFileSync(statePath(h), "utf8")).toBe(state);
+      expect(readlinkSync(lockPath(h))).toBe(String(process.pid));
+      // Status says a close is under way instead of inviting a second one.
+      const status = h.run(["status"]).out;
+      expect(status).toContain(`seed mode: being opened or closed (pid ${process.pid})`);
+      expect(status).not.toContain("or selfhost.sh seed-mode close");
+      // An open is refused as well.
+      expect(open(h).err).toContain("another seed-mode open or close is running");
+
+      // The holder gone (killed, a reboot): the next close takes the lock over and closes.
+      const dead = Bun.spawnSync(["true"]).pid;
+      rmLock(h);
+      symlinkSync(String(dead), lockPath(h));
+      expectOk(h.run(["seed-mode", "close"]));
+      expect(block(h)).toBeNull();
+      expect(existsSync(statePath(h))).toBe(false);
+      expect(existsSync(lockPath(h))).toBe(false);
     },
     TIMEOUT,
   );

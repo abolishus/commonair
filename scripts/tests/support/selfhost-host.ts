@@ -183,6 +183,7 @@ case "$1" in
     if [ "$2" = "\${STUB_DEP_FAILED:-none}" ] && [ -e "$STUB_STATE/dep-failed" ]; then echo inactive; exit 3; fi
     echo active; exit 0 ;;
   show) echo active; exit 0 ;;
+  enable) case "$*" in *commonair-seed-mode-close.timer*) [ -z "\${STUB_SEED_TIMER_FAIL:-}" ] || exit 1 ;; esac; exit 0 ;;
   reset-failed) rm -f "$STUB_STATE/migrate-start-limit"; exit 0 ;;
   stop) case "$*" in *commonair-migrate.service*) : >"$STUB_STATE/migrate-stopped" ;; esac; exit 0 ;;
   start)

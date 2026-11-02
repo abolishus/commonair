@@ -1370,7 +1370,20 @@ fetch_model() {
 
 install_units() {
   _rel=$1
+  # Open seed mode's units and close timer are not the release's: this would drop the timer and
+  # leave seed mode open with nothing to close it (ADR 0040). Its callers refuse first.
+  if seed_mode_open; then
+    die "install_units refused: staging seed mode is open" "fix: selfhost.sh seed-mode close first"
+  fi
   mkdir -p "$QUADLET_DIR" "$SYSTEMD_DIR"
+  # Closed, no seed-mode drop-in may stay (one left behind when its state was removed by hand
+  # would keep trusting the harness's address as a proxy). The directory only if that empties it.
+  for _f in "$QUADLET_DIR"/commonair-*.container.d/"$SEED_DROPIN"; do
+    [ -e "$_f" ] || [ -L "$_f" ] || continue
+    info "removing ${_f#"$QUADLET_DIR"/} (staging seed mode is closed)"
+    rm -f "$_f"
+    rmdir "${_f%/*}" 2>/dev/null || true
+  done
   # A container unit this install drops (rc.2's commonair-garage-init, now storage-init) is
   # stopped while its generated service still exists: after the daemon-reload below systemd
   # could no longer stop it by its unit file, and a one-shot would stay "active" forever.
@@ -2528,16 +2541,17 @@ cmd_reset_staging() {
 # sinks, an ActivityPub peer, the Twitch mock, an RTMP sink, a member relay) that the stack calls
 # back. Seed mode is a time-limited state of a staging instance that has them:
 #
-# - `open` saves the previous value of every key it changes (SEED_STATE, mode 0600), writes the
-#   seed-mode keys into commonair.env as one marked block, turns the giveaways, the watch gate, the
+# - `open` first arms a timer that closes seed mode at the deadline (6 hours at most; open fails,
+#   changing nothing, if it does not arm), then saves the previous value of every key it changes
+#   (SEED_STATE, mode 0600), writes the seed-mode keys into commonair.env as one marked block, turns the giveaways, the watch gate, the
 #   surge guard and push on, adds drop-ins to the api, worker and media units (what those units pin
 #   themselves: the hash lists, and for the API the harness's fixed address as a trusted proxy),
 #   installs the stripe-mock, Mailpit and seed-harness units (unit_in_mode lets them in only while
-#   SEED_STATE exists), arms a timer that closes it at the deadline (6 hours at most), and
-#   restarts what reads the changed keys.
+#   SEED_STATE exists), and restarts what reads the changed keys.
 # - `run` and `coverage` run the harness in the seed-harness container, on the commonair network.
 # - `close` removes the block, restores exactly the saved values, removes the units, the drop-ins
 #   and the timer, and restarts. The features above stay on; the seeded data stays.
+# - One open or close runs at a time (SEED_LOCK); a close while another holds it changes nothing.
 #
 # Nothing is published on the host, and every peer the stack calls is a container on its network.
 
@@ -2552,6 +2566,8 @@ SEED_UNITS="commonair-stripe-mock.container commonair-mailpit.container commonai
 SEED_DROPIN_UNITS="api worker media"
 SEED_DROPIN=50-seed-mode.conf
 SEED_TIMER=commonair-seed-mode-close.timer
+# One open or close at a time (the timer's close and one by hand): a symlink to the holder's pid.
+SEED_LOCK="$OBJECT_STATE_DIR/seed-mode.lock"
 SEED_CLOSE_SERVICE=commonair-seed-mode-close.service
 SEED_BLOCK_BEGIN="# >>> staging seed mode: selfhost.sh seed-mode close removes this block and restores the values it replaced >>>"
 SEED_BLOCK_END="# <<< staging seed mode <<<"
@@ -2561,6 +2577,29 @@ SEED_KEEP_ON="GIVEAWAYS_ENABLED=true CHAT_WATCH_GATE=on CHAT_SURGE_GUARD=on WEB_
 SEED_DB_TARGET="postgres:5432/commonair"
 
 seed_mode_open() { [ -f "$SEED_STATE" ]; }
+
+# The pid of a live open or close holding the lock, else nothing.
+seed_lock_holder() {
+  _holder=$(readlink "$SEED_LOCK" 2>/dev/null || true)
+  if [ -n "$_holder" ] && kill -0 "$_holder" 2>/dev/null; then printf '%s' "$_holder"; fi
+}
+
+# Takes the lock, or returns 1 when a live open or close holds it. A stale lock (its holder
+# killed, the host rebooted) is taken over.
+seed_lock() {
+  mkdir -p "$OBJECT_STATE_DIR"
+  if ! ln -s "$$" "$SEED_LOCK" 2>/dev/null; then
+    [ -z "$(seed_lock_holder)" ] || return 1
+    rm -f "$SEED_LOCK"
+    ln -s "$$" "$SEED_LOCK" 2>/dev/null || return 1
+  fi
+  trap 'seed_unlock; cleanup' EXIT
+  trap 'exit 1' INT TERM
+}
+
+seed_unlock() {
+  if [ "$(readlink "$SEED_LOCK" 2>/dev/null || true)" = "$$" ]; then rm -f "$SEED_LOCK"; fi
+}
 
 # The block's keys and values ($1: the webhook secret the harness signs stripe-mock's events with).
 # The same values as the compose overrides the local seed stack layers (scripts/infra.ts
@@ -2757,6 +2796,8 @@ cmd_seed_mode_open() {
   parse_seed_flags "$@"
   require_instance "seed-mode open"
   staging_guard "seed-mode open" "$SEED_CONFIRM"
+  seed_lock || die "seed-mode open refused: another seed-mode open or close is running (pid $(seed_lock_holder)). Nothing was changed." \
+    "wait for it to finish (systemctl --user status $SEED_CLOSE_SERVICE), then re-run"
   _host=$(env_get PUBLIC_HOSTNAME "$ENV_FILE")
   is_hostname "$_host" || die "seed-mode open refused: PUBLIC_HOSTNAME in $ENV_FILE is not a hostname. Nothing was changed."
   if seed_mode_open; then
@@ -2790,7 +2831,20 @@ cmd_seed_mode_open() {
   _deadline_utc=$(seed_utc "$_deadline")
   warn "opening seed mode on $_host until $_deadline_utc: test hooks, insecure outbound settings and mocks are ON"
 
-  # 1. The values this changes, saved before anything changes (close restores exactly these).
+  # 1. The close timer, armed before anything changes: whatever stops open from here on, the
+  #    deadline closes it. One that does not arm leaves the instance as it was.
+  mkdir -p "$SYSTEMD_DIR"
+  seed_write_timer "$(seed_utc "$_deadline" calendar)"
+  systemctl --user daemon-reload
+  if ! systemctl --user enable --now "$SEED_TIMER" >/dev/null 2>&1; then
+    systemctl --user disable --now "$SEED_TIMER" >/dev/null 2>&1 || true
+    rm -f "$SYSTEMD_DIR/$SEED_TIMER" "$SYSTEMD_DIR/$SEED_CLOSE_SERVICE"
+    systemctl --user daemon-reload || true
+    die "seed-mode open failed: could not arm $SEED_TIMER, so nothing would close seed mode. Nothing was changed." \
+      "see: systemctl --user status $SEED_TIMER, then re-run"
+  fi
+
+  # 2. The values this changes, saved before anything changes (close restores exactly these).
   mkdir -p "$OBJECT_STATE_DIR"
   _keys=$(seed_block_keys)
   (
@@ -2807,7 +2861,7 @@ cmd_seed_mode_open() {
   chmod 600 "$SEED_STATE.tmp"
   mv "$SEED_STATE.tmp" "$SEED_STATE"
 
-  # 2. commonair.env: the block replaces those keys; the features that stay on are plain lines.
+  # 3. commonair.env: the block replaces those keys; the features that stay on are plain lines.
   seed_env_rewrite "$_keys"
   _whsec="whsec_$(seed_random_hex)"
   {
@@ -2817,7 +2871,7 @@ cmd_seed_mode_open() {
   } >>"$ENV_FILE"
   for _kv in $SEED_KEEP_ON; do env_set "${_kv%%=*}" "${_kv#*=}"; done
 
-  # 3. Units, drop-ins and the close timer.
+  # 4. Units and drop-ins.
   mkdir -p "$SEED_DATA_DIR/reports"
   for _f in $SEED_UNITS; do cp "$CURRENT_LINK/quadlet/$_f" "$QUADLET_DIR/"; done
   for _u in $SEED_DROPIN_UNITS; do
@@ -2825,13 +2879,9 @@ cmd_seed_mode_open() {
     cp "$CURRENT_LINK/infra/selfhost/seed-mode/commonair-$_u.conf" "$QUADLET_DIR/commonair-$_u.container.d/$SEED_DROPIN"
   done
   seed_write_harness_dropin "$_host"
-  mkdir -p "$SYSTEMD_DIR"
-  seed_write_timer "$(seed_utc "$_deadline" calendar)"
   systemctl --user daemon-reload
-  systemctl --user enable --now "$SEED_TIMER" >/dev/null 2>&1 ||
-    warn "could not arm $SEED_TIMER: close seed mode by hand by $_deadline_utc (selfhost.sh seed-mode close)"
 
-  # 4. The mocks, then what reads the changed keys, then the harness.
+  # 5. The mocks, then what reads the changed keys, then the harness.
   info "starting stripe-mock and Mailpit, restarting $(seed_affected_units)"
   systemctl --user start commonair-stripe-mock.service commonair-mailpit.service ||
     warn "stripe-mock or Mailpit did not start (selfhost.sh status)"
@@ -2907,6 +2957,11 @@ cmd_seed_mode_coverage() {
 cmd_seed_mode_close() {
   parse_seed_flags "$@"
   require_instance "seed-mode close"
+  if ! seed_lock; then
+    say "another seed-mode open or close is running (pid $(seed_lock_holder); the timer's is $SEED_CLOSE_SERVICE). Nothing was changed."
+    say "selfhost.sh status shows seed mode once it is done; run close again if it is still open"
+    return 0
+  fi
   _anything=no
   if seed_mode_open || seed_block_present || [ -f "$SYSTEMD_DIR/$SEED_TIMER" ]; then _anything=yes; fi
   for _f in $SEED_UNITS; do [ ! -f "$QUADLET_DIR/$_f" ] || _anything=yes; done
@@ -2922,6 +2977,8 @@ cmd_seed_mode_close() {
   systemctl --user disable --now "$SEED_TIMER" >/dev/null 2>&1 || true
   # shellcheck disable=SC2046 # unit names have no spaces
   systemctl --user stop $(seed_services) 2>/dev/null || true
+  # The harness's env file, rendered at each of its starts, holds the instance's secrets.
+  rm -f "$UNIT_ENV_DIR/commonair-seed-harness.env" "$UNIT_ENV_DIR/commonair-seed-harness.env.tmp."*
 
   # 2. The drop-ins, the block, and exactly the values the block replaced.
   seed_remove_dropins
@@ -2949,6 +3006,11 @@ cmd_seed_mode_close() {
 }
 
 seed_mode_status() {
+  _closer=$(seed_lock_holder)
+  if [ -n "$_closer" ] && seed_mode_open; then
+    say "seed mode: being opened or closed (pid $_closer); see systemctl --user status $SEED_CLOSE_SERVICE"
+    return 0
+  fi
   if ! seed_mode_open; then
     if seed_block_present; then
       say "seed mode: a seed-mode block is in commonair.env without its state: run selfhost.sh seed-mode close"
