@@ -153,17 +153,26 @@ export async function writeNotificationRows(
       ),
     o,
   );
-  const sends = await insertChunks(
+  // The worker already wrote a real send for followers of the channels that went live earlier in
+  // the seed (one row per user and channel): keep those, and count only the rows added here.
+  let sends = 0;
+  await insertChunks(
     plan.goLiveSends,
-    (chunk) =>
-      db.insert(schema.notificationGoLiveSends).values(
-        chunk.map((s) => ({
-          userId: idOf(ids, s.user),
-          channelId: s.channelId,
-          lastSentAt: s.lastSentAt,
-          eventId: uuidv7(),
-        })),
-      ),
+    async (chunk) => {
+      const added = await db
+        .insert(schema.notificationGoLiveSends)
+        .values(
+          chunk.map((s) => ({
+            userId: idOf(ids, s.user),
+            channelId: s.channelId,
+            lastSentAt: s.lastSentAt,
+            eventId: uuidv7(),
+          })),
+        )
+        .onConflictDoNothing()
+        .returning({ userId: schema.notificationGoLiveSends.userId });
+      sends += added.length;
+    },
     o,
   );
   return { notifications, notification_preferences: prefs, notification_go_live_sends: sends };
