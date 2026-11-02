@@ -486,10 +486,17 @@ describe("/interact: raids", () => {
   it("counts down a started raid, then shows the last raid and the cooldown", async () => {
     const { client, m } = fakeApi();
     const until = new Date(Date.now() + 600_000).toISOString();
+    // The page polls: the raid stays pending until the checks below have run, however slow the
+    // runner, and only then completes.
+    let complete = () => {};
+    const completed = new Promise<void>((resolve) => (complete = resolve));
     m.interact.raids.current
       .mockResolvedValueOnce(raidState())
       .mockResolvedValueOnce(raidState({ raid: raid() }))
-      .mockResolvedValue(raidState({ raid: raid({ status: "completed", viewerCount: 7 }), cooldownEndsAt: until }));
+      .mockImplementation(async () => {
+        await completed;
+        return raidState({ raid: raid({ status: "completed", viewerCount: 7 }), cooldownEndsAt: until });
+      });
     renderInteract(client);
     await screen.findByTestId("raid-form");
     type("raid-target", "bob");
@@ -498,6 +505,7 @@ describe("/interact: raids", () => {
     expect(pending.dataset.to).toBe("bob");
     expect(pending.dataset.executeAt).toBe(FAR);
     expect(screen.queryByTestId("raid-form")).toBeNull();
+    complete();
     const last = await screen.findByTestId("raid-last");
     expect(last.dataset.status).toBe("completed");
     expect(last.dataset.viewers).toBe("7");
