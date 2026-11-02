@@ -39,12 +39,6 @@ const TABLES = [
   "account_deletions",
 ] as const;
 
-/**
- * Written by seed-media's swarm recording, which this unit only reads (its brief): not counted as
- * this unit's rows.
- */
-const READ_ONLY: ReadonlySet<string> = new Set(["integrity_flags"]);
-
 /** Every table is seeded: `evidence_audit_runs` comes from the evidence-audit ops tick. */
 const PENDING = [] as const;
 
@@ -55,7 +49,6 @@ const PENDING = [] as const;
 export async function tableCounts(h: DbHandle): Promise<Record<string, number>> {
   const out: Record<string, number> = {};
   for (const t of TABLES) {
-    if (READ_ONLY.has(t)) continue;
     const [row] = await h.sql.unsafe<{ n: number }[]>(`select count(*)::int as n from ${t}`);
     out[t] = Number(row?.n ?? 0);
   }

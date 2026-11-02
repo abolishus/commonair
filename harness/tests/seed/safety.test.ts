@@ -246,7 +246,14 @@ describe("planSafety: fixed logins", () => {
   test("viewer2: one report filed, a lesser action, a countered notice, one appeal decided and one pending", () => {
     expect(p.reports.filter((r) => r.reporter === "viewer2")).toHaveLength(1);
     const removal = p.reports.find((r) => r.subject.kind === "chatBy" && r.subject.authorHandle === "viewer2");
-    expect(removal?.outcome).toMatchObject({ status: "actioned", action: "remove_content" });
+    // A suspension (it lapses): only a restriction of the account gets a statement of reasons,
+    // which /settings/appeals lists.
+    expect(removal?.outcome).toMatchObject({
+      status: "actioned",
+      action: "suspend_user",
+      clauseId: expect.any(String),
+      durationSeconds: CELL_SUSPENSION_SECONDS,
+    });
     expect(p.dmca.find((d) => d.key === "viewer2")).toMatchObject({
       state: "countered",
       counter: { handle: "viewer2" },

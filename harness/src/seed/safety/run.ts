@@ -37,7 +37,7 @@ import {
   safetyStoreExtra,
   signInOrder,
 } from "./plan.ts";
-import { type HashMatchSpec, writeHashMatches } from "./write.ts";
+import { type HashMatchSpec, writeHashMatches, writePendingRelayFlags } from "./write.ts";
 
 const SETTLE_MS = 60_000;
 const STATEMENT_TIMEOUT_MS = 180_000;
@@ -125,6 +125,11 @@ export async function runSafety(ctx: SeedContext, plan: SafetyPlan, secret: stri
   await privacy(run);
   const attested = await attestations(run);
   const groupAppeal = await groupAppealStep(run);
+  const pendingFlags = await writePendingRelayFlags(ctx.db, new Date(), ctx.signal);
+  if (pendingFlags === 0)
+    throw new Error(
+      "seed-safety: no relay node to flag for review (seed-media registers one); /admin/integrity would open on an empty queue",
+    );
   const integrityFlags = await integrityFlagsStep(run);
   await enforcementCells(run);
   const jury = await juryStep(run);
@@ -153,7 +158,7 @@ export async function runSafety(ctx: SeedContext, plan: SafetyPlan, secret: stri
     "seed-safety: the analytics display bypass for streamer1 is a Valkey key (1 h TTL): after a Valkey reset or an hour, attestations and their share links wait out the 24 h display delay again",
     "seed-safety: T0 states cover open (first legal dismissal, dismissal_pending) and confirmed; a full dismissal needs a second legal reviewer, which the fixed logins do not have",
     `seed-safety: the evidence audit ran through the ops tick: ${audit["evidence.checked"] ?? 0} objects checked, ${audit["evidence.missing"] ?? 0} missing, ${audit["evidence.mismatched"] ?? 0} mismatched`,
-    `seed-safety: integrity flags listed on /admin/integrity: ${integrityFlags}${integrityFlags === 0 ? " (seed-media's swarm recording made none)" : ""}`,
+    `seed-safety: integrity flags listed on /admin/integrity: ${integrityFlags}, ${pendingFlags} of them pending review (relay_issuance_unknown, inserted directly: the worker raises it only for a receipt with issuance gaps, which the seed cannot provoke)`,
     `seed-safety: attested ${attested} recorded broadcasts${groupAppeal ? `; streamer1's ${groupAppeal} exclusion group was appealed and overturned` : "; no excluded group on streamer1's recordings, so no group appeal"}`,
     `seed-safety: account deletion stays scheduled for ${plan.deletion ?? "nobody (no bulk viewer)"}; restricted accounts: ${plan.restricted.join(", ")}`,
     `seed-safety: jury inputs: ${jury.juryCaseIds.length} closed T1/T2 cases and ${jury.juryReportIds.length} resolved reports`,
@@ -729,6 +734,13 @@ async function enforcementCells(run: Run): Promise<void> {
          where s.recipient_user_id = ${bannedId}`;
       return (row?.n ?? 0) > 0;
     },
+    { timeoutMs: STATEMENT_TIMEOUT_MS, intervalMs: 3_000, signal: run.ctx.signal },
+  );
+  // viewer2's brief suspension is stated too: /settings/appeals lists it.
+  const viewer2 = await run.sessions.as("viewer2");
+  await waitFor(
+    "viewer2's statement of reasons on /settings/appeals",
+    async () => ((await viewer2.api.client.me.enforcement.list({ limit: 1 })).items.length > 0 ? true : null),
     { timeoutMs: STATEMENT_TIMEOUT_MS, intervalMs: 3_000, signal: run.ctx.signal },
   );
 }

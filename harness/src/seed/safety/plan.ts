@@ -424,15 +424,18 @@ export function planSafety(rng: Rng, scale: SeedScale, input: PlanInput): Safety
       outcome: { status: "dismissed" },
       cell: null,
     });
-  // viewer2's lesser action: one of its chat lines removed (appealed, upheld below).
+  // viewer2's lesser action: a brief suspension over one of its chat lines (appealed, upheld
+  // below). A suspension, not a removal: only a restriction of the account gets a statement of
+  // reasons (services/worker/src/moderation/sor-build.ts, `report.resolve`), and /settings/appeals
+  // lists viewer2's statements. It lapses like the cell suspensions.
   const viewer2Removal = report({
     subject: { kind: "chatBy", authorHandle: "viewer2" },
     reason: "harassment",
     outcome: {
       status: "actioned",
-      action: "remove_content",
+      action: "suspend_user",
       clauseId: REASON_CLAUSES.harassment,
-      durationSeconds: null,
+      durationSeconds: CELL_SUSPENSION_SECONDS,
     },
     cell: null,
   });
