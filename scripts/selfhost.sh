@@ -74,6 +74,10 @@ Commands:
   backup     Take a WAL-G base backup now and list the backups; with --objects, copy the media
              and evidence buckets to the offsite store (docs/self-hosting/backups.md).
   status     Show the installed version, every unit's state and health, TLS, backups, disk use.
+  reset-staging
+             Staging only: drop the database, flush Valkey, migrate, restart, so that
+             `seed full` can fill it again (docs/self-hosting/upgrades.md, "Resetting a
+             staging instance"). Every row is gone afterwards; there is no backup first.
   --help     Show this help.
 
 install options:
@@ -160,6 +164,13 @@ backup options (no option: --database):
   --restore-objects that did not finish, until a re-run of it succeeds.
   Exit status 0 on success, 1 on any failure. A successful --objects run records its time in
   ~/.local/state/commonair/object-backup, which status shows.
+
+reset-staging options (refused unless commonair.env has DEMO_SEED_FULL=true, which only local
+and staging instances set):
+  --confirm <host>      Required: this instance's PUBLIC_HOSTNAME, exactly.
+  --base-seed           Also run the basic demo seed (demo:seed) afterwards. Its users make
+                        `seed full` refuse, so use it only for a staging that stays basic.
+  Object storage (VODs, clips) is not wiped: stale objects are harmless.
 
 A fork's releases: set COMMONAIR_REPOSITORY_URL=https://… for the first install; later
 upgrades use the repository recorded in the installed release. A fork whose code still
@@ -2322,6 +2333,146 @@ cmd_status() {
   done
 }
 
+# --- staging reset ------------------------------------------------------------------------
+#
+# `seed full` writes append-only rows (ledger, co-op, votes, audit) that only a database reset
+# removes (ADR 0004), so staging is reset by hand and reseeded. Staging runs NODE_ENV=production
+# like any instance; what marks it is DEMO_SEED_FULL=true in commonair.env, the full seed's own
+# guard flag, which a production instance never sets. --confirm with the exact hostname guards
+# against a shell on the wrong host.
+
+# Stay up through the reset: the database lives in Postgres, the caches in Valkey, and objects
+# are kept (stale VODs and clips are harmless; the next seed writes new ones).
+RESET_KEEP="commonair-postgres.service commonair-valkey.service commonair-garage.service"
+
+parse_reset_flags() {
+  RESET_CONFIRM=""
+  RESET_BASE_SEED=no
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --confirm)
+        [ $# -ge 2 ] && [ -n "$2" ] || die "--confirm needs a value (this instance's PUBLIC_HOSTNAME)"
+        RESET_CONFIRM=$2
+        shift 2
+        ;;
+      --base-seed) RESET_BASE_SEED=yes && shift ;;
+      -h | --help) usage && exit 0 ;;
+      *) die "unknown reset-staging option: $1" "see: selfhost.sh --help" ;;
+    esac
+  done
+  return 0
+}
+
+# Refuses, before anything is touched, unless this is a staging instance and the operator named it.
+staging_guard() {
+  _flag=$(env_get DEMO_SEED_FULL "$ENV_FILE")
+  case "$_flag" in
+    true | 1) ;;
+    *)
+      die "reset-staging refused: DEMO_SEED_FULL is ${_flag:-unset} in $ENV_FILE, not true" \
+        "only a local or staging instance sets it; a production instance is never reset. Nothing was changed."
+      ;;
+  esac
+  _host=$(env_get PUBLIC_HOSTNAME "$ENV_FILE")
+  [ -n "$_host" ] || die "reset-staging refused: $ENV_FILE has no PUBLIC_HOSTNAME. Nothing was changed."
+  [ -n "$RESET_CONFIRM" ] || die "reset-staging refused: pass --confirm $_host to reset this instance. Nothing was changed."
+  [ "$RESET_CONFIRM" = "$_host" ] ||
+    die "reset-staging refused: --confirm $RESET_CONFIRM is not this instance ($_host). Nothing was changed."
+}
+
+# Postgres and Valkey up and healthy (they normally never stopped).
+reset_wait_data() {
+  systemctl --user start --no-block commonair-postgres.service commonair-valkey.service 2>/dev/null || true
+  _deadline=$(($(date +%s) + HEALTH_TIMEOUT))
+  until unit_healthy commonair-postgres.service && unit_healthy commonair-valkey.service; do
+    [ "$(date +%s)" -lt "$_deadline" ] ||
+      die "Postgres or Valkey is not healthy after ${HEALTH_TIMEOUT}s; the app units are stopped" \
+        "see: selfhost.sh status; once they are healthy, re-run reset-staging"
+    sleep "$POLL_INTERVAL"
+  done
+}
+
+cmd_reset_staging() {
+  parse_reset_flags "$@"
+  require_instance reset-staging
+  staging_guard
+  _host=$(env_get PUBLIC_HOSTNAME "$ENV_FILE")
+  warn "resetting $_host: every row in its database is deleted, with no backup first"
+
+  # 1. the app units down (sockets first, so a connection cannot start Caddy again)
+  _stop=""
+  for _u in $(sockets) $(all_units); do
+    case " $RESET_KEEP " in *" $_u "*) continue ;; esac
+    _stop="$_stop $_u"
+  done
+  info "stopping the app units"
+  # shellcheck disable=SC2086 # unit names have no spaces
+  systemctl --user stop $_stop || die "could not stop the app units; the database was not touched" \
+    "see: selfhost.sh status"
+  reset_wait_data
+
+  # 2. a new, empty database, as the owner role (FORCE ends any connection left)
+  info "dropping and recreating the commonair database"
+  podman exec --user postgres commonair-postgres psql -X -q -v ON_ERROR_STOP=1 -U commonair -d postgres \
+    -c 'DROP DATABASE IF EXISTS commonair WITH (FORCE)' -c 'CREATE DATABASE commonair OWNER commonair' ||
+    die "dropping or recreating the database failed; the app units are stopped" \
+      "see: journalctl --user -u commonair-postgres; re-running reset-staging is safe"
+
+  # 3. sessions, queues and caches that name the old rows
+  info "flushing Valkey"
+  # shellcheck disable=SC2016 # expanded inside the container, where VALKEY_PASSWORD is set
+  podman exec commonair-valkey sh -c 'export VALKEYCLI_AUTH="$VALKEY_PASSWORD"; valkey-cli FLUSHALL | grep -qx OK' ||
+    die "flushing Valkey failed; the database is already empty and the app units are stopped" \
+      "see: journalctl --user -u commonair-valkey; re-running reset-staging is safe"
+
+  # 4. migrations and the app role, as install and upgrade run them (GOVERNANCE_BOOTSTRAP_JSON too)
+  systemctl --user reset-failed 'commonair-*' 2>/dev/null || true
+  info "running migrations (commonair-migrate)"
+  start_migrate || die "migrations failed on the empty database; the app units are stopped" \
+    "see: journalctl --user -u commonair-migrate"
+
+  # 5. optionally the basic demo tier, from the release's tools image (packages/db/src/demo)
+  if [ "$RESET_BASE_SEED" = yes ]; then
+    info "running the basic demo seed (demo:seed)"
+    # DEMO_SEED_PASSWORD passes by name from this shell, never on the command line.
+    _pw_env=""
+    if [ -n "${DEMO_SEED_PASSWORD:-}" ]; then _pw_env=--env=DEMO_SEED_PASSWORD; fi
+    podman run --rm --network commonair \
+      --secret commonair-owner-database-url,type=env,target=DATABASE_URL ${_pw_env:+"$_pw_env"} \
+      "$(tools_image "$CURRENT_LINK")" bun packages/db/src/demo/cli.ts seed ||
+      die "the demo seed failed; the database is migrated, the app units are stopped" \
+        "start them with: systemctl --user start $(services | tr '\n' ' ')"
+  fi
+
+  # 6. everything back, and healthy
+  info "starting the stack"
+  # shellcheck disable=SC2046
+  systemctl --user start --no-block $(sockets) $(services)
+  wait_healthy core || die "the instance did not become healthy after the reset" \
+    "see: selfhost.sh status, and journalctl --user -u 'commonair-*'"
+  if first_irc_cert; then wait_healthy all || warn "IRC is not healthy yet (selfhost.sh status)"; fi
+
+  say ""
+  say "Reset $_host: new empty database, migrated; Valkey flushed; units healthy."
+  if [ "$RESET_BASE_SEED" = yes ]; then
+    say "The basic demo seed ran (its accounts are listed above)."
+  fi
+  say "Not reset: object storage. VODs and clips in the media bucket stay; they are harmless,"
+  say "and the next seed writes new ones."
+  if [ "$RESET_BASE_SEED" = yes ]; then
+    say "seed full refuses a database with users, so it cannot run on top of the basic seed."
+  else
+    say ""
+    say "Next: fill it with the full seed, from a repository checkout whose DATABASE_URL reaches"
+    say "this database (Postgres is not published on the host: run the harness on the commonair"
+    say "network, where it is postgres:5432/commonair, or forward a port) and whose HARNESS_*_URL"
+    say "point at https://$_host:"
+    say "  DEMO_SEED_FULL=true bun harness/src/cli.ts seed full --confirm postgres:5432/commonair --scale medium"
+    say "--confirm is DATABASE_URL's host:port/database exactly (127.0.0.1:<port>/commonair through"
+    say "a forwarded port)."
+  fi
+}
+
 main() {
   [ $# -gt 0 ] || {
     usage
@@ -2334,6 +2485,7 @@ main() {
     upgrade) cmd_upgrade "$@" ;;
     backup) cmd_backup "$@" ;;
     status) cmd_status ;;
+    reset-staging) cmd_reset_staging "$@" ;;
     -h | --help | help) usage ;;
     *) die "unknown command: $_cmd" "see: selfhost.sh --help" ;;
   esac

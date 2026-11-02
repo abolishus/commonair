@@ -204,3 +204,42 @@ ways:
   root's environment instead: put the variable in front of the command there.
 
 The timers never download anything, so they need no URL.
+
+## Resetting a staging instance
+
+A staging instance filled with the full demo seed (`bun harness/src/cli.ts seed full`) holds
+append-only rows (ledger, co-op, votes, audit) that only a database reset removes (ADR 0004).
+Reset it by hand, as the `commonair` user:
+
+```sh
+sh ~/commonair/selfhost.sh reset-staging --confirm staging.example.org
+```
+
+It refuses, and changes nothing, unless `commonair.env` has `DEMO_SEED_FULL=true` (only local and
+staging instances set it; staging runs `NODE_ENV=production` like any instance, so that flag is
+what tells them apart) and `--confirm` equals the instance's `PUBLIC_HOSTNAME` exactly. It does not
+take a backup first: every row is gone afterwards.
+
+In order, it:
+
+1. stops every unit but Postgres, Valkey and Garage;
+2. drops the `commonair` database and creates it again, as the owner role;
+3. flushes Valkey (sessions, queues and caches that name the old rows);
+4. runs `commonair-migrate`, as `install` and `upgrade` do (`GOVERNANCE_BOOTSTRAP_JSON` applies);
+5. with `--base-seed` only, runs the basic demo seed (`demo:seed`) from the release's tools image;
+6. starts the stack again and waits for health.
+
+Object storage is not reset: VODs and clips stay in the media bucket. They are harmless, and the
+next seed writes new ones.
+
+Then fill it with the full seed from a repository checkout whose `DATABASE_URL` reaches the
+instance's database (Postgres is not published on the host: run the harness on the `commonair`
+network, or forward a port) and whose `HARNESS_*_URL` point at the instance:
+
+```sh
+DEMO_SEED_FULL=true bun harness/src/cli.ts seed full --confirm postgres:5432/commonair --scale medium
+```
+
+`--confirm` is `DATABASE_URL`'s `host:port/database`, exactly. The full seed refuses a database
+that has any users, so skip `--base-seed` when you mean to run it: `--base-seed` is for a staging
+instance that only needs the basic demo accounts.
