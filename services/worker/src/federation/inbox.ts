@@ -16,6 +16,11 @@
  *
  * The item is marked processed with an outcome (`FEDERATION_INBOX_OUTCOMES`); the sweep deletes
  * items after `FEDERATION_RULES.dropAfterDays`. Remote handles and URLs are never logged.
+ *
+ * A key or actor fetch that failed transiently (timeout, connection error, 5xx/408/429) throws
+ * `InboxRetry` instead, leaving the item unprocessed for the job's next attempt: the sender got
+ * its 202 at the API and never resends, so rejecting would lose the Follow (and its Accept) to
+ * one slow answer. The last attempt rejects as before.
  */
 import { FEDERATION_RULES } from "@commonair/contracts/enums";
 import { schema as s, uuidv7 } from "@commonair/db";
@@ -35,7 +40,7 @@ import type { FederationConfig } from "./config.ts";
 import { enqueueDeliveries } from "./deliver.ts";
 import { fetchActivityJson } from "./http.ts";
 import { blockedDomains, federates, isBlocked, loadChannel, localChannelIdOf } from "./local.ts";
-import { remoteActor, remoteKey, remoteKeyCacheKey } from "./remote.ts";
+import { isTransientFailure, type RemoteFailure, remoteActor, remoteKey, remoteKeyCacheKey } from "./remote.ts";
 
 export type InboxOutcome = "accepted" | "ignored" | "rejected" | "blocked";
 
@@ -47,18 +52,42 @@ export interface InboxResult {
 
 type Ctx = Pick<WorkerContext, "db" | "valkey" | "logger" | "enqueueBulk" | "now">;
 
+export interface InboxRunOptions {
+  /** No attempt follows this one: a transient failure rejects instead of throwing. Default true. */
+  lastAttempt?: boolean;
+}
+
+/** A transient fetch failure on an attempt that is not the last: the job retries. */
+export class InboxRetry extends Error {
+  constructor(public readonly reason: string) {
+    super(`federation inbox item deferred: ${reason}`);
+    this.name = "InboxRetry";
+  }
+}
+
 /** The path the remote addressed: the channel's inbox, or the shared inbox. */
 export const inboxPath = (channelId: string | null) => (channelId ? `/ap/channels/${channelId}/inbox` : "/ap/inbox");
 
 /** Errors a fresh key could fix (the sender rotated); anything else is final. */
 const REFETCH_ON: ReadonlySet<SignatureError> = new Set(["bad_signature", "bad_key", "key_actor_mismatch"]);
 
-export async function runInbox(itemId: string, ctx: Ctx, cfg: FederationConfig): Promise<InboxResult> {
+export async function runInbox(
+  itemId: string,
+  ctx: Ctx,
+  cfg: FederationConfig,
+  opts: InboxRunOptions = {},
+): Promise<InboxResult> {
   const [item] = await ctx.db.select().from(s.federationInboxItems).where(eq(s.federationInboxItems.id, itemId));
   if (!item) return { outcome: "ignored", reason: "missing" };
   if (item.processedAt !== null && item.outcome !== null) return { outcome: item.outcome, reason: "already_processed" };
 
-  const result = await processItem(item, ctx, cfg);
+  let result: InboxResult;
+  try {
+    result = await processItem(item, ctx, cfg, opts.lastAttempt ?? true);
+  } catch (err) {
+    if (err instanceof InboxRetry) ctx.logger.info("federation inbox item deferred", { itemId, reason: err.reason });
+    throw err;
+  }
   await ctx.db
     .update(s.federationInboxItems)
     .set({ processedAt: ctx.now(), outcome: result.outcome })
@@ -71,7 +100,14 @@ async function processItem(
   item: typeof s.federationInboxItems.$inferSelect,
   ctx: Ctx,
   cfg: FederationConfig,
+  lastAttempt: boolean,
 ): Promise<InboxResult> {
+  /** Reject on `prefix_<reason>`, or defer to the next attempt when the failure may pass. */
+  const fetchFailed = (prefix: string, f: RemoteFailure): InboxResult => {
+    const reason = `${prefix}_${f.reason}`;
+    if (!lastAttempt && isTransientFailure(f)) throw new InboxRetry(reason);
+    return { outcome: "rejected", reason };
+  };
   if (!cfg.enabled) return { outcome: "ignored", reason: "disabled" };
   let json: unknown;
   try {
@@ -110,19 +146,19 @@ async function processItem(
     // the actor itself is gone.
     if (inbound.kind === "delete-actor" && key.reason === "gone" && (await actorIsGone(cfg, inbound.actor, sig.keyId)))
       return applyDeleteActor(ctx, inbound.actor, "actor_gone");
-    return { outcome: "rejected", reason: `key_${key.reason}` };
+    return fetchFailed("key", key);
   }
   let verified = await verifyRequest(req, { publicKey: key.key.publicKeyPem, owner: key.key.owner }, opts);
   if (!verified.ok && key.cached && REFETCH_ON.has(verified.error)) {
     key = await remoteKey(ctx, cfg, sig.keyId, { refresh: true });
-    if (!key.ok) return { outcome: "rejected", reason: `key_${key.reason}` };
+    if (!key.ok) return fetchFailed("key", key);
     verified = await verifyRequest(req, { publicKey: key.key.publicKeyPem, owner: key.key.owner }, opts);
   }
   if (!verified.ok) return { outcome: "rejected", reason: verified.error };
 
   switch (inbound.kind) {
     case "follow":
-      return applyFollow(ctx, cfg, item.channelId, inbound);
+      return applyFollow(ctx, cfg, item.channelId, inbound, fetchFailed);
     case "undo-follow":
       return applyUndo(ctx, cfg, item.channelId, inbound);
     case "delete-actor":
@@ -135,6 +171,7 @@ async function applyFollow(
   cfg: FederationConfig,
   inboxChannelId: string | null,
   follow: Extract<InboundActivity, { kind: "follow" }>,
+  fetchFailed: (prefix: string, f: RemoteFailure) => InboxResult,
 ): Promise<InboxResult> {
   const channelId = localChannelIdOf(cfg, follow.object);
   if (!channelId) return { outcome: "ignored", reason: "not_local_actor" };
@@ -143,7 +180,8 @@ async function applyFollow(
   if (!federates(cfg, ch)) return { outcome: "ignored", reason: "not_federated" };
 
   const remote = await remoteActor(cfg, follow.actor);
-  if (!remote.ok) return { outcome: "rejected", reason: `actor_${remote.reason}` };
+  // Before any write, so a retry starts clean.
+  if (!remote.ok) return fetchFailed("actor", remote);
   const a = remote.actor;
   if (isBlocked(await blockedDomains(ctx.db), a.inbox, ...(a.sharedInbox ? [a.sharedInbox] : [])))
     return { outcome: "blocked", reason: "domain_blocked" };

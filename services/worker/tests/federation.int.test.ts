@@ -31,7 +31,7 @@ import { captureRetiredActor, deleteFederationData, sendRetiredActorDelete } fro
 import { FEDERATION_KEY_PURPOSE, type FederationConfig } from "../src/federation/config.ts";
 import { runDeliver } from "../src/federation/deliver.ts";
 import { runFanout } from "../src/federation/fanout.ts";
-import { inboxPath, runInbox } from "../src/federation/inbox.ts";
+import { InboxRetry, inboxPath, runInbox } from "../src/federation/inbox.ts";
 import { remoteKeyCacheKey } from "../src/federation/remote.ts";
 import { runRotate } from "../src/federation/rotate.ts";
 import { runSweep } from "../src/federation/sweep.ts";
@@ -421,6 +421,62 @@ describe("inbox", () => {
     expect(await runInbox(item.id, ctx(), cfg({ allowInsecure: false }))).toEqual({
       outcome: "rejected",
       reason: "key_rejected",
+    });
+    expect(await followers(ch.channel.id)).toEqual([]);
+  });
+
+  test("a transient key fetch failure defers the item to the next attempt, which accepts it", async () => {
+    const ch = await federatedChannel();
+    // A peer on a host name, so the resolver decides where its key fetch connects: first to an
+    // address nothing listens on (no answer, as when the remote is briefly unreachable), then to it.
+    const flaky = await startActivityPubPeer({ host: "localhost", username: "carol" });
+    let lookups = 0;
+    const resolve = async () => [
+      lookups++ === 0 ? { address: "::1", family: 6 as const } : { address: "127.0.0.1", family: 4 as const },
+    ];
+    try {
+      const item = await inboxItem(ch.channel.id, followOf(flaky, ch.urls.id), { from: flaky });
+      await expect(runInbox(item.id, ctx(), cfg({ resolve }), { lastAttempt: false })).rejects.toBeInstanceOf(
+        InboxRetry,
+      );
+      const [pending] = await owner
+        .select()
+        .from(schema.federationInboxItems)
+        .where(eq(schema.federationInboxItems.id, item.id));
+      expect(pending).toMatchObject({ processedAt: null, outcome: null });
+      expect(await followers(ch.channel.id)).toEqual([]);
+      expect(queued).toEqual([]);
+
+      expect(await runInbox(item.id, ctx(), cfg({ resolve }), { lastAttempt: false })).toEqual({
+        outcome: "accepted",
+        reason: "follow",
+      });
+      expect((await followers(ch.channel.id)).map((f) => f.actorId)).toEqual([flaky.actorId]);
+      expect(queued.map((j) => j.name)).toEqual([FEDERATION_JOBS.deliver]);
+    } finally {
+      await flaky.close();
+    }
+  });
+
+  test("the last attempt rejects a transient key failure; a final one rejects on any attempt", async () => {
+    const ch = await federatedChannel();
+    const keys = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response(null, { status: 503 }) });
+    try {
+      const item = await inboxItem(ch.channel.id, followOf(peer, ch.urls.id), {
+        keyId: `http://127.0.0.1:${keys.port}/key#main`,
+      });
+      expect(await runInbox(item.id, ctx(), cfg(), { lastAttempt: true })).toEqual({
+        outcome: "rejected",
+        reason: "key_failed",
+      });
+    } finally {
+      await keys.stop(true);
+    }
+    // A 404 is the remote's final word: no retry even with attempts left.
+    const gone = await inboxItem(ch.channel.id, followOf(peer, ch.urls.id), { keyId: `${peer.origin}/nope#k` });
+    expect(await runInbox(gone.id, ctx(), cfg(), { lastAttempt: false })).toEqual({
+      outcome: "rejected",
+      reason: "key_gone",
     });
     expect(await followers(ch.channel.id)).toEqual([]);
   });

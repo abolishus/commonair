@@ -7,7 +7,7 @@ import { federationConfig, federationEnvSlice, hostOf, mediaUrl } from "../src/f
 import { deliverJobId, retiredKeyStashKey } from "../src/federation/deliver.ts";
 import { inboxPath } from "../src/federation/inbox.ts";
 import { domainMatches, isBlocked, localChannelIdOf } from "../src/federation/local.ts";
-import { actorFromDocument, keyFromDocument, remoteKeyCacheKey } from "../src/federation/remote.ts";
+import { actorFromDocument, isTransientFailure, keyFromDocument, remoteKeyCacheKey } from "../src/federation/remote.ts";
 
 const CH = "0192a7c4-5b6d-7e8f-9a0b-1c2d3e4f5a6b";
 const ALICE = "https://mastodon.example/users/alice";
@@ -90,6 +90,18 @@ describe("remote documents", () => {
     expect(actorFromDocument(ALICE, { ...doc, id: "https://mastodon.example/users/bob" })).toBeNull();
     expect(actorFromDocument(ALICE, { ...doc, preferredUsername: "<b>" })?.handle).toBeNull();
     expect(actorFromDocument(ALICE, { ...doc, inbox: "javascript:alert(1)" })).toBeNull();
+  });
+  test("only a fetch that may pass on a retry is transient", () => {
+    // No answer (timeout, connection error), a 5xx, 408 and 429: worth another attempt.
+    expect(isTransientFailure({ reason: "failed" })).toBe(true);
+    for (const status of [500, 502, 503, 504, 408, 429])
+      expect(isTransientFailure({ reason: "failed", status })).toBe(true);
+    // The remote's final word: another 4xx, a 2xx that is not JSON, a 404/410, a guard refusal, a bad document.
+    for (const status of [400, 401, 403, 200]) expect(isTransientFailure({ reason: "failed", status })).toBe(false);
+    expect(isTransientFailure({ reason: "gone", status: 404 })).toBe(false);
+    expect(isTransientFailure({ reason: "gone", status: 410 })).toBe(false);
+    expect(isTransientFailure({ reason: "rejected" })).toBe(false);
+    expect(isTransientFailure({ reason: "malformed" })).toBe(false);
   });
   test("cache keys hash the keyId (a stranger's URL)", async () => {
     const k = await remoteKeyCacheKey(KEY);

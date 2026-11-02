@@ -24,9 +24,14 @@ export interface RemoteKey {
   publicKeyPem: string;
 }
 
-export type RemoteKeyResult =
-  | { ok: true; key: RemoteKey; cached: boolean }
-  | { ok: false; reason: "rejected" | "gone" | "failed" | "malformed" };
+/** Why a remote fetch gave no usable document; `status` is the HTTP status when one came back. */
+export interface RemoteFailure {
+  ok: false;
+  reason: "rejected" | "gone" | "failed" | "malformed";
+  status?: number;
+}
+
+export type RemoteKeyResult = { ok: true; key: RemoteKey; cached: boolean } | RemoteFailure;
 
 /** Valkey key of a cached remote key (the keyId hashed: it is a stranger's URL). */
 export const remoteKeyCacheKey = async (keyId: string) => `federation:remote-key:${await sha256Hex(keyId)}`;
@@ -76,7 +81,7 @@ export async function remoteKey(
     }
   }
   const res = await fetchActivityJson(withoutFragment(keyId), cfg);
-  if (!res.ok) return { ok: false, reason: res.reason };
+  if (!res.ok) return res;
   const key = keyFromDocument(keyId, res.json);
   if (!key) return { ok: false, reason: "malformed" };
   await ctx.valkey.set(cacheKey, JSON.stringify(key), "EX", REMOTE_KEY_TTL_SECONDS);
@@ -119,13 +124,22 @@ export function actorFromDocument(actorId: string, doc: unknown): RemoteActor | 
   return { id: actorId, inbox, sharedInbox, handle: user ? `@${user}@${domain}` : null, domain };
 }
 
-export type RemoteActorResult =
-  | { ok: true; actor: RemoteActor }
-  | { ok: false; reason: "rejected" | "gone" | "failed" | "malformed" };
+export type RemoteActorResult = { ok: true; actor: RemoteActor } | RemoteFailure;
 
 export async function remoteActor(cfg: FederationConfig, actorId: string): Promise<RemoteActorResult> {
   const res = await fetchActivityJson(actorId, cfg);
-  if (!res.ok) return { ok: false, reason: res.reason };
+  if (!res.ok) return res;
   const actor = actorFromDocument(actorId, res.json);
   return actor ? { ok: true, actor } : { ok: false, reason: "malformed" };
+}
+
+/**
+ * Whether a failed fetch may succeed if tried again: no answer at all (timeout, connection
+ * error), a 5xx, 408 or 429. A guard refusal, 404/410, another 4xx or a malformed document is
+ * the remote's final word.
+ */
+export function isTransientFailure(f: Pick<RemoteFailure, "reason" | "status">): boolean {
+  if (f.reason !== "failed") return false;
+  const st = f.status;
+  return st === undefined || st >= 500 || st === 408 || st === 429;
 }
