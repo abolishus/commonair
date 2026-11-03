@@ -6,8 +6,13 @@
  * Express account (idempotent per creator at Stripe) and records it in `payout_accounts`
  * (`provider: stripe`, disabled). Every visit reads the account's `payouts_enabled` from Stripe
  * and syncs it (so a missed `account.updated` heals), and returns a fresh onboarding link while
- * payouts are not enabled. Actual transfers to Connect accounts are out of scope: payouts for
- * Stripe creators are recorded with `provider: stripe` and marked paid by the treasurer.
+ * payouts are not enabled.
+ *
+ * The onboarding return path (`PAYOUT_RETURN_PATH`) is that card, so a creator who finishes
+ * onboarding comes back to a read of Stripe that marks the account ready and releases their
+ * `payout_account_not_ready` payouts to `pending`; the next payout run schedules them and pays each
+ * by a Connect transfer (batch 8, M1-connect: `transfers.ts` and the worker's `payout-transfers`
+ * job). The payout run reads only the stored `payouts_enabled`, so this sync is what lets it pay.
  */
 import { eq } from "drizzle-orm";
 import { schema } from "@commonair/db";
