@@ -44,6 +44,20 @@ interface LiveRow {
   categorySlug: string | null;
 }
 
+/**
+ * Who is in the live directory, over `channels ⋈ broadcasts (live) ⋈ users (owner)`. The category
+ * counts use the same predicate, so they cannot drift from `directory.live`.
+ */
+const inLiveDirectory = () =>
+  and(
+    isNotNull(channels.liveBroadcastId),
+    isNull(channels.suspendedAt),
+    isNull(broadcasts.endedAt),
+    // A T1-restricted broadcast is in no list, search or front-page section until cleared.
+    isNull(broadcasts.restrictedAt),
+    eq(users.banned, false),
+  );
+
 /** Every live, unsuspended, unrestricted channel with what ranking and cards need. */
 async function loadLive(deps: Deps, filter?: { categorySlug?: string | undefined }): Promise<LiveRow[]> {
   const rows = await deps.db
@@ -52,17 +66,7 @@ async function loadLive(deps: Deps, filter?: { categorySlug?: string | undefined
     .innerJoin(broadcasts, eq(broadcasts.id, channels.liveBroadcastId))
     .innerJoin(users, eq(users.id, channels.ownerId))
     .leftJoin(categories, eq(categories.id, broadcasts.categoryId))
-    .where(
-      and(
-        isNotNull(channels.liveBroadcastId),
-        isNull(channels.suspendedAt),
-        isNull(broadcasts.endedAt),
-        // A T1-restricted broadcast is in no list, search or front-page section until cleared.
-        isNull(broadcasts.restrictedAt),
-        eq(users.banned, false),
-        filter?.categorySlug ? eq(categories.slug, filter.categorySlug) : undefined,
-      ),
-    )
+    .where(and(inLiveDirectory(), filter?.categorySlug ? eq(categories.slug, filter.categorySlug) : undefined))
     .limit(MAX_LIVE);
   if (rows.length === 0) return [];
   const ids = rows.map((r) => r.c.id);
@@ -306,15 +310,9 @@ export const directory = {
       deps,
       rows.map((r) => r.c),
     );
-    const catRows = await deps.db
-      .select()
-      .from(categories)
-      .where(ilike(categories.name, `%${q.replace(/[\\%_]/g, (m) => `\\${m}`)}%`))
+    const catRows = await categoriesWithCounts(deps)
+      .query.where(ilike(categories.name, `%${q.replace(/[\\%_]/g, (m) => `\\${m}`)}%`))
       .limit(input.limit);
-    const catCounts = await liveCountsByCategory(
-      deps,
-      catRows.map((c) => c.id),
-    );
     return {
       channels: rows
         .map((r) => ({ r, l: live.get(r.c.id) ?? null }))
@@ -326,7 +324,7 @@ export const directory = {
           live: l,
           followerCount: r.c.followerCount,
         })),
-      categories: catRows.map((c) => toCategory(deps, c, catCounts.get(c.id) ?? 0)),
+      categories: catRows.map((r) => toCategory(deps, r.c, Number(r.n))),
     };
   }),
 
@@ -347,27 +345,63 @@ export function toCategory(deps: Deps, c: typeof categories.$inferSelect, liveCh
   };
 }
 
-async function liveCountsByCategory(deps: Deps, ids: string[]): Promise<Map<string, number>> {
-  if (ids.length === 0) return new Map();
-  const rows = await deps.db
-    .select({ id: channels.categoryId, n: sql<number>`count(*)::int` })
+/**
+ * Live channels per category, counted the way `directory.live?category=<slug>` lists them with
+ * its default `includeMature=false`: by the live broadcast's category (not the channel's), under
+ * the directory's own visibility predicate, and mature-exclusive (a mature broadcast, channel or
+ * category never counts). The categories contract takes no mature setting, so the count is the
+ * same for every caller and equals that default listing for anyone; an adult who opts in to
+ * mature streams may see more. One grouped subquery per call and no cache, so it is as fresh as
+ * the directory.
+ */
+function liveCounts(deps: Deps) {
+  return deps.db
+    .select({ categoryId: broadcasts.categoryId, n: sql<number>`count(*)::int`.as("n") })
     .from(channels)
-    .where(and(inArray(channels.categoryId, ids), isNotNull(channels.liveBroadcastId), isNull(channels.suspendedAt)))
-    .groupBy(channels.categoryId);
-  return new Map(rows.filter((r) => r.id !== null).map((r) => [r.id as string, Number(r.n)]));
+    .innerJoin(broadcasts, eq(broadcasts.id, channels.liveBroadcastId))
+    .innerJoin(users, eq(users.id, channels.ownerId))
+    .innerJoin(categories, eq(categories.id, broadcasts.categoryId))
+    .where(
+      and(inLiveDirectory(), eq(broadcasts.mature, false), eq(channels.mature, false), eq(categories.mature, false)),
+    )
+    .groupBy(broadcasts.categoryId)
+    .as("live_counts");
 }
 
-const liveCount = sql<number>`(select count(*)::int from ${channels} where ${channels.categoryId} = ${categories.id} and ${channels.liveBroadcastId} is not null and ${channels.suspendedAt} is null)`;
+/**
+ * Categories joined to their live counts. A join, not a scalar subquery in the select list:
+ * drizzle drops table names from a single-table select's columns, which turned the old
+ * `channels.category_id = categories.id` into `"categoryId" = "id"` on channels alone, always
+ * false, so every category read 0 (F20).
+ */
+function categoriesWithCounts(deps: Deps) {
+  const counts = liveCounts(deps);
+  const n = sql<number>`coalesce(${counts.n}, 0)`;
+  return {
+    n,
+    query: deps.db
+      .select({ c: categories, n })
+      .from(categories)
+      .leftJoin(counts, eq(counts.categoryId, categories.id))
+      .$dynamic(),
+  };
+}
+
+/** One category's live count, as `categories.get` reports it. */
+export async function liveChannelCount(deps: Deps, categoryId: string): Promise<number> {
+  const [row] = await categoriesWithCounts(deps).query.where(eq(categories.id, categoryId)).limit(1);
+  return Number(row?.n ?? 0);
+}
 
 export const categoriesRoutes = {
+  /** Busiest first. `liveChannels` is mature-exclusive, as `directory.live` is by default. */
   list: os.categories.list.handler(async ({ context: { deps }, input }) => {
     const offset = decodeCursor(input.cursor, isOffsetCursor)?.o ?? 0;
     const q = input.q?.trim();
-    const rows = await deps.db
-      .select({ c: categories, n: liveCount })
-      .from(categories)
+    const { n, query } = categoriesWithCounts(deps);
+    const rows = await query
       .where(q ? ilike(categories.name, `%${q.replace(/[\\%_]/g, (m) => `\\${m}`)}%`) : undefined)
-      .orderBy(desc(liveCount), categories.name)
+      .orderBy(desc(n), categories.name)
       .limit(input.limit + 1)
       .offset(offset);
     return {
@@ -376,11 +410,7 @@ export const categoriesRoutes = {
     };
   }),
   get: os.categories.get.handler(async ({ context: { deps }, input }) => {
-    const [row] = await deps.db
-      .select({ c: categories, n: liveCount })
-      .from(categories)
-      .where(eq(categories.slug, input.slug))
-      .limit(1);
+    const [row] = await categoriesWithCounts(deps).query.where(eq(categories.slug, input.slug)).limit(1);
     if (!row) throw notFound("Category not found");
     return toCategory(deps, row.c, Number(row.n));
   }),
