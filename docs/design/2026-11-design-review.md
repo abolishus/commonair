@@ -654,7 +654,7 @@ Chromium, one role at a time, and a script captured each page in both themes at 
 only". Roles: `demo_streamer1` (a streamer with data) and `newbie` (empty everywhere) for the 15
 studio pages; `viewer1` for `/settings/*` and `/coop/membership`; `viewer2` (seeded appeals and
 copyright data) for those two pages; `mod` for `/admin/moderation`, `/admin/appeals` and
-`/coop/jury`; `admin` for every `/admin/*` page and `/treasury`. The 216 JPEGs are in
+`/coop/jury`; `admin` for every `/admin/*` page and `/treasury`. The 216 JPEGs (plus 8 recaptured as `legal` and `treasurer`, 055–056) are in
 [`2026-11-review/signed-in/`](2026-11-review/signed-in/), named
 `NNN-<role>-<page>-<theme>-<width>.jpg`. Below, a reference such as `001 d1440` means
 `001-…-dark-1440.jpg` (`l` is light, `375` is the phone width). This pass reviewed the dark 1440
@@ -666,12 +666,17 @@ shot of every page and the 375 and light shots where layout or contrast was in q
   [021](2026-11-review/signed-in/021-newbie-chat-dark-1440.jpg)): the raw JSON
   `{"error":"websocket_required"}`. This is the known 426 (`fe6b9923`, not released on rc.9), so
   the studio chat page and the held queue were not captured.
-- `/admin/legal` and `/treasury`, all eight
+- `/admin/legal` and `/treasury` as admin, all eight
   ([046](2026-11-review/signed-in/046-admin-admin-legal-dark-1440.jpg),
   [054](2026-11-review/signed-in/054-admin-treasury-dark-1440.jpg)): "Page not found". Not a bug:
   the legal queue is for the `legal` role only and the treasury for treasurers only
-  (`routes/_admin/admin.legal.tsx:15`, `routes/_admin/treasury.tsx`). Recapture as
-  `demo_treasurer` and `demo_legal` (both seeded fixed accounts).
+  (`routes/_admin/admin.legal.tsx:15`, `routes/_admin/treasury.tsx`). Recaptured as `demo_legal`
+  ([055](2026-11-review/signed-in/055-legal-admin-legal-dark-1440.jpg)) and `demo_treasurer`
+  ([056](2026-11-review/signed-in/056-treasurer-treasury-dark-1440.jpg)). They add evidence to
+  three findings: the legal page shows raw event codes (`moderation.t0.dismiss_first`) and
+  full-width hashes (F34) and a native date-time input for "Filed at" (F33); at 375 px the
+  treasury table cuts off Amount, Status and the Confirm button with no scroll cue
+  ([056 l375](2026-11-review/signed-in/056-treasurer-treasury-light-375.jpg), F31).
 - [035 d375](2026-11-review/signed-in/035-viewer1-settings-notifications-dark-375.jpg): "Your
   notification settings could not be loaded" (the 429). The other three notifications shots are
   fine.
@@ -858,5 +863,5 @@ these sign-offs closes in full; the table says what each still needs.
 | N2 (`:430-431`)        | visual checks under `es` and `en-XA`, a fluent read of the Spanish                                                                  | not covered (English only)                                                                                                                                                                                                                                                                    | everything                                                                                                                              |
 | E6 (`:1603-1606`)      | browser checks of `/dashboard` simulcast, `/overlays`, `/content`, `/settings/privacy`, `/overlay/alerts`; both themes, 320 px, OBS | `/dashboard` simulcast (001, 016), `/overlays` (003, 018), `/content` (008, 023), `/settings/privacy` (031), each in both themes at 1440 and 375                                                                                                                                              | `/overlay/alerts?token=…` and the OBS browser source, 320 px, Storybook                                                                 |
 | E5 (`:1673-1675`)      | `/coop/*`, `/treasury` shares and patronage tabs, `/admin/coop`, `/transparency`; both themes, 320 px, keyboard                     | `/coop/membership` (038), `/coop/jury` (043), `/admin/coop` (053)                                                                                                                                                                                                                             | the other `/coop/*` tabs, `/treasury` (054 is not-found as `admin`; use `demo_treasurer`), `/transparency`, 320 px, keyboard, Storybook |
-| E4b (`:1737`)          | the money pages in both themes and on mobile                                                                                        | `/revenue` (010, 025), `/crew` (011, 026), `/settings/subscriptions` (034)                                                                                                                                                                                                                    | the channel Support page and gift controls, `/treasury`, 320 px                                                                         |
+| E4b (`:1737`)          | the money pages in both themes and on mobile                                                                                        | `/revenue` (010, 025), `/crew` (011, 026), `/settings/subscriptions` (034), `/treasury` payments (056)                                                                                                                                                                                        | the channel Support page and gift controls, `/treasury`, 320 px                                                                         |
 | E4a (`:1817`)          | browser checks of the design-system migration                                                                                       | every usable shot above (studio, settings, moderation, admin; both themes, both widths)                                                                                                                                                                                                       | Storybook, and the gate                                                                                                                 |
