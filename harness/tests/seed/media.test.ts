@@ -17,6 +17,7 @@ import {
   HOUR_MS,
   type HistoryInput,
   MEMBER_HOURS_DAYS,
+  RECENT_VOD_CHANNELS,
   RECORDING_CONCURRENCY,
   SWARM_SESSIONS,
   bulkRecordings,
@@ -24,7 +25,9 @@ import {
   maxConcurrency,
   planHistory,
   planRecordings,
+  recentVodChannels,
 } from "../../src/seed/media/plan.ts";
+import { DEFAULT_LIVE_CHANNELS, LIVE_FIXED_ORDER } from "../../src/seed/live.ts";
 import { createRng } from "../../src/seed/prng.ts";
 import { SEED_SCALES, type SeedScale } from "../../src/seed/scale.ts";
 import type { SeededChannel } from "../../src/seed/types.ts";
@@ -270,10 +273,9 @@ describe("planRecordings", () => {
     expect(new Set(handles).size).toBe(handles.length);
   });
 
-  test("bulk recordings scale with factor: 2, 4, 6; zero bulk streamers gives none", () => {
-    expect(bulkRecordings(SEED_SCALES.small, 10)).toBe(2);
-    expect(bulkRecordings(SEED_SCALES.medium, 100)).toBe(4);
-    expect(bulkRecordings(SEED_SCALES.large, 1000)).toBe(6);
+  test("bulk recordings: the recent-VOD channels plus the removed one at every scale; zero bulk streamers gives none", () => {
+    for (const scale of [SEED_SCALES.small, SEED_SCALES.medium, SEED_SCALES.large])
+      expect(bulkRecordings(scale, scale.streamers)).toBe(RECENT_VOD_CHANNELS + 1);
     expect(bulkRecordings(SEED_SCALES.large, 1)).toBe(1);
     const none = planRecordings(createRng(1), small, { bulkStreamers: [], bulkViewers: [] });
     expect(none.recordings.map((r) => r.handle)).toEqual([...FIXED_RECORDERS]);
@@ -326,6 +328,17 @@ describe("planRecordings", () => {
     expect(p?.watchPage || p?.makePrivate || p?.speech || p?.rehearsal).toBe(false);
     const none = planRecordings(createRng(7).fork("recordings"), small, { bulkStreamers: [], bulkViewers: [] });
     expect(none.recordings.filter((r) => r.removeMidStream)).toEqual([]);
+  });
+
+  test("at least six channels outside seed live's default set end with a public VOD, at every scale", () => {
+    const live = LIVE_FIXED_ORDER.slice(0, DEFAULT_LIVE_CHANNELS);
+    for (const scale of [SEED_SCALES.small, SEED_SCALES.medium, SEED_SCALES.large]) {
+      const plan = planRecordings(createRng(7).fork("recordings"), scale, bulk(scale));
+      const recent = recentVodChannels(plan, live);
+      expect(recent.length, `${scale.streamers} streamers`).toBeGreaterThanOrEqual(RECENT_VOD_CHANNELS);
+      expect(new Set(recent).size).toBe(recent.length);
+      for (const h of live) expect(recent).not.toContain(h);
+    }
   });
 
   test("clips fit inside their recording", () => {
