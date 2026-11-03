@@ -136,8 +136,13 @@ describe("the real harness graph", () => {
   test("a batch 7 scenario module selects its scenario and the w3 shard, which is never filtered", () => {
     expect(scenariosReaching("harness/src/n3/index.ts", graph)).toEqual(["twitch-import"]);
     expect(scenariosReaching("harness/src/w3/watch-rooms/index.ts", graph)).toEqual(["watch-room"]);
-    // seed-coverage runs seed full, whose seed-interact drives giveaways through this module.
-    expect(scenariosReaching("harness/src/w3/giveaways.ts", graph)).toEqual(["interact", "seed-coverage"]);
+    // seed-coverage runs seed full, whose seed-interact drives giveaways through this module;
+    // d-surfaces reads that run's store (seed/run.ts).
+    expect(scenariosReaching("harness/src/w3/giveaways.ts", graph)).toEqual([
+      "d-surfaces",
+      "interact",
+      "seed-coverage",
+    ]);
     expect(shardsFor(selectScenarios(["harness/src/n4/web.ts"], graph))).toEqual(["w3"]);
     expect(matrixShards({ scenarios: ALL, deploy: false, filteredShards: [] })).toContain("w3");
     expect(outputs({ scenarios: ["portability"], deploy: false, filteredShards: [] })).toContain('shards=["w3"]');
