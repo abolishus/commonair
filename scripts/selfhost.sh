@@ -79,7 +79,8 @@ Commands:
              restart, wait for health; roll back to the previous release if health fails.
   backup     Take a WAL-G base backup now and list the backups; with --objects, copy the media
              and evidence buckets to the offsite store (docs/self-hosting/backups.md).
-  status     Show the installed version, every unit's state and health, TLS, backups, disk use.
+  status     Show the installed version, every unit's state and health, TLS, backups, disk use;
+             with external Postgres and Valkey, their reachability, TLS, version and load.
   reset-staging
              Staging only: drop the database, flush Valkey, migrate, restart, so that
              `seed full` can fill it again (docs/self-hosting/upgrades.md, "Resetting a
@@ -153,9 +154,31 @@ never switches store (there is no --migrate-objects; see backups.md for copying 
   S3_EVIDENCE_ACCESS_KEY_ID and S3_EVIDENCE_SECRET_ACCESS_KEY, or install prompts for them.
   They are kept in commonair.env (mode 0600); a --reinstall without them keeps the stored ones.
 
+Postgres and Valkey (install only; default: both in containers on this host, with WAL-G backups).
+The two flags below select external servers instead, a managed service such as DigitalOcean's
+(docs/self-hosting/managed-services.md), chosen once, together: an instance never switches
+between bundled and external (that is a dump and restore, not a flag).
+  --database-url <url>  The owner's URL, postgres://<user>@<host>[:port]/<database>?sslmode=verify-full.
+                        The user needs CREATEROLE, not superuser; PostgreSQL 17 or 18.
+  --database-ca <file>  The PEM CA that signed the server's certificate (DigitalOcean: "Download
+                        CA certificate"). Without it the system's trusted CAs are used; on a
+                        --reinstall or upgrade, "system" drops the CA install recorded.
+  --valkey-url <url>    rediss://[<user>@]<host>[:port][/<db>]; no user: the default user.
+  --valkey-ca <file>    The PEM CA that signed Valkey's certificate ("system" as above).
+  --allow-insecure-database
+                        Accept sslmode=require or disable (a server on a private network).
+  --allow-insecure-valkey
+                        Accept redis:// without TLS (a server on a private network).
+  Passwords never go on the command line: export DATABASE_PASSWORD and VALKEY_PASSWORD, or
+  install prompts for them. They are kept only in Podman secrets, never in commonair.env; a
+  --reinstall or upgrade without them keeps the stored ones. A preflight checks TLS, the owner's
+  rights, the server version, the connection budget and Valkey's eviction policy before anything
+  is installed. DATABASE_POOL_MAX in the environment sets the pool size the budget assumes.
+
 upgrade options: --version | --bundle, --sha256sums, --registry, --require-signature,
   --insecure-no-checksum, --turn-relay | --no-turn-relay, --web-push | --no-web-push,
-  --captions | --no-captions, --captions-model. The object store stays as installed.
+  --captions | --no-captions, --captions-model, --database-ca, --valkey-ca (a new CA for
+  external servers). The object store, Postgres and Valkey stay as installed.
 
 backup options (no option: --database):
   --database            A WAL-G base backup of Postgres now, then the list of base backups.
@@ -521,10 +544,13 @@ run_as_service_user() {
   _stage=$(stage_for_service_user)
   info "continuing as $SERVICE_USER"
   _rc=0
+  # The flags are split on spaces only: a database URL's ? and an IPv6 host's [ ] must not glob.
+  set -f
   # shellcheck disable=SC2046,SC2016 # validated flags without spaces; $HOME/$@ expand in the inner sh
   runuser -u "$SERVICE_USER" -- env HOME="$_home" XDG_RUNTIME_DIR="$_rt" \
     DBUS_SESSION_BUS_ADDRESS="unix:path=$_rt/bus" sh -c 'cd "$HOME" && exec sh "$@"' sh \
     "$_stage/selfhost.sh" install $(user_args "$_stage") || _rc=$?
+  set +f
   rm -rf "$_stage"
   exit "$_rc"
 }
@@ -555,6 +581,9 @@ stage_for_service_user() {
   fi
   if [ -n "$MODEL_SRC" ]; then stage_copy "$MODEL_SRC" "$_st/model.onnx"; fi
   if [ -n "$CAPTIONS_MODEL_SRC" ]; then stage_copy "$CAPTIONS_MODEL_SRC" "$_st/captions-model.bin"; fi
+  # Certificates only, public by nature: world-readable in the stage is fine.
+  if [ -n "$DB_OPT_CA" ] && [ "$DB_OPT_CA" != system ]; then stage_copy "$DB_OPT_CA" "$_st/database-ca.pem"; fi
+  if [ -n "$VK_OPT_CA" ] && [ "$VK_OPT_CA" != system ]; then stage_copy "$VK_OPT_CA" "$_st/valkey-ca.pem"; fi
   chmod 0644 "$_st"/*
   chmod 0755 "$_st"
   printf '%s' "$_st"
@@ -591,6 +620,14 @@ user_args() {
   [ -n "$S3_OPT_BUCKET_BACKUPS" ] && _out="$_out --s3-bucket-backups $S3_OPT_BUCKET_BACKUPS"
   [ -n "$S3_OPT_BUCKET_EVIDENCE" ] && _out="$_out --s3-bucket-evidence $S3_OPT_BUCKET_EVIDENCE"
   [ "$S3_ALLOW_HTTP" = yes ] && _out="$_out --s3-allow-http"
+  # Postgres and Valkey: the URLs (validated, no spaces, no password) and the staged CAs. The
+  # passwords reach that run through the environment, like the S3 keys.
+  [ -n "$DB_OPT_URL" ] && _out="$_out --database-url $DB_OPT_URL"
+  case "$DB_OPT_CA" in "") ;; system) _out="$_out --database-ca system" ;; *) _out="$_out --database-ca $1/database-ca.pem" ;; esac
+  [ -n "$VK_OPT_URL" ] && _out="$_out --valkey-url $VK_OPT_URL"
+  case "$VK_OPT_CA" in "") ;; system) _out="$_out --valkey-ca system" ;; *) _out="$_out --valkey-ca $1/valkey-ca.pem" ;; esac
+  [ "$DB_ALLOW_INSECURE" = yes ] && _out="$_out --allow-insecure-database"
+  [ "$VK_ALLOW_INSECURE" = yes ] && _out="$_out --allow-insecure-valkey"
   printf '%s' "$_out"
 }
 
@@ -1018,10 +1055,14 @@ configure_env() {
   turn_env "$_host" "$_old_host"
   web_push_env
   captions_env
-  # The app-role URL; the services get it as a podman secret as well (create_secrets).
-  _app=$(env_get POSTGRES_APP_PASSWORD "$ENV_FILE")
-  env_set DATABASE_URL "postgres://commonair_app:$_app@postgres:5432/commonair"
-  valkey_env
+  # The app-role URL; the services get it as a podman secret as well (create_secrets). External
+  # Postgres and Valkey: state_env writes theirs instead.
+  if [ "$STATE_MODE" != external ]; then
+    _app=$(env_get POSTGRES_APP_PASSWORD "$ENV_FILE")
+    env_set DATABASE_URL "postgres://commonair_app:$_app@postgres:5432/commonair"
+    valkey_env
+  fi
+  state_env
   storage_env
 }
 
@@ -1048,8 +1089,10 @@ backfill_env() {
     env_set S3_PUBLIC_ENDPOINT "https://$_host"
   fi
   # Before Valkey had a password, VALKEY_URL was the development default; write_env generated
-  # VALKEY_PASSWORD for this upgrade.
-  valkey_env
+  # VALKEY_PASSWORD for this upgrade. An external Valkey's URL is state_env's.
+  if [ "$STATE_MODE" != external ]; then valkey_env; fi
+  # The collector's keys (contract §3.7) and the monitor role's password, new in batch 8.
+  state_env
   # Before coturn (P1), write_env's merge just added init-env's development STUN URL and an empty
   # TURN_EXTERNAL_IP. The relay stays as it was unless --turn-relay or --no-turn-relay says.
   case "$(env_get P2P_STUN_URLS "$ENV_FILE")" in
@@ -1108,13 +1151,16 @@ read_storage_mode() {
 }
 
 # Whether a unit file of the release belongs to this instance: Garage's only in Garage mode,
-# whisper's only with captions on, stripe-mock's, Mailpit's and the seed harness's only while
-# staging seed mode is open (ADR 0040).
+# Postgres's and Valkey's only with bundled state, whisper's only with captions on, stripe-mock's,
+# Mailpit's and the seed harness's only while staging seed mode is open (ADR 0040).
 unit_in_mode() {
   case "$1" in
     commonair-whisper.container) captions_on || return 1 ;;
     commonair-stripe-mock.container | commonair-mailpit.container | commonair-seed-harness.container)
       seed_mode_open || return 1
+      ;;
+    commonair-postgres.container | commonair-postgres-data.volume | commonair-valkey.container)
+      [ "${STATE_MODE:-bundled}" != external ] || return 1
       ;;
   esac
   [ "${STORAGE_MODE:-garage}" = external ] || return 0
@@ -1327,13 +1373,597 @@ storage_check() {
   return 0
 }
 
-# Podman secrets the units read, re-created from the env file every time (idempotent).
+# --- Postgres and Valkey: bundled (the default) or external ---------------------------------
+#
+# STATE_MODE in commonair.env says where the database and Valkey run. Unset (or bundled), the
+# default: commonair-postgres (with WAL-G) and commonair-valkey on this host, exactly as before.
+# `external`: an operator's servers, chosen with --database-url and --valkey-url on install, a
+# managed service such as DigitalOcean's (ADR 0032 §3, docs/self-hosting/managed-services.md).
+# Then install_units leaves both units out and renders the others without edges to them, migrate
+# runs as the operator's owner role (CREATEROLE, no superuser) and creates the app and monitor
+# roles, and each unit whose key list names DATABASE_CA_FILE or VALKEY_CA_FILE mounts the CA's
+# secret where that key points. The owner's and Valkey's passwords are never flags and never in
+# commonair.env: only in Podman secrets. Only external mode writes STATE_MODE, and an instance never
+# switches: moving the data is a dump and restore, which selfhost.sh does not do in place.
+
+STATE_MODE=bundled
+STATE_DOC="docs/self-hosting/managed-services.md, section 'Moving between bundled and managed services'"
+STATE_PG_CA_SECRET=commonair-pg-ca
+STATE_VK_CA_SECRET=commonair-valkey-ca
+STATE_PG_CA_PATH=/run/secrets/commonair-pg-ca
+STATE_VK_CA_PATH=/run/secrets/commonair-valkey-ca
+# A host name, an IPv4 address or an IPv6 literal in brackets, then an optional port.
+STATE_HOST_RE='([A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?|\[[0-9A-Fa-f:.]{2,45}\])(:[0-9]{1,5})?'
+# The URLs carry a user and a host, never a password (it would be in ps and in commonair.env).
+STATE_PG_URL_RE="^postgres(ql)?://[A-Za-z0-9._~%-]{1,63}@$STATE_HOST_RE/[A-Za-z0-9_.~%-]{1,63}(\\?sslmode=(disable|allow|prefer|require|verify-ca|verify-full))?\$"
+STATE_VK_URL_RE="^rediss?://([A-Za-z0-9._~%-]{1,63}@)?$STATE_HOST_RE(/[0-9]{1,2})?\$"
+
+# Percent-encodes $1 for a URL's user-info (RFC 3986: all but the unreserved characters), byte by
+# byte (LC_ALL=C). The value reaches awk through its environment, never its argv.
+url_encode() {
+  SELFHOST_VALUE="$1" LC_ALL=C awk 'BEGIN {
+    for (i = 1; i < 256; i++) ord[sprintf("%c", i)] = i
+    v = ENVIRON["SELFHOST_VALUE"]
+    out = ""
+    for (i = 1; i <= length(v); i++) {
+      c = substr(v, i, 1)
+      if (c ~ /^[A-Za-z0-9._~-]$/) out = out c
+      else out = out sprintf("%%%02X", ord[c])
+    }
+    printf "%s", out
+  }'
+}
+
+# Parts of a validated URL: the scheme, the user, what follows the user-info (host, port, path
+# and query), host[:port], the host with its port (a default one added), the sslmode.
+url_scheme() { printf '%s' "${1%%://*}"; }
+url_user() {
+  _uu=${1#*://}
+  case "$_uu" in *@*) printf '%s' "${_uu%%@*}" ;; esac
+}
+url_after_user() {
+  _ua=${1#*://}
+  printf '%s' "${_ua#*@}"
+}
+url_hostport() {
+  _uh=$(url_after_user "$1")
+  printf '%s' "${_uh%%/*}"
+}
+url_endpoint() {
+  _ue=$(url_hostport "$1")
+  case "$_ue" in
+    \[*\]:* | [!\[]*:*) printf '%s' "$_ue" ;;
+    *) printf '%s:%s' "$_ue" "$2" ;;
+  esac
+}
+url_sslmode() {
+  case "$1" in *\?sslmode=*) printf '%s' "${1##*sslmode=}" ;; *) printf 'prefer' ;; esac
+}
+# Where a database's data lives: host, port and database, not the user (an owner may rotate).
+pg_place() {
+  _pp=$(url_after_user "$1")
+  printf '%s/%s' "$(url_endpoint "$1" 5432)" "${_pp#*/}" | sed 's/?.*//'
+}
+
+# A URL with $2 (already encoded) as the password of its user.
+url_with_password() {
+  printf '%s://%s:%s@%s' "$(url_scheme "$1")" "$(url_user "$1")" "$2" "$(url_after_user "$1")"
+}
+
+# The owner's URL and Valkey's, with the passwords this run was given.
+owner_url_with_password() { url_with_password "$STATE_SET_DB_URL" "$(url_encode "$STATE_SET_DB_PW")"; }
+valkey_url_with_password() { url_with_password "$STATE_SET_VK_URL" "$(url_encode "$STATE_SET_VK_PW")"; }
+# The app role's URL on the same server and database (its password is init-env's, in the env file).
+app_database_url() {
+  printf 'postgres://commonair_app:%s@%s' "$(url_encode "$(env_get POSTGRES_APP_PASSWORD "$ENV_FILE")")" \
+    "$(url_after_user "$STATE_SET_DB_URL")"
+}
+
+# A CA file: readable PEM certificates, nothing else.
+check_ca_file() {
+  [ -f "$2" ] && [ -r "$2" ] || die "$1: no such readable file: $2"
+  if grep -q 'PRIVATE KEY' "$2"; then
+    die "$1 $2 holds a private key: refusing it" "fix: pass the CA certificate only (-----BEGIN CERTIFICATE-----), never a key"
+  fi
+  grep -q -e '-----BEGIN CERTIFICATE-----' "$2" ||
+    die "$1 $2 is not a PEM certificate (no -----BEGIN CERTIFICATE----- line)" \
+      "fix: pass the CA in PEM form (DigitalOcean's 'Download CA certificate' is); convert DER with: openssl x509 -inform der -in ca.der -out ca.pem"
+}
+
+# The flags, checked as parse_flags reads them (as root too, before anything happens).
+check_state_flags() {
+  if [ -n "$DB_OPT_URL" ]; then
+    case "$DB_OPT_URL" in
+      *://*:*@* | *://*@*@*)
+        die "--database-url holds a password: refusing it, since every user on this host can read a command line (ps)" \
+          "fix: --database-url postgres://<user>@<host>:<port>/<database>?sslmode=verify-full, and the password in" \
+          "DATABASE_PASSWORD in install's environment, or run install from a terminal, which asks for it"
+        ;;
+    esac
+    printf '%s' "$DB_OPT_URL" | grep -Eq "$STATE_PG_URL_RE" ||
+      die "not a database URL: --database-url must be postgres://<user>@<host>[:<port>]/<database>?sslmode=verify-full" \
+        "(the user and database percent-encoded, an IPv6 host in brackets; sslmode is the only parameter)"
+    _ssl=$(url_sslmode "$DB_OPT_URL")
+    if [ "$_ssl" != verify-full ] && [ "$DB_ALLOW_INSECURE" != yes ]; then
+      die "--database-url says sslmode=$_ssl: the server's certificate and name would not be verified" \
+        "fix: end the URL with ?sslmode=verify-full (and --database-ca <file> for a private CA), or pass" \
+        "--allow-insecure-database for a server on a private network only"
+    fi
+    # The metrics collector speaks three modes (contract §3.7): verify-full, require (TLS without
+    # verification) and disable. The others are libpq's in-betweens, refused rather than guessed.
+    case "$_ssl" in
+      verify-full | require | disable) ;;
+      *)
+        die "--database-url says sslmode=$_ssl, which selfhost.sh does not take" \
+          "fix: sslmode=verify-full; or, with --allow-insecure-database on a private network only," \
+          "sslmode=require (TLS, the certificate not verified) or sslmode=disable (no TLS)"
+        ;;
+    esac
+    if [ -n "$DB_OPT_CA" ] && [ "$_ssl" != verify-full ]; then
+      die "--database-ca is used with sslmode=verify-full only, and the URL says sslmode=$_ssl"
+    fi
+  fi
+  if [ -n "$VK_OPT_URL" ]; then
+    case "$VK_OPT_URL" in
+      *://*:*@* | *://*@*@*)
+        die "--valkey-url holds a password: refusing it, since every user on this host can read a command line (ps)" \
+          "fix: --valkey-url rediss://[<user>@]<host>:<port>, and the password in VALKEY_PASSWORD in install's" \
+          "environment, or run install from a terminal, which asks for it"
+        ;;
+    esac
+    printf '%s' "$VK_OPT_URL" | grep -Eq "$STATE_VK_URL_RE" ||
+      die "not a Valkey URL: --valkey-url must be rediss://[<user>@]<host>[:<port>][/<db>] (an IPv6 host in brackets)"
+    case "$VK_OPT_URL" in
+      redis://*)
+        [ "$VK_ALLOW_INSECURE" = yes ] || die "--valkey-url is redis://, without TLS: Valkey's password and every job would cross the network in the clear" \
+          "fix: use rediss:// (and --valkey-ca <file> for a private CA), or pass --allow-insecure-valkey for a server on a private network only"
+        [ -z "$VK_OPT_CA" ] || die "--valkey-ca is used with rediss:// only"
+        ;;
+    esac
+  fi
+  if [ "$DB_ALLOW_INSECURE" = yes ] && [ -z "$DB_OPT_URL" ]; then die "--allow-insecure-database goes with --database-url"; fi
+  if [ "$VK_ALLOW_INSECURE" = yes ] && [ -z "$VK_OPT_URL" ]; then die "--allow-insecure-valkey goes with --valkey-url"; fi
+  # "system": verify against the system's trusted CAs, dropping a CA install recorded.
+  if [ -n "$DB_OPT_CA" ] && [ "$DB_OPT_CA" != system ]; then check_ca_file --database-ca "$DB_OPT_CA"; fi
+  if [ -n "$VK_OPT_CA" ] && [ "$VK_OPT_CA" != system ]; then check_ca_file --valkey-ca "$VK_OPT_CA"; fi
+  return 0
+}
+
+refuse_state_switch() {
+  if [ "$1" = bundled ]; then
+    _from="the bundled Postgres and Valkey on this host (bundled)"
+    _to="external servers (--database-url, --valkey-url)"
+  else
+    _from="external Postgres and Valkey (external, $(pg_place "$(env_get DATABASE_OWNER_URL "$STATE_ENV")"))"
+    _to="the bundled ones (STATE_MODE=external is missing from $STATE_ENV)"
+  fi
+  die "this instance keeps its database and Valkey in $_from; this run asks for $_to" \
+    "moving between bundled and external Postgres and Valkey is a data migration, not a flag, and" \
+    "selfhost.sh refuses to switch in place. Nothing was changed." \
+    "fix: drop the flags (or restore the STATE_MODE line) to keep what is there, or follow the dump and" \
+    "restore procedure in $STATE_DOC."
+}
+
+# Sets STATE_MODE from an env file; refuses one that names external servers without saying so.
+read_state_mode() {
+  STATE_ENV=$1
+  _sm=$(env_get STATE_MODE "$1")
+  case "$_sm" in
+    "" | bundled)
+      STATE_MODE=bundled
+      if [ -n "$(env_get DATABASE_OWNER_URL "$1")" ]; then refuse_state_switch external bundled; fi
+      ;;
+    external) STATE_MODE=external ;;
+    *) die "STATE_MODE=$_sm in $1 is neither bundled nor external" "fix: correct the line (an instance keeps the Postgres and Valkey it was installed with)" ;;
+  esac
+}
+
+# The part of the choice that needs no password: the mode, the URLs, the insecure flags, checked
+# against the env file ($1 for root's precheck). Runs before anything is downloaded.
+resolve_state_settings() {
+  STATE_ENV=${1:-$ENV_FILE}
+  _have=""
+  if [ -f "$STATE_ENV" ]; then
+    read_state_mode "$STATE_ENV"
+    _have=$STATE_MODE
+  fi
+  if [ -n "$DB_OPT_URL$VK_OPT_URL" ]; then STATE_MODE=external; else STATE_MODE=${_have:-bundled}; fi
+  if [ -n "$_have" ] && [ "$_have" != "$STATE_MODE" ]; then refuse_state_switch "$_have" "$STATE_MODE"; fi
+  if [ "$STATE_MODE" != external ]; then
+    [ -z "$DB_OPT_CA$VK_OPT_CA" ] || die "--database-ca and --valkey-ca apply to external Postgres and Valkey only (--database-url, --valkey-url)"
+    return 0
+  fi
+  _sdb=""
+  _svk=""
+  if [ "$_have" = external ]; then
+    _sdb=$(env_get DATABASE_OWNER_URL "$STATE_ENV")
+    _svk=$(env_get VALKEY_URL "$STATE_ENV")
+  fi
+  STATE_SET_DB_URL=${DB_OPT_URL:-$_sdb}
+  STATE_SET_VK_URL=${VK_OPT_URL:-$_svk}
+  if [ -z "$STATE_SET_DB_URL" ] || [ -z "$STATE_SET_VK_URL" ]; then
+    die "external state needs both servers: --database-url and --valkey-url go together" \
+      "(the bundled Postgres and Valkey are the default: give neither for them)"
+  fi
+  if [ -n "$DB_OPT_URL" ] && [ -n "$_sdb" ] && [ "$(pg_place "$DB_OPT_URL")" != "$(pg_place "$_sdb")" ]; then
+    die "this instance keeps its database at $(pg_place "$_sdb"); --database-url would point it at $(pg_place "$DB_OPT_URL")" \
+      "its data would stay behind: selfhost.sh moves no database. Nothing was changed." \
+      "fix: drop --database-url (a new owner user on the same server and database is fine), or dump and" \
+      "restore into the new server first ($STATE_DOC) and install a new instance against it."
+  fi
+  if [ -n "$VK_OPT_URL" ] && [ -n "$_svk" ] && [ "$VK_OPT_URL" != "$_svk" ]; then
+    warn "Valkey moves from $(url_endpoint "$_svk" 6379) to $(url_endpoint "$VK_OPT_URL" 6379): queued jobs, sessions and caches on the old one are not carried over"
+  fi
+  # A new URL takes the flags given with it; otherwise what install recorded.
+  if [ -n "$DB_OPT_URL" ]; then
+    STATE_SET_DB_INSECURE=$DB_ALLOW_INSECURE
+  elif [ "$(env_get DATABASE_ALLOW_INSECURE "$STATE_ENV")" = true ]; then
+    STATE_SET_DB_INSECURE=yes
+  else
+    STATE_SET_DB_INSECURE=no
+  fi
+  if [ -n "$VK_OPT_URL" ]; then
+    STATE_SET_VK_INSECURE=$VK_ALLOW_INSECURE
+  elif [ "$(env_get VALKEY_ALLOW_INSECURE "$STATE_ENV")" = true ]; then
+    STATE_SET_VK_INSECURE=yes
+  else
+    STATE_SET_VK_INSECURE=no
+  fi
+  if [ "$STATE_SET_DB_INSECURE" = yes ]; then
+    warn "--allow-insecure-database: the database's certificate is not verified (sslmode=$(url_sslmode "$STATE_SET_DB_URL")); use it on a private network only"
+  fi
+  if [ "$STATE_SET_VK_INSECURE" = yes ]; then
+    case "$STATE_SET_VK_URL" in redis://*) warn "--allow-insecure-valkey: Valkey's password and every job cross the network without TLS; use it on a private network only" ;; esac
+  fi
+  if [ -n "$DB_OPT_CA" ] && [ "$(url_sslmode "$STATE_SET_DB_URL")" != verify-full ]; then
+    die "--database-ca is used with sslmode=verify-full only, and $STATE_ENV's DATABASE_OWNER_URL says sslmode=$(url_sslmode "$STATE_SET_DB_URL")"
+  fi
+  case "$STATE_SET_VK_URL" in redis://*) [ -z "$VK_OPT_CA" ] || die "--valkey-ca is used with rediss:// only" ;; esac
+  return 0
+}
+
+# As root, before root_prepare: the same checks against the service user's env file, so a refused
+# choice changes nothing on the host (as precheck_storage_as_root; a subshell keeps root's state).
+precheck_state_as_root() {
+  _env=/nonexistent
+  if id -u "$SERVICE_USER" >/dev/null 2>&1; then
+    _uhome=$(getent passwd "$SERVICE_USER" | cut -d: -f6)
+    _cand="$_uhome/.config/commonair/commonair.env"
+    if [ -n "$_uhome" ] && [ -f "$_cand" ] && [ ! -L "$_cand" ]; then _env=$_cand; fi
+  fi
+  (resolve_state_settings "$_env") || exit 1
+}
+
+secret_exists() { podman secret exists "$1" >/dev/null 2>&1; }
+
+# Asks on the terminal (passwords without echo). Fails without a terminal.
+prompt_state() {
+  [ -t 0 ] || return 1
+  printf 'selfhost: %s: ' "$1" >&2
+  case "$1" in *PASSWORD*) stty -echo 2>/dev/null || true ;; esac
+  IFS= read -r _ans || _ans=""
+  case "$1" in *PASSWORD*) stty echo 2>/dev/null || true && printf '\n' >&2 ;; esac
+  printf '%s' "$_ans"
+}
+
+# A password from the environment ($1), else the terminal, when $2 = yes (needed) or it is given.
+state_password() {
+  eval "_spv=\${$1:-}"
+  if [ -z "$_spv" ] && [ "$2" = yes ]; then _spv=$(prompt_state "$1") || _spv=""; fi
+  case "$_spv" in
+    *"
+"*) die "$1 holds a line break" ;;
+  esac
+  [ "${#_spv}" -le 1024 ] || die "$1 is longer than 1024 characters"
+  printf '%s' "$_spv"
+}
+
+# The secrets external state needs that this run must supply: each password when the URL is new
+# or its secret is missing (the environment wins over a stored one), each CA when the flag gives
+# one or the env file uses one whose secret is gone (never dropping TLS without a word).
+collect_state_secrets() {
+  STATE_SET_DB_PW=""
+  STATE_SET_VK_PW=""
+  STATE_SET_DB_CA=""
+  STATE_SET_VK_CA=""
+  [ "$STATE_MODE" = external ] || return 0
+  _dbn=no
+  _vkn=no
+  if [ -n "$DB_OPT_URL" ] || ! secret_exists commonair-owner-database-url; then _dbn=yes; fi
+  if [ -n "$VK_OPT_URL" ] || ! secret_exists commonair-valkey-url || ! secret_exists commonair-valkey-monitor-password; then
+    _vkn=yes
+  fi
+  STATE_SET_DB_PW=$(state_password DATABASE_PASSWORD "$_dbn")
+  STATE_SET_VK_PW=$(state_password VALKEY_PASSWORD "$_vkn")
+  # No child process inherits them from here on.
+  unset DATABASE_PASSWORD VALKEY_PASSWORD
+  _miss=""
+  if [ "$_dbn" = yes ] && [ -z "$STATE_SET_DB_PW" ]; then _miss="$_miss DATABASE_PASSWORD"; fi
+  if [ "$_vkn" = yes ] && [ -z "$STATE_SET_VK_PW" ]; then _miss="$_miss VALKEY_PASSWORD"; fi
+  [ -z "$_miss" ] || die "external Postgres and Valkey need their passwords; missing:$_miss" \
+    "fix: run selfhost.sh from a terminal, which asks for them (without echo), or export them in its" \
+    "environment; never as flags or in the URL, which ps shows to every user. They are kept in Podman" \
+    "secrets only, so later upgrades need them again only if a secret is removed."
+  if [ "$DB_OPT_CA" = system ]; then
+    STATE_SET_DB_CA=""
+  elif [ -n "$DB_OPT_CA" ]; then
+    STATE_SET_DB_CA=$DB_OPT_CA
+  elif state_pg_ca_on && ! secret_exists "$STATE_PG_CA_SECRET"; then
+    STATE_SET_DB_CA=$(prompt_state "the Postgres CA file (the secret $STATE_PG_CA_SECRET is gone)") || STATE_SET_DB_CA=""
+    [ -n "$STATE_SET_DB_CA" ] || die "the Podman secret $STATE_PG_CA_SECRET is missing, and the database is verified against it" \
+      "fix: re-run with --database-ca <file> (the CA that signed the server's certificate), or from a terminal, which asks for it"
+    check_ca_file "the Postgres CA" "$STATE_SET_DB_CA"
+  fi
+  if [ "$VK_OPT_CA" = system ]; then
+    STATE_SET_VK_CA=""
+  elif [ -n "$VK_OPT_CA" ]; then
+    STATE_SET_VK_CA=$VK_OPT_CA
+  elif state_vk_ca_on && ! secret_exists "$STATE_VK_CA_SECRET"; then
+    STATE_SET_VK_CA=$(prompt_state "the Valkey CA file (the secret $STATE_VK_CA_SECRET is gone)") || STATE_SET_VK_CA=""
+    [ -n "$STATE_SET_VK_CA" ] || die "the Podman secret $STATE_VK_CA_SECRET is missing, and Valkey is verified against it" \
+      "fix: re-run with --valkey-ca <file> (the CA that signed Valkey's certificate), or from a terminal, which asks for it"
+    check_ca_file "the Valkey CA" "$STATE_SET_VK_CA"
+  fi
+  return 0
+}
+
+# Whether each server's certificate is verified: the URL this run uses, else the one install recorded.
+state_pg_verified() {
+  [ "$(url_sslmode "${STATE_SET_DB_URL:-$(env_get DATABASE_OWNER_URL "$ENV_FILE")}")" = verify-full ]
+}
+state_vk_verified() {
+  case "${STATE_SET_VK_URL:-$(env_get VALKEY_URL "$ENV_FILE")}" in rediss://*) return 0 ;; *) return 1 ;; esac
+}
+
+# Whether the services verify against a CA of ours: one given now, or one install recorded, and
+# only while the URL verifies at all (a CA with sslmode=require would stop every service:
+# packages/db refuses that pairing) and --*-ca system did not drop it for the system's CAs.
+state_pg_ca_on() {
+  state_pg_verified && [ "${DB_OPT_CA:-}" != system ] &&
+    { [ -n "${STATE_SET_DB_CA:-}" ] || [ -n "$(env_get DATABASE_CA_FILE "$ENV_FILE")" ]; }
+}
+state_vk_ca_on() {
+  state_vk_verified && [ "${VK_OPT_CA:-}" != system ] &&
+    { [ -n "${STATE_SET_VK_CA:-}" ] || [ -n "$(env_get VALKEY_CA_FILE "$ENV_FILE")" ]; }
+}
+
+# DATABASE_POOL_MAX: install's environment (the preflight's fix says so), else the env file's.
+state_pool_max() {
+  _pm=${DATABASE_POOL_MAX:-$(env_get DATABASE_POOL_MAX "$ENV_FILE")}
+  _pm=${_pm:-10}
+  printf '%s' "$_pm" | grep -Eq '^[1-9][0-9]{0,3}$' || die "DATABASE_POOL_MAX must be a whole number from 1 to 9999, not $_pm"
+  printf '%s' "$_pm"
+}
+
+# Runs infra/selfhost/state-check.ts ($2: preflight or status) in release $1's tools image. The
+# passwords reach it only through podman's environment (--env NAME, no value on the command line)
+# or as the stored secrets; a new CA as a read-only mount of a copy, a stored one as its secret.
+state_check_run() {
+  make_tmp
+  _sc_rel=$1
+  _sc_mode=$2
+  _sc_dir="$TMP_ROOT/state-check"
+  rm -rf "$_sc_dir"
+  mkdir -p "$_sc_dir"
+  chmod 755 "$_sc_dir"
+  _sc_pg=""
+  _sc_vk=""
+  _sc_net=""
+  if ! podman network exists commonair >/dev/null 2>&1; then
+    _sc_net=$(preflight_network "$_sc_rel") || return 1
+  fi
+  # The route the services will take: the instance's network, or (first install) a stand-in.
+  set -- run --rm --network "${_sc_net:-commonair}"
+  if [ "$_sc_mode" = status ]; then
+    # The app role is enough to read the version and the connection count.
+    set -- "$@" --secret "commonair-database-url,type=env,target=STATE_PG_URL" \
+      --secret "commonair-valkey-url,type=env,target=STATE_VALKEY_URL"
+  else
+    if [ -n "$STATE_SET_DB_PW" ]; then
+      _sc_pg=$(owner_url_with_password)
+      set -- "$@" --env STATE_PG_URL
+    else
+      set -- "$@" --secret "commonair-owner-database-url,type=env,target=STATE_PG_URL"
+    fi
+    if [ -n "$STATE_SET_VK_PW" ]; then
+      _sc_vk=$(valkey_url_with_password)
+      set -- "$@" --env STATE_VALKEY_URL
+    else
+      set -- "$@" --secret "commonair-valkey-url,type=env,target=STATE_VALKEY_URL"
+    fi
+  fi
+  if [ -n "${STATE_SET_DB_CA:-}" ]; then
+    cp "$STATE_SET_DB_CA" "$_sc_dir/pg-ca.pem"
+    set -- "$@" -e STATE_PG_CA=/run/state-check/pg-ca.pem
+  elif state_pg_ca_on; then
+    set -- "$@" --secret "$STATE_PG_CA_SECRET,type=mount,target=$STATE_PG_CA_PATH,mode=0444" -e "STATE_PG_CA=$STATE_PG_CA_PATH"
+  fi
+  if [ -n "${STATE_SET_VK_CA:-}" ]; then
+    cp "$STATE_SET_VK_CA" "$_sc_dir/valkey-ca.pem"
+    set -- "$@" -e STATE_VALKEY_CA=/run/state-check/valkey-ca.pem
+  elif state_vk_ca_on; then
+    set -- "$@" --secret "$STATE_VK_CA_SECRET,type=mount,target=$STATE_VK_CA_PATH,mode=0444" -e "STATE_VALKEY_CA=$STATE_VK_CA_PATH"
+  fi
+  chmod 644 "$_sc_dir"/* 2>/dev/null || true
+  # What this run decided, else (status) what install recorded.
+  _sc_dbi=${STATE_SET_DB_INSECURE:-$(env_get DATABASE_ALLOW_INSECURE "$ENV_FILE")}
+  _sc_vki=${STATE_SET_VK_INSECURE:-$(env_get VALKEY_ALLOW_INSECURE "$ENV_FILE")}
+  case "$_sc_dbi" in yes | true) set -- "$@" -e STATE_ALLOW_INSECURE_DATABASE=true ;; esac
+  case "$_sc_vki" in yes | true) set -- "$@" -e STATE_ALLOW_INSECURE_VALKEY=true ;; esac
+  set -- "$@" -e "STATE_POOL_MAX=$(state_pool_max)" -v "$_sc_dir:/run/state-check:ro,Z" \
+    "$(tools_image "$_sc_rel")" bun infra/selfhost/state-check.ts "$_sc_mode"
+  _sc_rc=0
+  STATE_PG_URL=$_sc_pg STATE_VALKEY_URL=$_sc_vk podman "$@" || _sc_rc=$?
+  rm -rf "$_sc_dir"
+  if [ -n "$_sc_net" ]; then podman network rm "$_sc_net" >/dev/null 2>&1 || true; fi
+  return "$_sc_rc"
+}
+
+# Before the first install the commonair network does not exist yet, and Podman's default (pasta
+# for a rootless run) is not the route the services take. A throwaway bridge network with the
+# release's subnet (quadlet/commonair.network) is, the same way; the caller removes it, so the
+# preflight still leaves nothing behind, and commonair-network.service creates the real one.
+preflight_network() {
+  _pn_file="$1/quadlet/commonair.network"
+  _pn_subnet=$(sed -n 's/^Subnet=//p' "$_pn_file" 2>/dev/null | head -n 1)
+  _pn_range=$(sed -n 's/^IPRange=//p' "$_pn_file" 2>/dev/null | head -n 1)
+  [ -n "$_pn_subnet" ] && [ -n "$_pn_range" ] || { warn "no Subnet= or IPRange= in $_pn_file"; return 1; }
+  _pn_name="commonair-preflight-$$"
+  podman network create --subnet "$_pn_subnet" --ip-range "$_pn_range" "$_pn_name" >/dev/null ||
+    { warn "could not create the preflight's network $_pn_name ($_pn_subnet)"; return 1; }
+  printf '%s' "$_pn_name"
+}
+
+# Before anything is installed or changed: TLS, the owner's rights, the version, the connection
+# budget and Valkey's eviction policy (infra/selfhost/state-check.ts). Read only.
+state_preflight() {
+  [ "$STATE_MODE" = external ] || return 0
+  info "checking the external Postgres and Valkey (preflight: nothing is changed yet)"
+  _pf_rc=0
+  _pf_out=$(state_check_run "$1" preflight 2>&1) || _pf_rc=$?
+  printf '%s\n' "$_pf_out" | sed 's/^/  /' >&2
+  [ "$_pf_rc" -eq 0 ] || die "the external Postgres or Valkey failed the preflight; nothing was installed or changed" \
+    "fix: what the fix: lines above say, then re-run (docs/self-hosting/requirements.md, 'External Postgres and Valkey')"
+}
+
+# For status: each server's reachability, TLS, version and load, from the tools image, as unit rows.
+state_status() {
+  _ss_out=$(state_check_run "$CURRENT_LINK" status 2>&1) || true
+  printf '%s\n' "$_ss_out" | while IFS= read -r _l; do
+    case "$_l" in
+      "postgres "*) printf '  %-34s %-10s %s\n' commonair-postgres external "$(printf '%s' "${_l#postgres}" | sed 's/^ *//')" ;;
+      "valkey "*) printf '  %-34s %-10s %s\n' commonair-valkey external "$(printf '%s' "${_l#valkey}" | sed 's/^ *//')" ;;
+      "") ;;
+      *) printf '  %s\n' "$_l" ;;
+    esac
+  done
+}
+
+# The env file's view of Postgres and Valkey: external mode's URLs and switches, and in both modes
+# the metrics collector's keys (contract §3.7) and the monitor role's password, which migrate
+# reads (POSTGRES_MONITOR_PASSWORD; generated once, kept).
+state_env() {
+  if [ -z "$(env_get POSTGRES_MONITOR_PASSWORD "$ENV_FILE")" ]; then
+    env_set POSTGRES_MONITOR_PASSWORD "$(od -An -tx1 -N24 /dev/urandom | tr -d ' \n')"
+  fi
+  env_set PG_MONITOR_USER commonair_monitor
+  if [ "$STATE_MODE" != external ]; then
+    env_set PG_MONITOR_ENDPOINT postgres:5432
+    env_set PG_MONITOR_TLS disable
+    env_set VALKEY_MONITOR_ENDPOINT valkey:6379
+    env_set VALKEY_MONITOR_USER ""
+    env_set VALKEY_MONITOR_TLS off
+    env_set OBSERVABILITY_STATE_MODE bundled
+    return 0
+  fi
+  env_set STATE_MODE external
+  env_set DATABASE_OWNER_URL "$STATE_SET_DB_URL"
+  env_set DATABASE_URL "$(app_database_url)"
+  # Without its password, which only the Podman secret commonair-valkey-url holds.
+  env_set VALKEY_URL "$STATE_SET_VK_URL"
+  if state_pg_ca_on; then env_set DATABASE_CA_FILE "$STATE_PG_CA_PATH"; else env_set DATABASE_CA_FILE ""; fi
+  if state_vk_ca_on; then env_set VALKEY_CA_FILE "$STATE_VK_CA_PATH"; else env_set VALKEY_CA_FILE ""; fi
+  if [ "$STATE_SET_DB_INSECURE" = yes ]; then env_set DATABASE_ALLOW_INSECURE true; else env_set DATABASE_ALLOW_INSECURE false; fi
+  if [ "$STATE_SET_VK_INSECURE" = yes ]; then env_set VALKEY_ALLOW_INSECURE true; else env_set VALKEY_ALLOW_INSECURE false; fi
+  if [ -n "${DATABASE_POOL_MAX:-}" ]; then env_set DATABASE_POOL_MAX "$(state_pool_max)"; fi
+  env_set PG_MONITOR_ENDPOINT "$(url_endpoint "$STATE_SET_DB_URL" 5432)"
+  # verify-full, or with --allow-insecure-database require or disable (check_state_flags).
+  env_set PG_MONITOR_TLS "$(url_sslmode "$STATE_SET_DB_URL")"
+  env_set VALKEY_MONITOR_ENDPOINT "$(url_endpoint "$STATE_SET_VK_URL" 6379)"
+  # The instance's own Valkey user (empty: the default user); no other exists without ACL.
+  _vmu=$(url_user "$STATE_SET_VK_URL")
+  [ "$_vmu" != default ] || _vmu=""
+  env_set VALKEY_MONITOR_USER "$_vmu"
+  case "$STATE_SET_VK_URL" in rediss://*) env_set VALKEY_MONITOR_TLS on ;; *) env_set VALKEY_MONITOR_TLS off ;; esac
+  env_set OBSERVABILITY_STATE_MODE external
+  info "postgres: external, $(url_user "$STATE_SET_DB_URL")@$(pg_place "$STATE_SET_DB_URL"); valkey: external, $(url_endpoint "$STATE_SET_VK_URL" 6379)"
+}
+
+# External state's secrets. The app role's URL is rebuilt every time (its password is init-env's);
+# the owner's and Valkey's only when this run has the password, else the stored ones stay.
+state_secrets() {
+  printf '%s' "$(app_database_url)" | podman secret create --replace commonair-database-url - >/dev/null
+  if [ -n "$STATE_SET_DB_PW" ]; then
+    printf '%s' "$(owner_url_with_password)" | podman secret create --replace commonair-owner-database-url - >/dev/null
+  fi
+  printf '%s' "$2" | podman secret create --replace commonair-grafana-admin-password - >/dev/null
+  if [ -n "$STATE_SET_VK_PW" ]; then
+    printf '%s' "$(valkey_url_with_password)" | podman secret create --replace commonair-valkey-url - >/dev/null
+    printf '%s' "$STATE_SET_VK_PW" | podman secret create --replace commonair-valkey-monitor-password - >/dev/null
+  fi
+  monitor_password_secret
+  if [ -n "$STATE_SET_DB_CA" ]; then podman secret create --replace "$STATE_PG_CA_SECRET" - <"$STATE_SET_DB_CA" >/dev/null; fi
+  if [ -n "$STATE_SET_VK_CA" ]; then podman secret create --replace "$STATE_VK_CA_SECRET" - <"$STATE_SET_VK_CA" >/dev/null; fi
+  # A CA no unit mounts any more (--*-ca system, or a URL that no longer verifies).
+  if [ "$STATE_MODE" = external ] && ! state_pg_ca_on && secret_exists "$STATE_PG_CA_SECRET"; then
+    podman secret rm "$STATE_PG_CA_SECRET" >/dev/null 2>&1 || true
+  fi
+  if [ "$STATE_MODE" = external ] && ! state_vk_ca_on && secret_exists "$STATE_VK_CA_SECRET"; then
+    podman secret rm "$STATE_VK_CA_SECRET" >/dev/null 2>&1 || true
+  fi
+  return 0
+}
+
+# Copies release unit $2 into the Quadlet directory. With external state a container unit loses
+# every dependency edge to the bundled Postgres and Valkey units (none is installed), and one whose
+# key list names DATABASE_CA_FILE or VALKEY_CA_FILE mounts that CA's secret at the path the key
+# points to. Bundled: the release's file, byte for byte.
+install_unit_file() {
+  _iu=$(basename "$2")
+  if [ "${_iu##*.}" != container ]; then
+    cp "$2" "$QUADLET_DIR/"
+    return 0
+  fi
+  _keys="$1/infra/selfhost/env/${_iu%.container}.keys"
+  _pgca=""
+  _vkca=""
+  if state_pg_ca_on && [ -f "$_keys" ] && grep -qx DATABASE_CA_FILE "$_keys"; then _pgca="$STATE_PG_CA_SECRET,type=mount,target=$STATE_PG_CA_PATH,mode=0444"; fi
+  if state_vk_ca_on && [ -f "$_keys" ] && grep -qx VALKEY_CA_FILE "$_keys"; then _vkca="$STATE_VK_CA_SECRET,type=mount,target=$STATE_VK_CA_PATH,mode=0444"; fi
+  SELFHOST_PGCA=$_pgca SELFHOST_VKCA=$_vkca awk '
+    BEGIN { pg = ENVIRON["SELFHOST_PGCA"]; vk = ENVIRON["SELFHOST_VKCA"] }
+    /^(Wants|Requires|Requisite|BindsTo|PartOf|Upholds|After|Before)=/ {
+      key = substr($0, 1, index($0, "=") - 1)
+      n = split(substr($0, index($0, "=") + 1), names, /[ \t]+/)
+      kept = ""
+      for (i = 1; i <= n; i++)
+        if (names[i] != "" && names[i] != "commonair-postgres.service" && names[i] != "commonair-valkey.service")
+          kept = kept (kept == "" ? "" : " ") names[i]
+      if (kept != "") print key "=" kept
+      next
+    }
+    { print }
+    /^\[Container\]$/ {
+      if (pg != "" || vk != "") print "# selfhost.sh, external state: the CA the client verifies the server against."
+      if (pg != "") print "Secret=" pg
+      if (vk != "") print "Secret=" vk
+    }
+  ' "$2" >"$QUADLET_DIR/$_iu.tmp"
+  mv "$QUADLET_DIR/$_iu.tmp" "$QUADLET_DIR/$_iu"
+}
+
+# The release's systemd units this instance runs: WAL-G's backup service and timer need the
+# bundled Postgres (commonair-backup.service is Requisite= on it).
+systemd_unit_in_mode() {
+  case "$1" in
+    commonair-backup.service | commonair-backup.timer) [ "$STATE_MODE" != external ] ;;
+    *) return 0 ;;
+  esac
+}
+
+# Podman secrets the units read, re-created from the env file every time (idempotent). With
+# external Postgres and Valkey, the owner's and Valkey's passwords are not in the env file: their
+# secrets are re-created only when this run was given the password (state_secrets).
 create_secrets() {
   _app=$(env_get POSTGRES_APP_PASSWORD "$ENV_FILE")
   _owner=$(env_get POSTGRES_PASSWORD "$ENV_FILE")
   _grafana=$(env_get GRAFANA_ADMIN_PASSWORD "$ENV_FILE")
-  if [ -z "$_app" ] || [ -z "$_owner" ] || [ -z "$_grafana" ]; then
+  if [ -z "$_app" ] || [ -z "$_grafana" ] || { [ -z "$_owner" ] && [ "$STATE_MODE" != external ]; }; then
     die "$ENV_FILE lacks POSTGRES_APP_PASSWORD, POSTGRES_PASSWORD or GRAFANA_ADMIN_PASSWORD"
+  fi
+  if [ "$STATE_MODE" = external ]; then
+    state_secrets "$_app" "$_grafana"
+    info "podman secrets updated"
+    return 0
   fi
   # printf is a shell builtin: the values never appear in a process list.
   printf 'postgres://commonair_app:%s@postgres:5432/commonair' "$_app" |
@@ -1344,7 +1974,18 @@ create_secrets() {
   _vurl=$(env_get VALKEY_URL "$ENV_FILE")
   [ -n "$_vurl" ] || die "$ENV_FILE lacks VALKEY_URL"
   printf '%s' "$_vurl" | podman secret create --replace commonair-valkey-url - >/dev/null
+  # The metrics collector's (contract §3.7): the monitor role's password, and Valkey's own, since
+  # the bundled Valkey has only its default user.
+  monitor_password_secret
+  _vpw=$(env_get VALKEY_PASSWORD "$ENV_FILE")
+  printf '%s' "$_vpw" | podman secret create --replace commonair-valkey-monitor-password - >/dev/null
   info "podman secrets updated"
+}
+
+monitor_password_secret() {
+  _mon=$(env_get POSTGRES_MONITOR_PASSWORD "$ENV_FILE")
+  [ -n "$_mon" ] || die "$ENV_FILE lacks POSTGRES_MONITOR_PASSWORD"
+  printf '%s' "$_mon" | podman secret create --replace commonair-pg-monitor-password - >/dev/null
 }
 
 # Host files the units this instance runs bind-mount outside the release directory (derived from
@@ -1437,10 +2078,12 @@ install_units() {
     [ -d "$_f" ] && continue
     if [ -f "$_f" ] || [ -L "$_f" ]; then rm -f "$_f"; fi
   done
-  # With an external object store, Garage and its volumes are not installed at all.
+  # With an external object store, Garage and its volumes are not installed at all; with external
+  # Postgres and Valkey, neither are theirs, and the rest are rendered without edges to them.
   for _f in "$_rel"/quadlet/* "$_rel/$OPTIONAL_UNIT_DIR"/*; do
     [ -f "$_f" ] || continue
-    if unit_in_mode "$(basename "$_f")"; then cp "$_f" "$QUADLET_DIR/"; fi
+    unit_in_mode "$(basename "$_f")" || continue
+    if [ "${STATE_MODE:-bundled}" = external ]; then install_unit_file "$_rel" "$_f"; else cp "$_f" "$QUADLET_DIR/"; fi
   done
   # Units in ~/.config/systemd/user shadow Quadlet's generated ones, so a commonair-* unit the
   # release does not ship (an older release's, or one copied by hand for a manual install) goes.
@@ -1450,12 +2093,20 @@ install_units() {
     # below unless the release ships that name.
     [ -d "$_f" ] && continue
     _n=$(basename "$_f")
-    [ -e "$_rel/systemd/$_n" ] && continue
+    if [ -e "$_rel/systemd/$_n" ] && { [ "${STATE_MODE:-bundled}" != external ] || systemd_unit_in_mode "$_n"; }; then
+      continue
+    fi
     case "$_n" in *.timer | *.socket) systemctl --user disable --now "$_n" >/dev/null 2>&1 || true ;; esac
     info "removing $_n (not part of this release)"
     rm -f "$_f"
   done
-  cp "$_rel"/systemd/* "$SYSTEMD_DIR/"
+  if [ "${STATE_MODE:-bundled}" != external ]; then
+    cp "$_rel"/systemd/* "$SYSTEMD_DIR/"
+  else
+    for _f in "$_rel"/systemd/*; do
+      if systemd_unit_in_mode "$(basename "$_f")"; then cp "$_f" "$SYSTEMD_DIR/"; fi
+    done
+  fi
   # Each unit's env file is rendered from commonair.env at every start of the unit (ExecStartPre=
   # with the release's render-env.sh and key list). Drop the old ones, so no copy of a secret
   # stays behind for a unit this release no longer has, or under a key it no longer passes.
@@ -1586,8 +2237,11 @@ restart_stack() {
   # shellcheck disable=SC2046
   systemctl --user start --no-block $(sockets) $(services)
   # Enabled, a socket also listens at boot, before Caddy is up (connections wait in its queue).
-  # shellcheck disable=SC2046
-  systemctl --user enable --now $(sockets) commonair-backup.timer commonair-irc-cert.timer >/dev/null 2>&1 || true
+  # WAL-G's daily base backup runs only against the bundled Postgres.
+  _timers="commonair-irc-cert.timer"
+  if [ "${STATE_MODE:-bundled}" != external ]; then _timers="commonair-backup.timer $_timers"; fi
+  # shellcheck disable=SC2046,SC2086
+  systemctl --user enable --now $(sockets) $_timers >/dev/null 2>&1 || true
 }
 
 unit_healthy() {
@@ -1678,7 +2332,12 @@ next_steps() {
     say "  - TLS uses Caddy's internal CA. Trust its root on your clients:"
     say "      $(caddy_root_path)"
   fi
-  say "  - Backups: commonair-backup.timer runs daily; selfhost.sh backup runs one now."
+  if [ "$STATE_MODE" = external ]; then
+    say "  - Backups: the database is your provider's to back up (point-in-time recovery);"
+    say "    see docs/self-hosting/managed-services.md."
+  else
+    say "  - Backups: commonair-backup.timer runs daily; selfhost.sh backup runs one now."
+  fi
   say "  - selfhost.sh status shows units, health, TLS and backups."
 }
 
@@ -1726,6 +2385,13 @@ parse_flags() {
   S3_OPT_BUCKET_BACKUPS=""
   S3_OPT_BUCKET_EVIDENCE=""
   S3_ALLOW_HTTP=no
+  # External Postgres and Valkey (empty: bundled, or what commonair.env says).
+  DB_OPT_URL=""
+  DB_OPT_CA=""
+  VK_OPT_URL=""
+  VK_OPT_CA=""
+  DB_ALLOW_INSECURE=no
+  VK_ALLOW_INSECURE=no
   # The TURN relay: on, off, or empty (keep what commonair.env says; off on a first install).
   TURN_RELAY=""
   # Browser push: on, off, or empty (keep what commonair.env says; off on a first install).
@@ -1771,6 +2437,23 @@ parse_flags() {
         shift 2
         ;;
       --s3-allow-http) S3_ALLOW_HTTP=yes && shift ;;
+      --database-url | --database-ca | --valkey-url | --valkey-ca)
+        [ $# -ge 2 ] && [ -n "$2" ] || die "$1 needs a value"
+        case "$1" in
+          --database-url) DB_OPT_URL=$2 ;;
+          --database-ca) DB_OPT_CA=$2 ;;
+          --valkey-url) VK_OPT_URL=$2 ;;
+          --valkey-ca) VK_OPT_CA=$2 ;;
+        esac
+        shift 2
+        ;;
+      --allow-insecure-database) DB_ALLOW_INSECURE=yes && shift ;;
+      --allow-insecure-valkey) VK_ALLOW_INSECURE=yes && shift ;;
+      --database-pass* | --valkey-pass* | --db-pass* | --pg-pass*)
+        die "passwords are never flags: every user on this host can read a command line (ps)" \
+          "fix: export DATABASE_PASSWORD and VALKEY_PASSWORD in the shell that runs selfhost.sh, or run it" \
+          "from a terminal, which asks for them (without echo)"
+        ;;
       # coturn's TURN relay (docs/self-hosting/p2p.md). Kept in commonair.env, so it persists
       # across upgrades and reinstalls until the opposite flag.
       --turn-relay) TURN_RELAY=on && shift ;;
@@ -1819,9 +2502,10 @@ parse_flags() {
       die "not a bucket name: $_b (3-63 lowercase letters, digits, dots and hyphens; no '..')"
     fi
   done
-  for _f in "$BUNDLE" "$SUMS_FILE" "$MODEL_SRC" "$CAPTIONS_MODEL_SRC"; do
+  for _f in "$BUNDLE" "$SUMS_FILE" "$MODEL_SRC" "$CAPTIONS_MODEL_SRC" "$DB_OPT_CA" "$VK_OPT_CA"; do
     case "$_f" in *[[:space:]]*) die "paths with spaces are not supported: $_f" ;; esac
   done
+  check_state_flags
   if [ -n "$CAPTIONS_MODEL_SRC" ] && [ "$CAPTIONS" = off ]; then die "--captions-model and --no-captions contradict each other"; fi
   return 0
 }
@@ -1834,6 +2518,7 @@ cmd_install() {
         "re-run with --yes to allow that, or run as the user that will own the instance"
     fi
     precheck_storage_as_root
+    precheck_state_as_root
     root_prepare
     run_as_service_user
   fi
@@ -1852,8 +2537,10 @@ cmd_install() {
   TLS=${TLS:-acme}
   if [ -z "$REGISTRY" ] && [ -f "$SELFHOST_CONF" ]; then REGISTRY=$(env_get REGISTRY "$SELFHOST_CONF"); fi
   resolve_storage
+  resolve_state_settings
 
   host_checks
+  collect_state_secrets
   if [ -z "$VERSION" ] && [ -z "$BUNDLE" ] && [ -L "$CURRENT_LINK" ]; then
     # --reinstall alone: re-apply flags and commonair.env edits to the installed release.
     RELEASE_DIR=$(readlink "$CURRENT_LINK")
@@ -1867,6 +2554,7 @@ cmd_install() {
   check_captions "$RELEASE_DIR"
   apply_registry "$RELEASE_DIR" "$REGISTRY"
   pull_images "$RELEASE_DIR"
+  state_preflight "$RELEASE_DIR"
   write_env "$RELEASE_DIR"
   configure_env
   create_secrets
@@ -1881,6 +2569,15 @@ cmd_install() {
   next_steps
 }
 
+# External state takes no pre-upgrade backup: the provider's point-in-time recovery is the net.
+rollback_last_resort() {
+  if [ "$STATE_MODE" = external ]; then
+    printf '%s' "last resort if the schema change broke it: restore the database to a point just before the upgrade with your provider's point-in-time recovery ($STATE_DOC)"
+  else
+    printf '%s' "last resort if the schema change broke it: restore the pre-upgrade backup (selfhost.sh backup lists it)"
+  fi
+}
+
 rollback() {
   _prev=$1
   warn "rolling back to $(env_get COMMONAIR_VERSION "$_prev/release.env")"
@@ -1889,7 +2586,7 @@ rollback() {
   if bring_up; then
     die "upgrade failed; rolled back to $(installed_version), which is healthy" \
       "the failed release stays in $RELEASES_DIR for inspection" \
-      "last resort if the schema change broke it: restore the pre-upgrade backup (selfhost.sh backup lists it)"
+      "$(rollback_last_resort)"
   fi
   die "upgrade failed and the rollback is not healthy either" "see: selfhost.sh status"
 }
@@ -1924,10 +2621,16 @@ cmd_upgrade() {
   _cur=$(readlink "$CURRENT_LINK")
   _curv=$(installed_version)
   [ "$S3_FLAGS" = no ] || die "the object store is chosen at install: --s3-* flags apply to install --reinstall, not upgrade"
+  if [ -n "$DB_OPT_URL$VK_OPT_URL" ]; then
+    die "Postgres and Valkey are chosen at install: --database-url and --valkey-url apply to install --reinstall, not upgrade" \
+      "an upgrade keeps them as installed (--database-ca and --valkey-ca may replace a CA)"
+  fi
   read_storage_mode "$ENV_FILE"
+  resolve_state_settings
   resolve_repository_url
   if [ -z "$REGISTRY" ] && [ -f "$SELFHOST_CONF" ]; then REGISTRY=$(env_get REGISTRY "$SELFHOST_CONF"); fi
   check_podman
+  collect_state_secrets
 
   # 1. download and verify
   obtain_bundle
@@ -1937,11 +2640,17 @@ cmd_upgrade() {
   apply_registry "$RELEASE_DIR" "$REGISTRY"
   # 2. pull every image by digest (nothing has changed yet if this fails)
   pull_images "$RELEASE_DIR"
+  state_preflight "$RELEASE_DIR"
   network_preflight
-  # 3. base backup of the current database
-  info "taking a base backup before the upgrade"
-  systemctl --user start commonair-backup.service ||
-    die "the pre-upgrade backup failed; nothing was changed" "see: journalctl --user -u commonair-backup"
+  # 3. base backup of the current database (WAL-G, bundled Postgres only: an external one has its
+  # provider's point-in-time recovery, docs/self-hosting/managed-services.md)
+  if [ "$STATE_MODE" != external ]; then
+    info "taking a base backup before the upgrade"
+    systemctl --user start commonair-backup.service ||
+      die "the pre-upgrade backup failed; nothing was changed" "see: journalctl --user -u commonair-backup"
+  else
+    info "external Postgres: no WAL-G backup here; the provider's point-in-time recovery covers the upgrade"
+  fi
   # The new release's tools (init-env) may add variables; existing values are kept.
   write_env "$RELEASE_DIR"
   backfill_env
@@ -2390,6 +3099,12 @@ cmd_status() {
   else
     say "storage:   Garage on this host (commonair-garage)"
   fi
+  read_state_mode "$ENV_FILE"
+  if [ "$STATE_MODE" = external ]; then
+    _sdb=$(env_get DATABASE_OWNER_URL "$ENV_FILE")
+    _svk=$(env_get VALKEY_URL "$ENV_FILE")
+    say "state:     external Postgres at $(pg_place "$_sdb"), external Valkey at $(url_endpoint "$_svk" 6379)"
+  fi
   # Whether coturn runs and the relay is on; never the secret or the credentials.
   _coturn=$(systemctl --user show commonair-coturn.service --property=ActiveState --value 2>/dev/null || true)
   if [ -n "$(env_get P2P_TURN_URLS "$ENV_FILE")" ]; then
@@ -2415,15 +3130,21 @@ cmd_status() {
     _h=$(podman inspect --format '{{.State.Health.Status}}' "$_c" 2>/dev/null || true)
     printf '  %-34s %-10s %-10s %s\n' "${_u%.service}" "${_state:-?}" "${_sub:-?}" "${_h:--}"
   done
+  # External Postgres and Valkey run no unit here: "external" and what the servers answer.
+  if [ "$STATE_MODE" = external ]; then state_status; fi
   for _u in $(sockets); do
     _state=$(systemctl --user show "$_u" --property=ActiveState --value 2>/dev/null || true)
     _sub=$(systemctl --user show "$_u" --property=SubState --value 2>/dev/null || true)
     printf '  %-34s %-10s %-10s %s\n' "$_u" "${_state:-?}" "${_sub:-?}" "-"
   done
   say ""
-  _last=$(systemctl --user show commonair-backup.service --property=ExecMainExitTimestamp --value 2>/dev/null || true)
-  _res=$(systemctl --user show commonair-backup.service --property=Result --value 2>/dev/null || true)
-  say "last backup: ${_last:-never} (${_res:-?})"
+  if [ "$STATE_MODE" != external ]; then
+    _last=$(systemctl --user show commonair-backup.service --property=ExecMainExitTimestamp --value 2>/dev/null || true)
+    _res=$(systemctl --user show commonair-backup.service --property=Result --value 2>/dev/null || true)
+    say "last backup: ${_last:-never} (${_res:-?})"
+  else
+    say "last backup: the provider's (external Postgres; docs/self-hosting/managed-services.md)"
+  fi
   say "last object backup: $(object_backup_summary)"
   say ""
   say "volumes:"
@@ -2464,6 +3185,14 @@ parse_reset_flags() {
   return 0
 }
 
+# reset-staging and seed mode drop and flush the bundled containers' data; a staging instance runs
+# bundled state, and an external database is not this script's to drop.
+refuse_external_state() {
+  read_state_mode "$ENV_FILE"
+  [ "$STATE_MODE" != external ] || die "$1 refused: this instance uses external Postgres and Valkey; it works on the bundled ones only. Nothing was changed." \
+    "staging instances run the bundled Postgres and Valkey (docs/self-hosting/managed-services.md)"
+}
+
 # Refuses, before anything is touched, unless this is a staging instance and the operator named it
 # ($1: the command, for the messages; $2: what --confirm gave).
 staging_guard() {
@@ -2499,6 +3228,7 @@ reset_wait_data() {
 cmd_reset_staging() {
   parse_reset_flags "$@"
   require_instance reset-staging
+  refuse_external_state reset-staging
   staging_guard
   _host=$(env_get PUBLIC_HOSTNAME "$ENV_FILE")
   warn "resetting $_host: every row in its database is deleted, with no backup first"
@@ -2857,6 +3587,7 @@ seed_services() { for _u in $SEED_UNITS; do printf '%s.service ' "${_u%.containe
 cmd_seed_mode_open() {
   parse_seed_flags "$@"
   require_instance "seed-mode open"
+  refuse_external_state "seed-mode open"
   staging_guard "seed-mode open" "$SEED_CONFIRM"
   seed_lock || die "seed-mode open refused: another seed-mode open or close is running (pid $(seed_lock_holder)). Nothing was changed." \
     "wait for it to finish (systemctl --user status $SEED_CLOSE_SERVICE), then re-run"

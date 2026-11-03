@@ -77,6 +77,7 @@ const REAL_TOOLS = [
   "mkdir",
   "mktemp",
   "mv",
+  "od",
   "paste",
   "readlink",
   "rm",
@@ -318,8 +319,17 @@ describe("default: Garage on this host, as before", () => {
 
   test("the env file has exactly the keys it always had: .env.example's plus the same few", () => {
     const extra = Object.keys(envOf(h)).filter((k) => !exampleKeys.includes(k));
-    // What configure_env adds beyond init-env's keys, as before R0-b: no S3_MODE, no S3_CONNECT_SRC.
-    expect(extra.sort()).toEqual([]);
+    // What configure_env adds beyond init-env's keys: no S3_MODE, no S3_CONNECT_SRC; only the
+    // metrics collector's keys (S1-b, contract step §3.7), which point at the bundled containers.
+    expect(extra.sort()).toEqual([
+      "OBSERVABILITY_STATE_MODE",
+      "PG_MONITOR_ENDPOINT",
+      "PG_MONITOR_TLS",
+      "PG_MONITOR_USER",
+      "VALKEY_MONITOR_ENDPOINT",
+      "VALKEY_MONITOR_TLS",
+      "VALKEY_MONITOR_USER",
+    ]);
     expect(envOf(h).S3_MODE).toBeUndefined();
     expect(envOf(h).S3_CONNECT_SRC).toBeUndefined();
   });
