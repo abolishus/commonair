@@ -341,7 +341,8 @@ export async function stepGiveawayVerifyMine(run: InteractB8Extension): Promise<
     await checkAxe(ctx, page, "giveaway-verify-page");
     ctx.assert(
       title("no username on the page (decision (n))"),
-      !(await page.locator("body").innerText()).includes(entrant.username),
+      // The page content, not the site header, which shows the signed-in entrant's own account.
+      !(await page.locator("#main-content").innerText()).includes(entrant.username),
     );
   });
 
