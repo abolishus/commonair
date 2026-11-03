@@ -87,9 +87,37 @@ DEMO_SEED_FULL=true DEMO_SEED_PASSWORD='<at least 12 characters>' bun harness/sr
 | `medium` | 100       | 2 k     | 200 k      | 365 days | staging                          |
 | `large`  | 1 k       | 20 k    | 2 M        | 730 days | pagination and query-plan checks |
 
-At `small` the whole run takes roughly 20–25 minutes. Several units really go live, record, encode
-and wait for the worker; the slowest are seed-media at about 8 minutes and seed-coop at about 5.
+At `small` the whole run takes roughly 25–30 minutes. Several units really go live, record, encode
+and wait for the worker; the slowest are seed-media at about 10 minutes and seed-coop at about 5.
 The run order is: social, then interact, money and media, then safety, then coop, then platform.
+
+### Generated art
+
+seed-social gives the seeded accounts the visual identity a real instance has (design review F10):
+
+- **Avatars:** every streamer and every fixed login except `newbie` (which keeps the initial, for
+  comparison), and about 70% of the bulk viewers. Each one is the channel avatar and the profile
+  image, so it shows on cards, the channel page, chat and member lists.
+- **Banners and panels:** streamer1, streamer2 and streamer3 each get a 6:1 banner and 3–5 panels
+  (a title, a text body, a generated image on some, links to `https://example.org/<slug>/…` only).
+  These panels replace the plain ones the base rows give those three channels.
+- **Category box art:** not seeded. No procedure sets a category's box art yet, so `boxArtUrl`
+  stays `null` and the web shows its fallback tile (a contract request from D1-seed).
+
+The art is abstract: a gradient with a few large circles, rings and polygons, drawn by
+`harness/src/seed/art.ts` from the unit's seeded PRNG with the user id as the salt. It is never a
+photo, a face, text or a brand, and nothing is fetched. The generator makes an SVG and rasterizes
+the same scene to PNG for the upload, because the upload endpoint takes PNG, JPEG, WebP and GIF but
+not SVG, and the harness has a PNG encoder but no WebP one (WebP would need a new dependency). The
+images are CC0-1.0; none is committed, they are made at run time.
+
+Uploads go through the public API, as the dashboard's appearance card does them: a presigned PUT,
+the scanning commit, then `channels.update` with the merged theme (and `/update-user` for the
+profile image). Six run at once. The step skips any avatar, banner or panel set that is already
+there, so it never uploads twice. A resume (`--from`) never reruns seed-social anyway.
+
+At `medium` this is about 1,500 avatar uploads, each with a sign-in, so seed-social takes several
+minutes longer than before; `large` is about ten times that.
 
 ### `seed live`
 
@@ -107,6 +135,23 @@ deleted, banned from a chat or blocked by anyone. Chat reaches a page only over 
 is no history on join), so a page shows lines that arrive while it is open: each chatter says one
 every 25–60 s. `seed-coverage` runs it itself with faster chat (below), and staging seed mode runs
 it after `seed full` until `seed-mode close`.
+
+**Verified viewers (design review F12).** Each live channel also gets 3–15 seeded bulk viewers
+(the busiest channel the most; a channel's chatters first, then other bulk viewers, nobody on two
+channels) who watch it through the real playback path. They use the HTTP viewer of the `viewers`
+scenario: a signed-in playback session that downloads the live segments a player would and sends
+heartbeats with a person's jitter. Nothing writes counts to the database or Valkey, so the cards
+show only what the integrity scorer verifies; expect the first verified numbers a minute or two
+after the streams start. Viewers arrive over the first minute, watch for 20–50 minutes, leave and
+come back after 10–45 s, and a session that stops getting media (a publisher restart) is renewed.
+Each keeps one device id and fingerprint for the whole run.
+
+**Recently live.** seed-media records seven bulk streamers at every scale (one of them has its VOD
+removed mid-stream), so at least six channels outside `seed live`'s default three have a public
+VOD with a thumbnail for the home page's recently-live tiles.
+
+**Co-op proposals.** The filler proposals have distinct titles from a list (an action and an
+initiative), so `/coop` never shows "(2)" or "(3)" repeats (design review F19).
 
 ## Checking it: `seed-coverage`
 
