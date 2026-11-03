@@ -301,11 +301,13 @@ describe("ReplayModel", () => {
     // From the backfill on, not from the start.
     expect(ids(m)[0]).toBe(lines[149]?.id);
     expect(ids(m).at(-1)).toBe(lines[150]?.id);
-    // Seeking back before that span starts again there.
-    m.setPlayhead(us(at(10 * 60)));
+    // The first span was kept (batch 8): seeking back into it needs no request.
+    const kept = server.calls.length;
+    m.setPlayhead(us(at(2 * 60)));
     await flush();
-    expect(server.calls.some((c) => c.from === new Date(T0 + 9 * 60 * 1000).toISOString())).toBe(true);
-    expect(ids(m)).toEqual([lines[9]?.id, lines[10]?.id]);
+    expect(server.calls.length).toBe(kept);
+    expect(ids(m)).toEqual([lines[0]?.id, lines[1]?.id, lines[2]?.id]);
+    expect(m.snapshot()).toMatchObject({ spans: 2, kept: true });
   });
 
   it("a far seek made while the first page is in flight starts again at the target once it lands", async () => {
@@ -522,5 +524,136 @@ describe("ReplayModel", () => {
     const seen = n;
     m.setPlayhead(us(at(5)));
     expect(n).toBe(seen);
+  });
+});
+
+describe("ReplayModel spans (batch 8: a deep seek keeps what was loaded)", () => {
+  /** One line a minute for 200 minutes, five a page. */
+  const minutes = () => Array.from({ length: 200 }, (_, i) => item(at(i * 60)));
+
+  it("a deep seek starts a second span and keeps the first; seeking back needs no request", async () => {
+    const lines = minutes();
+    const server = new FakeServer(lines, { size: 5 });
+    const { m } = model(server);
+    m.setPlayhead(us(at(60)));
+    await flush();
+    expect(m.snapshot()).toMatchObject({ spans: 1, kept: false });
+    m.setPlayhead(us(at(120 * 60)));
+    await flush();
+    expect(m.snapshot()).toMatchObject({ spans: 2, kept: true });
+    expect(ids(m)).toEqual([lines[119]?.id, lines[120]?.id]);
+    const before = server.calls.length;
+    m.setPlayhead(us(at(2 * 60)));
+    await flush();
+    expect(server.calls.length).toBe(before);
+    expect(ids(m)).toEqual(lines.slice(0, 3).map((l) => l.id));
+    // And forward again into the second span: no request either.
+    m.setPlayhead(us(at(120 * 60 + 30)));
+    await flush();
+    expect(server.calls.length).toBe(before);
+    expect(ids(m)).toEqual([lines[119]?.id, lines[120]?.id]);
+  });
+
+  it("spans merge when the first pages on into the second, and page on with the second's cursor", async () => {
+    const lines = minutes();
+    const server = new FakeServer(lines, { size: 5 });
+    const { m } = model(server);
+    m.setPlayhead(us(at(0)));
+    await flush();
+    // Loaded 0–4 min; 15 min is more than 10 min past that: a span from 14 min (lines 14–18).
+    m.setPlayhead(us(at(15 * 60)));
+    await flush();
+    expect(m.snapshot().spans).toBe(2);
+    expect(server.calls.at(-1)?.from).toBe(new Date(T0 + 14 * 60 * 1000).toISOString());
+    // 8 min pages the first span on (5–9, 10–14) until it reaches the second's start: one span.
+    m.setPlayhead(us(at(8 * 60)));
+    await flush();
+    expect(m.snapshot().spans).toBe(1);
+    expect(m.heldLines()).toBe(19);
+    expect(ids(m)).toEqual(lines.slice(0, 9).map((l) => l.id));
+    // Near the joined end it pages on from where the second span had got to.
+    m.setPlayhead(us(at(17 * 60 + 30)));
+    await flush();
+    expect(server.calls.at(-1)).toEqual({ cursor: "19", limit: 200 });
+    expect(ids(m)).toEqual(lines.slice(0, 18).map((l) => l.id));
+  });
+
+  it("caps memory: past maxLines the span farthest from the playhead is dropped", async () => {
+    const lines = minutes();
+    const server = new FakeServer(lines, { size: 5 });
+    const { m } = model(server, { maxLines: 12 });
+    m.setPlayhead(us(at(0)));
+    await flush();
+    m.setPlayhead(us(at(50 * 60)));
+    await flush();
+    expect(m.snapshot().spans).toBe(2);
+    m.setPlayhead(us(at(100 * 60)));
+    await flush();
+    // The first span (farthest from 100 min) went; 50 min and 100 min are held.
+    expect(m.snapshot().spans).toBe(2);
+    expect(m.heldLines()).toBeLessThanOrEqual(12);
+    expect(ids(m)).toEqual([lines[99]?.id, lines[100]?.id]);
+    m.setPlayhead(us(at(51 * 60)));
+    await flush();
+    const calls = server.calls.length;
+    expect(ids(m)).toEqual([lines[49]?.id, lines[50]?.id, lines[51]?.id]);
+    // The dropped span is fetched again with `from`.
+    m.setPlayhead(us(at(60)));
+    await flush();
+    expect(server.calls.length).toBeGreaterThan(calls);
+    expect(server.calls[calls]?.from).toBeDefined();
+    expect(m.heldLines()).toBeLessThanOrEqual(12);
+  });
+
+  it("caps memory within one span: the oldest unshown lines go, the shown ones stay", async () => {
+    const lines = minutes();
+    const server = new FakeServer(lines, { size: 5 });
+    const { m } = model(server, { maxLines: 12, maxRows: 3 });
+    for (let min = 0; min <= 40; min += 5) {
+      m.setPlayhead(us(at(min * 60)));
+      await flush();
+      expect(m.heldLines()).toBeLessThanOrEqual(12);
+    }
+    expect(m.snapshot().spans).toBe(1);
+    expect(ids(m)).toEqual([lines[38]?.id, lines[39]?.id, lines[40]?.id]);
+    // The start moved past the trimmed lines: seeking back there starts a span with `from`.
+    const calls = server.calls.length;
+    m.setPlayhead(us(at(60)));
+    await flush();
+    expect(server.calls[calls]?.from).toBeDefined();
+    expect(ids(m)).toEqual([lines[0]?.id, lines[1]?.id]);
+  });
+
+  it("caps memory when the server ignores from: seeking back pages again from the start", async () => {
+    const lines = minutes();
+    const server = new FakeServer(lines, { size: 5, honourFrom: false });
+    const { m } = model(server, { maxLines: 12, maxRows: 3 });
+    m.setPlayhead(us(at(0)));
+    await flush();
+    // A deep seek: the server answers `from` from the start, so the model pages on from there.
+    m.setPlayhead(us(at(40 * 60)));
+    await flush();
+    expect(server.calls.filter((c) => c.from !== undefined)).toHaveLength(1);
+    expect(m.heldLines()).toBeLessThanOrEqual(12);
+    expect(ids(m)).toEqual([lines[38]?.id, lines[39]?.id, lines[40]?.id]);
+    const calls = server.calls.length;
+    m.setPlayhead(us(at(60)));
+    await flush();
+    expect(server.calls[calls]).toEqual({ limit: 200 });
+    expect(m.snapshot().spans).toBe(1);
+    expect(ids(m)).toEqual([lines[0]?.id, lines[1]?.id]);
+  });
+
+  it("reset drops every span", async () => {
+    const server = new FakeServer(minutes(), { size: 5 });
+    const { m } = model(server);
+    m.setPlayhead(us(at(0)));
+    await flush();
+    m.setPlayhead(us(at(100 * 60)));
+    await flush();
+    expect(m.snapshot().spans).toBe(2);
+    m.reset();
+    expect(m.snapshot()).toMatchObject({ status: "starting", spans: 1, kept: false });
+    expect(m.heldLines()).toBe(0);
   });
 });

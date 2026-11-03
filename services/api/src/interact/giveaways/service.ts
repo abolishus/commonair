@@ -526,15 +526,25 @@ export async function cancelGiveaway(ctx: Ctx, caller: Caller, channel: ChannelR
   return giveawayDto(ctx, ctx.db, cancelled, channel.slug, caller.user.id);
 }
 
-/** Public: everything needed to re-run the draw. The salt never leaves the database. */
-export async function verifyGiveaway(ctx: Ctx, slug: string, id: string): Promise<GiveawayVerification> {
+/**
+ * Public: everything needed to re-run the draw. The salt never leaves the database. `me` (batch 8
+ * CR9) is the signed-in caller's own pseudonym when they entered this giveaway, read from their
+ * `giveaway_entries` row, on any giveaway; null for anyone else and for anonymous callers.
+ */
+export async function verifyGiveaway(
+  ctx: Ctx,
+  slug: string,
+  id: string,
+  caller: Pick<Caller, "user"> | null = null,
+): Promise<GiveawayVerification> {
   requireGiveawaysEnabled(ctx);
   const channel = await channelBySlug(ctx.db, slug);
   const row = await settleDue(ctx, await inChannel(ctx.db, channel, id));
   const pseudonyms = await ctx.db
-    .select({ pseudonym: giveawayEntries.pseudonym })
+    .select({ pseudonym: giveawayEntries.pseudonym, userId: giveawayEntries.userId })
     .from(giveawayEntries)
     .where(eq(giveawayEntries.giveawayId, row.id));
+  const own = caller ? pseudonyms.find((p) => p.userId === caller.user.id) : undefined;
   const winners = await winnersOf(ctx.db, row.id);
   return {
     id: row.id,
@@ -548,7 +558,7 @@ export async function verifyGiveaway(ctx: Ctx, slug: string, id: string): Promis
     // No winner has opted in to showing a username (none can yet): the pseudonym only.
     winners: winners.map((w) => ({ rank: w.rank, index: w.index, pseudonym: w.pseudonym, username: null })),
     drawnAt: iso(row.drawnAt),
-    // Batch 8 CR9 (B8-web fills it): the signed-in caller's own pseudonym when they entered.
-    me: null,
+    // Batch 8 CR9: only the pseudonym, never the user id or the salt (decision (n)).
+    me: own ? { pseudonym: own.pseudonym } : null,
   };
 }

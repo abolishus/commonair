@@ -16,4 +16,7 @@ export type Key =
   | "fairPrediction.result.mismatch"
   | "fairPrediction.studio.teamNote"
   | "fairPrediction.studio.resolvedBy"
-  | "fairPrediction.studio.canceledBy";
+  | "fairPrediction.studio.canceledBy"
+  | "fairPrediction.grace.title"
+  | "fairPrediction.grace.note"
+  | "fairPrediction.grace.countdown";

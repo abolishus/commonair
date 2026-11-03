@@ -1,1 +1,7 @@
-{}
+{
+  "channelPage.title": "{name}",
+  "channelPage.loading": "Loading the channel",
+  "channelPage.panels.title": "About",
+  "channelPage.panels.link": "Visit {host}",
+  "channelPage.panels.linkLabel": "Visit {host} (opens a new tab on another site)"
+}

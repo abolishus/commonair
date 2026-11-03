@@ -92,5 +92,7 @@
   "jury.results.column.disagree": "En desacuerdo",
   "jury.results.column.unsure": "No seguro",
   "jury.results.reports": "Denuncias",
-  "jury.results.suppressedHint": "Menos de 10; se oculta para que nadie pueda ser identificado"
+  "jury.results.suppressedHint": "Menos de 10; se oculta para que nadie pueda ser identificado",
+  "jury.link.caseNotFound": "No se encontró ese caso. Puede que el enlace esté desactualizado.",
+  "jury.link.notInQueue": "Ese elemento ya no está en la cola abierta."
 }

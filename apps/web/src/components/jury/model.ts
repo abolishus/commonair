@@ -55,6 +55,19 @@ export const KIND_KEYS: Record<JuryCaseDto["subjectKind"], MessageKey> = {
   report: "jury.case.kind.report",
 };
 
+/**
+ * Where a re-review flag opens in the mod queue (`jury-flag-case-link`): a moderation case on the
+ * cases tab, selected by its id (`/admin/moderation?tab=cases&case=`), which opens even when closed.
+ * A report opens the reports tab with nothing selected: jury flags point at closed reports, which
+ * the open queue never holds, and there is no procedure to read a report by id.
+ */
+export function flagCaseSearch(f: Pick<JuryFlagDto, "subjectKind" | "subjectId">): {
+  tab: "cases" | "reports";
+  case?: string;
+} {
+  return f.subjectKind === "report" ? { tab: "reports" } : { tab: "cases", case: f.subjectId };
+}
+
 /** `<id>@<version>` → its version, or null. */
 export function ruleVersion(ruleRef: string | null): number | null {
   if (!ruleRef) return null;
