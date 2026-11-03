@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * The web ↔ harness contract (docs/testing/e1-, e2-, e3-, e4b-, e4c-, e5-, e7-, e8-, e9-, n2-, w1-, n1-, w2- and b7-selectors.md): every test id in the
+ * The web ↔ harness contract (docs/testing/e1-, e2-, e3-, e4b-, e4c-, e5-, e7-, e8-, e9-, n2-, w1-, n1-, w2-, b7- and b8-selectors.md): every test id in the
  * docs' "Test ids" tables must be rendered somewhere in the app (or, for ids the house primitives
  * own, in packages/ui), so renaming one without updating the docs and scenarios fails here.
  */
@@ -545,5 +545,78 @@ describe("b7-selectors.md (batch 7)", () => {
 
   it.each(PENDING_B7_IDS)("%s is still pending (lift it once rendered)", (id) => {
     expect(rendered(id)).toBe(false);
+  });
+});
+
+/**
+ * Batch 8 (docs/testing/b8-selectors.md): every first-column id of the "Test ids" tables is set in
+ * web or ui source, literally (`data-testid="x"` or a `"x"` constant: batch 8 has no `<x>`
+ * templates). Ids whose unit has not merged wait in PENDING_B8_IDS; a pending id already set as a
+ * `data-testid="x"` fails, so the list is emptied as M1-gifts-refunds, M1-connect, M1-coop-money,
+ * B8-server and B8-web merge (the orchestrator lifts each unit's ids at its merge). The pending check
+ * looks only at `data-testid` because some ids are also file, tab or job names (`refund-requests`,
+ * `payout-transfers`, `patronage-payouts`).
+ */
+const PENDING_B8_IDS: readonly string[] = [
+  // B8-web
+  "channel-panels",
+  "channel-panel",
+  "channel-banner",
+  "prediction-grace",
+  "jury-flag-case-link",
+  "giveaway-verify-mine",
+  "replay-span-kept",
+  // M1-gifts-refunds
+  "refund-requests",
+  "refund-request-unknown",
+  "refund-request-resolve",
+  // M1-connect
+  "payout-transfers",
+  "payout-transfer-status",
+  // M1-coop-money
+  "share-buy-stripe",
+  "patronage-payouts",
+  "patronage-pay",
+  // B8-server
+  "twitch-import-field",
+];
+
+describe("b8-selectors.md (batch 8)", () => {
+  const ids = testIds("b8-selectors.md");
+  const text = `${appText}\n${uiText}`;
+  const rendered = (id: string): boolean => onElement(id, text) || text.includes(`"${id}"`);
+
+  it("lists exactly the batch 8 test ids (contract step §4.4), once each, and only listed ones are pending", () => {
+    expect([...ids].sort()).toEqual(
+      [
+        "channel-panels",
+        "channel-panel",
+        "channel-banner",
+        "prediction-grace",
+        "jury-flag-case-link",
+        "giveaway-verify-mine",
+        "replay-span-kept",
+        "refund-requests",
+        "refund-request-unknown",
+        "refund-request-resolve",
+        "payout-transfers",
+        "payout-transfer-status",
+        "share-buy-stripe",
+        "patronage-payouts",
+        "patronage-pay",
+        "twitch-import-field",
+      ].sort(),
+    );
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const id of PENDING_B8_IDS) expect(ids).toContain(id);
+    expect(new Set(PENDING_B8_IDS).size).toBe(PENDING_B8_IDS.length);
+  });
+
+  it.each(ids.filter((id) => !PENDING_B8_IDS.includes(id)))("renders %s", (id) => {
+    expect(rendered(id)).toBe(true);
+  });
+
+  it.each(PENDING_B8_IDS)("%s is still pending (lift it once rendered)", (id) => {
+    expect(onElement(id, text)).toBe(false);
   });
 });
