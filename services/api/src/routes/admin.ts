@@ -13,9 +13,9 @@ import { publishUserControl } from "../lib/control.ts";
 import { userByUsername } from "../lib/dto.ts";
 import { badRequest, forbidden, notFound } from "../lib/errors.ts";
 import { os, requireCaller } from "../lib/orpc.ts";
-import { toCategory } from "./directory.ts";
+import { liveChannelCount, toCategory } from "./directory.ts";
 
-const { categories, users, channels } = schema;
+const { categories, users } = schema;
 
 export const admin = {
   egress: os.admin.egress.handler(({ context, input }) =>
@@ -42,11 +42,7 @@ export const admin = {
       });
       return c;
     });
-    const [{ n } = { n: 0 }] = await deps.db
-      .select({ n: sql<number>`count(*)::int` })
-      .from(channels)
-      .where(and(eq(channels.categoryId, row.id), sql`${channels.liveBroadcastId} is not null`));
-    return toCategory(deps, row, Number(n));
+    return toCategory(deps, row, await liveChannelCount(deps, row.id));
   }),
 
   setRole: os.admin.setRole.handler(async ({ context, input }) => {
