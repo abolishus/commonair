@@ -644,3 +644,219 @@ All were read signed out on 2026-11-03. No assets were copied.
 | 22-mobile-home-light.jpg                   | home at 375 px                                |
 | 23-mobile-menu-light.jpg                   | mobile menu Sheet                             |
 | 24-mobile-channel-live-dark.jpg            | 375 px channel header collapse (dark)         |
+
+## Addendum: signed-in pass
+
+**How it was done.** On 2026-11-03 the user signed in on staging (`staging-stream.abolish.us`,
+`v0.1.0-rc.9`, medium-scale seed, `seed live` running so streamer1–3 were live) in a headed
+Chromium, one role at a time, and a script captured each page in both themes at 1440×900 and
+375×812, full page up to three viewports tall, after dismissing the cookie banner with "Essential
+only". Roles: `demo_streamer1` (a streamer with data) and `newbie` (empty everywhere) for the 15
+studio pages; `viewer1` for `/settings/*` and `/coop/membership`; `viewer2` (seeded appeals and
+copyright data) for those two pages; `mod` for `/admin/moderation`, `/admin/appeals` and
+`/coop/jury`; `admin` for every `/admin/*` page and `/treasury`. The 216 JPEGs are in
+[`2026-11-review/signed-in/`](2026-11-review/signed-in/), named
+`NNN-<role>-<page>-<theme>-<width>.jpg`. Below, a reference such as `001 d1440` means
+`001-…-dark-1440.jpg` (`l` is light, `375` is the phone width). This pass reviewed the dark 1440
+shot of every page and the 375 and light shots where layout or contrast was in question.
+
+**Unusable shots** (the page did not render; none shows the sign-in page):
+
+- `/chat`, all eight ([006](2026-11-review/signed-in/006-streamer1-chat-dark-1440.jpg),
+  [021](2026-11-review/signed-in/021-newbie-chat-dark-1440.jpg)): the raw JSON
+  `{"error":"websocket_required"}`. This is the known 426 (`fe6b9923`, not released on rc.9), so
+  the studio chat page and the held queue were not captured.
+- `/admin/legal` and `/treasury`, all eight
+  ([046](2026-11-review/signed-in/046-admin-admin-legal-dark-1440.jpg),
+  [054](2026-11-review/signed-in/054-admin-treasury-dark-1440.jpg)): "Page not found". Not a bug:
+  the legal queue is for the `legal` role only and the treasury for treasurers only
+  (`routes/_admin/admin.legal.tsx:15`, `routes/_admin/treasury.tsx`). Recapture as
+  `demo_treasurer` and `demo_legal` (both seeded fixed accounts).
+- [035 d375](2026-11-review/signed-in/035-viewer1-settings-notifications-dark-375.jpg): "Your
+  notification settings could not be loaded" (the 429). The other three notifications shots are
+  fine.
+- [019 d375](2026-11-review/signed-in/019-newbie-interact-dark-375.jpg): "This page could not be
+  loaded" (the 429). The other three are fine.
+
+**Capture artifact, not a finding:** on full-page shots the studio and admin sidebars stop after
+the first viewport (for example [001 d1440](2026-11-review/signed-in/001-streamer1-dashboard-dark-1440.jpg)),
+because the sidebar is fixed to the viewport.
+
+### F21–F28 against the screenshots
+
+| Finding                               | Verdict              | Evidence and notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| ------------------------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F21 dashboard is a settings page      | confirmed            | [001 d1440](2026-11-review/signed-in/001-streamer1-dashboard-dark-1440.jpg): streamer1 is live, yet the page is a narrow column of stream health, setup, rewind, simulcast, Discord, appearance and fediverse cards. No preview, chat, viewer count or title editor. Health says "No problems detected" with no bitrate or fps. Revenue, Relays and View your channel repeat the sidebar. The 375 header is worse (F29).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| F22 flat studio navigation            | confirmed            | Every studio shot, for example [008 d1440](2026-11-review/signed-in/008-streamer1-content-dark-1440.jpg): 15 items, no group labels. The labels have changed since the code read ("Alerts & overlays", "Polls & raids", "Channel bot", "Chat safety", "Videos & clips", "Move channel", "Import from Twitch"). Admin is flat too, nine items ([044 d1440](2026-11-review/signed-in/044-admin-admin-moderation-dark-1440.jpg)).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| F23 `/chat` is settings, no mod view  | not reproduced       | The page did not render on staging (the known 426; [006](2026-11-review/signed-in/006-streamer1-chat-dark-1440.jpg)). The rename half is done: the sidebar already says "Chat safety". The mod-view half still stands from code; recapture after the next release.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| F24 one chart, for one broadcast      | confirmed            | [009 d1440](2026-11-review/signed-in/009-streamer1-analytics-dark-1440.jpg): the period is four stat cards; the only chart is one broadcast's audience, and its three series differ only by colour (also in light, [009 l1440](2026-11-review/signed-in/009-streamer1-analytics-light-1440.jpg)). The y axis has fractional viewer ticks (0.25, 0.5, 0.75). Revenue ([010 d1440](2026-11-review/signed-in/010-streamer1-revenue-dark-1440.jpg)) has a by-source bar, but no trend.                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| F25 empty states without a next step  | confirmed            | newbie: Videos & clips ([023](2026-11-review/signed-in/023-newbie-content-dark-1440.jpg)) says "Turn on recording" with no link; Analytics ([024](2026-11-review/signed-in/024-newbie-analytics-dark-1440.jpg)), the revenue ledger ([025](2026-11-review/signed-in/025-newbie-revenue-dark-1440.jpg)), Crew ([026](2026-11-review/signed-in/026-newbie-crew-dark-1440.jpg)) and Relays ([027](2026-11-review/signed-in/027-newbie-relays-dark-1440.jpg)) have no action. Import shows "No panels yet" as plain text ([014](2026-11-review/signed-in/014-streamer1-import-dark-1440.jpg)). The empties say what to do in words ("Propose one above", "Add a target below"), but none offers the button.                                                                                                                                                                                                                               |
+| F26 widths and headers differ         | confirmed            | Three left edges: wide pages start at 272 px (overlays, interact, bot, captions, content: [003](2026-11-review/signed-in/003-streamer1-overlays-dark-1440.jpg), [008](2026-11-review/signed-in/008-streamer1-content-dark-1440.jpg)); default pages at 288 px (analytics, revenue, crew, relays, developer: [011](2026-11-review/signed-in/011-streamer1-crew-dark-1440.jpg)); narrow pages are centred at 480 px (rehearse, move, import, dashboard: [002](2026-11-review/signed-in/002-streamer1-rehearse-dark-1440.jpg), [013](2026-11-review/signed-in/013-streamer1-move-dark-1440.jpg)). Admin repeats it (272 for moderation, egress and co-op; 288 for DMCA, integrity, incidents; centred for federation). The dashboard header has no description. Page titles also differ from their nav labels: "Creator dashboard" / Stream manager, "Rehearse" / Rehearsal, "Your relays" / Relays, "Move your channel" / Move channel. |
+| F27 settings have no navigation       | worse than described | No settings navigation on any of the seven pages, and three different widths: privacy and preferences are narrow ([031](2026-11-review/signed-in/031-viewer1-settings-privacy-dark-1440.jpg), [033](2026-11-review/signed-in/033-viewer1-settings-preferences-dark-1440.jpg)); connections, subscriptions, notifications, appeals and copyright start at 160 px ([032](2026-11-review/signed-in/032-viewer1-settings-connections-dark-1440.jpg)); `/coop/membership` starts at 96 px ([038](2026-11-review/signed-in/038-viewer1-coop-membership-dark-1440.jpg)). Privacy says "Download your data or delete your account", but a list of 100+ follow toggles pushes the delete control below three viewports (F37).                                                                                                                                                                                                                  |
+| F28 primitive and accessibility slips | not reproduced       | Not visible in settled screenshots: the loading text appears only before data arrives, and "Peak verified viewers 1" ([009](2026-11-review/signed-in/009-streamer1-analytics-dark-1440.jpg)) looks the same whether it comes from `formatNumber` or `<ViewerCount>`. The code finding stands.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+
+### New findings
+
+#### F29. The dashboard title breaks mid-word at 375 px
+
+- **Surface:** `/dashboard` at 375 px.
+- **Evidence:** "Creator dashboard" wraps into "Cre / ator / das / hbo / ard" because the three header
+  actions keep their width beside it ([001 d375](2026-11-review/signed-in/001-streamer1-dashboard-dark-375.jpg),
+  [001 l375](2026-11-review/signed-in/001-streamer1-dashboard-light-375.jpg),
+  [016 d375](2026-11-review/signed-in/016-newbie-dashboard-dark-375.jpg)).
+- **Recommendation:** `PageHeader` stacks its actions under the title below `sm`, and the title never
+  breaks inside a word. Drop the actions that repeat the sidebar (F21).
+- **Effort:** S. **Impact:** high (the first studio page on a phone).
+
+#### F30. The co-op tab row always highlights Overview
+
+- **Surface:** the co-op pages.
+- **Evidence:** on `/coop/membership` ([038 d1440](2026-11-review/signed-in/038-viewer1-coop-membership-dark-1440.jpg))
+  and `/coop/jury` ([043 d1440](2026-11-review/signed-in/043-mod-coop-jury-dark-1440.jpg)) the
+  selected tab is Overview. PROGRESS records this as fixed by an exact link match (`4df5d9b`), so
+  this is a regression or the fix missed these pages.
+- **Recommendation:** match the active tab on the route, and add a test that each `/coop/*` page
+  selects its own tab.
+- **Effort:** S. **Impact:** medium.
+
+#### F31. Tab rows and wide tables clip at 375 px with no cue
+
+- **Surface:** tab rows and tables on phones.
+- **Evidence:**
+  - The co-op tabs end at "Jury Se…" ([038 l375](2026-11-review/signed-in/038-viewer1-coop-membership-light-375.jpg)),
+    and the moderation tabs at "Takedown" ([044 d375](2026-11-review/signed-in/044-admin-admin-moderation-dark-375.jpg)).
+  - The revenue ledger shows Date, Type and part of Detail; gross, deductions, net and
+    Breakdown are off screen ([010 d375](2026-11-review/signed-in/010-streamer1-revenue-dark-375.jpg)).
+  - The bot's commands table hides uses, status and the edit and delete actions
+    ([005 d375](2026-11-review/signed-in/005-streamer1-bot-dark-375.jpg)).
+- **Recommendation:** tab rows become a `Select` (or scroll with an edge fade) below `sm`. Tables
+  whose key columns are money or actions render as stacked rows at 375 px, with the amount and
+  actions on each row.
+- **Effort:** M. **Impact:** medium-high.
+
+#### F32. Validation errors show before the user has done anything
+
+- **Surface:** `/revenue`, subscription tiers.
+- **Evidence:** for `newbie` the three tier name fields are red with "Give this tier a name" on
+  first load ([025 d1440](2026-11-review/signed-in/025-newbie-revenue-dark-1440.jpg)).
+- **Recommendation:** show field errors after blur or submit, not on mount.
+- **Effort:** S. **Impact:** medium (a new streamer's first look at revenue reads as an error).
+
+#### F33. Browser date-time inputs instead of the design-system field
+
+- **Surface:** `/crew` and `/admin/egress`.
+- **Evidence:** native `datetime-local` controls ("mm/dd/yyyy, --:-- --") with the browser's
+  calendar icon ([011 d1440](2026-11-review/signed-in/011-streamer1-crew-dark-1440.jpg),
+  [049 d1440](2026-11-review/signed-in/049-admin-admin-egress-dark-1440.jpg)). D4 replaced the same
+  control on signup.
+- **Recommendation:** use the date field D4 built, plus a time field, with the UTC note kept on
+  egress.
+- **Effort:** S. **Impact:** low-medium.
+
+#### F34. Raw keys and codes in admin pages
+
+- **Surface:** `/admin/integrity` and `/admin/egress`.
+- **Evidence:**
+  - An integrity flag shows its code `relay_issuance_unknown` as its title and lists raw keys
+    `receiptId`, `tolerance`, `gapMinutes`, `bytesIssued`, `bytesReported`, `bytesVerified`
+    ([048 d1440](2026-11-review/signed-in/048-admin-admin-integrity-dark-1440.jpg)).
+  - Egress prints "0 byte" ([049 d1440](2026-11-review/signed-in/049-admin-admin-egress-dark-1440.jpg)).
+- **Recommendation:** catalogue a label and description for each flag code and detail key (with the
+  raw code shown small for search). Format sizes with the shared byte formatter ("0 B").
+- **Effort:** S. **Impact:** medium (these strings bypass `t()`).
+
+#### F35. Body text jumps between two sizes inside the same card
+
+- **Surface:** the studio and settings, and the footer.
+- **Evidence:**
+  - Some notes render at the base size among `text-sm` help text: the three rewind notes and
+    "Not set up." on the dashboard ([001 d1440](2026-11-review/signed-in/001-streamer1-dashboard-dark-1440.jpg));
+    the stream key line on rehearse ([002](2026-11-review/signed-in/002-streamer1-rehearse-dark-1440.jpg));
+    the subscriptions note on move ([013](2026-11-review/signed-in/013-streamer1-move-dark-1440.jpg));
+    the raid protection note ([004](2026-11-review/signed-in/004-streamer1-interact-dark-1440.jpg));
+    "What it means" on crew ([011](2026-11-review/signed-in/011-streamer1-crew-dark-1440.jpg)); the
+    strike note on copyright ([040](2026-11-review/signed-in/040-viewer2-settings-copyright-dark-1440.jpg)).
+  - On captions the draft-privacy note sits loose between two cards, outside both
+    ([007 d1440](2026-11-review/signed-in/007-streamer1-captions-dark-1440.jpg)).
+  - In the footer, the links are larger than "Cookie settings" and the language button beside
+    them (every page).
+- **Recommendation:** one paragraph style inside cards (`text-sm text-muted-foreground` for notes,
+  or a `Callout` for the important ones), and one footer link size.
+- **Effort:** S. **Impact:** medium (it is visible on almost every page).
+
+#### F36. Lists that grow without limit
+
+- **Surface:** privacy, notifications, captions, admin apps and the appeals queue.
+- **Evidence:**
+  - Privacy's "Tell me if they move" and Notifications' "Channels you follow" list every followed
+    channel with a control each, 100+ rows with no search or bulk action
+    ([031](2026-11-review/signed-in/031-viewer1-settings-privacy-dark-1440.jpg),
+    [035](2026-11-review/signed-in/035-viewer1-settings-notifications-dark-1440.jpg)).
+  - Captions renders every cue of a VOD as an input ([007](2026-11-review/signed-in/007-streamer1-captions-dark-1440.jpg)).
+  - OAuth apps and the appeals queue render every item fully expanded, each appeal with its own
+    textarea ([052](2026-11-review/signed-in/052-admin-admin-apps-dark-1440.jpg),
+    [042](2026-11-review/signed-in/042-mod-admin-appeals-dark-1440.jpg)).
+- **Recommendation:** a search field and paging (the house "Load more") on the two settings lists,
+  with "all on / all off" for move notices; captions paged by time with a search; queue items
+  collapsed to a row that opens a detail panel.
+- **Effort:** M. **Impact:** medium.
+
+#### F37. Account deletion is out of sight
+
+- **Surface:** `/settings/privacy`.
+- **Evidence:** the page title promises "Download your data or delete your account", but after the
+  follow-notice list the delete control is not within three viewports at either width
+  ([031 d1440](2026-11-review/signed-in/031-viewer1-settings-privacy-dark-1440.jpg),
+  [031 d375](2026-11-review/signed-in/031-viewer1-settings-privacy-dark-375.jpg)).
+- **Recommendation:** with F27's settings layout, put account deletion in its own section near the
+  top of privacy or on an "Account" page, and move "Tell me if they move" to notifications.
+- **Effort:** S. **Impact:** medium (a legal right should be easy to find).
+
+#### F38. People appear under two names
+
+- **Surface:** settings and admin.
+- **Evidence:** Subscriptions lists channels by username with a "D" avatar on every row
+  (demo_streamer1, demo_council2), while the payments table on the same page uses display names
+  (Aurora Pixel, Lumen Beats) ([034 d1440](2026-11-review/signed-in/034-viewer1-settings-subscriptions-dark-1440.jpg)).
+  The dashboard's avatar preview shows "A" while the header avatar shows "D"
+  ([001 d1440](2026-11-review/signed-in/001-streamer1-dashboard-dark-1440.jpg)).
+- **Recommendation:** show the display name with `@username` secondary, and take `<ChannelAvatar>`'s
+  initial from the display name everywhere.
+- **Effort:** S. **Impact:** low-medium.
+
+#### F39. Small copy and layout slips
+
+- **Surface:** several pages.
+- **Evidence:**
+  - "Your material is restored after in 2 weeks" ([040](2026-11-review/signed-in/040-viewer2-settings-copyright-dark-1440.jpg)).
+  - An ended suspension still reads "Account suspended … Until 17 hours ago"
+    ([039](2026-11-review/signed-in/039-viewer2-settings-appeals-dark-1440.jpg)).
+  - The jury page tells staff to use "the switch above", which they do not have
+    ([043](2026-11-review/signed-in/043-mod-coop-jury-dark-1440.jpg)).
+  - OAuth apps' "Suspended only" label sits about 450 px from its switch
+    ([052](2026-11-review/signed-in/052-admin-admin-apps-dark-1440.jpg)).
+  - Relays: "Add a relay" runs into the "Relay name" label, and the three setup steps are boxes
+    with no numbers ([012](2026-11-review/signed-in/012-streamer1-relays-dark-1440.jpg)).
+  - Egress' Show button stretches over a whole column ([049](2026-11-review/signed-in/049-admin-admin-egress-dark-1440.jpg)).
+  - Notifications: each channel's bell switch has no visible label and sits below the name line
+    ([035](2026-11-review/signed-in/035-viewer1-settings-notifications-dark-1440.jpg)).
+  - Viewer appeals: the third empty state has no section heading
+    ([036](2026-11-review/signed-in/036-viewer1-settings-appeals-dark-1440.jpg)).
+- **Recommendation:** fix each in place. The copyright string needs a catalogue fix with a test on
+  its interpolation.
+- **Effort:** S. **Impact:** low.
+
+### Open PROGRESS.md sign-offs
+
+The screenshots are in English only, at 375 px rather than 320 px, with no keyboard pass. None of
+these sign-offs closes in full; the table says what each still needs.
+
+| Sign-off               | Asks for                                                                                                                            | Covered by                                                                                                                                                                                                                                                                                    | Still needed                                                                                                                            |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| W2 (`PROGRESS.md:369`) | browser, visual and `en-XA` checks of the wave-2 pages (attestations panel, group appeals, VOD and clip watch, the verify page)     | the attestations panel and "Left out of your counts" on `/analytics`: [009](2026-11-review/signed-in/009-streamer1-analytics-dark-1440.jpg), [009 l1440](2026-11-review/signed-in/009-streamer1-analytics-light-1440.jpg), [024](2026-11-review/signed-in/024-newbie-analytics-dark-1440.jpg) | a broadcast with exclusions (the appeal dialog), VOD and clip watch pages, `/attestations/verify`, `en-XA`                              |
+| W2 (`:386-387`)        | visual, `es` and `en-XA` checks of the W2 pages                                                                                     | English visuals of rehearse (002, 017), captions (007, 022) and analytics (009, 024), both themes, both widths                                                                                                                                                                                | `es` and `en-XA`                                                                                                                        |
+| N2 (`:430-431`)        | visual checks under `es` and `en-XA`, a fluent read of the Spanish                                                                  | not covered (English only)                                                                                                                                                                                                                                                                    | everything                                                                                                                              |
+| E6 (`:1603-1606`)      | browser checks of `/dashboard` simulcast, `/overlays`, `/content`, `/settings/privacy`, `/overlay/alerts`; both themes, 320 px, OBS | `/dashboard` simulcast (001, 016), `/overlays` (003, 018), `/content` (008, 023), `/settings/privacy` (031), each in both themes at 1440 and 375                                                                                                                                              | `/overlay/alerts?token=…` and the OBS browser source, 320 px, Storybook                                                                 |
+| E5 (`:1673-1675`)      | `/coop/*`, `/treasury` shares and patronage tabs, `/admin/coop`, `/transparency`; both themes, 320 px, keyboard                     | `/coop/membership` (038), `/coop/jury` (043), `/admin/coop` (053)                                                                                                                                                                                                                             | the other `/coop/*` tabs, `/treasury` (054 is not-found as `admin`; use `demo_treasurer`), `/transparency`, 320 px, keyboard, Storybook |
+| E4b (`:1737`)          | the money pages in both themes and on mobile                                                                                        | `/revenue` (010, 025), `/crew` (011, 026), `/settings/subscriptions` (034)                                                                                                                                                                                                                    | the channel Support page and gift controls, `/treasury`, 320 px                                                                         |
+| E4a (`:1817`)          | browser checks of the design-system migration                                                                                       | every usable shot above (studio, settings, moderation, admin; both themes, both widths)                                                                                                                                                                                                       | Storybook, and the gate                                                                                                                 |
