@@ -11,5 +11,8 @@
   "fairPrediction.result.mismatch": "{paid} {name} pagados de un bote de {pool} {name}.",
   "fairPrediction.studio.teamNote": "Ni tú, ni tus editores, ni tus moderadores pueden apostar en las predicciones de este canal. Las apuestas se cierran según lo que ve cada espectador.",
   "fairPrediction.studio.resolvedBy": "Resuelta por {user}",
-  "fairPrediction.studio.canceledBy": "Cancelada por {user}"
+  "fairPrediction.studio.canceledBy": "Cancelada por {user}",
+  "fairPrediction.grace.title": "Aún puedes apostar por lo que viste",
+  "fairPrediction.grace.note": "Tu transmisión todavía no había llegado al cierre, así que una apuesta ahora aún cuenta. Cada apuesta se comprueba al llegar.",
+  "fairPrediction.grace.countdown": "{seconds, plural, one {Queda # segundo} other {Quedan # segundos}}"
 }

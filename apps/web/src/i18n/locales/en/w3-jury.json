@@ -92,5 +92,7 @@
   "jury.results.column.disagree": "Disagree",
   "jury.results.column.unsure": "Unsure",
   "jury.results.reports": "Reports",
-  "jury.results.suppressedHint": "Fewer than 10, hidden so no one can be picked out"
+  "jury.results.suppressedHint": "Fewer than 10, hidden so no one can be picked out",
+  "jury.link.caseNotFound": "That case was not found. The link may be out of date.",
+  "jury.link.notInQueue": "That item is no longer in the open queue."
 }

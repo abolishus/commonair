@@ -11,5 +11,8 @@
   "fairPrediction.result.mismatch": "{paid} {name} paid out of a {pool} {name} pool.",
   "fairPrediction.studio.teamNote": "You, your editors and your moderators can't bet on this channel's predictions. Betting locks at what each viewer sees.",
   "fairPrediction.studio.resolvedBy": "Resolved by {user}",
-  "fairPrediction.studio.canceledBy": "Canceled by {user}"
+  "fairPrediction.studio.canceledBy": "Canceled by {user}",
+  "fairPrediction.grace.title": "Still time to bet on what you saw",
+  "fairPrediction.grace.note": "Your stream had not reached the lock yet, so a bet now still counts. Every bet is checked when it arrives.",
+  "fairPrediction.grace.countdown": "{seconds, plural, one {# second} other {# seconds}} left"
 }

@@ -55,6 +55,17 @@ export const KIND_KEYS: Record<JuryCaseDto["subjectKind"], MessageKey> = {
   report: "jury.case.kind.report",
 };
 
+/**
+ * Where a re-review flag opens in the mod queue (`jury-flag-case-link`): a moderation case on the
+ * cases tab, a report on the reports tab, selected by the subject's id (`/admin/moderation?tab=&case=`).
+ */
+export function flagCaseSearch(f: Pick<JuryFlagDto, "subjectKind" | "subjectId">): {
+  tab: "cases" | "reports";
+  case: string;
+} {
+  return { tab: f.subjectKind === "report" ? "reports" : "cases", case: f.subjectId };
+}
+
 /** `<id>@<version>` → its version, or null. */
 export function ruleVersion(ruleRef: string | null): number | null {
   if (!ruleRef) return null;
