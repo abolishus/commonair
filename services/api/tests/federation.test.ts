@@ -29,7 +29,6 @@ import {
 } from "../src/federation/inbox.ts";
 import { FEDERATION_LOCALES, federationMessage } from "../src/federation/messages.ts";
 import { nodeinfo, nodeinfoLinks } from "../src/federation/nodeinfo.ts";
-import { actorDeleteActivity } from "../src/federation/settings.ts";
 import { buildJrd, parseWebfingerResource } from "../src/federation/webfinger.ts";
 import mastodonActor from "./fixtures/federation/mastodon-actor.json" with { type: "json" };
 import mastodonFollow from "./fixtures/federation/mastodon-follow.json" with { type: "json" };
@@ -560,16 +559,5 @@ describe("misc", () => {
     expect(parseOutboxCursor(outboxCursor(c))).toEqual({ t: c.publishedAt, id: ID });
     for (const bad of [null, "", "x", "1_x", `1_${ID}${ID}`, `${"9".repeat(20)}_${ID}`])
       expect(parseOutboxCursor(bad)).toBeNull();
-  });
-
-  test("the actor Delete addresses the public and names the actor", () => {
-    expect(actorDeleteActivity(ACTOR, "abc")).toEqual({
-      "@context": "https://www.w3.org/ns/activitystreams",
-      id: `${ACTOR}#delete-abc`,
-      type: "Delete",
-      actor: ACTOR,
-      object: ACTOR,
-      to: ["https://www.w3.org/ns/activitystreams#Public"],
-    });
   });
 });

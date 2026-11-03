@@ -205,6 +205,64 @@ describe("chat.surge", () => {
     expect((await surgeEvents()).length).toBe(before);
   });
 
+  describe("a raid surge restarted by a moderator (batch 8)", () => {
+    const raid = () => ({ fromChannel: viewer.username, verifiedCount: 4 });
+    const store = (value: Record<string, unknown>) =>
+      api.deps.valkey.set(KEYS.surgeOverride(channelId), JSON.stringify(value), "EX", 600);
+    const stored = async () =>
+      JSON.parse((await api.deps.valkey.get(KEYS.surgeOverride(channelId))) ?? "null") as Record<string, unknown>;
+    const at = (ms: number) => new Date(Date.now() + ms).toISOString();
+
+    test("extending a raid surge keeps raid, and the raid's window", async () => {
+      const raidUntil = at(120_000);
+      await store({ state: "on", since: at(-60_000), until: raidUntil, by: null, raid: raid() });
+      await markOpen();
+      const r = await override(mod, "start");
+      expect(r.status).toBe(200);
+      expect(await stored()).toMatchObject({ state: "on", raid: raid(), raidUntil });
+      expect((await state(mod)).body).toMatchObject({ state: "on", raid: raid() });
+    });
+
+    test("a lapsed raid surge restarted inside the carry's grace keeps raid, with a new begin", async () => {
+      // The job recorded the expired end (marker gone); the key lives on for its grace minute.
+      await store({ state: "on", since: at(-660_000), until: at(-10_000), by: null, raid: raid() });
+      const before = (await surgeEvents()).length;
+      const r = await override(mod, "start");
+      expect(r.body).toMatchObject({ state: "on", by: { id: mod.userId } });
+      expect(Date.parse(r.body.since ?? "")).toBeGreaterThan(Date.now() - 10_000);
+      expect((await state(mod)).body).toMatchObject({ state: "on", raid: raid() });
+      expect((await surgeEvents()).slice(before)).toEqual([
+        { type: "chat.surge.begin", payload: { trigger: "moderator", until: r.body.until, by_user_id: mod.userId } },
+      ]);
+    });
+
+    test("past the raid's window, a restart drops raid; a moderator's extension never stretches it", async () => {
+      await store({
+        state: "on",
+        since: at(-60_000),
+        until: at(300_000),
+        by: mod.userId,
+        raid: raid(),
+        raidUntil: at(-120_000),
+      });
+      await markOpen();
+      await override(mod, "start");
+      expect((await stored()).raid).toBeUndefined();
+      expect((await state(mod)).body).toMatchObject({ state: "on", raid: null });
+    });
+
+    test("suppress clears raid", async () => {
+      await store({ state: "on", since: at(-60_000), until: at(120_000), by: null, raid: raid() });
+      await markOpen();
+      expect((await override(mod, "end")).body).toMatchObject({ state: "suppressed" });
+      expect((await stored()).raid).toBeUndefined();
+      expect((await state(mod)).body).toMatchObject({ state: "suppressed", raid: null });
+      // And starting again from the suppression has no raid to bring back.
+      await override(mod, "start");
+      expect((await state(mod)).body).toMatchObject({ state: "on", raid: null });
+    });
+  });
+
   test("with the guard turned off, a moderator can still end what is left; start stays refused", async () => {
     await override(mod, "start");
     await guard(false);

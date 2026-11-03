@@ -446,8 +446,8 @@ type StaffDetails = SorDetails["user.suspend"] | Extract<SorDetails["report.reso
  * A platform staff suspension (ADR 0019 answer 3): from the report queue (`report.resolve`, an
  * Art. 16 notice) or the admin suspension (`user.suspend` / `channel.suspend`, own initiative).
  * The clause is the one the staff member cited, at the version recorded when it applied. These
- * actions have no moderation case: the facts name the `mod_actions` row (the decision's own
- * record, which is also its appeal subject) as the reviewed case.
+ * actions have no moderation case, so the facts are `staff_action` (B7 CR6): the action, the clause
+ * and the time, and never a case reference. The `mod_actions` row stays the appeal subject.
  */
 async function staffStatement(
   row: AuditRow,
@@ -463,7 +463,13 @@ async function staffStatement(
     l,
     { kind: clause.ground, clauseId: clause.id, clauseVersion: clause.version, legalBasis: clause.legalBasis ?? null },
     {
-      facts: { code: "moderator_review", caseId: s.modActionId, caseOrigin: "human", decision: "suspend" },
+      // B7 CR6: no moderation case exists, so the facts name the action, clause and time only.
+      facts: {
+        code: "staff_action",
+        action: row.action as "report.resolve" | "user.suspend" | "channel.suspend",
+        clauseId: clause.id,
+        appliedAt: iso(row.createdAt),
+      },
       source: row.action === "report.resolve" ? "notice_art16" : "own_initiative",
       automatedDetection: false,
       automatedDecision: "not",

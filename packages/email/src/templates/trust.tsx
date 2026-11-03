@@ -16,6 +16,7 @@ import type {
   ENFORCEMENT_SOURCES,
   ModerationCategory,
   MODERATION_REVIEW_DECISIONS,
+  STAFF_ACTION_SOURCE_ACTIONS,
 } from "@commonair/contracts/enums";
 import type * as React from "react";
 import type { DateInput } from "../format.ts";
@@ -177,7 +178,9 @@ type EnforcementFactsData =
   | { code: "classifier"; category: ModerationCategory; tier: "t1" | "t2"; threshold: number; capturedAt: DateInput }
   | { code: "moderator_review"; caseRef: string; decision: (typeof MODERATION_REVIEW_DECISIONS)[number] }
   | { code: "ncii_notice"; requestRef: string; receivedAt: DateInput; deadlineAt: DateInput }
-  | { code: "hash_match"; capturedAt: DateInput };
+  | { code: "hash_match"; capturedAt: DateInput }
+  /** B7 CR6: a staff action with no moderation case; the clause is the statement's own. */
+  | { code: "staff_action"; action: (typeof STAFF_ACTION_SOURCE_ACTIONS)[number]; appliedAt: DateInput };
 
 /**
  * A statement of reasons (ADR 0019 decision 7, DSA Art. 17(3)). Complete on its own: a suspended
@@ -257,6 +260,14 @@ export const enforcementStatement = defineTemplate("enforcementStatement", {
         break;
       case "hash_match":
         facts = ctx.t(m.factsHash, { capturedAt: ctx.dateTime(f.capturedAt) });
+        break;
+      case "staff_action":
+        // The action, the clause and the time: no case exists, so none is cited.
+        facts = ctx.t(m["staffAction.facts"], {
+          action: label(`staffAction.action.${f.action}`),
+          clause,
+          appliedAt: ctx.dateTime(f.appliedAt),
+        });
         break;
     }
     const decision = { fully: m.decisionFully, partially: m.decisionPartially, not: m.decisionNot }[

@@ -88,9 +88,80 @@ export function previewFields(dto: Pick<TwitchImportDto, "preview">): PreviewFie
   };
 }
 
+/** The channel fields chosen one by one (`ImportChoices.fields`, batch 8). */
+export const CHANNEL_FIELDS = ["title", "category", "tags", "language", "description", "mature"] as const;
+export type ChannelField = (typeof CHANNEL_FIELDS)[number];
+
+export const FIELD_KEYS: Record<ChannelField, MessageKey> = {
+  title: "twitchImport.field.title",
+  category: "twitchImport.field.category",
+  tags: "twitchImport.field.tags",
+  language: "twitchImport.field.language",
+  description: "twitchImport.field.description",
+  mature: "twitchImport.field.mature",
+};
+
 export interface TwitchChoices {
   channel: boolean;
+  /** Absent: every channel field (the default); present: only those set to true. */
+  fields?: Partial<Record<ChannelField, boolean>>;
   emotes: string[];
+}
+
+/** The channel's current values, beside the imported ones in the preview. */
+export interface CurrentFields {
+  title: string;
+  category: string | null;
+  tags: string[];
+  language: string;
+  description: string;
+  mature: boolean;
+}
+
+/** `channels.get`'s fields as the preview compares them. */
+export function currentFields(c: {
+  title: string;
+  description: string;
+  category: { name: string } | null;
+  tags: string[];
+  language: string;
+  mature: boolean;
+}): CurrentFields {
+  return {
+    title: c.title,
+    category: c.category?.name ?? null,
+    tags: c.tags,
+    language: c.language,
+    description: c.description,
+    mature: c.mature,
+  };
+}
+
+/** Whether a field is chosen (every field is, until one is unticked). */
+export const fieldOn = (choices: TwitchChoices, field: ChannelField): boolean => choices.fields?.[field] ?? true;
+
+export function toggleField(choices: TwitchChoices, field: ChannelField): TwitchChoices {
+  const all = Object.fromEntries(CHANNEL_FIELDS.map((f) => [f, fieldOn(choices, f)])) as Record<ChannelField, boolean>;
+  return { ...choices, fields: { ...all, [field]: !all[field] } };
+}
+
+/** The channel item applies something: it is chosen and at least one field is. */
+const channelApplies = (choices: TwitchChoices): boolean =>
+  choices.channel && CHANNEL_FIELDS.some((f) => fieldOn(choices, f));
+
+/** What `twitchImport.start` sends; `fields` only once the streamer has changed one. */
+export function startChoices(choices: TwitchChoices): {
+  channel: boolean;
+  fields?: Partial<Record<ChannelField, boolean>>;
+  panels: false;
+  emotes: string[];
+} {
+  return {
+    channel: choices.channel,
+    ...(choices.fields ? { fields: { ...choices.fields } } : {}),
+    panels: false,
+    emotes: choices.emotes,
+  };
 }
 
 /** An emote the preview offers (not skipped). */
@@ -110,7 +181,7 @@ export function toggleEmote(choices: TwitchChoices, code: string): TwitchChoices
 
 /** Start is possible with something chosen, and with the assertion when emotes are. */
 export const canStart = (choices: TwitchChoices, asserted: boolean): boolean =>
-  (choices.channel || choices.emotes.length > 0) && (choices.emotes.length === 0 || asserted);
+  (channelApplies(choices) || choices.emotes.length > 0) && (choices.emotes.length === 0 || asserted);
 
 export const isRunning = (dto: Pick<TwitchImportDto, "status">): boolean =>
   dto.status === "queued" || dto.status === "running";
