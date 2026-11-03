@@ -148,6 +148,72 @@ Spaces, Hetzner Object Storage, a Garage node on a second host, or any other S3 
   ([object-storage.md](object-storage.md)). Decide before the first install; an instance never
   switches store.
 
+## Optional: external Postgres and Valkey
+
+The default runs Postgres and Valkey in containers on the instance's host, with WAL-G backups,
+and needs nothing below. As an option, `selfhost.sh install --database-url … --valkey-url …`
+uses external servers instead, such as a managed service (ADR 0032 §3,
+[configuration.md](configuration.md#postgres-and-valkey), and
+`managed-services.md` for DigitalOcean's). Both are external or neither, and
+an instance never switches afterwards. The preflight checks what it can before anything is
+installed.
+
+### External Postgres and Valkey
+
+**PostgreSQL:**
+
+- **Version 17 or 18** (the release is tested on 17). The preflight refuses any other.
+- **TLS with verification**: the URL says `sslmode=verify-full`, and `--database-ca` gives the
+  provider's CA when it is not publicly trusted (DigitalOcean's Standard edition hands out its
+  own). The preflight names the certificate's subject and issuer when it does not verify. A
+  weaker `sslmode` needs `--allow-insecure-database`, for a private network only.
+- **An owner role with `CREATEROLE`**, which owns the database (or may create in it and in its
+  `public` schema). It creates the tables, functions and triggers, and the app and monitor roles
+  (ADR 0004). **No superuser is needed** (S1-d proved the whole path without one), no extension
+  and no event trigger. A superuser works but the preflight warns: give the instance less. A role
+  without `CREATEROLE` is refused, with the `ALTER ROLE` to ask the provider for.
+- `commonair_monitor` gets `pg_monitor` only where the owner can grant it, which a managed
+  provider's owner cannot. The collector then reads the statistics any role can read.
+- Daily backups with point-in-time recovery are the provider's: WAL-G does not run against an
+  external database. `managed-services.md` covers backups and the drill.
+
+**Valkey or Redis-compatible:**
+
+- **A password**, for the default user (DigitalOcean's model: it has no ACL users) or for an ACL
+  user named in the URL.
+- **TLS**: `rediss://`, with `--valkey-ca` for a private CA. `redis://` needs
+  `--allow-insecure-valkey`, for a private network only.
+- **`maxmemory-policy noeviction`**, which BullMQ requires. The preflight reads it with `INFO` and
+  refuses anything else.
+- **Persistence on** (RDB or AOF), so a restart keeps queued jobs.
+- **No `CONFIG` or `ACL` at runtime**: neither the stack nor BullMQ sends either, so a provider that
+  restricts them works. The self-host e2e runs the whole stack through install, upgrade and job
+  cycles with users denied every `@admin` and `@dangerous` command and finds no refused command.
+  The commands from those categories the stack does need:
+  - **`INFO`** (`@dangerous`): BullMQ runs it on every new connection, to read the server's
+    version and `maxmemory_policy`. Without it BullMQ waits for its connection forever and no
+    job runs. Allow `+info` for an ACL user with restricted categories; DigitalOcean's users
+    have it.
+  - **`CLIENT SETNAME`** (`@connection`, not restricted): every connection names itself.
+  - `CLIENT LIST` (`@admin`) only for BullMQ's `getWorkers()`, which CommonAir does not call.
+
+### Connection budget
+
+Each service that opens a database pool (api, chat, media, origin, worker) opens up to
+`DATABASE_POOL_MAX` connections (default 10), `migrate` one, and three more stay spare for an
+operator's `psql` and the metrics collector:
+
+    needed = DATABASE_POOL_MAX × 5 + 1 + 3          (default: 54)
+    allowed = max_connections − superuser_reserved_connections − reserved_connections
+
+The preflight prints both numbers and refuses when `needed` is larger. Managed providers set
+`max_connections` by node size, and the smallest nodes allow few: DigitalOcean's 1 GB node has
+25, of which 3 are reserved, so 22 are left, enough for `DATABASE_POOL_MAX=3`. Either take a
+bigger node, or run `install` with a smaller `DATABASE_POOL_MAX` in its environment (the
+preflight's `fix:` line names the largest that fits). A smaller pool queues queries under load
+instead of failing them, so watch latency when you lower it. A connection pooler in front of the
+database (PgBouncer, or the provider's) is not tested with the stack yet.
+
 ## Accounts and access
 
 - Root (or `sudo`) on the server, once, for the host preparation.

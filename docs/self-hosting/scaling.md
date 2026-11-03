@@ -36,15 +36,25 @@ metrics, logs and traces.
 ## The order to scale in
 
 Scale out by role, not by buying a bigger box. The stages follow the co-op's own plan for its
-instance (ADR 0025; the scaling milestone, S1):
+instance (ADR 0025; the scaling milestone, S1).
+
+**The bundled install is the default, and the right start for almost every instance**: the
+whole stack on one server, Postgres and Valkey in containers with WAL-G backups, fully supported
+and tested. The co-op's own instance is the exception: it launches at stage 1 below
+(DigitalOcean Managed PostgreSQL and managed Valkey, each with a standby, and objects in Spaces),
+because its availability target leaves no room for a database restore measured in hours (ADR
+0032). Its servers are created by `selfhost.sh install` with the same flags any operator has.
 
 1. **Move state off the host.** Postgres and Valkey go to their own servers, or to managed
    services, so the database stops competing with FFmpeg for CPU and memory and can fail over.
-   Objects go to an external S3 store, which `selfhost.sh install --s3-*` already sets up with
-   any provider ([object-storage.md](object-storage.md)). `selfhost.sh` will accept an external
-   Postgres and Valkey too (S1-b), so a self-hosted instance can use the same managed products
-   as ours; a managed Postgres must let a non-superuser owner create the protection triggers and
-   the non-owner app role (ADR 0004).
+   Objects go to an external S3 store. `selfhost.sh install` sets up both with any provider:
+   `--s3-*` for the store ([object-storage.md](object-storage.md)), and `--database-url` with
+   `--valkey-url` for Postgres and Valkey ([configuration.md](configuration.md#postgres-and-valkey),
+   [requirements.md](requirements.md#external-postgres-and-valkey)). A managed Postgres needs
+   only an owner with `CREATEROLE`, no superuser (ADR 0032 §3). Decide before the first
+   install: an instance never switches between the bundled servers and external ones, since
+   that moves the data (`managed-services.md` describes the dump and
+   restore).
 2. **Add app servers** (API, chat, web, worker, origin, tracker) behind a load balancer.
 3. **Add media servers** for more transcoding and ingest.
 4. **Rely on member relays and P2P before any CDN.** Members who run a relay
@@ -55,7 +65,7 @@ instance (ADR 0025; the scaling milestone, S1):
 5. **A CDN last**, and only as an optional burst adapter (`CDN_PROVIDER=origin-pull`). The
    platform never requires one.
 
-Apart from the object store, steps 1 to 3 are not scripted yet: `selfhost.sh` manages one host. Doing them by hand means
+Apart from step 1, steps 2 and 3 are not scripted yet: `selfhost.sh` manages one host. Doing them by hand means
 running the same images with the same env file on another host, pointing `DATABASE_URL`,
 `VALKEY_URL` and the internal URLs at it, and keeping the internal ports off the public
 internet. Plan that work with the project before you need it.
