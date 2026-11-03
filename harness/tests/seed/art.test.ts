@@ -105,7 +105,8 @@ describe("the art generator", () => {
       for (let i = 3; i < png.data.length; i += 4 * 97) expect(png.data[i]).toBe(255);
       expect(png.data).toEqual(rasterize(scene).data);
     }
-  });
+    // Four supersampled rasters, each twice, and a PNG decode: ~7 s under the test runner.
+  }, 30_000);
 
   test("the raster draws what the SVG says: a pixel inside an opaque-enough circle takes its colour", () => {
     const scene = {
