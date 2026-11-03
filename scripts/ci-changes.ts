@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * Which of CI's expensive jobs a push needs (`ci.yml` job `changes`). The gate always runs. The
+ * Which of CI's expensive jobs a push needs (`ci.yml` job `changes`). The gate always runs its
+ * static group (format, REUSE, stray domains); a push of docs alone skips its other groups. The
  * harness runs only the scenarios a push can affect: none for docs, briefs and tests alone; for a
  * change inside the harness, the scenarios whose modules import the changed file (transitively);
  * every scenario for anything else. A path-filtered shard (`PATH_FILTERED_SHARDS`, the captions
@@ -32,6 +33,8 @@ export interface Changes {
   deploy: boolean;
   /** The path-filtered shards whose paths the changes reach (`PATH_FILTERED_SHARDS`). */
   filteredShards: readonly string[];
+  /** Only prose and pictures no test or build reads: the gate runs its static group alone. */
+  docsOnly?: true;
 }
 
 export const EVERYTHING: Changes = { scenarios: ALL, deploy: true, filteredShards: Object.keys(PATH_FILTERED_SHARDS) };
@@ -39,7 +42,9 @@ export const EVERYTHING: Changes = { scenarios: ALL, deploy: true, filteredShard
 /** Docs and planning text no test or build reads (docs/testing, docs/self-hosting and docs/developers are read by tests). */
 export function isDocsOnly(path: string): boolean {
   if (path.startsWith(".claude/")) return true;
-  if (path.startsWith("docs/")) return !/^docs\/(testing|self-hosting|developers)\//.test(path) && path.endsWith(".md");
+  // Screenshots and figures beside the prose (docs/brand is the site's own art, and is built).
+  if (path.startsWith("docs/"))
+    return !/^docs\/(testing|self-hosting|developers|brand)\//.test(path) && /\.(md|png|jpe?g|webp|gif)$/.test(path);
   // Top-level prose (README, PROGRESS, PLAN, CHANGELOG, …); nested READMEs are prose too.
   if (!path.includes("/") && path.endsWith(".md")) return true;
   return /(^|\/)README\.md$/.test(path) && !path.startsWith("packages/db/src/legal/");
@@ -162,6 +167,7 @@ export function classify(files: readonly string[], graph: ImportGraph): Changes 
     scenarios: selectScenarios(files, graph),
     deploy: files.some(isDeploy),
     filteredShards: filteredShardsReached(files),
+    ...(files.every(isDocsOnly) ? { docsOnly: true as const } : {}),
   };
 }
 
@@ -196,7 +202,7 @@ export function changesFor(
 export function outputs(c: Changes): string {
   const scenarios = c.scenarios === ALL ? ALL : c.scenarios.join(",");
   const shards = c.scenarios === ALL || c.scenarios.length > 0 ? matrixShards(c) : Object.keys(FULL_SHARDS);
-  return `code=${scenarios !== ""}\nscenarios=${scenarios}\nshards=${JSON.stringify(shards)}\ndeploy=${c.deploy}\n`;
+  return `code=${scenarios !== ""}\nscenarios=${scenarios}\nshards=${JSON.stringify(shards)}\ndeploy=${c.deploy}\ndocs=${c.docsOnly === true}\n`;
 }
 
 if (import.meta.main) {

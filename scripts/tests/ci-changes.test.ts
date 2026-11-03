@@ -32,6 +32,8 @@ describe("isDocsOnly", () => {
     "README.md",
     "docs/decisions/0035-sdk-license.md",
     "harness/README.md",
+    "docs/design/2026-11-review/02-home-desktop.jpg",
+    "docs/design/2026-11-review/07-live-player-hover.png",
   ])("%s is prose", (p) => expect(isDocsOnly(p)).toBe(true));
 
   test.each([
@@ -41,6 +43,8 @@ describe("isDocsOnly", () => {
     "packages/db/src/legal/terms.md", // seeded
     "packages/db/src/legal/README.md",
     "docs/brand/banner.svg",
+    "docs/brand/logo.png",
+    "docs/testing/screenshot.png",
     "apps/web/src/i18n/locales/en/core.json",
     "harness/src/e9/consent.ts",
   ])("%s is not", (p) => expect(isDocsOnly(p)).toBe(false));
@@ -153,12 +157,23 @@ describe("shardsFor and outputs", () => {
   });
   test("nothing selected: code false, and a non-empty shard list for the skipped matrix", () => {
     expect(outputs({ scenarios: [], deploy: false, filteredShards: [] })).toBe(
-      `code=false\nscenarios=\nshards=${JSON.stringify(Object.keys(FULL_SHARDS))}\ndeploy=false\n`,
+      `code=false\nscenarios=\nshards=${JSON.stringify(Object.keys(FULL_SHARDS))}\ndeploy=false\ndocs=false\n`,
     );
     expect(outputs({ scenarios: ["interact"], deploy: true, filteredShards: [] })).toBe(
-      'code=true\nscenarios=interact\nshards=["interact"]\ndeploy=true\n',
+      'code=true\nscenarios=interact\nshards=["interact"]\ndeploy=true\ndocs=false\n',
     );
     expect(outputs(EVERYTHING)).toContain("scenarios=all\n");
+    expect(outputs(EVERYTHING)).toContain("docs=false\n");
+  });
+
+  test("docs alone: docs true, so the gate runs its static group only", () => {
+    const docs = classify(["PLAN.md", ".claude/briefs/d/README.md", "docs/design/2026-11-review/01-a.jpg"], GRAPH);
+    expect(docs).toEqual({ scenarios: [], deploy: false, filteredShards: [], docsOnly: true });
+    expect(outputs(docs)).toContain("code=false\n");
+    expect(outputs(docs)).toContain("docs=true\n");
+    // A test, or anything else, alongside the docs runs the whole gate.
+    expect(classify(["PLAN.md", "scripts/tests/ci-changes.test.ts"], GRAPH).docsOnly).toBeUndefined();
+    expect(classify(["PLAN.md", "apps/web/src/main.tsx"], GRAPH).docsOnly).toBeUndefined();
   });
 });
 
@@ -284,6 +299,7 @@ describe("changesFor", () => {
       scenarios: [],
       deploy: false,
       filteredShards: [],
+      docsOnly: true,
     });
     // The consent race fix: harness/src/e9/consent.ts and its unit test.
     expect(changesFor({ EVENT_NAME: "push", BASE: "1c4266f", SHA: "d51c084" }, ROOT)).toEqual({

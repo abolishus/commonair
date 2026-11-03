@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: CC0-1.0
 #
 # Backstop CI: runs the same `bun run verify` used locally, one job per group of its steps. If it
-# goes red on main, fix main immediately. Pull requests run the gate; main, the nightly schedule
+# goes red on main, fix main immediately. A push of docs alone runs only the static group (format,
+# REUSE, stray domains): nothing else reads them. Pull requests run the gate; main, the nightly schedule
 # and a manual dispatch also run the full harness scenario, a release dry run (release.yml) and
 # the self-host end-to-end test. On a push to main, `changes` (scripts/ci-changes.ts) runs only the
 # harness scenarios (and shards) the push can affect, none for docs and tests alone, and skips the
@@ -47,6 +48,7 @@ jobs:
       scenarios: ${{ steps.classify.outputs.scenarios }}
       shards: ${{ steps.classify.outputs.shards }}
       deploy: ${{ steps.classify.outputs.deploy }}
+      docs: ${{ steps.classify.outputs.docs }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -106,6 +108,7 @@ jobs:
     # One job per group of the gate (`bun run verify --only <group>`), in parallel: a pull request
     # waits for the slowest group, not the sum, and a red group no longer hides the others.
     name: verify (${{ matrix.group }})
+    needs: changes
     runs-on: ubuntu-24.04
     timeout-minutes: ${{ matrix.timeout }}
     permissions:
@@ -158,15 +161,23 @@ jobs:
             }
     env:
       GROUP: ${{ matrix.group }}
+      # A docs-only push (scripts/ci-changes.ts) needs the static group alone; the others pass
+      # without setting up (a job `if` cannot read the matrix).
+      SKIP: ${{ needs.changes.outputs.docs == 'true' && matrix.group != 'static' }}
       # `podman compose` prefers the docker-compose plugin the runner image ships, which talks to
       # a Podman socket nobody started; the gate is written for podman-compose.
       PODMAN_COMPOSE_PROVIDER: podman-compose
     steps:
+      - name: Docs only
+        if: env.SKIP == 'true'
+        run: echo "::notice::docs-only push, the $GROUP group is skipped"
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        if: env.SKIP != 'true'
         with:
           persist-credentials: false
       # `$/` is not understood by actionlint or our pin check (see release-dry-run below).
       - uses: ./.github/actions/setup # zizmor: ignore[self-repository]
+        if: env.SKIP != 'true'
         with:
           bun-version: ${{ env.BUN_VERSION }}
           go-version: ${{ env.GO_VERSION }}
@@ -182,6 +193,7 @@ jobs:
           bun scripts/release/tools.ts install --dir "$RUNNER_TEMP/bin" tofu
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
       - name: Verify
+        if: env.SKIP != 'true'
         # Below the job's limit so a hung gate fails this step and leaves time to collect logs;
         # a job-level timeout cancels the job and diagnostics would be lost.
         timeout-minutes: ${{ matrix.step-timeout }}
@@ -192,7 +204,7 @@ jobs:
           export PATH="$PWD/node_modules/.bin:$PATH"
           bun scripts/verify.ts --only "$GROUP" 2>&1 | tee verify.log
       - name: Summary
-        if: always()
+        if: always() && env.SKIP != 'true'
         run: bun scripts/release/ci-summary.ts verify verify.log
       - name: Collect logs
         if: failure() || cancelled()
