@@ -15,8 +15,10 @@ import { api } from "../../lib/api.ts";
 import { getSessionUser, useBootstrap } from "../../lib/bootstrap.ts";
 import { requireSession } from "../../lib/guard.ts";
 import type { SubscriptionDto } from "../../lib/support.ts";
+import { titleHead } from "../../lib/page-title.ts";
 
 export const Route = createFileRoute("/_app/settings/subscriptions")({
+  head: () => titleHead(t("pageTitle.settingsSubscriptions")),
   // Server-side guard (SSR and client navigation); the component keeps a client fallback.
   beforeLoad: () => requireSession(() => getSessionUser()),
   component: SubscriptionsPage,

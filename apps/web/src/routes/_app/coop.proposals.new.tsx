@@ -13,9 +13,11 @@ import { getSessionUser, useBootstrap } from "../../lib/bootstrap.ts";
 import { isMember, proposalSaveError, type ProposalDraft } from "../../lib/coop.ts";
 import { requireSession } from "../../lib/guard.ts";
 import { t } from "../../i18n/index.ts";
+import { titleHead } from "../../lib/page-title.ts";
 
 /** Members: draft a proposal (private until opened for discussion). */
 export const Route = createFileRoute("/_app/coop/proposals/new")({
+  head: () => titleHead(t("pageTitle.coopProposalNew")),
   beforeLoad: () => requireSession(() => getSessionUser()),
   component: NewProposalPage,
 });

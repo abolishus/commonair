@@ -3,6 +3,8 @@
 
 import { createFileRoute } from "@tanstack/react-router";
 import { UnsubscribePage } from "../../components/notifications-unsubscribe/unsubscribe-page.tsx";
+import { t } from "../../i18n/index.ts";
+import { titleHead } from "../../lib/page-title.ts";
 
 /**
  * Anyone: confirms an email unsubscribe link (`GET /api/email/unsubscribe` redirects here with the
@@ -10,6 +12,7 @@ import { UnsubscribePage } from "../../components/notifications-unsubscribe/unsu
  * validates the strings.
  */
 export const Route = createFileRoute("/_app/settings/notifications/unsubscribe")({
+  head: () => titleHead(t("pageTitle.unsubscribe")),
   validateSearch: (search: Record<string, unknown>): { list?: string; token?: string } => ({
     ...(typeof search.list === "string" ? { list: search.list } : {}),
     ...(typeof search.token === "string" ? { token: search.token } : {}),

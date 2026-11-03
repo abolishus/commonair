@@ -10,9 +10,13 @@ import { NotFoundState } from "../../components/money/not-found.tsx";
 import { mayOpenAdminPage } from "../../components/safety/access.ts";
 import { t } from "../../i18n/index.ts";
 import { useBootstrap } from "../../lib/bootstrap.ts";
+import { titleHead } from "../../lib/page-title.ts";
 
 /** Admins only (the `_admin` guard): integrity flags, filtered, each decidable in place. */
-export const Route = createFileRoute("/_admin/admin/integrity")({ component: IntegrityRoute });
+export const Route = createFileRoute("/_admin/admin/integrity")({
+  head: () => titleHead(t("pageTitle.adminIntegrity")),
+  component: IntegrityRoute,
+});
 
 function IntegrityRoute(): React.JSX.Element {
   const { me } = useBootstrap();

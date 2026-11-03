@@ -10,9 +10,13 @@ import { LegalQueue } from "../../components/safety/legal.tsx";
 import { NotFoundState } from "../../components/money/not-found.tsx";
 import { t } from "../../i18n/index.ts";
 import { useBootstrap } from "../../lib/bootstrap.ts";
+import { titleHead } from "../../lib/page-title.ts";
 
 /** `legal` only: the `_admin` layout's guard answered everyone else with not-found. */
-export const Route = createFileRoute("/_admin/admin/legal")({ component: LegalPage });
+export const Route = createFileRoute("/_admin/admin/legal")({
+  head: () => titleHead(t("pageTitle.adminLegal")),
+  component: LegalPage,
+});
 
 function LegalPage(): React.JSX.Element {
   const { me } = useBootstrap();

@@ -40,8 +40,10 @@ import {
   type CaptionsDraft,
   type MaskError,
 } from "../../player/captions-studio.ts";
+import { titleHead } from "../../lib/page-title.ts";
 
 export const Route = createFileRoute("/_studio/captions")({
+  head: () => titleHead(t("pageTitle.studioCaptions")),
   // Server-side guard (SSR and client navigation); the component keeps a client fallback.
   beforeLoad: () => requireSession(() => getSessionUser()),
   component: CaptionsPage,

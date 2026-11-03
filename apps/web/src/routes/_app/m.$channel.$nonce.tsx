@@ -6,6 +6,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import type * as React from "react";
 import { MoveLanding } from "../../components/portability/landing.tsx";
 import { useBootstrap } from "../../lib/bootstrap.ts";
+import { t } from "../../i18n/index.ts";
+import { titleHead } from "../../lib/page-title.ts";
 
 /**
  * `/m/$channel/$nonce`: a move link's landing page (ADR 0037): the channel card and a follow button
@@ -13,6 +15,7 @@ import { useBootstrap } from "../../lib/bootstrap.ts";
  * Public. Caddy keeps `/m/*` on web.
  */
 export const Route = createFileRoute("/_app/m/$channel/$nonce")({
+  head: ({ params }) => titleHead(t("pageTitle.moveLanding", { channel: params.channel })),
   component: MoveLandingRoute,
 });
 

@@ -8,9 +8,14 @@ import { CoopOverview } from "../../components/coop/overview.tsx";
 import { coopLoads, useCoopLoad, useMyMembership } from "../../components/coop/use-coop.ts";
 import { api } from "../../lib/api.ts";
 import { useBootstrap } from "../../lib/bootstrap.ts";
+import { t } from "../../i18n/index.ts";
+import { titleHead } from "../../lib/page-title.ts";
 
 /** Public: the co-op overview (your membership card when signed in). */
-export const Route = createFileRoute("/_app/coop/")({ component: CoopPage });
+export const Route = createFileRoute("/_app/coop/")({
+  head: () => titleHead(t("pageTitle.coop")),
+  component: CoopPage,
+});
 
 const OPEN_LIMIT = 20;
 

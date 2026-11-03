@@ -89,6 +89,14 @@ const ALLOWLIST: AllowEntry[] = [
       "The VOD/clip player's <video> is PlayerChrome's child; hls.js (or the MP4) plays recordings, which PlayerController (bound to a live playback.start session) does not.",
   },
   {
+    file: "src/components/birth-date-field.tsx",
+    rule: "raw-interactive-element",
+    match: "<input ref={hidden}",
+    count: 1,
+    reason:
+      "D4 (F17): the three date-of-birth Selects submit one `birthDate` form value; a hidden input is not a control, and Base UI's Input re-renders its value, which resets a hidden input.",
+  },
+  {
     file: "src/components/altcha-field.tsx",
     rule: "custom-element",
     match: 'createElement("altcha-widget"',
@@ -451,5 +459,106 @@ describe("detectors", () => {
     expect(isArbitraryClass("w-64")).toBe(false);
     expect(isArbitraryClass("bg-destructive/10")).toBe(false);
     expect(isArbitraryClass("size-(--x")).toBe(false);
+  });
+});
+
+/**
+ * F15 (D4): every page sets its document title in `head()`, as "<page> · <site>" through
+ * `pageTitle()`/`titleHead()` (the OBS overlays keep `overlayHead`). Route files whose page another
+ * unit is rebuilding wait in PENDING_HEAD, with the unit that adds the title; the list only
+ * shrinks: an entry that has gained a `head` fails until it is removed here.
+ */
+export const PENDING_HEAD: Readonly<Record<string, string>> = {
+  "src/routes/_app/$channel.tsx": "B8-web, then D2-channel (title from the loader: the channel's name, live or not)",
+  "src/routes/_admin/admin.moderation.tsx": "B8-web, then D5-studio",
+  "src/routes/_app/$channel_.vods.$vodId.tsx": "D3-watch",
+  "src/routes/_app/$channel_.clips.$clipId.tsx": "D3-watch",
+  "src/routes/_app/coop.jury.tsx": "B8-web (owns components/jury), then D4's successor",
+  "src/routes/_app/$channel_.giveaways.$giveawayId.tsx": "B8-web (owns components/giveaways)",
+  "src/routes/_studio/import.tsx": "B8-server (owns components/twitch-import), then D5-studio",
+};
+
+/** Pathless layouts: no page of their own (the root's tagline title is the fallback). */
+const LAYOUT_ROUTES = new Set(["src/routes/_app.tsx", "src/routes/_studio.tsx", "src/routes/_admin.tsx"]);
+
+/** The options object of the file's `createFileRoute(...)({ ... })` / `createRootRoute({ ... })`, comments blanked. */
+export function routeOptions(source: string): string | null {
+  const code = lex(source);
+  const start = /\bcreate(?:File|Root)Route\((?:"[^"]*")?\)\(\{|\bcreateRootRoute\(\{/.exec(code);
+  if (!start) return null;
+  let depth = 1;
+  let i = start.index + start[0].length;
+  for (; i < code.length && depth > 0; i++) {
+    if (code[i] === "{") depth++;
+    else if (code[i] === "}") depth--;
+  }
+  return code.slice(start.index + start[0].length, i - 1);
+}
+
+/** Whether the route options set `head` (a top-level property, not a key nested in another option). */
+export function hasHead(source: string): boolean {
+  const options = routeOptions(source);
+  if (options === null) return false;
+  let depth = 0;
+  for (let i = 0; i < options.length; i++) {
+    const ch = options[i] ?? "";
+    if ("{([".includes(ch)) depth++;
+    else if ("})]".includes(ch)) depth--;
+    else if (depth === 0 && /[\s,]/.test(options[i - 1] ?? " ") && /^head\s*:/.test(options.slice(i))) return true;
+  }
+  return false;
+}
+
+describe("page titles (F15)", () => {
+  const routes = sources(join(SRC, "routes")).filter((f) => f.endsWith(".tsx"));
+  const rel = (full: string) => relative(WEB, full);
+
+  it("finds the route files", () => {
+    expect(routes.map(rel)).toContain("src/routes/__root.tsx");
+    expect(routes.length).toBeGreaterThan(50);
+  });
+
+  it("every page route sets a head", () => {
+    const missing = routes
+      .map(rel)
+      .filter((f) => !LAYOUT_ROUTES.has(f) && !(f in PENDING_HEAD))
+      .filter((f) => !hasHead(readFileSync(join(WEB, f), "utf8")));
+    expect(missing).toEqual([]);
+  });
+
+  it.each(Object.entries(PENDING_HEAD))("PENDING_HEAD %s (%s) exists and has no head yet", (file) => {
+    expect(existsSync(join(WEB, file))).toBe(true);
+    expect(hasHead(readFileSync(join(WEB, file), "utf8"))).toBe(false);
+  });
+
+  it("titles go through pageTitle() (overlays through overlayHead)", () => {
+    const bare = routes
+      .map(rel)
+      .filter((f) => f !== "src/routes/__root.tsx" && hasHead(readFileSync(join(WEB, f), "utf8")))
+      .filter(
+        (f) => !/\b(?:pageTitle|titleHead|overlayHead)\(/.test(routeOptions(readFileSync(join(WEB, f), "utf8")) ?? ""),
+      );
+    expect(bare).toEqual([]);
+  });
+
+  it("the root keeps the site tagline as the fallback title", () => {
+    const options = routeOptions(readFileSync(join(SRC, "routes/__root.tsx"), "utf8")) ?? "";
+    expect(options).toContain('{ title: t("app.title") }');
+  });
+
+  it("detects head only in the route options", () => {
+    expect(
+      hasHead('export const Route = createFileRoute("/x")({ head: () => titleHead(t("a")), component: X });'),
+    ).toBe(true);
+    expect(hasHead('export const Route = createFileRoute("/x")({ component: X });\nconst head: string = "";')).toBe(
+      false,
+    );
+    expect(hasHead('export const Route = createFileRoute("/x")({\n  // head: later\n  component: X,\n});')).toBe(false);
+    expect(hasHead('export const Route = createFileRoute("/x")({ loader: () => ({ head: 1 }), component: X });')).toBe(
+      false,
+    );
+    expect(
+      hasHead("export const Route = createRootRoute({\n  loader: () => 1,\n  head: () => ({ meta: [] }),\n});"),
+    ).toBe(true);
   });
 });

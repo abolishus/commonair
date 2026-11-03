@@ -35,8 +35,10 @@ import {
   type RevenueLineDto,
   type SubTierDto,
 } from "../../lib/money.ts";
+import { titleHead } from "../../lib/page-title.ts";
 
 export const Route = createFileRoute("/_studio/revenue")({
+  head: () => titleHead(t("pageTitle.studioRevenue")),
   // Server-side guard (SSR and client navigation); the component keeps a client fallback.
   beforeLoad: () => requireSession(() => getSessionUser()),
   component: RevenuePage,

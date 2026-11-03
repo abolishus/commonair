@@ -22,9 +22,13 @@ import {
   type CouncilStance,
   type VoteChoice,
 } from "../../lib/coop.ts";
+import { titleHead } from "../../lib/page-title.ts";
 
 /** Public: one proposal with its timeline, discussion, council response, ballot and tally. */
-export const Route = createFileRoute("/_app/coop/proposals/$id/")({ component: ProposalRoute });
+export const Route = createFileRoute("/_app/coop/proposals/$id/")({
+  head: () => titleHead(t("pageTitle.coopProposal")),
+  component: ProposalRoute,
+});
 
 const COMMENTS_PAGE = 50;
 

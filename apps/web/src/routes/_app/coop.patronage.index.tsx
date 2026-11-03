@@ -9,9 +9,12 @@ import { coopLoads, useCoopLoad } from "../../components/coop/use-coop.ts";
 import { api } from "../../lib/api.ts";
 import { getSessionUser, useBootstrap } from "../../lib/bootstrap.ts";
 import { requireSession } from "../../lib/guard.ts";
+import { t } from "../../i18n/index.ts";
+import { titleHead } from "../../lib/page-title.ts";
 
 /** Signed in: your patronage statements. */
 export const Route = createFileRoute("/_app/coop/patronage/")({
+  head: () => titleHead(t("pageTitle.coopPatronage")),
   beforeLoad: () => requireSession(() => getSessionUser()),
   component: PatronageRoute,
 });

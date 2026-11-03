@@ -10,9 +10,11 @@ import { NotFoundState } from "../../components/money/not-found.tsx";
 import { t } from "../../i18n/index.ts";
 import { getSessionUser, useBootstrap } from "../../lib/bootstrap.ts";
 import { requireSession } from "../../lib/guard.ts";
+import { titleHead } from "../../lib/page-title.ts";
 
 /** `/chat`: the verified-watch gate and surge-guard settings (ADR 0015), shown while the instance runs either. */
 export const Route = createFileRoute("/_studio/chat")({
+  head: () => titleHead(t("pageTitle.studioChat")),
   // Server-side guard (SSR and client navigation); the component keeps a client fallback.
   beforeLoad: () => requireSession(() => getSessionUser()),
   component: ChatSafetyPage,

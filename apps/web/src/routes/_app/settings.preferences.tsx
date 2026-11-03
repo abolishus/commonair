@@ -7,11 +7,12 @@ import { PreferencesPage } from "../../components/locale/preferences-page.tsx";
 import { t } from "../../i18n/index.ts";
 import { getSessionUser, useBootstrap } from "../../lib/bootstrap.ts";
 import { requireSession } from "../../lib/guard.ts";
+import { pageTitle } from "../../lib/page-title.ts";
 
 /** Settings: the member's language (ADR 0029 decision 3; batch 5 decision (e)). */
 export const Route = createFileRoute("/_app/settings/preferences")({
   beforeLoad: () => requireSession(() => getSessionUser()),
-  head: () => ({ meta: [{ title: t("preferences.pageTitle") }] }),
+  head: () => ({ meta: [{ title: pageTitle(t("preferences.pageTitle")) }] }),
   component: PreferencesRoute,
 });
 

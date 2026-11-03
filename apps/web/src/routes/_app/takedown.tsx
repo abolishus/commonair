@@ -8,9 +8,13 @@ import { createFileRoute } from "@tanstack/react-router";
 import type * as React from "react";
 import { TakedownForm } from "../../components/safety/takedown-form.tsx";
 import { t } from "../../i18n/index.ts";
+import { titleHead } from "../../lib/page-title.ts";
 
 /** Public: the NCII takedown request (TAKE IT DOWN Act). No account needed. */
-export const Route = createFileRoute("/_app/takedown")({ component: TakedownPage });
+export const Route = createFileRoute("/_app/takedown")({
+  head: () => titleHead(t("pageTitle.takedown")),
+  component: TakedownPage,
+});
 
 function TakedownPage(): React.JSX.Element {
   return (

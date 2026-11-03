@@ -13,8 +13,10 @@ import { api, errorCode } from "../../lib/api.ts";
 import { getSessionUser, useBootstrap } from "../../lib/bootstrap.ts";
 import { classLabel, errorRequirement, shareRules, type MemberClass } from "../../lib/coop.ts";
 import { requireSession } from "../../lib/guard.ts";
+import { titleHead } from "../../lib/page-title.ts";
 
 export const Route = createFileRoute("/_app/coop/membership")({
+  head: () => titleHead(t("pageTitle.coopMembership")),
   // Server-side guard (SSR and client navigation); the component keeps a client fallback.
   beforeLoad: () => requireSession(() => getSessionUser()),
   component: MembershipPage,

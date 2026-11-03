@@ -5,7 +5,9 @@ import {
   ChannelAvatar,
   EmptyState,
   Skeleton,
+  SkeletonAvatar,
   SkeletonGroup,
+  SkeletonText,
   StatusBadge,
   formatNumber,
   useLocale,
@@ -55,6 +57,37 @@ function Loading(): React.JSX.Element {
   );
 }
 
+/** The council list while it loads: rows the size of a member, busy for assistive tech. */
+function CouncilLoading(): React.JSX.Element {
+  return (
+    <SkeletonGroup data-testid="coop-council-loading" label={t("coop.loading")} className="flex flex-col gap-3">
+      {Array.from({ length: 3 }, (_, i) => (
+        <div key={i} className="flex items-center gap-3">
+          <SkeletonAvatar size="sm" />
+          <SkeletonText lines={2} />
+        </div>
+      ))}
+    </SkeletonGroup>
+  );
+}
+
+/** How many decisions the overview shows; the rest are on the proposals list (F19). */
+export const RECENT_DECISIONS = 5;
+
+/** The newest decided proposals first, at most `RECENT_DECISIONS`. */
+export function recentDecisions(months: readonly CoopMonthDto[] | null): ReturnType<typeof governanceOutcomes> {
+  if (!months) return [];
+  return (
+    governanceOutcomes(months)
+      .filter((g) => g.passed !== null)
+      .map((g, index) => ({ g, index }))
+      // Newest decision first; months arrive newest first, so the original order breaks ties.
+      .sort((a, b) => (b.g.decidedAt ?? "").localeCompare(a.g.decidedAt ?? "") || a.index - b.index)
+      .slice(0, RECENT_DECISIONS)
+      .map(({ g }) => g)
+  );
+}
+
 /** `/coop`: your membership, open proposals, recent decisions, the council and members by class. */
 export function CoopOverview({
   signedIn,
@@ -67,7 +100,7 @@ export function CoopOverview({
   const { locale } = useLocale();
   const counts = membersByClass(months);
   const classes = activeClasses(membership);
-  const decisions = months ? governanceOutcomes(months).filter((g) => g.passed !== null) : [];
+  const decisions = recentDecisions(months);
   return (
     <PageContainer data-testid="coop" width="wide" className="flex flex-col gap-6 py-8">
       <PageHeader title={t("coop.title")} description={t("coop.intro")} tabs={<CoopTabs current="overview" />} />
@@ -142,8 +175,26 @@ export function CoopOverview({
               )}
             </Section>
             {decisions.length > 0 && (
-              <Section heading={t("coop.decisions.title")}>
-                <GovernanceOutcomeList label={t("coop.decisions.title")} items={decisions.map(outcomeItem)} />
+              <Section
+                heading={t("coop.decisions.title")}
+                action={
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    nativeButton={false}
+                    render={
+                      <Link to="/coop/proposals" search={{ status: "decided" }} data-testid="coop-all-decisions" />
+                    }
+                  >
+                    {t("polish.coop.allDecisions")}
+                  </Button>
+                }
+              >
+                <GovernanceOutcomeList
+                  data-testid="coop-recent-decisions"
+                  label={t("coop.decisions.title")}
+                  items={decisions.map(outcomeItem)}
+                />
               </Section>
             )}
           </div>
@@ -188,7 +239,8 @@ export function CoopOverview({
                   {t("coop.council.more")}
                 </Button>
               }
-              empty={<p>{council ? t("coop.council.empty") : t("coop.loading")}</p>}
+              aria-busy={council ? undefined : true}
+              empty={council ? <p>{t("coop.council.empty")}</p> : <CouncilLoading />}
               items={(council?.members ?? []).map((m) => ({
                 id: m.user.id,
                 attributes: { "data-testid": "coop-council-member", "data-user-id": m.user.id, "data-rank": m.rank },

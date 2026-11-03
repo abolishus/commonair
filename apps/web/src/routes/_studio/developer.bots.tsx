@@ -10,9 +10,11 @@ import { developerClient } from "../../components/developer/client.ts";
 import { t } from "../../i18n/index.ts";
 import { getSessionUser, useBootstrap } from "../../lib/bootstrap.ts";
 import { requireSession } from "../../lib/guard.ts";
+import { titleHead } from "../../lib/page-title.ts";
 
 /** Studio: bot accounts you own and their tokens; tokens authorized on your account (E9-console). */
 export const Route = createFileRoute("/_studio/developer/bots")({
+  head: () => titleHead(t("pageTitle.studioDeveloperBots")),
   // Server-side guard (SSR and client navigation); the component keeps a client fallback.
   beforeLoad: () => requireSession(() => getSessionUser()),
   component: DeveloperBotsRoute,

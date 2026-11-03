@@ -13,9 +13,11 @@ import { developerClient } from "../../components/developer/client.ts";
 import { t } from "../../i18n/index.ts";
 import { getSessionUser, useBootstrap } from "../../lib/bootstrap.ts";
 import { requireSession } from "../../lib/guard.ts";
+import { titleHead } from "../../lib/page-title.ts";
 
 /** Studio: your OAuth apps, register one (E9-console). */
 export const Route = createFileRoute("/_studio/developer/")({
+  head: () => titleHead(t("pageTitle.studioDeveloper")),
   // Server-side guard (SSR and client navigation); the component keeps a client fallback.
   beforeLoad: () => requireSession(() => getSessionUser()),
   component: DeveloperRoute,

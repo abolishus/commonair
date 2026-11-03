@@ -12,13 +12,17 @@ import { isSessionExpired, toastActionError } from "../../lib/action-error.ts";
 import { api } from "../../lib/api.ts";
 import { useBootstrap } from "../../lib/bootstrap.ts";
 import { appointError, isAdmin } from "../../lib/coop.ts";
+import { titleHead } from "../../lib/page-title.ts";
 
 /**
  * Admins only. The `_admin` layout's guard (`components/safety/access.ts`) must know this path:
  * until `adminPageFor` maps `/admin/coop` to a page that `mayOpenAdminPage` grants to admins, the
  * guard answers everyone, admins included, with not-found. The check below is the client fallback.
  */
-export const Route = createFileRoute("/_admin/admin/coop")({ component: AdminCoopRoute });
+export const Route = createFileRoute("/_admin/admin/coop")({
+  head: () => titleHead(t("pageTitle.adminCoop")),
+  component: AdminCoopRoute,
+});
 
 const EMPTY: AppointWorkerFormValues = { username: "", minute: "" };
 

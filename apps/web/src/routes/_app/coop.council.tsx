@@ -11,9 +11,13 @@ import { coopLoads, useCoopLoad, useMyMembership } from "../../components/coop/u
 import { t } from "../../i18n/index.ts";
 import { api } from "../../lib/api.ts";
 import { useBootstrap } from "../../lib/bootstrap.ts";
+import { titleHead } from "../../lib/page-title.ts";
 
 /** Public: the creator council, how it was seated, board seats and elections (members stand and vote). */
-export const Route = createFileRoute("/_app/coop/council")({ component: CouncilRoute });
+export const Route = createFileRoute("/_app/coop/council")({
+  head: () => titleHead(t("pageTitle.coopCouncil")),
+  component: CouncilRoute,
+});
 
 function CouncilRoute(): React.JSX.Element {
   const { me } = useBootstrap();

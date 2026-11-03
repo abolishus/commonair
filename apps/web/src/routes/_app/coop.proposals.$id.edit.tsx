@@ -13,9 +13,11 @@ import { api } from "../../lib/api.ts";
 import { getSessionUser, useBootstrap } from "../../lib/bootstrap.ts";
 import { draftFromProposal, editableBy, proposalSaveError, type ProposalDraft } from "../../lib/coop.ts";
 import { requireSession } from "../../lib/guard.ts";
+import { titleHead } from "../../lib/page-title.ts";
 
 /** The author, while `draft` or `discussion`: edit the proposal (an edit in discussion restarts it). */
 export const Route = createFileRoute("/_app/coop/proposals/$id/edit")({
+  head: () => titleHead(t("pageTitle.coopProposalEdit")),
   beforeLoad: () => requireSession(() => getSessionUser()),
   component: EditProposalPage,
 });

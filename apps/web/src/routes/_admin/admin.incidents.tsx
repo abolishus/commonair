@@ -10,9 +10,13 @@ import { NotFoundState } from "../../components/money/not-found.tsx";
 import { mayOpenAdminPage } from "../../components/safety/access.ts";
 import { t } from "../../i18n/index.ts";
 import { useBootstrap } from "../../lib/bootstrap.ts";
+import { titleHead } from "../../lib/page-title.ts";
 
 /** Admins only (the `_admin` guard): open and update status-page incidents. */
-export const Route = createFileRoute("/_admin/admin/incidents")({ component: IncidentsRoute });
+export const Route = createFileRoute("/_admin/admin/incidents")({
+  head: () => titleHead(t("pageTitle.adminIncidents")),
+  component: IncidentsRoute,
+});
 
 function IncidentsRoute(): React.JSX.Element {
   const { me } = useBootstrap();

@@ -10,9 +10,13 @@ import { NotFoundState } from "../../components/money/not-found.tsx";
 import { mayOpenAdminPage } from "../../components/safety/access.ts";
 import { t } from "../../i18n/index.ts";
 import { useBootstrap } from "../../lib/bootstrap.ts";
+import { titleHead } from "../../lib/page-title.ts";
 
 /** Admins only (the `_admin` guard): egress by delivery source and by broadcast. */
-export const Route = createFileRoute("/_admin/admin/egress")({ component: EgressRoute });
+export const Route = createFileRoute("/_admin/admin/egress")({
+  head: () => titleHead(t("pageTitle.adminEgress")),
+  component: EgressRoute,
+});
 
 function EgressRoute(): React.JSX.Element {
   const { me } = useBootstrap();

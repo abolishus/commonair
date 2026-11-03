@@ -10,9 +10,12 @@ import { NotFoundState } from "../../components/money/not-found.tsx";
 import { api } from "../../lib/api.ts";
 import { getSessionUser, useBootstrap } from "../../lib/bootstrap.ts";
 import { requireSession } from "../../lib/guard.ts";
+import { t } from "../../i18n/index.ts";
+import { titleHead } from "../../lib/page-title.ts";
 
 /** Signed in: one of your statements, explained line by line. */
 export const Route = createFileRoute("/_app/coop/patronage/$periodId")({
+  head: () => titleHead(t("pageTitle.coopPatronageStatement")),
   beforeLoad: () => requireSession(() => getSessionUser()),
   component: StatementRoute,
 });

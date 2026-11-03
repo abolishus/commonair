@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { useRequestNow } from "@commonair/ui";
 import { PageHeader } from "@commonair/ui/blocks/headers";
 import { Button } from "@commonair/ui/components/button";
 import { Checkbox } from "@commonair/ui/components/checkbox";
@@ -10,6 +11,8 @@ import { PageContainer } from "@commonair/ui/layouts";
 import { Link, createFileRoute, useLocation } from "@tanstack/react-router";
 import * as React from "react";
 import { AltchaField, type AltchaFieldHandle } from "../../components/altcha-field.tsx";
+import { AuthLayout } from "../../components/auth-layout.tsx";
+import { BirthDateField } from "../../components/birth-date-field.tsx";
 import { FormError } from "../../components/form-error.tsx";
 import { LegalDocumentList, splitByAcceptance, type LegalDoc } from "../../components/legal-document-link.tsx";
 import { SignUpPasswordField } from "../../components/password-fields.tsx";
@@ -17,21 +20,37 @@ import { ResendVerification } from "../../components/resend-verification.tsx";
 import { t } from "../../i18n/index.ts";
 import { api } from "../../lib/api.ts";
 import { signUp } from "../../lib/auth.ts";
+import { authSearch, authTarget, carriedSearch } from "../../lib/auth-return.ts";
+import { EMPTY_DATE, partsFromIso, validateBirthDate, type DateParts } from "../../lib/birth-date.ts";
 import { authErrorMessage } from "../../lib/form-errors.ts";
 import { field } from "../../lib/form.ts";
-import { returnToSearch, safeReturnTo } from "../../lib/guard.ts";
+import { titleHead } from "../../lib/page-title.ts";
 
 export const Route = createFileRoute("/_app/signup")({
-  // `?returnTo=`: the verification link lands there (e.g. back on an OAuth consent page).
-  validateSearch: returnToSearch,
+  head: () => titleHead(t("pageTitle.signup")),
+  // `?redirect=` / `?returnTo=`: the verification link lands there (the page the visitor came
+  // from, or an OAuth consent page). Same-origin paths only.
+  validateSearch: authSearch,
   component: SignUpPage,
 });
 
+const BIRTH_DATE_ERRORS = {
+  required: "polish.birthDate.required",
+  invalid: "polish.birthDate.invalid",
+  future: "polish.birthDate.future",
+} as const;
+
 function SignUpPage(): React.JSX.Element {
   // From the location, not the route match: the page also renders outside it (tests). Re-checked.
-  const returnTo = safeReturnTo(useLocation({ select: (l) => (l.search as { returnTo?: unknown }).returnTo }));
+  const search = authSearch(useLocation().search as Record<string, unknown>);
+  const target = authTarget(search);
+  const carried = carriedSearch(search);
+  const requestNow = useRequestNow();
+  const [now] = React.useState(() => new Date(requestNow ?? Date.now()));
   const [docs, setDocs] = React.useState<LegalDoc[] | null>(null);
   const [altcha, setAltcha] = React.useState<string | null>(null);
+  const [birth, setBirth] = React.useState<DateParts>(EMPTY_DATE);
+  const [birthError, setBirthError] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [pending, setPending] = React.useState(false);
   const [doneEmail, setDoneEmail] = React.useState<string | null>(null);
@@ -46,10 +65,25 @@ function SignUpPage(): React.JSX.Element {
       .catch(() => {});
   }, []);
 
+  const onBirthChange = (next: DateParts) => {
+    setBirth(next);
+    // Clear a shown error as soon as the date is fine; keep it while it is still wrong.
+    if (birthError) {
+      const checked = validateBirthDate(next, now);
+      setBirthError("error" in checked ? t(BIRTH_DATE_ERRORS[checked.error]) : null);
+    }
+  };
+
   const onSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!altcha || pending) return;
     const form = new FormData(e.currentTarget);
+    const checked = validateBirthDate(partsFromIso(field(form, "birthDate")), now);
+    if ("error" in checked) {
+      setBirthError(t(BIRTH_DATE_ERRORS[checked.error]));
+      e.currentTarget.querySelector<HTMLElement>('[data-testid^="signup-birthdate-"]')?.focus();
+      return;
+    }
     const email = field(form, "email").trim();
     setPending(true);
     setError(null);
@@ -66,11 +100,11 @@ function SignUpPage(): React.JSX.Element {
           email,
           username: field(form, "username").trim().toLowerCase(),
           password: field(form, "password"),
-          birthDate: field(form, "birthDate"),
+          birthDate: checked.iso,
           altcha,
           acceptedDocumentIds: requiredIds,
         },
-        returnTo,
+        target,
       );
       setDoneEmail(email);
     } catch (err) {
@@ -94,13 +128,12 @@ function SignUpPage(): React.JSX.Element {
           title={t("signup.checkEmailTitle")}
           description={t("signup.checkEmailBody", { email: doneEmail })}
         />
-        <ResendVerification email={doneEmail} callbackURL={returnTo} />
+        <ResendVerification email={doneEmail} callbackURL={target} />
       </PageContainer>
     );
 
   return (
-    <PageContainer width="form" className="flex flex-col gap-6 py-12">
-      <PageHeader title={t("signup.title")} />
+    <AuthLayout title={t("signup.title")}>
       <form onSubmit={(e) => void onSubmit(e)}>
         <FieldGroup>
           <Field>
@@ -130,13 +163,7 @@ function SignUpPage(): React.JSX.Element {
             <FieldDescription id="signup-username-hint">{t("signup.usernameHint")}</FieldDescription>
           </Field>
           <SignUpPasswordField />
-          {/* A native date input (shadcn `Input type="date"`), not DateOfBirthField's three Selects:
-              the e1 contract fills `signup-birthdate` with one YYYY-MM-DD value, and the browser's
-              date picker is accessible and localized on every platform. */}
-          <Field>
-            <FieldLabel htmlFor="signup-birthdate">{t("field.birthDate")}</FieldLabel>
-            <Input id="signup-birthdate" data-testid="signup-birthdate" name="birthDate" type="date" required />
-          </Field>
+          <BirthDateField value={birth} onValueChange={onBirthChange} error={birthError} now={now} />
           {/* While the list loads the box is shown (the API requires acceptance whenever any document
               does); it disappears only once it is known that nothing needs accepting. */}
           {(docs === null || required.length > 0) && (
@@ -170,16 +197,12 @@ function SignUpPage(): React.JSX.Element {
           </Button>
           <FieldDescription>
             {t("signup.haveAccount")}{" "}
-            <Button
-              variant="link"
-              nativeButton={false}
-              render={<Link to="/signin" search={returnTo === undefined ? {} : { returnTo }} />}
-            >
+            <Button variant="link" nativeButton={false} render={<Link to="/signin" search={carried} />}>
               {t("nav.signIn")}
             </Button>
           </FieldDescription>
         </FieldGroup>
       </form>
-    </PageContainer>
+    </AuthLayout>
   );
 }

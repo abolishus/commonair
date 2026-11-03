@@ -11,6 +11,7 @@ import { api } from "../../lib/api.ts";
 import { signOut } from "../../lib/auth.ts";
 import { getSessionUser, useBootstrap } from "../../lib/bootstrap.ts";
 import { requireSession } from "../../lib/guard.ts";
+import { pageTitle } from "../../lib/page-title.ts";
 
 /** OAuth consent for an app's authorization request (E9-consent; ADR 0027 §1). Signed out: sign-in returns here. */
 export const Route = createFileRoute("/_app/oauth2/authorize")({
@@ -21,7 +22,7 @@ export const Route = createFileRoute("/_app/oauth2/authorize")({
     meta: [
       { name: "referrer", content: "no-referrer" },
       { name: "robots", content: "noindex, nofollow" },
-      { title: t("oauth.consent.pageTitle") },
+      { title: pageTitle(t("oauth.consent.pageTitle")) },
     ],
   }),
   component: AuthorizePage,

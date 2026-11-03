@@ -7,9 +7,14 @@ import { SettingsPage } from "../../components/coop/council.tsx";
 import { CoopLoadGate } from "../../components/coop/load-error.tsx";
 import { coopLoads, useCoopLoad } from "../../components/coop/use-coop.ts";
 import { api } from "../../lib/api.ts";
+import { t } from "../../i18n/index.ts";
+import { titleHead } from "../../lib/page-title.ts";
 
 /** Public: the governance settings and the decision that last set each. */
-export const Route = createFileRoute("/_app/coop/settings")({ component: SettingsRoute });
+export const Route = createFileRoute("/_app/coop/settings")({
+  head: () => titleHead(t("pageTitle.coopSettings")),
+  component: SettingsRoute,
+});
 
 function SettingsRoute(): React.JSX.Element {
   const settings = useCoopLoad("settings", () => api().coop.settings());

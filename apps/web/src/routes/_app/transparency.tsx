@@ -15,9 +15,13 @@ import { useLoad } from "../../components/money/use-load.ts";
 import { t } from "../../i18n/index.ts";
 import { api } from "../../lib/api.ts";
 import { parseTransparencyPeriod, transparencyPeriodOptions, type TransparencyPeriod } from "../../lib/money.ts";
+import { titleHead } from "../../lib/page-title.ts";
 
 /** Public: the co-op's books by month, from the ledger, the open enforcement report (ADR 0019) and the advisory jury's results (ADR 0038). */
-export const Route = createFileRoute("/_app/transparency")({ component: TransparencyPage });
+export const Route = createFileRoute("/_app/transparency")({
+  head: () => titleHead(t("pageTitle.transparency")),
+  component: TransparencyPage,
+});
 
 function TransparencyPage(): React.JSX.Element {
   const [period, setPeriod] = React.useState<TransparencyPeriod>(12);
