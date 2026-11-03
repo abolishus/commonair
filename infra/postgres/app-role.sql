@@ -27,8 +27,26 @@ BEGIN
   END IF;
 END $$;
 
--- No attribute that could bypass triggers, row security or grants.
-ALTER ROLE commonair_app NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT;
+-- No attribute that could bypass triggers, row security or grants. Naming SUPERUSER, REPLICATION
+-- or BYPASSRLS at all, even to switch it off, needs a superuser (or that attribute), which a
+-- managed database's owner is not (S1-d, ADR 0032 §3). So a non-superuser owner switches off
+-- only what is on, and fails loudly where it cannot.
+DO $$
+DECLARE
+  r record;
+BEGIN
+  IF (SELECT rolsuper FROM pg_catalog.pg_roles WHERE rolname = current_user) THEN
+    ALTER ROLE commonair_app NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT;
+    RETURN;
+  END IF;
+  SELECT * INTO r FROM pg_catalog.pg_roles WHERE rolname = 'commonair_app';
+  IF r.rolsuper THEN ALTER ROLE commonair_app NOSUPERUSER; END IF;
+  IF r.rolreplication THEN ALTER ROLE commonair_app NOREPLICATION; END IF;
+  IF r.rolbypassrls THEN ALTER ROLE commonair_app NOBYPASSRLS; END IF;
+  IF r.rolcreatedb THEN ALTER ROLE commonair_app NOCREATEDB; END IF;
+  IF r.rolcreaterole THEN ALTER ROLE commonair_app NOCREATEROLE; END IF;
+  IF r.rolinherit THEN ALTER ROLE commonair_app NOINHERIT; END IF;
+END $$;
 
 -- The role must never own objects (owners can disable triggers) nor inherit another role.
 DO $$

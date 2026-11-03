@@ -512,7 +512,8 @@ describe("render-env.sh", () => {
     grafana: [],
     "irc-cert": [],
     mediamtx: ["INTERNAL_API_SECRET"],
-    migrate: ["POSTGRES_APP_PASSWORD"],
+    // The app role's password, and the read-only monitor role's (infra/postgres/monitor-role.sql).
+    migrate: ["POSTGRES_APP_PASSWORD", "POSTGRES_MONITOR_PASSWORD"],
     // Staging seed mode's harness (ADR 0040): the stack's session and internal secrets (it signs
     // in, encrypts the Discord sink URLs and calls the test hooks), the seed's own webhook secret,
     // and the media bucket's key (seed-media lists what it recorded). Never the evidence key.

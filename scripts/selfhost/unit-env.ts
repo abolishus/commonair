@@ -271,7 +271,7 @@ export const STATIC_UNITS: Record<string, StaticList> = {
   },
   migrate: {
     why: "packages/db/src/migrate.ts and infra/postgres/apply-app-role.ts (DATABASE_URL is a Podman secret)",
-    keys: ["GOVERNANCE_BOOTSTRAP_JSON", "POSTGRES_APP_PASSWORD"],
+    keys: ["DATABASE_CA_FILE", "GOVERNANCE_BOOTSTRAP_JSON", "POSTGRES_APP_PASSWORD", "POSTGRES_MONITOR_PASSWORD"],
   },
   "seed-harness": {
     why: "what `seed full` reads from the instance (harness/src/env.ts, and the instance values safety-io.ts, stripe.ts and seed/platform.ts fall back to); staging seed mode only",

@@ -91,6 +91,12 @@ export const databaseEnv = z.object({
   DATABASE_URL: z.url(),
   /** Most Postgres connections each service process holds. */
   DATABASE_POOL_MAX: z.coerce.number().int().positive().default(10),
+  /**
+   * PEM file of the CA that signed the Postgres server's certificate (an external database whose
+   * provider hands out its own CA, ADR 0032 §3). When set, clients verify the server against it
+   * and refuse a DATABASE_URL whose `sslmode` is weaker than `verify-full`. Unset: unchanged.
+   */
+  DATABASE_CA_FILE: z.string().min(1).optional(),
   /** Password of the least-privilege application role (compose creates `commonair_app`). */
   POSTGRES_APP_PASSWORD: z.string().optional(),
   /**
@@ -106,6 +112,11 @@ export const valkeyEnv = z.object({
    * (VALKEY_PASSWORD), `redis://:<password>@host:6379`: init-env writes it that way.
    */
   VALKEY_URL: z.url(),
+  /**
+   * PEM file of the CA that signed the Valkey server's certificate. When set, VALKEY_URL must be
+   * `rediss://` and the client verifies the server against this CA. Unset: unchanged.
+   */
+  VALKEY_CA_FILE: z.string().min(1).optional(),
 });
 
 export const internalEnv = z.object({
@@ -232,6 +243,8 @@ export const paymentsEnv = z.object({
     .default("Contact the co-op treasurer to set up how you are paid. Payouts start once they confirm it."),
   /** Days a pending (unconfirmed) payment stays open before it expires as failed. */
   PAYMENT_PENDING_DAYS: z.coerce.number().int().min(1).max(60).default(7),
+  /** Hours an unpaid gift payment stays open before it expires as failed (ADR 0007 Amendment 1). */
+  GIFT_PAYMENT_HOURS: z.coerce.number().int().min(1).max(168).default(24),
 });
 
 export const mediaEnv = z.object({
@@ -631,6 +644,11 @@ export const workerEnv = z.object({
 export const infraEnv = z.object({
   /** Password of the Postgres owner role `commonair` (migrations and backups). */
   POSTGRES_PASSWORD: z.string().min(1).optional(),
+  /**
+   * Password of the read-only `commonair_monitor` role the metrics collector logs in as
+   * (infra/postgres/monitor-role.sql). The migrate job creates the role only when this is set.
+   */
+  POSTGRES_MONITOR_PASSWORD: z.string().min(12).optional(),
   /** Garage requires exactly 64 hex characters. */
   GARAGE_RPC_SECRET: z
     .string()
