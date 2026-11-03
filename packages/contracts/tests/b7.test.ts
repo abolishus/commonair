@@ -184,7 +184,7 @@ describe("internal", () => {
     expect(KEYS.roomPresence(id(1))).toBe(`room:presence:${id(1)}`);
     expect(KEYS.roomSync(id(1))).toBe(`room:sync:${id(1)}`);
     expect(new Set(Object.values(QUEUES)).size).toBe(Object.values(QUEUES).length);
-    expect(Object.values(FEDERATION_JOBS)).toHaveLength(5);
+    expect(Object.values(FEDERATION_JOBS)).toHaveLength(6);
     expect(INTERNAL_ROUTES.uploadCommit).toBe("/internal/uploads/commit");
     expect(
       UploadCommitBody.safeParse({ channelId: id(1), userId: id(2), key: "incoming/x", purpose: "avatar" }).success,

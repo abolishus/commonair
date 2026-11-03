@@ -19,6 +19,7 @@ const USER = "01890000-0000-7000-8000-00000000c0de";
 const PAYOUT = "01890000-0000-7000-8000-0000000000b0";
 const TRANSFER = "01890000-0000-7000-8000-0000000000b1";
 const PERIOD = "01890000-0000-7000-8000-0000000000b2";
+const PATRONAGE_PAYOUT = "01890000-0000-7000-8000-0000000000b3";
 const AT = new Date("2026-11-03T12:00:00Z");
 
 const sum = (p: Posting) => p.entries.reduce((s, e) => s + e.amountCents, 0);
@@ -36,6 +37,7 @@ const transferInput = (over: Partial<PayoutTransferReversedInput> = {}): PayoutT
   ...over,
 });
 const patronageInput = (over: Partial<PatronagePayoutReversedInput> = {}): PatronagePayoutReversedInput => ({
+  payoutId: PATRONAGE_PAYOUT,
   periodId: PERIOD,
   userId: USER,
   provider: "manual",
@@ -113,6 +115,7 @@ describe("payoutTransferReversed", () => {
 describe("patronagePayoutReversed", () => {
   test("Dr cash:<provider>, Cr the member's patronage payable; undoes patronagePayout", () => {
     const paid = patronagePayout({
+      payoutId: PATRONAGE_PAYOUT,
       periodId: PERIOD,
       userId: USER,
       provider: "stripe",
@@ -133,10 +136,22 @@ describe("patronagePayoutReversed", () => {
     expect(back.refId).toBe(PERIOD);
   });
 
-  test("the key carries the member and the cumulative total", () => {
+  test("the keys carry the payout row (a member may be paid again after a failure) and the cumulative total", () => {
     expect(patronagePayoutReversed(patronageInput()).idempotencyKey).toBe(
-      `patronage-payout-reversed:${PERIOD}:${USER}:700`,
+      `patronage-payout-reversed:${PATRONAGE_PAYOUT}:700`,
     );
+    const pay = (payoutId: string) =>
+      patronagePayout({
+        payoutId,
+        periodId: PERIOD,
+        userId: USER,
+        provider: "manual",
+        amountCents: 700,
+        currency: "usd",
+        occurredAt: AT,
+      });
+    expect(pay(PATRONAGE_PAYOUT).idempotencyKey).toBe(`patronage-payout:${PATRONAGE_PAYOUT}`);
+    expect(pay(TRANSFER).idempotencyKey).not.toBe(pay(PATRONAGE_PAYOUT).idempotencyKey);
     expect(patronagePayoutReversed(patronageInput({ amountCents: 100, cumulativeCents: 800 })).idempotencyKey).not.toBe(
       patronagePayoutReversed(patronageInput()).idempotencyKey,
     );

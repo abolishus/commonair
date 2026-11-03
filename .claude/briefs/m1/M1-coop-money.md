@@ -88,10 +88,12 @@ reviewed by counsel (none retained)".
    - **Manual adapter** (the default): rows are `pending` until a treasurer marks each `paid` with a
      reference. That posts `patronagePayout` (Dr patronage payable, Cr cash:manual).
    - **Stripe:** for members with a ready Express account, the `patronage-payout` job calls
-     M1-connect's transfer service, with the key `patronage-payout:<periodId>:<userId>`. On success
-     it posts `patronagePayout` with `cash:stripe`. Members without an account stay `pending` for
-     the manual path.
-   - A reversal posts `patronagePayoutReversed` and returns the amount to the payable.
+     M1-connect's transfer service, with the row's key `patronage-payout:<patronagePayoutId>`. On
+     success it posts `patronagePayout` (keyed by the row id) with `cash:stripe`. Members without
+     an account stay `pending` for the manual path.
+   - A reversal posts `patronagePayoutReversed` and returns the amount to the payable. A `failed`
+     or `reversed` row is followed by a new row for the same member and period (the unique index
+     covers only `pending` and `paid` rows; contract step review fix).
    - `coop.patronage.payouts` lists rows for treasurers. A member sees only their own row on the
      period page.
 4. **Web.**

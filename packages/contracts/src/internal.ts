@@ -966,6 +966,8 @@ export const FEDERATION_JOBS = {
   fanout: "federation-fanout",
   rotate: "federation-rotate",
   sweep: "federation-sweep",
+  /** Batch 8 (decision (h)): a channel turned federation off; its remote followers go. */
+  followerCleanup: "federation-follower-cleanup",
 } as const;
 export const FederationInboxJob = z.object({ itemId: z.uuid() });
 export type FederationInboxJob = z.infer<typeof FederationInboxJob>;
@@ -984,6 +986,12 @@ export const FederationDeliverJob = z.object({
 export type FederationDeliverJob = z.infer<typeof FederationDeliverJob>;
 export const FederationRotateJob = z.object({ channelId: z.uuid().optional() });
 export const FederationSweepJob = z.object({});
+/**
+ * Removes the remote followers of a channel that turned federation off, once their actor `Delete`
+ * is queued. `upTo` is the instant federation went off: followers who arrived later are kept.
+ */
+export const FederationFollowerCleanupJob = z.object({ channelId: z.uuid(), upTo: z.iso.datetime({ offset: true }) });
+export type FederationFollowerCleanupJob = z.infer<typeof FederationFollowerCleanupJob>;
 export const federationJobId = (name: string, id: string) => `${name}-${id}`;
 
 /** Relay purges (decision (x)) on `QUEUES.relayPurge`: write `relay_purges` rows for one outbox event. */

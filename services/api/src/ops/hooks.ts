@@ -10,6 +10,7 @@
  */
 import { Queue, QueueEvents } from "bullmq";
 import { Valkey } from "iovalkey";
+import { valkeyTls } from "@commonair/service";
 import {
   EXPORT_JOBS,
   INTERNAL_ROUTES,
@@ -67,7 +68,11 @@ export interface OpsTickRunner {
 
 export function createOpsTickRunner(valkeyUrl: string, prefix: string): OpsTickRunner {
   // BullMQ refuses ioredis key prefixes and needs maxRetriesPerRequest: null.
-  const conn = new Valkey(valkeyUrl, { maxRetriesPerRequest: null, connectionName: "api-ops-queue" });
+  const conn = new Valkey(valkeyUrl, {
+    ...valkeyTls(valkeyUrl),
+    maxRetriesPerRequest: null,
+    connectionName: "api-ops-queue",
+  });
   const queues = new Map<string, Queue>();
   const events = new Map<string, { ev: QueueEvents; conn: Valkey }>();
   const queueOf = (name: string) => {
@@ -81,7 +86,11 @@ export function createOpsTickRunner(valkeyUrl: string, prefix: string): OpsTickR
   const eventsOf = async (name: string) => {
     let e = events.get(name);
     if (!e) {
-      const c = new Valkey(valkeyUrl, { maxRetriesPerRequest: null, connectionName: "api-ops-events" });
+      const c = new Valkey(valkeyUrl, {
+        ...valkeyTls(valkeyUrl),
+        maxRetriesPerRequest: null,
+        connectionName: "api-ops-events",
+      });
       const ev = new QueueEvents(name, { connection: c, prefix });
       e = { ev, conn: c };
       events.set(name, e);

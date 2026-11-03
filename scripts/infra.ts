@@ -25,9 +25,17 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pidAlive, TEST_OWNER_LABEL, testOwnerPid } from "./test-owner.ts";
 
-export const TEST_SERVICES = ["postgres", "valkey", "mailpit", "garage", "garage-init", "migrate"];
+/**
+ * `test`: what integration tests need. stripe-mock (profile `stripe`) is in it so the payments
+ * client's stripe-mock tests run in CI instead of skipping.
+ */
+export const TEST_SERVICES = ["postgres", "valkey", "mailpit", "garage", "garage-init", "migrate", "stripe-mock"];
+/** Compose profiles `test` enables (only for the services it names). */
+export const TEST_PROFILES = ["stripe"];
 /** Long-running services that report health. */
 export const HEALTHY_SERVICES = ["postgres", "valkey", "mailpit", "garage"];
+/** `test`'s long-running services (not in `HEALTHY_SERVICES`, which the stack reuses). */
+export const TEST_HEALTHY_SERVICES = [...HEALTHY_SERVICES, "stripe-mock"];
 /** One-shot jobs that must exit 0. */
 export const ONE_SHOT_SERVICES = ["garage-init", "migrate"];
 /** Long-running services of the whole platform plus the harness profile (`stack`). */
@@ -720,8 +728,9 @@ if (import.meta.main) {
       // first migration of a fresh volume already seeds the harness's governance bootstrap.
       const files = stackFiles(process.argv.slice(3));
       compose([...files, "build", ...BUILD_SERVICES], 20 * 60_000);
-      composeUp([...files, "up", "-d", ...TEST_SERVICES], 5 * 60_000);
-      await waitHealthy(HEALTHY_SERVICES);
+      const testProfiles = TEST_PROFILES.flatMap((p) => ["--profile", p]);
+      composeUp([...files, ...testProfiles, "up", "-d", ...TEST_SERVICES], 5 * 60_000);
+      await waitHealthy(TEST_HEALTHY_SERVICES);
       await waitExited(ONE_SHOT_SERVICES);
       sweepStaleTestDatabases();
       console.log(`infra: ${TEST_SERVICES.join(", ")} healthy`);

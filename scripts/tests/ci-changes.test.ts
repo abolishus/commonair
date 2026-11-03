@@ -148,6 +148,13 @@ describe("the real harness graph", () => {
     expect(outputs({ scenarios: ["portability"], deploy: false, filteredShards: [] })).toContain('shards=["w3"]');
   });
 
+  test("type-only re-exports are no edges (the batch 8 kit re-exports every context type)", () => {
+    expect(graph.get("harness/src/b8/kit.ts")).toEqual([]);
+    // Type-only imports still are: a scenario runs on what the imported module builds.
+    expect(graph.get("harness/src/b8/server.ts")).toContain("harness/src/b8/kit.ts");
+    expect(scenariosReaching("harness/src/e6/kit.ts", graph)).not.toContain("twitch-import");
+  });
+
   test("the platform reaches many scenarios; the CLI reaches none, so it selects all", () => {
     expect(scenariosReaching("harness/src/platform.ts", graph).length).toBeGreaterThan(5);
     expect(selectScenarios(["harness/src/cli.ts"], graph)).toBe(ALL);

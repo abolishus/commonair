@@ -688,6 +688,7 @@ describe("other rules", () => {
 
   test("patronage payout and manual confirmation", () => {
     const pp = patronagePayout({
+      payoutId: PAYMENT,
       periodId: PAYMENT,
       userId: USER,
       provider: "manual",

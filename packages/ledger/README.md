@@ -52,19 +52,19 @@ create rows idempotently (`insert … on conflict do nothing`, then read back).
 Every rule is a pure function returning a `Posting` (`kind`, `description`, `refType`, `refId`,
 `idempotencyKey`, `currency`, `occurredAt`, `metadata`, `entries`) that is already validated.
 
-| Rule                  | Key                                    | Entries                                                                                                                                               |
-| --------------------- | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `paymentSucceeded`    | `payment:<paymentId>`                  | Dr cash (or provider receivable) gross; Cr tax-payable tax; Cr creator-hold creator share; Cr platform-cut co-op share; Dr payment-fees / Cr cash fee |
-| `holdRelease`         | `hold-release:<paymentId>`             | Dr creator-hold; Cr creator                                                                                                                           |
-| `refund`              | `refund:<disputeId>`                   | Cr cash amount; Dr tax-payable, platform-cut and creator accounts proportionally                                                                      |
-| `chargeback`          | `chargeback:<disputeId>`               | As refund, plus Dr payment-fees / Cr cash for the dispute fee                                                                                         |
-| `payout`              | `payout:<payoutId>`                    | Dr creator (amount + netted receivable); Cr creator receivable; Cr cash amount                                                                        |
-| `sharePurchase`       | `share-purchase:<shareId>`             | Dr cash; Cr member-share                                                                                                                              |
-| `shareRefund`         | `share-refund:<shareId>`               | Dr member-share; Cr cash                                                                                                                              |
-| `infrastructureCost`  | `infra-cost:<infraCostId>`             | Dr expense:infrastructure:<category>; Cr cash                                                                                                         |
-| `patronageAllocation` | `patronage-allocation:<periodId>`      | Dr retained-surplus total; Cr patronage-payable per member                                                                                            |
-| `patronagePayout`     | `patronage-payout:<periodId>:<userId>` | Dr patronage-payable; Cr cash                                                                                                                         |
-| `manualConfirmation`  | `manual-confirmation:<paymentId>`      | Dr cash:manual; Cr receivable:provider:manual                                                                                                         |
+| Rule                  | Key                               | Entries                                                                                                                                               |
+| --------------------- | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `paymentSucceeded`    | `payment:<paymentId>`             | Dr cash (or provider receivable) gross; Cr tax-payable tax; Cr creator-hold creator share; Cr platform-cut co-op share; Dr payment-fees / Cr cash fee |
+| `holdRelease`         | `hold-release:<paymentId>`        | Dr creator-hold; Cr creator                                                                                                                           |
+| `refund`              | `refund:<disputeId>`              | Cr cash amount; Dr tax-payable, platform-cut and creator accounts proportionally                                                                      |
+| `chargeback`          | `chargeback:<disputeId>`          | As refund, plus Dr payment-fees / Cr cash for the dispute fee                                                                                         |
+| `payout`              | `payout:<payoutId>`               | Dr creator (amount + netted receivable); Cr creator receivable; Cr cash amount                                                                        |
+| `sharePurchase`       | `share-purchase:<shareId>`        | Dr cash; Cr member-share                                                                                                                              |
+| `shareRefund`         | `share-refund:<shareId>`          | Dr member-share; Cr cash                                                                                                                              |
+| `infrastructureCost`  | `infra-cost:<infraCostId>`        | Dr expense:infrastructure:<category>; Cr cash                                                                                                         |
+| `patronageAllocation` | `patronage-allocation:<periodId>` | Dr retained-surplus total; Cr patronage-payable per member                                                                                            |
+| `patronagePayout`     | `patronage-payout:<payoutId>`     | Dr patronage-payable; Cr cash                                                                                                                         |
+| `manualConfirmation`  | `manual-confirmation:<paymentId>` | Dr cash:manual; Cr receivable:provider:manual                                                                                                         |
 
 **The cut.** Net = gross − tax. The creator receives `floor(net × streamerShare)`, the co-op the
 remainder, so the split is always exact. Example: $10.99 incl. $0.99 tax, 90/10 cut, $0.62 fee →

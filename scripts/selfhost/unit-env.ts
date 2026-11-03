@@ -277,6 +277,7 @@ export const STATIC_UNITS: Record<string, StaticList> = {
     why: "what `seed full` reads from the instance (harness/src/env.ts, and the instance values safety-io.ts, stripe.ts and seed/platform.ts fall back to); staging seed mode only",
     keys: [
       "AUTH_SECRET",
+      "DATABASE_CA_FILE",
       "DEMO_SEED_FULL",
       "INTERNAL_API_SECRET",
       "S3_ACCESS_KEY_ID",

@@ -178,6 +178,9 @@ export function stripeClient(opts: StripeClientOptions): StripeClient {
     };
     if (body) headers["content-type"] = "application/x-www-form-urlencoded";
     if (key) headers["idempotency-key"] = key;
+    // Encoded once, outside the retry loop: a local encoding error sent nothing, so it is thrown as
+    // is rather than reported as an unreachable Stripe.
+    const encoded = body ? encodeForm(body) : undefined;
     let lastError: unknown = null;
     for (let attempt = 0; attempt <= retries; attempt++) {
       if (attempt > 0) await Bun.sleep(200 * 2 ** (attempt - 1));
@@ -187,7 +190,7 @@ export function stripeClient(opts: StripeClientOptions): StripeClient {
         res = await doFetch(`${base}${path}`, {
           method,
           headers,
-          ...(body ? { body: encodeForm(body) } : {}),
+          ...(encoded !== undefined ? { body: encoded } : {}),
           signal: AbortSignal.timeout(timeoutMs),
         });
         // A body cut off by the timeout is as unknown as no answer at all.
@@ -205,8 +208,19 @@ export function stripeClient(opts: StripeClientOptions): StripeClient {
       if (res.ok) return parsed;
       const e = (parsed.error ?? {}) as Json;
       const message = str(e.message) ?? `Stripe answered ${res.status}`;
-      if (res.status < 500) throw new StripeRequestError(message, res.status, str(e.type), str(e.code));
-      lastError = new StripeOutcomeUnknown(message, res.status, str(e.type), str(e.code));
+      const code = str(e.code);
+      // Not refusals: a request with the same key may still be running (409), the key was already
+      // used with other parameters so the first request may have acted (idempotency_error), or the
+      // rate limit is passing (429). Retried where waiting can help; never "nothing happened".
+      // Stripe names this in the error's type; some answers carry it as the code.
+      if (str(e.type) === "idempotency_error" || code === "idempotency_error")
+        throw new StripeOutcomeUnknown(message, res.status, str(e.type), code);
+      if (res.status === 409 || res.status === 429) {
+        lastError = new StripeOutcomeUnknown(message, res.status, str(e.type), code);
+        continue;
+      }
+      if (res.status < 500) throw new StripeRequestError(message, res.status, str(e.type), code);
+      lastError = new StripeOutcomeUnknown(message, res.status, str(e.type), code);
     }
     if (lastError instanceof StripeApiError) throw lastError;
     throw new StripeOutcomeUnknown(`Stripe is unreachable: ${String(lastError)}`, 503, null, null);
@@ -288,7 +302,8 @@ export function stripeClient(opts: StripeClientOptions): StripeClient {
         if (r.has_more !== true || !last) return out;
         after = last.id;
       }
-      return out;
+      // A cut-off list could read as "no such refund" to a reconciler.
+      throw malformed("more refunds than the client pages through");
     },
   };
 }

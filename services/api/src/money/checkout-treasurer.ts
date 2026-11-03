@@ -408,7 +408,11 @@ export const treasurerCheckoutHandlers = {
     try {
       await sendPaymentReceipt(deps, input.paymentId);
     } catch (err) {
-      deps.logger.warn("could not send a payment receipt", { paymentId: input.paymentId, err });
+      // By name only: a mail transport's message can carry the recipient's address.
+      deps.logger.warn("could not send a payment receipt", {
+        paymentId: input.paymentId,
+        error: err instanceof Error ? err.name : typeof err,
+      });
     }
     return { ok: true as const };
   }),

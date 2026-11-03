@@ -40,7 +40,7 @@ ALTER TABLE "payments" ADD COLUMN "gift" boolean DEFAULT false NOT NULL;--> stat
 ALTER TABLE "patronage_payouts" ADD CONSTRAINT "patronage_payouts_period_id_patronage_periods_id_fk" FOREIGN KEY ("period_id") REFERENCES "public"."patronage_periods"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "patronage_payouts" ADD CONSTRAINT "patronage_payouts_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "payout_transfers" ADD CONSTRAINT "payout_transfers_payout_id_payouts_id_fk" FOREIGN KEY ("payout_id") REFERENCES "public"."payouts"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-CREATE UNIQUE INDEX "patronage_payouts_period_user_uq" ON "patronage_payouts" USING btree ("period_id","user_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "patronage_payouts_period_user_uq" ON "patronage_payouts" USING btree ("period_id","user_id") WHERE "patronage_payouts"."status" in ('pending', 'paid');--> statement-breakpoint
 CREATE UNIQUE INDEX "patronage_payouts_idempotency_uq" ON "patronage_payouts" USING btree ("idempotency_key");--> statement-breakpoint
 CREATE INDEX "patronage_payouts_user_idx" ON "patronage_payouts" USING btree ("user_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "payout_transfers_payout_uq" ON "payout_transfers" USING btree ("payout_id");--> statement-breakpoint
@@ -49,8 +49,18 @@ CREATE UNIQUE INDEX "payout_transfers_idempotency_uq" ON "payout_transfers" USIN
 CREATE INDEX "payout_transfers_status_idx" ON "payout_transfers" USING btree ("status","created_at");--> statement-breakpoint
 -- Batch 8 decision (d): mark existing gift payments (a payment some subscription names in
 -- gift_payment_id). Where one gifter already holds several pending gifts for a channel, only the
--- newest is marked while pending, so 0049's one-pending-gift index can be built; the older ones
--- expire as before (money-expire-pending) and gain the flag nowhere else.
+-- newest is marked while pending, so 0049's one-pending-gift index can be built. The older ones
+-- stay unmarked, and the flag never changes after 0049, so they are expired now: money-expire-pending
+-- fails them on its next run (as it would any due payment) instead of letting one succeed unmarked.
+UPDATE "payments" p
+   SET "expires_at" = LEAST(COALESCE(p."expires_at", now()), now())
+ WHERE p."status" = 'pending'
+   AND EXISTS (SELECT 1 FROM "subscriptions" s WHERE s."gift_payment_id" = p."id")
+   AND EXISTS (SELECT 1 FROM "payments" q
+                WHERE q."status" = 'pending' AND q."id" <> p."id"
+                  AND q."user_id" = p."user_id" AND q."channel_id" = p."channel_id"
+                  AND EXISTS (SELECT 1 FROM "subscriptions" s2 WHERE s2."gift_payment_id" = q."id")
+                  AND (q."created_at", q."id") > (p."created_at", p."id"));--> statement-breakpoint
 UPDATE "payments" p
    SET "gift" = true
  WHERE EXISTS (SELECT 1 FROM "subscriptions" s WHERE s."gift_payment_id" = p."id")

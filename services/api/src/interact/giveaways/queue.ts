@@ -9,6 +9,7 @@
  */
 import { Queue } from "bullmq";
 import { Valkey } from "iovalkey";
+import { valkeyTls } from "@commonair/service";
 import { GIVEAWAY_JOBS, QUEUES, type GiveawayCloseJob } from "@commonair/contracts/internal";
 import type { Deps } from "../../deps.ts";
 
@@ -22,7 +23,11 @@ export const closeJobId = (giveawayId: string) => `giveaway-close-${giveawayId}`
 
 export function createGiveawayCloseQueue(valkeyUrl: string, prefix: string): GiveawayCloseQueue {
   // BullMQ refuses ioredis key prefixes and needs maxRetriesPerRequest: null.
-  const conn = new Valkey(valkeyUrl, { maxRetriesPerRequest: null, connectionName: "api-giveaway-queue" });
+  const conn = new Valkey(valkeyUrl, {
+    ...valkeyTls(valkeyUrl),
+    maxRetriesPerRequest: null,
+    connectionName: "api-giveaway-queue",
+  });
   const queue = new Queue(QUEUES.interact, { connection: conn, prefix });
   return {
     async schedule(giveawayId, closesAt, now) {

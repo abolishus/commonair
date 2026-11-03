@@ -566,12 +566,10 @@ const PENDING_B8_IDS: readonly string[] = [
   "jury-flag-case-link",
   "giveaway-verify-mine",
   "replay-span-kept",
-  // M1-gifts-refunds
-  "refund-requests",
+  // M1-gifts-refunds (`refund-requests` is rendered by the contract step's stub tab)
   "refund-request-unknown",
   "refund-request-resolve",
-  // M1-connect
-  "payout-transfers",
+  // M1-connect (`payout-transfers` is rendered by the contract step's stub tab)
   "payout-transfer-status",
   // M1-coop-money
   "share-buy-stripe",
@@ -596,9 +594,11 @@ describe("b8-selectors.md (batch 8)", () => {
         "jury-flag-case-link",
         "giveaway-verify-mine",
         "replay-span-kept",
+        "treasury-tab-refunds",
         "refund-requests",
         "refund-request-unknown",
         "refund-request-resolve",
+        "treasury-tab-transfers",
         "payout-transfers",
         "payout-transfer-status",
         "share-buy-stripe",

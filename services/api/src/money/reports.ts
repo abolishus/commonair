@@ -339,7 +339,7 @@ async function revenueLedger(
       const facts: PaymentFacts | null = pay
         ? { kind: pay.kind, quantity: pay.quantity, giftSubscription: pay.gift === true }
         : null;
-      const isPayout = kind === "payout_reserve" || kind === "payout_cancel";
+      const isPayout = revenueLineType(kind, null) === "payout";
       const gross = isPayout || r.gross === null ? null : num(r.gross);
       return {
         id: r.id,

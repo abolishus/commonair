@@ -21,6 +21,9 @@ describe("postgresTls", () => {
     for (const url of [BASE, `${BASE}?sslmode=require`, `${BASE}?sslmode=disable`]) {
       expect(postgresTls(url)).toEqual({ url });
     }
+    // A multi-host URL (which WHATWG URL refuses, and postgres.js takes) passes through too.
+    const multi = "postgres://u:p@h1:5432,h2:5432/db?sslmode=require";
+    expect(postgresTls(multi)).toEqual({ url: multi });
   });
 
   test("a CA file with verify-full: verified TLS against that CA", () => {

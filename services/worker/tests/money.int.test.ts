@@ -108,6 +108,7 @@ describe("money-expire-pending", () => {
     });
     // A gift payment for two recipients.
     const giftPay = await payment({
+      gift: true,
       userId: gifter.user.id,
       channelId: owner.channel.id,
       quantity: 2,
@@ -236,6 +237,7 @@ describe("money-expire-pending", () => {
     const owner = await channelWithTiers();
     const gifter = await makeUser(db());
     const giftPay = await payment({
+      gift: true,
       userId: gifter.user.id,
       channelId: owner.channel.id,
       quantity: 4,
@@ -448,7 +450,12 @@ describe("money-renew", () => {
     const owner = await channelWithTiers();
     const gifter = await makeUser(db());
     const recipient = await makeUser(db());
-    const giftPay = await payment({ status: "succeeded", userId: gifter.user.id, channelId: owner.channel.id });
+    const giftPay = await payment({
+      gift: true,
+      status: "succeeded",
+      userId: gifter.user.id,
+      channelId: owner.channel.id,
+    });
     const sub = await subscription({
       subscriberId: recipient.user.id,
       channelId: owner.channel.id,
@@ -469,6 +476,7 @@ describe("money-renew", () => {
     const gifter = await makeUser(db());
     const recipient = await makeUser(db());
     const giftPay = await payment({
+      gift: true,
       provider: "stripe",
       providerRef: `pi_${uuidv7()}`,
       status: "succeeded",
