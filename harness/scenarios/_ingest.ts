@@ -6,6 +6,8 @@
  * `channels.get` → playback through the origin in Chromium and WebKit with measured TTFF and
  * glass-to-glass latency → stop → offline.
  */
+import type { HeartbeatTiming } from "../src/fingerprint.ts";
+import { STEADY_TIMING } from "../src/integrity-viewers.ts";
 import { summarize } from "../src/metrics.ts";
 import type { ScenarioContext } from "../src/scenario.ts";
 import type { Viewer } from "../src/viewer.ts";
@@ -19,6 +21,16 @@ export const MAX_GLASS_TO_GLASS_MS = 15_000;
  * Linux WebKit plays through hls.js and needs no more than the plain budget; the looser one holds.
  */
 export const MAX_GLASS_TO_GLASS_WHIP_WEBKIT_MS = 20_000;
+
+/**
+ * Heartbeat timing of the ingest viewers. HUMAN_TIMING sends 3 % of beats 10-30 s late, and a late
+ * first beat can land after the viewers stop (main CI runs 41490048809 and 41721879712: WebKit
+ * playing, 0 beats, 0 errors). These scenarios check that beats are accepted, not how integrity
+ * treats late ones (integrity-basic does that).
+ */
+export const INGEST_VIEWER_TIMING: HeartbeatTiming = STEADY_TIMING;
+/** How long the scenario waits for every viewer's first accepted heartbeat. */
+export const FIRST_HEARTBEAT_WAIT_MS = 25_000;
 
 /** The glass-to-glass budget (p50) for one ingest protocol and browser engine. */
 export function glassToGlassBudgetMs(protocol: "rtmp" | "whip", engine: string): number {
@@ -47,7 +59,7 @@ export async function ingestScenario(ctx: ScenarioContext, protocol: "rtmp" | "w
   ctx.check("broadcast summary present", live.live !== null);
 
   const viewers: Viewer[] = await ctx.step("open Chromium and WebKit viewers", () =>
-    p.openViewers(channel, { chromium: 1, webkit: 1 }),
+    p.openViewers(channel, { chromium: 1, webkit: 1, timing: INGEST_VIEWER_TIMING }),
   );
   for (const v of viewers) ctx.defer(() => v.stop());
 
@@ -93,7 +105,7 @@ export async function ingestScenario(ctx: ScenarioContext, protocol: "rtmp" | "w
     Promise.all(
       viewers.map((v) =>
         waitFor(`a heartbeat from ${v.id}`, async () => ((await v.report()).heartbeats > 0 ? true : null), {
-          timeoutMs: 25_000,
+          timeoutMs: FIRST_HEARTBEAT_WAIT_MS,
           intervalMs: 500,
           signal: ctx.signal,
         }).catch(() => false),
@@ -105,6 +117,9 @@ export async function ingestScenario(ctx: ScenarioContext, protocol: "rtmp" | "w
     ctx.check(`${r.engine}: heartbeats accepted`, r.heartbeats > 0 && r.heartbeatErrors === 0, {
       heartbeats: r.heartbeats,
       errors: r.heartbeatErrors,
+      // Sent but neither answered nor failed: a request still in flight when the viewer stopped.
+      ...(r.heartbeatsSent === undefined ? {} : { sent: r.heartbeatsSent }),
+      lastErrors: r.errors.slice(-3),
     });
   }
 

@@ -262,6 +262,13 @@ describe("API-mode playback sessions", () => {
       await viewer.waitForFirstFrame(45_000);
       const heartbeats = () => api.calls.filter((c) => c.path.endsWith("/heartbeat"));
       await waitFor("two heartbeats", () => heartbeats().length >= 2, { timeoutMs: 20_000, intervalMs: 250 });
+      // Beats start with the session, before the first frame: at this 1.5 s cadence a slow
+      // starter (WebKit on CI, TTFF of several seconds) has sent two with nothing played yet.
+      // Wait for one sent after playback advanced (CI run 41692011499).
+      await waitFor("a heartbeat with played time", () => heartbeats().some((c) => Number(c.input.playedSeconds) > 0), {
+        timeoutMs: 20_000,
+        intervalMs: 250,
+      });
       // The page counts a heartbeat when its answer arrives, after the API has seen the request;
       // stopping first would abort the second one in flight.
       await waitFor("two heartbeats answered", async () => (await viewer.report()).heartbeats >= 2, {
@@ -291,6 +298,9 @@ describe("API-mode playback sessions", () => {
       // The player server's proxy turned the page's simulated address into x-forwarded-for.
       expect(api.calls.every((c) => c.xff === "73.10.20.30")).toBe(true);
       expect(report.heartbeats).toBeGreaterThanOrEqual(2);
+      // Every beat sent was answered, or is the one still in flight at stop.
+      expect(report.heartbeatsSent).toBeGreaterThanOrEqual(report.heartbeats);
+      expect(report.heartbeatsSent ?? 0).toBeLessThanOrEqual(report.heartbeats + report.heartbeatErrors + 1);
       expect(report.heartbeatErrors).toBe(0);
       expect(report.source).toBe("origin");
       expect(report.sessionId).not.toBeNull();

@@ -37,6 +37,8 @@ export interface PlayerInfo {
   sessionId: string | null;
   source: string | null;
   heartbeats: number;
+  /** Heartbeat requests sent; more than answered plus failed means one is still in flight. */
+  heartbeatsSent: number;
   heartbeatErrors: number;
   errors: string[];
   stopped: boolean;
@@ -112,6 +114,7 @@ class Player {
       sessionId: null,
       source: null,
       heartbeats: 0,
+      heartbeatsSent: 0,
       heartbeatErrors: 0,
       errors: [],
       stopped: false,
@@ -230,6 +233,7 @@ class Player {
     const v = this.video;
     const buffered = v.buffered.length > 0 ? v.buffered.end(v.buffered.length - 1) - v.currentTime : 0;
     const latest = s?.latencyMs.at(-1);
+    this.info.heartbeatsSent++;
     try {
       const res = await this.session.heartbeat({
         playedSeconds: s?.playedSeconds ?? 0,
