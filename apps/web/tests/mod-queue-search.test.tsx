@@ -197,6 +197,20 @@ describe("the queue from the URL", () => {
     expect(error).toHaveBeenCalledWith(t("jury.link.notInQueue"));
   });
 
+  it("a linked report on a later page loads the next page instead of a toast", async () => {
+    const error = vi.spyOn(toast, "error").mockImplementation(() => 1);
+    const onChange = vi.fn<(next: ModQueueLocation) => void>();
+    const reports = vi.fn<ModerationClient["reports"]>(async (cursor) =>
+      cursor === undefined ? { items: [], nextCursor: "p2" } : { items: [], nextCursor: null },
+    );
+    wrap(
+      <Controlled initial={{ tab: "reports", case: ID(77) }} client={fakeClient({ reports })} onChange={onChange} />,
+    );
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith({ tab: "reports", case: null }));
+    expect(reports).toHaveBeenCalledWith("p2");
+    expect(error).toHaveBeenCalledTimes(1);
+  });
+
   it("without the reports permission a reports link opens the cases tab with nothing selected", async () => {
     const reports = vi.fn<ModerationClient["reports"]>(async () => ({ items: [], nextCursor: null }));
     wrap(
@@ -243,7 +257,7 @@ describe("the jury flag link", () => {
 
   it("targets the cases tab for a moderation case and the reports tab for a report", () => {
     expect(flagCaseSearch(flag("moderation_case", OPEN_CASE))).toEqual({ tab: "cases", case: OPEN_CASE });
-    expect(flagCaseSearch(flag("report", ID(77)))).toEqual({ tab: "reports", case: ID(77) });
+    expect(flagCaseSearch(flag("report", ID(77)))).toEqual({ tab: "reports" });
   });
 
   it("renders jury-flag-case-link to /admin/moderation?tab=&case=", () => {
@@ -254,7 +268,7 @@ describe("the jury flag link", () => {
     expect(urls.map((u) => u.pathname)).toEqual(["/admin/moderation", "/admin/moderation"]);
     expect(urls.map((u) => [u.searchParams.get("tab"), u.searchParams.get("case")])).toEqual([
       ["cases", OPEN_CASE],
-      ["reports", ID(77)],
+      ["reports", null],
     ]);
   });
 });

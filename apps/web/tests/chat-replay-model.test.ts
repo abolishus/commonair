@@ -624,6 +624,26 @@ describe("ReplayModel spans (batch 8: a deep seek keeps what was loaded)", () =>
     expect(ids(m)).toEqual([lines[0]?.id, lines[1]?.id]);
   });
 
+  it("caps memory when the server ignores from: seeking back pages again from the start", async () => {
+    const lines = minutes();
+    const server = new FakeServer(lines, { size: 5, honourFrom: false });
+    const { m } = model(server, { maxLines: 12, maxRows: 3 });
+    m.setPlayhead(us(at(0)));
+    await flush();
+    // A deep seek: the server answers `from` from the start, so the model pages on from there.
+    m.setPlayhead(us(at(40 * 60)));
+    await flush();
+    expect(server.calls.filter((c) => c.from !== undefined)).toHaveLength(1);
+    expect(m.heldLines()).toBeLessThanOrEqual(12);
+    expect(ids(m)).toEqual([lines[38]?.id, lines[39]?.id, lines[40]?.id]);
+    const calls = server.calls.length;
+    m.setPlayhead(us(at(60)));
+    await flush();
+    expect(server.calls[calls]).toEqual({ limit: 200 });
+    expect(m.snapshot().spans).toBe(1);
+    expect(ids(m)).toEqual([lines[0]?.id, lines[1]?.id]);
+  });
+
   it("reset drops every span", async () => {
     const server = new FakeServer(minutes(), { size: 5 });
     const { m } = model(server);

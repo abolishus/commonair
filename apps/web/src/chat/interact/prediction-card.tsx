@@ -199,6 +199,20 @@ export function ChatPredictionCard({
   const [refusedStaff, setRefusedStaff] = React.useState(false);
   // A refusal in the grace closes its form for good: the server has said no for this lock.
   const [graceClosed, setGraceClosed] = React.useState(false);
+  // Whether the card's amount field was the last thing focused: at the lock it unmounts, and the
+  // grace form's field takes the keyboard focus over (a removed element fires no reliable blur).
+  const amountFocused = React.useRef(false);
+  React.useEffect(() => {
+    const onFocus = (e: FocusEvent) => {
+      const el = e.target;
+      amountFocused.current =
+        el instanceof HTMLElement &&
+        el.dataset.testid === "chat-prediction-amount" &&
+        el.closest(`[data-prediction-id="${CSS.escape(p.id)}"]`) !== null;
+    };
+    document.addEventListener("focusin", onFocus);
+    return () => document.removeEventListener("focusin", onFocus);
+  }, [p.id]);
 
   const balance = points?.points ?? 0;
   const name = displayPointsName(points?.pointsName);
@@ -330,6 +344,7 @@ export function ChatPredictionCard({
         name={name}
         disabled={pending || value === null}
         onBet={(id) => void bet(id, true)}
+        takeFocus={amountFocused}
       />
     </>
   );
@@ -353,6 +368,7 @@ function GraceBet({
   name,
   disabled,
   onBet,
+  takeFocus,
 }: {
   prediction: PredictionViewDto;
   endsAt: number;
@@ -364,8 +380,16 @@ function GraceBet({
   name: string;
   disabled: boolean;
   onBet: (outcomeId: string) => void;
+  /** True when the card's amount field had the focus as the lock removed it. */
+  takeFocus: React.RefObject<boolean>;
 }): React.JSX.Element {
   const headingId = React.useId();
+  const amountRef = React.useRef<HTMLInputElement>(null);
+  React.useEffect(() => {
+    const active = document.activeElement;
+    if (takeFocus.current && (active === null || active === document.body)) amountRef.current?.focus();
+    // The ref object is stable, so this runs once, on mount: only the lock's unmount strands the focus.
+  }, [takeFocus]);
   const left = Math.min(GRACE_MS, Math.max(0, endsAt - nowMs));
   const seconds = Math.ceil(left / 1000);
   return (
@@ -386,6 +410,7 @@ function GraceBet({
         </ProgressLabel>
       </Progress>
       <Input
+        ref={amountRef}
         type="number"
         inputMode="numeric"
         min={1}

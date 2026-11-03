@@ -103,11 +103,11 @@ function card(
   const bet = opts.bet ?? vi.fn<InteractClient["bet"]>();
   // As the chat panel does: every bet carries this channel's playhead and mode.
   const client = withPlayhead(interact(bet), "rivertide", clock);
-  return render(
+  const tree = (pr: PredictionViewDto) => (
     <LocaleProvider locale={locale} messages={uiMessages}>
       <TooltipProvider>
         <ChatPredictionCard
-          prediction={prediction}
+          prediction={pr}
           channel={opts.channel === undefined ? LIVE : opts.channel}
           clock={clock}
           now={now}
@@ -119,8 +119,10 @@ function card(
           onPointsSpent={() => {}}
         />
       </TooltipProvider>
-    </LocaleProvider>,
+    </LocaleProvider>
   );
+  const r = render(tree(prediction));
+  return Object.assign(r, { update: (pr: PredictionViewDto) => r.rerender(tree(pr)) });
 }
 
 const grace = () => screen.queryByTestId("prediction-grace");
@@ -241,6 +243,22 @@ describe("the grace bet form", () => {
     expect(grace()).toBeNull();
     tickTo(LOCKED_AT + 5_000);
     expect(grace()).toBeNull();
+  });
+
+  it("keeps the keyboard focus on the amount field across the lock", () => {
+    const r = card(locked({ status: "active", lockedAt: null, lockMediaTs: null }));
+    const before = screen.getByTestId("chat-prediction-amount");
+    act(() => before.focus());
+    r.update(locked());
+    const field = (grace() as HTMLElement).querySelector('[data-testid="chat-prediction-amount"]');
+    expect(document.activeElement).toBe(field);
+  });
+
+  it("does not take the focus when the amount field did not have it", () => {
+    const r = card(locked({ status: "active", lockedAt: null, lockMediaTs: null }));
+    r.update(locked());
+    expect(grace()).not.toBeNull();
+    expect(document.activeElement).toBe(document.body);
   });
 
   it("passes the accessibility checks in grace", () => {

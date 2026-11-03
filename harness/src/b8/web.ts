@@ -20,6 +20,7 @@
  *
  * Every actor is the step's own, apart from the twitch-import streamer step 3 leaves.
  */
+import AxeBuilder from "@axe-core/playwright";
 import type { Locator, Page } from "playwright";
 import { playerBundles } from "../player-server.ts";
 import type { ScenarioContext } from "../scenario.ts";
@@ -33,6 +34,7 @@ import { testIdSelector as tid } from "../w2/rehearsal/checks.ts";
 import { toDate } from "../w2/sql-time.ts";
 import { type E8Streamer, newE8Streamer, waitLive } from "../e8/kit.ts";
 import { PANEL_EXPECTED } from "../n3/index.ts";
+import { blockingViolations } from "../n4/web.ts";
 import { signInViaUi } from "../web/flows.ts";
 import { ROUTES } from "../web/selectors.ts";
 import { WebSession } from "../web/session.ts";
@@ -148,6 +150,17 @@ async function signedInSession(ctx: ScenarioContext, user: SignedInUser | null, 
 
 const within = (scope: Page | Locator, id: string, data: Record<string, string> = {}) => scope.locator(tid(id, data));
 
+/** The brief's axe check: no serious or critical violation inside `testId` (all are recorded). */
+async function checkAxe(ctx: ScenarioContext, page: Page, testId: string): Promise<void> {
+  const result = await new AxeBuilder({ page }).include(tid(testId)).analyze();
+  ctx.data(
+    `b8.web.axe.${testId}`,
+    result.violations.map((v) => ({ id: v.id, impact: v.impact ?? null, nodes: v.nodes.length })),
+  );
+  const blocking = blockingViolations(result.violations);
+  ctx.assert(`b8 web: ${testId} has no serious axe violations`, blocking.length === 0, blocking);
+}
+
 // ------------------------------------------------------------------ interact: grace-bet-web
 
 export async function stepGraceBetWeb(run: InteractB8Extension): Promise<void> {
@@ -220,6 +233,7 @@ export async function stepGraceBetWeb(run: InteractB8Extension): Promise<void> {
       endsAt !== null && Date.parse(endsAt) === Date.parse(lock.lockedAt) + GRACE_MS,
       { endsAt, lockedAt: lock.lockedAt },
     );
+    await checkAxe(ctx, page, B8_WEB_IDS.grace);
     await within(grace, "chat-prediction-amount").fill(String(GRACE_BET), { timeout: UI_TIMEOUT_MS });
     await within(grace, `chat-prediction-bet-${A}`).click({ timeout: UI_TIMEOUT_MS });
     await within(page, "chat-prediction-my-bet", { "outcome-id": A, points: String(GRACE_BET) }).waitFor({
@@ -324,6 +338,7 @@ export async function stepGiveawayVerifyMine(run: InteractB8Extension): Promise<
     );
     await within(page, B8_WEB_IDS.verifyMine, { pseudonym: own }).waitFor({ timeout: UI_TIMEOUT_MS });
     ctx.assert(title("exactly one mark"), (await within(page, B8_WEB_IDS.verifyMine).count()) === 1);
+    await checkAxe(ctx, page, "giveaway-verify-page");
     ctx.assert(
       title("no username on the page (decision (n))"),
       !(await page.locator("body").innerText()).includes(entrant.username),
@@ -377,8 +392,14 @@ export async function stepChannelPanelsBanner(run: TwitchImportB8Extension): Pro
   await ctx.step(title("the imported mature label hides the banner before 18+"), async () => {
     const got = await c.get({ channel });
     if (!got.mature) return;
+    // After hydration: SSR never renders the banner, so an early count would prove nothing.
+    await page.waitForLoadState("networkidle", { timeout: UI_TIMEOUT_MS }).catch(() => undefined);
     ctx.assert(title("no banner for an anonymous visitor"), (await within(page, B8_WEB_IDS.banner).count()) === 0);
     await c.update({ channel, mature: false });
+    // Step 4 (and any rerun) expects the imported label back.
+    ctx.defer(async () => {
+      await c.update({ channel, mature: true });
+    });
   });
 
   await ctx.step(title("channel-panels: in order, markup as text, nofollow ugc links"), async () => {
@@ -400,6 +421,7 @@ export async function stepChannelPanelsBanner(run: TwitchImportB8Extension): Pro
       const problems = panelLinkProblems(await link.getAttribute("target"), await link.getAttribute("rel"));
       ctx.assert(title("the link is nofollow ugc in a new tab"), problems.length === 0, problems);
     }
+    await checkAxe(ctx, page, B8_WEB_IDS.panels);
   });
 
   await ctx.step(title("channel-banner: our own media URL, decorative, in its frame"), async () => {
@@ -412,6 +434,7 @@ export async function stepChannelPanelsBanner(run: TwitchImportB8Extension): Pro
     });
     ctx.assert(title("alt is empty"), (await img.getAttribute("alt")) === "");
     ctx.assert(title("lazy"), (await img.getAttribute("loading")) === "lazy");
+    await checkAxe(ctx, page, B8_WEB_IDS.banner);
   });
 
   await ctx.step(title("320 px: no horizontal scroll"), async () => {

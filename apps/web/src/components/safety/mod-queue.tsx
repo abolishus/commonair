@@ -95,7 +95,8 @@ export interface ModQueueProps {
   client?: ModerationClient;
   /**
    * The tab and selection from the URL (`?tab=&case=`); with `onLocationChange` the queue is
-   * controlled by them, so back and forward move through what was opened. Without, it keeps its own.
+   * controlled by them, so a shared or reloaded URL reopens the same view (the route replaces the
+   * history entry, so selections do not pile up in back and forward). Without, it keeps its own.
    */
   location?: ModQueueLocation;
   onLocationChange?: (next: ModQueueLocation) => void;
@@ -187,11 +188,25 @@ export function ModQueue({
   const report = selected?.kind === "report" ? reports.items?.find((r) => r.id === selected.id) : undefined;
   const request = selected?.kind === "ncii" ? ncii.items?.find((r) => r.id === selected.id) : undefined;
 
-  // A linked report or NCII request (a jury flag, a shared URL) that the open queue does not hold:
-  // there is no procedure to read one by id, so say so and clear the selection.
-  const missing =
-    (selected?.kind === "report" && reports.items !== null && report === undefined) ||
-    (selected?.kind === "ncii" && ncii.items !== null && request === undefined);
+  // A linked report or NCII request (a shared URL) not on the loaded pages: load the next page while
+  // there is one; once the open queue is exhausted, there is no procedure to read one by id, so say
+  // so and clear the selection.
+  const unseenReport = selected?.kind === "report" && reports.items !== null && report === undefined;
+  const unseenNcii = selected?.kind === "ncii" && ncii.items !== null && request === undefined;
+  const missing = (unseenReport && !reports.hasMore) || (unseenNcii && !ncii.hasMore);
+  const seekRef = React.useRef(() => {});
+  React.useEffect(() => {
+    seekRef.current = () => {
+      if (unseenReport && reports.hasMore && !reports.loadingMore) reports.loadMore();
+      if (unseenNcii && ncii.hasMore && !ncii.loadingMore) ncii.loadMore();
+    };
+  });
+  const seeking =
+    (unseenReport && reports.hasMore && !reports.loadingMore) || (unseenNcii && ncii.hasMore && !ncii.loadingMore);
+  const loadedCount = (reports.items?.length ?? 0) + (ncii.items?.length ?? 0);
+  React.useEffect(() => {
+    if (seeking) seekRef.current();
+  }, [seeking, loadedCount]);
   // The latest `setSelected` (a fresh closure every render), so the effect runs once per miss.
   const clearRef = React.useRef(() => setSelected(null));
   React.useEffect(() => {

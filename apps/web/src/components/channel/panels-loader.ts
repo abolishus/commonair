@@ -18,21 +18,21 @@ export interface ChannelPage {
 /**
  * The channel page's first render: the summary (as `getChannel`) plus the banner, panels and
  * suspension, from one `channels.get`. `null` when the channel does not exist. The visitor's cookie
- * is forwarded so `viewer.following` reflects them.
+ * is forwarded so `viewer.following` reflects them. The body stays inside the handler so the
+ * compiler drops `server/env.ts` from the client bundle.
  */
-export async function loadChannelPage(slug: string, cookie?: string): Promise<ChannelPage | null> {
-  if (!SLUG.test(slug)) return null;
-  try {
-    const dto = await serverApi(loadWebEnv().API_INTERNAL_URL, cookie ? { cookie } : {}).channels.get({
-      channel: slug,
-    });
-    return { summary: summarize(dto), extras: channelExtras(dto) };
-  } catch (err) {
-    if (errorCode(err) === "NOT_FOUND") return null;
-    throw err;
-  }
-}
-
 export const getChannelPage = createServerFn({ method: "GET" })
   .validator((input: { channel: string }) => ({ channel: String(input.channel).toLowerCase() }))
-  .handler(({ data }) => loadChannelPage(data.channel, getRequestHeader("cookie")));
+  .handler(async ({ data }): Promise<ChannelPage | null> => {
+    if (!SLUG.test(data.channel)) return null;
+    const cookie = getRequestHeader("cookie");
+    try {
+      const dto = await serverApi(loadWebEnv().API_INTERNAL_URL, cookie ? { cookie } : {}).channels.get({
+        channel: data.channel,
+      });
+      return { summary: summarize(dto), extras: channelExtras(dto) };
+    } catch (err) {
+      if (errorCode(err) === "NOT_FOUND") return null;
+      throw err;
+    }
+  });

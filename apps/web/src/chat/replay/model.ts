@@ -75,7 +75,11 @@ export const REPLAY_AHEAD_MICROS = 120 * MICROS_PER_SECOND;
 export const REPLAY_JUMP_MICROS = 10 * 60 * MICROS_PER_SECOND;
 export const REPLAY_BACKFILL_MICROS = 60 * MICROS_PER_SECOND;
 export const REPLAY_MAX_ROWS = 300;
-/** The memory cap: 25 pages, an hour of a busy chat; ADR 0012 amendment 1 keeps no other bound. */
+/**
+ * The memory cap: 25 pages, an hour of a busy chat; ADR 0012 amendment 1 keeps no other bound.
+ * Accepted limit: lines ahead of the playhead are never trimmed, so a span can hold up to
+ * `REPLAY_AHEAD_MICROS` of chat plus one page beyond the cap.
+ */
 export const REPLAY_MAX_LINES = 5_000;
 export const REPLAY_RETRY_DELAYS_MS: readonly number[] = [1_000, 2_000, 5_000, 10_000];
 
@@ -320,8 +324,14 @@ export class ReplayModel {
     if (at === null) return;
     const here = this.spanAt(at);
     let next: Span;
-    if (this.fromIgnored) next = this.spans[0] as Span;
-    else if (here && (!here.fetched || at - loadedEnd(here) <= this.opts.jumpMicros)) next = here;
+    if (this.fromIgnored) {
+      // One span only; behind its (trimmed) start, page again from the very beginning.
+      const only = this.spans[0] as Span;
+      if (only.start !== null && at < only.start) {
+        next = newSpan(null);
+        this.spans = [next];
+      } else next = only;
+    } else if (here && (!here.fetched || at - loadedEnd(here) <= this.opts.jumpMicros)) next = here;
     else {
       // Far past the span before it (or before every span, once the first was dropped by the cap).
       next = newSpan(at - this.opts.backfillMicros);
@@ -460,8 +470,8 @@ export class ReplayModel {
       this.spans = this.spans.filter((s) => s !== far);
     }
     const over = this.heldLines() - max;
-    // With `from` ignored there is no way back to a trimmed start: keep everything.
-    if (over <= 0 || this.fromIgnored) return;
+    // With `from` ignored, seeking back before a trimmed start pages again from the beginning.
+    if (over <= 0) return;
     const s = this.active;
     const shown = this.playhead === null ? 0 : countAtOrBefore(s.lines, this.playhead);
     let n = Math.min(over, Math.max(0, shown - this.opts.maxRows));
