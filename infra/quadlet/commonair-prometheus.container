@@ -1,7 +1,8 @@
 # SPDX-FileCopyrightText: 2026 CommonAir contributors
 # SPDX-License-Identifier: CC0-1.0
 #
-# Prometheus.
+# Prometheus, with the recording rules and alerts of infra/prometheus/rules
+# (docs/operators/monitoring.md).
 [Unit]
 Description=CommonAir prometheus
 # Never give up on a crash loop: RestartSteps below throttles it instead (ADR 0023 §10).
@@ -14,9 +15,17 @@ ContainerName=commonair-prometheus
 RunInit=true
 Network=commonair.network
 NetworkAlias=prometheus
-Volume=%h/commonair/infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro,Z
+# Only the keys of commonair.env this unit needs (SLO_TARGET, EGRESS_BUDGET_GIB,
+# LIVE_STREAMS_PER_HOST, MANAGED_DB_METRICS_*), copied at every start.
+EnvironmentFile=%h/.config/commonair/unit-env/commonair-prometheus.env
+# prometheus.yml, rules/ and start.sh, which renders those settings into rules (and the optional
+# managed-db-metrics job) before it execs Prometheus. The optional job's password is a Podman
+# secret an operator adds with a drop-in (docs/operators/monitoring.md); nothing here needs it.
+Volume=%h/commonair/infra/prometheus:/etc/prometheus:ro,Z
 Volume=commonair-prometheus-data.volume:/prometheus
-Exec=--config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/prometheus --storage.tsdb.retention.time=30d
+Entrypoint=/bin/sh
+# 35 days: the 7-day sustained peak looks back 8 days and the 30-day budget and egress 30.
+Exec=/etc/prometheus/start.sh --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/prometheus --storage.tsdb.retention.time=35d
 HealthCmd=CMD wget -q -O /dev/null http://127.0.0.1:9090/-/ready
 HealthInterval=10s
 HealthTimeout=3s
@@ -33,6 +42,9 @@ HealthOnFailure=kill
 # Leaves the cgroup as the next start needs it: RestartMode=direct skips systemd's own cleanup
 # (scripts/selfhost/cgroup-reset.sh says why).
 ExecStopPost=-/bin/sh %h/commonair/scripts/selfhost/cgroup-reset.sh
+# Renders that env file from commonair.env, so an edit there applies on the next restart. It
+# fails closed: an unreadable commonair.env leaves no env file, and the unit does not start.
+ExecStartPre=/bin/sh %h/commonair/scripts/selfhost/render-env.sh %h/commonair/infra/selfhost/env/commonair-prometheus.keys %h/.config/commonair/commonair.env %h/.config/commonair/unit-env/commonair-prometheus.env
 Restart=always
 RestartMode=direct
 RestartSec=5

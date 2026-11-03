@@ -1,7 +1,9 @@
 # SPDX-FileCopyrightText: 2026 CommonAir contributors
 # SPDX-License-Identifier: CC0-1.0
 #
-# OpenTelemetry Collector (OTLP in; Tempo, Prometheus, Loki out).
+# OpenTelemetry Collector (OTLP in; Tempo, Prometheus, Loki out). It also reads the host, Postgres
+# and Valkey (docs/operators/monitoring.md): the bundled containers, or the managed services over
+# verified TLS with the read-only monitor role (contract step §3.7).
 [Unit]
 Description=CommonAir otel-collector
 # Never give up on a crash loop: RestartSteps below throttles it instead (ADR 0023 §10).
@@ -18,7 +20,22 @@ ContainerName=commonair-otel-collector
 RunInit=true
 Network=commonair.network
 NetworkAlias=otel-collector
-Volume=%h/commonair/infra/otel-collector/config.yaml:/etc/otelcol-contrib/config.yaml:ro,Z
+# Only the keys of commonair.env this unit needs (PG_MONITOR_*, VALKEY_MONITOR_*,
+# OBSERVABILITY_STATE_MODE, DATABASE_CA_FILE, VALKEY_CA_FILE), copied at every start.
+EnvironmentFile=%h/.config/commonair/unit-env/commonair-otel-collector.env
+# The monitor logins' passwords: Podman secrets, never in commonair.env or a config file. With
+# bundled Valkey (no ACL user) the Valkey one is the server's own password. selfhost.sh creates
+# both in either state mode. The providers' CAs (commonair-pg-ca, commonair-valkey-ca) are mounted
+# by selfhost.sh's external-state drop-in at the paths DATABASE_CA_FILE and VALKEY_CA_FILE name.
+Secret=commonair-pg-monitor-password,type=env,target=PG_MONITOR_PASSWORD
+Secret=commonair-valkey-monitor-password,type=env,target=VALKEY_MONITOR_PASSWORD
+# config.yaml and the tls/ fragments it picks by PG_MONITOR_TLS and VALKEY_MONITOR_TLS.
+Volume=%h/commonair/infra/otel-collector:/etc/otelcol-contrib:ro,Z
+# The host's /proc, read-only, for the hostmetrics receiver (root_path /hostfs): CPU, memory and
+# load (/proc/stat, /proc/meminfo, /proc/loadavg) and disk I/O (/proc/diskstats) are host-wide
+# there, where the container's own /proc would show only its cgroup's view. No SELinux label:
+# /proc cannot be relabelled. /sys is not mounted: no scraper in use reads it.
+Volume=/proc:/hostfs/proc:ro
 Exec=--config=/etc/otelcol-contrib/config.yaml
 HealthCmd=CMD /usr/local/bin/busybox wget -q -O /dev/null http://127.0.0.1:13133/
 HealthInterval=10s
@@ -36,6 +53,9 @@ HealthOnFailure=kill
 # Leaves the cgroup as the next start needs it: RestartMode=direct skips systemd's own cleanup
 # (scripts/selfhost/cgroup-reset.sh says why).
 ExecStopPost=-/bin/sh %h/commonair/scripts/selfhost/cgroup-reset.sh
+# Renders that env file from commonair.env, so an edit there applies on the next restart. It
+# fails closed: an unreadable commonair.env leaves no env file, and the unit does not start.
+ExecStartPre=/bin/sh %h/commonair/scripts/selfhost/render-env.sh %h/commonair/infra/selfhost/env/commonair-otel-collector.keys %h/.config/commonair/commonair.env %h/.config/commonair/unit-env/commonair-otel-collector.env
 Restart=always
 RestartMode=direct
 RestartSec=5
