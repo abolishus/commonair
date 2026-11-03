@@ -383,7 +383,14 @@ export const ENFORCEMENT_AUTOMATED_DECISIONS = ["fully", "partially", "not"] as 
 /** Art. 17(3)(d)/(e): a terms (contractual) or an illegal-content ground. */
 export const ENFORCEMENT_GROUNDS = ["terms", "illegal"] as const;
 /** The `facts.code` discriminator of `EnforcementFacts`. */
-export const ENFORCEMENT_FACT_CODES = ["classifier", "moderator_review", "ncii_notice", "hash_match"] as const;
+export const ENFORCEMENT_FACT_CODES = [
+  "classifier",
+  "moderator_review",
+  "ncii_notice",
+  "hash_match",
+  // Batch 8 (B7 CR6): a staff action with no moderation case (`STAFF_ACTION_SOURCE_ACTIONS`).
+  "staff_action",
+] as const;
 export const ENFORCEMENT_DELIVERY_CHANNELS = ["email", "in_app"] as const;
 /**
  * The audit actions that may produce a statement (ADR 0019 decision 3); the builder selects
@@ -705,3 +712,39 @@ export type RelayPurgeReason = (typeof RELAY_PURGE_REASONS)[number];
  * days; one answer carries at most `maxItems` rows; a prefix is at most `prefixMaxLength` bytes.
  */
 export const RELAY_PURGE_RULES = { holdSeconds: 25, retentionDays: 7, maxItems: 500, prefixMaxLength: 256 } as const;
+
+// Batch 8 (M1, B8-server; .claude/briefs/b8/contract-step.md) ------------------------------
+
+/**
+ * `payout_transfers.status` (M1-connect, ADR 0007 Amendment 1): one Stripe Connect transfer per
+ * payout. Migration 0049 allows only `pending → created | failed` and `created → reversed`.
+ */
+export const PAYOUT_TRANSFER_STATUSES = ["pending", "created", "failed", "reversed"] as const;
+export type PayoutTransferStatus = (typeof PAYOUT_TRANSFER_STATUSES)[number];
+/** `patronage_payouts.status` (M1-coop-money): the same transitions, with `paid` for `created`. */
+export const PATRONAGE_PAYOUT_STATUSES = ["pending", "paid", "failed", "reversed"] as const;
+export type PatronagePayoutStatus = (typeof PATRONAGE_PAYOUT_STATUSES)[number];
+/**
+ * The append-only `audit_log` markers of a treasurer refund request (ADR 0007 decision 3,
+ * `services/api/src/money/stripe-refunds.ts`). `payment.refund_outcome_unknown`: the provider call
+ * timed out or failed after the client's retries, so Stripe may have refunded; the request keeps
+ * blocking until it is reconciled, resolved or past its TTL.
+ */
+export const REFUND_MARKER_ACTIONS = [
+  "payment.refund_requested",
+  "payment.refund_submitted",
+  "payment.refund_request_failed",
+  "payment.refund_outcome_unknown",
+] as const;
+export type RefundMarkerAction = (typeof REFUND_MARKER_ACTIONS)[number];
+/** The `money.treasurer.refundRequests.list` filter: still blocking, outcome unknown, or every request. */
+export const REFUND_REQUEST_FILTERS = ["outstanding", "unknown", "all"] as const;
+/** A refund request's state in the treasurer view. */
+export const REFUND_REQUEST_STATES = ["outstanding", "unknown", "resolved"] as const;
+/** `money.treasurer.refundRequests.resolve`: what the treasurer found at Stripe. */
+export const REFUND_REQUEST_RESOLUTIONS = ["refunded", "failed"] as const;
+/**
+ * The staff actions whose statement of reasons carries `facts.code = "staff_action"` (B7 CR6):
+ * applied by staff with no moderation case behind them, so the statement cites no case.
+ */
+export const STAFF_ACTION_SOURCE_ACTIONS = ["report.resolve", "user.suspend", "channel.suspend"] as const;

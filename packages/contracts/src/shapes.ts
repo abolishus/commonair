@@ -411,6 +411,14 @@ export const JuryCasesPerPanelSetting = z.object({ casesPerPanel: z.number().int
 export type JuryCasesPerPanelSetting = z.infer<typeof JuryCasesPerPanelSetting>;
 
 /**
+ * `shares.cardPayments` (batch 8, M1-coop-money; an ordinary decision, seeded off): whether
+ * members may pay their share by card through Stripe Checkout when the instance runs the Stripe
+ * adapter. Off keeps `coop.buyShare` on the manual path. Shape-checked by the database (0049).
+ */
+export const SharesCardPaymentsSetting = z.object({ enabled: z.boolean() });
+export type SharesCardPaymentsSetting = z.infer<typeof SharesCardPaymentsSetting>;
+
+/**
  * Giveaway eligibility (decision (t)): only account age, follow age and verified-watch seconds
  * (ADR 0015). Strict, so a subscription, points or payment criterion cannot be expressed.
  */

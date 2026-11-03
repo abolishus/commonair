@@ -493,17 +493,37 @@ describe("event → action mapping", () => {
     });
   });
 
-  test("refund failures (refund.failed, charge.refund.updated failed); other refund updates are ignored", () => {
-    const failed = { id: "re_1", object: "refund", payment_intent: "pi_1", amount: 100, status: "failed" };
+  test("refund failures (refund.failed, *.refund.updated failed); other refund updates are refund.updated", () => {
+    const failed = {
+      id: "re_1",
+      object: "refund",
+      payment_intent: "pi_1",
+      amount: 100,
+      currency: "USD",
+      status: "failed",
+      metadata: { payment_id: "pay_1" },
+    };
     expect(stripeAction(envelope("refund.failed", failed))).toEqual({
       type: "refund.failed",
       refundId: "re_1",
       paymentIntent: "pi_1",
     });
+    expect(stripeAction(envelope("refund.failed", { ...failed, status: "succeeded" }))).toEqual({ type: "ignored" });
     expect(stripeAction(envelope("charge.refund.updated", failed))).toMatchObject({ type: "refund.failed" });
-    expect(stripeAction(envelope("charge.refund.updated", { ...failed, status: "succeeded" }))).toEqual({
-      type: "ignored",
-    });
+    expect(stripeAction(envelope("refund.updated", failed))).toMatchObject({ type: "refund.failed" });
+    for (const type of ["charge.refund.updated", "refund.updated"])
+      expect(stripeAction(envelope(type, { ...failed, status: "succeeded" }))).toEqual({
+        type: "refund.updated",
+        refundId: "re_1",
+        paymentIntent: "pi_1",
+        paymentId: "pay_1",
+        status: "succeeded",
+        amountCents: 100,
+        currency: "usd",
+      });
+    expect(() => stripeAction(envelope("refund.updated", { ...failed, status: "pending", amount: undefined }))).toThrow(
+      StripeEventError,
+    );
     const redacted = stripeEnvelope(redactStripeEvent({ ...envelopeBody("refund.failed", failed) }));
     expect(redacted && stripeAction(redacted)).toMatchObject({ type: "refund.failed", refundId: "re_1" });
   });

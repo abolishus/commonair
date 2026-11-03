@@ -113,7 +113,7 @@ export function payoutHoldLabel(reason: string): string {
 
 // ── Every treasury tab (E4b, E5 and the W1 fraud review) ──────────────────────────────────────
 
-export type TreasuryPageTab = TreasuryCoopTab | "fraud";
+export type TreasuryPageTab = TreasuryCoopTab | "fraud" | "refunds" | "transfers";
 const PAGE_TABS: readonly TreasuryPageTab[] = [
   "payments",
   "payouts",
@@ -122,12 +122,15 @@ const PAGE_TABS: readonly TreasuryPageTab[] = [
   "shares",
   "patronage",
   "fraud",
+  "refunds",
+  "transfers",
 ];
 const isPageTab = (value: unknown): value is TreasuryPageTab => PAGE_TABS.some((tab) => tab === value);
 
 /**
  * The treasury page's tabs: `TreasuryCoopTabs`' six (same ids, labels and test ids), then
- * "Fraud review" (`treasury-tab-fraud`).
+ * "Fraud review" (`treasury-tab-fraud`), then batch 8's refund requests
+ * (`treasury-tab-refunds`) and payout transfers (`treasury-tab-transfers`).
  */
 export function TreasuryPageTabs({
   value,
@@ -136,7 +139,7 @@ export function TreasuryPageTabs({
 }: {
   value: TreasuryPageTab;
   onValueChange: (tab: TreasuryPageTab) => void;
-  panels: TreasuryPanels & { fraud: React.ReactNode };
+  panels: TreasuryPanels & { fraud: React.ReactNode; refunds: React.ReactNode; transfers: React.ReactNode };
 }): React.JSX.Element {
   const panel = (tab: TreasuryPageTab) => <div className="flex flex-col gap-4 pt-4">{panels[tab]}</div>;
   return (
@@ -176,6 +179,18 @@ export function TreasuryPageTabs({
           content: panel("patronage"),
         },
         { id: "fraud", label: t("fraud.tab"), "data-testid": "treasury-tab-fraud", content: panel("fraud") },
+        {
+          id: "refunds",
+          label: t("refundRequests.tab"),
+          "data-testid": "treasury-tab-refunds",
+          content: panel("refunds"),
+        },
+        {
+          id: "transfers",
+          label: t("payoutTransfers.tab"),
+          "data-testid": "treasury-tab-transfers",
+          content: panel("transfers"),
+        },
       ]}
     />
   );

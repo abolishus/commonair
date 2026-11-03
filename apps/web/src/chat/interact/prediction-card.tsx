@@ -11,8 +11,20 @@ import { displayPointsName } from "./points-chip.tsx";
 import { type InteractClient, interactErrorKey, isStaffRefusal } from "./client.ts";
 import { MAX_BET_POINTS, betAmount, type LoyaltyBalanceDto, type PredictionViewDto } from "./state.ts";
 
+/** The channel a prediction runs on, as the channel page knows it (batch 8 contract step §3.8). */
+export interface PredictionChannel {
+  id: string;
+  /** Whether the channel is live now: the grace window after a lock is offered only while it is. */
+  live: boolean;
+}
+
 export interface ChatPredictionCardProps {
   prediction: PredictionViewDto;
+  /**
+   * The channel and its live state, or null where the page does not know them. Accepted and not
+   * read yet: B8-web uses it for the grace window (W3-fair-predictions request 3).
+   */
+  channel?: PredictionChannel | null;
   signedIn: boolean;
   /** The owner, editors and moderators cannot bet (ADR 0026): no betting controls for them. */
   staff: boolean;

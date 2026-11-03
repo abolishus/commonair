@@ -192,6 +192,14 @@ export const DEFAULT_GOVERNANCE_SETTINGS = [
     description: "Advisory jury: closed cases sampled for each panel.",
     value: { casesPerPanel: 20 },
   },
+  // Batch 8 (M1-coop-money): card payment for shares ships off; the co-op votes it on.
+  {
+    key: "shares.cardPayments",
+    protected: false,
+    description:
+      "Co-op shares by card (ADR 0020): whether members may pay their share through the card provider when the instance has one. Off keeps shares on bank transfer, confirmed by a treasurer.",
+    value: { enabled: false },
+  },
 ] as const;
 
 export type GovernanceOverrides = Record<string, Record<string, unknown>>;

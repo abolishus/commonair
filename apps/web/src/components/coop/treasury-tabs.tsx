@@ -16,6 +16,8 @@ import {
   type ShareStatus,
 } from "../../lib/coop.ts";
 import { usePaged } from "../money/use-load.ts";
+import { PayoutTransfers } from "../treasury/payout-transfers.tsx";
+import { RefundRequests } from "../treasury/refund-requests.tsx";
 import { CoopLoadError } from "./load-error.tsx";
 import { PatronagePanel, SharesPanel, type PatronageRunResultDto } from "./treasury.tsx";
 import { coopLoads, pagedLoad, useCoopLoad } from "./use-coop.ts";
@@ -58,6 +60,16 @@ export function CoopSharesTab(): React.JSX.Element {
       />
     </>
   );
+}
+
+/** Treasury `refunds` tab (batch 8): refund requests, M1-gifts-refunds' component, which loads its own data. */
+export function TreasuryRefundRequestsTab(): React.JSX.Element {
+  return <RefundRequests />;
+}
+
+/** Treasury `transfers` tab (batch 8): payout transfers, M1-connect's component, which loads its own data. */
+export function TreasuryPayoutTransfersTab(): React.JSX.Element {
+  return <PayoutTransfers />;
 }
 
 /** Why `coop.patronage.run` was refused, in words. */

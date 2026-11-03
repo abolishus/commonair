@@ -8,6 +8,7 @@
 import { createDb } from "@commonair/db";
 import { afterAll, describe, expect, test } from "vite-plus/test";
 import { EXPORT_FILES, fileValue, filesFor } from "../src/exports/collectors.ts";
+import { GIVEAWAY_EXPORT_FILES } from "../src/exports/giveaways.ts";
 import { WATCH_ROOM_EXPORT_FILES } from "../src/exports/watch-rooms.ts";
 import { PORTABILITY_EXPORT_FILES } from "../src/portability/export.ts";
 
@@ -21,7 +22,7 @@ const scope = { userId: USER, channelId: CHANNEL };
 
 // Batch 7 units own their files and their allow-list tests (tests/export-<unit>*.test.ts); this
 // table pins every other file. The per-section checks below still cover theirs.
-const UNIT_FILES = [...WATCH_ROOM_EXPORT_FILES, ...PORTABILITY_EXPORT_FILES];
+const UNIT_FILES = [...WATCH_ROOM_EXPORT_FILES, ...PORTABILITY_EXPORT_FILES, ...GIVEAWAY_EXPORT_FILES];
 const unitOwned = (f: { name: string; kind: string }) => UNIT_FILES.some((u) => u.name === f.name && u.kind === f.kind);
 const coreFiles = (kind: "account" | "channel") => filesFor(kind).filter((f) => !unitOwned(f));
 
@@ -62,7 +63,7 @@ describe("export collectors", () => {
     ]);
     // Batch 7: the unit-owned files come after, and nothing builds into a bundle by collectors.
     expect(filesFor("account").map((f) => f.name)).toEqual(
-      expect.arrayContaining(["watch-rooms.json", "portability.json"]),
+      expect.arrayContaining(["watch-rooms.json", "portability.json", "interact-giveaways.json"]),
     );
     expect(
       filesFor("account")

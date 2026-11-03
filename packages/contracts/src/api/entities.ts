@@ -689,6 +689,65 @@ export const TreasurerPayout = Payout.extend({
   reference: z.string().nullable(),
   createdAt: Timestamp,
 });
+
+/**
+ * Batch 8 (M1-gifts-refunds, ADR 0007 decision 3): one treasurer refund request and its
+ * append-only audit markers, oldest first. `state`: `outstanding` while it blocks a new request,
+ * `unknown` while the provider's answer is unknown (listed even after the TTL), `resolved` once
+ * submitted and posted, failed, or resolved by a treasurer.
+ */
+export const RefundRequestView = z.object({
+  /** The `requestId` the markers share. */
+  id: Id,
+  paymentId: Id,
+  paymentKind: z.enum(E.PAYMENT_KINDS),
+  provider: z.enum(E.PAYMENT_PROVIDERS),
+  amount: Money,
+  /** What the request asked for (the rest of the payment when it was made). */
+  requested: Money,
+  state: z.enum(E.REFUND_REQUEST_STATES),
+  /** `paid_after_end` for an automatic refund (ADR 0007 decision 2); null for a treasurer's own. */
+  reason: z.enum(["paid_after_end"]).nullable(),
+  /** Null for a system request (auto-refund). */
+  requestedBy: UserPublic.pick({ id: true, username: true }).nullable(),
+  markers: z.array(z.object({ action: z.enum(E.REFUND_MARKER_ACTIONS), at: Timestamp })),
+  createdAt: Timestamp,
+});
+export type RefundRequestView = z.infer<typeof RefundRequestView>;
+
+/** Batch 8 (M1-connect, ADR 0007 Amendment 1): one payout's Stripe Connect transfer. */
+export const PayoutTransferView = z.object({
+  id: Id,
+  payoutId: Id,
+  user: UserPublic.pick({ id: true, username: true, displayName: true }),
+  /** The payout run: the payouts' period start. */
+  periodStart: Timestamp,
+  amount: Money,
+  reversed: Money,
+  status: z.enum(E.PAYOUT_TRANSFER_STATUSES),
+  /** An opaque short code (e.g. `account_not_ready`, `held`), never the provider's message. */
+  failureCode: z.string().nullable(),
+  /** The provider's transfer id once created. */
+  providerRef: z.string().nullable(),
+  createdAt: Timestamp,
+  updatedAt: Timestamp,
+});
+export type PayoutTransferView = z.infer<typeof PayoutTransferView>;
+
+/** Batch 8 (M1-coop-money): one member's patronage payout for a period. */
+export const PatronagePayoutView = z.object({
+  id: Id,
+  periodId: Id,
+  user: UserPublic.pick({ id: true, username: true, displayName: true }),
+  amount: Money,
+  provider: z.enum(E.PAYMENT_PROVIDERS),
+  status: z.enum(E.PATRONAGE_PAYOUT_STATUSES),
+  /** The treasurer's reference (manual) or the provider's transfer id. */
+  reference: z.string().nullable(),
+  createdAt: Timestamp,
+  paidAt: Timestamp.nullable(),
+});
+export type PatronagePayoutView = z.infer<typeof PatronagePayoutView>;
 export const LedgerLine = z.object({
   transactionId: Id,
   occurredAt: Timestamp,
@@ -1201,6 +1260,16 @@ export const EnforcementFacts = z.discriminatedUnion("code", [
   z.object({ code: z.literal("ncii_notice"), requestId: Id, receivedAt: Timestamp, deadlineAt: Timestamp }),
   /** T0 NCII-list matches only: a CSAM-list match never produces a statement. */
   z.object({ code: z.literal("hash_match"), listCategory: z.literal("ncii"), capturedAt: Timestamp }),
+  /**
+   * Batch 8 (B7 CR6): a staff action with no moderation case behind it, so the statement names the
+   * action, the clause and the time, and never a case reference.
+   */
+  z.object({
+    code: z.literal("staff_action"),
+    action: z.enum(E.STAFF_ACTION_SOURCE_ACTIONS),
+    clauseId: z.string().min(1).max(100),
+    appliedAt: Timestamp,
+  }),
 ]);
 export type EnforcementFacts = z.infer<typeof EnforcementFacts>;
 
@@ -2162,9 +2231,25 @@ export type PortabilityImport = z.infer<typeof PortabilityImport>;
 /** What `imports.start` applies: the channel fields, panels, and the emote codes chosen. */
 export const ImportChoices = z.object({
   channel: z.boolean(),
+  /**
+   * Batch 8 (N3-import request 5): which channel fields `channel` applies. Absent means every
+   * field, as before; a field absent from the object, or false, is left as it is here.
+   */
+  fields: z
+    .object({
+      title: z.boolean(),
+      description: z.boolean(),
+      tags: z.boolean(),
+      language: z.boolean(),
+      mature: z.boolean(),
+      category: z.boolean(),
+    })
+    .partial()
+    .optional(),
   panels: z.boolean(),
   emotes: z.array(z.string().regex(/^[A-Za-z0-9]{2,20}$/)).max(100),
 });
+export type ImportChoices = z.infer<typeof ImportChoices>;
 export const PresignedUpload = z.object({
   key: z.string(),
   uploadUrl: z.string(),
@@ -2233,6 +2318,11 @@ export const GiveawayVerification = z.object({
     }),
   ),
   drawnAt: Timestamp.nullable(),
+  /**
+   * Batch 8 (W3-giveaways CR9): the signed-in caller's own pseudonym when they entered this
+   * giveaway, on any giveaway; null when signed out or not entered. The salt is never published.
+   */
+  me: z.object({ pseudonym: z.string() }).nullable(),
 });
 export type GiveawayVerification = z.infer<typeof GiveawayVerification>;
 

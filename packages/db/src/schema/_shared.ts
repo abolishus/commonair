@@ -143,3 +143,6 @@ export const federationSubjectKind = pgEnum("federation_subject_kind", E.FEDERAT
 export const federationInboxOutcome = pgEnum("federation_inbox_outcome", E.FEDERATION_INBOX_OUTCOMES);
 export const federationDeliveryStatus = pgEnum("federation_delivery_status", E.FEDERATION_DELIVERY_STATUSES);
 export const relayPurgeReason = pgEnum("relay_purge_reason", E.RELAY_PURGE_REASONS);
+// Batch 8 (M1).
+export const payoutTransferStatus = pgEnum("payout_transfer_status", E.PAYOUT_TRANSFER_STATUSES);
+export const patronagePayoutStatus = pgEnum("patronage_payout_status", E.PATRONAGE_PAYOUT_STATUSES);

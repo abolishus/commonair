@@ -75,6 +75,7 @@
   "enforcementStatement.factsReview": "A moderator reviewed case {caseRef} and decided: {decision}.",
   "enforcementStatement.factsNcii": "We received a request about intimate images on {receivedAt} (request {requestRef}). We had until {deadlineAt} to act on it.",
   "enforcementStatement.factsHash": "Content captured on {capturedAt} matched an image on our list of intimate images removed after earlier requests.",
+  "enforcementStatement.staffAction.facts": "A member of our staff applied this action under {clause} on {appliedAt}. No moderation case was opened for it.",
   "enforcementStatement.sourceLabel": "How it came to our attention",
   "enforcementStatement.sourceOwn": "Our own checks or moderators",
   "enforcementStatement.sourceNotice": "A notice from someone else (we do not say who)",

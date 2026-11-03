@@ -361,6 +361,11 @@ export const RoomSyncReport = z.object({
   playheadWallclock: z.iso.datetime({ offset: true }),
   mode: z.enum(PLAYBACK_MODES),
   at: z.number().int(),
+  /**
+   * Batch 8 (B8-player, W3-watch-rooms review MEDIUM 1): the reporting player's live edge as a
+   * wall-clock instant, null in `dvr` mode. Absent in reports from players before batch 8.
+   */
+  edgeWallclock: z.iso.datetime({ offset: true }).nullable().optional(),
 });
 export type RoomSyncReport = z.infer<typeof RoomSyncReport>;
 
@@ -1025,3 +1030,46 @@ export type WatchRoomAgeBody = z.infer<typeof WatchRoomAgeBody>;
 /** Body of `INTERNAL_ROUTES.relayPurgeHold`; null restores the default. */
 export const RelayPurgeHoldBody = z.object({ seconds: z.number().int().min(1).max(25).nullable() });
 export type RelayPurgeHoldBody = z.infer<typeof RelayPurgeHoldBody>;
+
+// Batch 8 (M1, B8-server; .claude/briefs/b8/contract-step.md §3.6) ---------------------------
+
+/**
+ * Batch 8 job names, by queue. The worker registers them (`services/worker/src/jobs/index.ts`,
+ * names re-exported from `jobs/names.ts`); the API enqueues the on-demand ones.
+ *
+ * - `QUEUES.payments`: `refundReconcile` every 15 minutes (M1-gifts-refunds); `payoutTransfers`
+ *   on demand, one job per Stripe payout with `payoutTransferJobId` (M1-connect);
+ *   `patronagePayout` on demand, one job per member and period with `patronagePayoutJobId`
+ *   (M1-coop-money).
+ * - `QUEUES.portability`: `incomingCleanup` and `importRecordExpiry`, daily (B8-server).
+ */
+export const B8_JOBS = {
+  refundReconcile: "refund-reconcile",
+  payoutTransfers: "payout-transfers",
+  patronagePayout: "patronage-payout",
+  incomingCleanup: "portability-incoming-cleanup",
+  importRecordExpiry: "import-record-expiry",
+} as const;
+export type B8JobName = (typeof B8_JOBS)[keyof typeof B8_JOBS];
+
+/** `refund-reconcile`: scheduled, works from the audit markers and the clock. */
+export const RefundReconcileJob = z.object({});
+export type RefundReconcileJob = z.infer<typeof RefundReconcileJob>;
+/** `payout-transfers`: one Stripe payout's Connect transfer (the payout must be `scheduled`). */
+export const PayoutTransferJob = z.object({ payoutId: z.uuid() });
+export type PayoutTransferJob = z.infer<typeof PayoutTransferJob>;
+/**
+ * Stable BullMQ job id: one transfer job per payout, however often a run is retried. Dashes, not
+ * colons: BullMQ refuses a custom id with one colon.
+ */
+export const payoutTransferJobId = (payoutId: string) => `payout-transfer-${payoutId}`;
+/** `patronage-payout`: one member's patronage payout for an approved period. */
+export const PatronagePayoutJob = z.object({ periodId: z.uuid(), userId: z.uuid() });
+export type PatronagePayoutJob = z.infer<typeof PatronagePayoutJob>;
+export const patronagePayoutJobId = (periodId: string, userId: string) => `patronage-payout-${periodId}-${userId}`;
+/** `portability-incoming-cleanup` (decision (i)): scheduled, works from `portability_imports`. */
+export const PortabilityIncomingCleanupJob = z.object({});
+export type PortabilityIncomingCleanupJob = z.infer<typeof PortabilityIncomingCleanupJob>;
+/** `import-record-expiry` (decision (j)): scheduled, clears Twitch import data after 30 days. */
+export const ImportRecordExpiryJob = z.object({});
+export type ImportRecordExpiryJob = z.infer<typeof ImportRecordExpiryJob>;

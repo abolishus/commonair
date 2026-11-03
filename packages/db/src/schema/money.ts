@@ -115,6 +115,11 @@ export const payments = pgTable(
     tier: smallint(),
     /** Gift subs bought by this payment; 1 otherwise. `amountCents` is the total. */
     quantity: smallint().notNull().default(1),
+    /**
+     * A gift-sub payment (its subscriptions point back through `gift_payment_id`). Batch 8 decision
+     * (d): migration 0049's partial unique index allows one pending gift per gifter and channel.
+     */
+    gift: boolean().notNull().default(false),
     /** A pending payment not confirmed by then expires as failed (manual adapter). */
     expiresAt: ts(),
     succeededAt: ts(),

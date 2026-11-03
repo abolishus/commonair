@@ -16,7 +16,9 @@ import { schema } from "@commonair/db";
 import { createAdapter, loadStripeEvents, loadStripeSignature } from "@commonair/payments";
 import type { Deps } from "../deps.ts";
 import { invalidateSubscribers } from "./checkout-shared.ts";
+import { sendPaymentReceipt } from "./receipt.ts";
 import { type AppliedAction, applyStripeAction, prepareStripeAction } from "./stripe-events.ts";
+import { runRefundFollowUp } from "./stripe-events/refunds.ts";
 
 const { paymentEvents } = schema;
 
@@ -182,6 +184,22 @@ export async function handleStripeWebhook(deps: Deps, req: Request, rateLimitSub
       } catch (err) {
         deps.logger.warn("could not end a Stripe subscription after a clawback", { eventId: envelope.id, err });
       }
+    }
+  }
+  // Batch 8 after-commit hooks (ADR 0007 decision 2): outside the transaction and its row locks,
+  // best effort. Each is idempotent, so a missed one is caught by a redelivery or the reconciler.
+  for (const paymentId of new Set(applied.receipts ?? [])) {
+    try {
+      await sendPaymentReceipt(deps, paymentId);
+    } catch (err) {
+      deps.logger.warn("could not send a payment receipt", { eventId: envelope.id, paymentId, err });
+    }
+  }
+  if (applied.followUp) {
+    try {
+      await runRefundFollowUp(deps, applied.followUp);
+    } catch (err) {
+      deps.logger.warn("a webhook follow-up failed", { eventId: envelope.id, kind: applied.followUp.kind, err });
     }
   }
   return reply(200, { received: true, outcome: applied.outcome });

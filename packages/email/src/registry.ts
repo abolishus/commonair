@@ -9,6 +9,7 @@ import { goLiveDigest } from "./templates/notify.tsx";
 import { chargebackNotice, payoutSent } from "./templates/payments.tsx";
 import { channelMoved } from "./templates/portability.tsx";
 import { accountDeletionCompleted, accountDeletionScheduled, dataExportReady } from "./templates/privacy.tsx";
+import { paymentReceipt } from "./templates/receipt.tsx";
 import { newSignIn, streamKeyRevoked, twoFactorDisabled, twoFactorEnabled } from "./templates/security.tsx";
 import {
   appealDecided,
@@ -33,6 +34,7 @@ export const templates = {
   accountDeletionCompleted,
   payoutSent,
   chargebackNotice,
+  paymentReceipt,
   governanceVoteOpened,
   governanceResultPublished,
   councilReviewRequested,

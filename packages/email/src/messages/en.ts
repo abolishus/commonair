@@ -14,11 +14,12 @@ import layout from "./locales/en/layout.json" with { type: "json" };
 import notify from "./locales/en/notify.json" with { type: "json" };
 import payments from "./locales/en/payments.json" with { type: "json" };
 import privacy from "./locales/en/privacy.json" with { type: "json" };
+import receipt from "./locales/en/receipt.json" with { type: "json" };
 import security from "./locales/en/security.json" with { type: "json" };
 import trust from "./locales/en/trust.json" with { type: "json" };
 
 /** Every English JSON group, by file name (the order of `locales/en/`). */
-export const EN_GROUPS = { account, governance, layout, notify, payments, privacy, security, trust } as const;
+export const EN_GROUPS = { account, governance, layout, notify, payments, privacy, receipt, security, trust } as const;
 
 type Flat = typeof account &
   typeof governance &
@@ -26,6 +27,7 @@ type Flat = typeof account &
   typeof notify &
   typeof payments &
   typeof privacy &
+  typeof receipt &
   typeof security &
   typeof trust;
 

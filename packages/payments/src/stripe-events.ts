@@ -80,6 +80,35 @@ export type StripeAction =
       feeRefundCents: number;
     }
   | { type: "refund.failed"; refundId: string; paymentIntent: string | null }
+  /**
+   * Batch 8 (M1-gifts-refunds): a refund changed state without failing (a failure parses to
+   * `refund.failed`, as before). Success is still posted from `charge.refunded`.
+   */
+  | {
+      type: "refund.updated";
+      refundId: string;
+      paymentIntent: string | null;
+      /** Our payment id, when the refund carries it in metadata. */
+      paymentId: string | null;
+      status: string;
+      amountCents: number;
+      currency: string;
+    }
+  /**
+   * Batch 8 (M1-connect): a Connect transfer was reversed (`transfer.reversed`) or changed
+   * (`transfer.updated`). `amountReversed` is Stripe's cumulative total.
+   */
+  | {
+      type: "transfer.reversed" | "transfer.updated";
+      transferRef: string;
+      destination: string | null;
+      amountCents: number;
+      amountReversed: number;
+      currency: string;
+      /** Our ids from the transfer's metadata. */
+      payoutId: string | null;
+      transferId: string | null;
+    }
   | { type: "account.updated"; accountId: string; payoutsEnabled: boolean }
   | { type: "ignored" };
 
@@ -229,10 +258,35 @@ export function stripeAction(e: StripeEventEnvelope): StripeAction {
         ...disputeFees(o),
       };
     case "refund.failed":
-    case "charge.refund.updated":
-      // Only a failure matters here: success is posted from charge.refunded.
       if (o.status !== "failed") return { type: "ignored" };
       return { type: "refund.failed", refundId: need(str(o.id), "refund id"), paymentIntent: ref(o.payment_intent) };
+    case "refund.updated":
+    case "charge.refund.updated": {
+      // A failure keeps its own action; success is posted from charge.refunded.
+      if (o.status === "failed")
+        return { type: "refund.failed", refundId: need(str(o.id), "refund id"), paymentIntent: ref(o.payment_intent) };
+      return {
+        type: "refund.updated",
+        refundId: need(str(o.id), "refund id"),
+        paymentIntent: ref(o.payment_intent),
+        paymentId: meta(o, "payment_id"),
+        status: need(str(o.status), "refund status"),
+        amountCents: need(int(o.amount), "amount"),
+        currency: need(str(o.currency), "currency").toLowerCase(),
+      };
+    }
+    case "transfer.reversed":
+    case "transfer.updated":
+      return {
+        type: e.type,
+        transferRef: need(str(o.id), "transfer id"),
+        destination: ref(o.destination),
+        amountCents: need(int(o.amount), "amount"),
+        amountReversed: int(o.amount_reversed) ?? 0,
+        currency: need(str(o.currency), "currency").toLowerCase(),
+        payoutId: meta(o, "payout_id"),
+        transferId: meta(o, "transfer_id"),
+      };
     case "account.updated":
       return {
         type: "account.updated",
@@ -247,7 +301,18 @@ export function stripeAction(e: StripeEventEnvelope): StripeAction {
 // ------------------------------------------------------------------------------- redaction
 
 /** Our own metadata keys; anything else an account sets is not ours to keep. */
-const METADATA_KEYS = ["payment_id", "reference", "kind", "subscription_id", "user_id"] as const;
+const METADATA_KEYS = [
+  "payment_id",
+  "reference",
+  "kind",
+  "subscription_id",
+  "user_id",
+  // Batch 8: Connect transfers (M1-connect, M1-coop-money) and refund requests (M1-gifts-refunds).
+  "payout_id",
+  "transfer_id",
+  "period_id",
+  "request_id",
+] as const;
 /** Scalar fields of `data.object` the processor reads (ids, amounts, statuses, enums). */
 const SCALAR_KEYS = [
   "id",
@@ -264,9 +329,13 @@ const SCALAR_KEYS = [
   "tax",
   "billing_reason",
   "payouts_enabled",
+  // Batch 8: transfers.
+  "amount_reversed",
+  "reversed",
+  "transfer_group",
 ] as const;
 /** Expandable references, kept as ids only. */
-const REF_KEYS = ["payment_intent", "subscription", "invoice", "charge"] as const;
+const REF_KEYS = ["payment_intent", "subscription", "invoice", "charge", "destination"] as const;
 
 function pickMetadata(v: unknown): Record<string, string> | undefined {
   if (!isObj(v)) return undefined;

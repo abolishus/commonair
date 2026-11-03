@@ -1,0 +1,5 @@
+{
+  "refundRequests.tab": "Refund requests",
+  "refundRequests.empty.title": "No refund requests",
+  "refundRequests.empty.body": "Refunds that are waiting on the payment provider show up here."
+}

@@ -322,6 +322,7 @@ async function honest(over: { winnerCount?: number } = {}): Promise<GiveawayVeri
     winnerCount,
     winners: picked.map((index, i) => ({ rank: i + 1, index, pseudonym: entries[index] as string, username: null })),
     drawnAt: "2026-11-01T12:10:00.000Z",
+    me: null,
   };
 }
 
