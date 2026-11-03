@@ -190,6 +190,11 @@ export async function runSeedLiveCommand(o: SeedLiveCommand): Promise<number> {
     out,
     sleep: (ms, signal) => sleep(ms, signal),
   };
+  // A long-running process: a stray rejection (a chat waiter, a publisher's restart) is logged, and
+  // the streams keep going, instead of Bun ending the process on it.
+  const onStray = (err: unknown) =>
+    log.warn("seed live: ignored an unhandled failure", { error: err instanceof Error ? err.message : String(err) });
+  process.on("unhandledRejection", onStray);
   // Keeps /analytics showing streamer1's history while the streams run (BYPASS_RENEW_MS says why).
   const secret = internalSecret(env, source);
   const s1 = logins.find((l) => l.username === "demo_streamer1")?.channelId;
@@ -212,6 +217,7 @@ export async function runSeedLiveCommand(o: SeedLiveCommand): Promise<number> {
     o.signal?.removeEventListener("abort", onSignal);
     process.off("SIGINT", onSignal);
     process.off("SIGTERM", onSignal);
+    process.off("unhandledRejection", onStray);
     controller.abort();
     await bypass;
     await stopSeedProxy();

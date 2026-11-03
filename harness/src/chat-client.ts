@@ -190,16 +190,18 @@ export class ChatClient {
     this.ws.send(JSON.stringify(frame));
   }
 
+  // The requests below send first, then wait: a reply is dispatched on a later tick, so none is
+  // missed, and a send that throws (the socket just closed) leaves no waiter behind to reject,
+  // unhandled, when its timeout fires (which ended long-running `seed live`).
+
   async join(channel: string): Promise<FrameOf<"joined">> {
-    const joined = this.next("joined", (f) => f.channel === channel);
     this.raw({ op: "join", channel });
-    return joined;
+    return this.next("joined", (f) => f.channel === channel);
   }
 
   async part(channel: string): Promise<void> {
-    const parted = this.next("parted", (f) => f.channel === channel);
     this.raw({ op: "part", channel });
-    await parted;
+    await this.next("parted", (f) => f.channel === channel);
   }
 
   /** Send a message and wait for the server's ack (id null + held=false means rejected; see notices). */
@@ -209,9 +211,8 @@ export class ChatClient {
     opts: { replyToId?: string; isAction?: boolean } = {},
   ): Promise<FrameOf<"ack">> {
     const nonce = `n${++this.nonce}`;
-    const ack = this.next("ack", (f) => f.nonce === nonce);
     this.raw({ op: "send", channel, body, nonce, isAction: opts.isAction ?? false, replyToId: opts.replyToId });
-    return ack;
+    return this.next("ack", (f) => f.nonce === nonce);
   }
 
   /** Fire-and-forget send (spam bots do not wait for acks). */
@@ -220,9 +221,8 @@ export class ChatClient {
   }
 
   async command(channel: string, command: string, args: string[] = []): Promise<FrameOf<"notice">> {
-    const notice = this.next("notice", (f) => f.channel === channel || f.channel === null);
     this.raw({ op: "command", channel, command, args, nonce: `n${++this.nonce}` });
-    return notice;
+    return this.next("notice", (f) => f.channel === channel || f.channel === null);
   }
 
   messages(channel?: string): FrameOf<"message">[] {

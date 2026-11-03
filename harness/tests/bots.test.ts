@@ -157,6 +157,19 @@ describe("chat client", () => {
     await chat.part("chan");
   }, 30_000);
 
+  test("a request on a closed socket rejects at once and leaves no waiter to time out unhandled", async () => {
+    const fake = startFakeChat();
+    const chat = await ChatClient.connect({ url: fake.url });
+    await chat.join("chan");
+    chat.close();
+    await expect(chat.send("chan", "late")).rejects.toThrow(ChatProtocolError);
+    await expect(chat.join("chan")).rejects.toThrow(ChatProtocolError);
+    await expect(chat.part("chan")).rejects.toThrow(ChatProtocolError);
+    await expect(chat.command("chan", "slow")).rejects.toThrow(ChatProtocolError);
+    // Each waiter is a frame listener with a 10 s timer: none may be left.
+    expect((chat as unknown as { listeners: Set<unknown> }).listeners.size).toBe(0);
+  });
+
   test("server error frames reject waiters", async () => {
     const fake = startFakeChat();
     const chat = await ChatClient.connect({ url: fake.url });
