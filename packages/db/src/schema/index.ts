@@ -19,3 +19,4 @@ export * from "./splits.ts";
 export * from "./captions.ts";
 export * from "./analytics.ts";
 export * from "./b7.ts";
+export * from "./b8.ts";

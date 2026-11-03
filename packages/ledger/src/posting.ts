@@ -25,6 +25,10 @@ export const POSTING_KINDS = [
   "split_shortfall_writeoff",
   "split_suspense_release",
   "split_suspense_forfeit",
+  // Batch 8 (M1-connect, M1-coop-money): a reversed Connect transfer or patronage payout returns
+  // the money to the payable it was paid from.
+  "payout_transfer_reversal",
+  "patronage_payout_reversal",
 ] as const;
 export type PostingKind = (typeof POSTING_KINDS)[number];
 

@@ -76,6 +76,8 @@ const EXPECTED: Record<string, ProcedureMeta["access"]> = {
   "coop.patronage.run": "treasurer",
   "coop.patronage.approve": "finance",
   "coop.patronage.periods": "finance",
+  "coop.patronage.payouts": "treasurer",
+  "coop.patronage.pay": "finance",
   "coop.transparency": "public",
   "coop.feeSchedule": "public",
 };

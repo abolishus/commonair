@@ -715,6 +715,18 @@ describe("gift subscriptions", () => {
       .from(schema.subscriptions)
       .where(eq(schema.subscriptions.giftPaymentId, named.body.paymentId));
     expect(s).toMatchObject({ subscriberId: leftUser.id, tier: 3, status: "incomplete" });
+
+    // Batch 8 decision (d): one pending gift per gifter and channel (the 0049 index).
+    const [p] = await db().select().from(schema.payments).where(eq(schema.payments.id, named.body.paymentId));
+    expect(p?.gift).toBe(true);
+    const again = await subscribe(alice, gifts.username, { tier: 1, gift: { count: 1, to: bob.username } });
+    expect(again.status).toBe(409);
+    // It lapses as `money-expire-pending` would, so the next gift may start.
+    await db().update(schema.payments).set({ status: "failed" }).where(eq(schema.payments.id, named.body.paymentId));
+    await db()
+      .update(schema.subscriptions)
+      .set({ status: "expired" })
+      .where(eq(schema.subscriptions.giftPaymentId, named.body.paymentId));
   });
 
   test("a gift recipient cannot cancel it", async () => {

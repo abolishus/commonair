@@ -65,6 +65,9 @@ async function withCheckoutRetry<T>(run: () => Promise<T>): Promise<T> {
       if (attempt < 3 && violatesConstraint(err, "payments_provider_ref_uq", "subscriptions_active_uq")) continue;
       if (violatesConstraint(err, "subscriptions_active_uq"))
         throw conflict("A recipient's subscription changed while checking out; try again");
+      // Batch 8 decision (d): the database allows one pending gift per gifter and channel (0049).
+      if (violatesConstraint(err, "payments_open_gift_uq"))
+        throw conflict("Your earlier gift to this channel is still waiting for payment");
       throw err;
     }
   }
@@ -366,6 +369,7 @@ export const checkoutHandlers = {
           currency,
           tier: tier.tier,
           quantity: recipients.length,
+          gift: true,
           expiresAt: new Date(now.getTime() + pendingDays * DAY_MS),
         });
         await tx.insert(subscriptions).values(

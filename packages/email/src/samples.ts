@@ -78,6 +78,18 @@ export function sampleData(publicUrl: string, v: SampleValues = ENGLISH_SAMPLE_V
       reference: "CB-7731",
       earningsUrl: url("/dashboard/earnings"),
     },
+    paymentReceipt: {
+      amountCents: 499,
+      currency: "EUR",
+      lines: [
+        { kind: "creator", amountCents: 449 },
+        { kind: "coop_share", amountCents: 50 },
+      ],
+      paidAt: at,
+      reference: "CA-7KQ2M9XW",
+      channelName: v.channelName,
+      kind: "subscription",
+    },
     governanceVoteOpened: {
       proposalTitle: v.proposalTitle,
       closesAt: "2026-11-01T18:00:00Z",

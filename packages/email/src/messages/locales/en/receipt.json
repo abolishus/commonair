@@ -1,0 +1,8 @@
+{
+  "paymentReceipt.subject": "Your receipt: {amount}",
+  "paymentReceipt.preview": "Thank you for your payment.",
+  "paymentReceipt.heading": "Thank you for your payment",
+  "paymentReceipt.amountLabel": "Amount",
+  "paymentReceipt.paidLabel": "Paid",
+  "paymentReceipt.referenceLabel": "Reference"
+}

@@ -40,6 +40,7 @@ test("the registry covers every notice the platform sends", () => {
       "accountDeletionCompleted",
       "payoutSent",
       "chargebackNotice",
+      "paymentReceipt",
       "governanceVoteOpened",
       "governanceResultPublished",
       "councilReviewRequested",

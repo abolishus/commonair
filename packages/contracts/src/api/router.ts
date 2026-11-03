@@ -877,6 +877,11 @@ export const contract = {
           dvrToken: z.string().optional(),
           switchTo: z.string().optional(),
           /**
+           * Batch 8 (B8-player): a DVR playlist URL on the origin, sent only when the session's DVR
+           * source is a relay that left the active set. Never origin → relay or relay → relay.
+           */
+          dvrSwitchTo: z.string().optional(),
+          /**
            * The beat came sooner than the server's floor and was ignored (nothing recorded).
            * Clients keep accumulating their counters and send them with the next beat.
            */
@@ -1632,6 +1637,53 @@ export const contract = {
         })
         .input(z.object({ id: Id, reference: z.string().max(200) }))
         .output(Ok),
+      /**
+       * Batch 8 (M1-gifts-refunds, ADR 0007 decision 3): provider refund requests and their audit
+       * markers. `resolve` settles a request whose outcome Stripe never told us (audited); it is
+       * refused while the request is still being reconciled.
+       */
+      refundRequests: {
+        list: treasurer
+          .route({
+            method: "GET",
+            path: "/treasurer/refund-requests",
+            summary: "Provider refund requests: outstanding, outcome unknown, or all",
+            ...tag("Treasury"),
+          })
+          .input(PageInput.extend({ state: z.enum(E.REFUND_REQUEST_FILTERS).default("outstanding") }))
+          .output(page(D.RefundRequestView)),
+        resolve: treasurer
+          .route({
+            method: "POST",
+            path: "/treasurer/refund-requests/{requestId}/resolve",
+            summary: "Record what Stripe did with a refund request whose outcome is unknown",
+            ...tag("Treasury"),
+          })
+          .input(
+            z.object({
+              requestId: Id,
+              outcome: z.enum(E.REFUND_REQUEST_RESOLUTIONS),
+              note: z.string().max(500).default(""),
+            }),
+          )
+          .output(D.RefundRequestView),
+      },
+      /** Batch 8 (M1-connect, ADR 0007 Amendment 1): the Connect transfer of each Stripe payout. */
+      transfers: treasurer
+        .route({
+          method: "GET",
+          path: "/treasurer/payout-transfers",
+          summary: "Stripe Connect transfers by payout run",
+          ...tag("Treasury"),
+        })
+        .input(
+          PageInput.extend({
+            /** The payout run: the payouts' `periodStart`. Omitted: every run, newest first. */
+            periodStart: Timestamp.optional(),
+            status: z.enum(E.PAYOUT_TRANSFER_STATUSES).optional(),
+          }),
+        )
+        .output(page(D.PayoutTransferView)),
       recordCost: treasurer
         .route({
           method: "POST",
@@ -2976,6 +3028,37 @@ export const contract = {
           ...tag("Patronage"),
         })
         .output(z.array(D.PatronagePeriodView)),
+      /** Batch 8 (M1-coop-money): a period's payout rows, for treasurers. */
+      payouts: treasurer
+        .route({
+          method: "GET",
+          path: "/coop/patronage/{periodId}/payouts",
+          summary: "A period's patronage payouts",
+          ...tag("Patronage"),
+        })
+        .input(z.object({ periodId: Id }))
+        .output(z.array(D.PatronagePayoutView)),
+      /**
+       * Batch 8 (M1-coop-money): pay an approved period out, one row per member with a positive
+       * allocation. Two approvers, as for write-offs: the first call records the request, a second
+       * treasurer (or an admin) approves it. Audited; a repeat changes nothing.
+       */
+      pay: finance
+        .route({
+          method: "POST",
+          path: "/coop/patronage/{periodId}/pay",
+          summary: "Request, or approve, paying a period's patronage out",
+          ...tag("Patronage"),
+        })
+        .errors(SECOND_APPROVER)
+        .input(z.object({ periodId: Id }))
+        .output(
+          z.object({
+            state: z.enum(["awaiting_second_approver", "approved"]),
+            /** Payout rows created by this call (0 until approved, and on a repeat). */
+            created: z.number().int(),
+          }),
+        ),
     },
     transparency: base
       .route({
