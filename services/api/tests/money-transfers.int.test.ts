@@ -21,6 +21,7 @@ import {
   paymentSucceeded,
   post,
   recordPayoutTransferCreated,
+  recordPayoutTransferFailed,
   releaseDueHolds,
   runPayoutBatch,
 } from "@commonair/ledger";
@@ -319,6 +320,29 @@ describe("transfer webhooks", () => {
     const [row] = await db.select().from(schema.payoutTransfers).where(eq(schema.payoutTransfers.id, transfer.id));
     expect(row).toMatchObject({ status: "created", providerRef: "tr_early1", reversedCents: 700 });
     expect((await db.select().from(schema.payouts).where(eq(schema.payouts.id, payout.id)))[0]?.status).toBe("paid");
+    manualEnv();
+  });
+});
+
+describe("orphaned transfers", () => {
+  test("a Stripe transfer on a failed row posts nothing and is audited once for the treasurer", async () => {
+    const { user, payout, transfer } = await paidTransfer();
+    await recordPayoutTransferFailed(db, { transferId: transfer.id, failureCode: "held", at: new Date() });
+    const owed = async () => (await creatorBalances(db, user, "usd")).availableCents;
+    const before = await owed();
+    const r = await deliver("transfer.updated", transferObject(transfer, "tr_orphan1", 0));
+    expect(r).toEqual({ status: 200, body: { received: true, outcome: "transfer_orphaned" } });
+    const again = await deliver("transfer.reversed", transferObject(transfer, "tr_orphan1", 0));
+    expect(again.body.outcome).toBe("transfer_orphaned");
+    expect(await owed()).toBe(before);
+    const audits = await db
+      .select()
+      .from(schema.auditLog)
+      .where(and(eq(schema.auditLog.subjectId, transfer.id), eq(schema.auditLog.action, "payout_transfer.orphaned")));
+    expect(audits).toHaveLength(1);
+    expect(audits[0]?.details).toEqual({ payoutId: payout.id, payeeUserId: user, transferRef: "tr_orphan1" });
+    const [row] = await db.select().from(schema.payoutTransfers).where(eq(schema.payoutTransfers.id, transfer.id));
+    expect(row).toMatchObject({ status: "failed", providerRef: null });
     manualEnv();
   });
 });

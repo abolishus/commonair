@@ -16,9 +16,11 @@ import {
   creatorBalances,
   holdPayoutsForFraud,
   insertFraudFlag,
+  openPayoutTransfer,
   payoutTransferKey,
   paymentSucceeded,
   post,
+  recordPayoutTransferCreated,
   releaseDueHolds,
   runPayoutBatch,
   schedulePayoutTransfers,
@@ -257,13 +259,12 @@ describe("payout-transfers", () => {
     expect(first.calls).toHaveLength(0);
     expect((await payoutOf(e!.id))?.status).toBe("held");
 
-    // Held after the row opened (a retry finds it): the transfer fails `held`, the payout is cancelled.
+    // Held after the row opened but before any request left: the transfer fails `held`, the payout
+    // is cancelled back to the payable.
     const late = await payee();
     const [p] = await run([late]);
-    const timeout = fakeAdapter(() => {
-      throw new StripeOutcomeUnknown("timed out", 503, null, null);
-    });
-    await expect(runPayoutTransfer(ctx(), { adapter: timeout.adapter }, p!.id, NOT_LAST)).rejects.toThrow(/timed out/);
+    const opened = await openPayoutTransfer(db(), { payoutId: p!.id, at: new Date() });
+    expect(opened.transfer?.failureCode).toBeNull();
     await insertFraudFlag(db(), {
       payeeUserId: late.id,
       kind: "manual",
@@ -282,6 +283,120 @@ describe("payout-transfers", () => {
     expect((await transferOf(p!.id))?.status).toBe("failed");
   });
 
+  test("a timeout then a fraud hold: the retry never cancels a transfer Stripe may have made", async () => {
+    const u = await payee();
+    const [p] = await run([u]);
+    const availableBefore = (await creatorBalances(db(), u.id, "usd")).availableCents;
+    const timeout = fakeAdapter(() => {
+      throw new StripeOutcomeUnknown("timed out", 503, null, null);
+    });
+    await expect(runPayoutTransfer(ctx(), { adapter: timeout.adapter }, p!.id, NOT_LAST)).rejects.toThrow(/timed out/);
+    expect(await transferOf(p!.id)).toMatchObject({ status: "pending", failureCode: "sending", providerRef: null });
+    await insertFraudFlag(db(), {
+      payeeUserId: u.id,
+      kind: "manual",
+      evidence: {},
+      raisedById: null,
+      at: new Date(),
+    });
+    await holdPayoutsForFraud(db(), u.id);
+    const { adapter, calls } = fakeAdapter(okAnswer);
+    expect(await runPayoutTransfer(ctx(), { adapter }, p!.id, NOT_LAST)).toEqual({
+      outcome: "unknown",
+      transferId: (await transferOf(p!.id))!.id,
+      reason: "held",
+    });
+    expect(calls).toHaveLength(0);
+    expect(await transferOf(p!.id)).toMatchObject({ status: "pending", failureCode: "outcome_unknown" });
+    expect((await payoutOf(p!.id))?.status).toBe("held");
+    // Nothing went back to the payable: the reservation stands.
+    expect((await creatorBalances(db(), u.id, "usd")).availableCents).toBe(availableBefore);
+    const failed = await db()
+      .select()
+      .from(schema.events)
+      .where(eq(schema.events.type, "money.payout_transfer.failed"));
+    expect(failed.some((e) => (e.payload as { payout_id: string }).payout_id === p!.id)).toBe(false);
+  });
+
+  test("a timeout then a disabled account: left pending as outcome unknown, not cancelled", async () => {
+    const u = await payee();
+    const [p] = await run([u]);
+    const timeout = fakeAdapter(() => {
+      throw new StripeOutcomeUnknown("timed out", 503, null, null);
+    });
+    await expect(runPayoutTransfer(ctx(), { adapter: timeout.adapter }, p!.id, NOT_LAST)).rejects.toThrow(/timed out/);
+    await db()
+      .update(schema.payoutAccounts)
+      .set({ payoutsEnabled: false })
+      .where(eq(schema.payoutAccounts.userId, u.id));
+    const { adapter, calls } = fakeAdapter(okAnswer);
+    expect(await runPayoutTransfer(ctx(), { adapter }, p!.id, NOT_LAST)).toMatchObject({
+      outcome: "unknown",
+      reason: "account_not_ready",
+    });
+    expect(calls).toHaveLength(0);
+    expect((await payoutOf(p!.id))?.status).toBe("scheduled");
+    expect(await transferOf(p!.id)).toMatchObject({ status: "pending", failureCode: "outcome_unknown" });
+    // Ready again: a later run's job sends under the same key, and Stripe's answer settles it.
+    await db()
+      .update(schema.payoutAccounts)
+      .set({ payoutsEnabled: true })
+      .where(eq(schema.payoutAccounts.userId, u.id));
+    expect(await runPayoutTransfer(ctx(), { adapter }, p!.id, NOT_LAST)).toMatchObject({ outcome: "created" });
+    expect(calls.map((c) => c.idempotencyKey)).toEqual([payoutTransferKey(p!.id)]);
+  });
+
+  test("any other error on the last attempt leaves outcome unknown, not a bare pending row", async () => {
+    const u = await payee();
+    const [p] = await run([u]);
+    const { adapter } = fakeAdapter(() => {
+      throw new TypeError("socket hang up");
+    });
+    await expect(runPayoutTransfer(ctx(), { adapter }, p!.id, NOT_LAST)).rejects.toThrow(TypeError);
+    expect(await transferOf(p!.id)).toMatchObject({ status: "pending", failureCode: "sending" });
+    await expect(runPayoutTransfer(ctx(), { adapter }, p!.id, LAST)).rejects.toThrow(TypeError);
+    expect(await transferOf(p!.id)).toMatchObject({ status: "pending", failureCode: "outcome_unknown" });
+    expect((await payoutOf(p!.id))?.status).toBe("scheduled");
+  });
+
+  test("a payee with no Stripe account: the payout is cancelled with a system audit row", async () => {
+    const u = await payee();
+    const [p] = await run([u]);
+    await db().delete(schema.payoutAccounts).where(eq(schema.payoutAccounts.userId, u.id));
+    const { adapter, calls } = fakeAdapter(okAnswer);
+    expect(await runPayoutTransfer(ctx(), { adapter }, p!.id, NOT_LAST)).toEqual({
+      outcome: "cancelled",
+      reason: "no_account",
+    });
+    expect(calls).toHaveLength(0);
+    expect((await payoutOf(p!.id))?.status).toBe("failed");
+    expect((await creatorBalances(db(), u.id, "usd")).availableCents).toBe(p!.amountCents);
+    const audits = await db()
+      .select()
+      .from(schema.auditLog)
+      .where(and(eq(schema.auditLog.action, "payout.cancel"), eq(schema.auditLog.subjectId, p!.id)));
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toMatchObject({ actorType: "system", subjectType: "payout" });
+    expect(audits[0]?.details).toMatchObject({ reason: "no_account", payeeUserId: u.id });
+  });
+
+  test("the webhook recorded it first: this job's own success still sends the payout-sent mail", async () => {
+    const u = await payee();
+    const [p] = await run([u]);
+    const before = mails.length;
+    const { adapter } = fakeAdapter(async (r) => {
+      const res = okAnswer(r);
+      await recordPayoutTransferCreated(db(), {
+        transferId: r.transferId,
+        providerRef: res.providerRef,
+        at: new Date(),
+      });
+      return res;
+    });
+    expect(await runPayoutTransfer(ctx(), { adapter }, p!.id, NOT_LAST)).toMatchObject({ outcome: "created" });
+    expect(mails.slice(before).filter((m) => m.template === "payoutSent")).toHaveLength(1);
+  });
+
   test("a timeout keeps the transfer pending; the retry reuses the key; the last attempt says outcome unknown", async () => {
     const u = await payee();
     const [p] = await run([u]);
@@ -292,7 +407,7 @@ describe("payout-transfers", () => {
     await expect(runPayoutTransfer(ctx(), { adapter: flaky.adapter }, p!.id, NOT_LAST)).rejects.toThrow(
       StripeOutcomeUnknown,
     );
-    expect(await transferOf(p!.id)).toMatchObject({ status: "pending", failureCode: null });
+    expect(await transferOf(p!.id)).toMatchObject({ status: "pending", failureCode: "sending" });
     await expect(runPayoutTransfer(ctx(), { adapter: flaky.adapter }, p!.id, LAST)).rejects.toThrow(
       StripeOutcomeUnknown,
     );

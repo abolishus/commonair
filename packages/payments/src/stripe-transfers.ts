@@ -16,7 +16,11 @@ import { StripeOutcomeUnknown } from "./errors.ts";
 import type { FormObject } from "./stripe-form.ts";
 import type { StripeClient, StripeTransfer } from "./stripe-client.ts";
 
-/** The idempotency key of a payout's transfer: stable across retries, one per payout row. */
+/**
+ * The idempotency key of a payout's transfer: stable across retries, one per payout row. The ledger's
+ * `payoutTransferKey` writes the row's key (payments does not depend on the ledger); both tests pin
+ * the format `payout-transfer:<payoutId>`, and `transferParams` refuses any other.
+ */
 export const payoutTransferKey = (payoutId: string): string => `payout-transfer:${payoutId}`;
 
 const ACCOUNT = /^acct_[A-Za-z0-9]{1,250}$/;

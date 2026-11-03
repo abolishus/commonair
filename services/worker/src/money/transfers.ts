@@ -7,10 +7,13 @@
  *
  * 1. open the `pending` transfer row, in its own transaction (`openPayoutTransfer`);
  * 2. after commit, check the payee: their Stripe account can receive payouts and they are not under
- *    fraud review (ADR 0036; `payouts_fraud_guard` and 0049 are the backstop). If not, the transfer
- *    fails (`account_not_ready` / `held`) and the payout is cancelled back to the payable, and
- *    Stripe is never called;
- * 3. call Stripe outside any transaction, under the payout's idempotency key;
+ *    fraud review (ADR 0036; `payouts_fraud_guard` and 0049 are the backstop). If not, and no earlier
+ *    attempt can have reached Stripe, the transfer fails (`account_not_ready` / `held`) and the
+ *    payout is cancelled back to the payable, and Stripe is never called. If an earlier attempt may
+ *    have reached Stripe (the row is marked `sending`), the transfer may exist there: it is never
+ *    cancelled, but left pending as `outcome_unknown` for a person (or a later run once the payee is
+ *    ready again, under the same key);
+ * 3. mark the row `sending`, then call Stripe outside any transaction, under the payout's key;
  * 4. record the answer: created → payout paid (`payoutSent`), then the payout-sent mail; a definite
  *    4xx → failed, payout cancelled (`payoutCancel`); an unknown outcome → still pending, and the job
  *    throws so BullMQ retries with the same key (Stripe answers with the same transfer). After the
@@ -28,21 +31,17 @@ import {
   PAYOUT_TRANSFER_CODES,
   PAYOUT_TRANSFER_KEY_WINDOW_MS,
   PayoutStateError,
-  cancelPayout,
+  cancelPayoutWithoutAccount,
+  markPayoutTransferSending,
   markPayoutTransferUnsettled,
   markStripeAccountNotReady,
   openPayoutTransfer,
   payeeHasHoldingFlag,
   recordPayoutTransferCreated,
   recordPayoutTransferFailed,
+  transferMayHaveReachedStripe,
 } from "@commonair/ledger";
-import {
-  type PaymentAdapter,
-  StripeOutcomeUnknown,
-  StripeRequestError,
-  type TransferResult,
-  createAdapter,
-} from "@commonair/payments";
+import { type PaymentAdapter, StripeRequestError, type TransferResult, createAdapter } from "@commonair/payments";
 import type { WorkerContext } from "../context.ts";
 
 type TransferRow = typeof schema.payoutTransfers.$inferSelect;
@@ -59,6 +58,8 @@ export type PayoutTransferOutcome =
   | { outcome: "unrecorded"; transferId: string }
   /** No Stripe account to send to at all: the payout is cancelled back to the payable, no row. */
   | { outcome: "cancelled"; reason: "no_account" }
+  /** An earlier attempt may have reached Stripe and the payee is now held or not ready: left for a person. */
+  | { outcome: "unknown"; transferId: string; reason: "held" | "account_not_ready" }
   | { outcome: "skipped"; reason: "manual" | "not_scheduled" | "settled" | "waiting" };
 
 /** Stripe error codes that say the destination account cannot take transfers (deleted, restricted). */
@@ -107,7 +108,9 @@ export async function runPayoutTransfer(
   if (!opened.transfer) {
     if (opened.reason === "not_scheduled") return { outcome: "skipped", reason: "not_scheduled" };
     // A scheduled Stripe payout whose payee has no Stripe account any more: nothing can be sent.
-    await cancelPayout(ctx.db, { payoutId, at: ctx.now() });
+    // Rechecked under the payout lock and audited; an account connected meanwhile waits for the next run.
+    if (!(await cancelPayoutWithoutAccount(ctx.db, { payoutId, at: ctx.now() })))
+      return { outcome: "skipped", reason: "waiting" };
     ctx.logger.warn("payout transfer: no Stripe account; payout cancelled", { payoutId });
     return { outcome: "cancelled", reason: "no_account" };
   }
@@ -119,21 +122,33 @@ export async function runPayoutTransfer(
   // Stripe answered with its id before, but the payout was not scheduled then: settle it now if it is.
   if (t.providerRef !== null) {
     if (payout.status !== "scheduled") return { outcome: "skipped", reason: "waiting" };
-    return created(ctx, t, { providerRef: t.providerRef, amountCents: t.amountCents, currency: t.currency });
+    return created(
+      ctx,
+      t,
+      { providerRef: t.providerRef, amountCents: t.amountCents, currency: t.currency },
+      { sentNow: false },
+    );
   }
 
-  if (payout.status === "held") return fail(ctx, t, PAYOUT_TRANSFER_CODES.held);
+  // An earlier attempt (this job's or a former run's) may have created the transfer at Stripe.
+  const maybeSent = transferMayHaveReachedStripe(t);
+  const notSendable = (reason: "held" | "account_not_ready") =>
+    maybeSent
+      ? leaveUnknown(ctx, t, reason)
+      : fail(ctx, t, PAYOUT_TRANSFER_CODES[reason === "held" ? "held" : "accountNotReady"]);
+  if (payout.status === "held") return notSendable("held");
   if (payout.status !== "scheduled") return { outcome: "skipped", reason: "waiting" };
-  if (await payeeHasHoldingFlag(ctx.db, payout.userId)) return fail(ctx, t, PAYOUT_TRANSFER_CODES.held);
+  if (await payeeHasHoldingFlag(ctx.db, payout.userId)) return notSendable("held");
   const [acct] = await ctx.db
     .select()
     .from(schema.payoutAccounts)
     .where(eq(schema.payoutAccounts.userId, payout.userId));
   if (acct?.provider !== "stripe" || !acct.payoutsEnabled || acct.providerAccountId !== t.destinationRef)
-    return fail(ctx, t, PAYOUT_TRANSFER_CODES.accountNotReady);
+    return notSendable("account_not_ready");
 
   // Past Stripe's idempotency window a repeat could create a second transfer: a person settles it.
-  if (ctx.now().getTime() - t.createdAt.getTime() > PAYOUT_TRANSFER_KEY_WINDOW_MS) {
+  // A row that never reached Stripe has nothing to repeat, so it is sent whatever its age.
+  if (maybeSent && ctx.now().getTime() - t.createdAt.getTime() > PAYOUT_TRANSFER_KEY_WINDOW_MS) {
     await markPayoutTransferUnsettled(ctx.db, {
       transferId: t.id,
       code: PAYOUT_TRANSFER_CODES.outcomeUnknown,
@@ -143,6 +158,8 @@ export async function runPayoutTransfer(
     return { outcome: "unknown", transferId: t.id };
   }
 
+  // Before the request leaves: from here on this row is never failed without Stripe's definite answer.
+  await markPayoutTransferSending(ctx.db, { transferId: t.id, at: ctx.now() });
   let result: TransferResult;
   try {
     result = await send({
@@ -161,14 +178,10 @@ export async function runPayoutTransfer(
     }
     // A request the adapter refused to build never reached Stripe.
     if (err instanceof RangeError) return fail(ctx, t, "invalid_request");
-    if (err instanceof StripeOutcomeUnknown && opts.lastAttempt) {
-      await markPayoutTransferUnsettled(ctx.db, {
-        transferId: t.id,
-        code: PAYOUT_TRANSFER_CODES.outcomeUnknown,
-        at: ctx.now(),
-      });
-    }
-    ctx.logger.warn("payout transfer: outcome unknown, retrying with the same key", {
+    // Any other error may have followed a request Stripe received: after the last attempt the
+    // treasurer sees `outcome_unknown`, not a bare pending row.
+    if (opts.lastAttempt) await markUnknownBestEffort(ctx, t);
+    ctx.logger.warn("payout transfer: no answer, retrying with the same key", {
       payoutId,
       transferId: t.id,
       errorName: err instanceof Error ? err.name : "UnknownError",
@@ -176,7 +189,49 @@ export async function runPayoutTransfer(
     });
     throw err;
   }
-  return created(ctx, t, result);
+  try {
+    return await created(ctx, t, result, { sentNow: true });
+  } catch (err) {
+    // Stripe answered, but recording it failed: the next attempt asks again under the same key.
+    if (opts.lastAttempt) await markUnknownBestEffort(ctx, t);
+    throw err;
+  }
+}
+
+/** On the last attempt: mark `outcome_unknown`; an error here must not hide the original one. */
+async function markUnknownBestEffort(ctx: WorkerContext, t: TransferRow): Promise<void> {
+  try {
+    await markPayoutTransferUnsettled(ctx.db, {
+      transferId: t.id,
+      code: PAYOUT_TRANSFER_CODES.outcomeUnknown,
+      at: ctx.now(),
+    });
+  } catch (err) {
+    ctx.logger.warn("payout transfer: could not mark the outcome unknown", {
+      payoutId: t.payoutId,
+      transferId: t.id,
+      errorName: err instanceof Error ? err.name : "UnknownError",
+    });
+  }
+}
+
+/** The payee is not sendable now, but Stripe may already have the transfer: keep it pending, unknown. */
+async function leaveUnknown(
+  ctx: WorkerContext,
+  t: TransferRow,
+  reason: "held" | "account_not_ready",
+): Promise<PayoutTransferOutcome> {
+  await markPayoutTransferUnsettled(ctx.db, {
+    transferId: t.id,
+    code: PAYOUT_TRANSFER_CODES.outcomeUnknown,
+    at: ctx.now(),
+  });
+  ctx.logger.warn("payout transfer may exist at Stripe but the payee is not sendable; left for a person", {
+    payoutId: t.payoutId,
+    transferId: t.id,
+    reason,
+  });
+  return { outcome: "unknown", transferId: t.id, reason };
 }
 
 async function fail(ctx: WorkerContext, t: TransferRow, code: string): Promise<PayoutTransferOutcome> {
@@ -189,15 +244,23 @@ async function fail(ctx: WorkerContext, t: TransferRow, code: string): Promise<P
   return { outcome: "failed", transferId: t.id, code };
 }
 
-async function created(ctx: WorkerContext, t: TransferRow, r: TransferResult): Promise<PayoutTransferOutcome> {
+async function created(
+  ctx: WorkerContext,
+  t: TransferRow,
+  r: TransferResult,
+  opts: { sentNow: boolean },
+): Promise<PayoutTransferOutcome> {
   try {
-    const { created: changed } = await recordPayoutTransferCreated(ctx.db, {
+    const { created: changed, transfer } = await recordPayoutTransferCreated(ctx.db, {
       transferId: t.id,
       providerRef: r.providerRef,
       at: ctx.now(),
     });
     ctx.logger.info("payout transfer created", { payoutId: t.payoutId, transferId: t.id });
-    if (changed) await payoutSentMail(ctx, t, r.providerRef);
+    // The webhook may have recorded it first (it sends no mail): this call's own success still mails.
+    // A row already settled before this job never reaches here (it is skipped as `settled`).
+    if (changed || (opts.sentNow && transfer.providerRef === r.providerRef))
+      await payoutSentMail(ctx, t, r.providerRef);
     return { outcome: "created", transferId: t.id };
   } catch (err) {
     // The payout left `scheduled` (a fraud hold) while Stripe created the transfer. Keep Stripe's id

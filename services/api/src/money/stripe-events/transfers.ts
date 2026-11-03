@@ -11,7 +11,10 @@
  * The transfer is found by Stripe's id, or by our row id in its metadata: an event may arrive
  * before the worker recorded `created`. Then the event settles it first (Stripe has the transfer),
  * under the same row locks as the worker. A transfer that is not ours (a patronage payout, another
- * platform's) is `ignored`; one that does not match its row is `transfer_mismatch`.
+ * platform's) is `ignored`; one that does not match its row is `transfer_mismatch`. A transfer on a
+ * row we failed (its payout was cancelled back to the payable, so the payee may be paid twice) posts
+ * nothing but writes a `payout_transfer.orphaned` system audit row for the treasurer to reconcile
+ * (`transfer_orphaned`).
  */
 import type { Executor } from "@commonair/db";
 import {
@@ -19,6 +22,7 @@ import {
   PayoutStateError,
   findPayoutTransfer,
   markPayoutTransferUnsettled,
+  recordOrphanedPayoutTransfer,
   recordPayoutTransferCreated,
   recordPayoutTransferReversal,
 } from "@commonair/ledger";
@@ -44,7 +48,10 @@ async function applyTransfer(tx: Executor, a: TransferAction, now: Date): Promis
   const row = await findPayoutTransfer(tx, { providerRef: a.transferRef, transferId: a.transferId });
   if (!row) return noop("ignored");
   if (!matchesTransfer(row, a)) return noop("transfer_mismatch");
-  if (row.status === "failed") return noop("transfer_failed");
+  if (row.status === "failed") {
+    await recordOrphanedPayoutTransfer(tx, { transferId: row.id, providerRef: a.transferRef, at: now });
+    return noop("transfer_orphaned");
+  }
   let current = row;
   let settled = false;
   if (row.status === "pending") {

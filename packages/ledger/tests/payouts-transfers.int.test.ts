@@ -16,9 +16,11 @@ import {
   PAYOUT_TRANSFER_CODES,
   PayoutStateError,
   accounts,
+  cancelPayoutWithoutAccount,
   creatorBalances,
   holdPayoutsForFraud,
   insertFraudFlag,
+  markPayoutTransferSending,
   markPayoutTransferUnsettled,
   markStripeAccountNotReady,
   openPayoutTransfer,
@@ -26,6 +28,7 @@ import {
   paymentSucceeded,
   post,
   rawBalance,
+  recordOrphanedPayoutTransfer,
   recordPayoutTransferCreated,
   recordPayoutTransferFailed,
   recordPayoutTransferReversal,
@@ -33,6 +36,7 @@ import {
   runPayoutBatch,
   schedulePayoutTransfers,
   findPayoutTransfer,
+  transferMayHaveReachedStripe,
 } from "../src/index.ts";
 
 vi.setConfig({ testTimeout: 30_000, hookTimeout: 60_000 });
@@ -355,6 +359,67 @@ describe("send, cancel and reverse", () => {
     await expect(
       recordPayoutTransferReversal(db, { transferId: tr.id, reversedTotalCents: 100, at: AT }),
     ).rejects.toThrow(PayoutStateError);
+  });
+});
+
+describe("send markers and reconciliation", () => {
+  test("`sending` is written once, before the first request, and a later answer clears it", async () => {
+    const f = await reservedPayout();
+    const tr = await scheduledTransfer(f);
+    expect(transferMayHaveReachedStripe(tr)).toBe(false);
+    expect(await markPayoutTransferSending(db, { transferId: tr.id, at: AT })).toBe(true);
+    expect(await markPayoutTransferSending(db, { transferId: tr.id, at: AT })).toBe(false);
+    const [row] = await db.select().from(s.payoutTransfers).where(eq(s.payoutTransfers.id, tr.id));
+    expect(row).toMatchObject({ status: "pending", failureCode: "sending", providerRef: null });
+    expect(transferMayHaveReachedStripe(row!)).toBe(true);
+    // Outcome unknown replaces it (audited); Stripe's answer clears it.
+    expect(
+      await markPayoutTransferUnsettled(db, { transferId: tr.id, code: PAYOUT_TRANSFER_CODES.outcomeUnknown, at: AT }),
+    ).toBe(true);
+    expect(await markPayoutTransferSending(db, { transferId: tr.id, at: AT })).toBe(false);
+    const created = await recordPayoutTransferCreated(db, { transferId: tr.id, providerRef: "tr_marked", at: AT });
+    expect(created.transfer.failureCode).toBeNull();
+  });
+
+  test("a Stripe transfer on a failed row is audited once as orphaned; nothing is posted", async () => {
+    const f = await reservedPayout();
+    const tr = await scheduledTransfer(f);
+    await recordPayoutTransferFailed(db, { transferId: tr.id, failureCode: "held", at: AT });
+    const owedBefore = await owed(f);
+    const mark = () => recordOrphanedPayoutTransfer(db, { transferId: tr.id, providerRef: "tr_orphan", at: AT });
+    expect(await mark()).toBe(true);
+    expect(await mark()).toBe(false);
+    const audits = await db
+      .select()
+      .from(s.auditLog)
+      .where(and(eq(s.auditLog.subjectId, tr.id), eq(s.auditLog.action, "payout_transfer.orphaned")));
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toMatchObject({ actorType: "system", subjectType: "payout_transfer" });
+    expect(audits[0]?.details).toEqual({ payoutId: f.payoutId, payeeUserId: f.userId, transferRef: "tr_orphan" });
+    expect(await owed(f)).toBe(owedBefore);
+    const [row] = await db.select().from(s.payoutTransfers).where(eq(s.payoutTransfers.id, tr.id));
+    expect(row).toMatchObject({ status: "failed", providerRef: null });
+  });
+
+  test("a scheduled payout with no Stripe account is cancelled with an audit row; one with an account is not", async () => {
+    const f = await reservedPayout();
+    await schedulePayoutTransfers(db);
+    expect((await payoutOf(f.payoutId)).status).toBe("scheduled");
+    // An account still there: nothing happens.
+    expect(await cancelPayoutWithoutAccount(db, { payoutId: f.payoutId, at: AT })).toBe(false);
+    await owner.delete(s.payoutAccounts).where(eq(s.payoutAccounts.userId, f.userId));
+    expect(await cancelPayoutWithoutAccount(db, { payoutId: f.payoutId, at: AT })).toBe(true);
+    expect((await payoutOf(f.payoutId)).status).toBe("failed");
+    expect(await owed(f)).toBe(f.amountCents);
+    // Not scheduled any more: a repeat does nothing and writes nothing.
+    expect(await cancelPayoutWithoutAccount(db, { payoutId: f.payoutId, at: AT })).toBe(false);
+    const audits = await db
+      .select()
+      .from(s.auditLog)
+      .where(and(eq(s.auditLog.subjectId, f.payoutId), eq(s.auditLog.action, "payout.cancel")));
+    expect(audits).toHaveLength(1);
+    expect(audits[0]?.details).toMatchObject({ reason: "no_account", payeeUserId: f.userId });
+    expect(await rawBalance(db, accounts.payoutClearing(f.userId), f.cur)).toBe(0);
   });
 });
 

@@ -717,6 +717,11 @@ export const PAYOUT_TRANSFER_CODES = {
   outcomeUnknown: "outcome_unknown",
   /** Stripe created it (`provider_ref` is set), but the payout was no longer scheduled. Still pending. */
   sentUnrecorded: "sent_unrecorded",
+  /**
+   * Written before the first Stripe call: from here on the request may have reached Stripe, so the
+   * row is never failed (cancelled) without Stripe's definite answer. Still pending.
+   */
+  sending: "sending",
 } as const;
 
 /** BullMQ attempts of one `payout-transfers` job; the producer and the worker's last-attempt check share it. */
@@ -729,7 +734,10 @@ export const PAYOUT_TRANSFER_BACKOFF_MS = 30_000;
  */
 export const PAYOUT_TRANSFER_KEY_WINDOW_MS = 20 * 3_600_000;
 
-/** The idempotency key of a payout's transfer (row and Stripe call): stable across retries. */
+/**
+ * The idempotency key of a payout's transfer (row and Stripe call): stable across retries. The
+ * payments package keeps its own copy (it does not depend on the ledger); both tests pin the format.
+ */
 export const payoutTransferKey = (payoutId: string): string => `payout-transfer:${payoutId}`;
 
 /**
@@ -761,7 +769,15 @@ const HOLDING_FLAG_SQL = sql.raw(
 export async function schedulePayoutTransfers(db: Executor): Promise<{ scheduled: number; payoutIds: string[] }> {
   return db.transaction(async (tx) => {
     // The batch lock, as runPayoutBatch and the account sync: neither sees a half-scheduled run.
-    await lockFraudPayoutBatch(tx);
+    // runPayoutBatch and lockedPayout lock per currency: take the batch lock of every currency with
+    // a Stripe payout to schedule or send (and the fraud batch's), in sorted order.
+    const { payoutRules } = await loadMoneySettings(tx);
+    const found = await tx
+      .selectDistinct({ currency: schema.payouts.currency })
+      .from(schema.payouts)
+      .where(and(eq(schema.payouts.provider, "stripe"), inArray(schema.payouts.status, ["pending", "scheduled"])));
+    const currencies = [...new Set([payoutRules.currency, ...found.map((r) => r.currency)])].sort();
+    for (const currency of currencies) await lockPayoutBatch(tx, currency);
     const p = schema.payouts;
     // Explicit `payouts.` qualifiers: the subqueries have their own user_id columns.
     const moved = await tx
@@ -770,6 +786,7 @@ export async function schedulePayoutTransfers(db: Executor): Promise<{ scheduled
       .where(
         and(
           eq(p.provider, "stripe"),
+          inArray(p.currency, currencies),
           eq(p.status, "pending"),
           sql`exists (select 1 from payout_accounts a where a.user_id = payouts.user_id and a.provider = 'stripe'
                         and a.payouts_enabled and a.provider_account_id is not null)`,
@@ -780,7 +797,10 @@ export async function schedulePayoutTransfers(db: Executor): Promise<{ scheduled
     const open = await tx.execute<{ id: string }>(sql`
       select p.id::text as id from payouts p
         left join payout_transfers t on t.payout_id = p.id
-       where p.provider = 'stripe' and p.status = 'scheduled' and (t.id is null or t.status = 'pending')
+       where p.provider = 'stripe' and p.status = 'scheduled' and p.currency in (${sql.join(
+         currencies.map((c) => sql`${c}`),
+         sql`, `,
+       )}) and (t.id is null or t.status = 'pending')
        order by p.id`);
     return { scheduled: moved.length, payoutIds: open.map((r) => r.id) };
   });
@@ -990,6 +1010,100 @@ export async function markPayoutTransferUnsettled(
       subjectId: transfer.id,
       reason: "",
       details: { payoutId: transfer.payoutId, payeeUserId: payout.userId, code: opts.code },
+      createdAt: opts.at,
+    });
+    return true;
+  });
+}
+
+/**
+ * Mark a pending transfer `sending` just before its first Stripe call (no Stripe id, no code yet).
+ * From then on the worker never fails it without Stripe's definite answer: an earlier request may
+ * have created the transfer. Not audited (a step of the send, not an outcome). Returns whether it changed.
+ */
+export async function markPayoutTransferSending(
+  db: Executor,
+  opts: { transferId: string; at: Date },
+): Promise<boolean> {
+  return db.transaction(async (tx) => {
+    const { transfer } = await lockedTransfer(tx, opts.transferId);
+    if (transfer.status !== "pending" || transfer.providerRef !== null || transfer.failureCode !== null) return false;
+    await tx
+      .update(transfers)
+      .set({ failureCode: PAYOUT_TRANSFER_CODES.sending, updatedAt: opts.at })
+      .where(eq(transfers.id, transfer.id));
+    return true;
+  });
+}
+
+/** Whether a pending transfer's request may have reached Stripe (it may exist there): never cancel it. */
+export const transferMayHaveReachedStripe = (t: Pick<TransferRow, "providerRef" | "failureCode">): boolean =>
+  t.providerRef !== null || t.failureCode !== null;
+
+/**
+ * Stripe reports a transfer on a row we failed (its payout was cancelled back to the payable): the
+ * payee may be paid twice. Nothing is posted; a system audit row (once per row) tells the treasurer
+ * to reconcile it. Returns whether it was written now.
+ */
+export async function recordOrphanedPayoutTransfer(
+  db: Executor,
+  opts: { transferId: string; providerRef: string; at: Date },
+): Promise<boolean> {
+  return db.transaction(async (tx) => {
+    const { payout, transfer } = await lockedTransfer(tx, opts.transferId);
+    const [seen] = await tx
+      .select({ id: schema.auditLog.id })
+      .from(schema.auditLog)
+      .where(
+        and(
+          eq(schema.auditLog.action, "payout_transfer.orphaned"),
+          eq(schema.auditLog.subjectType, "payout_transfer"),
+          eq(schema.auditLog.subjectId, transfer.id),
+        ),
+      )
+      .limit(1);
+    if (seen) return false;
+    await tx.insert(schema.auditLog).values({
+      id: uuidv7(opts.at.getTime()),
+      actorType: "system",
+      actorId: null,
+      action: "payout_transfer.orphaned",
+      subjectType: "payout_transfer",
+      subjectId: transfer.id,
+      reason: "",
+      details: { payoutId: transfer.payoutId, payeeUserId: payout.userId, transferRef: opts.providerRef },
+      createdAt: opts.at,
+    });
+    return true;
+  });
+}
+
+/**
+ * A scheduled Stripe payout with no transfer row whose payee has no Stripe account to send to:
+ * cancel it back to the payable (`payoutCancel`) with a system audit row, in one transaction.
+ * Rechecked under the payout lock, so an account connected meanwhile wins. Returns whether it cancelled.
+ */
+export async function cancelPayoutWithoutAccount(db: Executor, opts: { payoutId: string; at: Date }): Promise<boolean> {
+  return db.transaction(async (tx) => {
+    const { row } = await lockedPayout(tx, opts.payoutId);
+    if (row.provider !== "stripe" || row.status !== "scheduled") return false;
+    const [existing] = await tx.select({ id: transfers.id }).from(transfers).where(eq(transfers.payoutId, row.id));
+    if (existing) return false;
+    const [acct] = await tx
+      .select({ provider: schema.payoutAccounts.provider, ref: schema.payoutAccounts.providerAccountId })
+      .from(schema.payoutAccounts)
+      .where(eq(schema.payoutAccounts.userId, row.userId));
+    if (acct?.provider === "stripe" && acct.ref) return false;
+    await cancelPayout(tx, { payoutId: row.id, at: opts.at });
+    await tx.insert(schema.auditLog).values({
+      id: uuidv7(opts.at.getTime()),
+      actorType: "system",
+      actorId: null,
+      action: "payout.cancel",
+      subjectType: "payout",
+      subjectId: row.id,
+      reason: "",
+      details: { payeeUserId: row.userId, reason: "no_account", amountCents: row.amountCents, currency: row.currency },
       createdAt: opts.at,
     });
     return true;
