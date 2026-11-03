@@ -4,6 +4,7 @@
 import { describe, expect, test } from "vite-plus/test";
 import { bulkStreamerHandle, bulkViewerHandle } from "../../src/seed/accounts.ts";
 import {
+  BYPASS_RENEW_MS,
   CHATTERS_PER_CHANNEL,
   CHAT_GAP_MS,
   COVERAGE_CHAT_GAP_MS,
@@ -20,6 +21,7 @@ import {
   liveRefusals,
   nextLine,
   planLive,
+  renewUntilAborted,
   runLive,
 } from "../../src/seed/live.ts";
 import { createRng } from "../../src/seed/prng.ts";
@@ -260,5 +262,84 @@ describe("runLive", () => {
   test("no channels: exit 1 at once", async () => {
     const f = fakeDeps();
     expect(await runLive({ channels: [], chatters: [], short: 0 }, f.deps, new AbortController().signal)).toBe(1);
+  });
+});
+
+describe("renewUntilAborted", () => {
+  test("renews at once and every interval, well inside the bypass's one-hour TTL", async () => {
+    expect(BYPASS_RENEW_MS).toBe(30 * 60_000);
+    const ac = new AbortController();
+    const calls: string[] = [];
+    let renewals = 0;
+    await renewUntilAborted(
+      async () => {
+        renewals++;
+        calls.push("renew");
+      },
+      BYPASS_RENEW_MS,
+      ac.signal,
+      {
+        out: (l) => calls.push(l),
+        sleep: async (ms) => {
+          calls.push(`sleep ${ms}`);
+          if (renewals === 3) ac.abort();
+        },
+      },
+    );
+    expect(calls).toEqual([
+      "renew",
+      `sleep ${BYPASS_RENEW_MS}`,
+      "renew",
+      `sleep ${BYPASS_RENEW_MS}`,
+      "renew",
+      `sleep ${BYPASS_RENEW_MS}`,
+    ]);
+  });
+
+  test("a failed renewal is reported and retried at the next tick, never thrown", async () => {
+    const ac = new AbortController();
+    const out: string[] = [];
+    let n = 0;
+    await renewUntilAborted(
+      async () => {
+        n++;
+        if (n === 1) throw new Error("answered HTTP 503");
+      },
+      10,
+      ac.signal,
+      {
+        out: (l) => out.push(l),
+        sleep: async () => {
+          if (n === 2) ac.abort();
+        },
+      },
+    );
+    expect(n).toBe(2);
+    expect(out).toEqual(["seed live: renewing the analytics display bypass failed (answered HTTP 503)"]);
+  });
+
+  test("stops when the sleep is aborted, and does nothing once aborted", async () => {
+    const ac = new AbortController();
+    let n = 0;
+    await renewUntilAborted(
+      async () => {
+        n++;
+      },
+      10,
+      ac.signal,
+      {
+        out: () => undefined,
+        sleep: async () => {
+          ac.abort();
+          throw new Error("aborted");
+        },
+      },
+    );
+    expect(n).toBe(1);
+    await renewUntilAborted(async () => void n++, 10, ac.signal, {
+      out: () => undefined,
+      sleep: async () => undefined,
+    });
+    expect(n).toBe(1);
   });
 });

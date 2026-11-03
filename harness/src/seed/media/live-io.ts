@@ -12,10 +12,12 @@ import { createDb } from "@commonair/db";
 import { createLogger } from "@commonair/observability";
 import { ChatClient } from "../../chat-client.ts";
 import { loadHarnessEnv } from "../../env.ts";
+import { internalSecret } from "../../safety-io.ts";
 import { Streamer, rtmpPublishUrl } from "../../streamer.ts";
 import { type SignedInUser, UserFactory } from "../../users.ts";
 import { sleep } from "../../wait.ts";
 import {
+  BYPASS_RENEW_MS,
   CHAT_GAP_MS,
   DEFAULT_LIVE_CHANNELS,
   type LiveDeps,
@@ -24,9 +26,11 @@ import {
   liveRefusals,
   nextLine,
   planLive,
+  renewUntilAborted,
   runLive,
 } from "../live.ts";
 import { seedApiFactory, stopSeedProxy } from "../clients.ts";
+import { AnalyticsHooks } from "../safety/api.ts";
 import { createRng } from "../prng.ts";
 
 /** The PRNG seed of `seed live` (it takes no `--seed`: the same channels and lines every time). */
@@ -48,6 +52,7 @@ export interface SeedLiveCommand {
 
 interface Login {
   username: string;
+  channelId: string | null;
   email: string;
   slug: string | null;
   restricted: boolean;
@@ -65,7 +70,7 @@ export async function runSeedLiveCommand(o: SeedLiveCommand): Promise<number> {
   try {
     if (handle && DEMO_SEED_FULL)
       logins = await handle.sql<Login[]>`
-        select u.username, u.email, c.slug,
+        select u.username, u.email, c.slug, c.id as "channelId",
                (u.banned or u.deleted_at is not null
                 or exists (select 1 from account_deletions d where d.user_id = u.id and d.status = 'scheduled')
                 or exists (select 1 from chat_bans b where b.user_id = u.id)
@@ -185,6 +190,18 @@ export async function runSeedLiveCommand(o: SeedLiveCommand): Promise<number> {
     out,
     sleep: (ms, signal) => sleep(ms, signal),
   };
+  // Keeps /analytics showing streamer1's history while the streams run (BYPASS_RENEW_MS says why).
+  const secret = internalSecret(env, source);
+  const s1 = logins.find((l) => l.username === "demo_streamer1")?.channelId;
+  const bypass =
+    secret && s1
+      ? renewUntilAborted(
+          () => new AnalyticsHooks(env.HARNESS_API_URL, secret, controller.signal).bypass(s1, true),
+          BYPASS_RENEW_MS,
+          controller.signal,
+          deps,
+        )
+      : Promise.resolve();
   try {
     return await runLive(plan, deps, controller.signal);
   } catch (err) {
@@ -196,6 +213,7 @@ export async function runSeedLiveCommand(o: SeedLiveCommand): Promise<number> {
     process.off("SIGINT", onSignal);
     process.off("SIGTERM", onSignal);
     controller.abort();
+    await bypass;
     await stopSeedProxy();
   }
 }

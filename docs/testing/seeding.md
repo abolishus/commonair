@@ -306,6 +306,9 @@ sh ~/commonair/selfhost.sh seed-mode close
     stack's ingest, with bulk viewers chatting. It keeps running until `close` or the deadline.
     Its pid (the container's) is `/reports/seed-live.pid`, and its log is `seed-live.log` in the
     reports directory.
+  - While it runs, it renews streamer1's analytics display bypass every 30 minutes. seed-safety
+    turns the bypass on, but it is a Valkey key with a one-hour TTL (and a resume flushes Valkey),
+    so without the renewal `/analytics` would wait out the 24 h display delay again.
 - **One unit at a time, and resuming:** `run` asks the harness for its units (`seed units`) and
   runs `seed full --to <unit>` for each, with `--from <unit>` from the second on. Between units it
   dumps the database (`pg_dump -Fc`, as the owner, while the stack keeps running) to

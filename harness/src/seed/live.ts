@@ -12,6 +12,7 @@
  * The plan and the supervisor are pure over injected dependencies (a fake process runner in the
  * tests); `media/live-io.ts` wires them to ffmpeg, the API and chat.
  */
+import { ANALYTICS_DISPLAY_BYPASS_TTL_SECONDS } from "@commonair/contracts/internal";
 import { FIXED_ACCOUNTS } from "./accounts.ts";
 import { CHAT_LINES, fillLine } from "./media/content.ts";
 import type { Rng } from "./prng.ts";
@@ -215,6 +216,40 @@ async function superviseChannel(c: LiveChannel, deps: LiveDeps, signal: AbortSig
     await deps.sleep(RESTART_BACKOFF_MS, signal).catch(() => undefined);
   }
   return false;
+}
+
+/**
+ * How often `seed live` renews streamer1's analytics display bypass (half its TTL). seed-safety
+ * turns it on, but it is a Valkey key that lapses after an hour, and a resumed seed flushes Valkey:
+ * without it, `/analytics` and attestations wait out the 24 h display delay again.
+ */
+export const BYPASS_RENEW_MS = (ANALYTICS_DISPLAY_BYPASS_TTL_SECONDS * 1000) / 2;
+
+/**
+ * Calls `renew` now and then every `everyMs` until `signal` aborts. A failure is reported and the
+ * next tick tries again: losing the bypass must never stop the streams.
+ */
+export async function renewUntilAborted(
+  renew: () => Promise<void>,
+  everyMs: number,
+  signal: AbortSignal,
+  deps: Pick<LiveDeps, "sleep" | "out">,
+): Promise<void> {
+  while (!signal.aborted) {
+    try {
+      await renew();
+    } catch (err) {
+      if (signal.aborted) return;
+      deps.out(
+        `seed live: renewing the analytics display bypass failed (${err instanceof Error ? err.message : String(err)})`,
+      );
+    }
+    try {
+      await deps.sleep(everyMs, signal);
+    } catch {
+      return;
+    }
+  }
 }
 
 /** Run the plan until `signal`. Exit code 0 clean, 1 when a channel could not be kept live. */
