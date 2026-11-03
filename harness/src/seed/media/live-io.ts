@@ -12,6 +12,8 @@ import { createDb } from "@commonair/db";
 import { createLogger } from "@commonair/observability";
 import { ChatClient } from "../../chat-client.ts";
 import { loadHarnessEnv } from "../../env.ts";
+import { type Fingerprint, newDeviceId, realisticFingerprint } from "../../fingerprint.ts";
+import { HttpViewer } from "../../http-viewer.ts";
 import { internalSecret } from "../../safety-io.ts";
 import { Streamer, rtmpPublishUrl } from "../../streamer.ts";
 import { type SignedInUser, UserFactory } from "../../users.ts";
@@ -30,6 +32,7 @@ import {
   runLive,
 } from "../live.ts";
 import { seedApiFactory, stopSeedProxy } from "../clients.ts";
+import { type WatcherDeps, planWatchers, runWatchers } from "../live-viewers.ts";
 import { AnalyticsHooks } from "../safety/api.ts";
 import { createRng } from "../prng.ts";
 
@@ -48,7 +51,12 @@ export interface SeedLiveCommand {
   signal?: AbortSignal;
   /** Each chatter's wait between lines; `CHAT_GAP_MS` by default. */
   chatGapMs?: readonly [number, number];
+  /** Seeded viewers watching through the real playback path (`live-viewers.ts`); on by default. */
+  watchers?: boolean;
 }
+
+/** A watch session that got no video segment for this long is renewed (a live segment is ~2 s). */
+export const WATCH_STALE_MS = 60_000;
 
 interface Login {
   username: string;
@@ -195,6 +203,41 @@ export async function runSeedLiveCommand(o: SeedLiveCommand): Promise<number> {
   const onStray = (err: unknown) =>
     log.warn("seed live: ignored an unhandled failure", { error: err instanceof Error ? err.message : String(err) });
   process.on("unhandledRejection", onStray);
+  // The verified audience: each viewer keeps its device and fingerprint across its sessions.
+  const devices = new Map<string, { deviceId: string; fingerprint: Fingerprint }>();
+  const watcherDeps: WatcherDeps = {
+    async startWatch(w) {
+      const u = await signIn(w.handle);
+      let device = devices.get(w.handle);
+      if (!device) {
+        device = { deviceId: newDeviceId(), fingerprint: realisticFingerprint() };
+        devices.set(w.handle, device);
+      }
+      const v = new HttpViewer({ target: { channel: w.channel }, api: u.api.client, ...device, log });
+      try {
+        await v.start();
+      } catch (err) {
+        await v.stop().catch(() => undefined);
+        throw err;
+      }
+      const startedAt = Date.now();
+      return {
+        async healthy() {
+          if ((await v.report()).errors.length > 0) return false;
+          return Date.now() - (v.lastSegmentAt ?? startedAt) < WATCH_STALE_MS;
+        },
+        stop: async () => {
+          await v.stop();
+        },
+      };
+    },
+    out,
+    sleep: (ms, signal) => sleep(ms, signal),
+    now: () => Date.now(),
+  };
+  const watchers =
+    o.watchers === false ? [] : planWatchers(rng.fork("watchers"), plan.channels, available.viewers, plan.chatters);
+  const watching = runWatchers(watchers, rng.fork("watching"), watcherDeps, controller.signal);
   // Keeps /analytics showing streamer1's history while the streams run (BYPASS_RENEW_MS says why).
   const secret = internalSecret(env, source);
   const s1 = logins.find((l) => l.username === "demo_streamer1")?.channelId;
@@ -220,6 +263,9 @@ export async function runSeedLiveCommand(o: SeedLiveCommand): Promise<number> {
     process.off("unhandledRejection", onStray);
     controller.abort();
     await bypass;
+    const watched = await watching;
+    if (watchers.length > 0)
+      out(`seed live: viewers ran ${watched.sessions} watch sessions (${watched.renewed} renewed after losing media)`);
     await stopSeedProxy();
   }
 }
