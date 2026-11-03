@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { QUEUES } from "@commonair/contracts/internal";
+import { B8_JOBS, QUEUES } from "@commonair/contracts/internal";
 import { describe, expect, test } from "vite-plus/test";
 import { JOBS } from "../src/jobs/index.ts";
 import { MONEY_BATCH_SIZE, MONEY_BUDGET_MS, moneyConfig, moneyConfigFromEnv } from "../src/money/config.ts";
@@ -150,7 +150,9 @@ describe("takeWithinCap", () => {
 
 describe("money job wiring", () => {
   test("five scheduled jobs on the payments queue (three here, two from W1)", () => {
-    const money = JOBS.filter((j) => j.queue === QUEUES.payments);
+    // Batch 8's payments jobs are pinned in tests/b8-jobs.test.ts.
+    const b8 = new Set<string>(Object.values(B8_JOBS));
+    const money = JOBS.filter((j) => j.queue === QUEUES.payments && !b8.has(j.name));
     expect(money.map((j) => j.name).sort()).toEqual(
       [...Object.values(MONEY_JOBS), "money-fraud-scan", "money-reconcile"].sort(),
     );

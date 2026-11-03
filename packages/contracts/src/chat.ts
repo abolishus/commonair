@@ -73,6 +73,8 @@ export const ClientFrame = z.discriminatedUnion("op", [
     roomId: z.uuid(),
     playheadWallclock: Timestamp,
     mode: z.enum(PLAYBACK_MODES),
+    /** Batch 8 (B8-player): the player's live edge as a wall-clock instant; null in `dvr` mode. */
+    edgeWallclock: Timestamp.nullable().optional(),
     nonce,
   }),
 ]);

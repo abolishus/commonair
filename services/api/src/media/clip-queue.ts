@@ -8,6 +8,7 @@
  */
 import { Queue } from "bullmq";
 import { Valkey } from "iovalkey";
+import { valkeyTls } from "@commonair/service";
 import { QUEUES } from "@commonair/contracts/internal";
 import type { Deps } from "../deps.ts";
 
@@ -18,7 +19,11 @@ export interface ClipQueue {
 
 export function createClipQueue(valkeyUrl: string, prefix: string): ClipQueue {
   // BullMQ refuses ioredis key prefixes and needs maxRetriesPerRequest: null.
-  const conn = new Valkey(valkeyUrl, { maxRetriesPerRequest: null, connectionName: "api-clips-queue" });
+  const conn = new Valkey(valkeyUrl, {
+    ...valkeyTls(valkeyUrl),
+    maxRetriesPerRequest: null,
+    connectionName: "api-clips-queue",
+  });
   const queue = new Queue(QUEUES.clips, { connection: conn, prefix });
   return {
     async enqueue(clipId) {

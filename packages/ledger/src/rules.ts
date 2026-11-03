@@ -889,6 +889,45 @@ export function payoutSent(i: PayoutSentInput): Posting {
   });
 }
 
+export interface PayoutTransferReversedInput {
+  payoutId: string;
+  /** Our `payout_transfers.id`. */
+  transferId: string;
+  /** The payee: the reversed money returns to their earnings payable. */
+  userId: string;
+  /** This reversal's amount (the increase in the transfer's reversed total). */
+  amountCents: number;
+  /** The transfer's reversed total after this reversal (`payout_transfers.reversed_cents`). */
+  cumulativeCents: number;
+  currency: string;
+  occurredAt: Date;
+}
+
+/**
+ * Part or all of a Connect transfer came back (batch 8, decision (f)): the cash is at Stripe again
+ * and the creator is owed it again, so a later payout run pays it. Keyed by the cumulative total,
+ * so two partial reversals are two postings and a redelivered event posts nothing.
+ */
+export function payoutTransferReversed(i: PayoutTransferReversedInput): Posting {
+  assertCents("amount", i.amountCents, { allowZero: false });
+  assertCents("cumulative", i.cumulativeCents, { allowZero: false });
+  if (i.amountCents > i.cumulativeCents) throw new RangeError("a reversal cannot exceed the reversed total");
+  return finish({
+    kind: "payout_transfer_reversal",
+    description: "Payout transfer reversed",
+    refType: "payout",
+    refId: i.payoutId,
+    idempotencyKey: `payout-transfer-reversed:${i.transferId}:${i.cumulativeCents}`,
+    currency: i.currency,
+    occurredAt: i.occurredAt,
+    metadata: { userId: i.userId, transferId: i.transferId, cumulativeCents: i.cumulativeCents },
+    entries: [
+      { code: accounts.cash("stripe"), amountCents: i.amountCents, memo: "transfer reversed" },
+      { code: accounts.creator(i.userId), amountCents: -i.amountCents, memo: "transfer reversed" },
+    ],
+  });
+}
+
 export interface PayoutCancelInput {
   payoutId: string;
   userId: string;
@@ -1084,6 +1123,11 @@ export function patronageAllocation(i: PatronageAllocationInput): Posting {
 }
 
 export interface PatronagePayoutInput {
+  /**
+   * The `patronage_payouts` row paid (batch 8). A failed or reversed row is followed by a new row,
+   * so the key is the row's, not the member's and period's.
+   */
+  payoutId: string;
   periodId: string;
   userId: string;
   provider: string;
@@ -1099,13 +1143,52 @@ export function patronagePayout(i: PatronagePayoutInput): Posting {
     description: "Patronage paid",
     refType: "patronage_period",
     refId: i.periodId,
-    idempotencyKey: `patronage-payout:${i.periodId}:${i.userId}`,
+    idempotencyKey: `patronage-payout:${i.payoutId}`,
     currency: i.currency,
     occurredAt: i.occurredAt,
-    metadata: { userId: i.userId },
+    metadata: { userId: i.userId, payoutId: i.payoutId },
     entries: [
       { code: accounts.patronagePayable(i.userId), amountCents: i.amountCents },
       { code: accounts.cash(i.provider), amountCents: -i.amountCents },
+    ],
+  });
+}
+
+export interface PatronagePayoutReversedInput {
+  /** The `patronage_payouts` row that came back. */
+  payoutId: string;
+  periodId: string;
+  userId: string;
+  /** Where the payout was paid from (`cash:<provider>`). */
+  provider: string;
+  /** This reversal's amount. */
+  amountCents: number;
+  /** Every reversal of this payout row so far, this one included. */
+  cumulativeCents: number;
+  currency: string;
+  occurredAt: Date;
+}
+
+/**
+ * A paid patronage payout came back (batch 8, M1-coop-money): the cash returns and the member is
+ * owed it again. Keyed by the cumulative total, like `payoutTransferReversed`.
+ */
+export function patronagePayoutReversed(i: PatronagePayoutReversedInput): Posting {
+  assertCents("amount", i.amountCents, { allowZero: false });
+  assertCents("cumulative", i.cumulativeCents, { allowZero: false });
+  if (i.amountCents > i.cumulativeCents) throw new RangeError("a reversal cannot exceed the reversed total");
+  return finish({
+    kind: "patronage_payout_reversal",
+    description: "Patronage payout reversed",
+    refType: "patronage_period",
+    refId: i.periodId,
+    idempotencyKey: `patronage-payout-reversed:${i.payoutId}:${i.cumulativeCents}`,
+    currency: i.currency,
+    occurredAt: i.occurredAt,
+    metadata: { userId: i.userId, payoutId: i.payoutId, cumulativeCents: i.cumulativeCents },
+    entries: [
+      { code: accounts.cash(i.provider), amountCents: i.amountCents },
+      { code: accounts.patronagePayable(i.userId), amountCents: -i.amountCents },
     ],
   });
 }

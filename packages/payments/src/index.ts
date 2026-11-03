@@ -7,10 +7,11 @@
  * imports), so the manual path never loads them; their types are re-exported type-only.
  */
 export * from "./adapter.ts";
+export * from "./errors.ts";
 export * from "./factory.ts";
 export * from "./format.ts";
 export * from "./manual.ts";
 export * from "./reference.ts";
 export type { StripeAction, StripeEventEnvelope, StripeRefundItem } from "./stripe-events.ts";
 export type { SignatureCheck } from "./stripe-signature.ts";
-export type { StripeClient, StripeClientOptions } from "./stripe-client.ts";
+export type { StripeClient, StripeClientOptions, StripeRefund, StripeTransfer } from "./stripe-client.ts";

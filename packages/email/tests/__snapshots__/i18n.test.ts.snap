@@ -595,6 +595,35 @@ Recibes este correo por tu cuenta en Example Air.
 Example Air funciona con software libre. Obtén el código fuente https://forge.example.test/air/commonair/tree/0123abcd."
 `;
 
+exports[`paymentReceipt in Spanish > renders with lang and dir, and differs from English in subject and body 1`] = `
+"Tu recibo: 4,99 €
+
+Example Air https://air.example.test
+
+
+Gracias por tu pago
+
+Importe
+
+4,99 €
+
+Pagado
+
+18 de octubre de 2026 a las 14:30 UTC
+
+Referencia
+
+CA-7KQ2M9XW
+
+----------------------------------------
+
+Recibes este correo por tu cuenta en Example Air.
+
+¿Tienes preguntas? Escribe a hello@air.example.test.
+
+Example Air funciona con software libre. Obtén el código fuente https://forge.example.test/air/commonair/tree/0123abcd."
+`;
+
 exports[`payoutSent in Spanish > renders with lang and dir, and differs from English in subject and body 1`] = `
 "Liquidación enviada: 1234,56 €
 

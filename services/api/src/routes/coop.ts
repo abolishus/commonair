@@ -5,6 +5,7 @@
 import { councilHandlers } from "../coop/council.ts";
 import { membershipHandlers } from "../coop/membership.ts";
 import { patronageHandlers } from "../coop/patronage.ts";
+import { patronagePayoutHandlers } from "../coop/patronage-payouts.ts";
 import { proposalHandlers } from "../coop/proposals.ts";
 import { feeScheduleHandler } from "../money/fee-schedule.ts";
 import { transparencyHandler } from "../money/reports.ts";
@@ -21,7 +22,7 @@ export const coop = {
   council: councilHandlers.council,
   elections: councilHandlers.elections,
   board: councilHandlers.board,
-  patronage: patronageHandlers,
+  patronage: { ...patronageHandlers, ...patronagePayoutHandlers },
   transparency: transparencyHandler,
   feeSchedule: feeScheduleHandler,
 };

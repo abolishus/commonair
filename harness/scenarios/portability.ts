@@ -15,9 +15,15 @@
  * pending (`src/w3/steps.ts`) and run only when named. W3-portability fills this file and
  * `src/w3/portability/`.
  *
+ * B8 extension (`--set b8=`, `src/b8/steps.ts`): `incoming-cleanup` (B8-server,
+ * `src/b8/server.ts`) runs after the steps.
+ *
  * Runs in the `w3` shard, on the harness stack with the batch 7 overrides
  * (`bun scripts/infra.ts stack --harness --w3`).
  */
+import type { PortabilityB8Extension } from "../src/b8/kit.ts";
+import { stepIncomingCleanup } from "../src/b8/server.ts";
+import { type B8Extension, b8ExtensionTitle, b8Extensions, withB8Steps } from "../src/b8/steps.ts";
 import { parseVia } from "../src/money.ts";
 import { defineScenario } from "../src/scenario.ts";
 import { PORTABILITY_STEP_RUNNERS, newPortabilityRun } from "../src/w3/portability/index.ts";
@@ -28,6 +34,10 @@ import {
   withPrerequisites,
 } from "../src/w3/steps.ts";
 
+const B8_STEPS: Readonly<Record<B8Extension<"portability">, (run: PortabilityB8Extension) => Promise<void>>> = {
+  "incoming-cleanup": stepIncomingCleanup,
+};
+
 export default defineScenario({
   name: "portability",
   description:
@@ -37,15 +47,22 @@ export default defineScenario({
   timeoutMs: 20 * 60_000,
   async run(ctx) {
     const selected = parsePortabilitySteps(ctx.param("steps", "all"));
-    const { steps, added } = withPrerequisites(selected, PORTABILITY_STEP_PREREQUISITES);
+    // `--set b8=` names a pending extension; by default only merged ones run (src/b8/steps.ts).
+    const b8 = b8Extensions("portability", ctx.param("b8", ""));
+    const forB8 = withB8Steps(selected, b8.run);
+    const prerequisites = withPrerequisites(forB8.steps, PORTABILITY_STEP_PREREQUISITES);
+    const steps = prerequisites.steps;
+    const added = [...new Set([...forB8.added, ...prerequisites.added])].sort((a, b) => a - b);
     const via = parseVia(ctx.param("via", "web"));
     ctx.data("steps", { selected, run: steps, addedPrerequisites: added });
     ctx.data("via", via);
-    if (steps.length === 0) {
+    ctx.data("b8.extensions", b8);
+    if (steps.length === 0 && b8.run.length === 0) {
       ctx.skipStep("portability", "every step is pending (W3-portability not merged yet); name one with --set steps=");
       return;
     }
     const run = await newPortabilityRun(ctx, { via });
     for (const n of steps) await ctx.step(portabilityTitle(n, "run"), () => PORTABILITY_STEP_RUNNERS[n](run));
+    for (const name of b8.run) await ctx.step(b8ExtensionTitle(name, "run"), () => B8_STEPS[name](run));
   },
 });

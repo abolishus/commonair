@@ -21,8 +21,8 @@ Agents write and test this code; they never apply it or hold the token.
 | ---------------------------------------------- | ------------------------------------------------------------------------------------------------ |
 | `digitalocean/modules/instance/`               | one instance: tags, project, VPCs, droplets, firewalls, backups, monitoring, stage 1 and stage 2 |
 | `digitalocean/modules/instance/tests/`         | `tofu test` with `mock_provider "digitalocean"`: no token, no account                            |
-| `digitalocean/envs/staging/`                   | staging root: one shared-vCPU droplet, stage 0 only                                              |
-| `digitalocean/envs/production/`                | production root: stage 0 at launch; stage 1 and 2 behind variables                               |
+| `digitalocean/envs/staging/`                   | staging root: one shared-vCPU droplet, stage 0 by default; stage 1 only for a U5 agent-track run |
+| `digitalocean/envs/production/`                | production root: stage 1 at launch (U4); stage 2 behind `app_count`                              |
 | `check.sh`                                     | `fmt -check`, `validate` in every root and module, `tofu test`                                   |
 | `provider-licenses.json`                       | the license of every provider in a `.terraform.lock.hcl` (ADR 0002)                              |
 | `*/.terraform.lock.hcl`                        | provider hashes for linux_amd64, linux_arm64 and darwin_arm64                                    |
@@ -96,7 +96,7 @@ and database firewalls select on `commonair-<env>-app`, so a staging droplet nev
 production's database firewall. SSH keys are looked up by fingerprint among the keys already on
 the account; tofu never creates one, and a missing fingerprint fails the plan.
 
-**Stage 0 (launch)**:
+**Stage 0**:
 
 - one droplet: Debian 13 (`debian-13-x64`), `droplet_size` with no default (S1-a chooses it),
   IPv6 on, the monitoring agent on, in the VPC;

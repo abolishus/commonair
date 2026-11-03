@@ -13,6 +13,11 @@
  * - `stream.offline` → `relay-purge` (the job decides whether a recording ended).
  * - `channel.moved` → `portability-moved`.
  * - `federation.inbox.received` → `federation-inbox`.
+ * - `federation.actor.disabled` → `federation-deliver` of the actor `Delete`, one job per distinct
+ *   follower inbox (batch 8, decision (h)).
+ * - `channel.federation {enabled:false}` → the same `Delete` deliveries, plus
+ *   `federation-follower-cleanup`, queued in the same bulk so every follower it removes already
+ *   has its `Delete` queued. `{enabled:true}` starts nothing.
  * - `jury.panel.drawn` → nothing (audit only).
  *
  * Federation fan-out is gated twice: `FEDERATION_ENABLED` on the instance and the channel's
@@ -21,9 +26,12 @@
  * vast majority, from queuing work.
  *
  * Job ids are deterministic per event (no colon: BullMQ refuses a two-part id with one), so a
- * re-relayed batch (at-least-once) enqueues nothing new.
+ * re-relayed batch (at-least-once) enqueues nothing new. The actor `Delete` is the exception: its
+ * activity id, and so each delivery's job id (`deliverJobId`), is stable per channel and key
+ * generation, so the two events written for one change (or a repeat) queue one `Delete` per inbox.
+ * Both read the actor and its followers in the relay transaction; a channel with no actor row (an
+ * account deletion removes it) has nobody to tell from here.
  */
-import { federationEnv, loadEnv } from "@commonair/config";
 import { EVENTS, type EventType } from "@commonair/contracts/events";
 import {
   FEDERATION_JOBS,
@@ -33,30 +41,44 @@ import {
   relayPurgeJobId,
   federationJobId,
   portabilityJobId,
+  type FederationDeliverJob,
   type FederationFanoutJob,
+  type FederationFollowerCleanupJob,
   type FederationInboxJob,
   type PortabilityMovedJob,
   type RelayPurgeEmitJob,
 } from "@commonair/contracts/internal";
 import { type Executor, schema } from "@commonair/db";
-import { and, inArray, sql } from "drizzle-orm";
+import { actorUrls, deleteActorActivity } from "@commonair/federation";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { z } from "zod";
 import type { EnqueueOptions } from "../context.ts";
 import type { QueueName } from "../env.ts";
+import { federationEnvSlice } from "../federation/config.ts";
+import { deliverJobId } from "../federation/deliver.ts";
+import { blockedDomains, isBlocked } from "../federation/local.ts";
 
-const { channels, events } = schema;
+const { channels, events, federationActors, federationFollowers } = schema;
 type EventRow = typeof events.$inferSelect;
 
 export interface B7Job {
   queue: QueueName;
   name: string;
-  data: FederationFanoutJob | FederationInboxJob | PortabilityMovedJob | RelayPurgeEmitJob;
+  data:
+    | FederationFanoutJob
+    | FederationInboxJob
+    | FederationDeliverJob
+    | FederationFollowerCleanupJob
+    | PortabilityMovedJob
+    | RelayPurgeEmitJob;
   opts: EnqueueOptions;
 }
 
 export interface B7OutboxFlags {
   /** `FEDERATION_ENABLED`. */
   federation: boolean;
+  /** The instance's public origin, which actor ids are built on (the site's `publicUrl`). */
+  publicUrl: string;
 }
 
 let cachedFlags: B7OutboxFlags | undefined;
@@ -64,7 +86,9 @@ let cachedFlags: B7OutboxFlags | undefined;
 /** Read once per process from the env `workerEnv` validated at start-up; tests pass their own source. */
 export function b7OutboxFlags(source?: Record<string, string | undefined>): B7OutboxFlags {
   if (!source && cachedFlags) return cachedFlags;
-  const flags = { federation: loadEnv(federationEnv, source ?? process.env).FEDERATION_ENABLED };
+  const env = federationEnvSlice(source ?? process.env);
+  // The same derivation as `instanceSite` and `federationConfig`'s fallback.
+  const flags = { federation: env.FEDERATION_ENABLED, publicUrl: env.PUBLIC_URL.replace(/\/+$/, "") };
   if (!source) cachedFlags = flags;
   return flags;
 }
@@ -97,6 +121,71 @@ async function federatedChannels(tx: Executor, ids: readonly string[]): Promise<
   return new Set(rows.map((r) => r.id));
 }
 
+/** What an actor `Delete` needs from the relay transaction: the key generation and the inboxes. */
+export interface ActorDeleteTarget {
+  /** `federation_actors.key_created_at`: a rotation starts a new generation. */
+  keyCreatedAt: Date;
+  /** Distinct inboxes (shared where offered) of the followers who arrived by `upTo`, unblocked. */
+  inboxes: string[];
+}
+
+/**
+ * The channel's actor and the follower inboxes to tell, as of `upTo` (the event's time: a
+ * follower who arrived after federation came back on is not told). Null without an actor row.
+ */
+export async function actorDeleteTarget(
+  tx: Executor,
+  channelId: string,
+  upTo: Date,
+): Promise<ActorDeleteTarget | null> {
+  const [actor] = await tx
+    .select({ keyCreatedAt: federationActors.keyCreatedAt })
+    .from(federationActors)
+    .where(eq(federationActors.channelId, channelId));
+  if (!actor) return null;
+  const [rows, blocks] = await Promise.all([
+    tx
+      .select({ inbox: federationFollowers.inbox, sharedInbox: federationFollowers.sharedInbox })
+      .from(federationFollowers)
+      .where(
+        and(
+          eq(federationFollowers.channelId, channelId),
+          // `upTo` has milliseconds; created_at has microseconds.
+          sql`date_trunc('milliseconds', ${federationFollowers.createdAt}) <= ${upTo.toISOString()}::timestamptz`,
+        ),
+      ),
+    blockedDomains(tx),
+  ]);
+  const inboxes = new Set<string>();
+  for (const r of rows) {
+    const target = r.sharedInbox ?? r.inbox;
+    if (!isBlocked(blocks, target)) inboxes.add(target);
+  }
+  return { keyCreatedAt: actor.keyCreatedAt, inboxes: [...inboxes].sort() };
+}
+
+/**
+ * The actor `Delete` deliveries (attempt 1): one per inbox, the activity id stable per channel and
+ * key generation (`#delete/key-<ms>`), so `deliverJobId` is too.
+ */
+export async function actorDeleteJobs(
+  publicUrl: string,
+  channelId: string,
+  target: ActorDeleteTarget,
+): Promise<B7Job[]> {
+  const activity = deleteActorActivity(actorUrls(publicUrl, channelId), `key-${target.keyCreatedAt.getTime()}`);
+  // The builders return closed interfaces; the job carries the activity as a JSON record.
+  const json = activity as unknown as Record<string, unknown>;
+  return Promise.all(
+    target.inboxes.map(async (inbox) => ({
+      queue: QUEUES.federation,
+      name: FEDERATION_JOBS.deliver,
+      data: { channelId, inbox, objectId: null, activity: json, attempt: 1 } satisfies FederationDeliverJob,
+      opts: { jobId: await deliverJobId(activity.id, inbox, 1) },
+    })),
+  );
+}
+
 /** Whether a row takes media off the air (so relays must drop their copies). */
 function purges(row: EventRow): boolean {
   switch (row.type) {
@@ -122,6 +211,7 @@ export async function b7JobsFor(
   rows: readonly EventRow[],
   _now: Date,
   flags: B7OutboxFlags = b7OutboxFlags(),
+  targetOf: typeof actorDeleteTarget = actorDeleteTarget,
 ): Promise<B7Job[]> {
   const candidates = flags.federation
     ? [...new Set(rows.filter((r) => FEDERATED_TYPES.has(r.type)).flatMap((r) => channelOf(r) ?? []))]
@@ -168,8 +258,37 @@ export async function b7JobsFor(
         });
         break;
       }
+      case "federation.actor.disabled": {
+        if (!flags.federation) break;
+        const p = payloadOf("federation.actor.disabled", row);
+        const target = await targetOf(tx, p.channel_id, row.occurredAt);
+        if (target) out.push(...(await actorDeleteJobs(flags.publicUrl, p.channel_id, target)));
+        break;
+      }
+      case "channel.federation": {
+        const p = payloadOf("channel.federation", row);
+        if (!flags.federation || p.enabled) break;
+        const target = await targetOf(tx, p.channel_id, row.occurredAt);
+        if (!target) break;
+        out.push(...(await actorDeleteJobs(flags.publicUrl, p.channel_id, target)));
+        out.push({
+          queue: QUEUES.federation,
+          name: FEDERATION_JOBS.followerCleanup,
+          data: { channelId: p.channel_id, upTo: row.occurredAt.toISOString() },
+          opts: { jobId: federationJobId(FEDERATION_JOBS.followerCleanup, row.id) },
+        });
+        break;
+      }
       // jury.panel.drawn: audit only, no job.
     }
   }
-  return out;
+  // Both actor events for one change name the same deliveries; keep the first of each.
+  const seen = new Set<string>();
+  return out.filter((j) => {
+    const id = j.opts.jobId;
+    if (id === undefined) return true;
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
 }

@@ -11,6 +11,7 @@ import {
   captionsEnv,
   chatEnv,
   costModelEnv,
+  databaseEnv,
   dvrEnv,
   coreEnv,
   evidenceOpenEnv,
@@ -26,6 +27,7 @@ import {
   portabilityEnv,
   turnEnv,
   twitchImportEnv,
+  valkeyEnv,
   webPushEnv,
   webPushPublicEnv,
 } from "../src/env.ts";
@@ -186,6 +188,35 @@ describe("env", () => {
     expect(() => loadEnv(paymentsEnv, { STRIPE_SECRET_KEY: "sk_live_abc" })).toThrow(EnvError);
     expect(loadEnv(paymentsEnv, { STRIPE_SECRET_KEY: "sk_test_abc" }).STRIPE_SECRET_KEY).toBe("sk_test_abc");
     expect(loadEnv(paymentsEnv, {}).PAYMENTS_PROVIDER).toBe("manual");
+  });
+
+  test("GIFT_PAYMENT_HOURS: whole hours from 1 to 168, default 24", () => {
+    expect(loadEnv(paymentsEnv, {}).GIFT_PAYMENT_HOURS).toBe(24);
+    expect(loadEnv(paymentsEnv, { GIFT_PAYMENT_HOURS: "1" }).GIFT_PAYMENT_HOURS).toBe(1);
+    expect(loadEnv(paymentsEnv, { GIFT_PAYMENT_HOURS: "168" }).GIFT_PAYMENT_HOURS).toBe(168);
+    for (const bad of ["0", "169", "1.5", "-3", "day"]) {
+      expect(() => loadEnv(paymentsEnv, { GIFT_PAYMENT_HOURS: bad }), bad).toThrow(EnvError);
+    }
+  });
+
+  test("DATABASE_CA_FILE and VALKEY_CA_FILE are optional paths; unset keeps today's behaviour", () => {
+    const base = { DATABASE_URL: "postgres://u@db/x", VALKEY_URL: "redis://cache:6379" };
+    expect(loadEnv(databaseEnv, base).DATABASE_CA_FILE).toBeUndefined();
+    expect(loadEnv(valkeyEnv, base).VALKEY_CA_FILE).toBeUndefined();
+    expect(loadEnv(databaseEnv, { ...base, DATABASE_CA_FILE: "/run/secrets/pg-ca" }).DATABASE_CA_FILE).toBe(
+      "/run/secrets/pg-ca",
+    );
+    expect(loadEnv(valkeyEnv, { ...base, VALKEY_CA_FILE: "/run/secrets/valkey-ca" }).VALKEY_CA_FILE).toBe(
+      "/run/secrets/valkey-ca",
+    );
+  });
+
+  test("POSTGRES_MONITOR_PASSWORD, when set, has at least 12 characters", () => {
+    expect(loadEnv(infraEnv, {}).POSTGRES_MONITOR_PASSWORD).toBeUndefined();
+    expect(() => loadEnv(infraEnv, { POSTGRES_MONITOR_PASSWORD: "short" })).toThrow(EnvError);
+    expect(loadEnv(infraEnv, { POSTGRES_MONITOR_PASSWORD: "a-long-enough-pw" }).POSTGRES_MONITOR_PASSWORD).toBe(
+      "a-long-enough-pw",
+    );
   });
 
   test("instanceSite applies contact overrides and strips trailing slashes", () => {

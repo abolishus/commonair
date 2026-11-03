@@ -135,6 +135,7 @@ async function pay(i: PayInput): Promise<string> {
       providerRef: reference(),
       kind: i.kind,
       status: "succeeded",
+      gift: i.gift !== undefined,
       userId: i.payer,
       channelId,
       tipId,

@@ -12,6 +12,7 @@ import {
   PayoutRulesSetting,
   PlatformCutSetting,
   PointsAccrualSetting,
+  SharesCardPaymentsSetting,
   type GovernanceChange,
 } from "@commonair/contracts/shapes";
 import { type Executor, schema } from "@commonair/db";
@@ -93,6 +94,7 @@ const VALUE_SHAPES: Readonly<Record<string, z.ZodType>> = {
   "jury.enabled": JuryEnabledSetting,
   "jury.panelSize": JuryPanelSizeSetting,
   "jury.casesPerPanel": JuryCasesPerPanelSetting,
+  "shares.cardPayments": SharesCardPaymentsSetting,
 };
 
 export type ClassifiedChanges =

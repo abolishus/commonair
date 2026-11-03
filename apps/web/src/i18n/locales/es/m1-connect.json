@@ -1,0 +1,5 @@
+{
+  "payoutTransfers.tab": "Transferencias",
+  "payoutTransfers.empty.title": "No hay transferencias de pagos",
+  "payoutTransfers.empty.body": "Aquí aparecen las transferencias de Stripe hechas para los pagos a creadores."
+}

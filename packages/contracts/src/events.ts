@@ -30,6 +30,7 @@ import {
   PATRONAGE_STATUSES,
   PAYMENT_FRAUD_KINDS,
   PAYMENT_FRAUD_STATUSES,
+  PAYMENT_PROVIDERS,
   SHARE_STATUSES,
   ATTESTATION_KINDS,
   SPLIT_BASES,
@@ -639,6 +640,82 @@ export const EVENTS = {
       held_payouts: z.number().int(),
     },
   }),
+  // Internal (batch 8, M1-connect and M1-coop-money; ADR 0007 Amendment 1): Connect transfers and
+  // patronage payouts. Written in the transaction that changes the row. Ids and cents only.
+  "money.payout_transfer.created": def({
+    version: "1",
+    condition: [],
+    scopes: [],
+    internal: true,
+    description: "Internal: a payout's Stripe Connect transfer was created (the payout is paid)",
+    payload: {
+      transfer_id: id,
+      payout_id: id,
+      payee_user_id: id,
+      amount_cents: z.number().int(),
+      currency: z.string(),
+    },
+  }),
+  "money.payout_transfer.failed": def({
+    version: "1",
+    condition: [],
+    scopes: [],
+    internal: true,
+    description: "Internal: a payout's transfer was refused; the payout is cancelled back to the payable",
+    payload: {
+      transfer_id: id,
+      payout_id: id,
+      payee_user_id: id,
+      /** An opaque short code (`payout_transfers.failure_code`), never the provider's message. */
+      failure_code: z.string().max(64),
+    },
+  }),
+  "money.payout_transfer.reversed": def({
+    version: "1",
+    condition: [],
+    scopes: [],
+    internal: true,
+    description: "Internal: some or all of a transfer was reversed; the amount returned to the payable",
+    payload: {
+      transfer_id: id,
+      payout_id: id,
+      payee_user_id: id,
+      /** This reversal. */
+      amount_cents: z.number().int(),
+      /** Every reversal of the transfer so far (`payout_transfers.reversed_cents`). */
+      reversed_cents: z.number().int(),
+      currency: z.string(),
+    },
+  }),
+  "coop.patronage_payout.paid": def({
+    version: "1",
+    condition: [],
+    scopes: [],
+    internal: true,
+    description: "Internal: a member's patronage payout for a period was paid",
+    payload: {
+      patronage_payout_id: id,
+      period_id: id,
+      user_id: id,
+      amount_cents: z.number().int(),
+      currency: z.string(),
+      provider: z.enum(PAYMENT_PROVIDERS),
+    },
+  }),
+  "coop.patronage_payout.reversed": def({
+    version: "1",
+    condition: [],
+    scopes: [],
+    internal: true,
+    description: "Internal: a paid patronage payout was reversed; the amount returned to the member's payable",
+    payload: {
+      patronage_payout_id: id,
+      period_id: id,
+      user_id: id,
+      amount_cents: z.number().int(),
+      currency: z.string(),
+    },
+  }),
   // Internal (trust & safety, ADR 0006). Ids and enums only: never frames, URLs, keys or PII.
   "moderation.flagged": def({
     version: "1",
@@ -910,6 +987,25 @@ export const EVENTS = {
       "Internal: a channel set where it moved to (decision (l)); the worker sends the grant holders one email",
     /** The https address the streamer published on the channel page; never a person's data. */
     payload: { channel_id: id, moved_to: z.string() },
+  }),
+  // Batch 8 decision (h): federation state changes, routed to the worker by `b7JobsFor`. A toggle
+  // never emits the public `channel.update`.
+  "federation.actor.disabled": def({
+    version: "1",
+    condition: [],
+    scopes: [],
+    internal: true,
+    description:
+      "Internal: a channel's ActivityPub actor stopped federating (federation off, suspension or account deletion); the worker sends its Delete",
+    payload: { channel_id: id },
+  }),
+  "channel.federation": def({
+    version: "1",
+    condition: [],
+    scopes: [],
+    internal: true,
+    description: "Internal: a channel turned federation on or off; off also removes its remote followers",
+    payload: { channel_id: id, enabled: z.boolean() },
   }),
   "portability.import.finished": def({
     version: "1",

@@ -66,6 +66,52 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
     `/chat` once the Caddy fix is released.
   - **Wave 2** waits on batch 8's B8-web and B8-player.
 
+**Batch 8 contract step merged (2026-11-03).** Four parallel parts, then a four-dimension
+independent review plus the database security review of `0049`, then one fix pass. On `main` at
+`6f620512` (merges `b5fc9be9`, `7aa95566`, `8700f97f`, `3600368b`); CI run `41692011499` green (the
+first attempt's only failure was the WebKit `drivers.int` API-mode playback test, unrelated; it
+passed on rerun). What landed:
+
+- **(A) S1-d:** `packages/db/tests/external-owner.int.test.ts` (35 tests) runs every migration, the
+  app role, the monitor role, every trigger family and the restore as a `LOGIN CREATEROLE` owner
+  with no superuser, over `sslmode=verify-full` against a private CA, in a throwaway container of
+  the pinned Postgres 17 image (CI runs it; it refuses to skip when `CI` is set).
+  **No step needs a superuser**, so decision (a)'s re-plan point did not trigger. One fix was
+  needed: `app-role.sql`'s `ALTER ROLE … NOSUPERUSER …` is refused to a non-superuser on PG 16+,
+  so the owner now switches off only attributes that are on. **`pg_monitor` is not grantable by
+  the owner on PG 17**: `monitor-role.sql` creates `commonair_monitor` without it (WAL size and
+  other roles' `pg_stat_activity` state are lost; the stats views stay readable). **The
+  owner-only restore works** (pre-data, `DISABLE TRIGGER USER`, data, `ENABLE`, post-data) and
+  catches a doubled `follower_count`; `pg_dump` puts every trigger in post-data anyway.
+  `DATABASE_CA_FILE` and `VALKEY_CA_FILE` (unset changes nothing), also spread into every raw
+  BullMQ connection; `GIFT_PAYMENT_HOURS`; `POSTGRES_MONITOR_PASSWORD`; ADR 0032 §4 amended and
+  its U4 "Decisions at acceptance" written. **The DigitalOcean check (§1.5) waits for the staging
+  token** (U5).
+- **(B) money and contracts:** `0048_b8.sql` (`payments.gift`, `payout_transfers`,
+  `patronage_payouts`), `0049_b8_protections.sql`, the two reversal rules, the Stripe client's
+  transfer and refund calls, `StripeOutcomeUnknown`, the webhook split into
+  `stripe-events/{refunds,transfers,shares}.ts`, the after-commit receipt and auto-refund hooks,
+  five `notImplemented` procedures, `shares.cardPayments`, the `paymentReceipt` template, and every
+  B8 contract field (`edgeWallclock`, `dvrSwitchTo`, `ImportChoices.fields`, `verify.me`, the
+  `staff_action` facts, the federation events).
+- **(C) seams:** federation event routing in `b7JobsFor` (plus a `followerCleanup` job), the five
+  batch 8 job stubs, the giveaway export stub, the prediction card's `channel` prop, the treasury
+  `refunds` and `transfers` tabs, and the `m1-money`, `m1-connect`, `m1-coop` and `b8-channel`
+  namespaces.
+- **(D):** ADR 0007 Amendment 1 (accepted), ADR 0014 Amendment 1 (proposed), production tofu
+  `enable_managed_state = true` (and `instance_origin` now required), `harness/src/b8/steps.ts`
+  with all 21 extensions pending, `docs/testing/b8-selectors.md` and `PENDING_B8_IDS`.
+- **Database security review:** proven bypasses fixed with regression tests: a payout changed
+  under its Stripe transfer (now `payouts_transfer_guard`), a gift created without the flag
+  (`subscriptions.gift_payment_id` must name a `gift` payment), NULL gifter or channel, owner
+  `TRUNCATE`, and late references on failed patronage payouts. The other attacks held.
+- **Differs from the spec** (listed in `batch8/README.md` "Contract step as landed"): the
+  patronage unique index is partial so failed or reversed payouts can be retried, with ledger keys
+  per payout row; `refundRequests` is `{list, resolve}`; transfers filter by `periodStart`; the
+  facts variant is `code: "staff_action"`; stripe-mock now starts in `scripts/infra.ts test`.
+- The fix pass added the two payout tables to the seed's `NOT_SEEDED` list (the seed-full
+  session's file).
+
 **Batch 7 done (2026-11-02): W3 + N3 + N4 milestone on `43ae60dc`.** CI is green on the push run
 (41360599768; `ingest-whip` TTFF passed on rerun) and on a full `workflow_dispatch` run (41365937421;
 a chat-filter timing test passed on rerun). All 12 harness shards passed, plus the self-host jobs.

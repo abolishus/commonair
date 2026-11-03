@@ -9,6 +9,7 @@
  */
 import { Queue, QueueEvents } from "bullmq";
 import { Valkey } from "iovalkey";
+import { valkeyTls } from "@commonair/service";
 import { PORTABILITY_JOBS, type PortabilityImportJob, QUEUES, portabilityJobId } from "@commonair/contracts/internal";
 import type { Deps } from "../deps.ts";
 
@@ -24,12 +25,20 @@ export interface PortabilityQueue {
 
 export function createPortabilityQueue(valkeyUrl: string, prefix: string): PortabilityQueue {
   // BullMQ refuses ioredis key prefixes and needs maxRetriesPerRequest: null.
-  const conn = new Valkey(valkeyUrl, { maxRetriesPerRequest: null, connectionName: "api-portability-queue" });
+  const conn = new Valkey(valkeyUrl, {
+    ...valkeyTls(valkeyUrl),
+    maxRetriesPerRequest: null,
+    connectionName: "api-portability-queue",
+  });
   const queue = new Queue(QUEUES.portability, { connection: conn, prefix });
   let events: Promise<{ ev: QueueEvents; conn: Valkey }> | null = null;
   const queueEvents = () => {
     events ??= (async () => {
-      const c = new Valkey(valkeyUrl, { maxRetriesPerRequest: null, connectionName: "api-portability-events" });
+      const c = new Valkey(valkeyUrl, {
+        ...valkeyTls(valkeyUrl),
+        maxRetriesPerRequest: null,
+        connectionName: "api-portability-events",
+      });
       const ev = new QueueEvents(QUEUES.portability, { connection: c, prefix });
       await ev.waitUntilReady();
       return { ev, conn: c };

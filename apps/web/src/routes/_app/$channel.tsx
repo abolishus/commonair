@@ -147,6 +147,7 @@ function ChannelView({ initial }: { initial: ChannelSummary }): React.JSX.Elemen
         aside={
           <ChatPanel
             channel={channel.slug}
+            stream={{ id: channel.id, live: channel.live !== null }}
             signedIn={me !== null}
             selfUsername={me?.username ?? null}
             // Bounded so the log scrolls inside the panel: under the player on phones, beside it on desktop.

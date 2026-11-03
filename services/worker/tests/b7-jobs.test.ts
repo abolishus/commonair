@@ -3,6 +3,7 @@
 
 /** The batch 7 job stubs are registered on their queues (contract step §5.1), and the outbox mapping (§5.2). */
 import {
+  B8_JOBS,
   FEDERATION_JOBS,
   GIVEAWAY_JOBS,
   JURY_JOBS,
@@ -25,10 +26,17 @@ describe("batch 7 jobs", () => {
 
   test("every batch 7 job has a handler on its queue", () => {
     expect(names(QUEUES.watchRooms)).toEqual([WATCH_ROOM_JOBS.retention]);
+    // Batch 8 adds two daily portability jobs.
     expect(names(QUEUES.portability)).toEqual(
-      [...Object.values(PORTABILITY_JOBS), ...Object.values(TWITCH_JOBS)].sort(),
+      [
+        ...Object.values(PORTABILITY_JOBS),
+        ...Object.values(TWITCH_JOBS),
+        B8_JOBS.incomingCleanup,
+        B8_JOBS.importRecordExpiry,
+      ].sort(),
     );
     expect(names(QUEUES.jury)).toEqual(Object.values(JURY_JOBS).sort());
+    // Batch 8's follower cleanup (decision (h)) is in FEDERATION_JOBS.
     expect(names(QUEUES.federation)).toEqual(Object.values(FEDERATION_JOBS).sort());
     expect(names(QUEUES.relayPurge)).toEqual([RELAY_PURGE_JOBS.emit, `${RELAY_PURGE_JOBS.emit}-cleanup`].sort());
     expect(reg.get(QUEUES.interact)?.has(GIVEAWAY_JOBS.close)).toBe(true);
@@ -42,8 +50,9 @@ describe("batch 7 jobs", () => {
       QUEUES.federation,
       QUEUES.relayPurge,
     ]);
+    const b8 = new Set<string>(Object.values(B8_JOBS));
     const scheduled = scheduledJobs(reg)
-      .filter((j) => b7Queues.has(j.queue))
+      .filter((j) => b7Queues.has(j.queue) && !b8.has(j.name))
       .map((j) => [j.name, j.schedule]);
     const byName = (a: unknown[], b: unknown[]) => String(a[0]).localeCompare(String(b[0]));
     expect(scheduled.sort(byName)).toEqual(
@@ -115,8 +124,8 @@ describe("b7JobsFor", () => {
   const A = uuidv7();
   const B = uuidv7();
   const now = new Date();
-  const on = { federation: true };
-  const off = { federation: false };
+  const on = { federation: true, publicUrl: "https://air.test" };
+  const off = { federation: false, publicUrl: "https://air.test" };
   const online = (channelId: string) =>
     row(
       "stream.online",
@@ -231,8 +240,11 @@ describe("b7JobsFor", () => {
   });
 
   test("the flag is read through loadEnv", () => {
-    expect(b7OutboxFlags({ FEDERATION_ENABLED: "true" })).toEqual({ federation: true });
-    expect(b7OutboxFlags({ FEDERATION_ENABLED: "" })).toEqual({ federation: false });
-    expect(b7OutboxFlags({})).toEqual({ federation: false });
+    expect(b7OutboxFlags({ FEDERATION_ENABLED: "true", PUBLIC_URL: "https://air.test/" })).toEqual({
+      federation: true,
+      publicUrl: "https://air.test",
+    });
+    expect(b7OutboxFlags({ FEDERATION_ENABLED: "" }).federation).toBe(false);
+    expect(b7OutboxFlags({})).toEqual({ federation: false, publicUrl: "http://localhost:3000" });
   });
 });

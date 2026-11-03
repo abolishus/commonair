@@ -1,9 +1,10 @@
 # SPDX-FileCopyrightText: 2026 CommonAir contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-# Staging: one shared-vCPU droplet, stage 0 only, upgraded to every release candidate with
+# Staging: one shared-vCPU droplet, stage 0 by default, upgraded to every release candidate with
 # selfhost.sh (ADR 0025 decision 2). It replaces the hand-made commonair-rc-test (README,
-# "Adopting the staging droplet").
+# "Adopting the staging droplet"). Stage 1 (enable_managed_state, default false) is created only
+# when a run asks for it: the U5 agent track's managed checks, destroyed at the end of the run.
 
 terraform {
   required_version = "= 1.13.1"
@@ -74,6 +75,10 @@ module "instance" {
   # Staging is watched from production's monitoring droplet, so it has no uptime monitoring
   # until production is applied (README, "Running it").
   enable_monitoring_droplet = false
+
+  # Off unless a run sets it (U5): managed clusters are billed from creation.
+  enable_managed_state = var.enable_managed_state
+  instance_origin      = var.instance_origin
 
   ssh_key_fingerprints = var.ssh_key_fingerprints
   operator_cidrs       = var.operator_cidrs

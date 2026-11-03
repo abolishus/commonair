@@ -11,3 +11,9 @@ export {
   VerifyCallbackJob,
   WEBHOOK_JOBS,
 } from "@commonair/contracts/internal";
+
+/** Batch 8 job names (contract step §3.6); the API enqueues the on-demand ones, so they live in the contract. */
+export { B8_JOBS, type B8JobName } from "@commonair/contracts/internal";
+
+/** The follower cleanup (decision (h), `b7/outbox-jobs.ts`) is `FEDERATION_JOBS.followerCleanup`. */
+export { FederationFollowerCleanupJob } from "@commonair/contracts/internal";

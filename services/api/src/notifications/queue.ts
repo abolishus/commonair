@@ -8,6 +8,7 @@
  */
 import { Queue } from "bullmq";
 import { Valkey } from "iovalkey";
+import { valkeyTls } from "@commonair/service";
 import { NOTIFY_JOBS, QUEUES, type DiscordJob } from "@commonair/contracts/internal";
 import type { Deps } from "../deps.ts";
 
@@ -19,7 +20,11 @@ export interface NotifyQueue {
 
 export function createNotifyQueue(valkeyUrl: string, prefix: string): NotifyQueue {
   // BullMQ refuses ioredis key prefixes and needs maxRetriesPerRequest: null.
-  const conn = new Valkey(valkeyUrl, { maxRetriesPerRequest: null, connectionName: "api-notify-queue" });
+  const conn = new Valkey(valkeyUrl, {
+    ...valkeyTls(valkeyUrl),
+    maxRetriesPerRequest: null,
+    connectionName: "api-notify-queue",
+  });
   const queue = new Queue(QUEUES.notifications, { connection: conn, prefix });
   return {
     async enqueueDiscordTest(channelId, minute) {

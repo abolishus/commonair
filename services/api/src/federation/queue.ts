@@ -9,6 +9,7 @@
  */
 import { Queue } from "bullmq";
 import { Valkey } from "iovalkey";
+import { valkeyTls } from "@commonair/service";
 import { FEDERATION_JOBS, type FederationDeliverJob, QUEUES, federationJobId } from "@commonair/contracts/internal";
 import type { Deps } from "../deps.ts";
 
@@ -20,7 +21,11 @@ export interface FederationQueue {
 
 export function createFederationQueue(valkeyUrl: string, prefix: string): FederationQueue {
   // BullMQ refuses ioredis key prefixes and needs maxRetriesPerRequest: null.
-  const conn = new Valkey(valkeyUrl, { maxRetriesPerRequest: null, connectionName: "api-federation-queue" });
+  const conn = new Valkey(valkeyUrl, {
+    ...valkeyTls(valkeyUrl),
+    maxRetriesPerRequest: null,
+    connectionName: "api-federation-queue",
+  });
   const queue = new Queue(QUEUES.federation, { connection: conn, prefix });
   const opts = { removeOnComplete: 1000, removeOnFail: 1000 };
   return {

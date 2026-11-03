@@ -18,7 +18,14 @@
  *
  * Every value scanned for is generated per run with a distinctive marker. The report carries
  * ids, counts, labels and file names only: never an email, token, key or link.
+ *
+ * B8 extension (`--set b8=`, `src/b8/steps.ts`): `giveaway-section` (B8-server,
+ * `src/b8/server.ts`: `interact-giveaways.json` holds the caller's own rows only) runs after
+ * step 6, on the same kit.
  */
+import type { DataExportB8Extension } from "../src/b8/kit.ts";
+import { stepGiveawaySection } from "../src/b8/server.ts";
+import { type B8Extension, b8ExtensionTitle, b8Extensions } from "../src/b8/steps.ts";
 import {
   type Needle,
   SECRET_PATTERNS,
@@ -66,6 +73,10 @@ const CLEANUP_TIMEOUT_MS = 2 * 60_000;
 /** U's simulcast target (disabled: it never pushes; the harness stack allows private targets). */
 const SIMULCAST_URL = "rtmp://mock-rtmp:1936/live";
 
+const B8_STEPS: Readonly<Record<B8Extension<"data-export">, (kit: DataExportB8Extension) => Promise<void>>> = {
+  "giveaway-section": stepGiveawaySection,
+};
+
 export default defineScenario({
   name: "data-export",
   description:
@@ -73,8 +84,12 @@ export default defineScenario({
   needs: ["api", "web", "chat", "worker", "mail", "browser"],
   timeoutMs: 15 * 60_000,
   async run(ctx) {
+    // `--set b8=` names a pending extension; by default only merged ones run (src/b8/steps.ts).
+    const b8 = b8Extensions("data-export", ctx.param("b8", ""));
+    ctx.data("b8.extensions", b8);
     const kit = await setupKit(ctx);
     await dataExport(ctx, kit);
+    for (const name of b8.run) await ctx.step(b8ExtensionTitle(name, "run"), () => B8_STEPS[name](kit));
     kit.done();
   },
 });

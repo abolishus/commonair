@@ -26,6 +26,9 @@ import { addOneMonthUtc } from "./checkout-rules.ts";
 import { endSubscriptions } from "./checkout-shared.ts";
 import { confirmPaymentTx, reversePaymentTx } from "./checkout-treasurer.ts";
 import { postPaymentWithSplit } from "./splits.ts";
+import { refundUpdated } from "./stripe-events/refunds.ts";
+import { shareCheckoutCompleted } from "./stripe-events/shares.ts";
+import { transferReversed, transferUpdated } from "./stripe-events/transfers.ts";
 import { recordProviderRefundFailed } from "./stripe-refunds.ts";
 
 const { payments, subscriptions, tips, channels, disputes, payoutAccounts, payouts } = schema;
@@ -44,6 +47,12 @@ export interface PreparedAction {
   fee: { feeCents: number; currency: string } | null;
 }
 
+/**
+ * Work that must follow the commit, outside the row lock (ADR 0007 decision 2): an automatic
+ * refund of money booked for an ended subscription (`stripe-events/refunds.ts`, M1-gifts-refunds).
+ */
+export type FollowUp = { kind: "auto_refund"; paymentId: string };
+
 export interface AppliedAction {
   /** What happened, for the log (enums only). */
   outcome: string;
@@ -51,6 +60,10 @@ export interface AppliedAction {
   invalidate: { channelId: string; userIds: string[] }[];
   /** Stripe subscriptions to end after commit (our side already ended them). */
   cancelProviderSubscriptions: string[];
+  /** Batch 8: run by `stripe-webhook.ts` after the transaction commits. */
+  followUp?: FollowUp;
+  /** Batch 8: payments that became `succeeded` here; each gets its receipt after commit (`receipt.ts`). */
+  receipts?: string[];
 }
 
 /** created_at is Postgres' clock, the event time Stripe's; allow them to disagree a little. */
@@ -173,6 +186,7 @@ async function confirmPending(
     outcome: "confirmed",
     invalidate: [{ channelId: r.channelId, userIds: r.subscribers }],
     cancelProviderSubscriptions: [],
+    receipts: [p.id],
   };
 }
 
@@ -185,14 +199,29 @@ function refuseFinished(p: PaymentRow): AppliedAction {
 
 // ------------------------------------------------------------------------------- handlers
 
+type CheckoutCompleted = Extract<StripeAction, { type: "checkout.completed" }>;
+
 async function checkoutCompleted(
   tx: Executor,
-  a: Extract<StripeAction, { type: "checkout.completed" }>,
+  a: CheckoutCompleted,
   prepared: PreparedAction,
   now: Date,
 ): Promise<AppliedAction> {
   const p = await lockPaymentById(tx, a.paymentId);
   if (!p || p.provider !== "stripe") return noop("unknown_payment");
+  // Co-op shares have their own handler (M1-coop-money); until it is filled it takes this path.
+  if (p.kind === "membership_share")
+    return shareCheckoutCompleted(tx, p, a, prepared, now, () => checkoutCompletedGeneric(tx, p, a, prepared, now));
+  return checkoutCompletedGeneric(tx, p, a, prepared, now);
+}
+
+async function checkoutCompletedGeneric(
+  tx: Executor,
+  p: PaymentRow,
+  a: CheckoutCompleted,
+  prepared: PreparedAction,
+  now: Date,
+): Promise<AppliedAction> {
   if (a.mode === "subscription") {
     // The first invoice (`invoice.paid`) carries the PaymentIntent, amount and period: it confirms.
     await linkSubscription(tx, p, a.subscription, now);
@@ -240,8 +269,8 @@ async function bookSubscriptionPayment(
   moneyRef: string,
   prepared: PreparedAction,
   now: Date,
-): Promise<void> {
-  if (a.amountPaid <= 0) return;
+): Promise<string | null> {
+  if (a.amountPaid <= 0) return null;
   if (a.taxCents < 0 || a.taxCents > a.amountPaid) throw new StripeProcessingError("tax out of range");
   const feeCents = feeFor(prepared, a.currency);
   const paymentId = uuidv7();
@@ -281,6 +310,7 @@ async function bookSubscriptionPayment(
     cutHistoryId,
     occurredAt: receivedAt,
   });
+  return paymentId;
 }
 
 async function invoicePaid(tx: Executor, a: InvoicePaid, prepared: PreparedAction, now: Date): Promise<AppliedAction> {
@@ -332,12 +362,20 @@ async function invoicePaid(tx: Executor, a: InvoicePaid, prepared: PreparedActio
   if (!c) throw new StripeProcessingError("the subscription's channel is gone");
   if (a.currency !== sub.currency)
     throw new StripeProcessingError(`Stripe charged ${a.currency}, the subscription is in ${sub.currency}`);
-  await bookSubscriptionPayment(tx, sub, c, a, moneyRef, prepared, now);
+  const booked = await bookSubscriptionPayment(tx, sub, c, a, moneyRef, prepared, now);
+  const receipts = booked ? [booked] : [];
 
   if (sub.status !== "active" && sub.status !== "past_due") {
-    // Ended here (refund, chargeback, expiry) but Stripe still billed: the money is booked (the
-    // treasurer can refund it), the subscription stays ended and Stripe is told to stop.
-    return { outcome: "paid_after_end", invalidate: [], cancelProviderSubscriptions: [a.subscription] };
+    // Ended here (refund, chargeback, expiry) but Stripe still billed: the money is booked, the
+    // subscription stays ended and Stripe is told to stop. After commit the money is refunded
+    // automatically (ADR 0007 decision 2, `stripe-events/refunds.ts`).
+    return {
+      outcome: "paid_after_end",
+      invalidate: [],
+      cancelProviderSubscriptions: [a.subscription],
+      receipts,
+      ...(booked ? { followUp: { kind: "auto_refund" as const, paymentId: booked } } : {}),
+    };
   }
   const start = sub.currentPeriodEnd ?? a.paidAt;
   const end = a.periodEnd && a.periodEnd > start ? a.periodEnd : addOneMonthUtc(start);
@@ -358,6 +396,7 @@ async function invoicePaid(tx: Executor, a: InvoicePaid, prepared: PreparedActio
     outcome: "renewed",
     invalidate: sub.status === "past_due" ? [{ channelId: c.id, userIds: [sub.subscriberId] }] : [],
     cancelProviderSubscriptions: [],
+    receipts,
   };
 }
 
@@ -605,6 +644,13 @@ export async function applyStripeAction(
       await recordProviderRefundFailed(tx, p, a.refundId);
       return noop("refund_failed");
     }
+    // Batch 8: each unit fills its own file (contract step §2.5).
+    case "refund.updated":
+      return refundUpdated(tx, a, now);
+    case "transfer.reversed":
+      return transferReversed(tx, a, now);
+    case "transfer.updated":
+      return transferUpdated(tx, a, now);
     case "ignored":
       return noop("ignored");
   }

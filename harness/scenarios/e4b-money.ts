@@ -18,9 +18,18 @@
  * harness plays Stripe's part with signed webhook events (`src/stripe.ts`) instead of the
  * treasurer's confirm and chargeback. The figures are the same; each payment also carries Stripe's
  * fee, which is the co-op's expense and leaves the creator figures unchanged.
+ *
+ * B8 extensions (`--set b8=`, `src/b8/steps.ts`) run after the W1 and W2 ones, on the same
+ * context: `gift-window`, `auto-refund`, `refund-unknown` and `receipt-email` (M1-gifts-refunds,
+ * `src/b8/money-refunds.ts`), `connect-transfer` and `transfer-reversed` (M1-connect,
+ * `src/b8/money-connect.ts`).
  */
 import { join } from "node:path";
 import type { Page } from "playwright";
+import type { MoneyB8Extension } from "../src/b8/kit.ts";
+import { stepConnectTransfer, stepTransferReversed } from "../src/b8/money-connect.ts";
+import { stepAutoRefund, stepGiftWindow, stepReceiptEmail, stepRefundUnknown } from "../src/b8/money-refunds.ts";
+import { type B8Extension, b8ExtensionTitle, b8Extensions } from "../src/b8/steps.ts";
 import type { ChatClient } from "../src/chat-client.ts";
 import {
   ApiCreator,
@@ -825,14 +834,16 @@ async function e4bMoney(ctx: ScenarioContext, sessions: WebSession[], check: Sce
   const unbalanced = unbalancedTransactions(ledger.rows);
   ctx.assert("every transaction sums to zero per currency", unbalanced.length === 0, { unbalanced });
 
-  // ------------------------------------------------------------ W1 and W2 extensions
-  // `--set w1=` / `--set w2=` name pending ones; by default only merged extensions run
-  // (src/w1/steps.ts, src/w2/steps.ts).
+  // ------------------------------------------------------------ W1, W2 and B8 extensions
+  // `--set w1=` / `--set w2=` / `--set b8=` name pending ones; by default only merged extensions
+  // run (src/w1/steps.ts, src/w2/steps.ts, src/b8/steps.ts).
   const extensions = w1Extensions("e4b-money", ctx.param("w1", ""));
   ctx.data("w1.extensions", extensions);
   const w2 = w2Extensions("e4b-money", ctx.param("w2", ""));
   ctx.data("w2.extensions", w2);
-  if (extensions.length === 0 && w2.run.length === 0) return;
+  const b8 = b8Extensions("e4b-money", ctx.param("b8", ""));
+  ctx.data("b8.extensions", b8);
+  if (extensions.length === 0 && w2.run.length === 0 && b8.run.length === 0) return;
   // Stripe: the checkout's reference is empty until the payment succeeds; its PaymentIntent is the reference then.
   const pay = (v: { paymentId: string; reference: string }) => ({
     paymentId: v.paymentId,
@@ -867,4 +878,13 @@ async function e4bMoney(ctx: ScenarioContext, sessions: WebSession[], check: Sce
     "split-new-payee": stepSplitNewPayee,
   };
   for (const name of w2.run) await ctx.step(w2ExtensionTitle(name, "run"), () => W2_STEPS[name](ext));
+  const B8_STEPS: Readonly<Record<B8Extension<"e4b-money">, (e: MoneyB8Extension) => Promise<void>>> = {
+    "gift-window": stepGiftWindow,
+    "auto-refund": stepAutoRefund,
+    "refund-unknown": stepRefundUnknown,
+    "connect-transfer": stepConnectTransfer,
+    "transfer-reversed": stepTransferReversed,
+    "receipt-email": stepReceiptEmail,
+  };
+  for (const name of b8.run) await ctx.step(b8ExtensionTitle(name, "run"), () => B8_STEPS[name](ext));
 }

@@ -87,6 +87,13 @@ export type ImportGraph = ReadonlyMap<string, readonly string[]>;
 
 const SCENARIOS = "harness/scenarios/";
 const IMPORT = /(?:\bfrom|\bimport)\s*\(?\s*["'](\.{1,2}\/[^"']+\.tsx?)["']/g;
+/**
+ * Type-only re-exports (`export type { … } from "…";`) are no edges: a barrel of context types
+ * (harness/src/b8/kit.ts re-exports every extended scenario's) forwards nothing at runtime, and
+ * each type's own scenario already reaches its module. Type-only imports stay edges: a scenario
+ * that imports only `Platform`'s type still runs on the platform the CLI builds from that module.
+ */
+const TYPE_REEXPORT = /^\s*export\s+type\s*\{[^}]*\}\s*from\s*["'][^"']+["'];?/gm;
 
 /** A scenario module's name: its file name (the registry checks the two agree). */
 const scenarioOf = (path: string): string | null =>
@@ -102,7 +109,7 @@ export function harnessGraph(root: string): ImportGraph {
       const rel = `${dir}/${name}`;
       if (statSync(join(root, rel)).isDirectory()) walk(rel);
       else if (/\.tsx?$/.test(name) && !isTestOnly(rel)) {
-        const text = readFileSync(join(root, rel), "utf8");
+        const text = readFileSync(join(root, rel), "utf8").replace(TYPE_REEXPORT, "");
         const deps = [...text.matchAll(IMPORT)].map((m) => normalize(join(dirname(rel), m[1] ?? "")));
         graph.set(rel, deps);
       }

@@ -548,5 +548,7 @@ export async function verifyGiveaway(ctx: Ctx, slug: string, id: string): Promis
     // No winner has opted in to showing a username (none can yet): the pseudonym only.
     winners: winners.map((w) => ({ rank: w.rank, index: w.index, pseudonym: w.pseudonym, username: null })),
     drawnAt: iso(row.drawnAt),
+    // Batch 8 CR9 (B8-web fills it): the signed-in caller's own pseudonym when they entered.
+    me: null,
   };
 }

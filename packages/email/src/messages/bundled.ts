@@ -12,6 +12,7 @@ import esLayout from "./locales/es/layout.json" with { type: "json" };
 import esNotify from "./locales/es/notify.json" with { type: "json" };
 import esPayments from "./locales/es/payments.json" with { type: "json" };
 import esPrivacy from "./locales/es/privacy.json" with { type: "json" };
+import esReceipt from "./locales/es/receipt.json" with { type: "json" };
 import esSecurity from "./locales/es/security.json" with { type: "json" };
 import esTrust from "./locales/es/trust.json" with { type: "json" };
 import { en, nestFlat } from "./en.ts";
@@ -23,5 +24,5 @@ const fromGroups = (...groups: Readonly<Record<string, string>>[]): PartialCatal
 /** Catalogs by BCP 47 tag, one per `locales/<lang>/` directory. */
 export const BUNDLED: Readonly<Record<string, PartialCatalog>> = {
   en,
-  es: fromGroups(esAccount, esGovernance, esLayout, esNotify, esPayments, esPrivacy, esSecurity, esTrust),
+  es: fromGroups(esAccount, esGovernance, esLayout, esNotify, esPayments, esPrivacy, esReceipt, esSecurity, esTrust),
 };

@@ -8,6 +8,7 @@
  */
 import { DelayedError, Queue, Worker, type Job } from "bullmq";
 import { Valkey } from "iovalkey";
+import { valkeyTls } from "@commonair/service";
 import { QUEUES } from "@commonair/contracts/internal";
 import type { Logger } from "@commonair/observability";
 import { errorCategory } from "./moderation/logging.ts";
@@ -48,7 +49,8 @@ export interface Jobs {
   close(): Promise<void>;
 }
 
-const connection = (url: string) => new Valkey(url, { maxRetriesPerRequest: null, enableReadyCheck: true });
+const connection = (url: string) =>
+  new Valkey(url, { ...valkeyTls(url), maxRetriesPerRequest: null, enableReadyCheck: true });
 
 export function startJobs(opts: JobsOptions): Jobs {
   const prefix = opts.prefix;

@@ -9,3 +9,7 @@ ssh_key_fingerprints = ["00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00"]
 
 # Your own addresses, as narrow as you can (a /32 or a /64).
 operator_cidrs = ["192.0.2.10/32", "2001:db8::/64"]
+
+# Stage 1, only for an agent-track run that asks for it (U5); destroy the clusters at its end.
+# enable_managed_state = true
+# instance_origin      = "https://staging.example.org"

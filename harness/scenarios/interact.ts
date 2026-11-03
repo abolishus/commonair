@@ -21,9 +21,17 @@
  * (`src/w3/giveaways.ts`), `surge-raid` (`src/w3/surge-raids.ts`) and `fair-prediction`
  * (`src/w3/predictions.ts`). Each sets up what it needs on the shared run.
  *
+ * B8 extensions (`--set b8=`, `src/b8/steps.ts`) run after those: `grace-bet-web` and
+ * `giveaway-verify-mine` (B8-web, `src/b8/web.ts`) and `raid-restart-keeps-raid` (B8-server,
+ * `src/b8/server.ts`).
+ *
  * Needs `DATABASE_URL` (outbox checks, the role CLI) and the harness stack (harness/compose.e8.yaml;
  * the W3 extensions also harness/compose.w3.yaml, `stack --harness --w3`).
  */
+import type { InteractB8Extension } from "../src/b8/kit.ts";
+import { stepRaidRestartKeepsRaid } from "../src/b8/server.ts";
+import { type B8Extension, b8ExtensionTitle, b8Extensions, withB8Steps } from "../src/b8/steps.ts";
+import { stepGiveawayVerifyMine, stepGraceBetWeb } from "../src/b8/web.ts";
 import { parseVia } from "../src/money.ts";
 import {
   type InteractStep,
@@ -61,6 +69,12 @@ const W3_STEPS: Readonly<Record<W3Extension<"interact">, (run: InteractW3Extensi
   "fair-prediction": stepFairPrediction,
 };
 
+const B8_STEPS: Readonly<Record<B8Extension<"interact">, (run: InteractB8Extension) => Promise<void>>> = {
+  "grace-bet-web": stepGraceBetWeb,
+  "giveaway-verify-mine": stepGiveawayVerifyMine,
+  "raid-restart-keeps-raid": stepRaidRestartKeepsRaid,
+};
+
 export default defineScenario({
   name: "interact",
   description:
@@ -70,19 +84,26 @@ export default defineScenario({
   timeoutMs: 20 * 60_000,
   async run(ctx) {
     const selected = parseInteractSteps(ctx.param("steps", "all"));
-    const { steps, added } = withPrerequisites(selected, INTERACT_STEP_PREREQUISITES);
+    // `--set b8=` names a pending extension; by default only merged ones run (src/b8/steps.ts).
+    const b8 = b8Extensions("interact", ctx.param("b8", ""));
+    const forB8 = withB8Steps(selected, b8.run);
+    const prerequisites = withPrerequisites(forB8.steps, INTERACT_STEP_PREREQUISITES);
+    const steps = prerequisites.steps;
+    const added = [...new Set([...forB8.added, ...prerequisites.added])].sort((a, b) => a - b);
     const via = parseVia(ctx.param("via", "web"));
     ctx.data("steps", { selected, run: steps, addedPrerequisites: added });
     ctx.data("via", via);
     // `--set w3=` names a pending extension; by default only merged ones run (src/w3/steps.ts).
     const w3 = w3Extensions("interact", ctx.param("w3", ""));
     ctx.data("w3.extensions", w3);
-    if (steps.length === 0 && w3.run.length === 0) {
+    ctx.data("b8.extensions", b8);
+    if (steps.length === 0 && w3.run.length === 0 && b8.run.length === 0) {
       ctx.skipStep("interact", "every step is pending (no E8 unit merged yet); name one with --set steps=");
       return;
     }
     const run = await newE8Run(ctx, { via, prefix: "e8i" });
     for (const n of steps) await ctx.step(interactTitle(n, "run"), () => STEPS[n](run));
     for (const name of w3.run) await ctx.step(w3ExtensionTitle(name, "run"), () => W3_STEPS[name](run));
+    for (const name of b8.run) await ctx.step(b8ExtensionTitle(name, "run"), () => B8_STEPS[name](run));
   },
 });

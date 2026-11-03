@@ -16,7 +16,9 @@ import { schema } from "@commonair/db";
 import { createAdapter, loadStripeEvents, loadStripeSignature } from "@commonair/payments";
 import type { Deps } from "../deps.ts";
 import { invalidateSubscribers } from "./checkout-shared.ts";
+import { sendPaymentReceipt } from "./receipt.ts";
 import { type AppliedAction, applyStripeAction, prepareStripeAction } from "./stripe-events.ts";
+import { runRefundFollowUp } from "./stripe-events/refunds.ts";
 
 const { paymentEvents } = schema;
 
@@ -171,7 +173,15 @@ export async function handleStripeWebhook(deps: Deps, req: Request, rateLimitSub
     eventId: envelope.id,
     outcome: applied.outcome,
   });
-  for (const i of applied.invalidate) await invalidateSubscribers(deps, i.channelId, i.userIds);
+  // The event is committed: a cache error must not skip the hooks below or answer 500 (Stripe would
+  // redeliver an event that now only answers `duplicate`).
+  for (const i of applied.invalidate) {
+    try {
+      await invalidateSubscribers(deps, i.channelId, i.userIds);
+    } catch (err) {
+      deps.logger.warn("could not invalidate subscriber caches", { eventId: envelope.id, error: errorName(err) });
+    }
+  }
   if (applied.cancelProviderSubscriptions.length > 0) {
     // Our side ended these subscriptions (clawback): stop Stripe charging them. Best effort; an
     // operator can end them in Stripe, and the later `customer.subscription.deleted` is a no-op.
@@ -184,5 +194,34 @@ export async function handleStripeWebhook(deps: Deps, req: Request, rateLimitSub
       }
     }
   }
+  // Batch 8 after-commit hooks (ADR 0007 decision 2): outside the transaction and its row locks,
+  // best effort and idempotent. Nothing retries them here: the event is marked processed in the
+  // transaction, so a redelivery answers `duplicate` before reaching them. A missed auto-refund
+  // needs a durable trigger of its own (M1-gifts-refunds: a sweep of ended subscriptions' booked
+  // payments, or an outbox event written with the booking). Errors are logged by name only: a mail
+  // transport's message can carry the recipient's address.
+  for (const paymentId of new Set(applied.receipts ?? [])) {
+    try {
+      await sendPaymentReceipt(deps, paymentId);
+    } catch (err) {
+      deps.logger.warn("could not send a payment receipt", { eventId: envelope.id, paymentId, error: errorName(err) });
+    }
+  }
+  if (applied.followUp) {
+    try {
+      await runRefundFollowUp(deps, applied.followUp);
+    } catch (err) {
+      deps.logger.warn("a webhook follow-up failed", {
+        eventId: envelope.id,
+        kind: applied.followUp.kind,
+        error: errorName(err),
+      });
+    }
+  }
   return reply(200, { received: true, outcome: applied.outcome });
+}
+
+/** An error's class name only, never its message (which may carry an address or a provider text). */
+function errorName(err: unknown): string {
+  return err instanceof Error ? err.name : typeof err;
 }

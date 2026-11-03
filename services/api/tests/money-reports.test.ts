@@ -265,6 +265,8 @@ describe("revenue line types", () => {
     expect(revenueLineType("chargeback_reversal", sub)).toBe("chargeback");
     expect(revenueLineType("payout_reserve", null)).toBe("payout");
     expect(revenueLineType("payout_cancel", null)).toBe("payout");
+    expect(revenueLineType("payout_transfer_reversal", null)).toBe("payout");
+    expect(REVENUE_LEDGER_KINDS).toContain("payout_transfer_reversal");
   });
 
   test("hold releases and payout sends are never rows; revenue kinds are the payment ones", () => {

@@ -56,6 +56,16 @@ function lazyStripeAdapter(env: PaymentsEnvLike): PaymentAdapter {
       return a.payoutAccountStatus(accountId);
     },
     paymentFee: async (ref) => (await get()).paymentFee?.(ref) ?? null,
+    transfer: async (r) => {
+      const a = await get();
+      if (!a.transfer) throw new AdapterUnavailableError("transfers are not supported");
+      return a.transfer(r);
+    },
+    refundStatus: async (ref) => {
+      const a = await get();
+      if (!a.refundStatus) throw new AdapterUnavailableError("refund status is not supported");
+      return a.refundStatus(ref);
+    },
   };
 }
 

@@ -1,0 +1,5 @@
+{
+  "payoutTransfers.tab": "Transfers",
+  "payoutTransfers.empty.title": "No payout transfers",
+  "payoutTransfers.empty.body": "Stripe transfers made for payouts show up here."
+}

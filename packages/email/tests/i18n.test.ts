@@ -52,6 +52,7 @@ describe("catalogs", () => {
       "notify",
       "payments",
       "privacy",
+      "receipt",
       "security",
       "trust",
     ]);

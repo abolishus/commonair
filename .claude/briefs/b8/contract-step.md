@@ -185,7 +185,9 @@ Owner: orchestrator. Files: `packages/db/**` (schema and the two migrations),
   - `id`, `period_id`, `user_id`, `amount_cents`, `currency`, `provider`, `provider_ref`;
   - `status` (`pending`, `paid`, `failed`, `reversed`);
   - `idempotency_key`, `created_at`, `paid_at`;
-  - unique (`period_id`, `user_id`).
+  - unique (`period_id`, `user_id`) **where status is `pending` or `paid`** (changed at review: a
+    failed or reversed payout can be retried with a new row; the ledger keys are per payout row,
+    `patronage-payout:<payoutId>`).
 - Shares need no new table: `membership_shares` and `payments.kind = membership_share` exist.
   `buyShare` writes the same rows for Stripe as for manual.
 

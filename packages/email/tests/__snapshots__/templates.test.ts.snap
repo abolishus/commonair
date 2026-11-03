@@ -595,6 +595,35 @@ Questions? Write to hello@air.example.test.
 Example Air runs on free software. Get the source code https://forge.example.test/air/commonair/tree/0123abcd."
 `;
 
+exports[`paymentReceipt > renders accessible HTML and a plain-text alternative 1`] = `
+"Your receipt: €4.99
+
+Example Air https://air.example.test
+
+
+Thank you for your payment
+
+Amount
+
+€4.99
+
+Paid
+
+October 18, 2026 at 2:30 PM UTC
+
+Reference
+
+CA-7KQ2M9XW
+
+----------------------------------------
+
+You are receiving this email because of your account on Example Air.
+
+Questions? Write to hello@air.example.test.
+
+Example Air runs on free software. Get the source code https://forge.example.test/air/commonair/tree/0123abcd."
+`;
+
 exports[`payoutSent > renders accessible HTML and a plain-text alternative 1`] = `
 "Payout sent: €1,234.56
 

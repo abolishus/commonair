@@ -26,6 +26,7 @@ import { badRequest, conflict, notFound, precondition } from "../lib/errors.ts";
 import { os, requireCaller } from "../lib/orpc.ts";
 import { confirmedPeriod, disputeOutcome, tierCode } from "./checkout-rules.ts";
 import { endSubscriptions, invalidateSubscribers, userEventFields } from "./checkout-shared.ts";
+import { sendPaymentReceipt } from "./receipt.ts";
 import { postPaymentWithSplit } from "./splits.ts";
 import { requestProviderRefund } from "./stripe-refunds.ts";
 import { withCoopErrors } from "../coop/errors.ts";
@@ -403,6 +404,16 @@ export const treasurerCheckoutHandlers = {
       return r;
     });
     if (done.channelId) await invalidateSubscribers(deps, done.channelId, done.subscribers);
+    // Batch 8: the receipt follows the commit; it is best effort and sends at most once.
+    try {
+      await sendPaymentReceipt(deps, input.paymentId);
+    } catch (err) {
+      // By name only: a mail transport's message can carry the recipient's address.
+      deps.logger.warn("could not send a payment receipt", {
+        paymentId: input.paymentId,
+        error: err instanceof Error ? err.name : typeof err,
+      });
+    }
     return { ok: true as const };
   }),
 

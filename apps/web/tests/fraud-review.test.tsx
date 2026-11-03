@@ -223,7 +223,7 @@ describe("raise", () => {
 });
 
 describe("treasury tabs and payouts", () => {
-  it("the fraud tab follows the six existing ones", () => {
+  it("the fraud tab follows the six existing ones, then batch 8's two", () => {
     wrap(
       <TreasuryPageTabs
         value="fraud"
@@ -236,10 +236,22 @@ describe("treasury tabs and payouts", () => {
           shares: null,
           patronage: null,
           fraud: <p>fraud</p>,
+          refunds: null,
+          transfers: null,
         }}
       />,
     );
-    for (const tab of ["payments", "payouts", "accounts", "costs", "shares", "patronage", "fraud"])
+    for (const tab of [
+      "payments",
+      "payouts",
+      "accounts",
+      "costs",
+      "shares",
+      "patronage",
+      "fraud",
+      "refunds",
+      "transfers",
+    ])
       expect(screen.queryAllByTestId(`treasury-tab-${tab}`), tab).toHaveLength(1);
     expect(one("treasury-tab-fraud").textContent).toBe(en["fraud.tab"]);
   });

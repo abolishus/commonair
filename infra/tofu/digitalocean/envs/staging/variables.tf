@@ -21,3 +21,16 @@ variable "operator_cidrs" {
   description = "Operator CIDRs allowed to reach SSH."
   type        = list(string)
 }
+
+variable "enable_managed_state" {
+  description = "Stage 1 (ADR 0032): managed PostgreSQL and Valkey, instance buckets in Spaces. Off for staging; the U5 agent track turns it on for one run and destroys the clusters at its end."
+  type        = bool
+  default     = false
+  nullable    = false
+}
+
+variable "instance_origin" {
+  description = "Staging's https origin, for CORS on the media bucket. Required only with enable_managed_state."
+  type        = string
+  default     = null
+}

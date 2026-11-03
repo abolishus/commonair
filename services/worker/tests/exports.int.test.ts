@@ -323,6 +323,8 @@ describe.skipIf(!storage)("data export", () => {
       // Batch 7: unit-owned files (empty objects until their units land).
       "watch-rooms.json",
       "portability.json",
+      // Batch 8: B8-server's file (an empty array until it lands).
+      "interact-giveaways.json",
     ];
     expect(Object.keys(acc.files).sort()).toEqual([...accountFiles, MANIFEST].sort());
     expect(acc.json("enforcement_statements.json")).toEqual([

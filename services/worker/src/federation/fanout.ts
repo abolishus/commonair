@@ -11,9 +11,10 @@
  * - `moderation.restriction` restricted → `Delete` of that broadcast's `Note`.
  * - `channel.suspension` suspended → `Delete` of the actor to every follower inbox, then the
  *   followers are removed (recorded choice: remote followers are lost for good).
- * - `channel.federation` (requested internal event; `channel.update` too) while the streamer's
- *   setting is off → `Delete` of the actor, followers removed (the setting went off). Today
- *   `b7JobsFor` routes neither; the daily sweep catches a channel turned off until it does.
+ * - `channel.federation` (or `channel.update`) while the streamer's setting is off → `Delete` of
+ *   the actor, followers removed. Kept for a fan-out job queued by hand: since batch 8 `b7JobsFor`
+ *   routes `channel.federation` and `federation.actor.disabled` to the deliveries directly, and
+ *   the daily sweep still catches a channel turned off by any other path.
  *
  * Nothing happens unless `FEDERATION_ENABLED` and the channel federates now (both re-checked
  * here: a setting can change between the relay and this job). An object whose `Delete` went out
@@ -315,9 +316,7 @@ export async function runFanout(eventId: string, ctx: Ctx, cfg: FederationConfig
     default:
       break;
   }
-  // The streamer turned federation off. `channel.federation` is the internal event requested
-  // from the orchestrator (not in the contracts yet, hence the plain string); `channel.update`
-  // is accepted too. Until either is routed here, the daily sweep catches it.
+  // The streamer turned federation off (see the header: the relay routes this event itself now).
   const type: string = event.type;
   if (type === "channel.federation" || type === "channel.update") {
     if (ch.settingEnabled || !ch.actor) return SKIP;

@@ -65,6 +65,9 @@ async function withCheckoutRetry<T>(run: () => Promise<T>): Promise<T> {
       if (attempt < 3 && violatesConstraint(err, "payments_provider_ref_uq", "subscriptions_active_uq")) continue;
       if (violatesConstraint(err, "subscriptions_active_uq"))
         throw conflict("A recipient's subscription changed while checking out; try again");
+      // Batch 8 decision (d): the database allows one pending gift per gifter and channel (0049).
+      if (violatesConstraint(err, "payments_open_gift_uq"))
+        throw conflict("Your earlier gift to this channel is still waiting for payment");
       throw err;
     }
   }
@@ -322,6 +325,22 @@ export const checkoutHandlers = {
     return withCheckoutRetry(() =>
       deps.db.transaction(async (tx) => {
         const now = deps.now();
+        // Decision (d): checked before a provider session exists, so a refused gift leaves no live
+        // checkout behind; payments_open_gift_uq (0049) still catches a race, mapped above.
+        const [open] = await tx
+          .select({ id: payments.id })
+          .from(payments)
+          .where(
+            and(
+              eq(payments.userId, caller.user.id),
+              eq(payments.channelId, c.id),
+              eq(payments.gift, true),
+              eq(payments.status, "pending"),
+            ),
+          )
+          .limit(1)
+          .for("update");
+        if (open) throw conflict("Your earlier gift to this channel is still waiting for payment");
         let recipients: string[];
         if (gift.to !== undefined) {
           const [to] = await tx.select({ id: users.id }).from(users).where(eq(users.username, gift.to.toLowerCase()));
@@ -366,6 +385,7 @@ export const checkoutHandlers = {
           currency,
           tier: tier.tier,
           quantity: recipients.length,
+          gift: true,
           expiresAt: new Date(now.getTime() + pendingDays * DAY_MS),
         });
         await tx.insert(subscriptions).values(

@@ -8,6 +8,7 @@
  */
 import { Queue } from "bullmq";
 import { Valkey } from "iovalkey";
+import { valkeyTls } from "@commonair/service";
 import { MODERATION_JOBS, ModerationScanJob, ModerationT0Job, QUEUES, t0JobId } from "@commonair/contracts/internal";
 
 export interface ModerationQueue {
@@ -24,7 +25,11 @@ export interface ModerationQueue {
 const T0_KEEP_SECONDS = 30 * 86_400;
 
 export function createModerationQueue(opts: { valkeyUrl: string; prefix?: string }): ModerationQueue {
-  const connection = new Valkey(opts.valkeyUrl, { maxRetriesPerRequest: null, enableReadyCheck: true });
+  const connection = new Valkey(opts.valkeyUrl, {
+    ...valkeyTls(opts.valkeyUrl),
+    maxRetriesPerRequest: null,
+    enableReadyCheck: true,
+  });
   const queue = new Queue(QUEUES.moderation, { connection, prefix: opts.prefix });
   return {
     waitingCount: () => queue.getWaitingCount(),

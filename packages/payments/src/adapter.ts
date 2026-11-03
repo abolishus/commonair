@@ -53,6 +53,41 @@ export interface RefundRequest {
   idempotencyKey: string;
 }
 
+/**
+ * One payout's transfer to the payee's provider account (batch 8, M1-connect). Metadata carries
+ * ids only, never a name or an email.
+ */
+export interface TransferRequest {
+  /** Our `payouts.id`. */
+  payoutId: string;
+  /** Our `payout_transfers.id`. */
+  transferId: string;
+  /** The payee's provider account (Stripe: the Express account, `acct_…`). */
+  destination: string;
+  amountCents: number;
+  currency: string;
+  /** Groups a payout run's transfers at the provider (the run's period start, ISO). */
+  group: string;
+  /** Stable across retries (`payout-transfer:<payoutId>`), so a retry returns the same transfer. */
+  idempotencyKey: string;
+}
+
+export interface TransferResult {
+  /** The provider's transfer id (Stripe `tr_…`). */
+  providerRef: string;
+  amountCents: number;
+  currency: string;
+}
+
+/** What the provider says became of a refund (batch 8, M1-gifts-refunds' reconciliation). */
+export interface RefundStatus {
+  providerRef: string;
+  /** Normalized: `pending` covers Stripe's `pending` and `requires_action`. */
+  status: "pending" | "succeeded" | "failed" | "canceled";
+  amountCents: number;
+  currency: string;
+}
+
 export interface PayoutOnboardingRequest {
   userId: string;
   /** The creator's existing provider account, or null to create one. */
@@ -84,4 +119,15 @@ export interface PaymentAdapter {
    * while the provider has not attached it yet (callers retry; they never book a fee of 0).
    */
   paymentFee?(providerPaymentRef: string): Promise<{ feeCents: number; currency: string } | null>;
+  /**
+   * Batch 8 (M1-connect): pay one payout to the payee's provider account. Throws
+   * `StripeRequestError` on a definite refusal and `StripeOutcomeUnknown` when the provider may
+   * have acted (retry with the same idempotency key). The manual adapter has none: nothing moves.
+   */
+  transfer?(request: TransferRequest): Promise<TransferResult>;
+  /**
+   * Batch 8 (M1-gifts-refunds): a refund's state at the provider, by its id, or null when the
+   * provider has no such refund.
+   */
+  refundStatus?(providerRef: string): Promise<RefundStatus | null>;
 }

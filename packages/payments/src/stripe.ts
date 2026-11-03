@@ -18,10 +18,14 @@ import type {
   PaymentAdapter,
   PayoutOnboardingRequest,
   RefundRequest,
+  RefundStatus,
+  TransferRequest,
 } from "./adapter.ts";
+import { StripeRequestError } from "./errors.ts";
 import { manualReference } from "./reference.ts";
 import type { FormObject } from "./stripe-form.ts";
 import { type StripeClient, type StripeClientOptions, stripeClient } from "./stripe-client.ts";
+import { stripeTransfer } from "./stripe-transfers.ts";
 
 export interface StripeAdapterOptions {
   client: StripeClient | StripeClientOptions;
@@ -117,5 +121,40 @@ export function stripeAdapter(opts: StripeAdapterOptions): PaymentAdapter {
       if (!ref.startsWith("pi_")) return null;
       return client.paymentIntentFee(ref);
     },
+    transfer(r: TransferRequest) {
+      return stripeTransfer(client, r);
+    },
+    async refundStatus(ref) {
+      // `pyr_` refunds come from some payment methods; any other id is not a refund of ours.
+      if (!/^(re|pyr)_/.test(ref)) return null;
+      let refund: Awaited<ReturnType<StripeClient["retrieveRefund"]>>;
+      try {
+        refund = await client.retrieveRefund(ref);
+      } catch (err) {
+        // A definite "no such refund"; anything else (unknown outcome) is the caller's to retry.
+        if (err instanceof StripeRequestError && err.status === 404) return null;
+        throw err;
+      }
+      return {
+        providerRef: refund.id,
+        status: refundStatusOf(refund.status),
+        amountCents: refund.amount,
+        currency: refund.currency,
+      };
+    },
   };
+}
+
+/** Stripe's refund statuses, normalized (`requires_action` waits like `pending`). */
+export function refundStatusOf(status: string | null): RefundStatus["status"] {
+  switch (status) {
+    case "succeeded":
+      return "succeeded";
+    case "failed":
+      return "failed";
+    case "canceled":
+      return "canceled";
+    default:
+      return "pending";
+  }
 }
