@@ -102,10 +102,12 @@ describe("the art generator", () => {
       const scene = artScene(artRng(root(), "png"), f);
       const png = decodePng(artPng(scene));
       expect([png.width, png.height]).toEqual([ART_SIZES[f].width, ART_SIZES[f].height]);
-      for (let i = 3; i < png.data.length; i += 4 * 97) expect(png.data[i]).toBe(255);
-      expect(png.data).toEqual(rasterize(scene).data);
+      let translucent = 0;
+      for (let i = 3; i < png.data.length; i += 4) if (png.data[i] !== 255) translucent++;
+      expect(translucent).toBe(0);
+      // A byte compare: vitest's deep equality over a ~1 MB array is what made this slow on CI.
+      expect(Buffer.compare(Buffer.from(png.data), Buffer.from(rasterize(scene).data))).toBe(0);
     }
-    // Four supersampled rasters, each twice, and a PNG decode: ~7 s under the test runner.
   }, 30_000);
 
   test("the raster draws what the SVG says: a pixel inside an opaque-enough circle takes its colour", () => {
