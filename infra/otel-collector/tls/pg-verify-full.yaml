@@ -1,0 +1,9 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# PG_MONITOR_TLS=verify-full: sslmode=verify-full against the provider's CA (DATABASE_CA_FILE,
+# the commonair-pg-ca secret mounted read-only), or the system trust store when it is empty. The
+# host name is checked against the certificate: never insecure_skip_verify.
+insecure: false
+insecure_skip_verify: false
+ca_file: ${env:DATABASE_CA_FILE:-}

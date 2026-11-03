@@ -1,0 +1,119 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# promtool rule tests, run by infra/tests/observability.test.ts after start.sh rendered our
+# instance's settings into /tmp/commonair-rules-ours: SLO_TARGET=0.999, EGRESS_BUDGET_GIB=500,
+# LIVE_STREAMS_PER_HOST=8.
+rule_files:
+  - ../prometheus/rules/commonair-recording.yml
+  - ../prometheus/rules/commonair-alerts.yml
+  - /tmp/commonair-rules-ours/rules/configured.yml
+# Under the 5-minute lookback, so each group sees the others' latest values (Prometheus runs at 15 s).
+evaluation_interval: 4m
+
+tests:
+  # The same 2% errors that stay quiet at 0.995 burn 19.6 times the 0.999 budget: both pages, and
+  # each names the target it measured against.
+  - interval: 1m
+    input_series:
+      - series: 'http_server_request_duration_seconds_count{service_name="api",http_response_status_code="200"}'
+        values: "0+600x200"
+      - series: 'http_server_request_duration_seconds_count{service_name="api",http_response_status_code="500"}'
+        values: "0+12x200"
+      # Two upgrades, 600 s and 500 s: 1100 s is 85% of half the monthly budget at 0.999 (1296 s).
+      - series: 'commonair_upgrade_downtime_seconds{upgrade_id="a"}'
+        values: "600x5"
+      - series: 'commonair_upgrade_downtime_seconds{upgrade_id="b"}'
+        values: "_x10 500x5"
+    promql_expr_test:
+      - expr: commonair:slo_target
+        eval_time: 10m
+        exp_samples:
+          - labels: 'commonair:slo_target{slo_target="0.999"}'
+            value: 0.999
+    alert_rule_test:
+      - eval_time: 72m
+        alertname: CommonairSloBurnFast
+        exp_alerts:
+          - exp_labels:
+              severity: page
+              slo_target: "0.999"
+              summary: The error budget is burning over 14.4 times too fast (1 h and 5 min)
+              runbook: docs/operators/monitoring.md#commonairsloburnfast
+      - eval_time: 72m
+        alertname: CommonairSloBurnSlow
+        exp_alerts:
+          - exp_labels:
+              severity: page
+              slo_target: "0.999"
+              summary: The error budget is burning over 6 times too fast (6 h and 30 min)
+              runbook: docs/operators/monitoring.md#commonairsloburnslow
+      - eval_time: 32m
+        alertname: CommonairStage1UpgradeDowntime
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+              slo_target: "0.999"
+              summary: Upgrade downtime in 30 days is over 80% of half the monthly error budget (stage 1 trigger)
+              runbook: docs/operators/monitoring.md#commonairstage1upgradedowntime
+
+  # One upgrade of 1000 s is 77% of 1296 s: quiet.
+  - interval: 1m
+    input_series:
+      - series: 'commonair_upgrade_downtime_seconds{upgrade_id="a"}'
+        values: "1000x5"
+    alert_rule_test:
+      - eval_time: 32m
+        alertname: CommonairStage1UpgradeDowntime
+        exp_alerts: []
+
+  # 500 GiB a month is 207 kB/s; the alert is at 80%, 166 kB/s. 200 kB/s fires, 150 kB/s does not.
+  - interval: 1m
+    input_series:
+      - series: 'origin_egress_bytes_total{source="origin"}'
+        values: "0+12000000x60"
+    alert_rule_test:
+      - eval_time: 32m
+        alertname: CommonairStage3Egress
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+              summary: Origin egress in 30 days is over 80% of the egress budget (stage 3 trigger)
+              runbook: docs/operators/monitoring.md#commonairstage3egress
+  - interval: 1m
+    input_series:
+      - series: 'origin_egress_bytes_total{source="origin"}'
+        values: "0+9000000x60"
+    alert_rule_test:
+      - eval_time: 32m
+        alertname: CommonairStage3Egress
+        exp_alerts: []
+
+  # Eight days: 7 live streams against 8 per host (over 6.4: fires); Postgres 0.39 and host CPU
+  # 0.47, each just under its line (quiet).
+  - interval: 2m
+    input_series:
+      - series: "media_streams_live"
+        values: "7x5765"
+      - series: "system_cpu_logical_count"
+        values: "4x5765"
+      - series: 'system_cpu_time_seconds_total{cpu="cpu0",state="user"}'
+        values: "0+56.4x5765"
+      - series: 'system_cpu_time_seconds_total{cpu="cpu0",state="idle"}'
+        values: "0+63.6x5765"
+      - series: 'commonair_postgres_active_time_seconds_total{state_mode="bundled"}'
+        values: "0+187.2x5765"
+    alert_rule_test:
+      - eval_time: 8d12m
+        alertname: CommonairStage2LiveStreams
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+              summary: Concurrent live streams have peaked over 80% of the per-host number every day for 7 days (stage 2 trigger)
+              runbook: docs/operators/monitoring.md#commonairstage2livestreams
+      - eval_time: 8d12m
+        alertname: CommonairStage0PostgresCpu
+        exp_alerts: []
+      - eval_time: 8d12m
+        alertname: CommonairStage1AppCpu
+        exp_alerts: []

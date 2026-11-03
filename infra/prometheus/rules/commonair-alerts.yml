@@ -1,0 +1,144 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# Alerts. Severity `ticket`: look at it this week. Severity `page`: a human now (L1-status routes
+# both, infra/grafana/provisioning/alerting). Every alert carries `summary`, `severity` and
+# `runbook` (its section of docs/operators/monitoring.md); infra/tests/observability.test.ts checks
+# them, and that each stage threshold is 80% of ADR 0032's trigger.
+groups:
+  # ADR 0032 §2: each stage's trigger, alerted at 80% so the next stage is built before it fires.
+  # Evaluated at the global interval, not the triggers group's 5 minutes: a rule only sees another
+  # group's series within the 5-minute lookback, and two 5-minute groups could just miss each other.
+  - name: commonair-stage-triggers
+    rules:
+      - alert: CommonairStage0PostgresCpu
+        # Trigger: Postgres container CPU over 50% (bundled state).
+        expr: commonair:postgres_cpu:sustained_peak_7d > 0.4
+        labels:
+          severity: ticket
+          summary: Postgres load has peaked over 40% of the host every day for 7 days (stage 0 trigger at 50%)
+          runbook: docs/operators/monitoring.md#commonairstage0postgrescpu
+      - alert: CommonairStage0ErrorBudget
+        # Trigger: the 99.5% budget spent in two months of a quarter. Approximated by one rolling
+        # 30-day window, so it warns on the first such month (monitoring.md says so).
+        expr: commonair:stage0_budget_spent:30d > 0.8
+        labels:
+          severity: ticket
+          summary: 80% of the 99.5% monthly error budget is spent (stage 0 trigger at 100%)
+          runbook: docs/operators/monitoring.md#commonairstage0errorbudget
+      - alert: CommonairStage0RestoreTime
+        # Trigger: the restore time over 4 h. 0.8 × 4 h = 11520 s.
+        expr: commonair:restore_drill:seconds > 11520
+        labels:
+          severity: ticket
+          summary: The last restore drill took over 3.2 h (stage 0 trigger at 4 h)
+          runbook: docs/operators/monitoring.md#commonairstage0restoretime
+      - alert: CommonairStage1AppCpu
+        # Trigger: app droplet CPU over 60%.
+        expr: commonair:host_cpu:sustained_peak_7d > 0.48
+        labels:
+          severity: ticket
+          summary: App host CPU has peaked over 48% every day for 7 days (stage 1 trigger at 60%)
+          runbook: docs/operators/monitoring.md#commonairstage1appcpu
+      - alert: CommonairStage1UpgradeDowntime
+        # Trigger: upgrade downtime over half the monthly budget (at the configured target).
+        expr: commonair:upgrade_downtime:budget_ratio_30d > 0.8
+        labels:
+          severity: ticket
+          summary: Upgrade downtime in 30 days is over 80% of half the monthly error budget (stage 1 trigger)
+          runbook: docs/operators/monitoring.md#commonairstage1upgradedowntime
+      - alert: CommonairStage2TranscodeCpu
+        # Trigger: transcode CPU over 70%.
+        expr: commonair:transcode_cpu:sustained_peak_7d > 0.56
+        labels:
+          severity: ticket
+          summary: Transcode CPU has peaked over 56% of the host every day for 7 days (stage 2 trigger at 70%)
+          runbook: docs/operators/monitoring.md#commonairstage2transcodecpu
+      - alert: CommonairStage2LiveStreams
+        # Trigger: concurrent live streams past S1-a's per-host number (LIVE_STREAMS_PER_HOST).
+        expr: commonair:live_streams:sustained_peak_7d > on() (0.8 * commonair:live_streams_per_host)
+        labels:
+          severity: ticket
+          summary: Concurrent live streams have peaked over 80% of the per-host number every day for 7 days (stage 2 trigger)
+          runbook: docs/operators/monitoring.md#commonairstage2livestreams
+      - alert: CommonairStage3Egress
+        # Trigger: monthly egress past the budget (EGRESS_BUDGET_GIB).
+        expr: commonair:egress_bytes:30d > on() (0.8 * commonair:egress_budget_bytes)
+        labels:
+          severity: ticket
+          summary: Origin egress in 30 days is over 80% of the egress budget (stage 3 trigger)
+          runbook: docs/operators/monitoring.md#commonairstage3egress
+
+  # Multi-window burn rates on the availability target (the slo_target label): 14.4× spends 2% of
+  # a 30-day budget in an hour, 6× spends 5% in 6 hours. The short window ends the alert quickly
+  # once the errors stop.
+  - name: commonair-slo
+    rules:
+      - alert: CommonairSloBurnFast
+        expr: commonair:slo_burn_rate:1h > 14.4 and commonair:slo_burn_rate:5m > 14.4
+        for: 2m
+        labels:
+          severity: page
+          summary: The error budget is burning over 14.4 times too fast (1 h and 5 min)
+          runbook: docs/operators/monitoring.md#commonairsloburnfast
+      - alert: CommonairSloBurnSlow
+        expr: commonair:slo_burn_rate:6h > 6 and commonair:slo_burn_rate:30m > 6
+        for: 15m
+        labels:
+          severity: page
+          summary: The error budget is burning over 6 times too fast (6 h and 30 min)
+          runbook: docs/operators/monitoring.md#commonairsloburnslow
+
+  # State, bundled or managed. Each works without pg_monitor.
+  - name: commonair-state
+    rules:
+      - alert: CommonairPostgresConnections
+        expr: sum by (state_mode) (postgresql_backends) / max by (state_mode) (postgresql_connection_max) > 0.8
+        for: 10m
+        labels:
+          severity: ticket
+          summary: Postgres connections are over 80% of max_connections
+          runbook: docs/operators/monitoring.md#commonairpostgresconnections
+      - alert: CommonairPostgresSizeGrowth
+        expr: >-
+          (max by (state_mode) (postgresql_db_size_bytes) - max by (state_mode) (postgresql_db_size_bytes offset 1d))
+          / max by (state_mode) (postgresql_db_size_bytes offset 1d) > 0.2
+          and max by (state_mode) (postgresql_db_size_bytes) > 1073741824
+        labels:
+          severity: ticket
+          summary: The database grew by more than 20% in a day
+          runbook: docs/operators/monitoring.md#commonairpostgressizegrowth
+      - alert: CommonairValkeyMemory
+        expr: max by (state_mode) (redis_memory_used_bytes) / max by (state_mode) (redis_maxmemory_bytes > 0) > 0.8
+        for: 10m
+        labels:
+          severity: ticket
+          summary: Valkey memory is over 80% of maxmemory
+          runbook: docs/operators/monitoring.md#commonairvalkeymemory
+      - alert: CommonairStateScrapeFailing
+        # The only sign that the path to a managed cluster (or the monitor login) broke. The
+        # postgresql receiver counts its failed scrapes; the redis receiver does not, so a Valkey
+        # that stops answering shows as its series gone while the collector itself is up.
+        expr: >-
+          sum by (receiver) (rate(otelcol_scraper_errored_metric_points{receiver=~"postgresql|redis"}[5m])) > 0
+          or label_replace(absent(postgresql_backends), "receiver", "postgresql", "", "") and on() (max(up{job="otel-collector"}) == 1)
+          or label_replace(absent(redis_uptime_seconds_total), "receiver", "redis", "", "") and on() (max(up{job="otel-collector"}) == 1)
+        for: 5m
+        labels:
+          severity: ticket
+          summary: The collector cannot read Postgres or Valkey metrics
+          runbook: docs/operators/monitoring.md#commonairstatescrapefailing
+      - alert: CommonairDiskFilling
+        expr: max(system_filesystem_utilization_ratio{mountpoint="/"}) > 0.8
+        for: 30m
+        labels:
+          severity: ticket
+          summary: The host's root filesystem is over 80% full
+          runbook: docs/operators/monitoring.md#commonairdiskfilling
+      - alert: CommonairCollectorDown
+        expr: up{job=~"otel-collector|otel-collector-internal"} == 0
+        for: 5m
+        labels:
+          severity: ticket
+          summary: Prometheus cannot scrape the OpenTelemetry Collector
+          runbook: docs/operators/monitoring.md#commonaircollectordown

@@ -1,0 +1,5 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# PG_MONITOR_TLS=disable: the bundled Postgres, reached inside the Podman network only.
+insecure: true
