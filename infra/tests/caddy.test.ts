@@ -40,7 +40,8 @@ describe("routing", () => {
       "/.well-known/nodeinfo": "api:3001",
       "/nodeinfo/*": "api:3001",
       "/ap/*": "api:3001",
-      "/chat": "chat:3002",
+      // Page loads first (the studio's /chat page), then the WebSocket (the next test).
+      "/chat": "web:3000",
       "/hls/*": "origin:3003",
       "/p2p-digest/*": "origin:3003",
       "/relay-pull/*": "origin:3003",
@@ -51,6 +52,13 @@ describe("routing", () => {
       "@whip": "mediamtx:8889",
       "/tracker*": "tracker:8000",
     });
+  });
+
+  test("/chat: HTML page loads that upgrade nothing go to the web app, the rest to chat's /ws", () => {
+    const block = /^\thandle \/chat \{\n([\s\S]*?)^\t\}/m.exec(site)?.[1] ?? "";
+    expect(block).toMatch(/@chat_page \{\s*header Accept \*text\/html\*\s*not header Upgrade \*\s*\}/);
+    expect(block).toMatch(/handle @chat_page \{\s*reverse_proxy web:3000\s*\}/);
+    expect(block).toMatch(/handle \{\s*rewrite \* \/ws\s*reverse_proxy chat:3002\s*\}/);
   });
 
   test("/internal is answered 404 before any route can proxy it", () => {
@@ -92,10 +100,6 @@ describe("routing", () => {
   test("ActivityPub paths go to the API unrewritten; move links (/m/*) stay with the web app", () => {
     expect(site).toMatch(/\thandle \/ap\/\* \{\n\t\treverse_proxy api:3001\n\t\}\n/);
     expect(handles().map(([m]) => m)).not.toContain("/m/*");
-  });
-
-  test("the chat WebSocket is rewritten to the service's /ws", () => {
-    expect(site).toMatch(/handle \/chat \{\n\t\trewrite \* \/ws\n\t\treverse_proxy chat:3002\n\t\}/);
   });
 
   test("the overlay event stream is not buffered (SSE)", () => {

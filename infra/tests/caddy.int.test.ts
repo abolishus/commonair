@@ -264,10 +264,12 @@ describe("caddy live: presigned object routes", () => {
   function curl(
     method: string,
     path: string,
-    opts: { body?: Uint8Array; headers?: Record<string, string> } = {},
+    opts: { body?: Uint8Array; headers?: Record<string, string>; http1?: boolean } = {},
   ): Reply {
     const dir = mkdtempSync(join(tmpdir(), "commonair-caddy-curl-"));
     const args = ["-sS", "-k", "--path-as-is", "--resolve", `${HOST}:${port}:127.0.0.1`];
+    // HTTP/2 has no Connection or Upgrade headers; a browser's WebSocket handshake is HTTP/1.1.
+    if (opts.http1) args.push("--http1.1");
     args.push(...(method === "HEAD" ? ["-I"] : ["-X", method]));
     args.push("-D", join(dir, "headers"), "-o", join(dir, "body"), "-w", "%{http_code}");
     for (const [k, v] of Object.entries(opts.headers ?? {})) args.push("-H", `${k}: ${v}`);
@@ -333,6 +335,10 @@ describe("caddy live: presigned object routes", () => {
         '\theader X-Stub "web {method} {uri}"',
         `\trespond "${FILLER}" 404`,
         "}",
+        ":3002 {",
+        '\theader X-Stub "chat {method} {uri}"',
+        '\trespond "chat" 426',
+        "}",
         "",
       ].join("\n"),
     );
@@ -349,6 +355,8 @@ describe("caddy live: presigned object routes", () => {
       "garage",
       "--network-alias",
       "web",
+      "--network-alias",
+      "chat",
       "-v",
       `${dir}/Caddyfile:/etc/caddy/Caddyfile:ro,Z`,
       IMAGE,
@@ -414,6 +422,18 @@ describe("caddy live: presigned object routes", () => {
     const head = curl("HEAD", raw);
     expect(head.status).toBe(200);
     expect(head.stub).toBe(`garage HEAD ${HOST} ${raw}`);
+  });
+
+  test("a /chat page load reaches the web app; the chat WebSocket still reaches chat's /ws", () => {
+    const html = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
+    expect(curl("GET", "/chat", { headers: { accept: html } }).stub).toBe("web GET /chat");
+    const ws = { connection: "Upgrade", upgrade: "websocket", "sec-websocket-version": "13" };
+    expect(curl("GET", "/chat", { headers: ws, http1: true }).stub).toBe("chat GET /ws");
+    // An upgrade wins even with an HTML Accept, and no Accept at all is chat's.
+    expect(curl("GET", "/chat", { headers: { ...ws, accept: html }, http1: true }).stub).toBe("chat GET /ws");
+    expect(curl("GET", "/chat").stub).toBe("chat GET /ws");
+    // Only the exact path: the studio's other pages were never chat's.
+    expect(curl("GET", "/chat/x", { headers: { accept: html } }).stub).toBe("web GET /chat/x");
   });
 
   test("the web app's responses are still compressed", () => {

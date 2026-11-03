@@ -206,10 +206,21 @@ import http-{$CADDY_LISTEN:ports}
 		reverse_proxy api:3001
 	}
 
-	# Chat WebSocket: wss://<host>/chat → chat:3002/ws
+	# Chat WebSocket: wss://<host>/chat → chat:3002/ws. The studio's /chat page shares the path:
+	# a page load (it asks for HTML and upgrades nothing) goes to the web app, everything else to
+	# chat, as before (a WebSocket request never asks for HTML, over HTTP/1.1 or HTTP/2).
 	handle /chat {
-		rewrite * /ws
-		reverse_proxy chat:3002
+		@chat_page {
+			header Accept *text/html*
+			not header Upgrade *
+		}
+		handle @chat_page {
+			reverse_proxy web:3000
+		}
+		handle {
+			rewrite * /ws
+			reverse_proxy chat:3002
+		}
 	}
 
 	# Live HLS, and live captions under it (`live/<slug>/captions/<lang>/…`, ADR 0011).
