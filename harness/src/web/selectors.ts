@@ -305,6 +305,57 @@ export const P1_TEST_IDS = {
   privacyP2pToggle: "privacy-p2p-toggle",
 } as const;
 
+/**
+ * The design batches D1–D5 (.claude/briefs/d/, docs/design/2026-11-design-review.md), registered
+ * once by D0 so no two D units edit this file. The `d-surfaces` scenario uses them.
+ */
+export const D_TEST_IDS = {
+  // D1: discovery (the directory, category pages, search, the side rail, the home page).
+  directoryPage: "directory-page",
+  directoryCategoryGrid: "directory-category-grid",
+  categoryPage: "category-page",
+  categoryTabLive: "category-tab-live",
+  categoryTabVideos: "category-tab-videos",
+  categoryTabClips: "category-tab-clips",
+  searchPage: "search-page",
+  searchResultsChannels: "search-results-channels",
+  searchResultsCategories: "search-results-categories",
+  headerSearch: "header-search",
+  sideRail: "side-rail",
+  sideRailItem: "side-rail-item",
+  homeHero: "home-hero",
+  homeCategoriesShelf: "home-categories-shelf",
+  homeRecentTile: "home-recent-tile",
+  // D2: the channel page, the player and chat.
+  channelTabs: "channel-tabs",
+  channelTabHome: "channel-tab-home",
+  channelTabVideos: "channel-tab-videos",
+  channelTabClips: "channel-tab-clips",
+  channelTabAbout: "channel-tab-about",
+  channelOfflineHero: "channel-offline-hero",
+  channelVideoGrid: "channel-video-grid",
+  channelMetaCategory: "channel-meta-category",
+  channelMetaUptime: "channel-meta-uptime",
+  channelShare: "channel-share",
+  playerControls: "player-controls",
+  playerSettings: "player-settings",
+  playerFullscreen: "player-fullscreen",
+  playerTheatre: "player-theatre",
+  playerPip: "player-pip",
+  playerShortcutsDialog: "player-shortcuts-dialog",
+  playerDataSaverChip: "player-data-saver-chip",
+  chatPinnedStrip: "chat-pinned-strip",
+  // D3: the VOD and clip watch pages.
+  watchMeta: "watch-meta",
+  watchChannelCard: "watch-channel-card",
+  watchMoreGrid: "watch-more-grid",
+  watchShare: "watch-share",
+  // D4: polish.
+  skipLink: "skip-link",
+  emptyStateAction: "empty-state-action",
+  accountThemeSwitcher: "account-theme-switcher",
+} as const;
+
 export const TEST_IDS = {
   ...E1_TEST_IDS,
   ...E2_TEST_IDS,
@@ -314,6 +365,7 @@ export const TEST_IDS = {
   ...E4C_TEST_IDS,
   ...E4C_NESTED_TEST_IDS,
   ...P1_TEST_IDS,
+  ...D_TEST_IDS,
 } as const;
 
 /**
@@ -401,6 +453,12 @@ export const ROUTES = {
   adminLegal: "/admin/legal",
   channel: (slug: string) => `/${encodeURIComponent(slug)}`,
   embed: (slug: string) => `/embed/${encodeURIComponent(slug)}`,
+  /** D1 (decision (a)): the category directory; the nav label stays "Browse". */
+  browse: "/directory",
+  /** D1: one category's live channels, videos and clips. */
+  category: (slug: string) => `/directory/${encodeURIComponent(slug)}`,
+  /** D1: channels and categories matching `q`. */
+  search: (q: string) => `/search?${new URLSearchParams({ q }).toString()}`,
 } as const;
 
 /** CSS selector for a test id, optionally with attribute constraints (`{ state: "playing" }` → `[data-state="playing"]`). */

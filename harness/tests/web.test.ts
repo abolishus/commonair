@@ -10,6 +10,7 @@ import { extractLinks, findTokenLink } from "../src/mailpit.ts";
 import { verificationHop } from "../src/users.ts";
 import {
   DIRECTORY_SECTIONS,
+  D_TEST_IDS,
   E1_TEST_IDS,
   E2_CHANGED_E1_IDS,
   E2_ROUTE_PATTERNS,
@@ -236,7 +237,8 @@ describe("selectors match docs/testing/e4b-selectors.md", () => {
     const later =
       Object.values(E4C_TEST_IDS).length +
       Object.values(E4C_NESTED_TEST_IDS).length +
-      Object.values(P1_TEST_IDS).length;
+      Object.values(P1_TEST_IDS).length +
+      Object.values(D_TEST_IDS).length;
     expect(Object.values(TEST_IDS)).toHaveLength(earlier.size + e4b.length + later);
   });
 
@@ -304,7 +306,9 @@ describe("selectors match docs/testing/e4c-selectors.md", () => {
     const e4c = [...Object.values(E4C_TEST_IDS), ...Object.values(E4C_NESTED_TEST_IDS)];
     expect(new Set(e4c).size).toBe(e4c.length);
     for (const id of e4c) expect(earlier.has(id)).toBe(false);
-    expect(Object.values(TEST_IDS)).toHaveLength(earlier.size + e4c.length + Object.values(P1_TEST_IDS).length);
+    expect(Object.values(TEST_IDS)).toHaveLength(
+      earlier.size + e4c.length + Object.values(P1_TEST_IDS).length + Object.values(D_TEST_IDS).length,
+    );
   });
 
   test("P1 ids collide with no earlier id and are in TEST_IDS", () => {
@@ -503,5 +507,21 @@ describe("hydration wait", () => {
     // The web root sets the marker the harness waits for.
     const root = readFileSync(fileURLToPath(new URL("../../apps/web/src/routes/__root.tsx", import.meta.url)), "utf8");
     expect(root).toContain('document.documentElement.dataset.hydrated = "true"');
+  });
+});
+
+describe("D design batches (.claude/briefs/d/D0-contract-step.md)", () => {
+  test("D ids are unique, collide with no earlier id and are in TEST_IDS", () => {
+    const d = Object.values(D_TEST_IDS);
+    expect(new Set(d).size).toBe(d.length);
+    const all = Object.values(TEST_IDS);
+    for (const id of d) expect(all.filter((x) => x === id)).toHaveLength(1);
+  });
+
+  test("D routes follow decision (a)", () => {
+    expect(ROUTES.browse).toBe("/directory");
+    expect(ROUTES.category("just-chatting")).toBe("/directory/just-chatting");
+    expect(ROUTES.category("a/b")).toBe("/directory/a%2Fb");
+    expect(ROUTES.search("art & music")).toBe("/search?q=art+%26+music");
   });
 });

@@ -5,6 +5,13 @@
 
 import type { Key as Coop } from "./coop.gen.ts";
 import type { Key as Core } from "./core.gen.ts";
+import type { Key as D1Discovery } from "./d1-discovery.gen.ts";
+import type { Key as D2Channel } from "./d2-channel.gen.ts";
+import type { Key as D2Chat } from "./d2-chat.gen.ts";
+import type { Key as D2Player } from "./d2-player.gen.ts";
+import type { Key as D3Watch } from "./d3-watch.gen.ts";
+import type { Key as D4Polish } from "./d4-polish.gen.ts";
+import type { Key as D5Studio } from "./d5-studio.gen.ts";
 import type { Key as E7Admin } from "./e7-admin.gen.ts";
 import type { Key as E7Appeals } from "./e7-appeals.gen.ts";
 import type { Key as E7Chat } from "./e7-chat.gen.ts";
@@ -51,6 +58,13 @@ import type { Key as W3WatchRooms } from "./w3-watch-rooms.gen.ts";
 export type MessageKey =
   | Coop
   | Core
+  | D1Discovery
+  | D2Channel
+  | D2Chat
+  | D2Player
+  | D3Watch
+  | D4Polish
+  | D5Studio
   | E7Admin
   | E7Appeals
   | E7Chat
@@ -96,6 +110,13 @@ export type MessageKey =
 export const NAMESPACES = [
   "coop",
   "core",
+  "d1-discovery",
+  "d2-channel",
+  "d2-chat",
+  "d2-player",
+  "d3-watch",
+  "d4-polish",
+  "d5-studio",
   "e7-admin",
   "e7-appeals",
   "e7-chat",
