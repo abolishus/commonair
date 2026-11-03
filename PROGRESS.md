@@ -22,6 +22,50 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
 
 ## In flight
 
+**D wave 1 done (2026-11-03): D0, D4, D1-seed, D1-api and D5-capture on `main`** (briefs in
+`.claude/briefs/d/`). CI is green on `4200b863` (41683521066), which contains all the code.
+
+- **D0:** the seven D namespaces, `D_TEST_IDS` with the `/directory`, `/directory/$category` and
+  `/search?q=` routes, and the `d-surfaces` scenario (rest shard; it skips without a separate
+  `seed full`'s store and `DEMO_SEED_PASSWORD`).
+- **D1-api (F20):** every category count was 0, because a single-table drizzle select dropped the
+  table names in the count subquery. Counts now come from one grouped query that uses the
+  directory's own live predicate, keyed on the broadcast's category, and excluding mature
+  channels. The admin category upsert uses the same count.
+- **D1-seed:**
+  - generated CC0 art: avatars as PNG, since the endpoint refuses SVG; banners and 3–5 panels on
+    streamer1–3;
+  - 3–15 verified viewers per channel in `seed live`, over the real playback path;
+  - unique co-op proposal titles;
+  - seven recently-live VODs.
+- **D4:**
+  - `head()` titles on every route, with a `PENDING_HEAD` list for batch 8 and D2/D3;
+  - the skip link first;
+  - shared not-found and error states with an action, also the router's defaults;
+  - theme from the cookie and no transitions until hydration;
+  - two-column sign-in and sign-up, a three-select date of birth (the harness fills it), a
+    `redirect` param limited to same-origin paths, and a password reset in `/signin`;
+  - the co-op overview capped at 5 decisions.
+- **D5-capture:** 216 signed-in screenshots on staging (seed mode reopened until 21:43 UTC), plus
+  the addendum in `docs/design/2026-11-design-review.md`:
+  - F21, F22 and F24–F26 confirmed; F27 worse; F23 and F28 not reproduced;
+  - new findings F29–F39;
+  - no PROGRESS sign-off closes in full (screenshots are `en` only, at 375 px, with no keyboard
+    pass).
+- **Open:**
+  - **Box art** needs a contract change: `admin.categoryArtUploadUrl` and
+    `admin.setCategoryBoxArt` (D1-seed's request). Until then D1-web's fallback tile applies.
+  - **D4's remaining requests:**
+    - password-reset routes in `AUTH_ROUTES`;
+    - `?status=decided` on the proposals list;
+    - D1-web's header links set `redirect`;
+    - D2-channel adopts `ChannelNotFoundState`;
+    - D5-studio re-exports `NotFoundState`;
+    - the embed not-found action.
+  - **D5 recapture:** `/admin/legal` and `/treasury` as `demo_legal` and `demo_treasurer`, and
+    `/chat` once the Caddy fix is released.
+  - **Wave 2** waits on batch 8's B8-web and B8-player.
+
 **Batch 7 done (2026-11-02): W3 + N3 + N4 milestone on `43ae60dc`.** CI is green on the push run
 (41360599768; `ingest-whip` TTFF passed on rerun) and on a full `workflow_dispatch` run (41365937421;
 a chat-filter timing test passed on rerun). All 12 harness shards passed, plus the self-host jobs.
