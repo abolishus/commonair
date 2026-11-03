@@ -13,10 +13,11 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import { admin, magicLink, twoFactor, username } from "better-auth/plugins";
 import { adminAc, userAc } from "better-auth/plugins/admin/access";
-import { eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { ALTCHA_FIELD, AUTH_BASE_PATH, AUTH_ROUTES } from "@commonair/contracts/auth";
 import { schema, uuidv7, type Database, type Executor } from "@commonair/db";
 import type { Deps } from "../deps.ts";
+import { emit } from "../events/outbox.ts";
 import { publishUserControl } from "../lib/control.ts";
 import { instanceMediaBase, isInstanceMediaRef } from "../lib/media-ref.ts";
 import { isCommittedUpload, keyOfRef } from "../moderation/committed.ts";
@@ -80,6 +81,7 @@ export function createAuth(deps: Deps) {
   const { env, db, site, mailer, logger } = deps;
   const minAge = env.AUTH_MIN_AGE;
   const twoFactorEnabling = new WeakSet<object>();
+  const banClearing = new WeakSet<object>();
 
   const social: Record<string, { clientId: string; clientSecret: string; disableImplicitSignUp: true }> = {};
   const providers = [
@@ -270,8 +272,16 @@ export function createAuth(deps: Deps) {
               data.image = key;
             }
             if (data.twoFactorEnabled === true && ctx) twoFactorEnabling.add(ctx);
+            // Decision (g): the admin plugin clears a lapsed ban at sign-in through this update.
+            if (data.banned === false && ctx) banClearing.add(ctx);
           },
           after: async (user, ctx) => {
+            // Only the update that cleared a ban (marked in `before`). Better Auth runs the sign-in's
+            // clear inside the endpoint, so `ctx` is set; other user updates take no locks here.
+            if (ctx && banClearing.has(ctx)) {
+              banClearing.delete(ctx);
+              if (user.banned !== true) await recordLapsedWithRetry(db, user.id, deps.now(), logger);
+            }
             // Chat and IRC cache display names and avatars.
             if (ctx?.path === "/update-user")
               await publishUserControl(deps, { op: "invalidate", userId: user.id, reason: "profile_changed" });
@@ -319,3 +329,72 @@ export function createAuth(deps: Deps) {
 }
 
 export type Auth = ReturnType<typeof createAuth>;
+
+/**
+ * Decision (g): a lapsed ban cleared at sign-in writes `channel.suspension {suspended: false}` for
+ * each of the user's channels it leaves unsuspended, exactly once. The suspension being undone is
+ * the channel's latest `channel.suspension` event: one is owed only while that event still says
+ * `suspended: true` and the channel is no longer suspended. The channel rows are locked first, as
+ * the `ban-expiry` sweep's `withSuspensionState` locks them, so the sweep, a second sign-in and
+ * this path serialize, and whichever comes second finds the unsuspension written. A channel
+ * suspended in its own right stays suspended (no event), as does a user with no channel.
+ */
+/**
+ * The hook is not transactional: `banned = false` is already committed when it runs, and the
+ * `ban-expiry` sweep selects banned users only, so it cannot recover an event lost here. Retry
+ * once, then log at error level for an operator (contract request: the sweep also checks channels
+ * whose latest `channel.suspension` is still `true`).
+ */
+export async function recordLapsedWithRetry(
+  db: Database,
+  userId: string,
+  now: Date,
+  logger: Pick<Deps["logger"], "warn" | "error">,
+): Promise<number | null> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await recordLapsedUnsuspension(db, userId, now);
+    } catch (err) {
+      const errorName = (err as Error).name;
+      if (attempt >= 2) {
+        logger.error("lapsed ban unsuspension failed", { errorName, attempts: attempt });
+        return null;
+      }
+      logger.warn("lapsed ban unsuspension failed, retrying", { errorName });
+    }
+  }
+}
+
+export async function recordLapsedUnsuspension(db: Database, userId: string, now: Date): Promise<number> {
+  const { channels, users, events } = schema;
+  return db.transaction(async (tx) => {
+    const owned = await tx
+      .select({ id: channels.id })
+      .from(channels)
+      .where(eq(channels.ownerId, userId))
+      .orderBy(channels.id)
+      .for("update", { of: channels });
+    let written = 0;
+    for (const c of owned) {
+      const [state] = await tx
+        .select({
+          // The rule of `channel.suspension` (events/media-state.ts) as of now.
+          suspended: sql<boolean>`(${channels.suspendedAt} is not null or (${users.banned} and (${users.banExpires} is null or ${users.banExpires} > ${now.toISOString()}::timestamptz)))`,
+        })
+        .from(channels)
+        .innerJoin(users, eq(users.id, channels.ownerId))
+        .where(eq(channels.id, c.id));
+      if (!state || state.suspended) continue;
+      const [last] = await tx
+        .select({ suspended: sql<boolean | null>`(${events.payload}->>'suspended')::boolean` })
+        .from(events)
+        .where(and(eq(events.channelId, c.id), eq(events.type, "channel.suspension")))
+        .orderBy(desc(events.occurredAt), desc(events.id))
+        .limit(1);
+      if (last?.suspended !== true) continue;
+      await emit(tx, "channel.suspension", c.id, { channel_id: c.id, suspended: false }, now);
+      written++;
+    }
+    return written;
+  });
+}

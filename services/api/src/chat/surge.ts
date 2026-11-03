@@ -8,7 +8,7 @@
  * last statement, and the `surge` frame is published after the commit.
  */
 import { eq } from "drizzle-orm";
-import { surgeRaidOf } from "@commonair/interact";
+import { surgeRaidOf, type SurgeRaidInfo } from "@commonair/interact";
 import { KEYS, SurgeOverride } from "@commonair/contracts/internal";
 import { ChannelChatSettings } from "@commonair/contracts/shapes";
 import { schema } from "@commonair/db";
@@ -50,8 +50,31 @@ function parseOverride(raw: string | null): SurgeOverride | null {
   }
 }
 
-async function readOverride(deps: Deps, channelId: string): Promise<SurgeOverride | null> {
-  return parseOverride(await deps.valkey.get(KEYS.surgeOverride(channelId)));
+/**
+ * The stored value: `SurgeOverride`, plus the raid the worker stores beside it (`surgeRaidOf`) and,
+ * once a moderator's start has kept that raid, `raidUntil`: the end of the raid's own surge window
+ * (`RAID_RULES.surgeMinutes` from the raid: the `until` the raid left), so a moderator's later
+ * extension never stretches the raid past it. A new raid writes a fresh value without it.
+ */
+type StoredSurge = SurgeOverride & { raid?: SurgeRaidInfo; raidUntil?: string };
+
+/** The raid a start keeps: the stored one, while now is inside its window plus the carry's grace. */
+export function keptRaid(
+  raw: string | null,
+  stored: SurgeOverride | null,
+  now: Date,
+): { raid: SurgeRaidInfo; raidUntil: string } | null {
+  const raid = surgeRaidOf(raw);
+  if (!raid || raw === null || stored?.state !== "on") return null;
+  let raidUntil = stored.until;
+  try {
+    const v = (JSON.parse(raw) as { raidUntil?: unknown }).raidUntil;
+    if (typeof v === "string" && !Number.isNaN(Date.parse(v))) raidUntil = v;
+  } catch {
+    return null;
+  }
+  // The carry lasts the raid's surge plus the key's grace minute (`raidCarryTtlSeconds`).
+  return Date.parse(raidUntil) + TTL_GRACE_SECONDS * 1000 > now.getTime() ? { raid, raidUntil } : null;
 }
 
 async function dto(deps: Deps, o: SurgeOverride | null): Promise<SurgeStateDto> {
@@ -79,8 +102,9 @@ export const chatSurge = {
       return { ...OFF, unavailable: true };
     }
     const o = parseOverride(raw);
-    // Batch 7 decision (w): the raid holding chat (the worker stores it beside the override).
-    return { ...(await dto(context.deps, o)), raid: o?.state === "on" ? surgeRaidOf(raw) : null };
+    // Batch 7 decision (w): the raid holding chat (the worker stores it beside the override), named
+    // only while its own window lasts, not through a later extension of the surge.
+    return { ...(await dto(context.deps, o)), raid: keptRaid(raw, o, new Date())?.raid ?? null };
   }),
 
   override: os.chat.surge.override.handler(async ({ context, input }) => {
@@ -92,10 +116,11 @@ export const chatSurge = {
     // As `chatSettingsOf` in routes/chat.ts (not imported: that module composes this one).
     const parsed = ChannelChatSettings.safeParse(c.chatSettings);
     const settings = (parsed.success ? parsed.data : ChannelChatSettings.parse({})).surgeGuard;
-    const [stored, marked] = await Promise.all([
-      readOverride(deps, c.id),
+    const [raw, marked] = await Promise.all([
+      deps.valkey.get(KEYS.surgeOverride(c.id)),
       deps.valkey.exists(surgeOpenKey(c.id)).then((n) => n === 1),
     ]);
+    const stored = parseOverride(raw);
     // The job scans enabled channels only, so a manual `on` elsewhere would never get its cooldown
     // end. Ending stays open while anything is left over from before the guard was turned off.
     if (!settings.enabled && (input.action === "start" || (stored === null && !marked)))
@@ -104,19 +129,32 @@ export const chatSurge = {
     // Pair begins and ends on the same state the job uses: the marker says a begin has no end yet.
     // A marker without a key means the key lapsed before the job recorded it: record that first.
     const lapsed = marked && stored === null;
-    const open = !lapsed && (marked || stored?.state === "on");
     const now = new Date();
+    // A key whose `until` passed is surge mode that ended (the job records the end), kept only
+    // for the TTL's grace minute: a start then begins afresh, with its own begin event.
+    const live = stored?.state === "on" && Date.parse(stored.until) > now.getTime();
+    const open = !lapsed && (marked || live);
     const fresh = new Date(now.getTime() + settings.cooldownMinutes * 60_000).toISOString();
+    // A start keeps the raid the surge holds chat for while its window lasts; an end drops it.
+    const raid = input.action === "start" ? keptRaid(raw, stored, now) : null;
     // Starting while already on extends only: `since` (the chatted-before exemption) and `by` stay.
-    const next: SurgeOverride =
-      input.action === "start" && stored?.state === "on"
-        ? { ...stored, until: Date.parse(fresh) > Date.parse(stored.until) ? fresh : stored.until }
+    const base: SurgeOverride =
+      input.action === "start" && stored && live
+        ? {
+            state: stored.state,
+            since: stored.since,
+            by: stored.by,
+            until: Date.parse(fresh) > Date.parse(stored.until) ? fresh : stored.until,
+          }
         : {
             state: input.action === "start" ? "on" : "suppressed",
             since: now.toISOString(),
             until: fresh,
             by: caller.user.id,
           };
+    // Outside its window the raid is dropped, so the stored value (and the worker's end reason) stops
+    // naming it.
+    const next: StoredSurge = raid ? { ...base, ...raid } : base;
     const ttl = Math.max(1, Math.ceil((Date.parse(next.until) - now.getTime()) / 1000)) + TTL_GRACE_SECONDS;
 
     await deps.db.transaction(async (tx) => {

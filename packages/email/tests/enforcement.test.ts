@@ -119,6 +119,49 @@ describe("enforcementStatement", () => {
     expect(mail.text).toContain(m.detectionNo);
   });
 
+  describe("a staff action with no moderation case (B7 CR6)", () => {
+    const staff = (action: "report.resolve" | "user.suspend" | "channel.suspend") => ({
+      contentType: action === "user.suspend" ? ("account" as const) : ("channel" as const),
+      restrictionKind: action === "user.suspend" ? ("account" as const) : ("service" as const),
+      restrictionDetail: "suspended" as const,
+      facts: { code: "staff_action" as const, action, appliedAt: "2026-10-18T14:30:00Z" },
+      source: action === "report.resolve" ? ("notice_art16" as const) : ("own_initiative" as const),
+      automatedDetection: false,
+      automatedDecision: "not" as const,
+      clauseTitleKey: "clause.decency.harassment",
+      clauseRef: "decency.harassment@1",
+    });
+
+    test.each(["report.resolve", "user.suspend", "channel.suspend"] as const)(
+      "en: %s names the action, the clause and the time, and no case",
+      async (action) => {
+        const mail = await render(staff(action));
+        const facts = m["staffAction.facts"]
+          .replace("{action}", m[`staffAction.action.${action}`])
+          .replace("{clause}", m["clause.decency.harassment"])
+          .replace("{appliedAt}", "");
+        expect(mail.text).toContain(facts.slice(0, facts.indexOf(" on ")));
+        expect(mail.text).toContain("October 18, 2026");
+        expect(mail.text).toContain("decency.harassment@1");
+        expect(mail.text).not.toContain(m.factsReview.slice(0, 20));
+        expect(mail.text).not.toMatch(/\b(MA|MC)-[0-9A-F]{8}\b/);
+      },
+    );
+
+    test("es: the same statement in Spanish, with no case", async () => {
+      const mail = await renderEmail(
+        "enforcementStatement",
+        { ...base, ...staff("user.suspend") },
+        { site, locale: "es" },
+      );
+      expect(mail.locale).toBe("es");
+      expect(mail.text).toContain("Una persona de nuestro equipo suspendió la cuenta según");
+      expect(mail.text).toContain("No se abrió ningún caso de moderación.");
+      expect(mail.text).not.toMatch(/\b(MA|MC)-[0-9A-F]{8}\b/);
+      expect(mail.text).not.toContain("caso de moderación MC");
+    });
+  });
+
   test("operator text is escaped", async () => {
     const mail = await render({ explanation: "<script>alert(1)</script>" });
     expect(mail.html).not.toContain("<script>");

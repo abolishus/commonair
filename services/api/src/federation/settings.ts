@@ -7,26 +7,26 @@
  * - Turning federation on creates the actor row and its RSA-2048 key the first time (private key
  *   encrypted), and sets `channels.federation_settings.enabled` and `federation_actors.enabled`
  *   together.
- * - Turning it off keeps the key and stops delivery: the actor answers 410 from then on, and the
- *   actor `Delete` is queued to every follower inbox (deliver jobs; the worker signs and sends).
- *   A follower row is deleted only once the `Delete` for its inbox is queued: the rows are the
- *   only record of those inboxes, so a failed enqueue (or a crash after commit) leaves them, and
- *   turning off again retries. Remote servers drop the follow on that `Delete`, and the rows hold
- *   remote people's handles (decision 6).
+ * - Turning it off keeps the key and stops delivery: the actor answers 410 from then on. The
+ *   change writes `channel.federation {enabled: false}` (and `federation.actor.disabled` when the
+ *   actor was on) in the setting's transaction (batch 8 decision (h)). The worker's outbox relay
+ *   turns those into the actor `Delete` to every follower inbox and the follower cleanup, so the
+ *   API queues no delivery and deletes no follower itself, and a crash after commit loses nothing.
+ *   Remote servers drop the follow on that `Delete`, and the rows hold remote people's handles
+ *   (decision 6). A toggle never writes the public `channel.update`.
  * - Followers are listed to the owner (handle and server) and removable; removal deletes the row.
  */
-import { AS2_CONTEXT, AS2_PUBLIC } from "@commonair/federation";
 import { ChannelFederationSettings } from "@commonair/contracts/shapes";
-import { schema, uuidv7 } from "@commonair/db";
-import { and, count, desc, eq, inArray, sql } from "drizzle-orm";
+import { schema } from "@commonair/db";
+import { and, count, desc, eq, sql } from "drizzle-orm";
 import type { Deps } from "../deps.ts";
 import { audit } from "../events/audit.ts";
+import { emit } from "../events/outbox.ts";
 import { decodeCursor, encodeCursor, isKeyCursor, pageOf } from "../lib/cursor.ts";
 import { iso } from "../lib/dto.ts";
 import { apiError, notFound } from "../lib/errors.ts";
 import { actorUrl, handleOf, keyIdOf, suspendedSql } from "./ids.ts";
 import { newActorKey } from "./keys.ts";
-import { federationQueue } from "./queue.ts";
 
 const { channels, federationActors, federationFollowers, users } = schema;
 
@@ -64,54 +64,6 @@ export async function getSettings(deps: Deps, channel: ChannelRow) {
     actorId: enabled ? actorUrl(deps.site, channel.id) : null,
     followers: followers?.n ?? 0,
   };
-}
-
-/** The actor `Delete` sent when a channel stops federating (one per distinct inbox). */
-export function actorDeleteActivity(actor: string, id: string) {
-  return {
-    "@context": AS2_CONTEXT,
-    id: `${actor}#delete-${id}`,
-    type: "Delete",
-    actor,
-    object: actor,
-    to: [AS2_PUBLIC],
-  };
-}
-
-/**
- * Queue the actor `Delete` once per distinct inbox, then delete the followers whose inbox it was
- * queued for. A failed enqueue keeps those rows, so turning off again sends it then.
- */
-async function sendActorDelete(
-  deps: Deps,
-  channelId: string,
-  actor: string,
-  followers: { id: string; inbox: string; sharedInbox: string | null }[],
-): Promise<void> {
-  if (followers.length === 0) return;
-  const byInbox = new Map<string, string[]>();
-  for (const f of followers) {
-    const inbox = f.sharedInbox ?? f.inbox;
-    byInbox.set(inbox, [...(byInbox.get(inbox) ?? []), f.id]);
-  }
-  const deleteId = uuidv7(deps.now().getTime());
-  const activity = actorDeleteActivity(actor, deleteId);
-  const sent: string[] = [];
-  for (const [i, [inbox, ids]] of [...byInbox].entries()) {
-    try {
-      await federationQueue(deps).deliver(
-        { channelId, inbox, objectId: null, activity, attempt: 1 },
-        `${deleteId}-${i}`,
-      );
-      sent.push(...ids);
-    } catch (err) {
-      deps.logger.error("federation delete enqueue failed", { channelId, err: (err as Error).name });
-    }
-  }
-  if (sent.length > 0)
-    await deps.db
-      .delete(federationFollowers)
-      .where(and(eq(federationFollowers.channelId, channelId), inArray(federationFollowers.id, sent)));
 }
 
 export async function updateSettings(deps: Deps, channel: ChannelRow, userId: string, enabled: boolean | undefined) {
@@ -163,8 +115,8 @@ export async function updateSettings(deps: Deps, channel: ChannelRow, userId: st
           .update(federationActors)
           .set({ enabled: true, updatedAt: now })
           .where(eq(federationActors.channelId, channel.id));
-      // Audited on a change only: a repeated "on" is a no-op.
-      if (!was)
+      // Audited, and announced to the worker, on a change only: a repeated "on" is a no-op.
+      if (!was) {
         await audit(tx, {
           actorType: "user",
           actorId: userId,
@@ -173,9 +125,11 @@ export async function updateSettings(deps: Deps, channel: ChannelRow, userId: st
           subjectId: channel.id,
           channelId: channel.id,
         });
+        await emit(tx, "channel.federation", channel.id, { channel_id: channel.id, enabled: true }, now);
+      }
     });
   } else {
-    const followers = await deps.db.transaction(async (tx) => {
+    await deps.db.transaction(async (tx) => {
       const [c] = await tx
         .select({ settings: channels.federationSettings })
         .from(channels)
@@ -187,33 +141,31 @@ export async function updateSettings(deps: Deps, channel: ChannelRow, userId: st
         .update(channels)
         .set({ federationSettings: { ...ChannelFederationSettings.parse(c.settings), enabled: false } })
         .where(eq(channels.id, channel.id));
+      const now = deps.now();
       const off = await tx
         .update(federationActors)
-        .set({ enabled: false, updatedAt: deps.now() })
+        .set({ enabled: false, updatedAt: now })
         .where(and(eq(federationActors.channelId, channel.id), eq(federationActors.enabled, true)))
         .returning({ id: federationActors.channelId });
-      // Kept until their `Delete` is queued (below); a repeated "off" retries what is left.
-      const rows = await tx
-        .select({
-          id: federationFollowers.id,
-          inbox: federationFollowers.inbox,
-          sharedInbox: federationFollowers.sharedInbox,
-        })
+      if (!was && off.length === 0) return;
+      const [followers] = await tx
+        .select({ n: count() })
         .from(federationFollowers)
         .where(eq(federationFollowers.channelId, channel.id));
-      if (was || off.length > 0)
-        await audit(tx, {
-          actorType: "user",
-          actorId: userId,
-          action: "federation.channel.disable",
-          subjectType: "channel",
-          subjectId: channel.id,
-          channelId: channel.id,
-          details: { followers: rows.length },
-        });
-      return rows;
+      await audit(tx, {
+        actorType: "user",
+        actorId: userId,
+        action: "federation.channel.disable",
+        subjectType: "channel",
+        subjectId: channel.id,
+        channelId: channel.id,
+        details: { followers: followers?.n ?? 0 },
+      });
+      // The relay queues the actor `Delete` per inbox and the follower cleanup from these; both
+      // events for one change name the same deliveries, so each inbox gets one `Delete`.
+      await emit(tx, "channel.federation", channel.id, { channel_id: channel.id, enabled: false }, now);
+      if (off.length > 0) await emit(tx, "federation.actor.disabled", channel.id, { channel_id: channel.id }, now);
     });
-    await sendActorDelete(deps, channel.id, actor, followers);
   }
   const [fresh] = await deps.db.select().from(channels).where(eq(channels.id, channel.id));
   return getSettings(deps, fresh ?? channel);

@@ -107,6 +107,7 @@ function view(over: Partial<TwitchImportViewProps> = {}, theme: "dark" | "light"
   const fns = {
     onConnect: vi.fn<TwitchImportViewProps["onConnect"]>(),
     onToggleChannel: vi.fn<TwitchImportViewProps["onToggleChannel"]>(),
+    onToggleField: vi.fn<TwitchImportViewProps["onToggleField"]>(),
     onToggleEmote: vi.fn<TwitchImportViewProps["onToggleEmote"]>(),
     onAssert: vi.fn<TwitchImportViewProps["onAssert"]>(),
     onStart: vi.fn<TwitchImportViewProps["onStart"]>(),

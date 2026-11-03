@@ -140,7 +140,18 @@ export async function runTwitchImport(
 
     const out = await applyBundle(
       ctx,
-      { importId, bundle, files, choices: { channel: choices.channel, panels: false, emotes: choices.emotes } },
+      {
+        importId,
+        bundle,
+        files,
+        // The streamer's per-field choices (batch 8); absent means every field.
+        choices: {
+          channel: choices.channel,
+          ...(choices.fields ? { fields: choices.fields } : {}),
+          panels: false,
+          emotes: choices.emotes,
+        },
+      },
       opts.commitUpload ? { commitUpload: opts.commitUpload } : {},
     );
     return out.ok ? { applied: 1, items: out.items.length, fetched: files.size } : { failed: 1 };
