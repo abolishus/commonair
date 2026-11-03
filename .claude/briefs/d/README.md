@@ -142,16 +142,16 @@ hold it at the same time.
   fuller. Fuller pages come from the seed (D1-seed) and from surfacing data the API already
   returns.
 
-## Decisions for the user (answer before D0)
+## Decisions (answered by the user, 2026-11-03)
 
-- **(a) URL shape.** The proposal is Twitch's: `/directory`, `/directory/$category` and
-  `/search?q=`. The other option is `/browse` and `/c/$category`. `/directory` keeps `Browse` as
-  the nav label.
-- **(b) Theatre mode and chat.** Theatre widens the player to the viewport. The proposal keeps
-  chat docked on the right, as Twitch does. The other option hides chat behind a toggle.
-- **(c) The signed-in pass.** D5-capture needs a signed-in browser. Either the user signs in to
-  each seeded role in the built-in browser pane and the unit captures (the tool will not type the
-  seed password), or the user takes the screenshots from a checklist the unit writes.
-- **(d) Generated art.** The proposal is avatars and category tiles generated in the harness as
-  CC0 SVG (initials or geometric patterns from a seeded RNG, token-free colors are fine in seed
-  assets), uploaded through the normal media API. No fetched images.
+- **(a) URL shape: `/directory`, `/directory/$category` and `/search?q=`**, as on Twitch and in the
+  E4a boards. The nav label stays "Browse".
+- **(b) Theatre mode keeps chat docked on the right**, as on Twitch. Theatre mode also gets a
+  chat-collapse button for a full-width player (D2-player owns the button; D2-channel lays out
+  both states).
+- **(c) The signed-in pass: the user signs in, the unit captures.** For each seeded role, the user
+  signs in in the built-in browser pane, and D5-capture takes the screenshots. The unit never
+  sees, types or stores the password.
+- **(d) Generated art: CC0 SVGs made in the harness** from a seeded RNG, uploaded through the
+  normal media API. Abstract only (gradients and geometric shapes). Never faces, and nothing that
+  could pass for a real person or brand. No fetched images.
