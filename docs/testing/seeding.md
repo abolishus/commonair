@@ -306,6 +306,37 @@ sh ~/commonair/selfhost.sh seed-mode close
     stack's ingest, with bulk viewers chatting. It keeps running until `close` or the deadline.
     Its pid (the container's) is `/reports/seed-live.pid`, and its log is `seed-live.log` in the
     reports directory.
+- **One unit at a time, and resuming:** `run` asks the harness for its units (`seed units`) and
+  runs `seed full --to <unit>` for each, with `--from <unit>` from the second on. Between units it
+  dumps the database (`pg_dump -Fc`, as the owner, while the stack keeps running) to
+  `reports/snapshots/after-<unit>.dump`. After each unit the harness writes
+  `reports/seed-checkpoint-<unit>.json`: the store later units read (`store.extra` included), the
+  run's `now`, and the database's fingerprint (the count and a hash of every user id). A unit that
+  fails stops the run, and the error names the command that resumes it:
+
+  ```sh
+  DEMO_SEED_PASSWORD='<the same password>' \
+    sh ~/commonair/selfhost.sh seed-mode run --confirm staging-stream.abolish.us --scale medium --from coop
+  ```
+
+  - `--from coop` restores the dump taken after `safety` (the unit before): it stops the app units
+    (not Postgres, Valkey, Garage or the idle harness), recreates the database from the dump,
+    flushes Valkey and starts the stack. Then it runs `coop` and every unit after it.
+  - It refuses, changing nothing, without `DEMO_SEED_PASSWORD` (seed-social set every account's
+    password), or without both the checkpoint and the dump after the unit before.
+  - The harness checks the checkpoint again: the zero-users guard is relaxed only when the
+    checkpoint's target, scale, seed and user fingerprint match this database. A real instance's
+    database, or one the dump was not restored to, never matches.
+  - **Not restored: Valkey and object storage.** Valkey is flushed instead, as a reset does: it
+    holds sessions, rate limits, caches and queued jobs, which units recreate (they sign in again)
+    or which name rows of the failed attempt. Jobs queued but not yet run when the dump was taken
+    are lost; the worker's scheduled jobs come back when it starts. Media objects stay in the bucket.
+    The dump's rows still point at the earlier units' objects, and the failed unit's are orphans,
+    harmless as after a reset.
+  - A fresh `run` (no `--from`) deletes the old dumps, and the harness deletes the old checkpoints.
+  - Without selfhost.sh (a local stack), `seed full --from <unit>` works the same once you restore
+    the database yourself; the checkpoints are in `harness/reports/`.
+
 - **`live`:** restarts `seed live` (stop, then start), for example after the harness container
   restarted. It needs `DEMO_SEED_PASSWORD`, the password the run used.
 - **`close`:**

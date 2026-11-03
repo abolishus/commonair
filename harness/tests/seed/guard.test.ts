@@ -26,6 +26,13 @@ describe("fullSeedRefusals", () => {
     expect(fullSeedRefusals({ ...ok, databaseUrl: undefined })).toEqual(["DATABASE_URL is not set"]);
   });
 
+  test("a resume replaces the zero-users rule with the checkpoint's refusals", () => {
+    expect(fullSeedRefusals({ ...ok, userCount: 2000, resume: [] })).toEqual([]);
+    expect(fullSeedRefusals({ ...ok, userCount: 2000, resume: ["no checkpoint"] })).toEqual(["no checkpoint"]);
+    // The other rules still hold for a resume.
+    expect(fullSeedRefusals({ ...ok, seedFull: false, confirm: undefined, userCount: 9, resume: [] })).toHaveLength(2);
+  });
+
   test("the target never includes credentials", () => {
     expect(describeTarget(url)).toBe("db.internal:5432/commonair");
     expect(describeTarget("postgres://u:p@localhost/x")).toBe("localhost/x");

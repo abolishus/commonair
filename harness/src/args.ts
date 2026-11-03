@@ -5,6 +5,7 @@
 import { parseDuration } from "./metrics.ts";
 import { PROFILES, type Profile } from "./scenario.ts";
 import { SEED_SCALE_NAMES, type SeedScaleName, isSeedScaleName } from "./seed/scale.ts";
+import { SEED_UNIT_NAMES, type SeedUnitName } from "./seed/types.ts";
 
 export interface CommonFlags {
   profile: Profile;
@@ -24,7 +25,15 @@ export type Command =
       browserViewers?: number;
       protocol: "rtmp" | "whip";
     } & CommonFlags)
-  | { kind: "seed-full"; scale: SeedScaleName; seed: number; confirm?: string }
+  | {
+      kind: "seed-full";
+      scale: SeedScaleName;
+      seed: number;
+      confirm?: string;
+      from?: SeedUnitName;
+      to?: SeedUnitName;
+    }
+  | { kind: "seed-units" }
   | { kind: "seed-live"; channels: number; durationMs?: number }
   | { kind: "help" };
 
@@ -40,6 +49,8 @@ export const USAGE = `Usage:
                                            [--set key=value]... [--player harness|web] [--skip-unavailable]
   bun harness/src/cli.ts list [--json]
   bun harness/src/cli.ts seed full --confirm <host:port/db> [--scale small|medium|large] [--seed <n>]
+                                   [--from <unit>] [--to <unit>]
+  bun harness/src/cli.ts seed units
   bun harness/src/cli.ts seed live [--channels <K>] [--duration <30m>]
   bun harness/src/cli.ts load --streamers <N> --viewers <M> --duration <120s>
                               [--browser-viewers <K>] [--protocol rtmp|whip] [--report <path>]
@@ -47,7 +58,10 @@ export const USAGE = `Usage:
   run       run scenarios against the running stack ("full" runs every scenario)
   list      list available scenarios
   seed full fill a fresh local or staging database with demo data for every feature
-            (needs DEMO_SEED_FULL=true and a database with no users; remove it by resetting)
+            (needs DEMO_SEED_FULL=true and a database with no users; remove it by resetting).
+            --from resumes at a unit, on a database restored to the checkpoint after the unit
+            before it; --to stops after a unit
+  seed units the units in the order seed full runs them, one per line
   seed live keep K seeded channels streaming with chat until stopped (or for --duration)
   load      N streamers x M viewers for a duration; reports origin egress, CPU,
             p95 glass-to-glass latency and TTFF, and stall rate
@@ -161,16 +175,31 @@ export function parseArgs(argv: readonly string[]): Command {
       if (extra.length > 0) throw new UsageError(`unexpected argument ${extra[0]}`);
       if (Object.keys(params).length > 0) throw new UsageError("--set is not an option for seed");
       if (sub === "full") {
-        known(["--scale", "--seed", "--confirm"]);
+        known(["--scale", "--seed", "--confirm", "--from", "--to"]);
         const scale = flags.get("--scale") ?? "small";
         if (!isSeedScaleName(scale)) throw new UsageError(`--scale must be one of ${SEED_SCALE_NAMES.join(", ")}`);
         const confirm = flags.get("--confirm");
+        const unitFlag = (name: string): SeedUnitName | undefined => {
+          const v = flags.get(name);
+          if (v === undefined) return undefined;
+          if (!SEED_UNIT_NAMES.includes(v as SeedUnitName))
+            throw new UsageError(`${name} must be one of ${SEED_UNIT_NAMES.join(", ")}`);
+          return v as SeedUnitName;
+        };
+        const from = unitFlag("--from");
+        const to = unitFlag("--to");
         return {
           kind: "seed-full",
           scale,
           seed: positiveInt("--seed", flags.get("--seed") ?? "1"),
           ...(confirm ? { confirm } : {}),
+          ...(from ? { from } : {}),
+          ...(to ? { to } : {}),
         };
+      }
+      if (sub === "units") {
+        known([]);
+        return { kind: "seed-units" };
       }
       if (sub === "live") {
         known(["--channels", "--duration"]);
@@ -187,7 +216,7 @@ export function parseArgs(argv: readonly string[]): Command {
         }
         return { kind: "seed-live", channels, ...(durationMs === undefined ? {} : { durationMs }) };
       }
-      throw new UsageError("seed needs full or live");
+      throw new UsageError("seed needs full, units or live");
     }
     default:
       throw new UsageError(`unknown command "${command}"`);

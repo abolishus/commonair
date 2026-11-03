@@ -85,6 +85,14 @@ describe("argument parsing", () => {
       scale: "large",
       seed: 42,
     });
+    expect(parseArgs(["seed", "full", "--from", "coop", "--to=platform"])).toEqual({
+      kind: "seed-full",
+      scale: "small",
+      seed: 1,
+      from: "coop",
+      to: "platform",
+    });
+    expect(parseArgs(["seed", "units"])).toEqual({ kind: "seed-units" });
     expect(parseArgs(["seed", "live"])).toEqual({ kind: "seed-live", channels: 3 });
     expect(parseArgs(["seed", "live", "--channels", "5", "--duration", "30m"])).toEqual({
       kind: "seed-live",
@@ -97,6 +105,9 @@ describe("argument parsing", () => {
       ["seed", "full", "--scale", "huge"],
       ["seed", "full", "--channels", "2"],
       ["seed", "full", "extra"],
+      ["seed", "full", "--from", "everything"],
+      ["seed", "full", "--to", "Coop"],
+      ["seed", "units", "--scale", "small"],
       ["seed", "full", "--set", "a=b"],
       ["seed", "live", "--channels", "0"],
       ["seed", "live", "--scale", "small"],

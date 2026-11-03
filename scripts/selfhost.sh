@@ -194,12 +194,16 @@ need --confirm with this instance's PUBLIC_HOSTNAME):
                         surge guard and push, start stripe-mock, Mailpit and the seed harness, and
                         restart. Needs live captions on. It closes itself after N hours (default
                         and most: 6). Refuses while seed mode is open.
-  run --confirm <host> [--scale small|medium] [--seed n]
+  run --confirm <host> [--scale small|medium] [--seed n] [--from <unit>]
                         Run `seed full` (default --scale medium) in the harness container, after
                         reset-staging, then start `seed live` there: three seeded channels stream
                         with chat until close. DEMO_SEED_PASSWORD, if set, is the accounts'
                         password; otherwise the run makes one up and prints it. The store report
                         goes to ~/.local/share/commonair/seed-mode/reports/seed-store.json.
+                        It runs one unit at a time and dumps the database after each (reports/
+                        snapshots/). --from <unit> resumes a failed run there: it restores the
+                        dump taken after the unit before, then runs <unit> and the rest (needs the
+                        first run's DEMO_SEED_PASSWORD).
   live --confirm <host> (Re)start `seed live` there (needs DEMO_SEED_PASSWORD), e.g. after the
                         harness restarted.
   coverage --confirm <host>
@@ -2627,6 +2631,9 @@ SEED_BLOCK_END="# <<< staging seed mode <<<"
 SEED_KEEP_ON="GIVEAWAYS_ENABLED=true CHAT_WATCH_GATE=on CHAT_SURGE_GUARD=on WEB_PUSH_ENABLED=true"
 # DATABASE_URL's host:port/database inside the network (create_secrets), for seed full's --confirm.
 SEED_DB_TARGET="postgres:5432/commonair"
+# The database dumped after each seed unit (run --from restores one), next to the harness's
+# checkpoints (seed-checkpoint-<unit>.json) in the reports volume.
+SEED_SNAP_DIR="$SEED_DATA_DIR/reports/snapshots"
 
 seed_mode_open() { [ -f "$SEED_STATE" ]; }
 
@@ -2755,15 +2762,17 @@ parse_seed_flags() {
   SEED_HOURS=$SEED_MAX_HOURS
   SEED_SCALE=medium
   SEED_N=1
+  SEED_FROM=""
   while [ $# -gt 0 ]; do
     case "$1" in
-      --confirm | --hours | --scale | --seed)
+      --confirm | --hours | --scale | --seed | --from)
         [ $# -ge 2 ] && [ -n "$2" ] || die "$1 needs a value"
         case "$1" in
           --confirm) SEED_CONFIRM=$2 ;;
           --hours) SEED_HOURS=$2 ;;
           --scale) SEED_SCALE=$2 ;;
           --seed) SEED_N=$2 ;;
+          --from) SEED_FROM=$2 ;;
         esac
         shift 2
         ;;
@@ -2780,6 +2789,7 @@ parse_seed_flags() {
       "seed mode turns on test hooks and insecure settings; open it again later if a run needs more time"
   case "$SEED_SCALE" in small | medium) ;; *) die "--scale must be small or medium, not $SEED_SCALE" ;; esac
   case "$SEED_N" in *[!0-9]*) die "--seed must be a whole number, not $SEED_N" ;; esac
+  case "$SEED_FROM" in *[!a-z]*) die "--from must be a seed unit's name (selfhost.sh --help), not $SEED_FROM" ;; esac
   return 0
 }
 
@@ -3003,29 +3013,114 @@ seed_live_stop() {
     sh "$SEED_LIVE_PID" >/dev/null 2>&1 || true
 }
 
+# Dumps the database once seed-$1 succeeded: as the owner, from one consistent snapshot while the
+# stack keeps running (a template copy would need every connection closed).
+seed_snapshot() {
+  mkdir -p "$SEED_SNAP_DIR" || return 1
+  podman exec --user postgres commonair-postgres pg_dump -Fc -U commonair -d commonair \
+    >"$SEED_SNAP_DIR/after-$1.dump.tmp" || { rm -f "$SEED_SNAP_DIR/after-$1.dump.tmp"; return 1; }
+  mv "$SEED_SNAP_DIR/after-$1.dump.tmp" "$SEED_SNAP_DIR/after-$1.dump"
+}
+
+# Puts the database back as it was after seed-$1, as reset-staging does with an empty one: the app
+# units down (the idle seed harness stays up, so nothing it holds is lost), the database recreated
+# from the dump, Valkey flushed (the failed unit's sessions, rate limits and queued jobs name rows
+# the dump does not have), the stack back up.
+seed_restore() {
+  _stop=""
+  for _u in $(sockets) $(services); do
+    case " $RESET_KEEP commonair-seed-harness.service " in *" $_u "*) continue ;; esac
+    _stop="$_stop $_u"
+  done
+  info "restoring the database as it was after seed-$1 ($SEED_SNAP_DIR/after-$1.dump)"
+  # shellcheck disable=SC2086 # unit names have no spaces
+  systemctl --user stop $_stop || die "could not stop the app units; the database was not touched" \
+    "see: selfhost.sh status"
+  reset_wait_data
+  podman exec --user postgres commonair-postgres psql -X -q -v ON_ERROR_STOP=1 -U commonair -d postgres \
+    -c 'DROP DATABASE IF EXISTS commonair WITH (FORCE)' -c 'CREATE DATABASE commonair OWNER commonair' ||
+    die "dropping or recreating the database failed; the app units are stopped" \
+      "see: journalctl --user -u commonair-postgres; re-running run --from is safe"
+  podman exec -i --user postgres commonair-postgres pg_restore --exit-on-error -U commonair -d commonair \
+    <"$SEED_SNAP_DIR/after-$1.dump" ||
+    die "restoring the dump failed; the app units are stopped" \
+      "re-running run --from is safe; or reset-staging and run again from the start"
+  # shellcheck disable=SC2016 # expanded inside the container, where VALKEY_PASSWORD is set
+  podman exec commonair-valkey sh -c 'export VALKEYCLI_AUTH="$VALKEY_PASSWORD"; valkey-cli FLUSHALL | grep -qx OK' ||
+    die "flushing Valkey failed; the app units are stopped" "re-running run --from is safe"
+  # shellcheck disable=SC2046
+  systemctl --user start --no-block $(sockets) $(services)
+  wait_healthy core || die "the instance did not become healthy after the restore" \
+    "see: selfhost.sh status, and journalctl --user -u 'commonair-*'"
+}
+
+# `seed full` one unit at a time (--to), so the database is dumped between units and a failed run
+# resumes at the failed unit (--from) instead of from a reset. The harness lists the units, so
+# their order lives in one place.
 cmd_seed_mode_run() {
   parse_seed_flags "$@"
   require_instance "seed-mode run"
   staging_guard "seed-mode run" "$SEED_CONFIRM"
   seed_require_open "seed-mode run"
+  _units=$(seed_exec bun harness/src/cli.ts seed units) && [ -n "$_units" ] ||
+    die "seed-mode run refused: the harness did not list its seed units" "see: journalctl --user -u commonair-seed-harness"
+  _prev=""
+  _todo=""
+  _all=""
+  for _u in $_units; do
+    _all="$_all $_u"
+    if [ -n "$_todo" ] || [ -z "$SEED_FROM" ] || [ "$_u" = "$SEED_FROM" ]; then
+      _todo="$_todo $_u"
+    else
+      _prev=$_u
+    fi
+  done
+  [ -n "$_todo" ] || die "seed-mode run refused: --from $SEED_FROM is not a seed unit. Nothing was changed." \
+    "the units, in order:$_all"
+  if [ -n "$_prev" ]; then
+    [ -n "${DEMO_SEED_PASSWORD:-}" ] || die "seed-mode run refused: --from needs DEMO_SEED_PASSWORD. Nothing was changed." \
+      "export the password the first run used (it printed it, or you gave it), then re-run"
+    [ -f "$SEED_DATA_DIR/reports/seed-checkpoint-$_prev.json" ] && [ -f "$SEED_SNAP_DIR/after-$_prev.dump" ] ||
+      die "seed-mode run refused: no checkpoint and snapshot after seed-$_prev. Nothing was changed." \
+        "run --from a unit whose previous unit finished, or reset-staging and run again from the start"
+  fi
   _dl=$(env_get DEADLINE "$SEED_STATE")
   _left=$(( (${_dl:-0} - $(date -u +%s)) / 60 ))
-  info "running seed full --scale $SEED_SCALE --seed $SEED_N in commonair-seed-harness ($_left minutes left before seed mode closes)"
+  info "running seed full --scale $SEED_SCALE --seed $SEED_N (${SEED_FROM:+from $SEED_FROM:}$_todo) in commonair-seed-harness ($_left minutes left before seed mode closes)"
   [ "$_left" -ge 120 ] || warn "less than 2 hours left: a medium seed may not finish before the timer closes seed mode"
   # seed live signs the accounts in after the run, so the password is made here when none is given.
   if [ -z "${DEMO_SEED_PASSWORD:-}" ]; then
     DEMO_SEED_PASSWORD=$(seed_random_hex)
     export DEMO_SEED_PASSWORD
     say "Password for every account: $DEMO_SEED_PASSWORD"
-    say "(export DEMO_SEED_PASSWORD with it for seed-mode live and coverage)"
+    say "(export DEMO_SEED_PASSWORD with it for seed-mode live and coverage, and for run --from)"
   fi
-  _rc=0
-  seed_exec bun harness/src/cli.ts seed full --confirm "$SEED_DB_TARGET" --scale "$SEED_SCALE" --seed "$SEED_N" || _rc=$?
+  if [ -n "$_prev" ]; then
+    seed_restore "$_prev"
+  else
+    # A fresh run: an older run's dumps must not be restored over this one (the harness clears
+    # its own checkpoints).
+    rm -rf "$SEED_SNAP_DIR"
+  fi
+  _last=""
+  for _u in $_todo; do _last=$_u; done
+  for _u in $_todo; do
+    _rc=0
+    seed_exec bun harness/src/cli.ts seed full --confirm "$SEED_DB_TARGET" --scale "$SEED_SCALE" --seed "$SEED_N" \
+      ${_prev:+--from "$_u"} --to "$_u" || _rc=$?
+    if [ "$_rc" -ne 0 ]; then
+      die "seed full exited with $_rc in seed-$_u" \
+        "fix it, then resume there (it restores the database as it was after the unit before): sh $CURRENT_LINK/selfhost.sh seed-mode run --confirm $(env_get PUBLIC_HOSTNAME "$ENV_FILE") --scale $SEED_SCALE --seed $SEED_N --from $_u (with the same DEMO_SEED_PASSWORD)"
+    fi
+    # The last unit's dump would never be restored: --from always restores the one before it.
+    if [ "$_u" != "$_last" ]; then
+      seed_snapshot "$_u" || die "dumping the database after seed-$_u failed; the seed stopped there" \
+        "see: journalctl --user -u commonair-postgres; disk space: df -h $SEED_DATA_DIR"
+    fi
+    _prev=$_u
+  done
   say ""
   say "store report (accounts, channels, keys; no password): $SEED_DATA_DIR/reports/seed-store.json"
-  if [ "$_rc" -ne 0 ]; then
-    die "seed full exited with $_rc" "a run that stopped halfway needs a reset before the next: reset-staging, then run again"
-  fi
   seed_live_start
 }
 

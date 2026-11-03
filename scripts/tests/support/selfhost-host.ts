@@ -169,6 +169,10 @@ case "$1" in
   exec)
     # Seed mode's check that \`seed live\` runs in the harness container (STUB_SEED_LIVE_DOWN: it does not).
     case "$*" in *"kill -0"*) [ -z "\${STUB_SEED_LIVE_DOWN:-}" ] || exit 1 ;; esac
+    # The harness's seed units, in run order; STUB_SEED_FAIL_UNIT: that unit's \`seed full\` fails.
+    case "$*" in *"seed units"*) printf '%s\n' social interact money media safety coop platform; exit 0 ;; esac
+    case "$*" in *"seed full"*"--to \${STUB_SEED_FAIL_UNIT:-none}") exit 1 ;; esac
+    case "$*" in *pg_dump*) echo "PGDMP fake dump"; exit 0 ;; esac
     echo "backup-list: base_000000010000000000000003" ;;
   unshare) echo "1.0M	x" ;;
 esac

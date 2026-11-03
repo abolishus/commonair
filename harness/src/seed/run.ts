@@ -5,16 +5,26 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { loadEnv, seedEnv } from "@commonair/config";
-import { createDb } from "@commonair/db";
+import { type DbHandle, createDb } from "@commonair/db";
 import { generatePassword, passwordProblem } from "@commonair/db/demo";
 import type { Logger } from "@commonair/observability";
 import type { HarnessEnv } from "../env.ts";
+import {
+  type DbFingerprint,
+  type SeedCheckpoint,
+  CHECKPOINT_VERSION,
+  clearCheckpoints,
+  readCheckpoint,
+  resumeRefusals,
+  selectUnits,
+  writeCheckpoint,
+} from "./checkpoint.ts";
 import { stopSeedProxy } from "./clients.ts";
 import { pendingTables } from "./coverage.ts";
-import { fullSeedRefusals } from "./guard.ts";
+import { describeTarget, fullSeedRefusals } from "./guard.ts";
 import { createRng } from "./prng.ts";
 import { SEED_SCALES, type SeedScaleName } from "./scale.ts";
-import type { SeedStore, SeedUnitReport } from "./types.ts";
+import type { SeedStore, SeedUnitName, SeedUnitReport } from "./types.ts";
 import { SEED_UNITS, orderUnits } from "./units.ts";
 
 export interface SeedFullOptions {
@@ -34,6 +44,15 @@ export interface SeedFullOptions {
   storeFile?: string;
   /** Receives the store once every unit ran (the scenario's own seed). */
   onStore?: (store: SeedStore) => void;
+  /**
+   * Where checkpoints go (one after each unit) and `from` reads them. Unset: none are written, and
+   * `from` is refused.
+   */
+  checkpointDir?: string;
+  /** Resume: run from this unit, on a database restored to the checkpoint after the unit before it. */
+  from?: SeedUnitName;
+  /** Stop after this unit (`selfhost.sh` runs one unit at a time and snapshots in between). */
+  to?: SeedUnitName;
 }
 
 /** The store file's name in the harness report directory. */
@@ -61,20 +80,50 @@ export async function runSeedFull(o: SeedFullOptions): Promise<number> {
   const url = o.env.DATABASE_URL;
   const handle = url ? createDb({ url, max: 4, applicationName: "commonair-seed" }) : undefined;
   try {
-    const userCount = handle
-      ? Number((await handle.sql<{ n: number }[]>`select count(*)::int as n from users`)[0]?.n ?? 0)
-      : 0;
-    const refusals = fullSeedRefusals({ seedFull: DEMO_SEED_FULL, databaseUrl: url, confirm: o.confirm, userCount });
-    if (refusals.length > 0 || !handle) {
+    const selection = selectUnits(orderUnits(SEED_UNITS), o.from, o.to);
+    const fingerprint = handle ? await dbFingerprint(handle) : { users: 0, usersHash: "" };
+    let checkpoint: SeedCheckpoint | undefined;
+    let resume: string[] | undefined;
+    if (selection.resumeAfter && url) {
+      const after = selection.resumeAfter;
+      if (!o.checkpointDir) resume = ["this run has no report directory to read checkpoints from"];
+      else {
+        try {
+          checkpoint = readCheckpoint(o.checkpointDir, after);
+          resume = resumeRefusals({
+            after,
+            checkpoint,
+            target: describeTarget(url),
+            scale: o.scale,
+            seed: o.seed,
+            fingerprint,
+          });
+        } catch (err) {
+          resume = [(err as Error).message];
+        }
+      }
+      // seed-social set every account's password; a made-up one would sign nobody in.
+      if (!given) resume.push("DEMO_SEED_PASSWORD is not set; a resume needs the password the run started with");
+    }
+    const refusals = fullSeedRefusals({
+      seedFull: DEMO_SEED_FULL,
+      databaseUrl: url,
+      confirm: o.confirm,
+      userCount: fingerprint.users,
+      ...(resume ? { resume } : {}),
+    });
+    if (refusals.length > 0 || !handle || !url) {
       for (const r of refusals) out(`refused: ${r}`);
       return 2;
     }
     const password = given || generatePassword();
     const root = createRng(o.seed);
-    const store: SeedStore = { users: [], channels: [], extra: {} };
-    const now = new Date();
+    const store: SeedStore = checkpoint?.store ?? { users: [], channels: [], extra: {} };
+    const now = checkpoint ? new Date(checkpoint.now) : new Date();
+    if (checkpoint) out(`resuming after seed-${checkpoint.unit} (checkpoint of ${checkpoint.now})`);
+    else if (o.checkpointDir) clearCheckpoints(o.checkpointDir);
     const reports: { unit: string; report: SeedUnitReport }[] = [];
-    for (const unit of orderUnits(SEED_UNITS)) {
+    for (const unit of selection.run) {
       if (o.signal.aborted) throw o.signal.reason;
       const started = Date.now();
       out(`seed-${unit.name}: running`);
@@ -94,6 +143,27 @@ export async function runSeedFull(o: SeedFullOptions): Promise<number> {
       const rows = Object.values(report.rows).reduce((a, b) => a + b, 0);
       out(`seed-${unit.name}: ${rows} rows in ${((Date.now() - started) / 1000).toFixed(1)} s`);
       for (const n of report.notes ?? []) out(`  note: ${n}`);
+      if (o.checkpointDir) {
+        const file = writeCheckpoint(o.checkpointDir, {
+          version: CHECKPOINT_VERSION,
+          unit: unit.name,
+          target: describeTarget(url),
+          scale: o.scale,
+          seed: o.seed,
+          now: now.toISOString(),
+          fingerprint: await dbFingerprint(handle),
+          store,
+        });
+        out(`  checkpoint: ${file}`);
+      }
+    }
+    const passwordLine = given
+      ? "Password: the value of DEMO_SEED_PASSWORD"
+      : `Password for every account: ${password}`;
+    if (!selection.reachesEnd) {
+      out(`stopped after seed-${selection.run.at(-1)?.name ?? "?"} (--to)`);
+      out(passwordLine);
+      return 0;
     }
     o.onStore?.(store);
     if (o.storeFile) {
@@ -107,12 +177,19 @@ export async function runSeedFull(o: SeedFullOptions): Promise<number> {
       out("Not seeded yet:");
       for (const [unit, tables] of Object.entries(pending)) out(`  seed-${unit}: ${tables.join(", ")}`);
     }
-    out(given ? "Password: the value of DEMO_SEED_PASSWORD" : `Password for every account: ${password}`);
+    out(passwordLine);
     return 0;
   } finally {
     await stopSeedProxy();
     await handle?.close();
   }
+}
+
+/** Count and hash of every user id: what ties a checkpoint to its database. */
+export async function dbFingerprint(handle: DbHandle): Promise<DbFingerprint> {
+  const [row] = await handle.sql<{ n: number; h: string }[]>`
+    select count(*)::int as n, md5(coalesce(string_agg(id::text, ',' order by id), '')) as h from users`;
+  return { users: row?.n ?? 0, usersHash: row?.h ?? "" };
 }
 
 export interface SeedLiveOptions {

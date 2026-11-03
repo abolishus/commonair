@@ -621,15 +621,40 @@ describe("seed-mode run and coverage", () => {
       });
       expectOk(r);
       const exec = h.calls().filter((c) => c.startsWith("podman exec"));
-      expect(exec[0]).toBe(
-        "podman exec --env=DEMO_SEED_PASSWORD commonair-seed-harness bun harness/src/cli.ts seed full --confirm postgres:5432/commonair --scale small --seed 7",
+      const harness = "podman exec --env=DEMO_SEED_PASSWORD commonair-seed-harness bun harness/src/cli.ts";
+      const full = `${harness} seed full --confirm postgres:5432/commonair --scale small --seed 7`;
+      const dump = "podman exec --user postgres commonair-postgres pg_dump -Fc -U commonair -d commonair";
+      // The harness lists its units; each runs alone (the first fresh, the rest resuming), and the
+      // database is dumped between them, never after the last.
+      expect(exec.slice(0, 14)).toEqual([
+        `${harness} seed units`,
+        `${full} --to social`,
+        dump,
+        `${full} --from interact --to interact`,
+        dump,
+        `${full} --from money --to money`,
+        dump,
+        `${full} --from media --to media`,
+        dump,
+        `${full} --from safety --to safety`,
+        dump,
+        `${full} --from coop --to coop`,
+        dump,
+        `${full} --from platform --to platform`,
+      ]);
+      const snaps = join(h.home, ".local/share/commonair/seed-mode/reports/snapshots");
+      expect(readdirSync(snaps).sort()).toEqual(
+        ["coop", "interact", "media", "money", "safety", "social"].map((u) => `after-${u}.dump`),
       );
+      expect(readFileSync(join(snaps, "after-coop.dump"), "utf8")).toContain("PGDMP");
+      // A fresh run restores nothing.
+      expect(h.calls().some((c) => c.includes("pg_restore") || c.includes("DROP DATABASE"))).toBe(false);
       // Then seed live, detached, with the same password by name, its pid and log in the reports volume.
-      expect(exec[1]).toMatch(
+      expect(exec[14]).toMatch(
         /^podman exec -d --env=DEMO_SEED_PASSWORD commonair-seed-harness sh -c .*exec bun harness\/src\/cli\.ts seed live --channels "\$2".* sh \/reports\/seed-live\.pid 3 seed-live\.log$/,
       );
-      expect(exec[2]).toContain("kill -0");
-      expect(exec).toHaveLength(3);
+      expect(exec[15]).toContain("kill -0");
+      expect(exec).toHaveLength(16);
       expect(h.calls().join("\n")).not.toContain("staging-demo-pass-123");
       expect(r.out).toContain(join(h.home, ".local/share/commonair/seed-mode/reports/seed-store.json"));
       expect(r.err + r.out).toContain("seed live: 3 seeded channels stream with chat until seed-mode close");
@@ -641,11 +666,97 @@ describe("seed-mode run and coverage", () => {
       const pw = /^Password for every account: ([0-9a-f]{64})$/m.exec(made.out)?.[1];
       expect(pw).toBeDefined();
       const calls = h.calls().filter((c) => c.startsWith("podman exec"));
-      expect(calls[0]).toBe(
-        "podman exec --env=DEMO_SEED_PASSWORD commonair-seed-harness bun harness/src/cli.ts seed full --confirm postgres:5432/commonair --scale medium --seed 1",
+      expect(calls[1]).toBe(
+        "podman exec --env=DEMO_SEED_PASSWORD commonair-seed-harness bun harness/src/cli.ts seed full --confirm postgres:5432/commonair --scale medium --seed 1 --to social",
       );
-      expect(calls[1]).toMatch(/^podman exec -d --env=DEMO_SEED_PASSWORD commonair-seed-harness sh -c /);
+      expect(calls[14]).toMatch(/^podman exec -d --env=DEMO_SEED_PASSWORD commonair-seed-harness sh -c /);
       expect(h.calls().join("\n")).not.toContain(pw!);
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "a unit that fails stops the run there, says how to resume, and starts no seed live",
+    () => {
+      const h = staging();
+      expectOk(open(h));
+      writeFileSync(h.log, "");
+      const r = h.run(["seed-mode", "run", "--confirm", HOSTNAME], {
+        DEMO_SEED_PASSWORD: "staging-demo-pass-123",
+        STUB_SEED_FAIL_UNIT: "coop",
+      });
+      expect(r.code).toBe(1);
+      expect(r.err).toContain("seed full exited with 1 in seed-coop");
+      expect(r.err).toContain(`seed-mode run --confirm ${HOSTNAME} --scale medium --seed 1 --from coop`);
+      const exec = h.calls().filter((c) => c.startsWith("podman exec"));
+      expect(exec.at(-1)).toMatch(/seed full .* --from coop --to coop$/);
+      expect(exec.some((c) => c.includes("seed live"))).toBe(false);
+      const snaps = join(h.home, ".local/share/commonair/seed-mode/reports/snapshots");
+      expect(readdirSync(snaps)).toContain("after-safety.dump");
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "run --from restores the dump after the unit before, flushes Valkey, and runs from there",
+    () => {
+      const h = staging();
+      expectOk(open(h));
+      const reports = join(h.home, ".local/share/commonair/seed-mode/reports");
+      mkdirSync(join(reports, "snapshots"), { recursive: true });
+      writeFileSync(join(reports, "seed-checkpoint-safety.json"), "{}");
+      writeFileSync(join(reports, "snapshots/after-safety.dump"), "PGDMP");
+      writeFileSync(h.log, "");
+      const r = h.run(["seed-mode", "run", "--confirm", HOSTNAME, "--from", "coop"], {
+        DEMO_SEED_PASSWORD: "staging-demo-pass-123",
+      });
+      expectOk(r);
+      const calls = h.calls();
+      const at = (p: (c: string) => boolean) => calls.findIndex(p);
+      const stop = at((c) => c.startsWith("systemctl --user stop"));
+      const drop = at((c) => c.includes("DROP DATABASE IF EXISTS commonair WITH (FORCE)"));
+      const restore = at((c) => c.includes("pg_restore --exit-on-error -U commonair -d commonair"));
+      const flush = at((c) => c.includes("valkey-cli FLUSHALL"));
+      const start = at((c) => c.startsWith("systemctl --user start --no-block") && c.includes("api"));
+      const coop = at((c) => c.endsWith("--from coop --to coop"));
+      expect([stop, drop, restore, flush, start, coop].every((i) => i >= 0)).toBe(true);
+      expect(stop < drop && drop < restore && restore < flush && flush < start && start < coop).toBe(true);
+      // The idle harness stays up through the restore (stopping it would lose nothing, but its
+      // container would be recreated); Postgres and Valkey too.
+      expect(calls[stop]).toContain("commonair-api.service");
+      for (const kept of ["seed-harness", "postgres", "valkey"])
+        expect(calls[stop]).not.toContain(`commonair-${kept}.`);
+      const exec = calls.filter((c) => c.startsWith("podman exec") && c.includes("seed full"));
+      expect(exec.map((c) => c.replace(/.* --scale medium --seed 1 /, ""))).toEqual([
+        "--from coop --to coop",
+        "--from platform --to platform",
+      ]);
+      expect(r.err + r.out).toContain("seed live: 3 seeded channels");
+      // The dumps it resumed from stay, for another --from.
+      expect(readdirSync(join(reports, "snapshots"))).toEqual(["after-coop.dump", "after-safety.dump"]);
+    },
+    TIMEOUT,
+  );
+
+  test.each([
+    ["an unknown unit", ["--from", "everything"], {}, "--from everything is not a seed unit"],
+    ["no password", ["--from", "coop"], { DEMO_SEED_PASSWORD: "" }, "--from needs DEMO_SEED_PASSWORD"],
+    ["no checkpoint", ["--from", "coop"], {}, "no checkpoint and snapshot after seed-safety"],
+    ["a name with other characters", ["--from", "co-op"], {}, "--from must be a seed unit's name"],
+  ] as const)(
+    "run --from refuses with %s, changing nothing",
+    (_, args, env, message) => {
+      const h = staging();
+      expectOk(open(h));
+      writeFileSync(h.log, "");
+      const r = h.run(["seed-mode", "run", "--confirm", HOSTNAME, ...args], {
+        DEMO_SEED_PASSWORD: "staging-demo-pass-123",
+        ...env,
+      });
+      expect(r.code).toBe(1);
+      expect(r.err).toContain(message);
+      expect(h.calls().filter((c) => c.startsWith("systemctl --user stop"))).toEqual([]);
+      expect(h.calls().filter((c) => c.includes("seed full") || c.includes("pg_restore"))).toEqual([]);
     },
     TIMEOUT,
   );

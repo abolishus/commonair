@@ -6,7 +6,8 @@
  * a database reset removes, so it runs only where all three hold: the operator opted in
  * (`DEMO_SEED_FULL=true`), named the exact target (`--confirm host:port/db`, so a stray
  * DATABASE_URL cannot be seeded by accident), and the database has no users at all (a fresh or
- * reset database: a real instance always has some).
+ * reset database: a real instance always has some). A resume (`--from`) replaces the last rule with
+ * the checkpoint's: the database's users must be exactly those of a checkpoint this seed wrote.
  */
 export interface GuardInput {
   seedFull: boolean;
@@ -14,6 +15,8 @@ export interface GuardInput {
   confirm: string | undefined;
   /** Users in the target database (any kind, demo included). */
   userCount: number;
+  /** Resuming: the checkpoint's refusals (`resumeRefusals`; empty = it matches this database). */
+  resume?: readonly string[];
 }
 
 /** `host:port/database` of a connection URL, without credentials. */
@@ -32,7 +35,8 @@ export function fullSeedRefusals(i: GuardInput): string[] {
   }
   const target = describeTarget(i.databaseUrl);
   if (i.confirm !== target) out.push(`pass --confirm ${target} to seed this database`);
-  if (i.userCount > 0)
+  if (i.resume) out.push(...i.resume);
+  else if (i.userCount > 0)
     out.push(`the database has ${i.userCount} user(s); the full seed needs a fresh or reset database`);
   return out;
 }
