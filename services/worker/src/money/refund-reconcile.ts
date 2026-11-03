@@ -4,8 +4,8 @@
 /**
  * `refund-reconcile` (every 15 minutes; ADR 0007 decisions 2 and 3). Two passes:
  *
- * 1. **Unknown outcomes.** For each provider refund request whose outcome is unknown and that is
- *    younger than 7 days, ask the provider what became of it (`listRefunds` of the PaymentIntent;
+ * 1. **Unknown outcomes.** For each provider refund request whose outcome became unknown at least
+ *    `RECONCILE_MIN_AGE_MS` ago and that is younger than 7 days, ask the provider what became of it (`listRefunds` of the PaymentIntent;
  *    a refund carrying the request's idempotency key in its metadata is that request's, otherwise
  *    one of the same amount that no other request or posting claims):
  *    - it exists and succeeded: nothing to do, because the `charge.refunded` webhook posts it (the
@@ -21,14 +21,15 @@
  * 2. **The durable trigger for automatic refunds.** The API asks for the refund of money booked for
  *    an ended subscription right after the webhook commits (`services/api/src/money/auto-refund.ts`),
  *    best effort. This pass finds such bookings (a Stripe subscription payment created after its
- *    subscription had ended) that are 15 minutes to 7 days old and have no automatic request, and
+ *    subscription had ended, or a gift paid after its window and booked without starting any of
+ *    its gift subscriptions) that are 15 minutes to 7 days old and have no automatic request, and
  *    makes it with the same markers and idempotency key.
  *
  * The request rules are the API's (`services/api/src/money/stripe-refunds.ts`
  * `refundRequestStates`), carried here as the API and media carry the media-state rules; the
  * shared fixtures in both test files keep them in step.
  */
-import { and, eq, gt, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { loadEnv, paymentsEnv } from "@commonair/config";
 import { type Executor, schema, uuidv7 } from "@commonair/db";
 import { meter } from "@commonair/observability";
@@ -57,6 +58,11 @@ const MARKERS = [
 ] as const;
 export const REFUND_REQUEST_TTL_MS = 24 * 60 * 60 * 1000;
 export const PAID_AFTER_END = "paid_after_end";
+/**
+ * An unknown outcome is first asked about this long after it became unknown: Stripe may still be
+ * processing the call that timed out, and an empty listing seconds later is not yet "none".
+ */
+export const RECONCILE_MIN_AGE_MS = 5 * 60 * 1000;
 /** Unknown requests older than this are the treasurer's (`refundRequests.resolve`). */
 export const RECONCILE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 /** The API's after-commit hook gets this long before the sweep makes the automatic request. */
@@ -96,6 +102,8 @@ export interface RequestState {
   amountCents: number | null;
   state: "outstanding" | "unknown" | "resolved";
   blocking: boolean;
+  /** When the outcome became unknown, or null. */
+  unknownAt: Date | null;
   idempotencyKey: string | null;
   refundRef: string | null;
   reason: typeof PAID_AFTER_END | null;
@@ -113,7 +121,7 @@ export function requestStates(
   const submittedRef = new Map<string, string>();
   const released = new Set<string>();
   const failedRefs = new Set<string>();
-  const unknown = new Map<string, string | null>();
+  const unknown = new Map<string, { at: Date; key: string | null }>();
   for (const mk of [...markers].sort(byTime)) {
     const id = str(mk.details.requestId);
     const ref = str(mk.details.refundRef);
@@ -123,7 +131,8 @@ export function requestStates(
       if (ref) failedRefs.add(ref);
     }
     if (mk.action === REFUND_REQUEST_RESOLVED && id) released.add(id);
-    if (mk.action === REFUND_OUTCOME_UNKNOWN && id && !unknown.has(id)) unknown.set(id, str(mk.details.idempotencyKey));
+    if (mk.action === REFUND_OUTCOME_UNKNOWN && id && !unknown.has(id))
+      unknown.set(id, { at: mk.createdAt, key: str(mk.details.idempotencyKey) });
   }
   const knownRefs = new Set(submittedRef.values());
   const postedRefs = new Set(postings.flatMap((p) => (p.providerRef ? [p.providerRef] : [])));
@@ -137,8 +146,13 @@ export function requestStates(
     const ref = submittedRef.get(id) ?? null;
     let settled = released.has(id) || (ref !== null && (failedRefs.has(ref) || postedRefs.has(ref)));
     if (!settled) {
+      const from = r.createdAt.getTime();
       const match = anonymous.find(
-        (p) => !used.has(p) && p.amountCents === amount && p.createdAt.getTime() >= r.createdAt.getTime(),
+        (p) =>
+          !used.has(p) &&
+          p.amountCents === amount &&
+          p.createdAt.getTime() >= from &&
+          p.createdAt.getTime() <= from + REFUND_REQUEST_TTL_MS,
       );
       if (match) {
         used.add(match);
@@ -147,15 +161,23 @@ export function requestStates(
     }
     const live = now.getTime() - r.createdAt.getTime() <= REFUND_REQUEST_TTL_MS;
     const isUnknown = unknown.has(id);
+    const auto = str(r.details.reason) === PAID_AFTER_END;
     out.push({
       requestId: id,
       requestedAt: r.createdAt,
       amountCents: amount,
-      state: settled ? "resolved" : isUnknown && ref === null ? "unknown" : live ? "outstanding" : "resolved",
+      state: settled
+        ? "resolved"
+        : isUnknown && ref === null
+          ? "unknown"
+          : live || (auto && ref === null)
+            ? "outstanding"
+            : "resolved",
       blocking: !settled && live,
-      idempotencyKey: unknown.get(id) ?? null,
+      unknownAt: unknown.get(id)?.at ?? null,
+      idempotencyKey: unknown.get(id)?.key ?? null,
       refundRef: ref,
-      reason: str(r.details.reason) === PAID_AFTER_END ? PAID_AFTER_END : null,
+      reason: auto ? PAID_AFTER_END : null,
     });
   }
   return out;
@@ -352,18 +374,20 @@ export async function reconcileUnknownRefunds(
     unanswered: 0,
     unsupported: 0,
   };
-  const since = new Date(now.getTime() - RECONCILE_WINDOW_MS);
-  const rows = await ctx.db
-    .selectDistinct({ paymentId: auditLog.subjectId })
-    .from(auditLog)
-    .where(
-      and(
-        eq(auditLog.action, REFUND_OUTCOME_UNKNOWN),
-        eq(auditLog.subjectType, "payment"),
-        gt(auditLog.createdAt, since),
-      ),
-    )
-    .limit(RECONCILE_BATCH);
+  const since = new Date(now.getTime() - RECONCILE_WINDOW_MS).toISOString();
+  const ripe = new Date(now.getTime() - RECONCILE_MIN_AGE_MS).toISOString();
+  // Payments with an unknown request no failure or resolve released yet, oldest unknown first, so
+  // settled ones never fill the batch and every open one gets its turn.
+  const rows = await ctx.db.execute<{ paymentId: string }>(sql`
+    select u.subject_id as "paymentId" from audit_log u
+    where u.action = ${REFUND_OUTCOME_UNKNOWN} and u.subject_type = 'payment'
+      and u.created_at > ${since}::timestamptz and u.created_at <= ${ripe}::timestamptz
+      and not exists (select 1 from audit_log x where x.subject_type = 'payment' and x.subject_id = u.subject_id
+        and x.action in (${REFUND_REQUEST_FAILED}, ${REFUND_REQUEST_RESOLVED})
+        and x.details->>'requestId' = u.details->>'requestId')
+    group by u.subject_id
+    order by min(u.created_at)
+    limit ${RECONCILE_BATCH}`);
   const count = (outcome: keyof ReconcileResult) => {
     out[outcome]++;
     reconcileMetrics.outcomes.add(1, { outcome });
@@ -373,7 +397,11 @@ export async function reconcileUnknownRefunds(
     if (!p) continue;
     const h = await historyOf(ctx.db, p.id);
     const open = requestStates(h.markers, h.postings, now).filter(
-      (s) => s.state === "unknown" && now.getTime() - s.requestedAt.getTime() <= RECONCILE_WINDOW_MS,
+      (s) =>
+        s.state === "unknown" &&
+        now.getTime() - s.requestedAt.getTime() <= RECONCILE_WINDOW_MS &&
+        s.unknownAt !== null &&
+        now.getTime() - s.unknownAt.getTime() >= RECONCILE_MIN_AGE_MS,
     );
     if (open.length === 0) continue;
     if (!port.listRefunds || port.provider !== p.provider) {
@@ -464,16 +492,28 @@ export async function sweepPaidAfterEnd(
   const out: SweepResult = { candidates: 0, requested: 0, unknown: 0, failed: 0, skipped: 0, listed: 0 };
   const newest = new Date(now.getTime() - SWEEP_MIN_AGE_MS).toISOString();
   const oldest = new Date(now.getTime() - SWEEP_MAX_AGE_MS).toISOString();
+  // Two shapes of "booked after the end": a renewal or first invoice booked for a subscription that
+  // had already ended, and a gift paid after its window, booked without starting any of its gift
+  // subscriptions (none ever got a period; contract request 7 books it that way).
   const rows = await ctx.db.execute<{ id: string }>(sql`
-    select p.id from payments p join subscriptions s on s.id = p.subscription_id
-    where p.provider = 'stripe' and p.kind = 'subscription'
-      and p.status in ('succeeded', 'partially_refunded') and p.refunded_cents < p.amount_cents
-      and s.status not in ('active', 'past_due', 'incomplete')
-      and p.created_at >= s.updated_at - make_interval(secs => ${BOOKED_AFTER_END_SKEW_MS / 1000})
-      and p.created_at <= ${newest}::timestamptz and p.created_at > ${oldest}::timestamptz
-      and not exists (select 1 from audit_log a where a.subject_type = 'payment' and a.subject_id = p.id::text
+    select id from (
+      select p.id, p.created_at as booked_at from payments p join subscriptions s on s.id = p.subscription_id
+      where p.provider = 'stripe' and p.kind = 'subscription' and not p.gift
+        and p.status in ('succeeded', 'partially_refunded') and p.refunded_cents < p.amount_cents
+        and s.status not in ('active', 'past_due', 'incomplete')
+        and p.created_at >= s.updated_at - make_interval(secs => ${BOOKED_AFTER_END_SKEW_MS / 1000})
+      union all
+      select p.id, coalesce(p.succeeded_at, p.updated_at) as booked_at from payments p
+      where p.provider = 'stripe' and p.kind = 'subscription' and p.gift
+        and p.status in ('succeeded', 'partially_refunded') and p.refunded_cents < p.amount_cents
+        and exists (select 1 from subscriptions g where g.gift_payment_id = p.id)
+        and not exists (select 1 from subscriptions g where g.gift_payment_id = p.id
+          and (g.current_period_start is not null or g.status in ('active', 'past_due', 'incomplete')))
+    ) c
+    where c.booked_at <= ${newest}::timestamptz and c.booked_at > ${oldest}::timestamptz
+      and not exists (select 1 from audit_log a where a.subject_type = 'payment' and a.subject_id = c.id::text
         and a.action = ${REFUND_REQUESTED} and a.details->>'reason' = ${PAID_AFTER_END})
-    order by p.created_at
+    order by c.booked_at
     limit ${RECONCILE_BATCH}`);
   for (const { id } of rows) {
     out.candidates++;

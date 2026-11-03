@@ -52,7 +52,7 @@ export async function refundUpdated(
   if (!p) return outcome("ignored");
   if (a.currency !== p.currency) return outcome("refund_currency_mismatch");
   if (a.status === "canceled") {
-    await recordProviderRefundFailed(tx, p, a.refundId, now);
+    await recordProviderRefundFailed(tx, p, a.refundId, now, a.amountCents);
     return outcome("refund_canceled");
   }
   const attached = await attachRefundToUnknownRequest(

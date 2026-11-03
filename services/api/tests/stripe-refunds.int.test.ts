@@ -429,6 +429,30 @@ describe("outcome unknown (ADR 0007 decision 3)", () => {
     ).toBe(200);
   });
 
+  test("a failure of a refund nobody named releases an unknown request only when its amount matches", async () => {
+    const payer = await signUpAndSignIn(api);
+    const { paymentId, pi } = await paidTip(payer, 1400);
+    refundAnswers.push(500, 500, 500);
+    await treasurer.client.call("POST", `/api/treasurer/payments/${paymentId}/refund`, {
+      amountCents: 1000,
+      reason: "x",
+    });
+    const again = () =>
+      treasurer.client.call("POST", `/api/treasurer/payments/${paymentId}/refund`, { amountCents: 300, reason: "x" });
+    // A dashboard refund of 300 fails: refund.failed carries no amount, so it is recorded by id only.
+    const dash = { object: "refund", amount: 300, currency: "usd", payment_intent: pi };
+    await deliver(event("refund.failed", { ...dash, id: `re_${rand()}`, status: "failed" }));
+    // refund.updated canceled of another amount: not this request's either.
+    await deliver(event("refund.updated", { ...dash, id: `re_${rand()}`, status: "canceled" }));
+    expect((await again()).status).toBe(409);
+    const failed = (await markers(paymentId)).filter((m) => m.action === "payment.refund_request_failed");
+    expect(failed).toHaveLength(2);
+    for (const f of failed) expect(f.details).not.toHaveProperty("requestId");
+    // A canceled refund of exactly its amount is its refund: released.
+    await deliver(event("refund.updated", { ...dash, amount: 1000, id: `re_${rand()}`, status: "canceled" }));
+    expect((await again()).status).toBe(200);
+  });
+
   test("a refund.updated for a payment we do not know is ignored", async () => {
     const r = await deliver(
       event("refund.updated", {

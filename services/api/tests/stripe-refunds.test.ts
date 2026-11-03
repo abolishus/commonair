@@ -120,6 +120,16 @@ describe("an unknown request", () => {
     ]);
   });
 
+  test("an expired request never takes a posting made after its TTL, so a newer one gets it", () => {
+    const day = REFUND_REQUEST_TTL_MS / 60_000;
+    const ms = [requested("a", 500, 0), unknown("a", 0), requested("b", 500, day + 10), unknown("b", day + 10)];
+    const later = at(day + 30);
+    expect(stateOf(ms, [posting("ch_1:500", 500, day + 20)], later)).toEqual([
+      ["a", "unknown", false],
+      ["b", "resolved", false],
+    ]);
+  });
+
   test("one posting settles the oldest matching request only", () => {
     const ms = [requested("a", 500, 0), unknown("a", 0), requested("b", 500, 1), unknown("b", 1)];
     expect(stateOf(ms, [posting("re_1", 500, 5)])).toEqual([
@@ -135,6 +145,20 @@ describe("automatic requests", () => {
     expect(s?.reason).toBe(PAID_AFTER_END);
     const [t] = refundRequestStates([requested("a", 500, 0, { reason: "other" })], [], now);
     expect(t?.reason).toBeNull();
+  });
+
+  test("one listed for the treasurer (nothing sent) stays outstanding past the TTL, without blocking", () => {
+    const later = new Date(T0.getTime() + REFUND_REQUEST_TTL_MS + 1);
+    const listed = [requested("a", 500, 0, { reason: PAID_AFTER_END })];
+    expect(stateOf(listed, [], later)).toEqual([["a", "outstanding", false]]);
+    // A manual refund of the amount, or a resolve, settles it.
+    expect(stateOf(listed, [posting(null, 500, 60)], later)).toEqual([["a", "resolved", false]]);
+    expect(stateOf([...listed, m(REFUND_REQUEST_RESOLVED, { requestId: "a" }, 60)], [], later)).toEqual([
+      ["a", "resolved", false],
+    ]);
+    // One Stripe accepted is over at the TTL like any other.
+    const sent = [...listed, m(REFUND_SUBMITTED, { requestId: "a", refundRef: "re_1" }, 1)];
+    expect(stateOf(sent, [], later)).toEqual([["a", "resolved", false]]);
   });
 });
 

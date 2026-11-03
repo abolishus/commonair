@@ -19,6 +19,7 @@ import {
   REFUND_OUTCOME_UNKNOWN,
   REFUND_REQUESTED,
   REFUND_SUBMITTED,
+  RECONCILE_MIN_AGE_MS,
   type RefundPort,
   reconcileUnknownRefunds,
   runRefundReconcile,
@@ -191,6 +192,21 @@ describe("reconciling unknown outcomes", () => {
     expect((await markersOf(x.p.id)).map((m) => m.action)).toEqual([REFUND_REQUESTED, REFUND_OUTCOME_UNKNOWN]);
   });
 
+  test("an outcome that just became unknown is not asked about yet: Stripe may still be processing", async () => {
+    const x = await stripePayment();
+    await unknownRequest(x.p.id, 500, 2 * MIN);
+    const r = await reconcileUnknownRefunds(ctx(), port({ [x.p.providerRef]: [] }));
+    expect(r.none).toBe(0);
+    expect((await markersOf(x.p.id)).map((m) => m.action)).toEqual([REFUND_REQUESTED, REFUND_OUTCOME_UNKNOWN]);
+    // Once RECONCILE_MIN_AGE_MS has passed, an empty listing is "none".
+    const later = { ...ctx(), now: () => new Date(NOW.getTime() + RECONCILE_MIN_AGE_MS) };
+    await reconcileUnknownRefunds(later, port({ [x.p.providerRef]: [] }));
+    expect((await markersOf(x.p.id)).at(-1)).toMatchObject({
+      action: "payment.refund_request_failed",
+      details: { reason: "reconciled_none" },
+    });
+  });
+
   test("requests older than 7 days, and providers that cannot list, are left alone", async () => {
     const old = await stripePayment();
     await unknownRequest(old.p.id, 500, 8 * DAY);
@@ -312,6 +328,45 @@ describe("the automatic-refund sweep (the durable trigger)", () => {
       REFUND_REQUESTED,
       "payment.refund_request_failed",
     ]);
+  });
+
+  async function gift(age: number, started: boolean) {
+    const { p, owner } = await stripePayment({ kind: "subscription", tier: 1, gift: true, quantity: 1 });
+    const recipient = await makeUser(db());
+    await db()
+      .insert(schema.subscriptions)
+      .values({
+        id: uuidv7(),
+        subscriberId: recipient.user.id,
+        channelId: owner.channel.id,
+        tier: 1,
+        status: started ? "canceled" : "expired",
+        provider: "stripe",
+        priceCents: 500,
+        currency: "usd",
+        giftPaymentId: p.id,
+        ...(started ? { currentPeriodStart: ago(age + DAY), currentPeriodEnd: ago(age) } : {}),
+      });
+    await db()
+      .update(schema.payments)
+      .set({ createdAt: ago(age + DAY), succeededAt: ago(age) })
+      .where(eq(schema.payments.id, p.id));
+    return p;
+  }
+
+  test("a gift paid after its window (no gift subscription ever started) is refunded; a used gift is not", async () => {
+    const late = await gift(30 * MIN, false);
+    const used = await gift(30 * MIN, true);
+    const fresh = await gift(5 * MIN, false);
+    const calls: { paymentId: string; amountCents: number; idempotencyKey: string }[] = [];
+    await sweepPaidAfterEnd(ctx(), port({}, calls));
+    expect(calls.find((c) => c.paymentId === late.id)).toMatchObject({
+      amountCents: 500,
+      idempotencyKey: `refund-${late.id}-0-500`,
+    });
+    expect((await markersOf(late.id))[0]?.details).toMatchObject({ reason: PAID_AFTER_END });
+    expect(calls.some((c) => c.paymentId === used.id)).toBe(false);
+    expect(calls.some((c) => c.paymentId === fresh.id)).toBe(false);
   });
 
   test("one run does both passes", async () => {

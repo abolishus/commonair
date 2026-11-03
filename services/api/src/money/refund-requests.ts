@@ -6,7 +6,8 @@
  * with their audit markers (`stripe-refunds.ts`), and the audited resolve for a request whose
  * outcome Stripe never told us.
  *
- * `list` filters by state: `outstanding` (still blocking a new request), `unknown` (the provider's
+ * `list` filters by state: `outstanding` (still blocking a new request, or an automatic refund
+ * nothing was sent for, which stays listed past the TTL), `unknown` (the provider's
  * answer is unknown, listed even after the TTL) or `all`. Newest request first, paged by the
  * request marker's id (UUIDv7, time-ordered).
  *
@@ -14,7 +15,7 @@
  * in the request's first 15 minutes, while the reconciler (`refund-reconcile`) still asks Stripe,
  * and for a request Stripe answered with a refund id (its refund event settles it).
  */
-import { and, desc, eq, gt, inArray, lt, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, lt, or, sql } from "drizzle-orm";
 import { REFUND_MARKER_ACTIONS, type RefundMarkerAction } from "@commonair/contracts/enums";
 import type { RefundRequestView } from "@commonair/contracts/dto";
 import { type Executor, schema } from "@commonair/db";
@@ -25,6 +26,7 @@ import { iso } from "../lib/dto.ts";
 import { conflict, notFound, precondition } from "../lib/errors.ts";
 import { os, requireCaller } from "../lib/orpc.ts";
 import {
+  PAID_AFTER_END,
   REFUND_MARKER_ACTIONS_READ,
   REFUND_OUTCOME_UNKNOWN,
   REFUND_REQUESTED,
@@ -142,7 +144,12 @@ async function viewsFor(db: Executor, rows: readonly RequestRow[], now: Date): P
 }
 
 function prefilter(state: Filter, now: Date) {
-  if (state === "outstanding") return gt(auditLog.createdAt, new Date(now.getTime() - REFUND_REQUEST_TTL_MS));
+  if (state === "outstanding")
+    // Automatic refunds nothing was sent for stay outstanding past the TTL (`refundRequestStates`).
+    return or(
+      gt(auditLog.createdAt, new Date(now.getTime() - REFUND_REQUEST_TTL_MS)),
+      sql`${auditLog.details}->>'reason' = ${PAID_AFTER_END}`,
+    );
   if (state === "unknown")
     return sql`exists (select 1 from audit_log u where u.action = ${REFUND_OUTCOME_UNKNOWN}
       and u.subject_type = 'payment' and u.subject_id = ${auditLog.subjectId}

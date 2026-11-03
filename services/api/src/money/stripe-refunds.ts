@@ -22,8 +22,9 @@
  * A request stops blocking once it failed (our call, Stripe's `refund.failed`, or the reconciler
  * finding no refund), once a treasurer resolved it, once its refund id was posted, once a refund
  * posting of the same amount without a known refund id followed it (the cumulative
- * `charge.refunded` path), or after `REFUND_REQUEST_TTL_MS`. An unknown request past the TTL stops
- * blocking but stays listed as `unknown` until something settles it.
+ * `charge.refunded` path, while the request was live), or after `REFUND_REQUEST_TTL_MS`. An unknown
+ * request past the TTL stops blocking but stays listed as `unknown` until something settles it; so
+ * does an automatic refund nothing was sent for, listed as `outstanding`.
  */
 import { and, eq, inArray } from "drizzle-orm";
 import { type Executor, schema, uuidv7 } from "@commonair/db";
@@ -144,11 +145,16 @@ export function refundRequestStates(
     const ref = submittedRef.get(id) ?? null;
     let settled = released.has(id) || (ref !== null && (failedRefs.has(ref) || postedRefs.has(ref)));
     if (!settled) {
-      // Only a posting of exactly this amount, after the request, settles it without a refund id;
-      // any other dashboard refund leaves it open. Expired requests take theirs too, so a refund
-      // posted while one blocked keeps it settled after the TTL.
+      // Only a posting of exactly this amount, made while the request was live, settles it without
+      // a refund id; any other dashboard refund leaves it open. An expired request keeps the posting
+      // it took while live, but never takes one meant for a newer request.
+      const from = r.createdAt.getTime();
       const match = anonymous.find(
-        (p) => !used.has(p) && p.amountCents === amount && p.createdAt.getTime() >= r.createdAt.getTime(),
+        (p) =>
+          !used.has(p) &&
+          p.amountCents === amount &&
+          p.createdAt.getTime() >= from &&
+          p.createdAt.getTime() <= from + REFUND_REQUEST_TTL_MS,
       );
       if (match) {
         used.add(match);
@@ -157,11 +163,14 @@ export function refundRequestStates(
     }
     const live = now.getTime() - r.createdAt.getTime() <= REFUND_REQUEST_TTL_MS;
     const u = unknown.get(id) ?? null;
+    const auto = detail(r, "reason") === PAID_AFTER_END;
+    // An automatic refund nothing was sent for (listed for the treasurer) still owes the payer past
+    // the TTL: it stays listed as outstanding, without blocking, until a posting or a resolve.
     const state: RefundRequestState = settled
       ? "resolved"
       : u !== null && ref === null
         ? "unknown"
-        : live
+        : live || (auto && ref === null)
           ? "outstanding"
           : "resolved";
     out.push({
@@ -173,7 +182,7 @@ export function refundRequestStates(
       unknownAt: u?.at ?? null,
       idempotencyKey: u?.key ?? null,
       refundRef: ref,
-      reason: detail(r, "reason") === PAID_AFTER_END ? PAID_AFTER_END : null,
+      reason: auto ? PAID_AFTER_END : null,
     });
   }
   return out;
@@ -347,21 +356,30 @@ export async function requestProviderRefund(
 /**
  * Stripe reported a refund failed (`refund.failed`, or `refund.updated` canceled): the request
  * behind it stops blocking. Runs in the webhook's transaction with the payment row locked. A refund
- * id no request submitted is the refund of the oldest request whose outcome is unknown. Stripe sends
- * the same failure under several event types, so a refund id already marked is not marked again.
+ * id no request submitted is the refund of the oldest request whose outcome is unknown only when
+ * its amount is known and equal: a failed dashboard refund of another amount must not release a
+ * request Stripe may still have refunded (a second request would carry a new key, and refund
+ * twice). Without the amount (`refund.failed` does not carry it yet) the failure is recorded by
+ * refund id only, and the request is left to the reconciler, a resolve or the TTL. Stripe sends the
+ * same failure under several event types, so a refund id already marked is not marked again.
  */
 export async function recordProviderRefundFailed(
   tx: Executor,
   p: { id: string; channelId: string | null },
   refundRef: string,
   now: Date = new Date(),
+  amountCents: number | null = null,
 ): Promise<void> {
   const { markers, postings } = await refundHistory(tx, p.id);
   if (markers.some((m) => m.action === REFUND_REQUEST_FAILED && detail(m, "refundRef") === refundRef)) return;
   const states = refundRequestStates(markers, postings, now);
   const owner =
     states.find((s) => s.refundRef === refundRef) ??
-    states.filter((s) => s.state === "unknown").sort((a, b) => a.requestedAt.getTime() - b.requestedAt.getTime())[0];
+    (amountCents === null
+      ? undefined
+      : states
+          .filter((s) => s.state === "unknown" && s.amountCents === amountCents)
+          .sort((a, b) => a.requestedAt.getTime() - b.requestedAt.getTime())[0]);
   await audit(tx, {
     actorType: "system",
     actorId: null,

@@ -117,6 +117,29 @@ describe("requestStates (the API's rules)", () => {
   test("past the TTL: not blocking, still listed unknown", () => {
     expect(states(base, [], new Date(T0.getTime() + REFUND_REQUEST_TTL_MS + 1))).toEqual([["a", "unknown", false]]);
   });
+  test("records when it became unknown", () => {
+    expect(requestStates(base, [], at(30))[0]?.unknownAt).toEqual(at(0));
+  });
+  test("an expired request never takes a posting made after its TTL", () => {
+    const day = REFUND_REQUEST_TTL_MS / 60_000;
+    const ms = [
+      ...base,
+      mk(REFUND_REQUESTED, { requestId: "b", amountCents: 500 }, day + 10),
+      mk(REFUND_OUTCOME_UNKNOWN, { requestId: "b", idempotencyKey: "k2" }, day + 10),
+    ];
+    expect(states(ms, [post(null, 500, day + 20)], at(day + 30))).toEqual([
+      ["a", "unknown", false],
+      ["b", "resolved", false],
+    ]);
+  });
+  test("an automatic request nothing was sent for stays outstanding past the TTL, without blocking", () => {
+    const listed = [base[0]!];
+    const later = new Date(T0.getTime() + REFUND_REQUEST_TTL_MS + 1);
+    expect(states(listed, [], later)).toEqual([["a", "outstanding", false]]);
+    expect(states([mk(REFUND_REQUESTED, { requestId: "b", amountCents: 1 })], [], later)).toEqual([
+      ["b", "resolved", false],
+    ]);
+  });
 });
 
 describe("classifyRefundError", () => {
