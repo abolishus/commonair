@@ -4,6 +4,13 @@
 /** seed-social: accounts, channels, follows, chat and the rows every other unit builds on. Brief: `.claude/briefs/seed-full/seed-social.md`. */
 import { hashPassword } from "@commonair/db/demo";
 import { SeedSessions, createEmotes, seedPortability } from "./social/api.ts";
+import {
+  apiIdentityClient,
+  identityCounts,
+  planIdentity,
+  readIdentityExisting,
+  seedIdentity,
+} from "./social/identity.ts";
 import { CHAT_HORIZON_DAYS, planSocial, storeEntries } from "./social/plan.ts";
 import { chatWindowsForStore, writeChat, writeSocialBase } from "./social/write.ts";
 import type { SeedUnit } from "./types.ts";
@@ -76,6 +83,35 @@ export const unit: SeedUnit = {
     const portability = await seedPortability(sessions, plan, ctx.signal);
     for (const [table, n] of Object.entries(portability.rows)) rows[table] = (rows[table] ?? 0) + n;
 
+    // D1-seed: avatars, banners and panels through the upload pipeline (art.ts, decision (d)).
+    const identity = planIdentity(ctx.rng.fork("identity"), plan);
+    const slugs = new Map(plan.channels.map((c) => [c.ownerHandle, c.slug]));
+    const art = await seedIdentity({
+      plan: identity,
+      slugOf: (h) => {
+        const slug = slugs.get(h);
+        if (!slug) throw new Error(`seed-social: ${h} has no planned channel`);
+        return slug;
+      },
+      idOf: (h) => {
+        const id = ids.users.get(h);
+        if (!id) throw new Error(`seed-social: ${h} has no user id`);
+        return id;
+      },
+      clientFor: async (h) => apiIdentityClient((await sessions.as(h)).api, ctx.signal),
+      existing: await readIdentityExisting(ctx.db, plan.accounts),
+      rng: ctx.rng.fork("identity-art"),
+      signal: ctx.signal,
+    });
+    // The API's panels replace the direct inserts on the showcase channels.
+    const replaced = identity.panels.reduce(
+      (n, p) => n + (plan.channels.find((c) => c.ownerHandle === p.handle)?.panels.length ?? 0),
+      0,
+    );
+    if (art.panels > 0) rows.channel_panels = (rows.channel_panels ?? 0) - replaced + art.panels;
+    const planned = identityCounts(identity);
+    progress(`identity: ${art.avatars} avatars, ${art.banners} banners, ${art.panels} panels uploaded`);
+
     const bot = plan.accounts.find((a) => a.kind === "bot");
     const botUserId = bot ? ids.users.get(bot.handle) : undefined;
     if (!botUserId) throw new Error("seed-social: the bot account was not created");
@@ -102,6 +138,8 @@ export const unit: SeedUnit = {
         "seed-social: emotes exist only on the fixed streamers' channels (created through the upload pipeline, so the images are in the media bucket); there are no global emotes",
         "seed-social: events rows come only from the API calls (move links, follows through a link, grants, moved notice) and from the later units' API calls; the direct inserts write none",
         `seed-social: ${sessions.signedIn} accounts signed in through the API (each adds a real session row)`,
+        `seed-social: generated art (CC0): ${art.avatars} avatars and ${art.profileImages} profile images, ${art.banners} banners, ${art.panels} panels (${art.panelImages} with images) on ${identity.panels.map((p) => p.handle).join(", ")}; ${art.skipped} already there`,
+        `seed-social: ${planned.boxArt} categories keep boxArtUrl null: no procedure sets a category's box art yet (D1-seed contract request)`,
       ],
     };
   },
