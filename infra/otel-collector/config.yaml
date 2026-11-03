@@ -79,8 +79,9 @@ receivers:
     password: ${env:PG_MONITOR_PASSWORD:-not-configured}
     databases: [commonair]
     # tls/pg-verify-full.yaml (sslmode=verify-full, the CA from DATABASE_CA_FILE or the system
-    # store) or tls/pg-disable.yaml (bundled, inside the Podman network). Any other value of
-    # PG_MONITOR_TLS names no file, and the collector refuses to start: never a silent downgrade.
+    # store), tls/pg-require.yaml (TLS unverified, only with --allow-insecure-database) or
+    # tls/pg-disable.yaml (bundled, inside the Podman network). Any other value of PG_MONITOR_TLS
+    # names no file, and the collector refuses to start: never a silent downgrade.
     tls: ${file:/etc/otelcol-contrib/tls/pg-${env:PG_MONITOR_TLS:-disable}.yaml}
     metrics:
       postgresql.deadlocks: { enabled: true }

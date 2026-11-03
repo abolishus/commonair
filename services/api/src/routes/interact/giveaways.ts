@@ -36,6 +36,6 @@ export const giveaways = {
     cancelGiveaway(context.deps, requireCaller(context), requireChannel(context), input.id),
   ),
   verify: os.interact.giveaways.verify.handler(({ context, input }) =>
-    verifyGiveaway(context.deps, input.channel, input.id),
+    verifyGiveaway(context.deps, input.channel, input.id, context.caller),
   ),
 };

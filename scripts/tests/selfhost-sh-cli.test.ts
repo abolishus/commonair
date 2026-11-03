@@ -333,6 +333,9 @@ describe("install", () => {
       "podman secret create --replace commonair-owner-database-url -",
       "podman secret create --replace commonair-grafana-admin-password -",
       "podman secret create --replace commonair-valkey-url -",
+      // The metrics collector's (S1-b, contract step §3.7).
+      "podman secret create --replace commonair-pg-monitor-password -",
+      "podman secret create --replace commonair-valkey-monitor-password -",
     ]);
   });
 

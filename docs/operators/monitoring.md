@@ -88,7 +88,9 @@ fails at each scrape and [CommonairStateScrapeFailing](#commonairstatescrapefail
 `bun scripts/init-env.ts --merge` keeps; set a value by hand (`openssl rand -hex 24`), then rerun
 the `migrate` job so it creates the role.
 
-`PG_MONITOR_TLS` and `VALKEY_MONITOR_TLS` take exactly those two values each. They pick a file in
+`PG_MONITOR_TLS` and `VALKEY_MONITOR_TLS` take exactly those two values each, plus
+`PG_MONITOR_TLS=require` (TLS without verifying the certificate), which `selfhost.sh` writes only
+for a database URL with `sslmode=require` and `--allow-insecure-database`. They pick a file in
 `infra/otel-collector/tls/`; any other value makes the collector refuse to start rather than fall
 back to an unverified connection. `verify-full` checks the certificate chain against the CA (or the
 system trust store when `DATABASE_CA_FILE` is empty) and the host name against the certificate.

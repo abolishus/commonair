@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# PG_MONITOR_TLS=require: TLS without verifying the certificate, as sslmode=require. selfhost.sh
+# writes it only with --allow-insecure-database (a server on a private network).
+insecure: false
+insecure_skip_verify: true

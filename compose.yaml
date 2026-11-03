@@ -159,6 +159,8 @@ services:
     environment:
       DATABASE_URL: postgres://commonair:${POSTGRES_PASSWORD:-commonair}@postgres:5432/commonair
       POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:-}
+      # Creates the read-only commonair_monitor role the collector logs in as (unset: skipped).
+      POSTGRES_MONITOR_PASSWORD: ${POSTGRES_MONITOR_PASSWORD:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -487,9 +489,26 @@ services:
         }
     restart: unless-stopped
     command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    # Bundled state (contract step §3.7): the collector reads the stack's own Postgres and Valkey.
+    # Every service waits for the collector's health, so an empty password must not stop it:
+    # compose's `:-` also replaces an empty value, the login fails at scrape time instead, and
+    # CommonairStateScrapeFailing says so. An .env with POSTGRES_MONITOR_PASSWORD= (older than
+    # its __generate__ marker) needs a value set by hand; init-env --merge keeps the empty one.
+    environment:
+      OBSERVABILITY_STATE_MODE: bundled
+      PG_MONITOR_ENDPOINT: postgres:5432
+      PG_MONITOR_USER: commonair_monitor
+      PG_MONITOR_TLS: disable
+      PG_MONITOR_PASSWORD: ${POSTGRES_MONITOR_PASSWORD:-not-configured}
+      VALKEY_MONITOR_ENDPOINT: valkey:6379
+      VALKEY_MONITOR_TLS: "off"
+      VALKEY_MONITOR_PASSWORD: ${VALKEY_PASSWORD:-}
     # Host services in local development export to localhost:4318 (.env.example default).
     ports: ["${BIND_ADDRESS:-127.0.0.1}:${OTLP_HTTP_PORT:-4318}:4318"]
-    volumes: ["./infra/otel-collector/config.yaml:/etc/otelcol-contrib/config.yaml:ro,Z"]
+    volumes:
+      - ./infra/otel-collector:/etc/otelcol-contrib:ro,Z
+      # The host's /proc for the hostmetrics receiver (on macOS, the Podman machine's).
+      - /proc:/hostfs/proc:ro
     depends_on:
       loki:
         condition: service_healthy
@@ -502,13 +521,19 @@ services:
   prometheus:
     image: quay.io/prometheus/prometheus:v3.15.0@sha256:efd719c99d83b060d9daefdcf00360461adf279f45ef5391f8d111892118753e
     restart: unless-stopped
+    # start.sh renders SLO_TARGET, EGRESS_BUDGET_GIB and LIVE_STREAMS_PER_HOST into rules.
+    entrypoint: ["/bin/sh", "/etc/prometheus/start.sh"]
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
-      - --storage.tsdb.retention.time=30d
+      - --storage.tsdb.retention.time=35d
+    environment:
+      SLO_TARGET: ${SLO_TARGET:-}
+      EGRESS_BUDGET_GIB: ${EGRESS_BUDGET_GIB:-}
+      LIVE_STREAMS_PER_HOST: ${LIVE_STREAMS_PER_HOST:-}
     ports: ["${BIND_ADDRESS:-127.0.0.1}:${PROMETHEUS_PORT:-9090}:9090"]
     volumes:
-      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro,Z
+      - ./infra/prometheus:/etc/prometheus:ro,Z
       - prometheus-data:/prometheus
     healthcheck:
       <<: *healthcheck

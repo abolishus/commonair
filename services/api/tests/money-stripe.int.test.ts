@@ -43,7 +43,7 @@ let treasurer: Account;
 const feeless = new Set<string>();
 /** Connect accounts' payouts_enabled as the fake Stripe reports it. */
 const accountsEnabled = new Map<string, boolean>();
-/** Answer the next N refund creates with 500 (the client retries twice per call). */
+/** Answer the next N refund creates with a definite 400 (a 4xx is final: no retry). */
 const refundFailures = { left: 0 };
 const rand = () => crypto.randomUUID().replace(/-/g, "").slice(0, 14);
 const db = () => api.db.db;
@@ -75,7 +75,7 @@ function startFakeStripe() {
       if (url.pathname === "/v1/refunds") {
         if (refundFailures.left > 0) {
           refundFailures.left--;
-          return Response.json({ error: { message: "stripe down" } }, { status: 500 });
+          return Response.json({ error: { message: "refused", type: "invalid_request_error" } }, { status: 400 });
         }
         return Response.json({ id: `re_${rand()}`, status: "succeeded" });
       }
@@ -871,7 +871,7 @@ describe("follow-up fixes", () => {
   test("Stripe failing the refund call leaves no lockout; the retry goes through", async () => {
     const { paymentId } = await paidTip(1100);
     const path = `/api/treasurer/payments/${paymentId}/refund`;
-    refundFailures.left = 3; // one call = the first try + two retries
+    refundFailures.left = 1; // a 4xx is final: no retry (a 5xx is outcome-unknown, ADR 0007 decision 3)
     const failed = await treasurer.client.call("POST", path, { amountCents: 100, reason: "x" });
     expect(failed.status).toBe(412);
     expect((await markers(paymentId)).map((m) => m.action)).toEqual([

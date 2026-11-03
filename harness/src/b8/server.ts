@@ -22,9 +22,7 @@
  * The daily jobs (`portability-incoming-cleanup`, `import-record-expiry`) run now through the batch 7
  * test hook (`INTERNAL_ROUTES.b7Tick`, `OPS_TEST_HOOKS`), which runs them once the contract adds them
  * to `B7_TICK_JOBS`. Ages are set in the database (`DATABASE_URL`, the stack's owner connection),
- * timestamps through `w2/sql-time.ts`. Until the orchestrator lifts these extensions from
- * `PENDING_B8_EXTENSIONS`, the stub check in `tests/b8/steps.test.ts` looks for the words
- * "B8-server not merged" in this file: this sentence carries them.
+ * timestamps through `w2/sql-time.ts`.
  */
 import { RAID_RULES } from "@commonair/contracts/enums";
 import { B8_JOBS, INTERNAL_ROUTES, INTERNAL_SECRET_HEADER, KEYS } from "@commonair/contracts/internal";

@@ -74,7 +74,12 @@ beforeAll(async () => {
     restrictionKind: "account",
     restrictionDetail: "suspended",
     restrictionEndsAt: endsAt,
-    facts: { code: "moderator_review", caseId: modActionId, caseOrigin: "human", decision: "suspend" },
+    facts: {
+      code: "staff_action",
+      action: "report.resolve",
+      clauseId: SOR_RESOLVE_CLAUSE,
+      appliedAt: endsAt.toISOString(),
+    },
     source: "notice_art16",
     automatedDetection: false,
     automatedDecision: "not",

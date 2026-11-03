@@ -268,9 +268,9 @@ const portEnv = paymentsEnv.pick({
 });
 
 /**
- * The instance's provider. The adapter has no refund listing yet (contract request: an optional
- * `listRefunds` on `PaymentAdapter` over `StripeClient.listRefunds`); until it has, unknown
- * requests stay unknown here and settle by webhook, by the treasurer or at the TTL.
+ * The instance's provider. Without a refund listing (`PaymentAdapter.listRefunds`; the manual
+ * adapter has none), unknown requests stay unknown here and settle by webhook, by the treasurer or
+ * at the TTL.
  */
 export function refundPortFromEnv(source: Record<string, string | undefined> = process.env): RefundPort {
   const env = loadEnv(portEnv, source);

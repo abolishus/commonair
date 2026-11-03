@@ -641,7 +641,8 @@ export async function applyStripeAction(
       const p = await lockPaymentByRef(tx, a.paymentIntent);
       if (!p) return noop("unknown_payment");
       // The treasurer's request behind it stops blocking a new one (stripe-refunds.ts).
-      await recordProviderRefundFailed(tx, p, a.refundId);
+      // With its amount, a failure nobody named can release the matching unknown request.
+      await recordProviderRefundFailed(tx, p, a.refundId, now, a.amountCents);
       return noop("refund_failed");
     }
     // Batch 8: each unit fills its own file (contract step §2.5).

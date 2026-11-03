@@ -300,6 +300,12 @@ describe("wiring of the other units' checks", () => {
     expect(calls.at(-1)).toBe("checkStopPostOrder");
   });
 
+  test("install: the metrics check last, in the install's state mode (L1-observability)", () => {
+    const install = stepBody("install");
+    expect(install).toContain('await checkMetrics(inHost, expectThat, externalState ? "external" : "bundled");');
+    expect(install.indexOf("checkMetrics(")).toBeGreaterThan(install.indexOf("checkStopPostOrder();"));
+  });
+
   test("upgrade: IRC client addresses next to the repeated listener check, and the order again", () => {
     const calls = callsIn(stepBody("release ${v2}"));
     expect(calls.indexOf("checkIrcClientAddresses")).toBe(calls.indexOf("checkListeners") + 1);
@@ -367,18 +373,6 @@ describe("CI", () => {
     .split("\n")
     .map((l) => l.trim())
     .filter((l) => l && !l.startsWith("#"));
-  // S1-b's external-state row is the orchestrator's change to ci.yml (a contract request); until it
-  // lands, the matrix is batch 7's. Drop this branch once it has.
-  const pendingState = !job.includes("state: external");
-
-  const BATCH7_MATRIX = [
-    "matrix:",
-    "distro: [debian, fedora]",
-    "storage: [garage]",
-    "include:",
-    "- distro: debian",
-    "storage: external",
-  ];
   const S1B_MATRIX = [
     "matrix:",
     "distro: [debian, fedora]",
@@ -394,22 +388,16 @@ describe("CI", () => {
   ];
 
   test("both distributions with everything bundled, the external store, and external state on Debian", () => {
-    expect(matrix).toEqual(pendingState ? BATCH7_MATRIX : S1B_MATRIX);
+    expect(matrix).toEqual(S1B_MATRIX);
   });
 
   test("the run passes the variant, and each variant keeps its own logs", () => {
-    const lines = pendingState
-      ? [
-          'scripts/selfhost/e2e.ts --distro "$DISTRO" --storage "$STORAGE"',
-          "STORAGE: ${{ matrix.storage }}",
-          "name: selfhost-e2e-${{ matrix.distro }}-${{ matrix.storage }}-${{ github.run_attempt }}",
-        ]
-      : [
-          'scripts/selfhost/e2e.ts --distro "$DISTRO" --storage "$STORAGE" --state "$STATE"',
-          "STORAGE: ${{ matrix.storage }}",
-          "STATE: ${{ matrix.state }}",
-          "name: selfhost-e2e-${{ matrix.distro }}-${{ matrix.storage }}-${{ matrix.state }}-${{ github.run_attempt }}",
-        ];
+    const lines = [
+      'scripts/selfhost/e2e.ts --distro "$DISTRO" --storage "$STORAGE" --state "$STATE"',
+      "STORAGE: ${{ matrix.storage }}",
+      "STATE: ${{ matrix.state }}",
+      "name: selfhost-e2e-${{ matrix.distro }}-${{ matrix.storage }}-${{ matrix.state }}-${{ github.run_attempt }}",
+    ];
     for (const line of lines) expect(job).toContain(line);
   });
 });

@@ -111,6 +111,7 @@ export type Key =
   | "portability.reason.archiveChanged"
   | "portability.reason.importFailed"
   | "portability.reason.previewFailed"
+  | "portability.reason.nothingToApply"
   | "portability.reason.badBundle"
   | "portability.reason.other"
   | "portability.landing.loading"

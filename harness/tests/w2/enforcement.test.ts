@@ -104,7 +104,7 @@ describe("sor-resolve: the statement of a report resolved with a suspension", ()
     clauseId: SOR_RESOLVE_CLAUSE,
     appealSubjectType: "moderation_action",
     appealSubjectId: modActionId,
-    factsCode: "moderator_review",
+    factsCode: "staff_action",
   };
 
   test("a matching statement has no problems (the end within clock skew)", () => {

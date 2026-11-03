@@ -85,6 +85,7 @@ import {
   externalStoreSetup,
 } from "./e2e-s3.ts";
 import { checkObjectBackup, objectBackupSetup, objectBackupTeardown } from "./e2e-backup.ts";
+import { checkMetrics } from "./e2e-metrics.ts";
 import {
   E2E_STATE,
   type ValkeyUser,
@@ -1263,6 +1264,8 @@ async function main(): Promise<void> {
       checkIpv6();
       checkListeners();
       checkStopPostOrder();
+      // The collector's host, Postgres and Valkey series and the rule groups (L1-observability).
+      await checkMetrics(inHost, expectThat, externalState ? "external" : "bundled");
     });
 
     await step(`release ${v2} (new digests) and upgrade`, async () => {

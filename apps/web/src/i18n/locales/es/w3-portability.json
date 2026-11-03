@@ -106,6 +106,7 @@
   "portability.reason.archiveChanged": "El paquete cambió después de la vista previa. Vuelve a subirlo.",
   "portability.reason.importFailed": "La importación no pudo terminar.",
   "portability.reason.previewFailed": "No se pudo revisar el paquete. Vuelve a subirlo.",
+  "portability.reason.nothingToApply": "Nada que cambiar: los campos elegidos ya coinciden o no tienen equivalente aquí.",
   "portability.reason.badBundle": "Este archivo no es un paquete que esta instancia pueda leer.",
   "portability.reason.other": "No se pudo importar.",
   "portability.landing.loading": "Cargando el canal",

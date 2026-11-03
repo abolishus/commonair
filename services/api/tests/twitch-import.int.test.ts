@@ -411,5 +411,21 @@ describe("preview expiry and start", () => {
       choices: { channel: true, panels: false, emotes: [] },
     });
     expect([ok.status, ok.body.assertedAt]).toEqual([200, null]);
+    // No `fields`: every field applies, and none is stored.
+    const [row] = (await rowsOf(u)).filter((r) => r.id === p.body.id);
+    expect(row?.choices).toEqual({ channel: true, panels: false, emotes: [] });
+  });
+
+  test("the per-field choices are stored for the worker", async () => {
+    const u = await signUpAndSignIn(api);
+    expect(await connectAll(u)).toBe("connected");
+    const p = await u.client.call<ImportDto>("POST", `${base(u)}/preview`, {});
+    const fields = { title: false, description: true };
+    const ok = await u.client.call<ImportDto>("POST", `${base(u)}/${p.body.id}/start`, {
+      choices: { channel: true, fields, panels: false, emotes: [] },
+    });
+    expect(ok.status).toBe(200);
+    const [row] = (await rowsOf(u)).filter((r) => r.id === p.body.id);
+    expect(row?.choices).toEqual({ channel: true, fields, panels: false, emotes: [] });
   });
 });

@@ -40,11 +40,6 @@ async function load(client: VerifyClient, channel: string, id: string, signedIn:
   }
   // CR9: `verify.me` is the signed-in caller's own pseudonym on any giveaway they entered.
   let mine: string | null = signedIn ? (v.me?.pseudonym ?? null) : null;
-  if (signedIn && mine === null) {
-    // An API without `verify.me` (an older instance): `current` has it for the latest giveaway only.
-    const c = await client.interact.giveaways.current({ channel }).catch(() => null);
-    if (c?.id === id) mine = c.me?.pseudonym ?? null;
-  }
   // Only a pseudonym that is in the published list is marked (never a name: decision (n)).
   if (mine !== null && !v.entries.includes(mine)) mine = null;
   return { kind: "ready", v, mine };

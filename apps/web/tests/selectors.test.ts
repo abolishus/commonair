@@ -558,25 +558,10 @@ describe("b7-selectors.md (batch 7)", () => {
  * `payout-transfers`, `patronage-payouts`).
  */
 const PENDING_B8_IDS: readonly string[] = [
-  // B8-web
-  "channel-panels",
-  "channel-panel",
-  "channel-banner",
-  "prediction-grace",
-  "jury-flag-case-link",
-  "giveaway-verify-mine",
-  "replay-span-kept",
-  // M1-gifts-refunds (`refund-requests` is rendered by the contract step's stub tab)
-  "refund-request-unknown",
-  "refund-request-resolve",
-  // M1-connect (`payout-transfers` is rendered by the contract step's stub tab)
-  "payout-transfer-status",
   // M1-coop-money
   "share-buy-stripe",
   "patronage-payouts",
   "patronage-pay",
-  // B8-server
-  "twitch-import-field",
 ];
 
 describe("b8-selectors.md (batch 8)", () => {

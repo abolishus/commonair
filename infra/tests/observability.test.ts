@@ -498,10 +498,12 @@ describe("collector configuration", () => {
       ca_file: "${env:VALKEY_CA_FILE:-}",
     });
     expect(tls("pg-disable.yaml")).toEqual({ insecure: true });
+    // sslmode=require, which selfhost.sh writes only with --allow-insecure-database.
+    expect(tls("pg-require.yaml")).toEqual({ insecure: false, insecure_skip_verify: true });
     expect(tls("valkey-off.yaml")).toEqual({ insecure: true });
     // Exactly the §3.7 values: anything else names no file and the collector refuses to start.
     expect(readdirSync(join(ROOT, "infra/otel-collector/tls")).sort()).toEqual(
-      ["pg-disable.yaml", "pg-verify-full.yaml", "valkey-off.yaml", "valkey-on.yaml"].sort(),
+      ["pg-disable.yaml", "pg-require.yaml", "pg-verify-full.yaml", "valkey-off.yaml", "valkey-on.yaml"].sort(),
     );
     expect(read("infra/otel-collector/config.yaml")).not.toMatch(/insecure_skip_verify:\s*true/);
   });

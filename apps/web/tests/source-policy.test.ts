@@ -469,8 +469,6 @@ describe("detectors", () => {
  * shrinks: an entry that has gained a `head` fails until it is removed here.
  */
 export const PENDING_HEAD: Readonly<Record<string, string>> = {
-  "src/routes/_app/$channel.tsx": "B8-web, then D2-channel (title from the loader: the channel's name, live or not)",
-  "src/routes/_admin/admin.moderation.tsx": "B8-web, then D5-studio",
   "src/routes/_app/$channel_.vods.$vodId.tsx": "D3-watch",
   "src/routes/_app/$channel_.clips.$clipId.tsx": "D3-watch",
   "src/routes/_app/coop.jury.tsx": "B8-web (owns components/jury), then D4's successor",

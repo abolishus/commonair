@@ -252,7 +252,7 @@ describe("b7 test hooks", () => {
   test("every tickable job has a queue", () => {
     expect(B7_TICK_QUEUES[WATCH_ROOM_JOBS.retention]).toBe(QUEUES.watchRooms);
     expect(new Set(Object.values(B7_TICK_QUEUES))).toEqual(
-      new Set([QUEUES.watchRooms, QUEUES.jury, QUEUES.interact, QUEUES.federation]),
+      new Set([QUEUES.watchRooms, QUEUES.jury, QUEUES.interact, QUEUES.federation, QUEUES.portability]),
     );
   });
 

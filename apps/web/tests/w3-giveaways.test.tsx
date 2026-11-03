@@ -391,13 +391,11 @@ function verifyClient(v: GiveawayVerificationDto | Error, opts: { enabled?: bool
     },
     interact: {
       giveaways: {
+        // `verify.me` carries the signed-in caller's own pseudonym (CR9).
         verify: vi.fn<(...args: never[]) => Promise<unknown>>(async () => {
           if (v instanceof Error) throw v;
-          return v;
+          return opts.mine ? { ...v, me: { pseudonym: opts.mine } } : v;
         }),
-        current: vi.fn<(...args: never[]) => Promise<unknown>>(async () =>
-          giveaway({ me: { entered: true, pseudonym: opts.mine ?? null, eligible: true, reason: null, won: false } }),
-        ),
       },
     },
   } as unknown as VerifyClient;

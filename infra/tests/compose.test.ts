@@ -123,6 +123,8 @@ describe("compose.yaml: rootless rules", () => {
       const src = v.startsWith("${") ? v.slice(v.indexOf(":-") + 2, v.indexOf("}")) : (v.split(":")[0] ?? "");
       const mode = v.slice(v.lastIndexOf(":") + 1);
       if (/(docker|podman)\.sock|\/run\/(user\/\d+\/)?(podman|docker)/.test(v)) return [`${v}: engine socket`];
+      // The collector's hostmetrics receiver reads the host's /proc, read-only (its unit says why).
+      if (name === "otel-collector" && v === "/proc:/hostfs/proc:ro") return [];
       if (src.startsWith("./"))
         return /\bro\b/.test(mode) && (src.startsWith("./infra/") || src.startsWith("./.cache/models/"))
           ? []
@@ -313,13 +315,16 @@ describe("compose.yaml: configuration and secrets", () => {
     );
   });
 
-  test("no secret has a literal default in compose (only the dev Postgres owner password)", () => {
+  // Two exceptions: the dev Postgres owner password, and the collector's monitor login, whose
+  // sentinel keeps it starting (every service waits for its health) when .env has no password.
+  test("no secret has a literal default in compose (only the dev Postgres owner and monitor sentinel)", () => {
     const text = read("compose.yaml");
     const defaults = [
       ...text.matchAll(/\$\{([A-Z0-9_]*(?:SECRET[A-Z0-9_]*|TOKEN|PASSWORD|_KEY|_KEY_ID)):-([^}]*)\}/g),
     ].map((m) => `${m[1]}=${m[2]}`);
     expect(defaults.length).toBeGreaterThan(5);
-    expect(defaults.filter((d) => !d.endsWith("=") && d !== "POSTGRES_PASSWORD=commonair")).toEqual([]);
+    const allowed = new Set(["POSTGRES_PASSWORD=commonair", "POSTGRES_MONITOR_PASSWORD=not-configured"]);
+    expect(defaults.filter((d) => !d.endsWith("=") && !allowed.has(d))).toEqual([]);
   });
 
   test("grafana: no anonymous access, no phoning home, refuses the default password", () => {
@@ -462,6 +467,8 @@ describe("Quadlet mirror", () => {
     const badVolumes = keys(unit, "Volume").filter((v) => {
       const src = v.slice(0, v.indexOf(":"));
       if (src.endsWith(".volume")) return !existsSync(join(dir, src));
+      // The collector's host /proc (hostmetrics): read-only, and never relabelled (procfs cannot be).
+      if (src === "/proc") return !(name === "otel-collector" && v === "/proc:/hostfs/proc:ro");
       return !v.endsWith(SHARED_BINDS.has(src) ? ":ro,z" : ":ro,Z");
     });
     expect(badVolumes).toEqual([]);

@@ -124,8 +124,9 @@ describe("bundled (no flag): the default, as before", () => {
       VALKEY_MONITOR_TLS: "off",
       OBSERVABILITY_STATE_MODE: "bundled",
     });
-    // Generated once, so migrate creates the monitor role on the bundled stack too.
-    expect(env.POSTGRES_MONITOR_PASSWORD).toMatch(/^[0-9a-f]{48}$/);
+    // Generated once (hex: the collector puts it in a libpq URL), so migrate creates the monitor role
+    // on the bundled stack too: init-env's hex64, or selfhost.sh's own 48 for an older env file.
+    expect(env.POSTGRES_MONITOR_PASSWORD).toMatch(/^(?:[0-9a-f]{48}|[0-9a-f]{64})$/);
     for (const k of ["STATE_MODE", "DATABASE_OWNER_URL", "DATABASE_ALLOW_INSECURE", "VALKEY_ALLOW_INSECURE"])
       expect(env[k], k).toBeUndefined();
     expect(env.DATABASE_URL).toBe(`postgres://commonair_app:${env.POSTGRES_APP_PASSWORD}@postgres:5432/commonair`);
@@ -272,7 +273,7 @@ describe("external Postgres and Valkey", () => {
     expect(env.DATABASE_URL).toBe(
       `postgres://commonair_app:${env.POSTGRES_APP_PASSWORD}@db.example.com:25060/commonair?sslmode=verify-full`,
     );
-    expect(env.POSTGRES_MONITOR_PASSWORD).toMatch(/^[0-9a-f]{48}$/);
+    expect(env.POSTGRES_MONITOR_PASSWORD).toMatch(/^(?:[0-9a-f]{48}|[0-9a-f]{64})$/);
   });
 
   test("the secrets: the URLs carry the passwords percent-encoded, and decode to them exactly", () => {
@@ -483,7 +484,7 @@ describe("external Postgres and Valkey", () => {
       expect(h.state("state-check-preflight.args")).not.toContain("STATE_PG_CA");
       expect(existsSync(secretPath(h, "commonair-pg-ca"))).toBe(false);
       for (const u of installed(h))
-        expect(readFileSync(join(quadletDir(h), u), "utf8"), u).not.toContain("commonair-pg-ca");
+        expect(readFileSync(join(quadletDir(h), u), "utf8"), u).not.toContain("Secret=commonair-pg-ca");
       // Valkey keeps its CA.
       expect(envOf(h).VALKEY_CA_FILE).toBe("/run/secrets/commonair-valkey-ca");
     },
@@ -497,7 +498,7 @@ describe("external Postgres and Valkey", () => {
       expect(envOf(h)).toMatchObject({ VALKEY_CA_FILE: "", VALKEY_MONITOR_TLS: "on" });
       expect(existsSync(secretPath(h, "commonair-valkey-ca"))).toBe(false);
       for (const u of installed(h))
-        expect(readFileSync(join(quadletDir(h), u), "utf8"), u).not.toContain("commonair-valkey-ca");
+        expect(readFileSync(join(quadletDir(h), u), "utf8"), u).not.toContain("Secret=commonair-valkey-ca");
     },
     TIMEOUT,
   );
@@ -728,7 +729,7 @@ describe("hosts and the insecure flags", () => {
       expect(vk.pathname).toBe("/2");
       expect(decodeURIComponent(vk.password)).toBe(VK_PASSWORD);
       for (const u of installed(h))
-        expect(readFileSync(join(quadletDir(h), u), "utf8")).not.toContain("commonair-pg-ca");
+        expect(readFileSync(join(quadletDir(h), u), "utf8")).not.toContain("Secret=commonair-pg-ca");
     },
     TIMEOUT,
   );

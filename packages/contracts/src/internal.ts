@@ -1015,23 +1015,6 @@ export const UploadCommitResult = z.discriminatedUnion("ok", [
 ]);
 export type UploadCommitResult = z.infer<typeof UploadCommitResult>;
 
-/** Jobs `INTERNAL_ROUTES.b7Tick` runs now (test hooks only). */
-export const B7_TICK_JOBS = [
-  WATCH_ROOM_JOBS.retention,
-  JURY_JOBS.draw,
-  JURY_JOBS.close,
-  GIVEAWAY_JOBS.close,
-  FEDERATION_JOBS.rotate,
-  FEDERATION_JOBS.sweep,
-] as const;
-export const B7TickBody = z.object({
-  job: z.enum(B7_TICK_JOBS),
-  /** The job's payload (validated by the job's own schema). */
-  data: z.record(z.string(), z.unknown()).default({}),
-});
-export type B7TickBody = z.infer<typeof B7TickBody>;
-export const B7JobResult = z.record(z.string(), z.number().int());
-export type B7JobResult = z.infer<typeof B7JobResult>;
 /** Body of `INTERNAL_ROUTES.watchRoomAge`: end the room (if open) and move its times this many days back. */
 export const WatchRoomAgeBody = z.object({ roomId: z.uuid(), days: z.number().int().min(1).max(365) });
 export type WatchRoomAgeBody = z.infer<typeof WatchRoomAgeBody>;
@@ -1059,6 +1042,27 @@ export const B8_JOBS = {
   importRecordExpiry: "import-record-expiry",
 } as const;
 export type B8JobName = (typeof B8_JOBS)[keyof typeof B8_JOBS];
+
+/** Jobs `INTERNAL_ROUTES.b7Tick` runs now (test hooks only). */
+export const B7_TICK_JOBS = [
+  WATCH_ROOM_JOBS.retention,
+  JURY_JOBS.draw,
+  JURY_JOBS.close,
+  GIVEAWAY_JOBS.close,
+  FEDERATION_JOBS.rotate,
+  FEDERATION_JOBS.sweep,
+  // Batch 8 (B8-server): the two daily portability jobs, run now by the harness.
+  B8_JOBS.incomingCleanup,
+  B8_JOBS.importRecordExpiry,
+] as const;
+export const B7TickBody = z.object({
+  job: z.enum(B7_TICK_JOBS),
+  /** The job's payload (validated by the job's own schema). */
+  data: z.record(z.string(), z.unknown()).default({}),
+});
+export type B7TickBody = z.infer<typeof B7TickBody>;
+export const B7JobResult = z.record(z.string(), z.number().int());
+export type B7JobResult = z.infer<typeof B7JobResult>;
 
 /** `refund-reconcile`: scheduled, works from the audit markers and the clock. */
 export const RefundReconcileJob = z.object({});

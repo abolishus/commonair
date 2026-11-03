@@ -173,6 +173,16 @@ export async function handleStripeWebhook(deps: Deps, req: Request, rateLimitSub
     eventId: envelope.id,
     outcome: applied.outcome,
   });
+  // A transfer event that matched no row, or landed on a failed one, needs a treasurer's look.
+  if (
+    envelope.type.startsWith("transfer.") &&
+    (applied.outcome === "ignored" || applied.outcome === "transfer_orphaned")
+  )
+    deps.logger.warn("stripe transfer event needs a look", {
+      eventType: envelope.type,
+      eventId: envelope.id,
+      outcome: applied.outcome,
+    });
   // The event is committed: a cache error must not skip the hooks below or answer 500 (Stripe would
   // redeliver an event that now only answers `duplicate`).
   for (const i of applied.invalidate) {

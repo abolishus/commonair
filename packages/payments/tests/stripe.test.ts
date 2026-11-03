@@ -507,6 +507,10 @@ describe("event → action mapping", () => {
       type: "refund.failed",
       refundId: "re_1",
       paymentIntent: "pi_1",
+      amountCents: 100,
+    });
+    expect(stripeAction(envelope("refund.failed", { ...failed, amount: undefined }))).toMatchObject({
+      amountCents: null,
     });
     expect(stripeAction(envelope("refund.failed", { ...failed, status: "succeeded" }))).toEqual({ type: "ignored" });
     expect(stripeAction(envelope("charge.refund.updated", failed))).toMatchObject({ type: "refund.failed" });

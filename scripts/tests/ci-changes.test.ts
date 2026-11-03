@@ -134,7 +134,8 @@ describe("the real harness graph", () => {
   // Batch 7 decision (d): the w3 shard is an ordinary shard. The CI matrix is built from FULL_SHARDS
   // (outputs → `shards`), so it needs no workflow change and runs on every push selecting all.
   test("a batch 7 scenario module selects its scenario and the w3 shard, which is never filtered", () => {
-    expect(scenariosReaching("harness/src/n3/index.ts", graph)).toEqual(["twitch-import"]);
+    // interact too: its B8-web steps (b8/web.ts) read the Twitch fixture's panels from n3.
+    expect(scenariosReaching("harness/src/n3/index.ts", graph)).toEqual(["interact", "twitch-import"]);
     expect(scenariosReaching("harness/src/w3/watch-rooms/index.ts", graph)).toEqual(["watch-room"]);
     // seed-coverage runs seed full, whose seed-interact drives giveaways through this module;
     // d-surfaces reads that run's store (seed/run.ts).
@@ -143,7 +144,8 @@ describe("the real harness graph", () => {
       "interact",
       "seed-coverage",
     ]);
-    expect(shardsFor(selectScenarios(["harness/src/n4/web.ts"], graph))).toEqual(["w3"]);
+    // interact too: B8-web's steps (b8/web.ts) run n4's axe check.
+    expect(shardsFor(selectScenarios(["harness/src/n4/web.ts"], graph))).toEqual(["interact", "w3"]);
     expect(matrixShards({ scenarios: ALL, deploy: false, filteredShards: [] })).toContain("w3");
     expect(outputs({ scenarios: ["portability"], deploy: false, filteredShards: [] })).toContain('shards=["w3"]');
   });
