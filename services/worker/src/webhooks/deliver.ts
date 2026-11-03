@@ -300,17 +300,20 @@ export async function verifyCallback(
   );
   const echoed = outcome.result.ok && outcome.result.status === 200 && outcome.result.body.trim() === challenge;
   const status = echoed ? "enabled" : "failed";
-  await ctx.db
-    .update(subs)
-    .set({ status })
-    .where(and(eq(subs.id, sub.id), eq(subs.status, "verification_pending")));
-  if (!echoed && outcome.success) {
-    // 2xx without the challenge is still a failed verification; make the log row say why.
-    await ctx.db
-      .update(deliveries)
-      .set({ status: "failed", error: "challenge not echoed" })
-      .where(eq(deliveries.id, outcome.deliveryId));
-  }
+  // One transaction: whoever sees the subscription's final status also sees the log row explaining it.
+  await ctx.db.transaction(async (tx) => {
+    if (!echoed && outcome.success) {
+      // 2xx without the challenge is still a failed verification; make the log row say why.
+      await tx
+        .update(deliveries)
+        .set({ status: "failed", error: "challenge not echoed" })
+        .where(eq(deliveries.id, outcome.deliveryId));
+    }
+    await tx
+      .update(subs)
+      .set({ status })
+      .where(and(eq(subs.id, sub.id), eq(subs.status, "verification_pending")));
+  });
   return status;
 }
 
