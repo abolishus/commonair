@@ -360,9 +360,25 @@ export interface RecordingInput {
 export const SPEECH_SECONDS = 15 + 35 + 12;
 export const SWARM_SESSIONS = 8;
 
-/** Bulk streamers that record: 2 at small, 4 at medium, 6 at large. */
-export function bulkRecordings(scale: Pick<SeedScale, "factor">, available: number): number {
-  return Math.max(0, Math.min(available, 2 + 2 * Math.round(Math.log10(Math.max(1, scale.factor)))));
+/**
+ * Channels outside `seed live`'s default set (streamer1–3) that end the seed with a public VOD, so
+ * the home page's recently-live tiles have thumbnails at every scale (D1-seed).
+ */
+export const RECENT_VOD_CHANNELS = 6;
+
+/**
+ * Bulk streamers that record: `RECENT_VOD_CHANNELS` plus the one whose VOD is removed mid-stream,
+ * at every scale (council1's VOD is private, so it does not count).
+ */
+export function bulkRecordings(_scale: Pick<SeedScale, "factor">, available: number): number {
+  return Math.max(0, Math.min(available, RECENT_VOD_CHANNELS + 1));
+}
+
+/** Who ends the seed with a public VOD and is not in `live`: the recently-live tiles' channels. Pure. */
+export function recentVodChannels(plan: Pick<RecordingPlan, "recordings">, live: readonly string[]): string[] {
+  return plan.recordings
+    .filter((r) => !r.removeMidStream && !r.makePrivate && !live.includes(r.handle))
+    .map((r) => r.handle);
 }
 
 function planChat(r: Rng, seconds: number, owner: string, chatters: readonly string[]): PlannedLine[] {

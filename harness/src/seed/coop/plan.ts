@@ -258,6 +258,80 @@ const FILLER_TOPICS = [
   "Open a members' forum for feature ideas",
 ] as const;
 
+/** Ways to propose an initiative; each reads well before every `FILLER_INITIATIVES` entry. */
+const FILLER_ACTIONS = [
+  "Fund",
+  "Pilot",
+  "Trial",
+  "Budget for",
+  "Plan",
+  "Start",
+  "Launch",
+  "Support",
+  "Set up",
+  "Organise",
+  "Explore",
+  "Sponsor",
+  "Prototype",
+  "Run",
+  "Back",
+  "Look into",
+  "Commit to",
+  "Expand",
+  "Try out",
+  "Create",
+] as const;
+
+const FILLER_INITIATIVES = [
+  "a community art stream",
+  "captions in more languages",
+  "a mentorship programme for new streamers",
+  "a charity stream weekend",
+  "a creator onboarding guide",
+  "a monthly transparency digest",
+  "an open moderation workshop",
+  "a music licensing explainer",
+  "regional member meetups",
+  "a hardware lending library",
+  "a co-op podcast",
+  "a low-bandwidth viewing guide",
+  "a bug bounty for the player",
+  "a design review of the studio",
+  "a members' book club stream",
+  "a speedrun charity marathon",
+  "an archive of past co-op meetings",
+  "a small grants fund for new channels",
+  "a sign language interpreted stream",
+  "a members' photo walk",
+] as const;
+
+/**
+ * `n` distinct, plausible filler proposal titles (design review F19: no "(2)" suffixes): the
+ * hand-written topics first, then every action paired with every initiative, ordered so that
+ * neighbours differ in both. That is over 400 titles, enough for the large scale's 400 fillers;
+ * beyond them (no scale gets there) a later phase of the same idea. Pure.
+ */
+export function fillerTitles(n: number): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const add = (t: string) => {
+    if (out.length < n && !seen.has(t)) {
+      seen.add(t);
+      out.push(t);
+    }
+  };
+  for (const t of FILLER_TOPICS) add(t);
+  const pairs: string[] = [];
+  for (let k = 0; k < FILLER_ACTIONS.length * FILLER_INITIATIVES.length; k++) {
+    const what = k % FILLER_INITIATIVES.length;
+    const how = (what + Math.floor(k / FILLER_INITIATIVES.length)) % FILLER_ACTIONS.length;
+    pairs.push(`${FILLER_ACTIONS[how]} ${FILLER_INITIATIVES[what]}`);
+  }
+  for (const t of pairs) add(t);
+  for (let phase = 2; out.length < n; phase++) for (const t of pairs) add(`${t}, phase ${phase}`);
+  return out;
+}
+
 const has = (m: ElectorateMember, c: MemberClass) => m.classes.includes(c);
 
 /** `n` choices that pass an ordinary threshold of 0.5 (or fail it), shuffled. Pure given `rng`. */
@@ -490,14 +564,15 @@ export function planGovernance(rng: Rng, scale: SeedScale, input: GovernanceInpu
   const fillers = 4 * scale.factor;
   const fillerVoters = voterCount({ factor: 1 }, electorate.length, rules.ordinary.quorum);
   const fillerAuthors = rng.fork("filler-authors");
+  const titles = fillerTitles(fillers);
   for (let i = 0; i < fillers; i++) {
     const outcome = i % 3 === 2 ? "fail" : "pass";
-    const topic = FILLER_TOPICS[i % FILLER_TOPICS.length] as string;
+    const topic = titles[i] as string;
     proposals.push({
       ...base,
       ref: `filler-${i + 1}`,
       author: fillerAuthors.pick(electorate).handle,
-      title: i < FILLER_TOPICS.length ? topic : `${topic} (${Math.floor(i / FILLER_TOPICS.length) + 1})`,
+      title: topic,
       body: `An advisory proposal: ${topic.toLowerCase()}.`,
       change: null,
       target: outcome === "pass" ? "applied" : "rejected",
