@@ -1,0 +1,126 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# Recording rules for ADR 0032's stage triggers (§2) and the availability target (§1), read by
+# commonair-alerts.yml and the Grafana dashboards. docs/operators/monitoring.md explains each one.
+#
+# Triggers are "measured at the daily peak, sustained for 7 days": `daily_peak` is the highest
+# 5-minute value of the last 24 hours, and `sustained_peak_7d` the lowest of those over 7 days, so
+# it crosses a line only when every day's peak of the week did. A week with less than 7 days of
+# data (a new install, a lost volume) has no value: a two-day-old peak is not "sustained".
+groups:
+  # The availability target, as a series with an `slo_target` label. start.sh renders
+  # commonair:slo_target:configured from SLO_TARGET; without it the self-host default, 0.995.
+  - name: commonair-targets
+    rules:
+      - record: commonair:slo_target
+        expr: commonair:slo_target:configured or on() label_replace(vector(0.995), "slo_target", "0.995", "", "")
+
+  # The availability SLI: the share of HTTP requests our services answered without a 5xx. A whole
+  # host down records no requests at all, so L1-status's external probes complement it.
+  - name: commonair-sli
+    rules:
+      - record: commonair:sli_requests:rate5m
+        expr: sum(rate(http_server_request_duration_seconds_count[5m]))
+      - record: commonair:sli_errors:rate5m
+        expr: sum(rate(http_server_request_duration_seconds_count{http_response_status_code=~"5.."}[5m])) or on() (commonair:sli_requests:rate5m * 0)
+      - record: commonair:sli_error_ratio:rate5m
+        expr: commonair:sli_errors:rate5m / (commonair:sli_requests:rate5m > 0)
+      - record: commonair:sli_requests:rate30m
+        expr: sum(rate(http_server_request_duration_seconds_count[30m]))
+      - record: commonair:sli_errors:rate30m
+        expr: sum(rate(http_server_request_duration_seconds_count{http_response_status_code=~"5.."}[30m])) or on() (commonair:sli_requests:rate30m * 0)
+      - record: commonair:sli_error_ratio:rate30m
+        expr: commonair:sli_errors:rate30m / (commonair:sli_requests:rate30m > 0)
+      - record: commonair:sli_requests:rate1h
+        expr: sum(rate(http_server_request_duration_seconds_count[1h]))
+      - record: commonair:sli_errors:rate1h
+        expr: sum(rate(http_server_request_duration_seconds_count{http_response_status_code=~"5.."}[1h])) or on() (commonair:sli_requests:rate1h * 0)
+      - record: commonair:sli_error_ratio:rate1h
+        expr: commonair:sli_errors:rate1h / (commonair:sli_requests:rate1h > 0)
+      - record: commonair:sli_requests:rate6h
+        expr: sum(rate(http_server_request_duration_seconds_count[6h]))
+      - record: commonair:sli_errors:rate6h
+        expr: sum(rate(http_server_request_duration_seconds_count{http_response_status_code=~"5.."}[6h])) or on() (commonair:sli_requests:rate6h * 0)
+      - record: commonair:sli_error_ratio:rate6h
+        expr: commonair:sli_errors:rate6h / (commonair:sli_requests:rate6h > 0)
+      # Burn rate: how many times faster than the target allows the error budget is being spent.
+      # It keeps the slo_target label, so a page names the target it was measured against.
+      - record: commonair:slo_burn_rate:5m
+        expr: commonair:sli_error_ratio:rate5m / on() group_left(slo_target) (1 - commonair:slo_target)
+      - record: commonair:slo_burn_rate:30m
+        expr: commonair:sli_error_ratio:rate30m / on() group_left(slo_target) (1 - commonair:slo_target)
+      - record: commonair:slo_burn_rate:1h
+        expr: commonair:sli_error_ratio:rate1h / on() group_left(slo_target) (1 - commonair:slo_target)
+      - record: commonair:slo_burn_rate:6h
+        expr: commonair:sli_error_ratio:rate6h / on() group_left(slo_target) (1 - commonair:slo_target)
+
+  # 5-minute values of what the triggers measure.
+  - name: commonair-load
+    rules:
+      # App host CPU busy (stage 1): everything but idle and I/O wait, over all cores.
+      - record: commonair:host_cpu:ratio5m
+        expr: 1 - sum(rate(system_cpu_time_seconds_total{state=~"idle|wait"}[5m])) / sum(rate(system_cpu_time_seconds_total[5m]))
+      # Postgres load (stage 0, bundled state only): statement execution time per core, from
+      # pg_stat_database.active_time. It includes I/O and lock waits, so it reads high, never low.
+      - record: commonair:postgres_cpu:ratio5m
+        expr: sum(rate(commonair_postgres_active_time_seconds_total{state_mode="bundled"}[5m])) / scalar(max(system_cpu_logical_count))
+      # Transcode CPU (stage 2): ffmpeg CPU time per core, reported by the media service.
+      - record: commonair:transcode_cpu:ratio5m
+        expr: sum(rate(media_transcode_cpu_time_seconds_total[5m])) / scalar(max(system_cpu_logical_count))
+      # Concurrent live streams (stage 2).
+      - record: commonair:live_streams:count
+        expr: sum(media_streams_live)
+      # Origin egress (stage 3).
+      - record: commonair:egress_bytes:rate5m
+        expr: sum(rate(origin_egress_bytes_total[5m]))
+
+  - name: commonair-triggers
+    interval: 5m
+    rules:
+      - record: commonair:host_cpu:daily_peak
+        expr: max_over_time(commonair:host_cpu:ratio5m[1d])
+      - record: commonair:host_cpu:sustained_peak_7d
+        expr: min_over_time(commonair:host_cpu:daily_peak[7d]) and commonair:host_cpu:daily_peak offset 7d
+      - record: commonair:postgres_cpu:daily_peak
+        expr: max_over_time(commonair:postgres_cpu:ratio5m[1d])
+      - record: commonair:postgres_cpu:sustained_peak_7d
+        expr: min_over_time(commonair:postgres_cpu:daily_peak[7d]) and commonair:postgres_cpu:daily_peak offset 7d
+      - record: commonair:transcode_cpu:daily_peak
+        expr: max_over_time(commonair:transcode_cpu:ratio5m[1d])
+      - record: commonair:transcode_cpu:sustained_peak_7d
+        expr: min_over_time(commonair:transcode_cpu:daily_peak[7d]) and commonair:transcode_cpu:daily_peak offset 7d
+      - record: commonair:live_streams:daily_peak
+        expr: max_over_time(commonair:live_streams:count[1d])
+      - record: commonair:live_streams:sustained_peak_7d
+        expr: min_over_time(commonair:live_streams:daily_peak[7d]) and commonair:live_streams:daily_peak offset 7d
+
+      # The last restore drill's time (stage 0: over 4 h). S1-h's drill pushes the gauge through
+      # OTLP once a week; the collector drops a gauge that is not refreshed, so look back 8 days.
+      - record: commonair:restore_drill:seconds
+        expr: max(max_over_time(commonair_restore_drill_seconds[8d]))
+
+      # Upgrade downtime over 30 days against half the monthly budget at the configured target
+      # (stage 1). Each upgrade pushes one gauge with its own upgrade_id label.
+      - record: commonair:upgrade_downtime:seconds_30d
+        expr: sum(max_over_time(commonair_upgrade_downtime_seconds[30d]))
+      - record: commonair:upgrade_downtime:budget_ratio_30d
+        expr: commonair:upgrade_downtime:seconds_30d / on() group_left(slo_target) (0.5 * (1 - commonair:slo_target) * 2592000)
+
+      # Availability over 30 days, and the error budget left at the configured target. Averages of
+      # the 5-minute rates, so the result does not depend on any group's interval; with less than
+      # 30 days of data they cover what there is.
+      - record: commonair:sli_error_ratio:30d
+        expr: avg_over_time(commonair:sli_errors:rate5m[30d]) / (avg_over_time(commonair:sli_requests:rate5m[30d]) > 0)
+      - record: commonair:slo_availability:30d
+        expr: 1 - commonair:sli_error_ratio:30d
+      - record: commonair:error_budget_remaining:30d
+        expr: 1 - commonair:sli_error_ratio:30d / on() group_left(slo_target) (1 - commonair:slo_target)
+      # Stage 0's own trigger is the 99.5% budget, whatever target is configured.
+      - record: commonair:stage0_budget_spent:30d
+        expr: commonair:sli_error_ratio:30d / 0.005
+
+      # Origin egress over 30 days (stage 3), against EGRESS_BUDGET_GIB: the average rate times 30
+      # days, so a young install sees its month projected from the days it has.
+      - record: commonair:egress_bytes:30d
+        expr: avg_over_time(commonair:egress_bytes:rate5m[30d]) * 2592000

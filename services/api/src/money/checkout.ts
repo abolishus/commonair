@@ -14,7 +14,7 @@ import { type PaymentAdapter, createAdapter, manualInstructions } from "@commona
 import type { Deps } from "../deps.ts";
 import { decodeCursor, encodeCursor, isKeyCursor, pageOf } from "../lib/cursor.ts";
 import { channelBySlug, iso } from "../lib/dto.ts";
-import { badRequest, conflict, forbidden, notFound, precondition } from "../lib/errors.ts";
+import { apiError, badRequest, conflict, forbidden, notFound, precondition } from "../lib/errors.ts";
 import { os, requireCaller, requireChannel } from "../lib/orpc.ts";
 import {
   GIFT_POOL_CHAT_DAYS,
@@ -51,6 +51,11 @@ type CheckoutResult =
     };
 
 const DAY_MS = 86_400_000;
+const HOUR_MS = 3_600_000;
+
+/** Batch 8 decision (d): one unpaid gift per gifter and channel (i18n code `gift_pending`). */
+const giftPending = () =>
+  apiError("CONFLICT", "Your earlier gift to this channel is still waiting for payment", { reason: "gift_pending" });
 
 /**
  * Run a checkout transaction, again on the rare unique conflict: a reference collision
@@ -66,8 +71,7 @@ async function withCheckoutRetry<T>(run: () => Promise<T>): Promise<T> {
       if (violatesConstraint(err, "subscriptions_active_uq"))
         throw conflict("A recipient's subscription changed while checking out; try again");
       // Batch 8 decision (d): the database allows one pending gift per gifter and channel (0049).
-      if (violatesConstraint(err, "payments_open_gift_uq"))
-        throw conflict("Your earlier gift to this channel is still waiting for payment");
+      if (violatesConstraint(err, "payments_open_gift_uq")) throw giftPending();
       throw err;
     }
   }
@@ -340,7 +344,7 @@ export const checkoutHandlers = {
           )
           .limit(1)
           .for("update");
-        if (open) throw conflict("Your earlier gift to this channel is still waiting for payment");
+        if (open) throw giftPending();
         let recipients: string[];
         if (gift.to !== undefined) {
           const [to] = await tx.select({ id: users.id }).from(users).where(eq(users.username, gift.to.toLowerCase()));
@@ -386,7 +390,8 @@ export const checkoutHandlers = {
           tier: tier.tier,
           quantity: recipients.length,
           gift: true,
-          expiresAt: new Date(now.getTime() + pendingDays * DAY_MS),
+          // Decision (d): an unpaid gift holds its recipients' slots for GIFT_PAYMENT_HOURS only.
+          expiresAt: new Date(now.getTime() + deps.env.GIFT_PAYMENT_HOURS * HOUR_MS),
         });
         await tx.insert(subscriptions).values(
           recipients.map((subscriberId) => ({

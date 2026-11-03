@@ -1,0 +1,8 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# VALKEY_MONITOR_TLS=on: TLS verified against the provider's CA (VALKEY_CA_FILE, the
+# commonair-valkey-ca secret mounted read-only), or the system trust store when it is empty.
+insecure: false
+insecure_skip_verify: false
+ca_file: ${env:VALKEY_CA_FILE:-}

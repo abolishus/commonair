@@ -384,6 +384,21 @@ describe("build", () => {
       }),
     ]);
     for (const none of [dismissed, noop, lift]) expect(of(none)).toEqual([]);
+    // B7 CR6: each staff action's facts are `staff_action` (action, clause, time), never a case.
+    for (const [auditId, action] of [
+      [resolveAudit, "report.resolve"],
+      [userAudit, "user.suspend"],
+      [channelAudit, "channel.suspend"],
+    ] as const) {
+      const [s] = of(auditId);
+      expect(s?.facts).toEqual({
+        code: "staff_action",
+        action,
+        clauseId: "decency.harassment",
+        appliedAt: expect.any(String),
+      });
+      expect(Date.parse((s!.facts as { appliedAt: string }).appliedAt)).toBe(s!.createdAt.getTime());
+    }
     expect((await buildStatements(ctx())).inserted).toBe(0);
     // The coverage sweep shares the predicate: the no-statement rows are never missing.
     const cov = await sorCoverage(ctx());

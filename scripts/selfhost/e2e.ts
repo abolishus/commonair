@@ -4,7 +4,8 @@
 /**
  * Self-host end to end (ADR 0023 §7 and §9): what we test is what we ship.
  *
- *   bun scripts/selfhost/e2e.ts [--distro debian|fedora] [--storage garage|external] [--no-mirror] [--keep]
+ *   bun scripts/selfhost/e2e.ts [--distro debian|fedora] [--storage garage|external]
+ *     [--state bundled|external] [--no-mirror] [--keep]
  *
  * 1. Builds the 14 release images from this checkout (an image already built for this commit,
  *    by its label, is reused), pushes them to a throwaway Zot registry and writes a release
@@ -37,6 +38,15 @@
  * --storage external installs against an external S3 store (e2e-s3.ts: a second Garage in a
  * rootful container on the host) instead of the instance's own Garage, and checks uploads and
  * downloads against it instead of through Caddy. CI runs it on Debian only.
+ *
+ * --state external (S1-b) installs against external Postgres and Valkey as well (e2e-external.ts:
+ * a TLS-only Postgres 17 with a CREATEROLE owner and no superuser, and a TLS-only Valkey whose
+ * users may not run @admin or @dangerous commands, each in a rootful container on the host), and
+ * implies --storage external. It runs the preflight, the install with Valkey's ACL user, the
+ * upgrade (migrate once, as the owner), status, a worker restart, a re-install onto Valkey's
+ * password-only default user (DigitalOcean's model) and the rollback, and checks after each that
+ * no bundled Postgres or Valkey unit exists and that Valkey refused no command. The bundled
+ * default (no --state) runs exactly as before.
  *
  * Locally, third-party images come through a pull-through Zot mirror kept in
  * .cache/selfhost-e2e-mirror/ (e2e-mirror.ts), against Docker Hub's rate limit; --no-mirror
@@ -75,6 +85,16 @@ import {
   externalStoreSetup,
 } from "./e2e-s3.ts";
 import { checkObjectBackup, objectBackupSetup, objectBackupTeardown } from "./e2e-backup.ts";
+import { checkMetrics } from "./e2e-metrics.ts";
+import {
+  E2E_STATE,
+  type ValkeyUser,
+  checkExternalState,
+  externalStateEnv,
+  externalStateFlags,
+  externalStateSetup,
+  migrateRestarts,
+} from "./e2e-external.ts";
 
 // Test-only images (ADR 0022: digest-pinned, licensed in infra/image-licenses.json).
 export const ZOT_IMAGE =
@@ -184,9 +204,12 @@ export function timingsTable(rows: readonly (readonly [string, number])[]): stri
 // --- options ------------------------------------------------------------------------------
 
 export type Storage = "garage" | "external";
+/** Where Postgres and Valkey run: the instance's own containers, or external servers (S1-b). */
+export type State = "bundled" | "external";
 export interface E2eOptions {
   distro: Distro;
   storage: Storage;
+  state: State;
   keep: boolean;
   /** undefined: the default (mirrorWanted). */
   mirror: boolean | undefined;
@@ -197,21 +220,33 @@ export interface E2eOptions {
  * option is an error rather than ignored, so a typo cannot quietly run the default variant.
  */
 export function e2eOptions(argv: readonly string[]): E2eOptions {
-  const opts: E2eOptions = { distro: "debian", storage: "garage", keep: false, mirror: undefined };
-  const valued = { distro: Object.keys(HOST_IMAGES), storage: ["garage", "external"] } as const;
+  const opts: E2eOptions = { distro: "debian", storage: "garage", state: "bundled", keep: false, mirror: undefined };
+  let storageGiven = false;
+  const valued = {
+    distro: Object.keys(HOST_IMAGES),
+    storage: ["garage", "external"],
+    state: ["bundled", "external"],
+  } as const;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i] ?? "";
     const name = a.startsWith("--") ? a.slice(2) : "";
-    if (name === "distro" || name === "storage") {
+    if (name === "distro" || name === "storage" || name === "state") {
       const v = argv[++i] ?? "";
       if (!(valued[name] as readonly string[]).includes(v))
         throw new Error(`${a} must be ${valued[name].join(" or ")}, not ${v || "nothing"}`);
       if (name === "distro") opts.distro = v as Distro;
-      else opts.storage = v as Storage;
+      else if (name === "storage") {
+        opts.storage = v as Storage;
+        storageGiven = true;
+      } else opts.state = v as State;
     } else if (name === "keep") opts.keep = true;
     else if (name === "mirror" || name === "no-mirror") opts.mirror = name === "mirror";
     else throw new Error(`unknown option ${a}`);
   }
+  // External Postgres and Valkey run beside an external object store, as a managed stage 1 does.
+  if (opts.state === "external" && storageGiven && opts.storage !== "external")
+    throw new Error("--state external runs with --storage external (an instance on managed services)");
+  if (opts.state === "external") opts.storage = "external";
   return opts;
 }
 
@@ -1133,9 +1168,10 @@ const PODMAN_FIRST = {
 } as const;
 
 async function main(): Promise<void> {
-  const { distro, storage, keep, mirror: mirrorFlag } = e2eOptions(process.argv.slice(2));
+  const { distro, storage, state, keep, mirror: mirrorFlag } = e2eOptions(process.argv.slice(2));
   const mirror = mirrorWanted(mirrorFlag, process.env);
   const external = storage === "external";
+  const externalState = state === "external";
   rmSync(LOG_DIR, { recursive: true, force: true });
   mkdirSync(LOG_DIR, { recursive: true });
   const commit = run(["git", "rev-parse", "HEAD"]).trim();
@@ -1192,14 +1228,23 @@ async function main(): Promise<void> {
         fixturePorts.add(E2E_STORE.s3Port);
       });
 
-    await step(`install ${v1}${external ? " (external S3 store)" : ""}`, () => {
+    if (externalState)
+      await step("start the external Postgres and Valkey", () => {
+        externalStateSetup(inHost, expectThat);
+        fixturePorts.add(E2E_STATE.pgPort);
+        fixturePorts.add(E2E_STATE.valkeyPort);
+      });
+
+    const installLabel = externalState ? " (external Postgres, Valkey and S3)" : external ? " (external S3 store)" : "";
+    await step(`install ${v1}${installLabel}`, async () => {
       const bundle = `/e2e/releases/${v1}/${bundleAssetName(v1)}`;
       inHost(
         `${sh} install --bundle ${bundle} --tls internal --domain ${DOMAIN} --email ops@${DOMAIN} ` +
           `--registry ${MIRROR} --public-ip 127.0.0.1 ${model ? `--model /e2e/${MODEL_FILE} ` : ""}` +
-          `${external ? `${externalInstallFlags()} ` : ""}--yes`,
-        // The store's keys go in the environment, never on the command line.
-        { env: external ? externalInstallEnv() : {} },
+          `${external ? `${externalInstallFlags()} ` : ""}` +
+          `${externalState ? `${externalStateFlags("acl")} ` : ""}--yes`,
+        // The store's keys and the servers' passwords go in the environment, never on the command line.
+        { env: { ...(external ? externalInstallEnv() : {}), ...(externalState ? externalStateEnv("acl") : {}) } },
       );
       expectThat(installedVersion() === v1, `status reports ${v1}`);
       checkHttps();
@@ -1209,12 +1254,18 @@ async function main(): Promise<void> {
         checkBrowserStorage("install");
       }
       checkUnitEnv();
-      checkValkeyAuth();
+      // The bundled Valkey's own checks; an external one has its own (e2e-external.ts).
+      if (!externalState) {
+        checkValkeyAuth();
+      }
+      if (externalState) await checkExternalState(inHost, expectThat, "install");
       checkClientAddresses();
       checkIrcClientAddresses(inHost, expectThat);
       checkIpv6();
       checkListeners();
       checkStopPostOrder();
+      // The collector's host, Postgres and Valkey series and the rule groups (L1-observability).
+      await checkMetrics(inHost, expectThat, externalState ? "external" : "bundled");
     });
 
     await step(`release ${v2} (new digests) and upgrade`, async () => {
@@ -1228,6 +1279,10 @@ async function main(): Promise<void> {
       inHost(`sh ~/commonair/selfhost.sh upgrade --bundle /e2e/releases/${v2}/${bundleAssetName(v2)}`, { user: true });
       expectThat(installedVersion() === v2, `status reports ${v2}`);
       checkMigrateFirst(before);
+      if (externalState) {
+        const restarts = migrateRestarts(inHost);
+        expectThat(restarts === 0, `the upgrade ran migrate once, as the owner (${restarts} restarts)`);
+      }
       checkHttps();
       if (external) {
         // The upgrade keeps the store the install chose.
@@ -1236,7 +1291,11 @@ async function main(): Promise<void> {
         checkBrowserStorage("upgrade");
       }
       checkUnitEnv();
-      checkValkeyAuth();
+      // The bundled Valkey's own checks; an external one has its own (e2e-external.ts).
+      if (!externalState) {
+        checkValkeyAuth();
+      }
+      if (externalState) await checkExternalState(inHost, expectThat, "upgrade");
       checkListeners();
       checkIrcClientAddresses(inHost, expectThat);
       checkStopPostOrder();
@@ -1250,6 +1309,19 @@ async function main(): Promise<void> {
     // object restore, before the rollback. Its own step, so its time is in the timings table.
     // With --storage external that Garage is already the instance's store: objectBackupSetup
     // reuses a running one rather than calling externalStoreSetup (which removes it first).
+    if (externalState)
+      await step("re-install onto Valkey's password-only default user", async () => {
+        const user: ValkeyUser = "default";
+        const out = inHost(
+          `sh ~/commonair/selfhost.sh install --reinstall --valkey-url rediss://${E2E_STATE.host}:${E2E_STATE.valkeyPort} 2>&1`,
+          { user: true, env: { VALKEY_PASSWORD: externalStateEnv(user).VALKEY_PASSWORD! } },
+        );
+        expectThat(out.includes("ok: valkey: PING over TLS verified"), "the preflight passed with the default user");
+        expectThat(installedVersion() === v2, `status reports ${v2} on the default user`);
+        checkHttps();
+        await checkExternalState(inHost, expectThat, "default user");
+      });
+
     await step("backups: objects offsite and an object restore", () => {
       objectBackupSetup(inHost, expectThat);
       const t = checkObjectBackup(inHost, expectThat);
@@ -1272,6 +1344,7 @@ async function main(): Promise<void> {
       expectThat(out.includes(`rolled back to ${v2}, which is healthy`), "it reports a healthy rollback");
       expectThat(installedVersion() === v2, `status reports ${v2} again`);
       checkHttps();
+      if (externalState) await checkExternalState(inHost, expectThat, "rollback");
     });
   } catch (e) {
     collectLogs();
@@ -1283,6 +1356,7 @@ async function main(): Promise<void> {
     if (!keep) cleanup();
     else {
       if (external) log(`--keep: the external store is ${E2E_STORE.container} in ${HOST}`);
+      if (externalState) log(`--keep: the external servers are ${E2E_STATE.pg} and ${E2E_STATE.valkey} in ${HOST}`);
       console.log(`--keep: ${HOST} and ${ZOT} are still running (podman exec -it ${HOST} bash)`);
     }
   }

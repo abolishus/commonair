@@ -79,7 +79,7 @@ export type StripeAction =
       /** Dispute fees Stripe gave back (a won dispute's reinstatement). */
       feeRefundCents: number;
     }
-  | { type: "refund.failed"; refundId: string; paymentIntent: string | null }
+  | { type: "refund.failed"; refundId: string; paymentIntent: string | null; amountCents: number | null }
   /**
    * Batch 8 (M1-gifts-refunds): a refund changed state without failing (a failure parses to
    * `refund.failed`, as before). Success is still posted from `charge.refunded`.
@@ -259,12 +259,22 @@ export function stripeAction(e: StripeEventEnvelope): StripeAction {
       };
     case "refund.failed":
       if (o.status !== "failed") return { type: "ignored" };
-      return { type: "refund.failed", refundId: need(str(o.id), "refund id"), paymentIntent: ref(o.payment_intent) };
+      return {
+        type: "refund.failed",
+        refundId: need(str(o.id), "refund id"),
+        paymentIntent: ref(o.payment_intent),
+        amountCents: int(o.amount),
+      };
     case "refund.updated":
     case "charge.refund.updated": {
       // A failure keeps its own action; success is posted from charge.refunded.
       if (o.status === "failed")
-        return { type: "refund.failed", refundId: need(str(o.id), "refund id"), paymentIntent: ref(o.payment_intent) };
+        return {
+          type: "refund.failed",
+          refundId: need(str(o.id), "refund id"),
+          paymentIntent: ref(o.payment_intent),
+          amountCents: int(o.amount),
+        };
       return {
         type: "refund.updated",
         refundId: need(str(o.id), "refund id"),

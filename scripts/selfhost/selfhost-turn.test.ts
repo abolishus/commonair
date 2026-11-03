@@ -77,6 +77,7 @@ const REAL_TOOLS = [
   "mkdir",
   "mktemp",
   "mv",
+  "od",
   "paste",
   "readlink",
   "rm",

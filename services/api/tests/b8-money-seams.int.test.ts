@@ -32,9 +32,6 @@ const ID = "01890000-0000-7000-8000-0000000000b8";
 
 describe("the new procedures are stubs behind their access levels", () => {
   const routes: [method: string, path: string, body?: unknown][] = [
-    ["GET", "/api/treasurer/refund-requests?state=unknown"],
-    ["POST", `/api/treasurer/refund-requests/${ID}/resolve`, { outcome: "failed" }],
-    ["GET", "/api/treasurer/payout-transfers"],
     ["GET", `/api/coop/patronage/${ID}/payouts`],
     ["POST", `/api/coop/patronage/${ID}/pay`, {}],
   ];

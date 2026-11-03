@@ -8,6 +8,14 @@
 #   logs    → Loki's native OTLP endpoint
 # Podman's log files are not portable to read, so no filelog receiver: stdout JSON
 # logs stay available via `podman logs`, and OTLP is the shipped copy.
+#
+# It also collects the host, Postgres and Valkey itself (ADR 0032 §6, docs/operators/monitoring.md).
+# One config serves both state modes (contract step §3.7): with bundled state the PG_MONITOR_* and
+# VALKEY_MONITOR_* endpoints are the bundled containers (the defaults below), with external state
+# they are the managed services, reached over verified TLS with the read-only monitor role. A
+# remote that is down or refuses the login never stops the collector: each receiver logs the
+# failed scrape and counts it in otelcol_scraper_errored_metric_points (:8888; no _total), which the
+# CommonairStateScrapeFailing alert watches.
 extensions:
   health_check:
     endpoint: 0.0.0.0:13133
@@ -19,6 +27,94 @@ receivers:
         endpoint: 0.0.0.0:4317
       http:
         endpoint: 0.0.0.0:4318
+
+  # Reads the host's /proc, mounted read-only at /hostfs/proc (the Quadlet unit and compose say
+  # why): CPU, memory and load from /proc/stat, /proc/meminfo and /proc/loadavg, and disk I/O from
+  # /proc/diskstats, none of which a container namespace hides. Without root_path every figure
+  # would be the container's own. Two scrapers ADR 0032 §6 lists are not here, on purpose:
+  # - network: /proc/net/dev resolves through /proc/self to the collector's own network
+  #   namespace, so it would count the collector's traffic, not the host's. Egress comes from
+  #   origin_egress_bytes_total, which is what the stage 3 trigger names.
+  # - process: rootless Podman denies another container's /proc/<pid>/status and exe, so it
+  #   cannot see Postgres or ffmpeg. Postgres load comes from pg_stat_database (sql_query below).
+  host_metrics:
+    collection_interval: 30s
+    root_path: /hostfs
+    scrapers:
+      cpu:
+        metrics:
+          system.cpu.utilization: { enabled: true }
+          system.cpu.logical.count: { enabled: true }
+      memory:
+        metrics:
+          system.memory.utilization: { enabled: true }
+      load: {}
+      disk: {}
+
+  # Disk space of the root filesystem, seen from inside the container: the container's root is an
+  # overlay on the filesystem that holds Podman's storage and volumes (Postgres, Prometheus, media
+  # work), so its statfs is that disk's. The host's mount table is not readable rootless, so this
+  # one has no root_path. The overlay counts as "virtual", hence the include.
+  host_metrics/fs:
+    collection_interval: 60s
+    scrapers:
+      filesystem:
+        include_virtual_filesystems: true
+        include_mount_points:
+          mount_points: ["/"]
+          match_type: strict
+        metrics:
+          system.filesystem.utilization: { enabled: true }
+
+  # Reads pg_stat_database, pg_stat_user_tables, pg_stat_bgwriter, pg_settings and
+  # pg_database_size, which commonair_monitor reads without pg_monitor (ADR 0032 §4). The
+  # replication and WAL figures need pg_monitor; on a managed database they stay empty.
+  postgresql:
+    collection_interval: 30s
+    endpoint: ${env:PG_MONITOR_ENDPOINT:-postgres:5432}
+    transport: tcp
+    username: ${env:PG_MONITOR_USER:-commonair_monitor}
+    # An unset password must not stop the collector from starting (it would refuse the config):
+    # the login fails at scrape time instead, and that is counted and alerted on.
+    password: ${env:PG_MONITOR_PASSWORD:-not-configured}
+    databases: [commonair]
+    # tls/pg-verify-full.yaml (sslmode=verify-full, the CA from DATABASE_CA_FILE or the system
+    # store), tls/pg-require.yaml (TLS unverified, only with --allow-insecure-database) or
+    # tls/pg-disable.yaml (bundled, inside the Podman network). Any other value of PG_MONITOR_TLS
+    # names no file, and the collector refuses to start: never a silent downgrade.
+    tls: ${file:/etc/otelcol-contrib/tls/pg-${env:PG_MONITOR_TLS:-disable}.yaml}
+    metrics:
+      postgresql.deadlocks: { enabled: true }
+
+  # Statement execution time from pg_stat_database.active_time (Postgres 14+, readable without
+  # pg_monitor, and on a managed cluster): the stage 0 "Postgres CPU" trigger. It includes time
+  # spent waiting on I/O and locks, so it reads high, never low: the alert fires early, not late.
+  # The same login, database and TLS mode as the postgresql receiver, as a libpq URL (the monitor
+  # password must be URL-safe; selfhost.sh generates hex).
+  sql_query/pg:
+    driver: postgres
+    datasource: "postgresql://${env:PG_MONITOR_USER:-commonair_monitor}:${env:PG_MONITOR_PASSWORD:-not-configured}@${env:PG_MONITOR_ENDPOINT:-postgres:5432}/commonair?sslmode=${env:PG_MONITOR_TLS:-disable}&sslrootcert=${env:DATABASE_CA_FILE:-}&connect_timeout=10"
+    collection_interval: 30s
+    queries:
+      - sql: "SELECT coalesce(sum(active_time), 0) / 1000.0 AS active_seconds FROM pg_stat_database"
+        metrics:
+          - metric_name: commonair.postgres.active_time
+            value_column: active_seconds
+            value_type: double
+            data_type: sum
+            monotonic: true
+            aggregation: cumulative
+            unit: s
+
+  # INFO only: no CONFIG, no CLIENT LIST, which a managed Valkey restricts (ADR 0032).
+  redis:
+    collection_interval: 30s
+    endpoint: ${env:VALKEY_MONITOR_ENDPOINT:-valkey:6379}
+    username: ${env:VALKEY_MONITOR_USER:-}
+    password: ${env:VALKEY_MONITOR_PASSWORD:-}
+    tls: ${file:/etc/otelcol-contrib/tls/valkey-${env:VALKEY_MONITOR_TLS:-off}.yaml}
+    metrics:
+      redis.maxmemory: { enabled: true }
 
 processors:
   memory_limiter:
@@ -34,6 +130,27 @@ processors:
       - { key: http.client_ip, action: delete }
       - { key: user.email, action: delete }
       - { key: enduser.id, action: hash }
+  # The same for the state receivers, on data points and on resources (which become labels):
+  # no client addresses, no query text, no user names.
+  attributes/scrub-state:
+    actions:
+      - { key: client.address, action: delete }
+      - { key: client.port, action: delete }
+      - { key: network.peer.address, action: delete }
+      - { key: db.query.text, action: delete }
+      - { key: db.statement, action: delete }
+      - { key: postgresql.query, action: delete }
+      - { key: user.name, action: delete }
+      - { key: db.user, action: delete }
+  resource/scrub-state:
+    attributes:
+      - { key: client.address, action: delete }
+      - { key: db.user, action: delete }
+      - { key: user.name, action: delete }
+  # bundled or external (contract step §3.7), so a panel can say which state it shows.
+  resource/state:
+    attributes:
+      - { key: state_mode, value: "${env:OBSERVABILITY_STATE_MODE:-bundled}", action: upsert }
 
 exporters:
   otlp/tempo:
@@ -49,6 +166,17 @@ exporters:
 
 service:
   extensions: [health_check]
+  # The collector's own metrics, scraped by Prometheus (job otel-collector-internal): the scrape
+  # error counters are the only sign that the path to a managed cluster broke.
+  telemetry:
+    metrics:
+      level: normal
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: 0.0.0.0
+                port: 8888
   pipelines:
     traces:
       receivers: [otlp]
@@ -57,6 +185,10 @@ service:
     metrics:
       receivers: [otlp]
       processors: [memory_limiter, batch]
+      exporters: [prometheus]
+    metrics/state:
+      receivers: [host_metrics, host_metrics/fs, postgresql, sql_query/pg, redis]
+      processors: [memory_limiter, attributes/scrub-state, resource/scrub-state, resource/state, batch]
       exporters: [prometheus]
     logs:
       receivers: [otlp]

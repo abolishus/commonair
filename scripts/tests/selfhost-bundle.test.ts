@@ -101,7 +101,7 @@ describe("bundle contents", () => {
     const systemd = readdirSync(join(ROOT, "infra/systemd")).map((f) => `systemd/${f}`);
     // Every unit with an env file renders it from its key list at start (unit-env.ts).
     const keyLists = readdirSync(join(ROOT, "infra/selfhost/env")).map((f) => `infra/selfhost/env/${f}`);
-    expect(keyLists).toHaveLength(19);
+    expect(keyLists).toHaveLength(21);
     // Staging seed mode's drop-ins (selfhost.sh seed-mode open copies them next to the units).
     const seedMode = readdirSync(join(ROOT, "infra/selfhost/seed-mode")).map((f) => `infra/selfhost/seed-mode/${f}`);
     expect(seedMode).toHaveLength(3);
@@ -117,12 +117,26 @@ describe("bundle contents", () => {
       "infra/coturn/turnserver.conf",
       "infra/garage/garage.toml",
       "infra/grafana/dashboards/README.md",
+      "infra/grafana/dashboards/app.json",
+      "infra/grafana/dashboards/availability.json",
+      "infra/grafana/dashboards/host.json",
+      "infra/grafana/dashboards/postgres.json",
+      "infra/grafana/dashboards/stage-triggers.json",
+      "infra/grafana/dashboards/valkey.json",
       "infra/grafana/provisioning/dashboards/dashboards.yaml",
       "infra/grafana/provisioning/datasources/datasources.yaml",
       "infra/loki/loki.yaml",
       "infra/mediamtx/mediamtx.yml",
       "infra/otel-collector/config.yaml",
+      "infra/otel-collector/tls/pg-disable.yaml",
+      "infra/otel-collector/tls/pg-require.yaml",
+      "infra/otel-collector/tls/pg-verify-full.yaml",
+      "infra/otel-collector/tls/valkey-off.yaml",
+      "infra/otel-collector/tls/valkey-on.yaml",
       "infra/prometheus/prometheus.yml",
+      "infra/prometheus/rules/commonair-alerts.yml",
+      "infra/prometheus/rules/commonair-recording.yml",
+      "infra/prometheus/start.sh",
       "infra/tempo/tempo.yaml",
       // What the units' ExecStartPre= and ExecStopPost= lines use from %h/commonair/.
       "scripts/selfhost/cgroup-reset.sh",

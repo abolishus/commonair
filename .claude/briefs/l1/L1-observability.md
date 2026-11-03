@@ -78,7 +78,7 @@ is S1-b's.
    - `postgresql`:
      - endpoint `${env:PG_MONITOR_ENDPOINT}`, user `${env:PG_MONITOR_USER}`, password from the
        secret file;
-     - TLS from `PG_MONITOR_TLS`, with the CA file when set;
+     - TLS from `PG_MONITOR_TLS` (`require`: TLS without verification), with the CA file when set;
      - databases `commonair`.
    - `redis`: endpoint `${env:VALKEY_MONITOR_ENDPOINT}`, the password file, and TLS from
      `VALKEY_MONITOR_TLS`. It reads `INFO` only, which DigitalOcean allows.

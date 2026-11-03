@@ -74,29 +74,12 @@ export const B8_EXTENSION_UNITS: Readonly<Record<B8Extension, { unit: string; fi
 /**
  * Extensions whose implementing unit has not merged yet: selectable explicitly
  * (`--set b8=gift-window`) but left out of `all`, so the full harness on main stays green while
- * they are stubs. Every one at the contract step.
+ * they are stubs. Wave 1's were lifted at its merge; wave 2's remain.
  */
 export const PENDING_B8_EXTENSIONS: readonly B8Extension[] = [
-  "gift-window",
-  "auto-refund",
-  "refund-unknown",
-  "connect-transfer",
-  "transfer-reversed",
-  "receipt-email",
   "share-stripe",
   "patronage-payout",
-  "grace-bet-web",
-  "giveaway-verify-mine",
-  "raid-restart-keeps-raid",
   "edge-sync",
-  "field-choices",
-  "channel-panels-banner",
-  "import-expiry",
-  "actor-disabled-event",
-  "incoming-cleanup",
-  "giveaway-section",
-  "sor-staff-action",
-  "lapsed-ban-signin",
   "relay-dvr-switch",
 ];
 

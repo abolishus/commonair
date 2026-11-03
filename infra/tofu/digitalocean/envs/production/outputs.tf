@@ -48,3 +48,8 @@ output "managed_state_secrets" {
   value       = module.instance.managed_state_secrets
   sensitive   = true
 }
+
+output "observability_env" {
+  description = "Keys for this instance's commonair.env (docs/operators/monitoring.md#settings): U4's 99.9% target."
+  value       = { SLO_TARGET = "0.999" }
+}

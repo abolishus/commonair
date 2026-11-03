@@ -90,10 +90,24 @@ export function stripeAdapter(opts: StripeAdapterOptions): PaymentAdapter {
     async refund(r: RefundRequest) {
       if (!r.providerRef.startsWith("pi_")) throw new RangeError("this payment has no Stripe PaymentIntent to refund");
       const refund = await client.createRefund(
-        { payment_intent: r.providerRef, amount: r.amountCents, metadata: { payment_id: r.paymentId } },
+        {
+          payment_intent: r.providerRef,
+          amount: r.amountCents,
+          // refund_key lets the reconciler match a refund whose create answer was lost.
+          metadata: { payment_id: r.paymentId, refund_key: r.idempotencyKey },
+        },
         r.idempotencyKey,
       );
       return { providerRef: refund.id };
+    },
+    async listRefunds(pi: string) {
+      return (await client.listRefunds({ paymentIntent: pi })).map((r) => ({
+        id: r.id,
+        amount: r.amount,
+        currency: r.currency,
+        status: r.status,
+        metadata: r.metadata,
+      }));
     },
     async payoutOnboarding(r: PayoutOnboardingRequest) {
       const accountId =

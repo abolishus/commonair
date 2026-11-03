@@ -19,6 +19,7 @@ import { Valkey } from "iovalkey";
 import { valkeyTls } from "@commonair/service";
 import {
   B7JobResult,
+  B8_JOBS,
   B7TickBody,
   FEDERATION_JOBS,
   GIVEAWAY_JOBS,
@@ -44,6 +45,8 @@ export const B7_TICK_QUEUES: Record<B7TickBody["job"], string> = {
   [GIVEAWAY_JOBS.close]: QUEUES.interact,
   [FEDERATION_JOBS.rotate]: QUEUES.federation,
   [FEDERATION_JOBS.sweep]: QUEUES.federation,
+  [B8_JOBS.incomingCleanup]: QUEUES.portability,
+  [B8_JOBS.importRecordExpiry]: QUEUES.portability,
 };
 
 export interface B7TickRunner {

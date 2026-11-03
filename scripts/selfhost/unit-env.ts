@@ -261,6 +261,31 @@ export const STATIC_UNITS: Record<string, StaticList> = {
     why: "Grafana's GF_* settings (the admin password is a Podman secret)",
     keys: ["GF_*"],
   },
+  "otel-collector": {
+    why: "the ${env:...} references of infra/otel-collector/config.yaml and tls/*.yaml (the monitor passwords are Podman secrets)",
+    keys: [
+      "DATABASE_CA_FILE",
+      "OBSERVABILITY_STATE_MODE",
+      "PG_MONITOR_ENDPOINT",
+      "PG_MONITOR_TLS",
+      "PG_MONITOR_USER",
+      "VALKEY_CA_FILE",
+      "VALKEY_MONITOR_ENDPOINT",
+      "VALKEY_MONITOR_TLS",
+      "VALKEY_MONITOR_USER",
+    ],
+  },
+  prometheus: {
+    why: "the settings infra/prometheus/start.sh renders into rules and the optional managed-db-metrics job",
+    keys: [
+      "EGRESS_BUDGET_GIB",
+      "LIVE_STREAMS_PER_HOST",
+      "MANAGED_DB_METRICS_CA_FILE",
+      "MANAGED_DB_METRICS_TARGETS",
+      "MANAGED_DB_METRICS_USER",
+      "SLO_TARGET",
+    ],
+  },
   "irc-cert": {
     why: "infra/irc/sync-cert.ts",
     keys: ["IRC_PUBLIC_HOST"],
@@ -314,15 +339,7 @@ export const STATIC_UNITS: Record<string, StaticList> = {
  * its whole configuration as arguments; media holds its URL, WHISPER_URL; seed mode's Mailpit and
  * stripe-mock need no setting of the instance's).
  */
-export const NO_ENV_UNITS = [
-  "loki",
-  "mailpit",
-  "otel-collector",
-  "prometheus",
-  "stripe-mock",
-  "tempo",
-  "whisper",
-] as const;
+export const NO_ENV_UNITS = ["loki", "mailpit", "stripe-mock", "tempo", "whisper"] as const;
 
 export const unitName = (unit: string) => `commonair-${unit}`;
 export const keysPath = (unit: string) => `${KEYS_DIR}/${unitName(unit)}.keys`;

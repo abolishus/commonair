@@ -603,7 +603,13 @@ describe("staff suspensions", () => {
       channelId,
       content: { type: "account", id: target },
       restriction: { kind: "account", detail: "suspended", endsAt: new Date(AT.getTime() + 3600_000).toISOString() },
-      facts: { code: "moderator_review", caseId: d.modActionId, caseOrigin: "human", decision: "suspend" },
+      // B7 CR6: no moderation case, so no case reference: the action, clause and time.
+      facts: {
+        code: "staff_action",
+        action: "report.resolve",
+        clauseId: "decency.harassment",
+        appliedAt: AT.toISOString(),
+      },
       // A user's report is an Art. 16 notice.
       source: "notice_art16",
       automatedDetection: false,
@@ -640,6 +646,12 @@ describe("staff suspensions", () => {
       recipientUserId: target,
       content: { type: "account", id: target },
       restriction: { kind: "account", detail: "suspended", endsAt: new Date(AT.getTime() + 86_400_000).toISOString() },
+      facts: {
+        code: "staff_action",
+        action: "user.suspend",
+        clauseId: "decency.harassment",
+        appliedAt: AT.toISOString(),
+      },
       source: "own_initiative",
       automatedDecision: "not",
       appeal: { kind: "moderation", subjectType: "moderation_action", subjectId: d.modActionId },
@@ -656,9 +668,16 @@ describe("staff suspensions", () => {
       recipientUserId: owner,
       content: { type: "channel", id: channelId },
       restriction: { kind: "service", detail: "suspended", endsAt: null },
+      facts: {
+        code: "staff_action",
+        action: "channel.suspend",
+        clauseId: "decency.harassment",
+        appliedAt: AT.toISOString(),
+      },
       source: "own_initiative",
       appeal: { kind: "moderation", subjectType: "moderation_action", subjectId: d.modActionId },
     });
+    expect(Object.keys(s!.facts)).not.toContain("caseId");
     expectNoForbiddenData(s!);
   });
 
@@ -777,7 +796,7 @@ describe("the mail of a stored statement", () => {
       facts: { code: "classifier", threshold: 0.93 },
     });
     expect(mail.statementRef).toMatch(/^SR-[0-9A-F]{8}$/);
-    // A case decision is quoted as a case; a staff suspension (no case) as its mod action.
+    // A case decision is quoted as a case; a staff action (no case) never cites one (B7 CR6).
     const reviewed = {
       code: "moderator_review" as const,
       caseId: d.caseId,
@@ -790,9 +809,22 @@ describe("the mail of a stored statement", () => {
       site,
     );
     expect(byCase.facts).toMatchObject({ caseRef: expect.stringMatching(/^MC-[0-9A-F]{8}$/) });
-    for (const sourceAction of ["report.resolve", "user.suspend", "channel.suspend"]) {
-      const staff = statementMail({ ...stored, sourceAction, facts: reviewed }, { body, isDraft: true }, site);
-      expect(staff.facts).toMatchObject({ caseRef: expect.stringMatching(/^MA-[0-9A-F]{8}$/) });
+    for (const sourceAction of ["report.resolve", "user.suspend", "channel.suspend"] as const) {
+      const appliedAt = "2026-10-27T12:00:00.000Z";
+      const staff = statementMail(
+        {
+          ...stored,
+          sourceAction,
+          facts: { code: "staff_action", action: sourceAction, clauseId: "safety.weapons", appliedAt },
+        },
+        { body, isDraft: true },
+        site,
+      );
+      expect(staff.facts).toEqual({ code: "staff_action", action: sourceAction, appliedAt });
+      // A statement stored before batch 8 (the mod action as a "case") renders the same way.
+      const legacy = statementMail({ ...stored, sourceAction, facts: reviewed }, { body, isDraft: true }, site);
+      expect(legacy.facts).toEqual({ code: "staff_action", action: sourceAction, appliedAt: stored.createdAt });
+      expect(JSON.stringify(legacy.facts)).not.toMatch(/caseRef|MA-|MC-/);
     }
   });
 });

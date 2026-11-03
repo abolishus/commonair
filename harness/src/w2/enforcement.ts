@@ -405,7 +405,7 @@ export function resolveStatementProblems(
   if (s.clauseId !== want.clauseId) out.push(`clause ${s.clauseId}`);
   if (s.appealSubjectType !== "moderation_action" || s.appealSubjectId !== want.modActionId)
     out.push(`appeal ${s.appealSubjectType}/${s.appealSubjectId}`);
-  if (s.factsCode !== "moderator_review") out.push(`facts ${s.factsCode}`);
+  if (s.factsCode !== "staff_action") out.push(`facts ${s.factsCode}`);
   return out;
 }
 

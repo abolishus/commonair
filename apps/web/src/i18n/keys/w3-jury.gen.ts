@@ -97,4 +97,6 @@ export type Key =
   | "jury.results.column.disagree"
   | "jury.results.column.unsure"
   | "jury.results.reports"
-  | "jury.results.suppressedHint";
+  | "jury.results.suppressedHint"
+  | "jury.link.caseNotFound"
+  | "jury.link.notInQueue";

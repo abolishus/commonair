@@ -15,7 +15,8 @@
  * - **`bundle`** is an already parsed `PortabilityBundle` (`parseBundle` or `readBundleArchive`);
  *   **`files`** maps each `files/<name>` it refers to onto bytes the caller already checked
  *   against the manifest. A missing file is reported per item, never thrown.
- * - **`choices`** (`ImportChoices`): whether to apply the channel fields, the panels, and which
+ * - **`choices`** (`ImportChoices`): whether to apply the channel fields (and, with `fields`, which
+ *   of them; absent means all), the panels, and which
  *   emote codes. Everything not chosen is reported `skipped` / `not_chosen`.
  * - The standing statement is **not** checked here: the preview (or N3, whose bundles carry none)
  *   already did. `applyBundle` checks only the importer: an active local legal hold on the account
@@ -59,8 +60,17 @@ import { type CategoryRow, channelPatch, EMOTE_CODE, MAX_EMOTES, MAX_PANELS, map
 
 const { portabilityImports: imports, channels, channelPanels, emotes, categories } = schema;
 
+/** The channel fields an import can apply (`ImportChoices.fields`, N3-import request 5). */
+export const CHANNEL_FIELDS = ["title", "description", "tags", "language", "mature", "category"] as const;
+export type ChannelField = (typeof CHANNEL_FIELDS)[number];
+
 export interface ImportChoices {
   channel: boolean;
+  /**
+   * Which channel fields `channel` applies. Absent: every field (bundle imports). Present: only the
+   * fields set to true; an absent or false field is left as it is here.
+   */
+  fields?: Partial<Record<ChannelField, boolean>>;
   panels: boolean;
   /** Emote codes to import. */
   emotes: readonly string[];
@@ -209,23 +219,30 @@ export async function applyBundle(
   const saved = new Map<string, StoredItem>();
   for (const it of (row.result ?? []) as unknown as StoredItem[]) saved.set(itemId(it.kind, it.ref), it);
   const finished = (kind: ImportItemKind, ref: string) => (saved.get(itemId(kind, ref))?.outcome ?? null) !== null;
-  const record = async (item: StoredItem, write?: (tx: Executor) => Promise<void>) => {
-    await db.transaction(async (tx) => {
-      if (write) await write(tx);
-      await saveItem(tx, input.importId, item, ctx.now());
+  /** `write` may answer a different line for the item (the channel fields when nothing changed). */
+  const record = async (item: StoredItem, write?: (tx: Executor) => Promise<StoredItem | void>) => {
+    const line = await db.transaction(async (tx) => {
+      const replaced = write ? await write(tx) : undefined;
+      const out = replaced ?? item;
+      await saveItem(tx, input.importId, out, ctx.now());
+      return out;
     });
-    saved.set(itemId(item.kind, item.ref), item);
+    saved.set(itemId(line.kind, line.ref), line);
   };
   const { bundle, choices } = input;
 
   // Channel fields.
   if (!finished("channel", "channel")) {
     const label = bundle.channel.title;
-    if (!choices.channel)
+    const fields = chosenFields(choices);
+    if (fields.size === 0)
       await record({ kind: "channel", ref: "channel", label, outcome: "skipped", reason: "not_chosen" });
     else
-      await record({ kind: "channel", ref: "channel", label, outcome: "imported", reason: null }, (tx) =>
-        applyChannelFields(tx, who.channelId, bundle, ctx.now()),
+      await record({ kind: "channel", ref: "channel", label, outcome: "imported", reason: null }, async (tx) =>
+        // The chosen fields can leave nothing to change (only the category, with no match here).
+        (await applyChannelFields(tx, who.channelId, bundle, ctx.now(), fields))
+          ? undefined
+          : { kind: "channel", ref: "channel", label, outcome: "skipped", reason: NOTHING_TO_APPLY },
       );
   }
 
@@ -315,14 +332,35 @@ async function invalidateChatEmotes(ctx: Ctx, channelId: string): Promise<void> 
   }
 }
 
-async function applyChannelFields(tx: Executor, channelId: string, bundle: PortabilityBundle, now: Date) {
+/**
+ * The channel line's reason when the chosen fields change nothing. Not one of the web's reason keys
+ * yet, so it shows the generic "could not be imported" line (contract request for its own key).
+ */
+export const NOTHING_TO_APPLY = "nothing_to_apply";
+
+/** The channel fields to apply: none unless `channel` is chosen; every one when `fields` is absent. */
+export function chosenFields(choices: Pick<ImportChoices, "channel" | "fields">): ReadonlySet<ChannelField> {
+  if (!choices.channel) return new Set();
+  const { fields } = choices;
+  return new Set(fields === undefined ? CHANNEL_FIELDS : CHANNEL_FIELDS.filter((f) => fields[f] === true));
+}
+
+async function applyChannelFields(
+  tx: Executor,
+  channelId: string,
+  bundle: PortabilityBundle,
+  now: Date,
+  fields: ReadonlySet<ChannelField>,
+): Promise<boolean> {
   const [current] = await tx.select().from(channels).where(eq(channels.id, channelId)).for("update");
   if (!current) throw new Error("import into a channel that does not exist");
   const cats: CategoryRow[] = [];
-  const conds = [
-    bundle.channel.categorySlug ? eq(categories.slug, bundle.channel.categorySlug) : undefined,
-    bundle.channel.categoryName ? eq(categories.name, bundle.channel.categoryName) : undefined,
-  ].filter((c) => c !== undefined);
+  const conds = fields.has("category")
+    ? [
+        bundle.channel.categorySlug ? eq(categories.slug, bundle.channel.categorySlug) : undefined,
+        bundle.channel.categoryName ? eq(categories.name, bundle.channel.categoryName) : undefined,
+      ].filter((c) => c !== undefined)
+    : [];
   for (const cond of conds)
     cats.push(
       ...(await tx
@@ -331,7 +369,20 @@ async function applyChannelFields(tx: Executor, channelId: string, bundle: Porta
         .where(cond)),
     );
   const category = mapCategory(cats, bundle.channel.categorySlug, bundle.channel.categoryName);
-  const patch = channelPatch({ mature: current.mature }, bundle.channel, category);
+  const full = channelPatch({ mature: current.mature }, bundle.channel, category);
+  // Only the chosen fields. A mature category still sets the label when only the category is
+  // chosen (the studio edit's rule), and an import never clears it.
+  const categoryMature = fields.has("category") && category?.mature === true;
+  const patch: Partial<typeof full> = {
+    ...(fields.has("title") ? { title: full.title } : {}),
+    ...(fields.has("description") ? { description: full.description } : {}),
+    ...(fields.has("tags") ? { tags: full.tags } : {}),
+    ...(fields.has("language") ? { language: full.language } : {}),
+    ...(fields.has("mature") ? { mature: full.mature } : categoryMature ? { mature: true } : {}),
+    ...(fields.has("category") && full.categoryId !== undefined ? { categoryId: full.categoryId } : {}),
+  };
+  // Nothing to change: no write, no `channel.update`, and the line says skipped.
+  if (Object.keys(patch).length === 0) return false;
   const [row] = await tx.update(channels).set(patch).where(eq(channels.id, channelId)).returning();
   if (!row) throw new Error("channel update returned no row");
   if (row.liveBroadcastId)
@@ -359,6 +410,7 @@ async function applyChannelFields(tx: Executor, channelId: string, bundle: Porta
     },
     now,
   );
+  return true;
 }
 
 /**

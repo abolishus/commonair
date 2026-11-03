@@ -1,0 +1,118 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# promtool rule tests, run by infra/tests/observability.test.ts: Prometheus without start.sh's
+# rendered settings, so the target falls back to 0.995 (stage 0, the self-host default).
+rule_files:
+  - ../prometheus/rules/commonair-recording.yml
+  - ../prometheus/rules/commonair-alerts.yml
+# Under the 5-minute lookback, so each group sees the others' latest values (Prometheus runs at 15 s).
+evaluation_interval: 4m
+
+tests:
+  # 2% of requests fail: 3.9 times the 0.995 budget, under both burn lines, so nothing pages.
+  - interval: 1m
+    input_series:
+      - series: 'http_server_request_duration_seconds_count{service_name="api",http_response_status_code="200"}'
+        values: "0+600x200"
+      - series: 'http_server_request_duration_seconds_count{service_name="api",http_response_status_code="500"}'
+        values: "0+12x200"
+    promql_expr_test:
+      - expr: commonair:slo_target
+        eval_time: 10m
+        exp_samples:
+          - labels: 'commonair:slo_target{slo_target="0.995"}'
+            value: 0.995
+    alert_rule_test:
+      - eval_time: 100m
+        alertname: CommonairSloBurnFast
+        exp_alerts: []
+      - eval_time: 100m
+        alertname: CommonairSloBurnSlow
+        exp_alerts: []
+
+  # Eight days of load, sampled every 2 minutes on a 4-core host:
+  # Postgres 0.45 (over 0.4: fires), host CPU 0.5 (over 0.48: fires), transcode 0.55 (under 0.56:
+  # quiet), and one restore drill of 12000 s (over 11520: fires).
+  - interval: 2m
+    input_series:
+      - series: "system_cpu_logical_count"
+        values: "4x5765"
+      - series: 'system_cpu_time_seconds_total{cpu="cpu0",state="user"}'
+        values: "0+60x5765"
+      - series: 'system_cpu_time_seconds_total{cpu="cpu0",state="idle"}'
+        values: "0+60x5765"
+      - series: 'commonair_postgres_active_time_seconds_total{state_mode="bundled"}'
+        values: "0+216x5765"
+      - series: "media_transcode_cpu_time_seconds_total"
+        values: "0+264x5765"
+      - series: "commonair_restore_drill_seconds"
+        values: "_x5700 12000x3"
+    alert_rule_test:
+      - eval_time: 8d12m
+        alertname: CommonairStage0PostgresCpu
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+              summary: Postgres load has peaked over 40% of the host every day for 7 days (stage 0 trigger at 50%)
+              runbook: docs/operators/monitoring.md#commonairstage0postgrescpu
+      - eval_time: 8d12m
+        alertname: CommonairStage1AppCpu
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+              summary: App host CPU has peaked over 48% every day for 7 days (stage 1 trigger at 60%)
+              runbook: docs/operators/monitoring.md#commonairstage1appcpu
+      - eval_time: 8d12m
+        alertname: CommonairStage2TranscodeCpu
+        exp_alerts: []
+      - eval_time: 8d12m
+        alertname: CommonairStage0RestoreTime
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+              summary: The last restore drill took over 3.2 h (stage 0 trigger at 4 h)
+              runbook: docs/operators/monitoring.md#commonairstage0restoretime
+      # Six days in, the week is not complete yet: nothing is sustained.
+      - eval_time: 6d
+        alertname: CommonairStage1AppCpu
+        exp_alerts: []
+
+  # The collector is up but reads neither Postgres nor Valkey: Postgres counts its failed scrapes,
+  # and both sets of series are gone.
+  - interval: 1m
+    input_series:
+      - series: 'up{job="otel-collector",instance="otel-collector:9464"}'
+        values: "1x30"
+      - series: 'otelcol_scraper_errored_metric_points{receiver="postgresql",scraper="postgresql"}'
+        values: "0+20x30"
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: CommonairStateScrapeFailing
+        exp_alerts:
+          - exp_labels:
+              receiver: postgresql
+              severity: ticket
+              summary: The collector cannot read Postgres or Valkey metrics
+              runbook: docs/operators/monitoring.md#commonairstatescrapefailing
+          - exp_labels:
+              receiver: redis
+              severity: ticket
+              summary: The collector cannot read Postgres or Valkey metrics
+              runbook: docs/operators/monitoring.md#commonairstatescrapefailing
+
+  # Both answer: quiet.
+  - interval: 1m
+    input_series:
+      - series: 'up{job="otel-collector",instance="otel-collector:9464"}'
+        values: "1x30"
+      - series: 'otelcol_scraper_errored_metric_points{receiver="postgresql",scraper="postgresql"}'
+        values: "0x30"
+      - series: 'postgresql_backends{postgresql_database_name="commonair",state_mode="external"}'
+        values: "3x30"
+      - series: 'redis_uptime_seconds_total{state_mode="external"}'
+        values: "0+60x30"
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: CommonairStateScrapeFailing
+        exp_alerts: []

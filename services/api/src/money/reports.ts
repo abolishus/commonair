@@ -38,6 +38,7 @@ import { isoOrNull } from "../lib/dto.ts";
 import { badRequest, conflict, forbidden, notFound } from "../lib/errors.ts";
 import { type ResolvedContext, os, requireCaller, requireChannel } from "../lib/orpc.ts";
 import { stripePayoutAccount } from "./stripe-connect.ts";
+import { startPayoutTransfers } from "./transfers.ts";
 import {
   type PaymentFacts,
   type Period,
@@ -476,7 +477,7 @@ export const treasurerReportHandlers = {
     // Holds that are due count as available in this run.
     await releaseDueHolds(deps.db, { asOf: now, holdDays: payoutRules.holdDays, currency });
     const month = payoutMonth(periodEnd);
-    return deps.db.transaction(async (tx) => {
+    const out = await deps.db.transaction(async (tx) => {
       const r = await runPayoutBatch(tx, {
         periodStart: month.from,
         periodEnd: month.to,
@@ -500,6 +501,11 @@ export const treasurerReportHandlers = {
       });
       return { created: r.created, held: r.held, total: money(r.totalCents, currency) };
     });
+    // Batch 8 (M1-connect): after commit, schedule the ready Stripe payouts and queue their
+    // Connect transfers (nothing with the manual adapter). Not awaited: the producer retries
+    // Valkey forever (maxRetriesPerRequest: null); startPayoutTransfers never throws.
+    void startPayoutTransfers(deps);
+    return out;
   }),
 
   payouts: os.money.treasurer.payouts.handler(async ({ context, input }) => {

@@ -36,7 +36,8 @@ back up: no container reads it whole. Each unit gets a copy of just the keys it 
 `install` sets from its flags every time: the public URLs and `PUBLIC_HOSTNAME`,
 `IRC_PUBLIC_HOST`, `NODE_ENV`, `TLS_MODE`, `ACME_EMAIL`, `MTX_WEBRTCADDITIONALHOSTS` (only when
 you pass `--public-ip`) and `DATABASE_URL`, and the object store's settings
-([below](#object-storage)). The contacts (`CONTACT_EMAIL` and the others) are set from `--email`
+([below](#object-storage)), and with external Postgres and Valkey their settings and the metrics
+collector's keys ([Postgres and Valkey](#postgres-and-valkey)). The contacts (`CONTACT_EMAIL` and the others) are set from `--email`
 only while they are empty. Keys you add yourself are carried across upgrades.
 
 ## Object storage
@@ -78,6 +79,104 @@ instance's own keys, that each bucket exists and takes a write, and fails naming
 missing. `selfhost.sh status` shows which store is in use and, for an external one, lists each
 bucket with the instance's keys.
 
+## Postgres and Valkey
+
+By default `install` runs Postgres (with WAL-G backups) and Valkey in containers on the same
+host, and that is what most instances should use. Nothing below applies to it.
+
+As an option, `install` can point the instance at external servers instead: a managed
+PostgreSQL and Valkey such as DigitalOcean's, or your own on a private network. Then neither
+`commonair-postgres` nor `commonair-valkey` is installed, no unit depends on them, and `migrate`
+runs as your owner role and creates the app and monitor roles itself.
+[requirements.md](requirements.md#external-postgres-and-valkey) says what the servers need, and
+`managed-services.md` walks through DigitalOcean's. Both servers are
+external or neither is, and the choice is made at the first install: an instance never switches
+between bundled and external, because that moves the data (a dump and restore, described in
+managed-services.md).
+
+| `install` flag              | Env key                   | Default and meaning                                                                          |
+| --------------------------- | ------------------------- | -------------------------------------------------------------------------------------------- |
+| (either URL flag)           | `STATE_MODE`              | unset: bundled. `external` with `--database-url` and `--valkey-url`                          |
+| `--database-url <url>`      | `DATABASE_OWNER_URL`      | the owner's URL without a password: `postgres://<user>@<host>:<port>/<db>?sslmode=...`       |
+| `--database-ca <file>`      | `DATABASE_CA_FILE`        | `/run/secrets/commonair-pg-ca` with the flag; empty: the system's trusted CAs (`system`)     |
+| `--valkey-url <url>`        | `VALKEY_URL`              | `rediss://[<user>@]<host>:<port>[/<db>]`, without a password; no user: default user          |
+| `--valkey-ca <file>`        | `VALKEY_CA_FILE`          | `/run/secrets/commonair-valkey-ca` with the flag; empty: the system's trusted CAs (`system`) |
+| `--allow-insecure-database` | `DATABASE_ALLOW_INSECURE` | `false`: the URL must say `sslmode=verify-full`. `true` accepts `require` or `disable`       |
+| `--allow-insecure-valkey`   | `VALKEY_ALLOW_INSECURE`   | `false`: the URL must be `rediss://`. `true` accepts `redis://`                              |
+| (derived)                   | `DATABASE_URL`            | the app role's URL on the same server and database (password from the env file)              |
+
+The insecure flags exist for a server on a private network you control. `install` warns when
+it takes one, and the env file records it. Of libpq's other modes, `sslmode=require` (TLS, the
+certificate not verified) and `sslmode=disable` (no TLS) are accepted; `prefer`, `allow` and
+`verify-ca` are refused. A CA is used only with `sslmode=verify-full` and `rediss://`: a
+re-install onto a weaker URL drops the recorded CA, and `--database-ca system` (or
+`--valkey-ca system`) drops it when the server moves to a publicly trusted certificate.
+
+**Passwords are never flags and never in the URL**, since every user on the host can read a
+command line. Export `DATABASE_PASSWORD` (the owner's) and `VALKEY_PASSWORD` in the shell that
+runs `install`, or run it from a terminal and it asks for them without echo. Unlike every other
+secret, they are **not** written to `commonair.env`: they live only in the Podman secrets below,
+so `install --reinstall` and `upgrade` need them again only if you give a new URL or a secret
+is gone. Reserved characters in them (`@ : / ? #` and the like) are fine: `install`
+percent-encodes them into the secrets' URLs. Note that the env file's own `VALKEY_PASSWORD` key
+is the bundled Valkey's and is unused here.
+
+**Before anything is installed**, a preflight in the release's tools image checks, read only:
+that TLS verifies against the CA (naming the server certificate's subject when it does not);
+that the owner has `CREATEROLE` and is not a superuser (a superuser is only a warning); that the
+server is PostgreSQL 17 or 18; that `max_connections` covers the services' pools
+([the connection budget](requirements.md#connection-budget)); and that Valkey answers `PING`
+over TLS with the password and has `maxmemory-policy noeviction`. Each failure stops the
+install with a `fix:` line. Set `DATABASE_POOL_MAX` in `install`'s environment to size the pools
+for a small server; `install` records it in the env file.
+
+On an external instance:
+
+- `install --reinstall` keeps the servers. A new `--database-url` is accepted for a new owner user
+  on the same server and database; another server or database is refused, like a switch, because
+  its data would stay behind. A new `--valkey-url` is accepted with a warning: Valkey holds only
+  queues, sessions and caches, and those on the old server are not carried over.
+- `upgrade` takes no URL flag. It runs the preflight again, runs `migrate` once as the owner (the
+  role scripts are idempotent), and takes no WAL-G backup: the provider's point-in-time recovery
+  covers the database (`managed-services.md`). `--database-ca` and
+  `--valkey-ca` replace a CA, on `upgrade` and `install --reinstall` alike. If a CA's secret was
+  removed, both refuse to go on (or ask for the file at a terminal) rather than drop TLS. If an
+  upgrade fails and rolls back, the database is restored, if it must be, with the provider's
+  point-in-time recovery: no WAL-G backup was taken.
+- `status` shows `external` in place of the two units' state, with what each server answers:
+  reachable, TLS verified, the version, connections in use against what the server allows, and
+  `PING`, each with how long it took. It uses the app role and never prints a password.
+- `reset-staging` and `seed-mode open` refuse: a staging instance runs the bundled servers.
+
+### Secrets and the metrics collector's keys
+
+`selfhost.sh` writes these, and the metrics collector reads them.
+The collector's keys are in `commonair.env` and hold no secret; the secrets are Podman secrets,
+recreated by `install` and `upgrade` (the external passwords only when given, as above).
+
+| Podman secret                       | Holds                                                                                                       |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `commonair-database-url`            | the app role's URL (both modes)                                                                             |
+| `commonair-owner-database-url`      | the owner's URL with its password: `commonair` on the bundled Postgres, `--database-url`'s user on external |
+| `commonair-valkey-url`              | Valkey's URL with its password                                                                              |
+| `commonair-pg-monitor-password`     | `commonair_monitor`'s password (`POSTGRES_MONITOR_PASSWORD`, which `install` generates once)                |
+| `commonair-valkey-monitor-password` | the password of the Valkey user the collector uses: the instance's own (Valkey has no read-only user)       |
+| `commonair-pg-ca`                   | external only: `--database-ca`'s certificate, mounted read-only at `DATABASE_CA_FILE`                       |
+| `commonair-valkey-ca`               | external only: `--valkey-ca`'s certificate, mounted read-only at `VALKEY_CA_FILE`                           |
+
+Every unit whose key list names `DATABASE_CA_FILE` or `VALKEY_CA_FILE` (the services that open
+a pool, and `migrate`) mounts the CA's secret at that path.
+
+| Key                        | Bundled             | External                                                                            |
+| -------------------------- | ------------------- | ----------------------------------------------------------------------------------- |
+| `PG_MONITOR_ENDPOINT`      | `postgres:5432`     | the database's `host:port`                                                          |
+| `PG_MONITOR_USER`          | `commonair_monitor` | `commonair_monitor`                                                                 |
+| `PG_MONITOR_TLS`           | `disable`           | `verify-full`, or with `--allow-insecure-database` the URL's `require` or `disable` |
+| `VALKEY_MONITOR_ENDPOINT`  | `valkey:6379`       | Valkey's `host:port`                                                                |
+| `VALKEY_MONITOR_USER`      | empty (default)     | `--valkey-url`'s user; empty for the default user, named `default` or not           |
+| `VALKEY_MONITOR_TLS`       | `off`               | `on` for `rediss://`, `off` for `redis://`                                          |
+| `OBSERVABILITY_STATE_MODE` | `bundled`           | `external`                                                                          |
+
 ## How values are resolved
 
 - **Services validate their environment at start** and refuse to boot on a bad value. The
@@ -98,7 +197,9 @@ bucket with the instance's keys.
   env file is still where they come from, so editing them there does take effect. They are
   marked "env file (blanked in units that must not see it)" below.
 - **`DATABASE_URL` comes from a Podman secret** (`commonair-database-url`, the least-privilege
-  app role), which `install` recreates from `POSTGRES_APP_PASSWORD` every time.
+  app role), which `install` recreates from `POSTGRES_APP_PASSWORD` every time. So does
+  `VALKEY_URL` (`commonair-valkey-url`); with an external Valkey the env file's `VALKEY_URL` has no
+  password, and only the secret does ([Postgres and Valkey](#postgres-and-valkey)).
 - **Production instances other than the co-op's flagship must publish their own contacts.**
   With `NODE_ENV=production` and `INSTANCE_IS_FLAGSHIP=false`, the services refuse to start
   unless `CONTACT_EMAIL`, `SECURITY_EMAIL`, `ABUSE_EMAIL`, `DMCA_EMAIL` and `PRIVACY_EMAIL` are
@@ -150,17 +251,24 @@ unit does not start, rather than starting without its settings. `journalctl --us
 These are read by the third-party containers or the backup scripts, not by the CommonAir
 services, so the reference below does not list them.
 
-| Variable                    | Read by             | What it does                                                                                |
-| --------------------------- | ------------------- | ------------------------------------------------------------------------------------------- |
-| `MTX_WEBRTCADDITIONALHOSTS` | MediaMTX            | Addresses advertised to WHIP clients as ICE candidates, comma-separated. `install` sets it. |
-| `S3_MODE`                   | Caddy, storage-init | `external` for an operator's store ([Object storage](#object-storage)); unset is Garage     |
-| `S3_CONNECT_SRC`            | Caddy (CSP)         | External store only: the origin browsers upload to. `install` sets it.                      |
-| `AWS_ENDPOINT`              | WAL-G (Postgres)    | S3 endpoint for backups, instead of the instance's store ([backups.md](backups.md))         |
-| `AWS_REGION`                | WAL-G (Postgres)    | Region of that endpoint (default: `S3_REGION`)                                              |
-| `AWS_ACCESS_KEY_ID`         | WAL-G (Postgres)    | Key for the backup bucket (default: `S3_ACCESS_KEY_ID`)                                     |
-| `AWS_SECRET_ACCESS_KEY`     | WAL-G (Postgres)    | Secret for the backup bucket (default: `S3_SECRET_ACCESS_KEY`)                              |
-| `AWS_S3_FORCE_PATH_STYLE`   | WAL-G (Postgres)    | Path-style S3 URLs (default: `S3_FORCE_PATH_STYLE`, or `true` with `AWS_ENDPOINT`)          |
-| `WALG_S3_PREFIX`            | WAL-G (Postgres)    | Where backups go (default `s3://<S3_BUCKET_BACKUPS>/wal`)                                   |
+| Variable                    | Read by             | What it does                                                                                                   |
+| --------------------------- | ------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `MTX_WEBRTCADDITIONALHOSTS` | MediaMTX            | Addresses advertised to WHIP clients as ICE candidates, comma-separated. `install` sets it.                    |
+| `S3_MODE`                   | Caddy, storage-init | `external` for an operator's store ([Object storage](#object-storage)); unset is Garage                        |
+| `S3_CONNECT_SRC`            | Caddy (CSP)         | External store only: the origin browsers upload to. `install` sets it.                                         |
+| `STATE_MODE`                | `selfhost.sh`       | `external` for external Postgres and Valkey ([above](#postgres-and-valkey)); unset: bundled                    |
+| `DATABASE_OWNER_URL`        | `selfhost.sh`       | External Postgres: the owner's URL, without its password                                                       |
+| `DATABASE_ALLOW_INSECURE`   | `selfhost.sh`       | `true`: `--allow-insecure-database` was given                                                                  |
+| `VALKEY_ALLOW_INSECURE`     | `selfhost.sh`       | `true`: `--allow-insecure-valkey` was given                                                                    |
+| `PG_MONITOR_*`              | metrics collector   | Where and as whom it reads Postgres's statistics ([the table above](#secrets-and-the-metrics-collectors-keys)) |
+| `VALKEY_MONITOR_*`          | metrics collector   | Where and as whom it reads Valkey's `INFO`                                                                     |
+| `OBSERVABILITY_STATE_MODE`  | metrics collector   | `bundled` or `external`                                                                                        |
+| `AWS_ENDPOINT`              | WAL-G (Postgres)    | S3 endpoint for backups, instead of the instance's store ([backups.md](backups.md))                            |
+| `AWS_REGION`                | WAL-G (Postgres)    | Region of that endpoint (default: `S3_REGION`)                                                                 |
+| `AWS_ACCESS_KEY_ID`         | WAL-G (Postgres)    | Key for the backup bucket (default: `S3_ACCESS_KEY_ID`)                                                        |
+| `AWS_SECRET_ACCESS_KEY`     | WAL-G (Postgres)    | Secret for the backup bucket (default: `S3_SECRET_ACCESS_KEY`)                                                 |
+| `AWS_S3_FORCE_PATH_STYLE`   | WAL-G (Postgres)    | Path-style S3 URLs (default: `S3_FORCE_PATH_STYLE`, or `true` with `AWS_ENDPOINT`)                             |
+| `WALG_S3_PREFIX`            | WAL-G (Postgres)    | Where backups go (default `s3://<S3_BUCKET_BACKUPS>/wal`)                                                      |
 
 The object backups' settings, `BACKUP_OBJECTS_REMOTE_*` (`ENDPOINT`, `REGION`, `BUCKET`,
 `PREFIX`, `PATH_STYLE`, `ALLOW_HTTP`, `ACCESS_KEY_ID`, `SECRET_ACCESS_KEY`),
@@ -493,30 +601,30 @@ the tables by hand. Columns:
 
 ### `infraEnv`
 
-| Variable                    | Required | Default | Self-host        | Description                                                                                                                                                                                                                                          |
-| --------------------------- | -------- | ------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `POSTGRES_PASSWORD`         | no       | —       | generated        | Password of the Postgres owner role `commonair` (migrations and backups).                                                                                                                                                                            |
-| `POSTGRES_MONITOR_PASSWORD` | no       | —       | —                | Password of the read-only `commonair_monitor` role the metrics collector logs in as (infra/postgres/monitor-role.sql). The migrate job creates the role only when this is set.                                                                       |
-| `GARAGE_RPC_SECRET`         | no       | —       | generated        | Garage requires exactly 64 hex characters.                                                                                                                                                                                                           |
-| `GARAGE_ADMIN_TOKEN`        | no       | —       | generated        | Bearer token for Garage's admin API, used by commonair-storage-init (compose: garage-init) to create buckets and keys.                                                                                                                               |
-| `GRAFANA_ADMIN_PASSWORD`    | no       | —       | generated        | Password of Grafana's `admin` user; Grafana refuses to start without it.                                                                                                                                                                             |
-| `VALKEY_PASSWORD`           | no       | —       | generated        | Password Valkey requires (`requirepass`). Empty runs Valkey without one (development only; the self-hosted unit refuses to start without it). It goes into VALKEY_URL unescaped, so only URL-safe characters (init-env generates 64 hex characters). |
-| `BIND_ADDRESS`              | no       | —       | —                | Host interface for published ports (default 127.0.0.1).                                                                                                                                                                                              |
-| `PUBLIC_HOSTNAME`           | no       | —       | set by install   | Public hostname Caddy serves with TLS (profile `tls`).                                                                                                                                                                                               |
-| `TLS_MODE`                  | no       | —       | set by install   | Caddy's certificate source (ADR 0023): `acme` (default) gets a publicly trusted certificate for PUBLIC_HOSTNAME; `internal` uses Caddy's own CA for LAN and test hosts.                                                                              |
-| `ACME_EMAIL`                | no       | —       | set by install   | Account email for ACME expiry notices (optional).                                                                                                                                                                                                    |
-| `ACME_CA`                   | no       | —       | —                | ACME directory URL override, e.g. a staging CA (default: Let's Encrypt production; no ZeroSSL fallback).                                                                                                                                             |
-| `IMAGE_REGISTRY`            | no       | —       | —                | Compose only: registry and namespace of the CommonAir images (default `localhost/commonair`).                                                                                                                                                        |
-| `IMAGE_TAG`                 | no       | —       | —                | Compose only: tag of the CommonAir images (default `dev`).                                                                                                                                                                                           |
-| `WALG_RETAIN_FULL`          | no       | —       | —                | Full backups `commonair-backup` keeps; older ones are pruned (unset keeps all).                                                                                                                                                                      |
-| `POSTGRES_MAX_CONNECTIONS`  | no       | —       | —                | Postgres `max_connections` (compose default 400: parallel integration suites hold many pools).                                                                                                                                                       |
-| `COMPOSE_SUBNET`            | no       | —       | —                | Compose network subnet (default 10.89.42.0/24); a second stack on one host needs its own.                                                                                                                                                            |
-| `COMMONAIR_ENV_FILE`        | no       | —       | —                | Compose only: path of the env file our own images read; third-party services do not (default `.env`).                                                                                                                                                |
-| `CAPTIONS_MODEL`            | no       | —       | —                | Compose only (`whisper`, profile `captions`): host path of the captions weights (default `./.cache/models/whisper-ggml-base-q5_1.bin`, written by `scripts/fetch-model.ts --model captions`).                                                        |
-| `TURN_PORT`                 | no       | —       | set in the units | coturn's listening port, UDP only (`no-tcp`): STUN always, TURN when the relay is on (default 3478).                                                                                                                                                 |
-| `TURN_RELAY_PORT_MIN`       | no       | —       | —                | Lowest UDP port of coturn's relay range; used only when the relay is on (P2P_TURN_URLS set).                                                                                                                                                         |
-| `TURN_RELAY_PORT_MAX`       | no       | —       | —                | Highest UDP port of coturn's relay range; used only when the relay is on.                                                                                                                                                                            |
-| `TURN_EXTERNAL_IP`          | no       | —       | set by install   | The one public address coturn advertises (empty: none). MTX_WEBRTCADDITIONALHOSTS may list several hosts (IPv4,IPv6); this takes one, normally its first IPv4 entry.                                                                                 |
+| Variable                    | Required | Default | Self-host                 | Description                                                                                                                                                                                                                                          |
+| --------------------------- | -------- | ------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POSTGRES_PASSWORD`         | no       | —       | generated                 | Password of the Postgres owner role `commonair` (migrations and backups).                                                                                                                                                                            |
+| `POSTGRES_MONITOR_PASSWORD` | no       | —       | generated, set by install | Password of the read-only `commonair_monitor` role the metrics collector logs in as (infra/postgres/monitor-role.sql). The migrate job creates the role only when this is set.                                                                       |
+| `GARAGE_RPC_SECRET`         | no       | —       | generated                 | Garage requires exactly 64 hex characters.                                                                                                                                                                                                           |
+| `GARAGE_ADMIN_TOKEN`        | no       | —       | generated                 | Bearer token for Garage's admin API, used by commonair-storage-init (compose: garage-init) to create buckets and keys.                                                                                                                               |
+| `GRAFANA_ADMIN_PASSWORD`    | no       | —       | generated                 | Password of Grafana's `admin` user; Grafana refuses to start without it.                                                                                                                                                                             |
+| `VALKEY_PASSWORD`           | no       | —       | generated                 | Password Valkey requires (`requirepass`). Empty runs Valkey without one (development only; the self-hosted unit refuses to start without it). It goes into VALKEY_URL unescaped, so only URL-safe characters (init-env generates 64 hex characters). |
+| `BIND_ADDRESS`              | no       | —       | —                         | Host interface for published ports (default 127.0.0.1).                                                                                                                                                                                              |
+| `PUBLIC_HOSTNAME`           | no       | —       | set by install            | Public hostname Caddy serves with TLS (profile `tls`).                                                                                                                                                                                               |
+| `TLS_MODE`                  | no       | —       | set by install            | Caddy's certificate source (ADR 0023): `acme` (default) gets a publicly trusted certificate for PUBLIC_HOSTNAME; `internal` uses Caddy's own CA for LAN and test hosts.                                                                              |
+| `ACME_EMAIL`                | no       | —       | set by install            | Account email for ACME expiry notices (optional).                                                                                                                                                                                                    |
+| `ACME_CA`                   | no       | —       | —                         | ACME directory URL override, e.g. a staging CA (default: Let's Encrypt production; no ZeroSSL fallback).                                                                                                                                             |
+| `IMAGE_REGISTRY`            | no       | —       | —                         | Compose only: registry and namespace of the CommonAir images (default `localhost/commonair`).                                                                                                                                                        |
+| `IMAGE_TAG`                 | no       | —       | —                         | Compose only: tag of the CommonAir images (default `dev`).                                                                                                                                                                                           |
+| `WALG_RETAIN_FULL`          | no       | —       | —                         | Full backups `commonair-backup` keeps; older ones are pruned (unset keeps all).                                                                                                                                                                      |
+| `POSTGRES_MAX_CONNECTIONS`  | no       | —       | —                         | Postgres `max_connections` (compose default 400: parallel integration suites hold many pools).                                                                                                                                                       |
+| `COMPOSE_SUBNET`            | no       | —       | —                         | Compose network subnet (default 10.89.42.0/24); a second stack on one host needs its own.                                                                                                                                                            |
+| `COMMONAIR_ENV_FILE`        | no       | —       | —                         | Compose only: path of the env file our own images read; third-party services do not (default `.env`).                                                                                                                                                |
+| `CAPTIONS_MODEL`            | no       | —       | —                         | Compose only (`whisper`, profile `captions`): host path of the captions weights (default `./.cache/models/whisper-ggml-base-q5_1.bin`, written by `scripts/fetch-model.ts --model captions`).                                                        |
+| `TURN_PORT`                 | no       | —       | set in the units          | coturn's listening port, UDP only (`no-tcp`): STUN always, TURN when the relay is on (default 3478).                                                                                                                                                 |
+| `TURN_RELAY_PORT_MIN`       | no       | —       | —                         | Lowest UDP port of coturn's relay range; used only when the relay is on (P2P_TURN_URLS set).                                                                                                                                                         |
+| `TURN_RELAY_PORT_MAX`       | no       | —       | —                         | Highest UDP port of coturn's relay range; used only when the relay is on.                                                                                                                                                                            |
+| `TURN_EXTERNAL_IP`          | no       | —       | set by install            | The one public address coturn advertises (empty: none). MTX_WEBRTCADDITIONALHOSTS may list several hosts (IPv4,IPv6); this takes one, normally its first IPv4 entry.                                                                                 |
 
 ### `servicePorts`
 

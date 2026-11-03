@@ -130,4 +130,19 @@ export interface PaymentAdapter {
    * provider has no such refund.
    */
   refundStatus?(providerRef: string): Promise<RefundStatus | null>;
+  /**
+   * Batch 8 (M1-gifts-refunds' reconciler): every refund of a PaymentIntent as the provider lists
+   * it, with our metadata (`payment_id`, `refund_key`), to settle a refund whose outcome is unknown.
+   */
+  listRefunds?(paymentIntent: string): Promise<ListedRefund[]>;
+}
+
+/** A refund as the provider lists it (`listRefunds`). */
+export interface ListedRefund {
+  id: string;
+  amount: number;
+  currency: string;
+  /** The provider's status, or null when it sent none. */
+  status: string | null;
+  metadata: Record<string, string>;
 }

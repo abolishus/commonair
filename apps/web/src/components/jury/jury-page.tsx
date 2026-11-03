@@ -15,6 +15,7 @@ import { t, type MessageKey } from "../../i18n/index.ts";
 import { CoopTabs } from "../coop/nav.tsx";
 import { JuryCaseCard, type OnVote } from "./case-card.tsx";
 import {
+  flagCaseSearch,
   INELIGIBLE_KEYS,
   KIND_KEYS,
   panelClosesAt,
@@ -203,7 +204,20 @@ export function JuryFlags({ flags }: { flags: JuryFlagDto[] }): React.JSX.Elemen
                 <span className="font-mono text-xs break-all text-muted-foreground">{f.subjectId}</span>
                 <RelativeTime date={f.createdAt} className="text-xs text-muted-foreground" />
               </div>
-              <Button variant="outline" size="sm" nativeButton={false} render={<Link to="/admin/moderation" />}>
+              <Button
+                variant="outline"
+                size="sm"
+                nativeButton={false}
+                render={
+                  <Link
+                    to="/admin/moderation"
+                    search={flagCaseSearch(f)}
+                    data-testid="jury-flag-case-link"
+                    data-case-id={f.subjectId}
+                    data-kind={f.subjectKind}
+                  />
+                }
+              >
                 {t("jury.flags.open")}
               </Button>
             </li>

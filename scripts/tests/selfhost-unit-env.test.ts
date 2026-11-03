@@ -511,6 +511,9 @@ describe("render-env.sh", () => {
     ],
     grafana: [],
     "irc-cert": [],
+    // The monitor passwords reach the collector as Podman secrets, never through its env file.
+    "otel-collector": [],
+    prometheus: [],
     mediamtx: ["INTERNAL_API_SECRET"],
     // The app role's password, and the read-only monitor role's (infra/postgres/monitor-role.sql).
     migrate: ["POSTGRES_APP_PASSWORD", "POSTGRES_MONITOR_PASSWORD"],

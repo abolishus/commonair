@@ -393,7 +393,8 @@ here.
     mounted read-only at the paths `DATABASE_CA_FILE` and `VALKEY_CA_FILE` name (§1.4).
 - **Collector environment, in `commonair.env`, never secrets:**
   - `PG_MONITOR_ENDPOINT` (host:port), `PG_MONITOR_USER` (default `commonair_monitor`),
-    `PG_MONITOR_TLS` (`verify-full` or `disable`);
+    `PG_MONITOR_TLS` (`verify-full`, `require` (TLS, the certificate not verified; only with
+    `--allow-insecure-database`) or `disable`);
   - `VALKEY_MONITOR_ENDPOINT`, `VALKEY_MONITOR_USER` (empty for the default user),
     `VALKEY_MONITOR_TLS` (`on` or `off`);
   - `OBSERVABILITY_STATE_MODE` (`bundled` or `external`).

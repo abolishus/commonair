@@ -28,8 +28,12 @@ import { toastActionError } from "../../lib/action-error.ts";
 import { api, errorCode } from "../../lib/api.ts";
 import { FormError } from "../form-error.tsx";
 import {
+  CHANNEL_FIELDS,
   canStart,
+  currentFields,
   defaultChoices,
+  FIELD_KEYS,
+  fieldOn,
   isOffered,
   isRunning,
   KIND_KEYS,
@@ -38,9 +42,13 @@ import {
   previewFields,
   reasonKey,
   RESULT_KEYS,
+  startChoices,
   tierKey,
   toggleEmote,
+  toggleField,
   type CallbackOutcome,
+  type ChannelField,
+  type CurrentFields,
   type ImportItemDto,
   type TwitchChoices,
   type TwitchImportDto,
@@ -60,7 +68,10 @@ export interface TwitchImportViewProps {
   starting: boolean;
   onConnect: () => void;
   onToggleChannel: () => void;
+  onToggleField: (field: ChannelField) => void;
   onToggleEmote: (code: string) => void;
+  /** The channel's current values, shown beside the imported ones; null while unknown. */
+  current?: CurrentFields | null;
   onAssert: (on: boolean) => void;
   onStart: () => void;
   /** The paste-in helper, mounted when the import is available. */
@@ -140,12 +151,46 @@ function ImportCard(props: TwitchImportViewProps & { status: TwitchImportStatusD
   );
 }
 
-function FieldRow({ label, children }: { label: string; children: React.ReactNode }): React.JSX.Element {
+/** One channel field: its checkbox, the value the channel has now and the one the import brings. */
+function FieldChoice(props: {
+  field: ChannelField;
+  id: string;
+  enabled: boolean;
+  on: boolean;
+  current: string | null;
+  imported: string;
+  multiline?: boolean;
+  onToggle: () => void;
+}): React.JSX.Element {
+  const { field } = props;
   return (
-    <div className="flex min-w-0 flex-col gap-0.5">
-      <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className="min-w-0 break-words text-sm">{children}</dd>
-    </div>
+    <li
+      data-testid="twitch-import-field"
+      data-field={field}
+      data-state={props.enabled && props.on ? "on" : "off"}
+      className="flex min-w-0 items-start gap-3"
+    >
+      <Checkbox
+        id={props.id}
+        checked={props.enabled && props.on}
+        disabled={!props.enabled}
+        onCheckedChange={props.onToggle}
+      />
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <Label htmlFor={props.id} className="font-normal">
+          {t(FIELD_KEYS[field])}
+        </Label>
+        <span className="min-w-0 break-words text-xs text-muted-foreground" data-value="current">
+          {t("twitchImport.fields.current", { value: props.current ?? t("twitchImport.fields.currentUnknown") })}
+        </span>
+        <span
+          className={`min-w-0 break-words text-sm${props.multiline ? " whitespace-pre-line" : ""}`}
+          data-value="imported"
+        >
+          {t("twitchImport.fields.imported", { value: props.imported })}
+        </span>
+      </div>
+    </li>
   );
 }
 
@@ -186,18 +231,24 @@ function PreviewBody(
             <Label htmlFor={channelId} className="font-normal">
               {t("twitchImport.preview.channelChoice")}
             </Label>
-            <dl className="grid min-w-0 gap-2">
-              <FieldRow label={t("twitchImport.field.title")}>{fields.title || none}</FieldRow>
-              <FieldRow label={t("twitchImport.field.category")}>{fields.category ?? none}</FieldRow>
-              <FieldRow label={t("twitchImport.field.tags")}>
-                {fields.tags.length ? fields.tags.join(", ") : none}
-              </FieldRow>
-              <FieldRow label={t("twitchImport.field.language")}>{fields.language || none}</FieldRow>
-              <FieldRow label={t("twitchImport.field.description")}>
-                <span className="whitespace-pre-line">{fields.description || none}</span>
-              </FieldRow>
-            </dl>
+            <p className="text-xs text-muted-foreground">{t("twitchImport.fields.hint")}</p>
+            <ul className="flex min-w-0 flex-col gap-3" aria-label={t("twitchImport.fields.label")}>
+              {CHANNEL_FIELDS.map((field) => (
+                <FieldChoice
+                  key={field}
+                  field={field}
+                  id={`${channelId}-${field}`}
+                  enabled={props.choices.channel}
+                  on={fieldOn(props.choices, field)}
+                  current={currentValue(props.current, field, none)}
+                  imported={importedValue(fields, field, none)}
+                  multiline={field === "description"}
+                  onToggle={() => props.onToggleField(field)}
+                />
+              ))}
+            </ul>
             <p className="text-xs text-muted-foreground">{t("twitchImport.preview.categoryHint")}</p>
+            <p className="text-xs text-muted-foreground">{t("twitchImport.fields.matureKept")}</p>
           </div>
         </div>
         {fields.matureSuggested && (
@@ -272,6 +323,43 @@ function PreviewBody(
       </div>
     </div>
   );
+}
+
+const yesNo = (on: boolean) => t(on ? "twitchImport.fields.yes" : "twitchImport.fields.no");
+
+function importedValue(f: ReturnType<typeof previewFields>, field: ChannelField, none: string): string {
+  switch (field) {
+    case "title":
+      return f.title || none;
+    case "category":
+      return f.category ?? none;
+    case "tags":
+      return f.tags.length ? f.tags.join(", ") : none;
+    case "language":
+      return f.language || none;
+    case "description":
+      return f.description || none;
+    case "mature":
+      return yesNo(f.matureSuggested);
+  }
+}
+
+function currentValue(c: CurrentFields | null | undefined, field: ChannelField, none: string): string | null {
+  if (!c) return null;
+  switch (field) {
+    case "title":
+      return c.title || none;
+    case "category":
+      return c.category ?? none;
+    case "tags":
+      return c.tags.length ? c.tags.join(", ") : none;
+    case "language":
+      return c.language || none;
+    case "description":
+      return c.description || none;
+    case "mature":
+      return yesNo(c.mature);
+  }
 }
 
 function EmoteRow(props: {
@@ -363,15 +451,18 @@ export interface TwitchImportClient {
   start: (input: {
     channel: string;
     id: string;
-    choices: { channel: boolean; panels: boolean; emotes: string[] };
+    choices: ReturnType<typeof startChoices>;
     assertEmoteRights: boolean;
   }) => Promise<TwitchImportDto>;
+  /** The channel's current fields, for the comparison in the preview. */
+  current?: (input: { channel: string }) => Promise<CurrentFields>;
 }
 
 export const twitchImportClient = (): TwitchImportClient => ({
   status: (input) => api().twitchImport.status(input) as Promise<TwitchImportStatusDto>,
   connect: (input) => api().twitchImport.connect(input),
   start: (input) => api().twitchImport.start(input) as Promise<TwitchImportDto>,
+  current: async (input) => currentFields(await api().channels.get({ channel: input.channel })),
 });
 
 export function TwitchImportPage({
@@ -394,6 +485,7 @@ export function TwitchImportPage({
   const [asserted, setAsserted] = React.useState(false);
   const [connecting, setConnecting] = React.useState(false);
   const [starting, setStarting] = React.useState(false);
+  const [current, setCurrent] = React.useState<CurrentFields | null>(null);
   const previewId = React.useRef<string | null>(null);
 
   const apply = React.useCallback((s: TwitchImportStatusDto) => {
@@ -419,6 +511,24 @@ export function TwitchImportPage({
   React.useEffect(() => {
     void load();
   }, [load]);
+
+  // The channel as it is now, beside each imported value; without it the preview says so.
+  const hasPreview = status?.latest?.status === "previewed";
+  React.useEffect(() => {
+    const read = client.current;
+    if (!hasPreview || !read) return;
+    let live = true;
+    read({ channel })
+      .then((c) => {
+        if (live) setCurrent(c);
+      })
+      .catch(() => {
+        if (live) setCurrent(null);
+      });
+    return () => {
+      live = false;
+    };
+  }, [hasPreview, client, channel]);
 
   // Follow a running import until the worker is done.
   const running = status?.latest ? isRunning(status.latest) : false;
@@ -446,7 +556,7 @@ export function TwitchImportPage({
       const dto = await client.start({
         channel,
         id: p.id,
-        choices: { channel: choices.channel, panels: false, emotes: choices.emotes },
+        choices: startChoices(choices),
         assertEmoteRights: asserted,
       });
       setStatus((s) => (s ? { ...s, connected: false, latest: dto } : s));
@@ -478,6 +588,8 @@ export function TwitchImportPage({
       starting={starting}
       onConnect={() => void onConnect()}
       onToggleChannel={() => setChoices((c) => ({ ...c, channel: !c.channel }))}
+      onToggleField={(field) => setChoices((c) => toggleField(c, field))}
+      current={current}
       onToggleEmote={(code) => setChoices((c) => toggleEmote(c, code))}
       onAssert={setAsserted}
       onStart={() => void onStart()}

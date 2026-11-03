@@ -529,6 +529,7 @@ describe("helpers", () => {
     expect(importErrorReason(new Error("x"))).toBeNull();
     expect(reasonKey("bundle_unsafe_path")).toBe("portability.reason.badBundle");
     expect(reasonKey("code_taken")).toBe("portability.reason.codeTaken");
+    expect(reasonKey("nothing_to_apply")).toBe("portability.reason.nothingToApply");
     expect(reasonKey("something_new")).toBe("portability.reason.other");
     expect(reasonKey(null)).toBeNull();
   });

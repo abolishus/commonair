@@ -603,9 +603,19 @@ Example Air https://air.example.test
 
 Thank you for your payment
 
+You paid €4.99 to ada_plays on Example Air. This is your receipt.
+
 Amount
 
 €4.99
+
+Paid to
+
+ada_plays
+
+For
+
+Subscription
 
 Paid
 
@@ -614,6 +624,20 @@ October 18, 2026 at 2:30 PM UTC
 Reference
 
 CA-7KQ2M9XW
+
+Where your money goes
+
+To the creator
+
+€4.49
+
+To the co-op
+
+€0.50
+
+See your payments https://air.example.test/settings/subscriptions
+
+This receipt confirms your payment. It is not a tax invoice.
 
 ----------------------------------------
 

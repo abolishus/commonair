@@ -158,7 +158,7 @@ export async function startImport(
     channelId: string;
     userId: string;
     id: string;
-    choices: { channel: boolean; panels: boolean; emotes: string[] };
+    choices: { channel: boolean; fields?: dto.ImportChoices["fields"]; panels: boolean; emotes: string[] };
     assertEmoteRights: boolean;
   },
 ): Promise<ImportDto> {
@@ -191,7 +191,12 @@ export async function startImport(
       .update(imports)
       .set({
         status: "queued",
-        choices: { channel: input.choices.channel, panels: input.choices.panels, emotes },
+        choices: {
+          channel: input.choices.channel,
+          ...(input.choices.fields ? { fields: input.choices.fields } : {}),
+          panels: input.choices.panels,
+          emotes,
+        },
         ...(emotes.length > 0 ? { assertedAt: now, assertionVersion: EMOTE_RIGHTS_ASSERTION_VERSION } : {}),
         updatedAt: now,
       })

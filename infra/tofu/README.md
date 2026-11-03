@@ -137,7 +137,8 @@ address.
 - **Secrets on the droplet.** User data is readable from inside the droplet, so it carries only
   `package_update`/`package_upgrade` (`cloud_init_updates = false` drops even that). The service
   user, the env file and its secrets come from `selfhost.sh`. Spaces keys and database URIs are
-  sensitive outputs that the operator copies into `commonair.env`.
+  sensitive outputs that the operator copies into `commonair.env`. Production also copies
+  `tofu output observability_env` there (`SLO_TARGET=0.999`, U4); staging keeps the 0.995 default.
 
 ## State
 

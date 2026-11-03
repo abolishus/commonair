@@ -38,12 +38,10 @@ async function load(client: VerifyClient, channel: string, id: string, signedIn:
     const code = typeof err === "object" && err !== null && "code" in err ? err.code : null;
     return code === "NOT_FOUND" ? { kind: "missing" } : { kind: "failed" };
   }
-  let mine: string | null = null;
-  if (signedIn) {
-    // Only `current` carries the caller's own pseudonym, and only for the channel's latest giveaway.
-    const c = await client.interact.giveaways.current({ channel }).catch(() => null);
-    if (c?.id === id) mine = c.me?.pseudonym ?? null;
-  }
+  // CR9: `verify.me` is the signed-in caller's own pseudonym on any giveaway they entered.
+  let mine: string | null = signedIn ? (v.me?.pseudonym ?? null) : null;
+  // Only a pseudonym that is in the published list is marked (never a name: decision (n)).
+  if (mine !== null && !v.entries.includes(mine)) mine = null;
   return { kind: "ready", v, mine };
 }
 
@@ -177,7 +175,14 @@ export function GiveawayVerifyPage({
               className={p === mine ? "font-mono text-xs font-semibold break-all" : "font-mono text-xs break-all"}
             >
               {t("giveaways.verify.entryRow", { index: i, pseudonym: p })}
-              {p === mine ? ` ${t("giveaways.verify.you")}` : ""}
+              {p === mine ? (
+                <>
+                  {" "}
+                  <span data-testid="giveaway-verify-mine" data-pseudonym={p}>
+                    {t("giveaways.verify.you")}
+                  </span>
+                </>
+              ) : null}
             </li>
           ))}
         </ol>

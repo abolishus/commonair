@@ -106,6 +106,7 @@
   "portability.reason.archiveChanged": "The bundle changed after its preview. Upload it again.",
   "portability.reason.importFailed": "The import could not finish.",
   "portability.reason.previewFailed": "The bundle could not be checked. Upload it again.",
+  "portability.reason.nothingToApply": "Nothing to change: the chosen fields already match or have no match here.",
   "portability.reason.badBundle": "This file is not a bundle this instance can read.",
   "portability.reason.other": "This could not be imported.",
   "portability.landing.loading": "Loading the channel",

@@ -153,13 +153,12 @@ describe("extensions", () => {
 });
 
 describe("b8Extensions", () => {
-  test("empty and all run every extension not pending (none, at the contract step)", () => {
+  test("empty and all run every extension not pending", () => {
     for (const s of SCENARIOS) {
       const own = B8_EXTENSIONS[s] as readonly B8Extension[];
       const merged = own.filter((e) => !PENDING_B8_EXTENSIONS.includes(e));
       expect(b8Extensions(s, "").run).toEqual(merged);
       expect(b8Extensions(s, "ALL").run).toEqual(merged);
-      expect(b8Extensions(s, "").run).toEqual([]);
     }
   });
 

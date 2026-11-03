@@ -81,11 +81,11 @@ unit fills it).
 
 ### Payout transfers (M1-connect)
 
-| Test id                  | Element and attributes                                                                                                                                            |
-| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `treasury-tab-transfers` | The treasury's "Payout transfers" tab (the contract step mounts it)                                                                                               |
-| `payout-transfers`       | The treasury tab's transfer list by payout run (`<EmptyState>` when empty); each row `data-transfer-id`. The contract step's stub renders it as an `<EmptyState>` |
-| `payout-transfer-status` | A transfer's status; `data-status` (`PAYOUT_TRANSFER_STATUSES`), `data-reversed-cents`                                                                            |
+| Test id                  | Element and attributes                                                                                                                                                                                   |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `treasury-tab-transfers` | The treasury's "Payout transfers" tab (the contract step mounts it)                                                                                                                                      |
+| `payout-transfers`       | The treasury tab's transfer list by payout run (`<EmptyState>` when empty); each row `data-transfer-id`. The contract step's stub renders it as an `<EmptyState>`                                        |
+| `payout-transfer-status` | A transfer's status; `data-status` (`PAYOUT_TRANSFER_STATUSES`), `data-reversed-cents`, `data-failure-code` (the opaque code, empty when none; `sending` while a request is in flight or awaiting retry) |
 
 ### Co-op money (M1-coop-money)
 

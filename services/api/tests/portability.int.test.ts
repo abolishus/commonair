@@ -409,7 +409,7 @@ describe("imports (the API half)", () => {
         `/api/channels/${u.username}/imports/${p.body.id}/start`,
         body,
       );
-    const choices = { channel: true, panels: false, emotes: ["wave", "notInBundle"] };
+    const choices = { channel: true, fields: { tags: false }, panels: false, emotes: ["wave", "notInBundle"] };
     expect((await start({ choices })).status).toBe(412);
     const ok = await start({ choices, assertEmoteRights: true });
     expect(ok.status).toBe(200);
@@ -420,7 +420,8 @@ describe("imports (the API half)", () => {
       .select()
       .from(schema.portabilityImports)
       .where(eq(schema.portabilityImports.id, p.body.id));
-    expect(row?.choices).toEqual({ channel: true, panels: false, emotes: ["wave"] });
+    // The per-field choices reach the worker as given (batch 8).
+    expect(row?.choices).toEqual({ channel: true, fields: { tags: false }, panels: false, emotes: ["wave"] });
     expect(row?.assertionVersion).not.toBeNull();
     // Started once only.
     expect((await start({ choices, assertEmoteRights: true })).status).toBe(409);

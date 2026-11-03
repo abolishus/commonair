@@ -84,6 +84,10 @@ export function ReplayPanel({
       footer={<ChatReplayFooter>{t("replay.panel.footer")}</ChatReplayFooter>}
       className={className}
     >
+      {snap.kept ? (
+        // For the harness (docs/testing/b8-selectors.md): a deep seek kept the first span.
+        <span hidden data-testid="replay-span-kept" data-spans={snap.spans} />
+      ) : null}
       <ReplayBody snap={snap} originMicros={originMicros} onSeek={onSeek} onRetry={() => model.retry()} />
     </ChatPanel>
   );

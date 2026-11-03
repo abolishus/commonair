@@ -64,14 +64,12 @@ describe("batch 8 jobs", () => {
     const ctx = { logger: { debug: (...a: unknown[]) => logs.push(a) } } as never;
     const meta = { id: undefined, attemptsMade: 0 };
     for (const [queue, name] of [
-      [QUEUES.payments, B8_JOBS.refundReconcile],
-      [QUEUES.payments, B8_JOBS.payoutTransfers],
       [QUEUES.payments, B8_JOBS.patronagePayout],
-      [QUEUES.portability, B8_JOBS.incomingCleanup],
-      [QUEUES.portability, B8_JOBS.importRecordExpiry],
+      // B8-server filled `portability-incoming-cleanup` and `import-record-expiry`, M1-gifts-refunds
+      // `refund-reconcile` and M1-connect `payout-transfers`.
     ] as const)
       expect(await def(queue, name)?.handler({}, ctx, meta)).toEqual({ skipped: "stub" });
-    expect(logs).toHaveLength(5);
+    expect(logs).toHaveLength(1);
     expect(await b8Stub("x")({}, ctx)).toEqual({ skipped: "stub" });
   });
 });

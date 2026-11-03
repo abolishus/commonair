@@ -4,14 +4,33 @@
 # Application metrics arrive through the OpenTelemetry Collector's Prometheus
 # exporter; infrastructure exposes its own endpoints. MediaMTX metrics sit behind its
 # auth hook, so the media service reports stream health instead of a direct scrape.
+# The collector also exports the host, Postgres and Valkey metrics it collects itself
+# (docs/operators/monitoring.md).
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
+
+# Recording rules for the ADR 0032 triggers and the availability target, and the alerts on them.
+# /tmp/commonair/ holds what start.sh renders from the operator's settings at every start
+# (SLO_TARGET, EGRESS_BUDGET_GIB, LIVE_STREAMS_PER_HOST). Without it the defaults apply.
+rule_files:
+  - /etc/prometheus/rules/*.yml
+  - /tmp/commonair/rules/*.yml
+
+# The optional managed-db-metrics job (off by default), rendered by start.sh only when
+# MANAGED_DB_METRICS_TARGETS is set.
+scrape_config_files:
+  - /tmp/commonair/scrape/*.yml
 
 scrape_configs:
   - job_name: otel-collector
     static_configs:
       - targets: ["otel-collector:9464"]
+  # The collector's own telemetry: otelcol_scraper_errored_metric_points counts the failed scrapes
+  # of Postgres and Valkey, the only sign that the path to a managed cluster broke.
+  - job_name: otel-collector-internal
+    static_configs:
+      - targets: ["otel-collector:8888"]
   - job_name: prometheus
     static_configs:
       - targets: ["127.0.0.1:9090"]

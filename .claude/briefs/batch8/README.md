@@ -560,3 +560,35 @@ New in batch 8:
 - P2P bytes shown as client-reported in attestations (decision (m)).
 - Launching with no age-assurance adapter, on the default policy that prohibits explicit sexual
   content (ADR 0006:289-292).
+
+Reported by the wave 1 units (merged 2026-11-03; conservative defaults, each revisitable):
+
+- **S1-b external:** both database and Valkey URLs are required together; a Valkey repoint is
+  allowed with a warning; a Valkey password is always required; `reset-staging` and seed mode are
+  refused in external mode; the owner's and Valkey's passwords live only in Podman secrets; a pooler
+  (PgBouncer) is documented as untested; only `sslmode=require` or `disable` are accepted as
+  insecure modes (`verify-ca` refused, not mapped); weakening a URL silently drops its CA.
+- **L1-observability:** scrape failures and no-data alerts are tickets, only the burn rates page;
+  30-day egress and availability figures are projected from an average rate; one collector carries
+  OTLP and state metrics, so a bad monitor setting stops all telemetry (selfhost.sh validation is
+  the guard); the stage 0 budget alert watches one rolling 30-day window; dev compose falls back to
+  a `not-configured` monitor password; the monitor password stays in a libpq URL (hex only);
+  staging keeps `SLO_TARGET` 0.995, production 0.999.
+- **M1-gifts-refunds:** 15 min resolve grace, 15 min before the sweep refunds a booking, 5 min
+  after a timeout before asking Stripe; a refund failure with no known amount releases nothing; a
+  listed automatic refund never sent stays outstanding (not blocking) until settled; one
+  automatic attempt (a 4xx is not retried); at most one receipt, not retried after its claim; the
+  receipt links `/settings/subscriptions`; the sweep's "booked after end" heuristic (10 s before
+  the subscription's `updated_at`) until a durable mark exists.
+- **M1-connect:** readiness from the stored `payouts_enabled` flag, not a live account check; a
+  transfer that may have reached Stripe is never cancelled (it stays `outcome_unknown` for a
+  person); no re-send after 20 h for such rows; orphaned transfers are audited only, with no
+  automatic clawback; a payee held before a row opens keeps the payout held; the payout-sent mail
+  is best effort.
+- **B8-server:** a never-started Twitch preview is kept 30 days after `created_at`; the
+  record-expiry audit row is written on every run; the incoming cleanup also fails abandoned
+  previews as `archive_missing`; the staff-action email and `nothing_to_apply` wording (`en`,
+  `es`).
+- **B8-web:** a mature channel's banner stays hidden until the viewer confirms 18+, even offline;
+  a report flag opens the reports tab with nothing selected; the prediction grace offer uses the
+  client's clock (the server judges every bet).

@@ -5,9 +5,9 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # ADR 0007: E4b money follow-ups
 
-- Status: accepted (decisions 1–3 and item 6 are not implemented yet: batch 8 builds them, see
-  [Amendment 1](#amendment-1-gift-window-refund-outcomes-and-connect-transfers-batch-8), accepted
-  2026-11-02)
+- Status: accepted (decisions 1–3 and item 6 built in batch 8, merged 2026-11-03, as
+  [Amendment 1](#amendment-1-gift-window-refund-outcomes-and-connect-transfers-batch-8) describes;
+  the amendment was accepted 2026-11-02)
 - Date: 2026-10-20
 
 ## Context
@@ -19,12 +19,12 @@ still describe the current behaviour given under each item.
 
 ## Decisions
 
-### To build (not implemented)
+### Built in batch 8 (recorded 2026-10-20 as "to build")
 
 1. **Unpaid gifts cannot block viewers.** Today an unpaid gift checkout reserves each
    recipient's slot (`incomplete` subscription) for `PAYMENT_PENDING_DAYS`, so a gifter who never
    pays can lock up to `MONEY_LIMITS.giftMaxCount` viewers out of subscribing and out of other
-   gifters' pools. Decision: at most **one open unpaid gift checkout per gifter per channel**
+   gifters' pools. **Built in batch 8** (M1-gifts-refunds, A1.1). Decision: at most **one open unpaid gift checkout per gifter per channel**
    (`CONFLICT` otherwise), and gift payments expire after **24 hours** instead of
    `PAYMENT_PENDING_DAYS`. Needs a `MONEY_LIMITS` field (or config) for the gift window, a spec
    row change (Gift subs, Expiry), an API check in `money.subscribe`, the worker expiry using the
@@ -32,13 +32,16 @@ still describe the current behaviour given under each item.
 2. **Money collected for an ended subscription is refunded automatically.** Today a Stripe
    charge after we ended the subscription (refund, chargeback, expired first payment) is booked
    as `paid_after_end`, the subscription stays ended, Stripe is told to cancel, and a treasurer
-   must refund by hand. Decision: after booking, the webhook processing also requests a refund
+   must refund by hand. **Built in batch 8** (M1-gifts-refunds, A1.2), with a `refund-reconcile`
+   sweep as the durable trigger. A gift paid after its 24-hour window is not booked or refunded
+   yet (an open contract request). Decision: after booking, the webhook processing also requests a refund
    of that payment at Stripe (outside the row lock, like `requestProviderRefund`), so the creator
    is never credited for a period nobody received. Never reactivate the subscription (the end may
    come from a chargeback).
 3. **A Stripe refund call whose outcome is unknown keeps blocking.** Today a timeout or network
    error on the refund request writes `payment.refund_request_failed`, which releases the guard
-   although Stripe may have taken the refund. Decision: distinguish a definite refusal (4xx: mark
+   although Stripe may have taken the refund. **Built in batch 8** (M1-gifts-refunds, A1.3).
+   Decision: distinguish a definite refusal (4xx: mark
    failed, release) from an unknown outcome (timeout, network error, 5xx after retries: mark
    unknown, keep blocking until `charge.refunded`/`refund.failed` arrives or the 24-hour expiry).
 
@@ -53,7 +56,8 @@ still describe the current behaviour given under each item.
    earlier month (documented in `packages/ledger/README.md`).
 6. **Stripe Connect transfers are out of scope for E4b.** Payout runs record `provider: stripe`
    payouts for Stripe creators, but no money is moved to their connected accounts. Tracked in
-   PLAN.md as later work.
+   PLAN.md as later work. **Built in batch 8** (M1-connect): replaced by Connect transfers, one per
+   payout row (A1.4, A1.5), on stripe-mock only.
 
 ## Amendment 1: gift window, refund outcomes and Connect transfers (batch 8)
 

@@ -6,12 +6,12 @@
  * (its key, encrypted at rest), WebFinger, the actor (negotiation, mature, suspended, gone),
  * collections (followers: a count and no items; the outbox), NodeInfo (no usage counts), the inbox
  * (item and outbox event together, drop, blocked domain), domain blocks (followers dropped,
- * audited), key rotation (history, audit, the rotate job), turning off (the actor `Delete` queued,
- * followers dropped, 410), the followers procedures, and that no route makes an outbound request.
+ * audited), key rotation (history, audit, the rotate job), turning off (the two internal events,
+ * no delivery queued by the API, 410), the followers procedures, and that no route makes an outbound request.
  */
 import { and, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
-import { FEDERATION_JOBS, type FederationDeliverJob } from "@commonair/contracts/internal";
+import { FEDERATION_JOBS } from "@commonair/contracts/internal";
 import { schema, uuidv7 } from "@commonair/db";
 import { publicKeyPemFromPrivate } from "@commonair/federation";
 import { decryptSecret } from "@commonair/tokens";
@@ -636,7 +636,19 @@ describe("suspension and turning off", () => {
     await owner().update(schema.users).set({ banned: false }).where(eq(schema.users.id, other.userId));
   });
 
-  test("off: keeps the key, queues the actor Delete per inbox, drops followers, answers 410", async () => {
+  /** The outbox rows about this channel since `since` (type and payload), by type: one change shares a time. */
+  const eventsSince = async (id: string, since: Date) =>
+    (
+      await owner()
+        .select({ type: schema.events.type, payload: schema.events.payload })
+        .from(schema.events)
+        .where(
+          and(eq(schema.events.channelId, id), sql`${schema.events.occurredAt} >= ${since.toISOString()}::timestamptz`),
+        )
+        .orderBy(schema.events.type)
+    ).map((e) => [e.type, e.payload]);
+
+  test("off: keeps the key, writes the two internal events for the worker, queues nothing, answers 410", async () => {
     const id = channelIds[streamer.username]!;
     await owner().delete(schema.federationFollowers).where(eq(schema.federationFollowers.channelId, id));
     await addFollower(id, "https://masto.example/users/lee", "https://masto.example/inbox");
@@ -647,34 +659,31 @@ describe("suspension and turning off", () => {
       .from(schema.federationActors)
       .where(eq(schema.federationActors.channelId, id));
     jobs.length = 0;
+    const since = new Date(Date.now() - 1);
 
     const r = await enable(streamer, false);
     expect(r.status).toBe(200);
-    expect(r.body).toEqual({ enabled: false, instanceEnabled: true, handle: null, actorId: null, followers: 0 });
+    expect(r.body).toMatchObject({ enabled: false, instanceEnabled: true, handle: null, actorId: null });
 
-    const delivers = jobs.filter((j) => j.kind === "deliver").map((j) => j.data as FederationDeliverJob);
-    expect(delivers.map((d) => d.inbox).sort()).toEqual([
-      "https://masto.example/inbox",
-      "https://solo.example/users/ned/inbox",
-    ]);
-    for (const d of delivers)
-      expect(d).toMatchObject({
-        channelId: id,
-        objectId: null,
-        attempt: 1,
-        activity: { type: "Delete", actor: actorOf(id), object: actorOf(id) },
-      });
-    expect(new Set(delivers.map((d) => d.activity.id)).size).toBe(1);
+    // Batch 8 decision (h): the API queues no delivery; the outbox relay does, from these events.
+    expect(jobs.filter((j) => j.kind === "deliver")).toEqual([]);
     expect(FEDERATION_JOBS.deliver).toBe("federation-deliver");
+    expect(await eventsSince(id, since)).toEqual([
+      ["channel.federation", { channel_id: id, enabled: false }],
+      ["federation.actor.disabled", { channel_id: id }],
+    ]);
+    // Never the public `channel.update`.
+    expect((await eventsSince(id, since)).some(([type]) => type === "channel.update")).toBe(false);
+    // The follower rows wait for the worker's cleanup, which runs after their `Delete` is queued.
+    expect(
+      await owner().select().from(schema.federationFollowers).where(eq(schema.federationFollowers.channelId, id)),
+    ).toHaveLength(3);
 
     const [after] = await owner()
       .select()
       .from(schema.federationActors)
       .where(eq(schema.federationActors.channelId, id));
     expect(after).toMatchObject({ enabled: false, privateKeyEnc: before!.privateKeyEnc });
-    expect(
-      await owner().select().from(schema.federationFollowers).where(eq(schema.federationFollowers.channelId, id)),
-    ).toHaveLength(0);
     expect((await get(`/ap/channels/${id}`)).status).toBe(410);
     expect((await inboxPost(`/ap/channels/${id}/inbox`, follow("https://masto.example/users/o", id))).status).toBe(410);
     expect(
@@ -683,15 +692,22 @@ describe("suspension and turning off", () => {
     const [audit] = await owner()
       .select()
       .from(schema.auditLog)
-      .where(and(eq(schema.auditLog.action, "federation.channel.disable"), eq(schema.auditLog.subjectId, id)));
+      .where(and(eq(schema.auditLog.action, "federation.channel.disable"), eq(schema.auditLog.subjectId, id)))
+      .orderBy(sql`${schema.auditLog.createdAt} desc`)
+      .limit(1);
     expect(audit).toMatchObject({ actorId: streamer.userId, details: { followers: 3 } });
 
-    // Turning it off again queues nothing more.
+    // Turning it off again writes and queues nothing more.
     jobs.length = 0;
+    const again = new Date(Date.now() - 1);
     expect((await enable(streamer, false)).status).toBe(200);
     expect(jobs).toHaveLength(0);
-    // And back on: the same key, 200 again.
+    expect(await eventsSince(id, again)).toEqual([]);
+    // And back on: the same key, 200 again, and `channel.federation {enabled: true}` (no jobs).
+    const on = new Date(Date.now() - 1);
     expect((await enable(streamer, true)).body.enabled).toBe(true);
+    expect(await eventsSince(id, on)).toEqual([["channel.federation", { channel_id: id, enabled: true }]]);
+    expect(jobs).toHaveLength(0);
     const [back] = await owner()
       .select()
       .from(schema.federationActors)
@@ -700,32 +716,24 @@ describe("suspension and turning off", () => {
     expect((await get(`/ap/channels/${id}`)).status).toBe(200);
   });
 
-  test("off: a failed enqueue keeps those followers, and turning off again sends their Delete", async () => {
+  test("off: the events commit with the setting, so a queue outage loses nothing", async () => {
     const id = channelIds[streamer.username]!;
     await owner().delete(schema.federationFollowers).where(eq(schema.federationFollowers.channelId, id));
     expect((await enable(streamer, true)).status).toBe(200);
-    await addFollower(id, "https://up.example/users/ok");
-    const stuck = await addFollower(id, "https://down.example/users/kept");
+    await addFollower(id, "https://down.example/users/kept");
     jobs.length = 0;
-    failDeliver = (inbox) => inbox.startsWith("https://down.example/");
+    const since = new Date(Date.now() - 1);
+    failDeliver = () => true;
     try {
       expect((await enable(streamer, false)).status).toBe(200);
     } finally {
       failDeliver = null;
     }
-    expect(jobs.map((j) => (j.data as FederationDeliverJob).inbox)).toEqual(["https://up.example/users/ok/inbox"]);
-    const left = await owner()
-      .select()
-      .from(schema.federationFollowers)
-      .where(eq(schema.federationFollowers.channelId, id));
-    expect(left.map((f) => f.id)).toEqual([stuck.id]);
-
-    jobs.length = 0;
-    expect((await enable(streamer, false)).status).toBe(200);
-    expect(jobs.map((j) => (j.data as FederationDeliverJob).inbox)).toEqual(["https://down.example/users/kept/inbox"]);
-    expect(
-      await owner().select().from(schema.federationFollowers).where(eq(schema.federationFollowers.channelId, id)),
-    ).toHaveLength(0);
+    expect(jobs).toEqual([]);
+    expect((await eventsSince(id, since)).map(([type]) => type)).toEqual([
+      "channel.federation",
+      "federation.actor.disabled",
+    ]);
     expect((await enable(streamer, true)).status).toBe(200);
   });
 });

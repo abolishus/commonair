@@ -188,7 +188,7 @@ export async function startTwitchImport(
     channelLanguage: string;
     userId: string;
     id: string;
-    choices: { channel: boolean; panels: boolean; emotes: string[] };
+    choices: { channel: boolean; fields?: dto.ImportChoices["fields"]; panels: boolean; emotes: string[] };
     assertEmoteRights: boolean;
   },
 ): Promise<ImportDto> {
@@ -230,7 +230,13 @@ export async function startTwitchImport(
         requirement: "emote_rights",
       });
     // Twitch has no panels endpoint (decision (b)): panels come by paste, never from the job.
-    const choices = { channel: input.choices.channel, panels: false, emotes: chosen };
+    // Absent fields means every field (batch 8); a stored object limits what the channel line applies.
+    const choices = {
+      channel: input.choices.channel,
+      ...(input.choices.fields ? { fields: input.choices.fields } : {}),
+      panels: false,
+      emotes: chosen,
+    };
     const [updated] = await tx
       .update(imports)
       .set({

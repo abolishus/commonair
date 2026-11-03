@@ -11,6 +11,7 @@
  * Delivery rows and logs carry ids and codes only, never an address or provider text.
  */
 import { sourceLink, type InstanceSite } from "@commonair/config/site";
+import { STAFF_ACTION_SOURCE_ACTIONS } from "@commonair/contracts/enums";
 import { PLACEHOLDER_PATTERN, schema, type Executor } from "@commonair/db";
 import type { TemplateData } from "@commonair/email";
 import { findClause, noticeRedress, noticeSection, plainNoticeText } from "@commonair/moderation";
@@ -43,11 +44,13 @@ type StatementRow = typeof st.$inferSelect;
 const ref = (prefix: string, id: string) => `${prefix}-${id.replace(/-/g, "").slice(-8).toUpperCase()}`;
 export const statementRef = (id: string) => ref("SR", id);
 /**
- * Staff suspensions have no moderation case: their facts name the `mod_actions` row (B7), so the
- * mail quotes it as `MA-…`, never as a case reference support could not find. A dedicated facts
- * variant is the follow-up (B7-followups contract request 6).
+ * Staff suspensions have no moderation case (B7 CR6): their statements carry `staff_action` facts,
+ * and the mail names the action, clause and time, never a case reference. A statement built before
+ * batch 8 named the `mod_actions` row as a reviewed case; it is rendered the same way.
  */
-const STAFF_ACTIONS: ReadonlySet<string> = new Set(["report.resolve", "user.suspend", "channel.suspend"]);
+const STAFF_ACTIONS: ReadonlySet<string> = new Set<StaffAction>(STAFF_ACTION_SOURCE_ACTIONS);
+type StaffAction = (typeof STAFF_ACTION_SOURCE_ACTIONS)[number];
+const isStaffAction = (a: string): a is StaffAction => STAFF_ACTIONS.has(a);
 
 /** `{{placeholders}}` of a legal text, as the API renders them (`services/api/src/lib/legal.ts`). */
 export function renderPlaceholders(text: string, site: InstanceSite): string {
@@ -74,11 +77,12 @@ export function statementMail(
       facts = f;
       break;
     case "moderator_review":
-      facts = {
-        code: f.code,
-        caseRef: ref(STAFF_ACTIONS.has(s.sourceAction) ? "MA" : "MC", f.caseId),
-        decision: f.decision,
-      };
+      // A staff action stored before batch 8 carried no time of its own. The statement's creation
+      // (by `sor-build`, shortly after the action) stands in for it: approximate, later by at most
+      // the sweep's lag. Acceptable for the few legacy rows; new rows carry `appliedAt`.
+      facts = isStaffAction(s.sourceAction)
+        ? { code: "staff_action", action: s.sourceAction, appliedAt: s.createdAt }
+        : { code: f.code, caseRef: ref("MC", f.caseId), decision: f.decision };
       break;
     case "ncii_notice":
       facts = { code: f.code, requestRef: ref("NR", f.requestId), receivedAt: f.receivedAt, deadlineAt: f.deadlineAt };
@@ -87,8 +91,8 @@ export function statementMail(
       facts = { code: f.code, capturedAt: f.capturedAt };
       break;
     case "staff_action":
-      // B8-server renders staff-action statements (B7 CR6); sor-build does not emit them yet.
-      throw new Error("staff_action statements are not rendered yet");
+      facts = { code: f.code, action: f.action, appliedAt: f.appliedAt };
+      break;
   }
   const clause = findClause(s.clauseId, s.clauseVersion);
   const section = noticeSection(body, s.clauseId);

@@ -24,6 +24,7 @@ import { FormError } from "../form-error.tsx";
 import { useLoad, usePaged } from "../money/use-load.ts";
 import { t } from "../../i18n/index.ts";
 import { toastActionError } from "../../lib/action-error.ts";
+import { errorCode } from "../../lib/api.ts";
 import {
   imageDataUrl,
   moderationClient,
@@ -42,19 +43,81 @@ export const NOTE_MAX = 2000;
 const SLA_WARN_MS = 5 * 60_000;
 const NCII_WARN_MS = 12 * 60 * 60_000;
 
-export type ModTab = "cases" | "labels" | "reports" | "ncii";
+export const MOD_TABS = ["cases", "labels", "reports", "ncii"] as const;
+export type ModTab = (typeof MOD_TABS)[number];
 type Selection = { kind: "case" | "report" | "ncii"; id: string } | null;
+
+/** Where the queue is: its tab and the selected case, report or NCII request (null = none). */
+export interface ModQueueLocation {
+  tab: ModTab;
+  case: string | null;
+}
+
+/** `/admin/moderation`'s search params (docs/testing/b8-selectors.md): both optional. */
+export type ModerationSearch = {
+  tab?: ModTab;
+  case?: string;
+};
+
+const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const isModTab = (v: unknown): v is ModTab => typeof v === "string" && (MOD_TABS as readonly string[]).includes(v);
+
+/** `validateSearch` for `/admin/moderation`: an unknown tab or a malformed id is dropped, never trusted. */
+export function parseModerationSearch(raw: Record<string, unknown>): ModerationSearch {
+  const out: ModerationSearch = {};
+  if (isModTab(raw.tab)) out.tab = raw.tab;
+  if (typeof raw.case === "string" && ID.test(raw.case)) out.case = raw.case.toLowerCase();
+  return out;
+}
+
+/** The search params for a location; the defaults (`cases`, nothing selected) are left out. */
+export function moderationSearch(loc: ModQueueLocation): ModerationSearch {
+  const out: ModerationSearch = {};
+  if (loc.tab !== "cases") out.tab = loc.tab;
+  if (loc.case !== null) out.case = loc.case;
+  return out;
+}
+
+export function locationOf(search: ModerationSearch): ModQueueLocation {
+  return { tab: search.tab ?? "cases", case: search.case ?? null };
+}
+
+const KIND_OF_TAB: Record<ModTab, NonNullable<Selection>["kind"]> = {
+  cases: "case",
+  labels: "case",
+  reports: "report",
+  ncii: "ncii",
+};
 
 export interface ModQueueProps {
   /** Platform moderators and admins (reports need them; `legal` alone does not). */
   canReports: boolean;
   client?: ModerationClient;
+  /**
+   * The tab and selection from the URL (`?tab=&case=`); with `onLocationChange` the queue is
+   * controlled by them, so a shared or reloaded URL reopens the same view (the route replaces the
+   * history entry, so selections do not pile up in back and forward). Without, it keeps its own.
+   */
+  location?: ModQueueLocation;
+  onLocationChange?: (next: ModQueueLocation) => void;
 }
 
-export function ModQueue({ canReports, client: clientProp }: ModQueueProps): React.JSX.Element {
+export function ModQueue({
+  canReports,
+  client: clientProp,
+  location,
+  onLocationChange,
+}: ModQueueProps): React.JSX.Element {
   const [client] = React.useState(() => clientProp ?? moderationClient());
-  const [tab, setTab] = React.useState<ModTab>("cases");
-  const [selected, setSelected] = React.useState<Selection>(null);
+  const [own, setOwn] = React.useState<ModQueueLocation>(() => location ?? { tab: "cases", case: null });
+  const controlled = onLocationChange !== undefined && location !== undefined;
+  const loc = controlled ? location : own;
+  const setLoc = (next: ModQueueLocation) => (controlled ? onLocationChange(next) : setOwn(next));
+  // `legal` alone has no reports tab: a link to one opens the cases tab with nothing selected.
+  const tab: ModTab = loc.tab === "reports" && !canReports ? "cases" : loc.tab;
+  const selected: Selection = loc.case !== null && tab === loc.tab ? { kind: KIND_OF_TAB[tab], id: loc.case } : null;
+  const setTab = (next: ModTab) => setLoc({ tab: next, case: null });
+  const setSelected = (next: Selection) => setLoc({ tab, case: next?.id ?? null });
   const moreFailed = (err: unknown) => toastActionError(err, t("safety.modq.loadMoreFailed"));
   const cases = usePaged("t1", (cursor) => client.cases({ tier: "t1", status: "open", cursor }), moreFailed);
   const labels = usePaged("t2", (cursor) => client.cases({ tier: "t2", status: "labelled", cursor }), moreFailed);
@@ -125,16 +188,43 @@ export function ModQueue({ canReports, client: clientProp }: ModQueueProps): Rea
   const report = selected?.kind === "report" ? reports.items?.find((r) => r.id === selected.id) : undefined;
   const request = selected?.kind === "ncii" ? ncii.items?.find((r) => r.id === selected.id) : undefined;
 
+  // A linked report or NCII request (a shared URL) not on the loaded pages: load the next page while
+  // there is one; once the open queue is exhausted, there is no procedure to read one by id, so say
+  // so and clear the selection.
+  const unseenReport = selected?.kind === "report" && reports.items !== null && report === undefined;
+  const unseenNcii = selected?.kind === "ncii" && ncii.items !== null && request === undefined;
+  const missing = (unseenReport && !reports.hasMore) || (unseenNcii && !ncii.hasMore);
+  const seekRef = React.useRef(() => {});
+  React.useEffect(() => {
+    seekRef.current = () => {
+      if (unseenReport && reports.hasMore && !reports.loadingMore) reports.loadMore();
+      if (unseenNcii && ncii.hasMore && !ncii.loadingMore) ncii.loadMore();
+    };
+  });
+  const seeking =
+    (unseenReport && reports.hasMore && !reports.loadingMore) || (unseenNcii && ncii.hasMore && !ncii.loadingMore);
+  const loadedCount = (reports.items?.length ?? 0) + (ncii.items?.length ?? 0);
+  React.useEffect(() => {
+    if (seeking) seekRef.current();
+  }, [seeking, loadedCount]);
+  // The latest `setSelected` (a fresh closure every render), so the effect runs once per miss.
+  const clearRef = React.useRef(() => setSelected(null));
+  React.useEffect(() => {
+    clearRef.current = () => setSelected(null);
+  });
+  React.useEffect(() => {
+    if (!missing) return;
+    toast.error(t("jury.link.notInQueue"));
+    clearRef.current();
+  }, [missing]);
+
   return (
     <div data-testid="modq" className="flex flex-col gap-6">
       <PageTabs
         aria-label={t("safety.modq.tabs")}
         value={tab}
         onValueChange={(next) => {
-          if (next === "cases" || next === "labels" || next === "reports" || next === "ncii") {
-            setTab(next);
-            setSelected(null);
-          }
+          if (isModTab(next)) setTab(next);
         }}
         items={items}
       />
@@ -148,6 +238,11 @@ export function ModQueue({ canReports, client: clientProp }: ModQueueProps): Rea
           onDecided={() => {
             cases.reload();
             labels.reload();
+          }}
+          // A linked case (`?case=`) that does not exist, or is not this page's (T0): clear it.
+          onMissing={() => {
+            toast.error(t("jury.link.caseNotFound"));
+            setSelected(null);
           }}
         />
       )}
@@ -287,12 +382,26 @@ export function CaseDetail({
   id,
   client,
   onDecided,
+  onMissing,
 }: {
   id: string;
   client: ModerationClient;
   onDecided: () => void;
+  /** The API answered NOT_FOUND for `id` (a stale or mistyped link). */
+  onMissing?: () => void;
 }): React.JSX.Element {
-  const loaded = useLoad(`case|${id}`, () => client.case(id));
+  const missingRef = React.useRef(onMissing);
+  React.useEffect(() => {
+    missingRef.current = onMissing;
+  });
+  // Fetched by id, so a case that is not on the loaded page (a closed one from a jury flag) opens
+  // too; a closed case is read-only, as `CaseDetailView` shows no review form for it.
+  const loaded = useLoad(`case|${id}`, () =>
+    client.case(id).catch((err: unknown) => {
+      if (errorCode(err) === "NOT_FOUND") missingRef.current?.();
+      throw err;
+    }),
+  );
   if (loaded.failed && !loaded.data) return <FormError>{t("safety.modq.caseFailed")}</FormError>;
   if (!loaded.data) return <Loading />;
   return (

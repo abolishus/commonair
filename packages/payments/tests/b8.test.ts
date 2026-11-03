@@ -9,7 +9,6 @@
  */
 import { describe, expect, test } from "vite-plus/test";
 import {
-  AdapterUnavailableError,
   StripeApiError,
   StripeOutcomeUnknown,
   StripeRequestError,
@@ -294,20 +293,14 @@ describe("the adapter seams", () => {
     expect("refundStatus" in manual).toBe(false);
   });
 
-  test("the stripe adapter's transfer is the stripeTransfer stub until M1-connect fills it", async () => {
+  test("the stripe adapter's transfer goes through stripeTransfer", async () => {
     const { f, calls } = fakeFetch(() => Response.json(transferJson));
     const adapter = stripeAdapter({ client: { secretKey: "sk_test_x", fetch: f } });
-    expect(await adapter.transfer?.(request).catch((e: unknown) => e)).toBeInstanceOf(AdapterUnavailableError);
+    const r = { ...request, destination: "acct_1", amountCents: 5000 };
+    expect(await adapter.transfer?.(r)).toEqual({ providerRef: "tr_1", amountCents: 5000, currency: "usd" });
     const client = stripeClient({ secretKey: "sk_test_x", fetch: f });
-    expect(await stripeTransfer(client, request).catch((e: unknown) => e)).toBeInstanceOf(AdapterUnavailableError);
-    expect(calls).toHaveLength(0);
-    // The lazy factory adapter forwards to it.
-    const lazy = createAdapter({
-      PAYMENTS_PROVIDER: "stripe",
-      MANUAL_PAYMENT_INSTRUCTIONS: "",
-      STRIPE_SECRET_KEY: "sk_test_x",
-    });
-    expect(await lazy.transfer?.(request).catch((e: unknown) => e)).toBeInstanceOf(AdapterUnavailableError);
+    expect((await stripeTransfer(client, r)).providerRef).toBe("tr_1");
+    expect(calls).toHaveLength(2);
   });
 
   test("refundStatus normalizes Stripe's status; a missing refund is null", async () => {
@@ -335,6 +328,46 @@ describe("the adapter seams", () => {
       "pending",
       "pending",
     ]);
+  });
+
+  test("listRefunds lists a PaymentIntent's refunds with our metadata; refunds carry the refund key", async () => {
+    const { f, calls } = fakeFetch((_url, init) =>
+      init.method === "GET"
+        ? Response.json({
+            data: [
+              {
+                id: "re_1",
+                amount: 300,
+                currency: "usd",
+                status: "succeeded",
+                payment_intent: "pi_1",
+                metadata: { payment_id: "p1", refund_key: "k1", other: 1 },
+              },
+            ],
+            has_more: false,
+          })
+        : Response.json({ id: "re_2", object: "refund", status: "pending" }),
+    );
+    const adapter = stripeAdapter({ client: { secretKey: "sk_test_x", fetch: f } });
+    expect(await adapter.listRefunds?.("pi_1")).toEqual([
+      {
+        id: "re_1",
+        amount: 300,
+        currency: "usd",
+        status: "succeeded",
+        metadata: { payment_id: "p1", refund_key: "k1" },
+      },
+    ]);
+    expect(calls[0]?.url.searchParams.get("payment_intent")).toBe("pi_1");
+    await adapter.refund?.({
+      paymentId: "p1",
+      providerRef: "pi_1",
+      amountCents: 300,
+      idempotencyKey: "k1",
+    });
+    const body = new URLSearchParams(calls[1]?.init.body as string);
+    expect(body.get("metadata[payment_id]")).toBe("p1");
+    expect(body.get("metadata[refund_key]")).toBe("k1");
   });
 
   test("refundStatus passes an unknown outcome on", async () => {
