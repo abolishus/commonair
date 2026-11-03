@@ -1,8 +1,10 @@
 # SPDX-FileCopyrightText: 2026 CommonAir contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-# Production: stage 0 at launch (one dedicated-vCPU droplet, backups and monitoring in other
-# regions). Stage 1 is enable_managed_state, stage 2 is app_count > 1 (ADR 0032).
+# Production: stage 1 at launch (U4): one dedicated-vCPU app droplet, managed PostgreSQL and
+# Valkey with one standby each and the instance buckets in Spaces (enable_managed_state, default
+# true here), backups and monitoring in other regions. Stage 2 is app_count > 1 (ADR 0032). The
+# self-host default stays stage 0; this is only how our own instance is deployed.
 
 terraform {
   required_version = "= 1.13.1"

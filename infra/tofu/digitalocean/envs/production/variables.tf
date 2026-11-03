@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 # Open decisions have no default, so a plan cannot run until they are made: the region
-# (ADR 0025's open question) and the droplet size (S1-a's load test).
+# (ADR 0025's open question), the droplet size (S1-a's load test) and the instance origin (the
+# domain, an L1 item; stage 1 needs it for the media bucket's CORS).
 
 variable "state_passphrase" {
   description = "State and plan encryption passphrase. Set TF_VAR_state_passphrase from a password manager; never write it to a file in the repository."
@@ -58,9 +59,9 @@ variable "irc_plaintext" {
 }
 
 variable "enable_managed_state" {
-  description = "Stage 1: managed PostgreSQL and Valkey, instance buckets in Spaces."
+  description = "Stage 1: managed PostgreSQL and Valkey, instance buckets in Spaces. Production launches at stage 1 (U4, ADR 0032)."
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "pg_size" {
@@ -76,9 +77,8 @@ variable "valkey_size" {
 }
 
 variable "instance_origin" {
-  description = "The instance's https origin, for CORS on the media bucket (stage 1)."
+  description = "The instance's https origin, for CORS on the media bucket (stage 1). Required while enable_managed_state is true; null only with it false."
   type        = string
-  default     = null
 }
 
 variable "app_count" {

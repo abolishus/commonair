@@ -330,7 +330,8 @@ describe("wiring", () => {
   test("a new scenario with every step pending skips instead of failing in full", () => {
     for (const name of NEW_SCENARIOS) {
       const text = source(`scenarios/${name}.ts`);
-      expect(text, name).toContain("if (steps.length === 0) {");
+      // Batch 8 extensions also keep the scenario running (src/b8/steps.ts).
+      expect(text, name).toMatch(/if \(steps\.length === 0( && b8\.run\.length === 0)?\) \{/);
       expect(text, name).toContain(`ctx.skipStep("${name}"`);
     }
   });

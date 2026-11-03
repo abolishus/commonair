@@ -383,6 +383,19 @@ viewers), `trust-safety` (`sor-resolve`, around the steps), `integrity-basic`
 w3=<extension>[,…]` (or `none`) the extensions, which add the extensions, scenario steps and W2
 extensions they need.
 
+Batch 8 adds no scenario at its contract step, only extension steps (`src/b8/steps.ts`), each
+after the scenario's earlier extensions: `e4b-money` (`gift-window`, `auto-refund`,
+`refund-unknown`, `connect-transfer`, `transfer-reversed`, `receipt-email`), `e5-coop`
+(`share-stripe`, `patronage-payout`), `interact` (`grace-bet-web`, `giveaway-verify-mine`,
+`raid-restart-keeps-raid`), `watch-room` (`edge-sync`), `twitch-import` (`field-choices`,
+`channel-panels-banner`, `import-expiry`), `federation` (`actor-disabled-event`), `portability`
+(`incoming-cleanup`), `data-export` (`giveaway-section`) and `trust-safety` (`sor-staff-action`,
+`lapsed-ban-signin`, around the steps), plus `relay-dvr-switch` for the `relay-dvr` scenario
+B8-harness creates in wave 2. They are documented with
+[docs/testing/b8-selectors.md](../docs/testing/b8-selectors.md). Every one is pending until its
+unit merges; `--set b8=<extension>[,…]` (or `none`) names them, with the extensions and scenario
+steps they need.
+
 `e2e-basic` drives `apps/web` with Playwright and selects only by the routes and `data-testid`s in
 [docs/testing/e1-selectors.md](../docs/testing/e1-selectors.md), mirrored in `src/web/selectors.ts`
 (a unit test fails when they drift). The `web` need is met when `HARNESS_WEB_URL/healthz` answers 200. It publishes to `<stream-server-url>/<stream-key>` exactly as shown on the dashboard;

@@ -15,7 +15,9 @@
  * is not re-enrolled by the sync, and rejoins (`membership-rejoin-viewer`, E7).
  *
  * W3 extension (`--set w3=`, `src/w3/steps.ts`): `jury` (the advisory jury, ADR 0038;
- * `src/w3/jury.ts`) runs after the last step.
+ * `src/w3/jury.ts`) runs after the last step. B8 extensions (`--set b8=`, `src/b8/steps.ts`):
+ * `share-stripe` and `patronage-payout` (M1-coop-money, `src/b8/coop-money.ts`) run after it, on
+ * the same context.
  *
  * Governance windows run on the database clock: every wait is on state (`coop.proposals.get`)
  * with a deadline, ticking `proposals-advance` through the test hook. `--set via=api` drives
@@ -24,6 +26,9 @@
  */
 import { join } from "node:path";
 import type { Page } from "playwright";
+import { stepPatronagePayout, stepShareStripe } from "../src/b8/coop-money.ts";
+import type { CoopB8Extension } from "../src/b8/kit.ts";
+import { type B8Extension, b8ExtensionTitle, b8Extensions } from "../src/b8/steps.ts";
 import {
   type CoopDriver,
   type MembershipSnapshot,
@@ -115,6 +120,11 @@ const NOTE = "harness e5-coop";
 
 const W3_STEPS: Readonly<Record<W3Extension<"e5-coop">, (ext: CoopW3Extension) => Promise<void>>> = {
   jury: stepJury,
+};
+
+const B8_STEPS: Readonly<Record<B8Extension<"e5-coop">, (ext: CoopB8Extension) => Promise<void>>> = {
+  "share-stripe": stepShareStripe,
+  "patronage-payout": stepPatronagePayout,
 };
 
 interface People {
@@ -241,8 +251,11 @@ async function e5Coop(ctx: ScenarioContext, sessions: WebSession[], check: Scena
   const appRole = ctx.param("appRole", DEFAULT_APP_ROLE);
   // `--set w3=` names a pending extension; by default only merged ones run (src/w3/steps.ts).
   const w3 = w3Extensions("e5-coop", ctx.param("w3", ""));
+  // `--set b8=` likewise (src/b8/steps.ts).
+  const b8 = b8Extensions("e5-coop", ctx.param("b8", ""));
   ctx.data("steps", steps);
   ctx.data("w3.extensions", w3);
+  ctx.data("b8.extensions", b8);
   ctx.data("via", via);
   ctx.data("runStart", runStart.toISOString());
 
@@ -400,6 +413,7 @@ async function e5Coop(ctx: ScenarioContext, sessions: WebSession[], check: Scena
 
   const ext: CoopW3Extension = { ctx, via, people, hooks, databaseUrl, appRole, currency, check };
   for (const name of w3.run) await ctx.step(w3ExtensionTitle(name, "run"), () => W3_STEPS[name](ext));
+  for (const name of b8.run) await ctx.step(b8ExtensionTitle(name, "run"), () => B8_STEPS[name](ext));
 }
 
 function summarizeTicks(hooks: CoopHooks): Record<string, { count: number; skipped: number; errors: number }> {

@@ -19,9 +19,15 @@
  * named. The steps live in `src/w3/watch-rooms/`; they need `DATABASE_URL` (the direct insert and
  * row checks) and the b7 test hooks (`OPS_TEST_HOOKS=true`) for retention.
  *
+ * B8 extension (`--set b8=`, `src/b8/steps.ts`): `edge-sync` (B8-player, `src/b8/player.ts`) runs
+ * after the steps.
+ *
  * Runs in the `w3` shard, on the harness stack with the batch 7 overrides
  * (`bun scripts/infra.ts stack --harness --w3`).
  */
+import type { WatchRoomB8Extension } from "../src/b8/kit.ts";
+import { stepEdgeSync } from "../src/b8/player.ts";
+import { type B8Extension, b8ExtensionTitle, b8Extensions, withB8Steps } from "../src/b8/steps.ts";
 import { parseVia } from "../src/money.ts";
 import { defineScenario } from "../src/scenario.ts";
 import { WATCH_ROOM_STEP_RUNNERS, newWatchRoomRun } from "../src/w3/watch-rooms/index.ts";
@@ -32,6 +38,10 @@ import {
   withPrerequisites,
 } from "../src/w3/steps.ts";
 
+const B8_STEPS: Readonly<Record<B8Extension<"watch-room">, (run: WatchRoomB8Extension) => Promise<void>>> = {
+  "edge-sync": stepEdgeSync,
+};
+
 export default defineScenario({
   name: "watch-room",
   description:
@@ -41,15 +51,22 @@ export default defineScenario({
   timeoutMs: 20 * 60_000,
   async run(ctx) {
     const selected = parseWatchRoomSteps(ctx.param("steps", "all"));
-    const { steps, added } = withPrerequisites(selected, WATCH_ROOM_STEP_PREREQUISITES);
+    // `--set b8=` names a pending extension; by default only merged ones run (src/b8/steps.ts).
+    const b8 = b8Extensions("watch-room", ctx.param("b8", ""));
+    const forB8 = withB8Steps(selected, b8.run);
+    const prerequisites = withPrerequisites(forB8.steps, WATCH_ROOM_STEP_PREREQUISITES);
+    const steps = prerequisites.steps;
+    const added = [...new Set([...forB8.added, ...prerequisites.added])].sort((a, b) => a - b);
     const via = parseVia(ctx.param("via", "web"));
     ctx.data("steps", { selected, run: steps, addedPrerequisites: added });
     ctx.data("via", via);
-    if (steps.length === 0) {
+    ctx.data("b8.extensions", b8);
+    if (steps.length === 0 && b8.run.length === 0) {
       ctx.skipStep("watch-room", "every step is pending (W3-watch-rooms not merged yet); name one with --set steps=");
       return;
     }
     const run = await newWatchRoomRun(ctx, { via });
     for (const n of steps) await ctx.step(watchRoomTitle(n, "run"), () => WATCH_ROOM_STEP_RUNNERS[n](run));
+    for (const name of b8.run) await ctx.step(b8ExtensionTitle(name, "run"), () => B8_STEPS[name](run));
   },
 });

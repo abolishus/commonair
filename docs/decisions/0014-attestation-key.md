@@ -6,7 +6,9 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR 0014: Audience attestation key, chain and settle delay
 
 - Status: accepted (2026-10-27; the maintainer accepted the recommended answers, see
-  [Decisions at acceptance](#decisions-at-acceptance-2026-10-27))
+  [Decisions at acceptance](#decisions-at-acceptance-2026-10-27)).
+  [Amendment 1](#amendment-1-client-reported-p2p-bytes-statement-v-2) (client-reported P2P bytes,
+  statement `v: 2`) proposed 2026-11-02, maintainer to accept
 - Date: 2026-10-27 (code checked at `ccf9c17`)
 
 ## Context
@@ -234,3 +236,94 @@ Decided within these answers (recorded so reviewers can check them):
 - **The swarm's category follows the score.** A session's category is its highest-scoring
   signal's (`exclusionCategoryOf`), so a datacenter swarm on one device may group under
   `concurrency` or `automation`; the precedence is not changed for the harness.
+
+## Amendment 1: client-reported P2P bytes (statement `v: 2`)
+
+- Status: proposed (maintainer to accept; see
+  [Amendment 1 decisions at acceptance](#amendment-1-decisions-at-acceptance)). Nothing is built in
+  batch 8: statement `v: 2` (tokens, vectors, worker, SDK) is built in batch 9, after acceptance
+  ([batch 8](../../.claude/briefs/batch8/README.md#decisions) decision (m)).
+- Date: 2026-11-02 (code checked at `21b44584`)
+- Gates: the batch 9 attestation `v: 2` unit; P1 (ADR 0005 Amendment 1, the browser P2P client)
+
+**No counsel retained; listed for post-launch review** (batch 7 decision (h)). Showing a
+client-reported figure in a signed statement is counsel-like only in how it is labelled to a
+sponsor, so the conservative default is taken: the figure is named and shown as client-reported
+everywhere, and it is never added to anything attested. The item is on the batch 8 README's
+[Post-launch review](../../.claude/briefs/batch8/README.md#post-launch-review) list.
+
+### Context
+
+Since P1, viewers who opt in fetch segments from each other, and each heartbeat reports
+`bytesP2p` (`packages/contracts/src/api/entities.ts:336`), summed into
+`playback_sessions.bytes_p2p` (`services/api/src/routes/playback.ts:420`). The statement's
+`deliveryBytes` (decision 2) are origin, relay and CDN only, read from the instance's own egress
+samples (`services/worker/src/jobs/broadcast-rollup.ts:338-347`), and the schema refuses any other
+source (`packages/tokens/src/attestation.ts:56`, `v` a literal 1 at `:28`). The worker says why
+(`services/worker/src/jobs/integrity-attestation.ts:115-119`): P2P bytes are not the instance's
+delivery.
+
+The difference matters. Origin, relay and CDN bytes are measured by servers the instance runs or
+pays, and relay bytes are cross-checked against signed receipts. P2P bytes are whatever the
+client says: no server sees them move (the tracker only signals, ADR 0005), and ADR 0005
+decision 6 makes every client P2P report informational and non-paying. A sponsor reading a signed
+statement must not mistake that number for a measured one.
+
+### A1.1 A separate figure, labelled client-reported
+
+- Statement `v: 2` adds one top-level figure, `p2pBytesReported` (a non-negative integer, like
+  the others), after `deliveryBytes`. It is **not** a key of `deliveryBytes`: that object keeps
+  meaning "bytes the instance delivered and measured", and stays `{origin, relay, cdn}`.
+- Its value is the sum of heartbeat `bytesP2p` over the broadcast's **verified** sessions only
+  (`GATE_ELIGIBLE`, decision 7), so excluded or unjudged sessions cannot inflate it, carried
+  through the broadcast rollup like the other figures.
+- **Never summed into an attested figure.** No verifier, page, export or API sums it with
+  `deliveryBytes`, computes a "total delivered" from it, or derives a share of delivery from it.
+- **Never paying.** It feeds no payout, patronage, egress credit or integrity verdict
+  (ADR 0005 decision 6, unchanged).
+- **Labelled everywhere.** The verifier page, the owner's analytics and the SDK's verifier name it
+  "client-reported P2P bytes" (an i18n string), set apart from the delivery figures, with a line
+  saying that the instance did not measure it.
+
+### A1.2 Versioning
+
+- `v` is part of the signed bytes, so a `v: 1` statement keeps its exact bytes and keeps verifying.
+  Verifiers (TS, the SDK, the Go mirror if any) accept `v: 1` and `v: 2`, each against its own
+  schema; a `v: 1` statement simply has no P2P figure.
+- From the release that ships `v: 2`, the worker signs every new entry as `v: 2`, including a
+  `supersede` or `reissue` of a `v: 1` entry. Adding the field alone is not a change of figures,
+  so it never triggers a supersede (decision 4): old broadcasts are not re-signed to gain it.
+- `rulesetVersion` does not change: the figure is outside what a verdict means.
+- New vectors in `packages/tokens/vectors.json` for `v: 2`, and for a `v: 2` payload carrying a
+  `p2p` key inside `deliveryBytes`, which stays refused.
+
+### A1.3 Consequences of the amendment
+
+- A sponsor sees how much of the audience was served peer to peer, without the instance vouching
+  for that number.
+- Farming the figure gains nothing: it pays nothing and changes no verdict, and only verified
+  sessions count.
+- One more column in the broadcast rollup, and one more field per statement. No new dependency.
+
+### A1.4 Alternatives considered
+
+- **Add `p2p` to `deliveryBytes`.** Rejected: it would sit beside measured sources with the same
+  weight, and every reader summing `deliveryBytes` would add an unmeasured number.
+- **Attest only "P2P-evidenced" bytes** (sessions with tracker evidence, `P2P_EVIDENCE`). Rejected
+  for `v: 2`: evidence is per scoring window and kept only in Valkey, and it shows a session took
+  part in a swarm, not how many bytes it received. A later version may add it.
+- **Leave P2P out of statements.** Possible, and the current state. Rejected as the recommendation
+  because P2P can carry a large share of delivery once `P2P_DEFAULT` changes, and an attestation
+  that silently omits it understates reach.
+
+### Amendment 1 decisions at acceptance
+
+For the maintainer. Each item is the recommended default; accepting the amendment accepts them.
+
+1. **Separate figure (m):** `p2pBytesReported`, top level, outside `deliveryBytes`.
+2. **Source:** heartbeat `bytesP2p` over verified sessions only.
+3. **Labelled client-reported** everywhere it is shown, never summed into attested bytes, never
+   paying.
+4. **Versioning:** `v: 2` for new entries from its release; `v: 1` keeps verifying; no re-signing
+   of old broadcasts to add the field.
+5. **Build:** batch 9, after acceptance (tokens, vectors, worker, SDK).

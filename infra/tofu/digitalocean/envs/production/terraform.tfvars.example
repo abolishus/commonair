@@ -14,9 +14,11 @@ droplet_size      = "<dedicated-vCPU size slug from S1-a>"
 ssh_key_fingerprints = ["00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00"]
 operator_cidrs       = ["192.0.2.10/32", "2001:db8::/64"]
 
-# Stage 1 (ADR 0032): managed Postgres and Valkey, instance buckets in Spaces.
-# enable_managed_state = true
-# instance_origin      = "https://stream.example.org"
+# Stage 1 at launch (U4, ADR 0032): managed Postgres and Valkey, instance buckets in Spaces.
+# enable_managed_state defaults to true here; the origin is an open decision (the domain, L1).
+instance_origin = "https://stream.example.org"
+# pg_size     = "db-s-1vcpu-2gb" # S1-b's preflight checks the connection budget
+# valkey_size = "db-s-1vcpu-2gb"
 
 # Stage 2: app droplets behind a network load balancer (needs stage 1).
 # app_count = 2
