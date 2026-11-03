@@ -28,6 +28,7 @@ import {
   changeFor,
   choiceMix,
   expectedBoardSeats,
+  fillerTitles,
   forbiddenSamples,
   inRevenuePeriod,
   isAdult,
@@ -546,5 +547,27 @@ describe("filler proposals", () => {
     for (const p of governance.proposals)
       for (const v of p.votes) perVoter.set(v.handle, (perVoter.get(v.handle) ?? 0) + 1);
     expect(Math.max(...perVoter.values())).toBeLessThan(fillers.length);
+  });
+
+  test("every proposal title is unique at every scale, with no numbered repeats (F19)", () => {
+    for (const scale of [SMALL, SEED_SCALES.medium, SEED_SCALES.large]) {
+      const titles = plansFor(7, scale).governance.proposals.map((p) => p.title);
+      expect(new Set(titles).size, `factor ${scale.factor}`).toBe(titles.length);
+      for (const t of titles) {
+        expect(t).not.toMatch(/\(\d+\)$/);
+        expect(t.length).toBeGreaterThanOrEqual(5);
+        expect(t.length).toBeLessThanOrEqual(140);
+      }
+    }
+  });
+
+  test("fillerTitles: distinct, the hand-written topics first, and still distinct past every pairing", () => {
+    const small = fillerTitles(4);
+    expect(small[0]).toBe("Publish the moderation handbook in more languages");
+    const many = fillerTitles(1_000);
+    expect(many).toHaveLength(1_000);
+    expect(new Set(many).size).toBe(1_000);
+    expect(fillerTitles(400).every((t) => !t.includes("phase"))).toBe(true);
+    expect(fillerTitles(0)).toEqual([]);
   });
 });
