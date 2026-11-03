@@ -19,6 +19,33 @@ import type { FederationSpec } from "./plan.ts";
 import { publicVodOf } from "./write.ts";
 
 const DELIVERY_TIMEOUT_MS = 90_000;
+const PROBE_TIMEOUT_MS = 5_000;
+
+/**
+ * How the peers reach the instance's actor URLs. Behind Caddy (staging seed mode, where the harness
+ * resolves the public host to it) they are reachable as published, and must be: the worker accepts
+ * an inbox delivery only when its signed Host is one of the instance's public hosts. Without Caddy
+ * (the local stack) the public origin is the web app, which serves no `/ap/*`, so they go to the
+ * API's own port (`rewriteToApi`), whose host the instance also accepts there.
+ */
+export async function actorUrlRewrite(
+  actorId: string,
+  apiUrl: string,
+  fetchFn: (url: string, init: RequestInit) => Promise<Response> = fetch,
+): Promise<(url: string) => string> {
+  const instanceOrigin = new URL(actorId).origin;
+  try {
+    const res = await fetchFn(actorId, {
+      headers: { accept: "application/activity+json" },
+      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+    });
+    const doc = res.ok ? ((await res.json()) as { id?: unknown } | null) : null;
+    if (doc?.id === actorId) return (u) => u;
+  } catch {
+    // Unreachable or not JSON: not served at the public origin.
+  }
+  return (u) => rewriteToApi(u, instanceOrigin, apiUrl);
+}
 
 export const FEDERATION_FIX =
   "federation is off on this stack: start api and worker with FEDERATION_ENABLED=true and OUTBOUND_ALLOW_PRIVATE_NETWORKS=true (harness/compose.n4.yaml)";
@@ -48,8 +75,8 @@ export async function seedFederation(
   );
   const actorId = settings.actorId;
   if (!actorId) throw new Error("seed-platform: federation settings carry no actor id");
-  const instanceOrigin = new URL(actorId).origin;
-  const inbox = rewriteToApi(`${actorId}/inbox`, instanceOrigin, apiUrl);
+  const rewrite = await actorUrlRewrite(actorId, apiUrl);
+  const inbox = rewrite(`${actorId}/inbox`);
   const peers: { peer: ActivityPubPeer; close: boolean }[] = [];
   const closed = new Set<ActivityPubPeer>();
   try {
@@ -57,7 +84,7 @@ export async function seedFederation(
       const peer = await startActivityPubPeer({
         host: opts.webhookHost,
         username: p.username,
-        rewrite: (u) => rewriteToApi(u, instanceOrigin, apiUrl),
+        rewrite,
       });
       peers.push({ peer, close: p.closeBeforeActivity });
       const { activity, response } = await peer.follow(actorId, inbox);
