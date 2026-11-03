@@ -17,7 +17,12 @@ import {
   type TreasuryPageTab,
 } from "../../components/money/treasury.tsx";
 import { FraudReviewPanel, type FraudStatusFilter } from "../../components/money/fraud-review.tsx";
-import { CoopPatronageTab, CoopSharesTab } from "../../components/coop/treasury-tabs.tsx";
+import {
+  CoopPatronageTab,
+  CoopSharesTab,
+  TreasuryPayoutTransfersTab,
+  TreasuryRefundRequestsTab,
+} from "../../components/coop/treasury-tabs.tsx";
 import { usePaged } from "../../components/money/use-load.ts";
 import { useBootstrap } from "../../lib/bootstrap.ts";
 import { t } from "../../i18n/index.ts";
@@ -180,6 +185,9 @@ function TreasuryPage(): React.JSX.Element {
               />
             </>
           ),
+          // Batch 8: refund requests (M1-gifts-refunds) and payout transfers (M1-connect).
+          refunds: <TreasuryRefundRequestsTab />,
+          transfers: <TreasuryPayoutTransfersTab />,
         }}
       />
     </PageContainer>

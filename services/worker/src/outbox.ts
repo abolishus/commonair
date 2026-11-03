@@ -14,7 +14,7 @@ import { BusEvent, EVENTS, isInternalEvent, type EventType } from "@commonair/co
 import { QUEUES } from "@commonair/contracts/internal";
 import { schema } from "@commonair/db";
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
-import { b7JobsFor } from "./b7/outbox-jobs.ts";
+import { b7JobsFor, b7OutboxFlags } from "./b7/outbox-jobs.ts";
 import type { WorkerContext } from "./context.ts";
 import { applyGoalProgress } from "./interact/goals/outbox-hook.ts";
 import { WEBHOOK_JOBS } from "./jobs/names.ts";
@@ -166,7 +166,14 @@ export async function relayOutboxBatch(ctx: WorkerContext, batchSize = 200, valk
       );
     // Batch 7 (decision (z)): federation fan-out and inbox, relay purges, the moved email
     // (`b7/outbox-jobs.ts`). Same job-id idempotency as above.
-    const b7 = await b7JobsFor(tx, handled, ctx.now());
+    // Actor ids are built on the site the context carries, as the fan-out builds them.
+    const b7Flags = b7OutboxFlags();
+    const b7 = await b7JobsFor(
+      tx,
+      handled,
+      ctx.now(),
+      ctx.site ? { ...b7Flags, publicUrl: ctx.site.publicUrl } : b7Flags,
+    );
     for (const queue of new Set(b7.map((j) => j.queue)))
       await withTimeout(
         ctx.enqueueBulk(

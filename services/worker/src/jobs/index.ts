@@ -74,6 +74,12 @@ import { job as webhookRedeliver } from "./webhook-redeliver.ts";
 import { job as webhookRevocation } from "./webhook-revocation.ts";
 import { job as webhookTestEvent } from "./webhook-test-event.ts";
 import { job as webhookVerifyCallback } from "./webhook-verify-callback.ts";
+import { job as importRecordExpiry } from "./import-record-expiry.ts";
+import { job as patronagePayout } from "./patronage-payout.ts";
+import { job as payoutTransfers } from "./payout-transfers.ts";
+import { job as portabilityIncomingCleanup } from "./portability-incoming-cleanup.ts";
+import { job as refundReconcile } from "./refund-reconcile.ts";
+import { job as federationFollowerCleanup } from "./federation-follower-cleanup.ts";
 
 export const JOBS = [
   webhookFanout,
@@ -154,4 +160,11 @@ export const JOBS = [
   relayPurgeCleanup,
   // Decision (z): a lapsed timed ban writes its unsuspension.
   banExpiry,
+  // Batch 8.
+  federationFollowerCleanup,
+  portabilityIncomingCleanup,
+  importRecordExpiry,
+  refundReconcile,
+  payoutTransfers,
+  patronagePayout,
 ] as readonly JobDefinition[];

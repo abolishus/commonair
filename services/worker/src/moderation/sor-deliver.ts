@@ -86,6 +86,9 @@ export function statementMail(
     case "hash_match":
       facts = { code: f.code, capturedAt: f.capturedAt };
       break;
+    case "staff_action":
+      // B8-server renders staff-action statements (B7 CR6); sor-build does not emit them yet.
+      throw new Error("staff_action statements are not rendered yet");
   }
   const clause = findClause(s.clauseId, s.clauseVersion);
   const section = noticeSection(body, s.clauseId);

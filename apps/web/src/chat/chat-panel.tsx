@@ -34,7 +34,7 @@ import { browserInteractClient, withPlayhead, type InteractClient } from "./inte
 import { GiveawayCard } from "./interact/giveaway-card.tsx";
 import { PointsChip } from "./interact/points-chip.tsx";
 import { ChatPollCard } from "./interact/poll-card.tsx";
-import { ChatPredictionCard } from "./interact/prediction-card.tsx";
+import { ChatPredictionCard, type PredictionChannel } from "./interact/prediction-card.tsx";
 import { RaidBanner } from "./interact/raid-banner.tsx";
 import { useChatInteract } from "./interact/use-chat-interact.ts";
 import { errorMessage, noticeMessage } from "./messages.ts";
@@ -46,6 +46,8 @@ import { badgeAttr, chatStatusView, nameColorIndex, visibleBadges } from "./view
 
 export interface ChatPanelProps {
   channel: string;
+  /** The channel's id and live state, passed to the prediction card (batch 8 contract step §3.8). */
+  stream?: PredictionChannel;
   signedIn: boolean;
   /** The signed-in viewer's username, so moderation controls skip their own messages. */
   selfUsername?: string | null;
@@ -154,6 +156,7 @@ function onListKey(list: HTMLElement, e: KeyboardEvent, setActive: (id: string |
 
 export function ChatPanel({
   channel,
+  stream,
   signedIn,
   selfUsername = null,
   className,
@@ -368,6 +371,7 @@ export function ChatPanel({
           <ChatPredictionCard
             key={prediction.id}
             prediction={prediction}
+            channel={stream ?? null}
             signedIn={signedIn}
             staff={canModerate || isBroadcaster}
             points={points}
