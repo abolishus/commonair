@@ -966,6 +966,10 @@ describe("media pipeline", () => {
     expect(await media.ctx.storage.head(BUCKET, `clips/${clipId}.jpg`)).toBeNull();
     // A reconnect on the same path is kicked again before any work starts.
     await publisher?.stop();
+    // The API ends a kicked broadcast on MediaMTX's not-ready hook; the fake API does not, so end
+    // it here as the offline test does. Left open, the reconcile loop pairs that row with the
+    // reconnect's ready path and kicks it (rightly) before the wait below can see it ready.
+    await tdb.db.update(schema.broadcasts).set({ endedAt: new Date() }).where(eq(schema.broadcasts.id, live.id));
     const again = await goLiveNoWait(T0_PATTERN);
     await waitFor("reconnect refused", async () => !(await mtxApi.getPath(`live/${SLUG}`))?.ready, 20_000);
     expect(media.coordinator.session(again)).toBeUndefined();
