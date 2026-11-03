@@ -5,7 +5,9 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # ADR 0032: Scaling and availability in stages
 
-- Status: accepted (2026-10-27; see [Decisions at acceptance](#decisions-at-acceptance-2026-10-27))
+- Status: accepted (2026-10-27; see [Decisions at acceptance](#decisions-at-acceptance-2026-10-27));
+  amended 2026-11-02 for U4 ([Decisions at acceptance (2026-11-02)](#decisions-at-acceptance-2026-11-02))
+  and S1-d's findings (§3, §4)
 - Date: 2026-10-26 (provider facts checked on 2026-10-26)
 
 ## Context
@@ -126,6 +128,26 @@ of the self-hosting docs (`docs/self-hosting/managed-services.md`, S1-h):
   - No superuser, no extensions and no event triggers are needed. The migrations use none:
     `gen_random_uuid()` is core since Postgres 13. S1-d proves this against a Postgres with no
     superuser before S1-b ships.
+  - **S1-d's result (2026-11-02, Postgres 17.11).** `packages/db/tests/external-owner.int.test.ts`
+    runs the whole path as an owner with only LOGIN and CREATEROLE, over `sslmode=verify-full`
+    with a private CA: every migration, the app role, the monitor role, every protection trigger
+    (identical to a superuser-migrated database, and each family fires) and the owner-only
+    restore in §4. One fix was needed: on Postgres 16 and later a non-superuser may not name
+    `SUPERUSER`, `REPLICATION` or `BYPASSRLS` in `ALTER ROLE` even to switch them off, so
+    `app-role.sql` and `monitor-role.sql` switch off only the attributes that are on. Nothing
+    else needs a superuser. The run against a real DigitalOcean cluster (contract step §1.5)
+    follows on the staging project.
+  - **Client TLS:** postgres.js reads `sslmode` but not `sslrootcert`, and iovalkey takes no CA
+    from the URL. `DATABASE_CA_FILE` and `VALKEY_CA_FILE` name the provider's CA; with them set,
+    the clients verify against it and refuse a URL weaker than `sslmode=verify-full` or
+    `rediss://`. A `sslrootcert` path in the URL is taken as the CA too, so one URL serves our
+    services and `psql`/`pg_dump`.
+  - **Monitoring:** `infra/postgres/monitor-role.sql` creates `commonair_monitor` (LOGIN,
+    read-only, CONNECT only). It is a member of `pg_monitor` where the owner can grant it, and it
+    is not on a managed database: since Postgres 16 a CREATEROLE role grants only roles it holds
+    with ADMIN OPTION, and the owner does not hold `pg_monitor` that way. The test confirms the
+    grant is refused on Postgres 17 and the role is created anyway. What it misses without
+    `pg_monitor` is in §4.
 - **Valkey or Redis-compatible:**
   - password authentication, as the default user or an ACL user;
   - TLS (`rediss://`);
@@ -154,6 +176,50 @@ uses `pg_restore --disable-triggers` (or `SET session_replication_role = replica
 load), which needs a superuser or, on a managed database, a role granted `SET` on
 `session_replication_role`, and the drill then checks a few counts against the source, for
 example `channels.follower_count` against `follows`.
+
+**Amended by S1-d (2026-11-02): the restore needs no superuser.** Both ways above need one, and a
+managed database gives none: only a superuser may use `--disable-triggers`, and only a superuser
+can grant `SET` on `session_replication_role`. The restore runs as the owner instead, into a
+fresh database it owns (`infra/postgres/restore-owner.sql`):
+
+1. `pg_restore --section=pre-data --no-owner`;
+2. `restore-owner.sql` with `commonair.restore_triggers=disable`: `ALTER TABLE … DISABLE TRIGGER
+   USER` on every table in `public` and `drizzle`, which the owner may do on its own tables (the
+   internal foreign-key triggers stay on);
+3. `pg_restore --section=data`;
+4. `restore-owner.sql` with `commonair.restore_triggers=enable`;
+5. `pg_restore --section=post-data` (indexes, constraints and triggers; foreign keys are checked
+   here);
+6. `apply-app-role.ts`, then `infra/postgres/restore-check.sql` on the source and on the copy.
+
+`restore-check.sql` returns the row count of every table, the ledger balance per currency (0) and
+the number of channels whose `follower_count` differs from their counted follows (0). The test
+restores a dump of a seeded database this way, as the owner with no superuser, and the two outputs
+are equal. A doubled `follower_count` shows up as a non-zero mismatch.
+
+What the test also found: **`pg_dump` puts every trigger in post-data**, so a full sectioned restore
+never meets a trigger during the data load, and steps 2 and 4 find nothing to switch. The double
+counting above happens only in a data-only restore into a database that already has the triggers
+(a migrated one). The drill keeps steps 2 and 4 so one procedure covers both, and the test checks
+that `restore-owner.sql` switches every user trigger as the owner and refuses any other role.
+Creating the fresh database needs CREATEDB (DigitalOcean's `doadmin` has it) or the provider's
+API.
+
+**`pg_monitor` (S1-d).** The owner of a managed database cannot grant `pg_monitor` (§3), so the
+metrics role usually lacks it. Without it, `commonair_monitor` still reads `pg_stat_database`,
+`pg_stat_user_tables`, `pg_statio_user_tables`, `pg_stat_user_indexes`, `pg_stat_bgwriter`,
+`pg_stat_checkpointer`, `pg_stat_wal`, `pg_locks`, `pg_settings` (`max_connections`),
+`pg_database_size` and `pg_relation_size` (all checked by the test). It misses:
+
+- `pg_ls_waldir()`: WAL size and file count (permission denied, checked);
+- in `pg_stat_activity`, other roles' `state`, wait events and query text: the connection count
+  is there, the breakdown by state is not (checked);
+- in `pg_stat_replication`, the client and lag columns (Postgres documents them as visible only to
+  `pg_read_all_stats`, which `pg_monitor` includes). On a managed cluster the standby is the
+  provider's, so replication lag comes from DigitalOcean's metrics endpoint, not from us.
+
+Dashboards and alerts work with that reduced set or say "needs pg_monitor" (L1-observability).
+The bundled stack's migrate job runs as a superuser and grants it.
 
 ### 5. Load balancing keeps real client addresses
 
@@ -197,7 +263,7 @@ and images go through ADR 0002 and ADR 0022 like any dependency.
 - DigitalOcean's Advanced PostgreSQL edition with `sslrootcert=system` needs libpq ≥ 16 in any
   client that uses libpq (WAL-G, `pg_dump` in the tools image). Standard edition with a
   downloaded CA works with any version. Our instance starts on Standard unless S1-d finds a
-  reason not to.
+  reason not to. S1-d found none: the downloaded CA works through `DATABASE_CA_FILE` (§3).
 - Stage 2's rolling upgrades and planned instance replacement drain chat with SIGTERM (which
   closes the message writer and flushes it), never SIGKILL, which can lose acknowledged messages
   from the last flush interval ([Notes from S1-c](#notes-from-s1-c)). An unplanned host loss can
@@ -248,3 +314,37 @@ Still open:
 
 - The egress budget that triggers stage 3, in GiB per month: a maintainers' decision at launch
   (L1), from S1-a's per-viewer egress and the transfer allowance of the launch droplet.
+
+## Decisions at acceptance (2026-11-02)
+
+The maintainer answered U4 of batch 8 (`.claude/briefs/batch8/README.md`), changing the launch
+stage for our own instance:
+
+- **Our instance launches at stage 1:** DigitalOcean Managed PostgreSQL and managed Valkey, each
+  with one standby node, objects in Spaces, the app droplet and the monitoring droplet as before.
+  This is how we deploy our instance, not a change to `selfhost.sh`: bundled Postgres and Valkey
+  stay the self-host default with full support, and external managed services are an added
+  option beside them, as `--s3-*` is beside Garage.
+- **The 99.9% target applies from launch** (about 43 minutes a month), not 99.5%. DigitalOcean's
+  SLA for a cluster with a standby is 99.95%, so the target is within what the provider commits
+  to (§1).
+- **The stage 0 row of §2 and its trigger describe the self-host default only.** Our instance never
+  runs at stage 0.
+- **Our backups are the provider's point-in-time recovery (7 days) plus S1-h's nightly dump** to
+  Spaces in another region, 30 kept, restored by §4's owner-only procedure in a weekly drill and
+  once, timed, into a fresh managed cluster on the staging project. That time becomes our restore
+  time in §1. **WAL-G does not run for our instance;** it stays the bundled default's backup.
+- **Uptime.** The app droplet is still one host until stage 2, so planned upgrades count against
+  the 43 minutes. With a minor release every two weeks plus patches, each upgrade must take well
+  under 10 minutes of downtime. The stage 1 → 2 trigger, "upgrade downtime over half the monthly
+  budget", is about 21 minutes a month; L1-observability alerts at 80% of it. Paging must reach a
+  human within minutes, so the monitoring droplet alerts on its own probes, independent of the app
+  droplet.
+- **Cost.** Two managed clusters with one standby each are billed from day one: four database
+  nodes, on top of the app droplet, the monitoring droplet and Spaces. A standby node is billed
+  like a primary, so the database line is about double a single-node cluster; the exact prices are
+  checked at provisioning. The connection limit of the smallest nodes may force a larger Postgres
+  node than the data needs (S1-b's preflight reports it). In exchange: a database failover in
+  seconds instead of a restore measured in hours, and no WAL-G to run.
+- **Launch-readiness of stage 1** waits for one run of S1-d's checks against a real managed
+  cluster on the staging project (contract step §1.5), recorded here.
