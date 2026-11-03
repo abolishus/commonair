@@ -276,13 +276,11 @@ export function createAuth(deps: Deps) {
             if (data.banned === false && ctx) banClearing.add(ctx);
           },
           after: async (user, ctx) => {
-            // Not transactional: the 5-minute `ban-expiry` sweep stays the backstop, and
-            // `recordLapsedUnsuspension` writes the event only if nobody has yet.
-            if (user.banned !== true && (!ctx || banClearing.has(ctx))) {
-              if (ctx) banClearing.delete(ctx);
-              await recordLapsedUnsuspension(db, user.id, deps.now()).catch((err: unknown) =>
-                logger.warn("lapsed ban unsuspension failed", { errorName: (err as Error).name }),
-              );
+            // Only the update that cleared a ban (marked in `before`). Better Auth runs the sign-in's
+            // clear inside the endpoint, so `ctx` is set; other user updates take no locks here.
+            if (ctx && banClearing.has(ctx)) {
+              banClearing.delete(ctx);
+              if (user.banned !== true) await recordLapsedWithRetry(db, user.id, deps.now(), logger);
             }
             // Chat and IRC cache display names and avatars.
             if (ctx?.path === "/update-user")
@@ -341,6 +339,32 @@ export type Auth = ReturnType<typeof createAuth>;
  * this path serialize, and whichever comes second finds the unsuspension written. A channel
  * suspended in its own right stays suspended (no event), as does a user with no channel.
  */
+/**
+ * The hook is not transactional: `banned = false` is already committed when it runs, and the
+ * `ban-expiry` sweep selects banned users only, so it cannot recover an event lost here. Retry
+ * once, then log at error level for an operator (contract request: the sweep also checks channels
+ * whose latest `channel.suspension` is still `true`).
+ */
+export async function recordLapsedWithRetry(
+  db: Database,
+  userId: string,
+  now: Date,
+  logger: Pick<Deps["logger"], "warn" | "error">,
+): Promise<number | null> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await recordLapsedUnsuspension(db, userId, now);
+    } catch (err) {
+      const errorName = (err as Error).name;
+      if (attempt >= 2) {
+        logger.error("lapsed ban unsuspension failed", { errorName, attempts: attempt });
+        return null;
+      }
+      logger.warn("lapsed ban unsuspension failed, retrying", { errorName });
+    }
+  }
+}
+
 export async function recordLapsedUnsuspension(db: Database, userId: string, now: Date): Promise<number> {
   const { channels, users, events } = schema;
   return db.transaction(async (tx) => {

@@ -11,7 +11,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { schema, uuidv7 } from "@commonair/db";
-import { recordLapsedUnsuspension } from "../src/auth/index.ts";
+import { recordLapsedUnsuspension, recordLapsedWithRetry } from "../src/auth/index.ts";
 import { emit } from "../src/events/outbox.ts";
 import { setSuspension } from "../src/moderation/suspension.ts";
 import { client, signUpAndSignIn, startApi, type TestApi } from "./harness.ts";
@@ -168,5 +168,59 @@ describe("recordLapsedUnsuspension", () => {
       sql`select count(*)::int as n from events where channel_id = ${m.channelId}::uuid and type = 'channel.suspension'`,
     )) as unknown as [{ n: number }];
     expect(n).toBe(2);
+  });
+});
+
+describe("only the update that clears a ban", () => {
+  test("a profile update writes nothing, even with an unsuspension owed", async () => {
+    const m = await member();
+    await lapsedBan(m);
+    // Owed, but cleared outside the sign-in: the hook must not pick it up on an unrelated update.
+    await db().update(users).set({ banned: false, banExpires: null }).where(eq(users.id, m.userId));
+    // The suspension revoked the session: sign in again (no ban to clear, so nothing either).
+    const s = await m.client.call("POST", "/api/auth/sign-in/email", { email: m.email, password: m.password });
+    expect(s.status).toBe(200);
+    const r = await m.client.call("POST", "/api/auth/update-user", { name: "Renamed" });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    await Bun.sleep(300);
+    expect(await suspensions(db(), m.channelId)).toEqual([true]);
+  });
+});
+
+describe("recordLapsedWithRetry", () => {
+  const logs = () => {
+    const out: { level: string; msg: string }[] = [];
+    return {
+      out,
+      logger: {
+        warn: (msg: string) => out.push({ level: "warn", msg }),
+        error: (msg: string) => out.push({ level: "error", msg }),
+      },
+    };
+  };
+
+  test("a failed first attempt is retried once and writes the event", async () => {
+    const m = await member();
+    await lapsedBan(m);
+    await db().update(users).set({ banned: false, banExpires: null }).where(eq(users.id, m.userId));
+    let calls = 0;
+    const flaky = {
+      transaction: ((fn: never) =>
+        calls++ === 0 ? Promise.reject(new Error("serialization")) : db().transaction(fn)) as never,
+    } as unknown as Parameters<typeof recordLapsedWithRetry>[0];
+    const { out, logger } = logs();
+    expect(await recordLapsedWithRetry(flaky, m.userId, new Date(), logger)).toBe(1);
+    expect(calls).toBe(2);
+    expect(out.map((l) => l.level)).toEqual(["warn"]);
+    expect(await suspensions(db(), m.channelId)).toEqual([true, false]);
+  });
+
+  test("two failures log at error level and give up", async () => {
+    const failing = {
+      transaction: () => Promise.reject(new Error("down")),
+    } as unknown as Parameters<typeof recordLapsedWithRetry>[0];
+    const { out, logger } = logs();
+    expect(await recordLapsedWithRetry(failing, uuidv7(), new Date(), logger)).toBeNull();
+    expect(out.map((l) => l.level)).toEqual(["warn", "error"]);
   });
 });

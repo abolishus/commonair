@@ -5,7 +5,8 @@
  * `import-record-expiry` (batch 8 decision (j)) against a real database: 30 days after a Twitch
  * import finished its `preview` and `result` are cleared, while the status, source, times and
  * assertion fields stay; bundle imports and anything younger are left alone; an import still running
- * is skipped; each run writes one `audit_log` row with a count and no names.
+ * is skipped; a preview never started is cleared 30 days after it was made; each run writes one
+ * `audit_log` row with the counts and no names.
  */
 import { B8_JOBS, QUEUES } from "@commonair/contracts/internal";
 import { schema, uuidv7 } from "@commonair/db";
@@ -91,7 +92,7 @@ test("the 30-day boundary, the kept columns, bundles and running imports, and on
   const running = await importRow(channel, { status: "running", finishedAt: null });
   const before = await rowOf(due);
 
-  expect(await expireImportRecords(ctx())).toEqual({ cleared: 2, stuck: 1 });
+  expect(await expireImportRecords(ctx())).toEqual({ cleared: 2, abandoned: 0, stuck: 1 });
 
   for (const id of [due, failed]) {
     const r = await rowOf(id);
@@ -121,11 +122,37 @@ test("the 30-day boundary, the kept columns, bundles and running imports, and on
   expect(a).toMatchObject({
     actorId: null,
     subjectType: "job_run",
-    details: { source: "twitch", cleared: 2, stuck: 1 },
+    details: { source: "twitch", cleared: 2, abandoned: 0, stuck: 1 },
   });
   expect(JSON.stringify(a)).not.toContain(TWITCH_LOGIN);
 
   // The next run clears nothing more and still records that it ran.
-  expect(await expireImportRecords(ctx())).toEqual({ cleared: 0, stuck: 1 });
+  expect(await expireImportRecords(ctx())).toEqual({ cleared: 0, abandoned: 0, stuck: 1 });
   expect((await audits()).map((r) => (r.details as { cleared: number }).cleared).sort((a, b) => a - b)).toEqual([0, 2]);
+});
+
+test("a preview never started: cleared to an expired state 30 days after it was made", async () => {
+  const { channel } = await makeUser(t.db);
+  const cutoff = new Date(NOW.getTime() - 30 * DAY);
+  const old = await importRow(channel, { status: "previewed", finishedAt: null, createdAt: cutoff });
+  const fresh = await importRow(channel, {
+    status: "previewed",
+    finishedAt: null,
+    createdAt: new Date(cutoff.getTime() + 1),
+  });
+  const bundle = await importRow(channel, {
+    source: "commonair",
+    status: "previewed",
+    finishedAt: null,
+    createdAt: cutoff,
+  });
+
+  expect(await expireImportRecords(ctx())).toMatchObject({ cleared: 0, abandoned: 1 });
+  expect(await rowOf(old)).toMatchObject({ status: "previewed", preview: { state: "expired" }, result: null });
+  for (const id of [fresh, bundle]) expect((await rowOf(id)).preview).toEqual(preview);
+  const latest = (await audits()).map((r) => r.details as { abandoned?: number }).filter((d) => d.abandoned === 1);
+  expect(latest).toHaveLength(1);
+
+  // Already expired: not counted again.
+  expect(await expireImportRecords(ctx())).toMatchObject({ cleared: 0, abandoned: 0 });
 });

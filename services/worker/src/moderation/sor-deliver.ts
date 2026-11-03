@@ -77,6 +77,9 @@ export function statementMail(
       facts = f;
       break;
     case "moderator_review":
+      // A staff action stored before batch 8 carried no time of its own. The statement's creation
+      // (by `sor-build`, shortly after the action) stands in for it: approximate, later by at most
+      // the sweep's lag. Acceptable for the few legacy rows; new rows carry `appliedAt`.
       facts = isStaffAction(s.sourceAction)
         ? { code: "staff_action", action: s.sourceAction, appliedAt: s.createdAt }
         : { code: f.code, caseRef: ref("MC", f.caseId), decision: f.decision };

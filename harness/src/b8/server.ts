@@ -561,8 +561,8 @@ export async function stepIncomingCleanup(run: PortabilityB8Extension): Promise<
   ctx.assert("incoming-cleanup: the abandoned import's key is cleared", of(abandoned)?.archive_key === null, keys);
   ctx.assert("incoming-cleanup: the fresh upload is kept", of(fresh)?.archive_key === freshKey, keys);
   ctx.assert(
-    "incoming-cleanup: no status changes",
-    keys.every((k) => k.status === "previewed"),
+    "incoming-cleanup: the abandoned preview is failed, the fresh one still previewed",
+    of(abandoned)?.status === "failed" && of(fresh)?.status === "previewed",
     keys,
   );
 }

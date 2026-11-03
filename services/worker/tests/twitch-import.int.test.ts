@@ -22,7 +22,7 @@ import {
   snapshotOf,
   type TwitchSnapshot,
 } from "@commonair/twitch";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { startModeration } from "../../api/src/moderation/index.ts";
 import { recordingQueue } from "../../api/src/moderation/queue.ts";
@@ -30,6 +30,7 @@ import { signUpAndSignIn, startApi, type TestApi } from "../../api/tests/harness
 import { startTwitchMock, TWITCH_FIXTURE, type TwitchMock } from "../../../harness/src/mocks/twitch/server.ts";
 import { commitUpload } from "../src/b7/upload-commit.ts";
 import type { WorkerContext } from "../src/context.ts";
+import { NOTHING_TO_APPLY } from "../src/portability/import/apply.ts";
 import type { StoredItem } from "../src/portability/import/index.ts";
 import { runTwitchImport, type TwitchJobConfig } from "../src/twitch-import/run.ts";
 import { siteAt, stackStorage } from "./e6-fixtures.ts";
@@ -237,6 +238,24 @@ describe.skipIf(!storage)("twitch import (worker)", () => {
     expect(outcome((await rowOf(none)).result, "channel", "channel")).toEqual(["skipped", "not_chosen"]);
     const [same] = await db().select().from(schema.channels).where(eq(schema.channels.id, ch.id));
     expect(same?.title).toBe("Kept title");
+
+    // Only the category, and no category here matches it: nothing changes, so the line is skipped
+    // (not "imported"), and no `channel.update` is written.
+    const updates = async () =>
+      (
+        await db()
+          .select({ id: schema.events.id })
+          .from(schema.events)
+          .where(and(eq(schema.events.channelId, ch.id), eq(schema.events.type, "channel.update")))
+      ).length;
+    const before = await updates();
+    const nomatch = { ...snapshot, channel: { ...snapshot.channel, gameName: "No Such Category Anywhere" } };
+    const onlyCategory = await queued(u, { channel: true, emotes: [], fields: { category: true } }, nomatch);
+    await runTwitchImport(ctx(), onlyCategory, { config: config(), commitUpload: realCommit });
+    expect(outcome((await rowOf(onlyCategory)).result, "channel", "channel")).toEqual(["skipped", NOTHING_TO_APPLY]);
+    expect(await updates()).toBe(before);
+    const [after] = await db().select().from(schema.channels).where(eq(schema.channels.id, ch.id));
+    expect(after).toMatchObject({ title: "Kept title", categoryId: ch.categoryId });
   });
 
   test("the job is idempotent on retry", async () => {

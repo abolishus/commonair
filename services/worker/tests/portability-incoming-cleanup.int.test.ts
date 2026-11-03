@@ -120,12 +120,31 @@ test("each status, the 24 h boundary, and orphans", async () => {
 
   // A second run finds nothing.
   expect(await cleanIncomingArchives(ctx(storage))).toEqual({ deleted: 0, orphans: 0, failed: 0 });
-  // Statuses never change.
-  const statuses = await t.db
-    .select({ id: schema.portabilityImports.id, status: schema.portabilityImports.status })
+  // Only the abandoned preview changes status: failed for want of its archive, so it cannot start.
+  const rows = await t.db
+    .select()
     .from(schema.portabilityImports)
     .where(eq(schema.portabilityImports.channelId, channel.id));
-  expect(new Map(statuses.map((s) => [s.id, s.status])).get(queued.id)).toBe("queued");
+  const status = new Map(rows.map((s) => [s.id, s.status]));
+  expect(status.get(queued.id)).toBe("queued");
+  expect(status.get(running.id)).toBe("running");
+  expect(status.get(onTheEdge.id)).toBe("previewed");
+  expect(status.get(recent.id)).toBe("previewed");
+  expect(status.get(done.id)).toBe("done");
+  expect(status.get(failed.id)).toBe("failed");
+  const gone = rows.find((r) => r.id === abandoned.id);
+  expect(gone).toMatchObject({ status: "failed", finishedAt: NOW });
+  expect(gone?.result).toEqual([
+    { kind: "channel", ref: "channel", label: "", outcome: "rejected", reason: "archive_missing" },
+  ]);
+  const finished = await t.db
+    .select({ payload: schema.events.payload })
+    .from(schema.events)
+    .where(eq(schema.events.type, "portability.import.finished"));
+  const ours = new Set(rows.map((r) => r.id));
+  expect(finished.map((e) => (e.payload as { import_id: string }).import_id).filter((id) => ours.has(id))).toEqual([
+    abandoned.id,
+  ]);
 });
 
 test("a failed storage delete keeps archive_key, and the next run retries", async () => {

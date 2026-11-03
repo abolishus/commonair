@@ -9,6 +9,10 @@
  * assertion fields, so the audit trail stands. Each run writes one `audit_log` row with a count
  * and no names.
  *
+ * A Twitch preview that was never started has no `finished_at`: `IMPORT_RECORD_RETENTION_DAYS`
+ * after `created_at` (long past the preview's one-hour `PREVIEW_TTL_MS`, so it can no longer be
+ * started) its preview becomes `{state: "expired"}`, which the API serves as an expired preview.
+ *
  * Bundle imports (`source = commonair`) hold no third-party data and are left alone. An import still
  * `queued` or `running` past the retention has no `finished_at`: it is skipped with a warning.
  */
@@ -22,8 +26,10 @@ const { portabilityImports: imports } = schema;
 export const IMPORT_RECORD_RETENTION_DAYS = 30;
 
 export interface RecordExpiryResult {
-  /** Imports whose Twitch data was cleared this run. */
+  /** Finished imports whose Twitch data was cleared this run. */
   cleared: number;
+  /** Previews never started whose Twitch data was cleared this run. */
+  abandoned: number;
   /** Imports still queued or running past the retention (skipped, logged). */
   stuck: number;
 }
@@ -40,7 +46,9 @@ export async function expireImportRecords(ctx: WorkerContext): Promise<RecordExp
   const stuck = stuckRow?.n ?? 0;
   if (stuck > 0) ctx.logger.warn("import record expiry: imports still running past retention", { stuck });
 
-  const cleared = await ctx.db.transaction(async (tx) => {
+  // Anything beyond a bare `state` is data to clear (an expired preview keeps only its state).
+  const holdsData = sql`(${imports.preview} - 'state') <> '{}'::jsonb`;
+  const { cleared, abandoned } = await ctx.db.transaction(async (tx) => {
     const rows = await tx
       .update(imports)
       .set({ preview: {}, result: null, updatedAt: now })
@@ -50,23 +58,41 @@ export async function expireImportRecords(ctx: WorkerContext): Promise<RecordExp
           inArray(imports.status, ["done", "failed"]),
           isNotNull(imports.finishedAt),
           lte(imports.finishedAt, cutoff),
-          or(sql`${imports.preview} <> '{}'::jsonb`, isNotNull(imports.result)),
+          or(holdsData, isNotNull(imports.result)),
         ),
       )
       .returning({ id: imports.id });
-    // One row per run, the count only (zero included), so the audit shows the job ran.
+    const previews = await tx
+      .update(imports)
+      .set({ preview: { state: "expired" }, result: null, updatedAt: now })
+      .where(
+        and(
+          twitch,
+          eq(imports.status, "previewed"),
+          lte(imports.createdAt, cutoff),
+          or(holdsData, isNotNull(imports.result)),
+        ),
+      )
+      .returning({ id: imports.id });
+    // One row per run, the counts only (zero included), so the audit shows the job ran.
     await audit(
       tx,
       {
         action: "portability.import.expire",
         subjectType: "job_run",
         subjectId: uuidv7(now.getTime()),
-        details: { source: "twitch", cleared: rows.length, stuck, retentionDays: IMPORT_RECORD_RETENTION_DAYS },
+        details: {
+          source: "twitch",
+          cleared: rows.length,
+          abandoned: previews.length,
+          stuck,
+          retentionDays: IMPORT_RECORD_RETENTION_DAYS,
+        },
       },
       now,
     );
-    return rows.length;
+    return { cleared: rows.length, abandoned: previews.length };
   });
-  if (cleared > 0) ctx.logger.info("import record expiry", { cleared });
-  return { cleared, stuck };
+  if (cleared + abandoned > 0) ctx.logger.info("import record expiry", { cleared, abandoned });
+  return { cleared, abandoned, stuck };
 }

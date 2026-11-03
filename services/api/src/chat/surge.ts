@@ -102,8 +102,9 @@ export const chatSurge = {
       return { ...OFF, unavailable: true };
     }
     const o = parseOverride(raw);
-    // Batch 7 decision (w): the raid holding chat (the worker stores it beside the override).
-    return { ...(await dto(context.deps, o)), raid: o?.state === "on" ? surgeRaidOf(raw) : null };
+    // Batch 7 decision (w): the raid holding chat (the worker stores it beside the override), named
+    // only while its own window lasts, not through a later extension of the surge.
+    return { ...(await dto(context.deps, o)), raid: keptRaid(raw, o, new Date())?.raid ?? null };
   }),
 
   override: os.chat.surge.override.handler(async ({ context, input }) => {
@@ -151,6 +152,8 @@ export const chatSurge = {
             until: fresh,
             by: caller.user.id,
           };
+    // Outside its window the raid is dropped, so the stored value (and the worker's end reason) stops
+    // naming it.
     const next: StoredSurge = raid ? { ...base, ...raid } : base;
     const ttl = Math.max(1, Math.ceil((Date.parse(next.until) - now.getTime()) / 1000)) + TTL_GRACE_SECONDS;
 

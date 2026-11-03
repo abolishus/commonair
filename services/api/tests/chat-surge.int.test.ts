@@ -251,6 +251,29 @@ describe("chat.surge", () => {
       expect((await state(mod)).body).toMatchObject({ state: "on", raid: null });
     });
 
+    test("state stops naming the raid once its window has passed, with no write", async () => {
+      // A moderator's extension kept the raid; the surge runs on after the raid's own window.
+      await store({
+        state: "on",
+        since: at(-600_000),
+        until: at(300_000),
+        by: mod.userId,
+        raid: raid(),
+        raidUntil: at(-120_000),
+      });
+      expect((await state(mod)).body).toMatchObject({ state: "on", raid: null });
+      // Inside the window (plus the grace minute) it is still named.
+      await store({
+        state: "on",
+        since: at(-60_000),
+        until: at(300_000),
+        by: null,
+        raid: raid(),
+        raidUntil: at(-30_000),
+      });
+      expect((await state(mod)).body).toMatchObject({ state: "on", raid: raid() });
+    });
+
     test("suppress clears raid", async () => {
       await store({ state: "on", since: at(-60_000), until: at(120_000), by: null, raid: raid() });
       await markOpen();

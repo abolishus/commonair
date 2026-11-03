@@ -12,6 +12,9 @@
  * - an object under the prefix that no import names, once it is older than 24 h: an upload still
  *   in flight has no row yet, so a fresh one is never touched.
  *
+ * An abandoned preview that loses its archive is marked `failed` (`archive_missing`) in the same
+ * transaction, so it can no longer be started into a job that would fail for want of the archive.
+ *
  * A `queued` or `running` import is never touched. Each row is locked while its archive goes, so an
  * import cannot start from it at the same moment. When the storage delete fails the key is kept and
  * the next run tries again.
@@ -20,6 +23,7 @@ import { schema, type Executor } from "@commonair/db";
 import { INCOMING_PREFIX } from "@commonair/moderation";
 import { and, eq, inArray, isNotNull, lt, or } from "drizzle-orm";
 import type { WorkerContext } from "../context.ts";
+import { emit } from "../moderation/records.ts";
 
 const { portabilityImports: imports } = schema;
 
@@ -65,7 +69,7 @@ export async function cleanIncomingArchives(ctx: WorkerContext, batch = 500): Pr
     const outcome = await ctx.db.transaction(async (tx) => {
       // Re-checked under the row lock: an import started since the select is left alone.
       const [row] = await tx
-        .select({ key: imports.archiveKey })
+        .select({ key: imports.archiveKey, status: imports.status })
         .from(imports)
         .where(and(eq(imports.id, id), cleanable(cutoff)))
         .for("update");
@@ -75,7 +79,19 @@ export async function cleanIncomingArchives(ctx: WorkerContext, batch = 500): Pr
       } catch {
         return "failed" as const;
       }
-      await tx.update(imports).set({ archiveKey: null, updatedAt: now }).where(eq(imports.id, id));
+      if (row.status === "previewed") {
+        await tx
+          .update(imports)
+          .set({
+            archiveKey: null,
+            status: "failed",
+            finishedAt: now,
+            updatedAt: now,
+            result: [{ kind: "channel", ref: "channel", label: "", outcome: "rejected", reason: "archive_missing" }],
+          })
+          .where(eq(imports.id, id));
+        await emit(tx, "portability.import.finished", null, { import_id: id }, now);
+      } else await tx.update(imports).set({ archiveKey: null, updatedAt: now }).where(eq(imports.id, id));
       return "deleted" as const;
     });
     if (outcome === "deleted") out.deleted++;
