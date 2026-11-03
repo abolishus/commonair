@@ -9,9 +9,11 @@ import { MyCopyright } from "../../components/dmca/copyright.tsx";
 import { t } from "../../i18n/index.ts";
 import { getSessionUser, useBootstrap } from "../../lib/bootstrap.ts";
 import { requireSession } from "../../lib/guard.ts";
+import { titleHead } from "../../lib/page-title.ts";
 
 /** Signed in: copyright notices about your content and the counter-notice (E7-dmca). */
 export const Route = createFileRoute("/_app/settings/copyright")({
+  head: () => titleHead(t("pageTitle.settingsCopyright")),
   beforeLoad: () => requireSession(() => getSessionUser()),
   // `?notice=<id>` (the link in the `dmcaNoticeReceived` mail) scrolls to that notice.
   validateSearch: (search: Record<string, unknown>): { notice?: string } =>

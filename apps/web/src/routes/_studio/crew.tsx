@@ -20,9 +20,11 @@ import { t } from "../../i18n/index.ts";
 import { api } from "../../lib/api.ts";
 import { getSessionUser, useBootstrap } from "../../lib/bootstrap.ts";
 import { requireSession } from "../../lib/guard.ts";
+import { titleHead } from "../../lib/page-title.ts";
 
 /** `/crew`: revenue splits with the channel's crew (ADR 0013, W2-splits). */
 export const Route = createFileRoute("/_studio/crew")({
+  head: () => titleHead(t("pageTitle.studioCrew")),
   // Server-side guard (SSR and client navigation); the component keeps a client fallback.
   beforeLoad: () => requireSession(() => getSessionUser()),
   component: CrewPage,

@@ -9,6 +9,7 @@ import { t } from "../../i18n/index.ts";
 import { api } from "../../lib/api.ts";
 import { getSessionUser } from "../../lib/bootstrap.ts";
 import { requireSession } from "../../lib/guard.ts";
+import { pageTitle } from "../../lib/page-title.ts";
 
 /**
  * `?code=` from the device's verification link; anything else is dropped. A value the router's
@@ -34,7 +35,7 @@ export const Route = createFileRoute("/_app/activate")({
     meta: [
       { name: "referrer", content: "no-referrer" },
       { name: "robots", content: "noindex, nofollow" },
-      { title: t("oauth.device.pageTitle") },
+      { title: pageTitle(t("oauth.device.pageTitle")) },
     ],
   }),
   component: ActivatePage,

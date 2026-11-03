@@ -11,9 +11,11 @@ import { t } from "../../i18n/index.ts";
 import { getSessionUser, useBootstrap } from "../../lib/bootstrap.ts";
 import { requireSession } from "../../lib/guard.ts";
 import { channelSearch } from "../../lib/interact-studio.ts";
+import { titleHead } from "../../lib/page-title.ts";
 
 /** Studio: the channel bot (settings, filters, points, song requests, commands, timers and variables) (E8-studio). `?channel=` opens a channel the member moderates or edits. */
 export const Route = createFileRoute("/_studio/bot")({
+  head: () => titleHead(t("pageTitle.studioBot")),
   // Server-side guard (SSR and client navigation); the component keeps a client fallback.
   beforeLoad: () => requireSession(() => getSessionUser()),
   validateSearch: channelSearch,

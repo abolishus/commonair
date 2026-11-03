@@ -10,9 +10,13 @@ import { dmcaNoticeClient } from "../../components/dmca/client.ts";
 import { DmcaNoticeForm } from "../../components/dmca/notice-form.tsx";
 import { LegalDocumentLink, type LegalDoc } from "../../components/legal-document-link.tsx";
 import { t } from "../../i18n/index.ts";
+import { titleHead } from "../../lib/page-title.ts";
 
 /** Public: the DMCA notice form (17 U.S.C. § 512(c)(3)(A); E7-dmca). No account needed. */
-export const Route = createFileRoute("/_app/dmca")({ component: DmcaPage });
+export const Route = createFileRoute("/_app/dmca")({
+  head: () => titleHead(t("pageTitle.dmca")),
+  component: DmcaPage,
+});
 
 function DmcaPage(): React.JSX.Element {
   const [client] = React.useState(() => dmcaNoticeClient());

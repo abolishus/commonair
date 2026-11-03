@@ -24,9 +24,13 @@ import { t } from "../../i18n/index.ts";
 import { toastActionError } from "../../lib/action-error.ts";
 import { api } from "../../lib/api.ts";
 import { currentMonthPeriod, normalizeReference } from "../../lib/money.ts";
+import { titleHead } from "../../lib/page-title.ts";
 
 /** Treasurers only: the `_admin` layout's `beforeLoad` already answered everyone else with not-found. */
-export const Route = createFileRoute("/_admin/treasury")({ component: TreasuryPage });
+export const Route = createFileRoute("/_admin/treasury")({
+  head: () => titleHead(t("pageTitle.treasury")),
+  component: TreasuryPage,
+});
 
 const PAGE = 50;
 const SEARCH_DEBOUNCE_MS = 300;

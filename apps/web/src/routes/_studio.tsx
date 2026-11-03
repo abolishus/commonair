@@ -20,15 +20,38 @@ import {
   Video01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Link, Outlet, createFileRoute, useLocation } from "@tanstack/react-router";
+import { Link, Outlet, createFileRoute, useLocation, type ErrorComponentProps } from "@tanstack/react-router";
 import type * as React from "react";
+import { ErrorState, NotFoundState, ShellFallback } from "../components/not-found.tsx";
 import { AppFooter, AppHeader } from "../components/site-chrome.tsx";
 import { t } from "../i18n/index.ts";
 import { useBootstrap } from "../lib/bootstrap.ts";
 import { studioNav, type StudioEntry } from "../lib/nav.ts";
 
 /** Creator tools (stream manager, rehearsal, overlays, polls and raids, channel bot, chat safety, captions, content, analytics, revenue, crew, relays, moving the channel, importing from Twitch, developer) in the studio sidebar. Each page guards its own session. */
-export const Route = createFileRoute("/_studio")({ component: StudioLayout });
+export const Route = createFileRoute("/_studio")({
+  component: StudioLayout,
+  errorComponent: StudioError,
+  notFoundComponent: StudioNotFound,
+});
+
+/** The boundary replaced the studio layout: the public chrome, not a sidebar that may have failed. */
+function StudioError({ reset }: ErrorComponentProps): React.JSX.Element {
+  return (
+    <ShellFallback wrap>
+      <ErrorState reset={reset} />
+    </ShellFallback>
+  );
+}
+
+function StudioNotFound(): React.JSX.Element {
+  const replaced = Route.useMatch({ select: (m) => m.status === "notFound" });
+  return (
+    <ShellFallback wrap={replaced}>
+      <NotFoundState />
+    </ShellFallback>
+  );
+}
 
 function studioItem(entry: StudioEntry): NavItem {
   const base = { id: entry.id, current: entry.current };

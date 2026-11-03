@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { AppShell, AdminShell, type NavItem } from "@commonair/ui/layouts";
+import { AdminShell, type NavItem } from "@commonair/ui/layouts";
 import {
   Alert02Icon,
   AppStoreIcon,
@@ -16,9 +16,9 @@ import {
   UserGroupIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Link, Outlet, createFileRoute, useLocation } from "@tanstack/react-router";
+import { Link, Outlet, createFileRoute, useLocation, type ErrorComponentProps } from "@tanstack/react-router";
 import type * as React from "react";
-import { NotFoundState } from "../components/money/not-found.tsx";
+import { ErrorState, NotFoundState, ShellFallback } from "../components/not-found.tsx";
 import {
   adminPageFor,
   isLegal,
@@ -44,6 +44,7 @@ import { adminNav, type AdminEntry } from "../lib/nav.ts";
 export const Route = createFileRoute("/_admin")({
   beforeLoad: ({ location }) => requireAdminPage(location.pathname, () => getSessionUser()),
   component: AdminLayout,
+  errorComponent: AdminError,
   notFoundComponent: AdminNotFound,
 });
 
@@ -167,10 +168,19 @@ function AdminLayout(): React.JSX.Element {
   );
 }
 
+/** Also the layout's client fallback (rendered by `AdminLayout`), so it always brings the chrome. */
 function AdminNotFound(): React.JSX.Element {
   return (
-    <AppShell header={<AppHeader />} footer={<AppFooter />} skipLabel={t("nav.skipToContent")}>
+    <ShellFallback wrap>
       <NotFoundState />
-    </AppShell>
+    </ShellFallback>
+  );
+}
+
+function AdminError({ reset }: ErrorComponentProps): React.JSX.Element {
+  return (
+    <ShellFallback wrap>
+      <ErrorState reset={reset} />
+    </ShellFallback>
   );
 }

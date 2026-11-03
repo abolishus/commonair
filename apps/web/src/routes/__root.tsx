@@ -4,15 +4,24 @@
 /// <reference types="vite/client" />
 import { LocaleProvider, NowProvider, TooltipProvider, applyTheme, useResolvedTheme, type Theme } from "@commonair/ui";
 import { Toaster } from "@commonair/ui/toast";
-import { HeadContent, Outlet, Scripts, createRootRoute, useLocation, useRouter } from "@tanstack/react-router";
+import {
+  HeadContent,
+  Outlet,
+  Scripts,
+  createRootRoute,
+  useLocation,
+  useRouter,
+  type ErrorComponentProps,
+} from "@tanstack/react-router";
 import * as React from "react";
-import { localeDirection } from "@commonair/i18n";
 import { ConsentRoot } from "../components/consent/consent-root.tsx";
+import { ErrorState, NotFoundState, ShellFallback } from "../components/not-found.tsx";
 import { PwaRoot } from "../components/pwa/pwa-root.tsx";
 import { onLocaleApplied, syncLocale } from "../i18n/client.ts";
-import { t, uiMessagesFor } from "../i18n/index.ts";
+import { activeLocale, t, uiMessagesFor } from "../i18n/index.ts";
 import { getBootstrap } from "../lib/bootstrap.ts";
 import { rootChrome } from "../lib/overlay-page.ts";
+import { HYDRATING_CSS, rootHtmlAttributes } from "../lib/root-html.ts";
 import { PWA_THEME_COLORS } from "../pwa/theme.ts";
 import { storeTheme, tabTheme } from "../lib/theme.ts";
 import { ThemeContext } from "../lib/theme-context.ts";
@@ -39,9 +48,48 @@ export const Route = createRootRoute({
       { rel: "icon", href: "/icons/icon.svg", type: "image/svg+xml" },
       { rel: "apple-touch-icon", href: "/icons/apple-touch-icon.png" },
     ],
+    styles: [{ children: HYDRATING_CSS }],
   }),
   component: RootComponent,
+  notFoundComponent: RootNotFound,
+  errorComponent: RootError,
 });
+
+/** An unknown URL no layout claimed: inside the root, so with the public chrome. */
+function RootNotFound(): React.JSX.Element {
+  return (
+    <ShellFallback wrap>
+      <NotFoundState />
+    </ShellFallback>
+  );
+}
+
+/**
+ * The root itself failed (its loader, or a page outside every layout): a whole document, since the
+ * root's own `<html>` is gone. No bootstrap here, so no header, and the default theme.
+ */
+function RootError({ reset }: ErrorComponentProps): React.JSX.Element {
+  const pathname = useLocation({ select: (location) => location.pathname });
+  const locale = activeLocale();
+  const chrome = rootChrome(pathname, "dark");
+  return (
+    <html {...rootHtmlAttributes({ locale, theme: "dark", pathname, hydrating: false })} lang={locale}>
+      <head>
+        <HeadContent />
+      </head>
+      <body className={chrome.bodyClass}>
+        <LocaleProvider locale={locale} messages={uiMessagesFor(locale)}>
+          <TooltipProvider>
+            <main id="main-content">
+              <ErrorState reset={reset} />
+            </main>
+          </TooltipProvider>
+        </LocaleProvider>
+        <Scripts />
+      </body>
+    </html>
+  );
+}
 
 const subscribeNothing = () => () => {};
 const tabThemeSnapshot = (): Theme | null => tabTheme() ?? null;
@@ -65,10 +113,21 @@ function RootComponent(): React.JSX.Element {
   const resolved = useResolvedTheme(theme);
   const pathname = useLocation({ select: (location) => location.pathname });
   const chrome = rootChrome(pathname, theme);
+  // Transitions stay off until hydration has settled (`data-hydrating`, F14): two frames, so the
+  // tab-only theme applied right after hydration paints without a fade too.
+  const [hydrating, setHydrating] = React.useState(true);
   // Set once React has hydrated: input typed before then is reset by React, so tests (the harness,
   // screen readers' automation) can wait for `html[data-hydrated]` before they interact.
   React.useEffect(() => {
     document.documentElement.dataset.hydrated = "true";
+    let second = 0;
+    const first = requestAnimationFrame(() => {
+      second = requestAnimationFrame(() => setHydrating(false));
+    });
+    return () => {
+      cancelAnimationFrame(first);
+      cancelAnimationFrame(second);
+    };
   }, []);
   // `t()` is not reactive: a language switch remounts everything under `LocaleProvider` and
   // re-runs the matches so `head()` (the document title) is in the new language too.
@@ -103,13 +162,7 @@ function RootComponent(): React.JSX.Element {
     [theme],
   );
   return (
-    <html
-      lang={active.locale}
-      dir={localeDirection(active.locale)}
-      data-theme={theme}
-      data-overlay={chrome.dataOverlay}
-      className={chrome.htmlClass}
-    >
+    <html {...rootHtmlAttributes({ locale: active.locale, theme, pathname, hydrating })} lang={active.locale}>
       <head>
         <HeadContent />
       </head>

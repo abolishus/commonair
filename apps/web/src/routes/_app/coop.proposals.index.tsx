@@ -10,9 +10,14 @@ import { usePaged } from "../../components/money/use-load.ts";
 import { api } from "../../lib/api.ts";
 import { useBootstrap } from "../../lib/bootstrap.ts";
 import { isMember, type ProposalFilter } from "../../lib/coop.ts";
+import { t } from "../../i18n/index.ts";
+import { titleHead } from "../../lib/page-title.ts";
 
 /** Public: proposals by status; members get "New proposal". */
-export const Route = createFileRoute("/_app/coop/proposals/")({ component: ProposalsPage });
+export const Route = createFileRoute("/_app/coop/proposals/")({
+  head: () => titleHead(t("pageTitle.coopProposals")),
+  component: ProposalsPage,
+});
 
 const PAGE = 25;
 

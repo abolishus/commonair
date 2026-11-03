@@ -9,12 +9,15 @@ import { RehearsalWatchView, RehearsePage } from "../../components/rehearsal/pag
 import { getSessionUser, useBootstrap } from "../../lib/bootstrap.ts";
 import { requireSession } from "../../lib/guard.ts";
 import { channelSearch } from "../../lib/interact-studio.ts";
+import { t } from "../../i18n/index.ts";
+import { titleHead } from "../../lib/page-title.ts";
 
 /**
  * `/rehearse`: arm a private rehearsal, invite up to five followers, read the checklist and the
  * report (batch 6 decisions (f), (g)). `?channel=` of another channel is an invitee's watch view.
  */
 export const Route = createFileRoute("/_studio/rehearse")({
+  head: () => titleHead(t("pageTitle.studioRehearse")),
   // Server-side guard (SSR and client navigation): invitees watch signed in too.
   beforeLoad: () => requireSession(() => getSessionUser()),
   validateSearch: channelSearch,

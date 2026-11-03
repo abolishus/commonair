@@ -3,6 +3,8 @@
 
 import { createFileRoute } from "@tanstack/react-router";
 import { AttestationVerifier } from "../../components/attestations/verifier.tsx";
+import { t } from "../../i18n/index.ts";
+import { titleHead } from "../../lib/page-title.ts";
 
 /**
  * `/attestations/verify`: the public verifier for signed audience attestations (ADR 0014; the
@@ -10,5 +12,6 @@ import { AttestationVerifier } from "../../components/attestations/verifier.tsx"
  * session. The page is `AttestationVerifier`, which W2b-attestations owns.
  */
 export const Route = createFileRoute("/_app/attestations/verify")({
+  head: () => titleHead(t("pageTitle.attestationsVerify")),
   component: AttestationVerifier,
 });

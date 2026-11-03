@@ -12,8 +12,10 @@ import { t } from "../../i18n/index.ts";
 import { useBootstrap } from "../../lib/bootstrap.ts";
 import { getDirectory } from "../../lib/directory.ts";
 import { directorySections, offlineSections } from "../../lib/directory-sections.ts";
+import { titleHead } from "../../lib/page-title.ts";
 
 export const Route = createFileRoute("/_app/")({
+  head: () => titleHead(t("pageTitle.home")),
   // Ranking and viewer counts change on an interval: always refetch when navigating here.
   loader: () => getDirectory(),
   staleTime: 0,

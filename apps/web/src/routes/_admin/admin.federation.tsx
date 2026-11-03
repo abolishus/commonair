@@ -10,13 +10,17 @@ import { NotFoundState } from "../../components/money/not-found.tsx";
 import { mayOpenAdminPage } from "../../components/safety/access.ts";
 import { t } from "../../i18n/index.ts";
 import { useBootstrap } from "../../lib/bootstrap.ts";
+import { titleHead } from "../../lib/page-title.ts";
 
 /**
  * `/admin/federation`: the instance's ActivityPub domain blocks and key rotation (ADR 0030),
  * admins only (the `_admin` guard). While the instance does not federate it explains how to turn
  * federation on.
  */
-export const Route = createFileRoute("/_admin/admin/federation")({ component: FederationRoute });
+export const Route = createFileRoute("/_admin/admin/federation")({
+  head: () => titleHead(t("pageTitle.adminFederation")),
+  component: FederationRoute,
+});
 
 function FederationRoute(): React.JSX.Element {
   const { me, instance } = useBootstrap();

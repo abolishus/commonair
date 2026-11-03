@@ -6,9 +6,12 @@ import type * as React from "react";
 import { AnalyticsView } from "../../components/analytics/analytics-page.tsx";
 import { getSessionUser, useBootstrap } from "../../lib/bootstrap.ts";
 import { requireSession } from "../../lib/guard.ts";
+import { t } from "../../i18n/index.ts";
+import { titleHead } from "../../lib/page-title.ts";
 
 /** `/analytics`: verified audience, exclusions, delivery and marginal cost per broadcast (ADR 0014, decision (k)). */
 export const Route = createFileRoute("/_studio/analytics")({
+  head: () => titleHead(t("pageTitle.studioAnalytics")),
   // Server-side guard (SSR and client navigation); the component keeps a client fallback.
   beforeLoad: () => requireSession(() => getSessionUser()),
   component: AnalyticsPage,

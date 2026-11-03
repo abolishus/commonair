@@ -10,8 +10,10 @@ import { EnforcementSection } from "../../components/safety/enforcement.tsx";
 import { t } from "../../i18n/index.ts";
 import { getSessionUser, useBootstrap } from "../../lib/bootstrap.ts";
 import { requireSession } from "../../lib/guard.ts";
+import { titleHead } from "../../lib/page-title.ts";
 
 export const Route = createFileRoute("/_app/settings/appeals")({
+  head: () => titleHead(t("pageTitle.settingsAppeals")),
   // Server-side guard (SSR and client navigation); the component keeps a client fallback.
   beforeLoad: () => requireSession(() => getSessionUser()),
   component: AppealsPage,

@@ -8,11 +8,12 @@ import { t } from "../../i18n/index.ts";
 import { api } from "../../lib/api.ts";
 import { getSessionUser, useBootstrap } from "../../lib/bootstrap.ts";
 import { requireSession } from "../../lib/guard.ts";
+import { pageTitle } from "../../lib/page-title.ts";
 
 /** Settings: apps you authorized, their scopes, revoke (E9-consent). */
 export const Route = createFileRoute("/_app/settings/connections")({
   beforeLoad: () => requireSession(() => getSessionUser()),
-  head: () => ({ meta: [{ title: t("oauth.connections.pageTitle") }] }),
+  head: () => ({ meta: [{ title: pageTitle(t("oauth.connections.pageTitle")) }] }),
   component: ConnectionsPage,
 });
 

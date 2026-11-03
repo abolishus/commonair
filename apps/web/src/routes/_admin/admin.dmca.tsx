@@ -7,9 +7,13 @@ import { createFileRoute } from "@tanstack/react-router";
 import type * as React from "react";
 import { DmcaQueue } from "../../components/dmca/dmca-queue.tsx";
 import { t } from "../../i18n/index.ts";
+import { titleHead } from "../../lib/page-title.ts";
 
 /** Platform moderators (the `_admin` guard answers everyone else with not-found): the DMCA queue (E7-dmca). */
-export const Route = createFileRoute("/_admin/admin/dmca")({ component: DmcaQueuePage });
+export const Route = createFileRoute("/_admin/admin/dmca")({
+  head: () => titleHead(t("pageTitle.adminDmca")),
+  component: DmcaQueuePage,
+});
 
 function DmcaQueuePage(): React.JSX.Element {
   return (

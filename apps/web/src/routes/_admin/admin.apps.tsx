@@ -11,9 +11,13 @@ import { NotFoundState } from "../../components/money/not-found.tsx";
 import { mayOpenAdminPage } from "../../components/safety/access.ts";
 import { t } from "../../i18n/index.ts";
 import { useBootstrap } from "../../lib/bootstrap.ts";
+import { titleHead } from "../../lib/page-title.ts";
 
 /** Admins only (the `_admin` guard): every OAuth app, suspend and unsuspend (E9-console; ADR 0027 §4). */
-export const Route = createFileRoute("/_admin/admin/apps")({ component: AdminAppsRoute });
+export const Route = createFileRoute("/_admin/admin/apps")({
+  head: () => titleHead(t("pageTitle.adminApps")),
+  component: AdminAppsRoute,
+});
 
 function AdminAppsRoute(): React.JSX.Element {
   const { me } = useBootstrap();

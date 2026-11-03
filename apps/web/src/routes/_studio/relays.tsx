@@ -23,8 +23,10 @@ import { requireSession } from "../../lib/guard.ts";
 import { RELAY_NAME_MAX, RELAYS_POLL_MS, relayName, relayReadmeUrl, type RelayNodeDto } from "../../lib/relays.ts";
 import { browserPollEnv, pollWhileVisible } from "../../lib/stream-health.ts";
 import { safeHttpUrl } from "../../lib/url.ts";
+import { titleHead } from "../../lib/page-title.ts";
 
 export const Route = createFileRoute("/_studio/relays")({
+  head: () => titleHead(t("pageTitle.studioRelays")),
   // Server-side guard (SSR and client navigation); the component keeps a client fallback.
   beforeLoad: () => requireSession(() => getSessionUser()),
   component: RelaysPage,

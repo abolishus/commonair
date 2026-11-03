@@ -9,9 +9,11 @@ import { NotificationSettings } from "../../components/notifications/settings.ts
 import { t } from "../../i18n/index.ts";
 import { getSessionUser, useBootstrap } from "../../lib/bootstrap.ts";
 import { requireSession } from "../../lib/guard.ts";
+import { titleHead } from "../../lib/page-title.ts";
 
 /** Signed in: go-live notification preferences and browser push (ADR 0028). */
 export const Route = createFileRoute("/_app/settings/notifications/")({
+  head: () => titleHead(t("pageTitle.settingsNotifications")),
   // Server-side guard (SSR and client navigation); the component keeps a client fallback.
   beforeLoad: () => requireSession(() => getSessionUser()),
   component: NotificationSettingsPage,
