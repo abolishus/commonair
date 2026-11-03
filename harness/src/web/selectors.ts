@@ -354,6 +354,10 @@ export const D_TEST_IDS = {
   skipLink: "skip-link",
   emptyStateAction: "empty-state-action",
   accountThemeSwitcher: "account-theme-switcher",
+  /** D4 (F17): the date of birth is three selects inside the `signup-birthdate` fieldset. */
+  signupBirthdateDay: "signup-birthdate-day",
+  signupBirthdateMonth: "signup-birthdate-month",
+  signupBirthdateYear: "signup-birthdate-year",
 } as const;
 
 export const TEST_IDS = {

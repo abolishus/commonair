@@ -34,7 +34,7 @@ import { defineScenario, type ScenarioContext } from "../src/scenario.ts";
 import { Streamer } from "../src/streamer.ts";
 import { findTokenLink } from "../src/mailpit.ts";
 import { waitFor } from "../src/wait.ts";
-import { signInViaUi, waitForAltcha, waitForOneOf } from "../src/web/flows.ts";
+import { fillBirthDate, signInViaUi, waitForAltcha, waitForOneOf } from "../src/web/flows.ts";
 import { ROUTES, TEST_IDS as T, tid } from "../src/web/selectors.ts";
 import { type WebSessionOptions, WebSession, byTestId, probeStats, readValue } from "../src/web/session.ts";
 import { browserVerificationUrl, obsPublishUrl, rebaseOrigin } from "../src/web/urls.ts";
@@ -144,7 +144,7 @@ async function e2eBasic(ctx: ScenarioContext, sessions: WebSession[], check: Sce
     await byTestId(page, T.signupEmail).fill(creds.email, ui);
     await byTestId(page, T.signupUsername).fill(creds.username, ui);
     await byTestId(page, T.signupPassword).fill(creds.password, ui);
-    await byTestId(page, T.signupBirthdate).fill(creds.birthDate, ui);
+    await fillBirthDate(page, creds.birthDate, ui);
     await byTestId(page, T.signupLegal).check(ui);
     return page;
   });

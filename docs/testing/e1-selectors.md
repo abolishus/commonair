@@ -40,7 +40,7 @@ if auto sign-in is unavailable; the scenario handles both).
 | `signup-email`             | email input                                                                               |
 | `signup-username`          | username input                                                                            |
 | `signup-password`          | password input                                                                            |
-| `signup-birthdate`         | `<input type="date">` (value `YYYY-MM-DD`)                                                |
+| `signup-birthdate`         | Fieldset of three selects in locale order (`signup-birthdate-day`, `-month`, `-year`; D4) |
 | `signup-legal`             | checkbox accepting the current legal documents (`role="checkbox"`; Playwright `.check()`) |
 | `signup-altcha`            | wrapper of the ALTCHA widget; carries `data-state="verified"` once solved                 |
 | `signup-submit`            | submit button (disabled until ALTCHA is verified)                                         |

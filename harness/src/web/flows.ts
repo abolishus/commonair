@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /** Small web flows several scenarios share (sign up, sign in, wait for one of several elements). */
-import type { Page } from "playwright";
+import type { Locator, Page } from "playwright";
 import { type Mailpit, findTokenLink } from "../mailpit.ts";
 import type { UserCredentials } from "../users.ts";
 import { sleep, waitFor } from "../wait.ts";
@@ -128,6 +128,23 @@ export interface WebSignUpOptions {
  * Sign up through the web form (ALTCHA, legal checkbox), follow the verification email and end up
  * signed in (`nav-user` shows), signing in through the form when the link lands on `/signin`.
  */
+/**
+ * The sign-up form's date of birth (D4, F17): three selects in the locale's order. Year and month
+ * first, since the day list depends on them; days and years are picked by their number, the month
+ * by position (its label is localized).
+ */
+export async function fillBirthDate(p: Page, iso: string, ui: { timeout: number }): Promise<void> {
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!y || !m || !d) throw new Error(`fillBirthDate: not YYYY-MM-DD: ${iso}`);
+  const pick = async (id: TestId, option: (listbox: Locator) => Locator) => {
+    await byTestId(p, id).click(ui);
+    await option(p.getByRole("listbox")).click(ui);
+  };
+  await pick(T.signupBirthdateYear, (l) => l.getByRole("option", { name: String(y), exact: true }));
+  await pick(T.signupBirthdateMonth, (l) => l.getByRole("option").nth(m - 1));
+  await pick(T.signupBirthdateDay, (l) => l.getByRole("option", { name: String(d), exact: true }));
+}
+
 export async function signUpViaUi(o: WebSignUpOptions): Promise<Page> {
   const step = o.step ?? (<T>(_name: string, fn: () => Promise<T>) => fn());
   const ui = { timeout: o.timeoutMs };
@@ -137,7 +154,7 @@ export async function signUpViaUi(o: WebSignUpOptions): Promise<Page> {
     await byTestId(p, T.signupEmail).fill(o.creds.email, ui);
     await byTestId(p, T.signupUsername).fill(o.creds.username, ui);
     await byTestId(p, T.signupPassword).fill(o.creds.password, ui);
-    await byTestId(p, T.signupBirthdate).fill(o.creds.birthDate, ui);
+    await fillBirthDate(p, o.creds.birthDate, ui);
     await byTestId(p, T.signupLegal).check(ui);
     return p;
   });
