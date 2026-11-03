@@ -41,6 +41,8 @@ export interface ViewerReport {
   /** Segments that failed to download and were skipped (HTTP viewers). */
   skippedSegments: number;
   heartbeats: number;
+  /** Harness player pages only: heartbeat requests sent, answered or not (one may be in flight). */
+  heartbeatsSent?: number;
   heartbeatErrors: number;
   errors: string[];
 }

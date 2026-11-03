@@ -361,6 +361,7 @@ class BrowserViewer implements Viewer {
       bytesHttp: probe?.bytesHttp ?? 0,
       bytesP2p: probe?.bytesP2p ?? 0,
       heartbeats: info?.heartbeats ?? 0,
+      ...(info ? { heartbeatsSent: info.heartbeatsSent } : {}),
       heartbeatErrors: info?.heartbeatErrors ?? 0,
       errors: [...(info?.errors ?? []), ...(probe?.errors ?? [])],
     };
