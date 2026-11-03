@@ -13,7 +13,7 @@ import type { DbHandle } from "@commonair/db";
 import type { Mailer } from "@commonair/email";
 import type { NetworkClassifier } from "@commonair/integrity";
 import type { Logger } from "@commonair/observability";
-import { createValkey, valkeyCheck, type ReadinessCheck, type ValkeyClient } from "@commonair/service";
+import { createValkey, valkeyCheck, type ReadinessCheck, type ValkeyClient, valkeyTls } from "@commonair/service";
 import type { ObjectStorage } from "@commonair/storage";
 import { Valkey } from "iovalkey";
 import type { WorkerContext } from "./context.ts";
@@ -78,7 +78,11 @@ export interface WorkerHandle {
 export function createWorker(opts: CreateWorkerOptions): WorkerHandle {
   const valkey: ValkeyClient = createValkey(opts.valkeyUrl, { keyPrefix: opts.keyPrefix, name: "worker" });
   // BullMQ refuses keyPrefix and needs maxRetriesPerRequest: null for its blocking commands.
-  const bullConnection = new Valkey(opts.valkeyUrl, { maxRetriesPerRequest: null, connectionName: "worker-bullmq" });
+  const bullConnection = new Valkey(opts.valkeyUrl, {
+    ...valkeyTls(opts.valkeyUrl),
+    maxRetriesPerRequest: null,
+    connectionName: "worker-bullmq",
+  });
   const runtime = new JobRuntime({
     connection: bullConnection,
     prefix: opts.bullPrefix ?? "bull",

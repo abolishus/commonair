@@ -8,6 +8,7 @@
  */
 import { Queue } from "bullmq";
 import { Valkey } from "iovalkey";
+import { valkeyTls } from "@commonair/service";
 import { QUEUES, WEBHOOK_JOBS } from "@commonair/contracts/internal";
 import type { Deps } from "../deps.ts";
 
@@ -32,7 +33,11 @@ export interface WebhookQueue {
 
 export function createWebhookQueue(valkeyUrl: string, prefix: string): WebhookQueue {
   // BullMQ refuses ioredis key prefixes and needs maxRetriesPerRequest: null.
-  const conn = new Valkey(valkeyUrl, { maxRetriesPerRequest: null, connectionName: "api-webhooks-queue" });
+  const conn = new Valkey(valkeyUrl, {
+    ...valkeyTls(valkeyUrl),
+    maxRetriesPerRequest: null,
+    connectionName: "api-webhooks-queue",
+  });
   const queue = new Queue(QUEUES.webhooks, { connection: conn, prefix });
   return {
     async enqueue(name, data, jobId) {

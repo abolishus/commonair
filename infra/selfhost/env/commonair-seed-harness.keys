@@ -5,6 +5,7 @@
 # The keys of commonair.env that commonair-seed-harness receives (scripts/selfhost/render-env.sh),
 # from what `seed full` reads from the instance (harness/src/env.ts, and the instance values safety-io.ts, stripe.ts and seed/platform.ts fall back to); staging seed mode only.
 AUTH_SECRET
+DATABASE_CA_FILE
 DEMO_SEED_FULL
 INTERNAL_API_SECRET
 S3_ACCESS_KEY_ID

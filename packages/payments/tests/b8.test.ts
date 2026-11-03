@@ -103,6 +103,76 @@ describe("error classification", () => {
     expect((await c.createTransfer({ amount: 5000 }, "k")).id).toBe("tr_1");
   });
 
+  test("409 (a request with the same key still running) is retried, then an unknown outcome", async () => {
+    let n = 0;
+    const { f } = fakeFetch(() => {
+      n++;
+      return Response.json(
+        { error: { type: "invalid_request_error", code: "idempotency_key_in_use", message: "in use" } },
+        { status: 409 },
+      );
+    });
+    const c = stripeClient({ secretKey: "sk_test_x", fetch: f, retries: 1 });
+    const err = await c.createTransfer({ amount: 1 }, "payout-transfer:po_1").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(StripeOutcomeUnknown);
+    expect(isDefiniteRefusal(err)).toBe(false);
+    expect((err as StripeOutcomeUnknown).status).toBe(409);
+    expect(n).toBe(2);
+    // ... and a 409 then a success is a success.
+    let m = 0;
+    const ok = fakeFetch(() =>
+      ++m === 1 ? Response.json({ error: {} }, { status: 409 }) : Response.json(transferJson),
+    );
+    expect((await stripeClient({ secretKey: "sk_test_x", fetch: ok.f, retries: 1 }).createTransfer({}, "k")).id).toBe(
+      "tr_1",
+    );
+  });
+
+  test("an idempotency_error (the key went with other parameters) is unknown at once", async () => {
+    for (const error of [
+      { type: "idempotency_error", message: "Keys for idempotent requests can only be used with the same parameters" },
+      { type: "invalid_request_error", code: "idempotency_error" },
+    ]) {
+      let n = 0;
+      const { f } = fakeFetch(() => {
+        n++;
+        return Response.json({ error }, { status: 400 });
+      });
+      const c = stripeClient({ secretKey: "sk_test_x", fetch: f, retries: 2 });
+      const err = await c.createRefund({ amount: 1 }, "k").catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(StripeOutcomeUnknown);
+      expect(isDefiniteRefusal(err)).toBe(false);
+      expect(n).toBe(1);
+    }
+  });
+
+  test("429 is retried, then an unknown outcome; a 429 then a success is a success", async () => {
+    let n = 0;
+    const { f } = fakeFetch(() => {
+      n++;
+      return Response.json({ error: { type: "invalid_request_error", code: "rate_limit" } }, { status: 429 });
+    });
+    const c = stripeClient({ secretKey: "sk_test_x", fetch: f, retries: 2 });
+    const err = await c.createTransfer({ amount: 1 }, "k").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(StripeOutcomeUnknown);
+    expect((err as StripeOutcomeUnknown).status).toBe(429);
+    expect(n).toBe(3);
+    let m = 0;
+    const ok = fakeFetch(() => (++m === 1 ? new Response("slow down", { status: 429 }) : Response.json(transferJson)));
+    expect((await stripeClient({ secretKey: "sk_test_x", fetch: ok.f, retries: 1 }).createTransfer({}, "k")).id).toBe(
+      "tr_1",
+    );
+  });
+
+  test("a body that cannot be encoded is thrown as is, and nothing is sent", async () => {
+    const { f, calls } = fakeFetch(() => Response.json(transferJson));
+    const c = stripeClient({ secretKey: "sk_test_x", fetch: f, retries: 2 });
+    const err = await c.createTransfer({ amount: Number.NaN }, "k").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(StripeApiError);
+    expect(calls).toHaveLength(0);
+  });
+
   test("a success answer without what the call needs is an unknown outcome", async () => {
     const { f } = fakeFetch(() => Response.json({ object: "transfer" }));
     const c = stripeClient({ secretKey: "sk_test_x", fetch: f });
@@ -185,6 +255,21 @@ describe("transfers and refunds on the client", () => {
     expect(calls[1]?.url.searchParams.get("starting_after")).toBe("re_2");
   });
 
+  test("listRefunds never returns a cut-off list", async () => {
+    let n = 0;
+    const { f } = fakeFetch(() =>
+      Response.json({
+        object: "list",
+        has_more: true,
+        data: [{ id: `re_${++n}`, amount: 1, currency: "usd", status: "succeeded", payment_intent: "pi_1" }],
+      }),
+    );
+    const c = stripeClient({ secretKey: "sk_test_x", fetch: f, apiBase: "http://m.test" });
+    expect(await c.listRefunds({ paymentIntent: "pi_1" }).catch((e: unknown) => e)).toBeInstanceOf(
+      StripeOutcomeUnknown,
+    );
+  });
+
   test("the mappers refuse a malformed object", () => {
     expect(() => transferOf({ id: "tr_1" })).toThrow(StripeOutcomeUnknown);
     expect(() => refundOf({ id: "re_1", amount: 1 })).toThrow(StripeOutcomeUnknown);
@@ -240,6 +325,8 @@ describe("the adapter seams", () => {
     });
     expect(await adapter.refundStatus?.("re_gone")).toBeNull();
     expect(await adapter.refundStatus?.("CA-REF")).toBeNull();
+    // Some payment methods' refunds are `pyr_`.
+    expect((await adapter.refundStatus?.("pyr_1"))?.providerRef).toBe("re_1");
     expect(["succeeded", "failed", "canceled", "pending", null, "weird"].map(refundStatusOf)).toEqual([
       "succeeded",
       "failed",

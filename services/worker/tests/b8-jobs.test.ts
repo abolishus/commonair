@@ -18,7 +18,6 @@ import { type ActorDeleteTarget, actorDeleteJobs, b7JobsFor } from "../src/b7/ou
 import { b8Stub } from "../src/b8/stub.ts";
 import { deliverJobId } from "../src/federation/deliver.ts";
 import { JOBS } from "../src/jobs/index.ts";
-import { FEDERATION_FOLLOWER_CLEANUP } from "../src/jobs/names.ts";
 import { buildRegistry, scheduledJobs } from "../src/runtime/registry.ts";
 
 describe("batch 8 jobs", () => {
@@ -31,7 +30,7 @@ describe("batch 8 jobs", () => {
     expect(def(QUEUES.payments, B8_JOBS.patronagePayout)?.schedule).toBeUndefined();
     expect(def(QUEUES.portability, B8_JOBS.incomingCleanup)?.schedule).toEqual({ pattern: "13 4 * * *" });
     expect(def(QUEUES.portability, B8_JOBS.importRecordExpiry)?.schedule).toEqual({ pattern: "19 4 * * *" });
-    expect(def(QUEUES.federation, FEDERATION_FOLLOWER_CLEANUP)?.schedule).toBeUndefined();
+    expect(def(QUEUES.federation, FEDERATION_JOBS.followerCleanup)?.schedule).toBeUndefined();
     const b8 = new Set<string>(Object.values(B8_JOBS));
     expect(
       scheduledJobs(reg)
@@ -51,10 +50,10 @@ describe("batch 8 jobs", () => {
     expect(ok(QUEUES.payments, B8_JOBS.patronagePayout, { periodId: id })).toBe(false);
     expect(ok(QUEUES.portability, B8_JOBS.incomingCleanup, {})).toBe(true);
     expect(ok(QUEUES.portability, B8_JOBS.importRecordExpiry, {})).toBe(true);
-    expect(ok(QUEUES.federation, FEDERATION_FOLLOWER_CLEANUP, { channelId: id, upTo: new Date().toISOString() })).toBe(
-      true,
-    );
-    expect(ok(QUEUES.federation, FEDERATION_FOLLOWER_CLEANUP, { channelId: id })).toBe(false);
+    expect(
+      ok(QUEUES.federation, FEDERATION_JOBS.followerCleanup, { channelId: id, upTo: new Date().toISOString() }),
+    ).toBe(true);
+    expect(ok(QUEUES.federation, FEDERATION_JOBS.followerCleanup, { channelId: id })).toBe(false);
     // The on-demand ids are ones BullMQ accepts.
     expect(payoutTransferJobId(id)).not.toContain(":");
     expect(patronagePayoutJobId(id, id)).not.toContain(":");
@@ -138,13 +137,13 @@ describe("b7JobsFor: the federation events (decision (h))", () => {
     expect(jobs.map((j) => j.name)).toEqual([
       FEDERATION_JOBS.deliver,
       FEDERATION_JOBS.deliver,
-      FEDERATION_FOLLOWER_CLEANUP,
+      FEDERATION_JOBS.followerCleanup,
     ]);
     expect(jobs[2]).toEqual({
       queue: QUEUES.federation,
-      name: FEDERATION_FOLLOWER_CLEANUP,
+      name: FEDERATION_JOBS.followerCleanup,
       data: { channelId: A, upTo: r.occurredAt.toISOString() },
-      opts: { jobId: `${FEDERATION_FOLLOWER_CLEANUP}-${r.id}` },
+      opts: { jobId: `${FEDERATION_JOBS.followerCleanup}-${r.id}` },
     });
 
     const quiet = reader({ keyCreatedAt, inboxes });
@@ -154,7 +153,7 @@ describe("b7JobsFor: the federation events (decision (h))", () => {
 
   test("with no followers only the cleanup is queued; with no actor nothing is", async () => {
     const jobs = await b7JobsFor(tx, [toggled(false), disabled()], now, on, reader({ keyCreatedAt, inboxes: [] }).fn);
-    expect(jobs.map((j) => j.name)).toEqual([FEDERATION_FOLLOWER_CLEANUP]);
+    expect(jobs.map((j) => j.name)).toEqual([FEDERATION_JOBS.followerCleanup]);
     expect(await b7JobsFor(tx, [toggled(false), disabled()], now, on, reader(null).fn)).toEqual([]);
   });
 
@@ -170,7 +169,7 @@ describe("b7JobsFor: the federation events (decision (h))", () => {
     expect(jobs.map((j) => j.name)).toEqual([
       FEDERATION_JOBS.deliver,
       FEDERATION_JOBS.deliver,
-      FEDERATION_FOLLOWER_CLEANUP,
+      FEDERATION_JOBS.followerCleanup,
     ]);
     // A later relay of another event for the same generation names the same jobs.
     const again = await b7JobsFor(tx, [disabled()], now, on, reader(target).fn);

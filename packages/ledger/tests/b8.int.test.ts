@@ -53,6 +53,7 @@ describe("batch 8 reversal postings", () => {
     const userId = await newUser();
     const periodId = uuidv7();
     const posting = patronagePayoutReversed({
+      payoutId: uuidv7(),
       periodId,
       userId,
       provider: "manual",

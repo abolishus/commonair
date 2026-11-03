@@ -72,18 +72,20 @@ unit fills it).
 
 ### Refund requests (M1-gifts-refunds)
 
-| Test id                  | Element and attributes                                                                                |
-| ------------------------ | ----------------------------------------------------------------------------------------------------- |
-| `refund-requests`        | The treasury tab's request list (`<EmptyState>` when empty); each row `data-request-id`, `data-state` |
-| `refund-request-unknown` | A request whose Stripe outcome is unknown; `data-request-id`, `data-payment-id`                       |
-| `refund-request-resolve` | Resolves an unknown request (`refunded` or `failed`); opens a `ConfirmDialog`; `data-request-id`      |
+| Test id                  | Element and attributes                                                                                                                                          |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `treasury-tab-refunds`   | The treasury's "Refund requests" tab (the contract step mounts it)                                                                                              |
+| `refund-requests`        | The treasury tab's request list (`<EmptyState>` when empty); each row `data-request-id`, `data-state`. The contract step's stub renders it as an `<EmptyState>` |
+| `refund-request-unknown` | A request whose Stripe outcome is unknown; `data-request-id`, `data-payment-id`                                                                                 |
+| `refund-request-resolve` | Resolves an unknown request (`refunded` or `failed`); opens a `ConfirmDialog`; `data-request-id`                                                                |
 
 ### Payout transfers (M1-connect)
 
-| Test id                  | Element and attributes                                                                                  |
-| ------------------------ | ------------------------------------------------------------------------------------------------------- |
-| `payout-transfers`       | The treasury tab's transfer list by payout run (`<EmptyState>` when empty); each row `data-transfer-id` |
-| `payout-transfer-status` | A transfer's status; `data-status` (`PAYOUT_TRANSFER_STATUSES`), `data-reversed-cents`                  |
+| Test id                  | Element and attributes                                                                                                                                            |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `treasury-tab-transfers` | The treasury's "Payout transfers" tab (the contract step mounts it)                                                                                               |
+| `payout-transfers`       | The treasury tab's transfer list by payout run (`<EmptyState>` when empty); each row `data-transfer-id`. The contract step's stub renders it as an `<EmptyState>` |
+| `payout-transfer-status` | A transfer's status; `data-status` (`PAYOUT_TRANSFER_STATUSES`), `data-reversed-cents`                                                                            |
 
 ### Co-op money (M1-coop-money)
 

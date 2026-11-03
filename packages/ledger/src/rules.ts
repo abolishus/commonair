@@ -1123,6 +1123,11 @@ export function patronageAllocation(i: PatronageAllocationInput): Posting {
 }
 
 export interface PatronagePayoutInput {
+  /**
+   * The `patronage_payouts` row paid (batch 8). A failed or reversed row is followed by a new row,
+   * so the key is the row's, not the member's and period's.
+   */
+  payoutId: string;
   periodId: string;
   userId: string;
   provider: string;
@@ -1138,10 +1143,10 @@ export function patronagePayout(i: PatronagePayoutInput): Posting {
     description: "Patronage paid",
     refType: "patronage_period",
     refId: i.periodId,
-    idempotencyKey: `patronage-payout:${i.periodId}:${i.userId}`,
+    idempotencyKey: `patronage-payout:${i.payoutId}`,
     currency: i.currency,
     occurredAt: i.occurredAt,
-    metadata: { userId: i.userId },
+    metadata: { userId: i.userId, payoutId: i.payoutId },
     entries: [
       { code: accounts.patronagePayable(i.userId), amountCents: i.amountCents },
       { code: accounts.cash(i.provider), amountCents: -i.amountCents },
@@ -1150,13 +1155,15 @@ export function patronagePayout(i: PatronagePayoutInput): Posting {
 }
 
 export interface PatronagePayoutReversedInput {
+  /** The `patronage_payouts` row that came back. */
+  payoutId: string;
   periodId: string;
   userId: string;
   /** Where the payout was paid from (`cash:<provider>`). */
   provider: string;
   /** This reversal's amount. */
   amountCents: number;
-  /** Every reversal of this member's payout for the period so far, this one included. */
+  /** Every reversal of this payout row so far, this one included. */
   cumulativeCents: number;
   currency: string;
   occurredAt: Date;
@@ -1175,10 +1182,10 @@ export function patronagePayoutReversed(i: PatronagePayoutReversedInput): Postin
     description: "Patronage payout reversed",
     refType: "patronage_period",
     refId: i.periodId,
-    idempotencyKey: `patronage-payout-reversed:${i.periodId}:${i.userId}:${i.cumulativeCents}`,
+    idempotencyKey: `patronage-payout-reversed:${i.payoutId}:${i.cumulativeCents}`,
     currency: i.currency,
     occurredAt: i.occurredAt,
-    metadata: { userId: i.userId, cumulativeCents: i.cumulativeCents },
+    metadata: { userId: i.userId, payoutId: i.payoutId, cumulativeCents: i.cumulativeCents },
     entries: [
       { code: accounts.cash(i.provider), amountCents: i.amountCents },
       { code: accounts.patronagePayable(i.userId), amountCents: -i.amountCents },

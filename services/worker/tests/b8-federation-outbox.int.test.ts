@@ -6,13 +6,12 @@
  * followers in the relay transaction, queues one actor `Delete` per inbox and the follower cleanup,
  * and the cleanup removes only the followers who were there when federation went off.
  */
-import { FEDERATION_JOBS, QUEUES } from "@commonair/contracts/internal";
+import { FEDERATION_JOBS, type FederationFollowerCleanupJob, QUEUES } from "@commonair/contracts/internal";
 import { schema, uuidv7 } from "@commonair/db";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, expect, test } from "vite-plus/test";
 import type { EnqueueOptions, WorkerContext } from "../src/context.ts";
 import { job as cleanup } from "../src/jobs/federation-follower-cleanup.ts";
-import { FEDERATION_FOLLOWER_CLEANUP, type FederationFollowerCleanupJob } from "../src/jobs/names.ts";
 import { relayOutboxBatch } from "../src/outbox.ts";
 import { makeUser, setup, type TestEnv } from "./fixtures.ts";
 
@@ -91,11 +90,11 @@ test("federation off: one Delete per inbox, then the cleanup removes the followe
   expect(calls.map((c) => [c.name, (c.data as { inbox?: string }).inbox ?? null])).toEqual([
     [FEDERATION_JOBS.deliver, "https://a.example/inbox"],
     [FEDERATION_JOBS.deliver, "https://b.example/users/x/inbox"],
-    [FEDERATION_FOLLOWER_CLEANUP, null],
+    [FEDERATION_JOBS.followerCleanup, null],
   ]);
   const data = calls[2]?.data as FederationFollowerCleanupJob;
   expect(data).toEqual({ channelId: s.channel.id, upTo: off.toISOString() });
-  expect(calls[2]?.opts?.jobId).toBe(`${FEDERATION_FOLLOWER_CLEANUP}-${e!.id}`);
+  expect(calls[2]?.opts?.jobId).toBe(`${FEDERATION_JOBS.followerCleanup}-${e!.id}`);
 
   expect(await cleanup.handler(cleanup.data.parse(data), env.worker.ctx, { id: undefined, attemptsMade: 0 })).toEqual({
     removed: 3,

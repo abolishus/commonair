@@ -325,6 +325,22 @@ export const checkoutHandlers = {
     return withCheckoutRetry(() =>
       deps.db.transaction(async (tx) => {
         const now = deps.now();
+        // Decision (d): checked before a provider session exists, so a refused gift leaves no live
+        // checkout behind; payments_open_gift_uq (0049) still catches a race, mapped above.
+        const [open] = await tx
+          .select({ id: payments.id })
+          .from(payments)
+          .where(
+            and(
+              eq(payments.userId, caller.user.id),
+              eq(payments.channelId, c.id),
+              eq(payments.gift, true),
+              eq(payments.status, "pending"),
+            ),
+          )
+          .limit(1)
+          .for("update");
+        if (open) throw conflict("Your earlier gift to this channel is still waiting for payment");
         let recipients: string[];
         if (gift.to !== undefined) {
           const [to] = await tx.select({ id: users.id }).from(users).where(eq(users.username, gift.to.toLowerCase()));

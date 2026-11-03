@@ -125,7 +125,8 @@ export function stripeAdapter(opts: StripeAdapterOptions): PaymentAdapter {
       return stripeTransfer(client, r);
     },
     async refundStatus(ref) {
-      if (!ref.startsWith("re_")) return null;
+      // `pyr_` refunds come from some payment methods; any other id is not a refund of ours.
+      if (!/^(re|pyr)_/.test(ref)) return null;
       let refund: Awaited<ReturnType<StripeClient["retrieveRefund"]>>;
       try {
         refund = await client.retrieveRefund(ref);

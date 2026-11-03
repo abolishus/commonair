@@ -54,6 +54,8 @@ export function databaseCaFileFromEnv(source?: Record<string, string | undefined
  * quote the URL, which holds a password.
  */
 export function postgresTls(url: string, caFile?: string): PostgresTls {
+  // Before parsing: WHATWG URL refuses multi-host URLs (h1:5432,h2:5432), which postgres.js takes.
+  if (!caFile && !/[?&]sslrootcert=/.test(url)) return { url };
   const parsed = new URL(url);
   const rootCert = parsed.searchParams.get("sslrootcert");
   const ca = caFile ?? (rootCert && rootCert !== "system" ? rootCert : undefined);

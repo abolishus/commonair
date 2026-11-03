@@ -67,8 +67,9 @@ export const payoutTransfers = pgTable(
 );
 
 /**
- * A member's patronage payout for one approved period (M1-coop-money, ADR 0020). One row per
- * member and period; the paid rows of a member never exceed their `patronage_allocations` amount.
+ * A member's patronage payout for one approved period (M1-coop-money, ADR 0020). At most one open
+ * (`pending` or `paid`) row per member and period; a `failed` or `reversed` row is followed by a new
+ * one. The paid rows of a member never exceed their `patronage_allocations` amount.
  */
 export const patronagePayouts = pgTable(
   "patronage_payouts",
@@ -86,13 +87,15 @@ export const patronagePayouts = pgTable(
     /** The treasurer's reference (manual) or the provider's transfer id; set once. */
     providerRef: text(),
     status: patronagePayoutStatus().notNull().default("pending"),
-    /** `patronage-payout:<periodId>:<userId>`. */
+    /** `patronage-payout:<id>` (the row's own, so a member can be paid again after a failure). */
     idempotencyKey: text().notNull(),
     createdAt: createdAt(),
     paidAt: ts(),
   },
   (t) => [
-    uniqueIndex("patronage_payouts_period_user_uq").on(t.periodId, t.userId),
+    uniqueIndex("patronage_payouts_period_user_uq")
+      .on(t.periodId, t.userId)
+      .where(sql`${t.status} in ('pending', 'paid')`),
     uniqueIndex("patronage_payouts_idempotency_uq").on(t.idempotencyKey),
     index("patronage_payouts_user_idx").on(t.userId),
     check("patronage_payouts_amount_positive", sql`${t.amountCents} > 0`),

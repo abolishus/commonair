@@ -18,7 +18,6 @@ import { describe, expect, test } from "vite-plus/test";
 import { b7JobsFor, b7OutboxFlags } from "../src/b7/outbox-jobs.ts";
 import { stubHandler } from "../src/b7/stub.ts";
 import { JOBS } from "../src/jobs/index.ts";
-import { FEDERATION_FOLLOWER_CLEANUP } from "../src/jobs/names.ts";
 import { buildRegistry, scheduledJobs } from "../src/runtime/registry.ts";
 
 describe("batch 7 jobs", () => {
@@ -37,8 +36,8 @@ describe("batch 7 jobs", () => {
       ].sort(),
     );
     expect(names(QUEUES.jury)).toEqual(Object.values(JURY_JOBS).sort());
-    // Batch 8 adds the follower cleanup (decision (h)).
-    expect(names(QUEUES.federation)).toEqual([...Object.values(FEDERATION_JOBS), FEDERATION_FOLLOWER_CLEANUP].sort());
+    // Batch 8's follower cleanup (decision (h)) is in FEDERATION_JOBS.
+    expect(names(QUEUES.federation)).toEqual(Object.values(FEDERATION_JOBS).sort());
     expect(names(QUEUES.relayPurge)).toEqual([RELAY_PURGE_JOBS.emit, `${RELAY_PURGE_JOBS.emit}-cleanup`].sort());
     expect(reg.get(QUEUES.interact)?.has(GIVEAWAY_JOBS.close)).toBe(true);
   });

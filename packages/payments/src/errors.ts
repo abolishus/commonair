@@ -23,14 +23,18 @@ export class StripeApiError extends Error {
   }
 }
 
-/** A definite refusal: Stripe answered 4xx, so the request did nothing (never retried). */
+/**
+ * A definite refusal: Stripe answered 4xx, so the request did nothing (never retried). Not 409,
+ * 429 or `idempotency_error`, which leave the outcome open (see `StripeOutcomeUnknown`).
+ */
 export class StripeRequestError extends StripeApiError {
   override name = "StripeRequestError";
 }
 
 /**
- * The outcome is unknown: a timeout, a network error, or a 5xx after the client's retries, or a
- * success answer without the fields the call needs. Stripe may have done what was asked.
+ * The outcome is unknown: a timeout, a network error, a 5xx, 409 or 429 after the client's retries,
+ * a 400 `idempotency_error` (the key already went with other parameters), or a success answer
+ * without the fields the call needs. Stripe may have done what was asked.
  */
 export class StripeOutcomeUnknown extends StripeApiError {
   override name = "StripeOutcomeUnknown";

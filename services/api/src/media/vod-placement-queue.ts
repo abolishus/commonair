@@ -12,6 +12,7 @@
  */
 import { Queue } from "bullmq";
 import { Valkey } from "iovalkey";
+import { valkeyTls } from "@commonair/service";
 import { QUEUES } from "@commonair/contracts/internal";
 import type { Deps } from "../deps.ts";
 
@@ -26,7 +27,11 @@ export interface VodPlacementQueue {
 
 export function createVodPlacementQueue(valkeyUrl: string, prefix: string): VodPlacementQueue {
   // BullMQ refuses ioredis key prefixes and needs maxRetriesPerRequest: null.
-  const conn = new Valkey(valkeyUrl, { maxRetriesPerRequest: null, connectionName: "api-vod-placement-queue" });
+  const conn = new Valkey(valkeyUrl, {
+    ...valkeyTls(valkeyUrl),
+    maxRetriesPerRequest: null,
+    connectionName: "api-vod-placement-queue",
+  });
   const queue = new Queue(QUEUES.retention, { connection: conn, prefix });
   return {
     async enqueue(vodId) {

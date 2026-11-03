@@ -9,6 +9,7 @@
  */
 import { Queue, QueueEvents } from "bullmq";
 import { Valkey } from "iovalkey";
+import { valkeyTls } from "@commonair/service";
 import {
   DmcaDisableJob,
   DmcaRestoreResult,
@@ -49,12 +50,20 @@ export const dmcaDisableJobId = (noticeId: string) => `dmca-disable-${noticeId}`
 
 export async function createModerationQueue(valkeyUrl: string, prefix: string): Promise<ModerationQueue> {
   // BullMQ refuses ioredis key prefixes and needs maxRetriesPerRequest: null.
-  const conn = new Valkey(valkeyUrl, { maxRetriesPerRequest: null, connectionName: "api-moderation-queue" });
+  const conn = new Valkey(valkeyUrl, {
+    ...valkeyTls(valkeyUrl),
+    maxRetriesPerRequest: null,
+    connectionName: "api-moderation-queue",
+  });
   const queue = new Queue(QUEUES.moderation, { connection: conn, prefix });
   let events: { ev: QueueEvents; conn: InstanceType<typeof Valkey> } | null = null;
   const queueEvents = async () => {
     if (!events) {
-      const c = new Valkey(valkeyUrl, { maxRetriesPerRequest: null, connectionName: "api-moderation-events" });
+      const c = new Valkey(valkeyUrl, {
+        ...valkeyTls(valkeyUrl),
+        maxRetriesPerRequest: null,
+        connectionName: "api-moderation-events",
+      });
       const ev = new QueueEvents(QUEUES.moderation, { connection: c, prefix });
       await ev.waitUntilReady();
       events = { ev, conn: c };

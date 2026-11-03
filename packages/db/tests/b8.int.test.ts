@@ -7,10 +7,12 @@
  * `shares.cardPayments` setting and the app role's grants. Run as the least-privilege app role, by
  * direct inserts, so no application check stands in for a refusal.
  */
+import { readFileSync } from "node:fs";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vite-plus/test";
 import type { Database } from "../src/client.ts";
 import { uuidv7 } from "../src/ids.ts";
+import { MIGRATIONS_DIR } from "../src/migrate.ts";
 import * as s from "../src/schema/index.ts";
 import { createTestDatabase, type TestDatabase } from "../src/testing.ts";
 
@@ -162,6 +164,111 @@ describe("one pending gift per gifter and channel", () => {
         sql`${s.payments.userId} = ${gifter} and ${s.payments.channelId} = ${channel} and ${s.payments.gift} and ${s.payments.status} = 'pending'`,
       );
     expect(rows).toHaveLength(1);
+  });
+
+  test("a gift has a gifter and a channel (NULLs would slip past the index)", async () => {
+    const gifter = await newUser();
+    const channel = await newChannel();
+    await expectRefused(giftPayment(gifter, channel, { userId: null }), /has a gifter and a channel/);
+    await expectRefused(giftPayment(gifter, channel, { channelId: null }), /has a gifter and a channel/);
+    // A non-gift payment without a channel is unaffected.
+    await giftPayment(gifter, channel, { channelId: null, gift: false });
+  });
+
+  const giftSub = (
+    db: Pick<Database, "insert">,
+    gifter: string,
+    recipient: string,
+    channel: string,
+    giftPaymentId: string,
+  ) =>
+    db.insert(s.subscriptions).values({
+      subscriberId: recipient,
+      channelId: channel,
+      tier: 1,
+      status: "incomplete",
+      provider: "manual",
+      priceCents: 499,
+      currency: "usd",
+      giftedById: gifter,
+      giftPaymentId,
+    });
+
+  test("a subscription's gift payment must be flagged a gift (the index cannot be dodged)", async () => {
+    const gifter = await newUser();
+    const recipient = await newUser();
+    const channel = await newChannel();
+    const [plain] = await giftPayment(gifter, channel, { gift: false }).returning({ id: s.payments.id });
+    const [gift] = await giftPayment(gifter, channel).returning({ id: s.payments.id });
+    await expectRefused(giftSub(app, gifter, recipient, channel, plain!.id), /gift payment is a gift payment/);
+    const [row] = await giftSub(app, gifter, recipient, channel, gift!.id).returning({ id: s.subscriptions.id });
+    await expectRefused(
+      app.update(s.subscriptions).set({ giftPaymentId: plain!.id }).where(eq(s.subscriptions.id, row!.id)),
+      /gift payment is a gift payment/,
+    );
+  });
+
+  test("0048's backfill marks the newest pending gift and expires the older duplicates", async () => {
+    const migration = readFileSync(`${MIGRATIONS_DIR}/0048_b8.sql`, "utf8");
+    const backfill = migration
+      .slice(migration.indexOf("-- Batch 8 decision (d)"))
+      .split("--> statement-breakpoint")
+      .map((x) => x.trim())
+      .filter((x) => x.length > 0);
+    expect(backfill).toHaveLength(2);
+    const gifter = await newUser();
+    const channel = await newChannel();
+    const later = new Date(Date.now() + 86_400_000);
+    type Row = { gift: boolean; expiresAt: Date | null };
+    const rollback = new Error("rollback");
+    let result: Row[] = [];
+    const outcome = await owner
+      .transaction(async (tx) => {
+        // Rows from before 0048 (gift payments not yet flagged), which 0049 now refuses to link, and
+        // the backfill as it ran before 0049 froze the flag. Rolled back below.
+        await tx.execute(sql`alter table subscriptions disable trigger subscriptions_gift_payment_ck`);
+        await tx.execute(sql`alter table payments disable trigger payments_gift_frozen`);
+        const made: string[] = [];
+        for (const [i, status] of (["succeeded", "pending", "pending"] as const).entries()) {
+          const [p] = await tx
+            .insert(s.payments)
+            .values({
+              provider: "manual",
+              providerRef: `CA-${uuidv7()}`,
+              kind: "subscription",
+              status,
+              userId: gifter,
+              channelId: channel,
+              amountCents: 499,
+              currency: "usd",
+              tier: 1,
+              createdAt: new Date(Date.UTC(2026, 0, 1 + i)),
+              expiresAt: later,
+            })
+            .returning({ id: s.payments.id });
+          await giftSub(tx, gifter, await newUser(), channel, p!.id);
+          made.push(p!.id);
+        }
+        for (const statement of backfill) await tx.execute(sql.raw(statement));
+        const rows = await tx
+          .select({ id: s.payments.id, gift: s.payments.gift, expiresAt: s.payments.expiresAt })
+          .from(s.payments)
+          .where(sql`${s.payments.id} in ${made}`);
+        result = made.map((id) => rows.find((r) => r.id === id)!);
+        throw rollback;
+      })
+      .then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+    expect(outcome).toBe(rollback);
+    const [done, older, newest] = result;
+    expect(done!.gift).toBe(true);
+    expect(newest!.gift).toBe(true);
+    expect(newest!.expiresAt).toEqual(later);
+    // The older pending duplicate stays unflagged and is due now, so money-expire-pending fails it.
+    expect(older!.gift).toBe(false);
+    expect(older!.expiresAt!.getTime()).toBeLessThanOrEqual(Date.now());
   });
 });
 
@@ -336,6 +443,84 @@ describe("payout_transfers: the status machine", () => {
       await expectRefused(app.delete(s.payoutTransfers).where(eq(s.payoutTransfers.id, id)), /permission denied/),
     ).toBe("42501");
     await expectRefused(owner.delete(s.payoutTransfers).where(eq(s.payoutTransfers.id, id)), /never deleted/);
+    await expectRefused(owner.execute(sql`truncate payout_transfers cascade`), /append-only/);
+  });
+});
+
+describe("payout_transfers: the payout is frozen under its transfer", () => {
+  const setPayout = (id: string, set: Partial<typeof s.payouts.$inferInsert>) =>
+    app.update(s.payouts).set(set).where(eq(s.payouts.id, id));
+  const created = (id: string) => setTransfer(id, { status: "created", providerRef: `tr_${uuidv7()}` });
+
+  test("with a pending transfer: payee, provider, amount and currency never change", async () => {
+    const { payoutId } = await transfer();
+    const someoneElse = await newUser();
+    for (const set of [
+      { provider: "manual" as const },
+      { amountCents: 99_999 },
+      { currency: "eur" },
+      { userId: someoneElse },
+    ])
+      await expectRefused(setPayout(payoutId, set), /never change under its transfer/);
+  });
+
+  test("with a pending transfer: only pending, scheduled and held; never failed or paid", async () => {
+    const { payoutId } = await transfer();
+    await expectRefused(
+      setPayout(payoutId, { status: "failed" }),
+      /from scheduled to failed while its transfer is pending/,
+    );
+    await expectRefused(
+      setPayout(payoutId, { status: "paid" }),
+      /from scheduled to paid while its transfer is pending/,
+    );
+    // A fraud hold and its release (held -> pending) still work.
+    await setPayout(payoutId, { status: "held" });
+    await setPayout(payoutId, { status: "pending" });
+    await setPayout(payoutId, { status: "scheduled" });
+  });
+
+  test("pending -> created needs the payout still scheduled", async () => {
+    for (const status of ["held", "pending"] as const) {
+      const { id, payoutId } = await transfer();
+      await setPayout(payoutId, { status });
+      await expectRefused(created(id), /only for a scheduled payout/);
+    }
+    // The payout fails only after its transfer did, and then the transfer is final.
+    const { id, payoutId } = await transfer();
+    await setTransfer(id, { status: "failed", failureCode: "account_not_ready" });
+    await setPayout(payoutId, { status: "failed" });
+    await expectRefused(created(id), /cannot go from failed to created/);
+  });
+
+  test("with a created transfer: only scheduled -> paid; never failed or held", async () => {
+    const { id, payoutId } = await transfer();
+    await created(id);
+    await expectRefused(setPayout(payoutId, { status: "failed" }), /while its transfer is created/);
+    await expectRefused(setPayout(payoutId, { status: "held" }), /while its transfer is created/);
+    await expectRefused(setPayout(payoutId, { amountCents: 99_999 }), /never change under its transfer/);
+    await expectRefused(
+      setPayout(payoutId, { provider: "manual", status: "paid", amountCents: 99_999 }),
+      /never change under its transfer/,
+    );
+    await setPayout(payoutId, { status: "paid" });
+    await expectRefused(setPayout(payoutId, { status: "failed" }), /while its transfer is created/);
+    await expectRefused(setPayout(payoutId, { status: "scheduled" }), /while its transfer is created/);
+  });
+
+  test("with a failed transfer: the payout may fail, never be paid", async () => {
+    const { id, payoutId } = await transfer();
+    await setTransfer(id, { status: "failed", failureCode: "account_not_ready" });
+    await expectRefused(setPayout(payoutId, { status: "paid" }), /while its transfer is failed/);
+    await setPayout(payoutId, { status: "failed" });
+  });
+
+  test("a payout without a transfer is unaffected", async () => {
+    const { userId } = await stripePayee();
+    const p = await payout(userId);
+    await setPayout(p.id, { status: "failed" });
+    const [row] = await app.select({ status: s.payouts.status }).from(s.payouts).where(eq(s.payouts.id, p.id));
+    expect(row?.status).toBe("failed");
   });
 });
 
@@ -516,6 +701,41 @@ describe("patronage_payouts", () => {
       ),
     ).toBe("42501");
     await expectRefused(owner.delete(s.patronagePayouts).where(eq(s.patronagePayouts.id, row!.id)), /never deleted/);
+    await expectRefused(owner.execute(sql`truncate patronage_payouts cascade`), /append-only/);
+  });
+
+  const newRow = async (periodId: string, member: string, amountCents: number) => {
+    const id = uuidv7();
+    await app
+      .insert(s.patronagePayouts)
+      .values({ ...patronageRow(periodId, member, amountCents), id, idempotencyKey: `patronage-payout:${id}` });
+    return id;
+  };
+  const pay = (id: string) => setPatronage(id, { status: "paid", providerRef: `REF-${id}`, paidAt: new Date() });
+
+  test("a failed payout is followed by a new row, which can be paid", async () => {
+    const member = await newUser();
+    const periodId = await approvedPeriod(member, 600);
+    const first = await newRow(periodId, member, 600);
+    await setPatronage(first, { status: "failed" });
+    // A failed row never gains a reference or a paid time.
+    await expectRefused(setPatronage(first, { providerRef: "late" }), /only while it is pending/);
+    await expectRefused(setPatronage(first, { paidAt: new Date() }), /only while it is pending/);
+    const second = await newRow(periodId, member, 600);
+    await pay(second);
+  });
+
+  test("one open row at a time; after a reversal the member can be paid again", async () => {
+    const member = await newUser();
+    const periodId = await approvedPeriod(member, 400);
+    const first = await newRow(periodId, member, 400);
+    await pay(first);
+    // A pending or paid row holds the slot.
+    expect(await expectRefused(newRow(periodId, member, 400), /patronage_payouts_period_user_uq/)).toBe("23505");
+    await setPatronage(first, { status: "reversed" });
+    const second = await newRow(periodId, member, 400);
+    await pay(second);
+    expect(await expectRefused(newRow(periodId, member, 1), /patronage_payouts_period_user_uq/)).toBe("23505");
   });
 });
 

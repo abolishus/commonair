@@ -8,6 +8,7 @@
  */
 import { Queue } from "bullmq";
 import { Valkey } from "iovalkey";
+import { valkeyTls } from "@commonair/service";
 import { EXPORT_JOBS, QUEUES, type ExportBuildJob } from "@commonair/contracts/internal";
 import type { Deps } from "../deps.ts";
 
@@ -18,7 +19,11 @@ export interface ExportQueue {
 
 export function createExportQueue(valkeyUrl: string, prefix: string): ExportQueue {
   // BullMQ refuses ioredis key prefixes and needs maxRetriesPerRequest: null.
-  const conn = new Valkey(valkeyUrl, { maxRetriesPerRequest: null, connectionName: "api-exports-queue" });
+  const conn = new Valkey(valkeyUrl, {
+    ...valkeyTls(valkeyUrl),
+    maxRetriesPerRequest: null,
+    connectionName: "api-exports-queue",
+  });
   const queue = new Queue(QUEUES.exports, { connection: conn, prefix });
   return {
     async enqueue(exportId) {

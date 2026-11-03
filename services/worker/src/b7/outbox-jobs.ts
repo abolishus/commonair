@@ -43,6 +43,7 @@ import {
   portabilityJobId,
   type FederationDeliverJob,
   type FederationFanoutJob,
+  type FederationFollowerCleanupJob,
   type FederationInboxJob,
   type PortabilityMovedJob,
   type RelayPurgeEmitJob,
@@ -56,7 +57,6 @@ import type { QueueName } from "../env.ts";
 import { federationEnvSlice } from "../federation/config.ts";
 import { deliverJobId } from "../federation/deliver.ts";
 import { blockedDomains, isBlocked } from "../federation/local.ts";
-import { FEDERATION_FOLLOWER_CLEANUP, type FederationFollowerCleanupJob } from "../jobs/names.ts";
 
 const { channels, events, federationActors, federationFollowers } = schema;
 type EventRow = typeof events.$inferSelect;
@@ -273,9 +273,9 @@ export async function b7JobsFor(
         out.push(...(await actorDeleteJobs(flags.publicUrl, p.channel_id, target)));
         out.push({
           queue: QUEUES.federation,
-          name: FEDERATION_FOLLOWER_CLEANUP,
+          name: FEDERATION_JOBS.followerCleanup,
           data: { channelId: p.channel_id, upTo: row.occurredAt.toISOString() },
-          opts: { jobId: federationJobId(FEDERATION_FOLLOWER_CLEANUP, row.id) },
+          opts: { jobId: federationJobId(FEDERATION_JOBS.followerCleanup, row.id) },
         });
         break;
       }

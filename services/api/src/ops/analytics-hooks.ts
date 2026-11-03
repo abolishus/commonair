@@ -16,6 +16,7 @@
  */
 import { Queue, QueueEvents } from "bullmq";
 import { Valkey } from "iovalkey";
+import { valkeyTls } from "@commonair/service";
 import {
   ANALYTICS_DISPLAY_BYPASS_TTL_SECONDS,
   ANALYTICS_JOBS,
@@ -49,12 +50,20 @@ export interface AnalyticsTickRunner {
 
 export function createAnalyticsTickRunner(valkeyUrl: string, prefix: string): AnalyticsTickRunner {
   // BullMQ refuses ioredis key prefixes and needs maxRetriesPerRequest: null.
-  const conn = new Valkey(valkeyUrl, { maxRetriesPerRequest: null, connectionName: "api-analytics-queue" });
+  const conn = new Valkey(valkeyUrl, {
+    ...valkeyTls(valkeyUrl),
+    maxRetriesPerRequest: null,
+    connectionName: "api-analytics-queue",
+  });
   const queue = new Queue(QUEUES.analytics, { connection: conn, prefix });
   let events: { ev: QueueEvents; conn: Valkey } | null = null;
   const queueEvents = async () => {
     if (!events) {
-      const c = new Valkey(valkeyUrl, { maxRetriesPerRequest: null, connectionName: "api-analytics-events" });
+      const c = new Valkey(valkeyUrl, {
+        ...valkeyTls(valkeyUrl),
+        maxRetriesPerRequest: null,
+        connectionName: "api-analytics-events",
+      });
       const ev = new QueueEvents(QUEUES.analytics, { connection: c, prefix });
       await ev.waitUntilReady();
       events = { ev, conn: c };

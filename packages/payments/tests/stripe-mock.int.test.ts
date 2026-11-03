@@ -29,6 +29,9 @@ async function reachable(): Promise<boolean> {
   }
 }
 const up = await reachable();
+// CI starts stripe-mock with the test infra (scripts/infra.ts TEST_SERVICES): a skip there would
+// leave the client's Stripe calls untested, so it fails instead.
+if (!up && process.env.CI) throw new Error(`stripe-mock is not reachable at ${BASE} (CI is set)`);
 if (!up) console.warn(`stripe-mock is not reachable at ${BASE}; skipping its tests`);
 
 describe.skipIf(!up)("StripeClient against stripe-mock", () => {

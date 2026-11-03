@@ -6,20 +6,30 @@
 -- ordinary DML on every table who does not own them (AGENTS.md rule 9):
 --   1. Gifts (decision (d)): one pending gift payment per gifter and channel (a partial unique
 --      index; the API's CONFLICT is in addition to it). `payments.gift` is set at insert, only on a
---      subscription payment, and never changes.
+--      subscription payment with a gifter and a channel, and never changes. A subscription names a
+--      payment in `gift_payment_id` only if that payment is a gift, so the index cannot be dodged
+--      by an unflagged payment.
 --   2. Connect transfers (decision (f)): a `payout_transfers` row is inserted `pending`, with no
 --      provider reference, reversal or failure code, for a `scheduled` Stripe payout, for exactly
 --      the payout's amount and currency, to the payee's own Stripe payout account. Afterwards only
 --      `pending -> created | failed` and `created -> reversed` move the status; `created` needs the
 --      provider reference, `reversed` needs every cent reversed; `reversed_cents` only rises and
 --      only on a created transfer; the provider reference is set once; the failure code changes
---      only while pending; everything else is frozen. Rows are never deleted.
+--      only while pending; everything else is frozen. `pending -> created` needs the payout still
+--      `scheduled` (under its row lock). Rows are never deleted or truncated.
+--      Under a transfer, the payout is frozen too: its payee, provider, amount and currency never
+--      change, and its status follows the transfer's (pending: only among pending, scheduled and
+--      held, so fraud holds still work; created or reversed: only scheduled -> paid; `failed` only
+--      once the transfer failed; `paid` only once it was created). So a payout is never both paid
+--      by a transfer and cancelled back to the payable. Writers update the transfer first, then
+--      the payout, in one transaction.
 --   3. Patronage payouts (ADR 0020): a row is inserted `pending`, unpaid, for an approved (or
 --      distributed) period, in its currency, for a member with an allocation of at least the
 --      amount. `pending -> paid | failed` and `paid -> reversed` only; `paid` needs a reference and
---      a time, each set once; the provider changes only while pending; the paid rows of a member for
---      a period never sum above their allocation (checked under the allocation's row lock). Rows
---      are never deleted.
+--      a time, each set once and only while pending; the provider changes only while pending; the
+--      paid rows of a member for a period never sum above their allocation (checked under the
+--      allocation's row lock). A `failed` or `reversed` row is followed by a new one (0048's unique
+--      index covers only pending and paid rows). Rows are never deleted or truncated.
 --   4. Governance: `shares.cardPayments` is shape-checked like `SharesCardPaymentsSetting` in
 --      @commonair/contracts (seeded false by @commonair/db's seed).
 --   5. commonair_configure_app_role: the app loses DELETE on both new tables (redefined from 0046's
@@ -37,14 +47,35 @@ CREATE UNIQUE INDEX payments_open_gift_uq ON public.payments USING btree (user_i
 CREATE FUNCTION commonair_payments_gift_frozen() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp AS $$
 BEGIN
+  IF TG_OP = 'INSERT' THEN
+    -- The index treats NULLs as distinct; a CHECK would break account deletion (ON DELETE SET NULL).
+    IF NEW.gift AND (NEW.user_id IS NULL OR NEW.channel_id IS NULL) THEN
+      RAISE EXCEPTION 'a gift payment has a gifter and a channel' USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+  END IF;
   IF NEW.gift IS DISTINCT FROM OLD.gift THEN
     RAISE EXCEPTION 'a payment''s gift flag never changes' USING ERRCODE = 'check_violation';
   END IF;
   RETURN NEW;
 END $$;
 --> statement-breakpoint
-CREATE TRIGGER payments_gift_frozen BEFORE UPDATE OF gift ON public.payments
+CREATE TRIGGER payments_gift_frozen BEFORE INSERT OR UPDATE OF gift ON public.payments
   FOR EACH ROW EXECUTE FUNCTION commonair_payments_gift_frozen();
+--> statement-breakpoint
+CREATE FUNCTION commonair_subscriptions_gift_payment() RETURNS trigger
+LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp AS $$
+BEGIN
+  IF NEW.gift_payment_id IS NOT NULL
+     AND (TG_OP = 'INSERT' OR NEW.gift_payment_id IS DISTINCT FROM OLD.gift_payment_id)
+     AND NOT EXISTS (SELECT 1 FROM public.payments p WHERE p.id = NEW.gift_payment_id AND p.gift) THEN
+    RAISE EXCEPTION 'a subscription''s gift payment is a gift payment' USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END $$;
+--> statement-breakpoint
+CREATE TRIGGER subscriptions_gift_payment_ck BEFORE INSERT OR UPDATE OF gift_payment_id ON public.subscriptions
+  FOR EACH ROW EXECUTE FUNCTION commonair_subscriptions_gift_payment();
 --> statement-breakpoint
 
 -- 2. Connect transfers --------------------------------------------------------------------
@@ -87,6 +118,16 @@ BEGIN
   END IF;
 
   -- UPDATE.
+  IF NEW.status IS DISTINCT FROM OLD.status THEN
+    -- Held until commit, and taken before the payout's own update in the same transaction, so a
+    -- payout update elsewhere waits for this one and then sees the new transfer status (see
+    -- commonair_payouts_transfer_guard), or this one waits and sees the new payout status.
+    SELECT p.status INTO po FROM public.payouts p WHERE p.id = OLD.payout_id FOR SHARE;
+    IF OLD.status = 'pending' AND NEW.status = 'created' AND po.status IS DISTINCT FROM 'scheduled' THEN
+      RAISE EXCEPTION 'a transfer is recorded only for a scheduled payout (this one is %)', po.status
+        USING ERRCODE = 'check_violation';
+    END IF;
+  END IF;
   IF NEW.id IS DISTINCT FROM OLD.id OR NEW.payout_id IS DISTINCT FROM OLD.payout_id
      OR NEW.provider IS DISTINCT FROM OLD.provider OR NEW.destination_ref IS DISTINCT FROM OLD.destination_ref
      OR NEW.amount_cents IS DISTINCT FROM OLD.amount_cents OR NEW.currency IS DISTINCT FROM OLD.currency
@@ -121,6 +162,41 @@ END $$;
 --> statement-breakpoint
 CREATE TRIGGER payout_transfers_guard BEFORE INSERT OR UPDATE OR DELETE ON public.payout_transfers
   FOR EACH ROW EXECUTE FUNCTION commonair_payout_transfers_guard();
+--> statement-breakpoint
+CREATE TRIGGER payout_transfers_no_truncate BEFORE TRUNCATE ON public.payout_transfers
+  FOR EACH STATEMENT EXECUTE FUNCTION commonair_forbid_mutation();
+--> statement-breakpoint
+-- The payout under a transfer. The transfer is read, not locked: its writers lock the payout
+-- first (above), so whichever commits second sees the other's change on its fresh snapshot.
+CREATE FUNCTION commonair_payouts_transfer_guard() RETURNS trigger
+LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp AS $$
+DECLARE
+  tr_status text;
+BEGIN
+  SELECT t.status::text INTO tr_status FROM public.payout_transfers t WHERE t.payout_id = OLD.id;
+  IF NOT FOUND THEN
+    RETURN NEW;
+  END IF;
+  IF NEW.user_id IS DISTINCT FROM OLD.user_id OR NEW.provider IS DISTINCT FROM OLD.provider
+     OR NEW.amount_cents IS DISTINCT FROM OLD.amount_cents OR NEW.currency IS DISTINCT FROM OLD.currency THEN
+    RAISE EXCEPTION 'a payout''s payee, provider, amount and currency never change under its transfer'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  IF NEW.status IS NOT DISTINCT FROM OLD.status THEN
+    RETURN NEW;
+  END IF;
+  IF (tr_status = 'pending' AND NEW.status::text NOT IN ('pending', 'scheduled', 'held'))
+     OR (tr_status IN ('created', 'reversed') AND NOT (OLD.status::text = 'scheduled' AND NEW.status::text = 'paid'))
+     OR (NEW.status::text = 'paid' AND tr_status <> 'created')
+     OR (NEW.status::text = 'failed' AND tr_status <> 'failed') THEN
+    RAISE EXCEPTION 'a payout cannot go from % to % while its transfer is %', OLD.status, NEW.status, tr_status
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END $$;
+--> statement-breakpoint
+CREATE TRIGGER payouts_transfer_guard BEFORE UPDATE ON public.payouts
+  FOR EACH ROW EXECUTE FUNCTION commonair_payouts_transfer_guard();
 --> statement-breakpoint
 
 -- 3. Patronage payouts --------------------------------------------------------------------
@@ -171,6 +247,11 @@ BEGIN
     IF OLD.paid_at IS NOT NULL AND NEW.paid_at IS DISTINCT FROM OLD.paid_at THEN
       RAISE EXCEPTION 'a patronage payout''s paid time is set once' USING ERRCODE = 'check_violation';
     END IF;
+    IF OLD.status <> 'pending' AND (NEW.provider_ref IS DISTINCT FROM OLD.provider_ref
+                                    OR NEW.paid_at IS DISTINCT FROM OLD.paid_at) THEN
+      RAISE EXCEPTION 'a patronage payout''s reference and paid time are set only while it is pending'
+        USING ERRCODE = 'check_violation';
+    END IF;
     IF NEW.status IN ('paid', 'reversed') AND (NEW.provider_ref IS NULL OR NEW.paid_at IS NULL) THEN
       RAISE EXCEPTION 'a paid patronage payout has its reference and time' USING ERRCODE = 'check_violation';
     END IF;
@@ -197,6 +278,9 @@ END $$;
 --> statement-breakpoint
 CREATE TRIGGER patronage_payouts_guard BEFORE INSERT OR UPDATE OR DELETE ON public.patronage_payouts
   FOR EACH ROW EXECUTE FUNCTION commonair_patronage_payouts_guard();
+--> statement-breakpoint
+CREATE TRIGGER patronage_payouts_no_truncate BEFORE TRUNCATE ON public.patronage_payouts
+  FOR EACH STATEMENT EXECUTE FUNCTION commonair_forbid_mutation();
 --> statement-breakpoint
 
 -- 4. Governance: shares.cardPayments ------------------------------------------------------

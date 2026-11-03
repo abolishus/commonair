@@ -138,6 +138,8 @@ export const REVENUE_LEDGER_KINDS = [
   "chargeback_reversal",
   "payout_reserve",
   "payout_cancel",
+  // Batch 8: Stripe reversed a Connect transfer, so the creator is owed it again.
+  "payout_transfer_reversal",
 ] as const;
 export type RevenueLedgerKind = (typeof REVENUE_LEDGER_KINDS)[number];
 
@@ -151,7 +153,8 @@ export const isRevenueKind = (k: string): k is (typeof REVENUE_KINDS)[number] =>
 
 /**
  * The revenue-ledger `type` of a posting. A won chargeback is shown as a (positive) chargeback
- * row and a cancelled payout as a (positive) payout row, so the type set stays small.
+ * row and a cancelled payout or a reversed transfer as a (positive) payout row, so the type set
+ * stays small.
  */
 export function revenueLineType(kind: RevenueLedgerKind, payment: PaymentFacts | null): RevenueLineType {
   switch (kind) {
@@ -167,6 +170,7 @@ export function revenueLineType(kind: RevenueLedgerKind, payment: PaymentFacts |
       return "chargeback";
     case "payout_reserve":
     case "payout_cancel":
+    case "payout_transfer_reversal":
       return "payout";
   }
 }

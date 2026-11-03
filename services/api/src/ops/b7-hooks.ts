@@ -16,6 +16,7 @@
 import { Queue, QueueEvents } from "bullmq";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { Valkey } from "iovalkey";
+import { valkeyTls } from "@commonair/service";
 import {
   B7JobResult,
   B7TickBody,
@@ -63,8 +64,16 @@ export function createB7TickRunner(valkeyUrl: string, prefix: string): B7TickRun
     if (!p) {
       p = (async () => {
         // BullMQ refuses ioredis key prefixes and needs maxRetriesPerRequest: null.
-        const qc = new Valkey(valkeyUrl, { maxRetriesPerRequest: null, connectionName: `api-b7-${name}` });
-        const ec = new Valkey(valkeyUrl, { maxRetriesPerRequest: null, connectionName: `api-b7-${name}-events` });
+        const qc = new Valkey(valkeyUrl, {
+          ...valkeyTls(valkeyUrl),
+          maxRetriesPerRequest: null,
+          connectionName: `api-b7-${name}`,
+        });
+        const ec = new Valkey(valkeyUrl, {
+          ...valkeyTls(valkeyUrl),
+          maxRetriesPerRequest: null,
+          connectionName: `api-b7-${name}-events`,
+        });
         const events = new QueueEvents(name, { connection: ec, prefix });
         await events.waitUntilReady();
         return { queue: new Queue(name, { connection: qc, prefix }), events, conns: [qc, ec] };

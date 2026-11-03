@@ -10,6 +10,7 @@
  */
 import { Queue, QueueEvents } from "bullmq";
 import { Valkey } from "iovalkey";
+import { valkeyTls } from "@commonair/service";
 import {
   type InteractJobName,
   InteractJobResult,
@@ -28,12 +29,20 @@ export interface InteractTickRunner {
 
 export function createInteractTickRunner(valkeyUrl: string, prefix: string): InteractTickRunner {
   // BullMQ refuses ioredis key prefixes and needs maxRetriesPerRequest: null.
-  const conn = new Valkey(valkeyUrl, { maxRetriesPerRequest: null, connectionName: "api-interact-queue" });
+  const conn = new Valkey(valkeyUrl, {
+    ...valkeyTls(valkeyUrl),
+    maxRetriesPerRequest: null,
+    connectionName: "api-interact-queue",
+  });
   const queue = new Queue(QUEUES.interact, { connection: conn, prefix });
   let events: { ev: QueueEvents; conn: InstanceType<typeof Valkey> } | null = null;
   const queueEvents = async () => {
     if (!events) {
-      const c = new Valkey(valkeyUrl, { maxRetriesPerRequest: null, connectionName: "api-interact-events" });
+      const c = new Valkey(valkeyUrl, {
+        ...valkeyTls(valkeyUrl),
+        maxRetriesPerRequest: null,
+        connectionName: "api-interact-events",
+      });
       const ev = new QueueEvents(QUEUES.interact, { connection: c, prefix });
       await ev.waitUntilReady();
       events = { ev, conn: c };

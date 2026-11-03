@@ -9,6 +9,7 @@
  */
 import { Queue } from "bullmq";
 import { Valkey } from "iovalkey";
+import { valkeyTls } from "@commonair/service";
 import { portabilityJobId, QUEUES, TWITCH_JOBS, type TwitchImportJob } from "@commonair/contracts/internal";
 import type { Deps } from "../deps.ts";
 
@@ -23,7 +24,11 @@ export function createTwitchImportQueue(valkeyUrl: string, prefix: string): Twit
   return {
     async enqueue(importId) {
       // BullMQ refuses ioredis key prefixes and needs maxRetriesPerRequest: null.
-      const conn = new Valkey(valkeyUrl, { maxRetriesPerRequest: null, connectionName: "api-twitch-import" });
+      const conn = new Valkey(valkeyUrl, {
+        ...valkeyTls(valkeyUrl),
+        maxRetriesPerRequest: null,
+        connectionName: "api-twitch-import",
+      });
       const queue = new Queue(QUEUES.portability, { connection: conn, prefix });
       try {
         const data: TwitchImportJob = { importId };

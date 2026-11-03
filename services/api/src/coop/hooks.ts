@@ -10,6 +10,7 @@
  */
 import { Queue, QueueEvents } from "bullmq";
 import { Valkey } from "iovalkey";
+import { valkeyTls } from "@commonair/service";
 import { type CoopJobName, CoopJobResult, CoopTickBody, INTERNAL_ROUTES, QUEUES } from "@commonair/contracts/internal";
 import type { Deps } from "../deps.ts";
 
@@ -22,12 +23,20 @@ export interface CoopTickRunner {
 
 export function createCoopTickRunner(valkeyUrl: string, prefix: string): CoopTickRunner {
   // BullMQ refuses ioredis key prefixes and needs maxRetriesPerRequest: null.
-  const conn = new Valkey(valkeyUrl, { maxRetriesPerRequest: null, connectionName: "api-coop-queue" });
+  const conn = new Valkey(valkeyUrl, {
+    ...valkeyTls(valkeyUrl),
+    maxRetriesPerRequest: null,
+    connectionName: "api-coop-queue",
+  });
   const queue = new Queue(QUEUES.coop, { connection: conn, prefix });
   let events: { ev: QueueEvents; conn: InstanceType<typeof Valkey> } | null = null;
   const queueEvents = async () => {
     if (!events) {
-      const c = new Valkey(valkeyUrl, { maxRetriesPerRequest: null, connectionName: "api-coop-events" });
+      const c = new Valkey(valkeyUrl, {
+        ...valkeyTls(valkeyUrl),
+        maxRetriesPerRequest: null,
+        connectionName: "api-coop-events",
+      });
       const ev = new QueueEvents(QUEUES.coop, { connection: c, prefix });
       await ev.waitUntilReady();
       events = { ev, conn: c };

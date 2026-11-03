@@ -455,7 +455,40 @@ describe.runIf(HAVE_PODMAN)("migrations and the protections, applied by the owne
     },
   ];
   /** 0049_b8_protections.sql (contract part (B)): one probe per new guard. */
-  const B8_PROBES: Probe[] = [];
+  const B8_PROBES: Probe[] = [
+    {
+      family: "batch 8 (0049): one pending gift per gifter and channel",
+      as: "app",
+      run: (h) => h.sql`
+        insert into payments (id, provider, provider_ref, kind, status, user_id, channel_id, amount_cents,
+                              currency, tier, quantity, gift)
+        select gen_random_uuid(), 'manual', 'S1D-GIFT-' || g, 'subscription', 'pending', u.id, c.id, 499,
+               'usd', 1, 1, true
+          from (select id from users order by id limit 1) u, (select id from channels order by id limit 1) c,
+               generate_series(1, 2) g`,
+      refused: /payments_open_gift_uq/,
+    },
+    {
+      family: "batch 8 (0049): a payout transfer starts pending",
+      as: "app",
+      run: (h) => h.sql`
+        insert into payout_transfers (id, payout_id, provider, provider_ref, destination_ref, amount_cents,
+                                      currency, status, idempotency_key)
+        values (gen_random_uuid(), gen_random_uuid(), 'stripe', 'tr_s1d', 'acct_s1d', 1, 'usd', 'created',
+                's1d-probe')`,
+      refused: /starts pending/,
+    },
+    {
+      family: "batch 8 (0049): a patronage payout starts pending and unpaid",
+      as: "app",
+      run: (h) => h.sql`
+        insert into patronage_payouts (id, period_id, user_id, amount_cents, currency, provider, provider_ref,
+                                       status, idempotency_key, paid_at)
+        values (gen_random_uuid(), gen_random_uuid(), (select id from users order by id limit 1), 1, 'usd',
+                'manual', 'S1D', 'paid', 's1d-probe', now())`,
+      refused: /starts pending and unpaid/,
+    },
+  ];
 
   test.each([...PROBES, ...B8_PROBES].map((p) => [p.family, p] as const))("%s", async (_name, p) => {
     expect(await refusal(p.run(p.as === "app" ? app : owner))).toMatch(p.refused);
