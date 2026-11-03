@@ -27,7 +27,7 @@
 import { RAID_RULES } from "@commonair/contracts/enums";
 import { B8_JOBS, INTERNAL_ROUTES, INTERNAL_SECRET_HEADER, KEYS } from "@commonair/contracts/internal";
 import { createDb } from "@commonair/db";
-import { commit, newSalt, newSeed } from "@commonair/draw";
+import { newSalt, newSeed } from "@commonair/draw";
 import { RedisClient } from "bun";
 import type { Page } from "playwright";
 import { jsonEntry, readZip } from "../e6/archive.ts";
@@ -57,6 +57,7 @@ import type {
   SafetyB8Extension,
   TwitchImportB8Extension,
 } from "./kit.ts";
+import { insertDrawnGiveaway, insertPreviewedImport, type Sql } from "./server-sql.ts";
 
 // The scenarios' own values, repeated here: this module is imported by six scenarios, so it imports
 // no scenario's module (scripts/ci-changes.ts selects scenarios by import edges).
@@ -82,8 +83,6 @@ const STAFF_CLAUSE = "guidelines.general";
 export const CASE_REF = /\b(MA|MC)-[0-9A-F]{8}\b/;
 
 // ---------------------------------------------------------------------- shared helpers
-
-type Sql = ReturnType<typeof createDb>["sql"];
 
 async function withSql<T>(databaseUrl: string | undefined, label: string, fn: (sql: Sql) => Promise<T>): Promise<T> {
   if (!databaseUrl) throw new Error(`${label}: DATABASE_URL is not set (run from the repo root so Bun loads .env)`);
@@ -406,24 +405,42 @@ async function eventTypesSince(databaseUrl: string | undefined, channelId: strin
   });
 }
 
+/** A channel of its own that federates and that the peer follows (the Accept arrived). */
+async function followedChannel(run: FederationB8Extension, prefix: string): Promise<OwnChannel> {
+  const peer = await run.peer();
+  const ch = await federate(run, prefix);
+  const { activity, response } = await peer.follow(ch.actorId, ch.inbox);
+  run.ctx.assert("actor-disabled-event: the Follow is accepted (202)", response.status === 202, response.status);
+  await peer.waitFor((r) => isAcceptOf(r, ch.actorId, String(activity.id)), DELIVERY_TIMEOUT_MS);
+  return ch;
+}
+
+/** Rows in `federation_followers` for the channel. */
+async function followerCount(databaseUrl: string | undefined, channelId: string): Promise<number> {
+  const rows = await withSql(
+    databaseUrl,
+    "federation",
+    (sql) =>
+      sql<{ n: number }[]>`select count(*)::int as n from federation_followers where channel_id = ${channelId}::uuid`,
+  );
+  return rows[0]?.n ?? 0;
+}
+
 /**
  * `actor-disabled-event`: a channel of its own turns federation off; the peer receives one actor
  * `Delete`, sent by the worker from `channel.federation` (no `channel.update`), and the followers go.
- * Then the scenario's own channel (followed in step 3) is suspended: one `Delete` again, through the
- * suspension's fan-out, and no `federation.actor.disabled` beside it.
+ * Then a second channel of its own, followed by the peer, is suspended: one `Delete` again, through
+ * the suspension's fan-out, and no `federation.actor.disabled` beside it. Never the scenario's shared
+ * channel: step 9 removes the peer from its followers, and a channel nobody follows sends no Delete.
  */
 export async function stepActorDisabledEvent(run: FederationB8Extension): Promise<void> {
   const { ctx } = run;
   const databaseUrl = ctx.env.DATABASE_URL;
   const peer = await run.peer();
 
-  const own = await ctx.step("actor-disabled-event: a channel of its own federates and is followed", async () => {
-    const ch = await federate(run, "b8fedoff");
-    const { activity, response } = await peer.follow(ch.actorId, ch.inbox);
-    ctx.assert("actor-disabled-event: the Follow is accepted (202)", response.status === 202, response.status);
-    await peer.waitFor((r) => isAcceptOf(r, ch.actorId, String(activity.id)), DELIVERY_TIMEOUT_MS);
-    return ch;
-  });
+  const own = await ctx.step("actor-disabled-event: a channel of its own federates and is followed", () =>
+    followedChannel(run, "b8fedoff"),
+  );
   const fromOff = peer.received.length;
   const offAt = new Date();
   await ctx.step("actor-disabled-event: the streamer turns federation off", () =>
@@ -449,30 +466,24 @@ export async function stepActorDisabledEvent(run: FederationB8Extension): Promis
   await ctx.step("actor-disabled-event: the worker removes the followers", () =>
     waitFor(
       "the turned-off channel's followers removed",
-      async () =>
-        (
-          await withSql(
-            databaseUrl,
-            "federation",
-            (sql) =>
-              sql<
-                { n: number }[]
-              >`select count(*)::int as n from federation_followers where channel_id = ${own.channelId}::uuid`,
-          )
-        )[0]?.n === 0,
+      async () => (await followerCount(databaseUrl, own.channelId)) === 0,
       { timeoutMs: DELIVERY_TIMEOUT_MS, intervalMs: 2_000, signal: ctx.signal },
     ),
   );
 
-  // The suspension: the scenario's channel, followed by step 3.
-  const shared = await run.channel();
+  // The suspension: a second channel of its own, which the peer follows.
+  const target = await ctx.step("actor-disabled-event: a second channel federates and is followed", () =>
+    followedChannel(run, "b8fedsus"),
+  );
+  const followers = await followerCount(databaseUrl, target.channelId);
+  ctx.assert("actor-disabled-event: the channel to suspend has a follower to tell", followers > 0, { followers });
   if (databaseUrl === undefined) throw new Error("actor-disabled-event: DATABASE_URL is not set (the admin role)");
   const signedUp = await ctx.platform.signUp({ prefix: "b8fedmod" });
   await grantRole(databaseUrl, signedUp.username, "admin", ROLE_CLI_TIMEOUT_MS);
   const admin = await ctx.platform.users.signIn(signedUp);
   const suspend = (suspended: boolean) =>
     admin.api.client.safety.suspend({
-      username: shared.owner.username,
+      username: target.owner.username,
       target: "channel",
       suspended,
       reason: "harness b8 federation",
@@ -484,12 +495,12 @@ export async function stepActorDisabledEvent(run: FederationB8Extension): Promis
   ctx.defer(() => suspend(false).catch(() => undefined));
   await ctx.step("actor-disabled-event: the peer receives the actor Delete after the suspension", () =>
     peer.waitFor(
-      arrivedSince(peer.received)((r) => isActorDelete(r, shared.actorId)),
+      arrivedSince(peer.received)((r) => isActorDelete(r, target.actorId)),
       DELIVERY_TIMEOUT_MS,
     ),
   );
   await sleep(QUIET_WINDOW_MS, ctx.signal);
-  const susDeletes = peer.since(fromSus, (r) => isActorDelete(r, shared.actorId));
+  const susDeletes = peer.since(fromSus, (r) => isActorDelete(r, target.actorId));
   ctx.assert("actor-disabled-event: one Delete for the suspension", susDeletes.length === 1, {
     deletes: susDeletes.length,
   });
@@ -498,7 +509,7 @@ export async function stepActorDisabledEvent(run: FederationB8Extension): Promis
     susDeletes.every((r) => !apiMintedDelete(r.json?.id)),
     susDeletes.map((r) => r.json?.id),
   );
-  const susTypes = await eventTypesSince(databaseUrl, shared.channelId, susAt);
+  const susTypes = await eventTypesSince(databaseUrl, target.channelId, susAt);
   ctx.assert(
     "actor-disabled-event: the suspension writes channel.suspension and no second actor event",
     susTypes.includes("channel.suspension") && !susTypes.includes("federation.actor.disabled"),
@@ -531,14 +542,8 @@ export async function stepIncomingCleanup(run: PortabilityB8Extension): Promise<
   );
   const [abandoned, fresh] = await ctx.step("incoming-cleanup: an abandoned and a fresh preview", () =>
     withSql(run.databaseUrl, "incoming-cleanup", async (sql) => {
-      const row = async (key: string, createdAt: Date) =>
-        (
-          await sql<{ id: string }[]>`
-            insert into portability_imports (user_id, channel_id, source, status, archive_key, created_at, updated_at)
-            values (${user.id}::uuid, ${channelId}::uuid, 'commonair', 'previewed', ${key},
-                    ${tsParam(createdAt)}::timestamptz, ${tsParam(createdAt)}::timestamptz)
-            returning id::text as id`
-        )[0]?.id ?? "";
+      const row = (archiveKey: string, createdAt: Date) =>
+        insertPreviewedImport(sql, { userId: user.id, channelId, archiveKey, createdAt });
       return Promise.all([row(oldKey, new Date(Date.now() - 25 * 3_600_000)), row(freshKey, new Date())]);
     }),
   );
@@ -606,26 +611,20 @@ export async function stepGiveawaySection(kit: DataExportB8Extension): Promise<v
   const title = `Harness ${crypto.randomUUID().slice(0, 8)}`;
   const mine = `p${crypto.randomUUID().replaceAll("-", "")}`;
   const theirs = `p${crypto.randomUUID().replaceAll("-", "")}`;
-  await ctx.step("giveaway-section: a drawn giveaway both entered, the caller won", async () => {
-    const commitment = await commit(seed);
-    await withSql(kit.databaseUrl, "giveaway-section", async (sql) => {
-      const [g] = await sql<{ id: string }[]>`
-        insert into giveaways (channel_id, title, prize, eligibility, winner_count, seed_commitment, sealed_seed, salt)
-        values (${channelId}::uuid, ${title}, 'a mug',
-                ${JSON.stringify({ minAccountAgeDays: 0, minFollowDays: null, minVerifiedWatchSeconds: 0 })}::jsonb,
-                1, ${commitment}, 'v1.harness', ${salt})
-        returning id::text as id`;
-      const id = g?.id ?? "";
-      await sql`insert into giveaway_entries (giveaway_id, user_id, pseudonym)
-                values (${id}::uuid, ${me.id}::uuid, ${mine}), (${id}::uuid, ${other.id}::uuid, ${theirs})`;
-      await sql`update giveaways set status = 'closed', closed_at = now() where id = ${id}::uuid`;
-      await sql.begin(async (tx) => {
-        await tx`update giveaways set seed = ${seed} where id = ${id}::uuid`;
-        await tx`insert into giveaway_winners (giveaway_id, user_id, rank, draw_index) values (${id}::uuid, ${me.id}::uuid, 1, 0)`;
-        await tx`update giveaways set status = 'drawn', drawn_at = now() where id = ${id}::uuid`;
-      });
-    });
-  });
+  await ctx.step("giveaway-section: a drawn giveaway both entered, the caller won", () =>
+    withSql(kit.databaseUrl, "giveaway-section", (sql) =>
+      insertDrawnGiveaway(sql, {
+        channelId,
+        title,
+        seed,
+        salt,
+        entries: [
+          { userId: me.id, pseudonym: mine },
+          { userId: other.id, pseudonym: theirs },
+        ],
+      }),
+    ),
+  );
   const exportId = await ctx.step(
     "giveaway-section: the caller requests an account export",
     async () => (await me.api.client.me.exports.create({ kind: "account" })).id,
