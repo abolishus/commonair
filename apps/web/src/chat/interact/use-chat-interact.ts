@@ -140,11 +140,13 @@ export function useChatInteract({
     live.current = { channel, client, onFollowRaid, isBroadcaster, raid: state.raid };
   });
 
-  const refreshPrediction = React.useCallback(() => {
+  // `merge` keeps the frames' status and takes only what `current` alone knows (`predictionLoaded`).
+  const refreshPrediction = React.useCallback((merge = false) => {
     const { client: c, channel: ch } = live.current;
     c.predictionCurrent(ch).then(
       (prediction) => {
-        if (live.current.channel === ch) dispatch({ type: "prediction", prediction });
+        if (live.current.channel !== ch) return;
+        dispatch(merge ? { type: "predictionLoaded", prediction } : { type: "prediction", prediction });
       },
       () => undefined,
     );
@@ -233,6 +235,9 @@ export function useChatInteract({
         if (routed.frame.type === "channel.prediction.end") {
           refreshPrediction();
           refreshPoints();
+        } else if (routed.frame.type === "channel.prediction.lock") {
+          // The lock frame has no `lock_media_ts`, which the grace after a lock needs (ADR 0039 §3).
+          refreshPrediction(true);
         }
       } else if (routed.kind === "giveaway") {
         dispatch({ type: "giveawayFrame", frame: routed.frame });
