@@ -223,6 +223,51 @@ a Workflow:
   - `harness/src/b8/steps.ts` with `B8_EXTENSIONS`/`PENDING_B8_*`;
   - `docs/testing/b8-selectors.md` with `PENDING_B8_IDS`.
 
+## Contract step as landed (read before your brief)
+
+The contract step merged on 2026-11-03. Where it differs from `b8/contract-step.md` or a brief,
+this list wins:
+
+- **Patronage payouts:** the `(period_id, user_id)` unique index is partial (`pending` or
+  `paid`), so a failed or reversed payout is retried with a new row. `patronagePayout` and
+  `patronagePayoutReversed` take `payoutId` and are keyed by the payout row. The job id is still
+  `patronage-payout-<period>-<user>`; M1-coop-money may ask to key it by the row id.
+- **Transfers:** `payouts_transfer_guard` freezes a payout's user, provider, amount and currency
+  once a transfer exists, and ties its status to the transfer's (`→ paid` needs `created`,
+  `→ failed` needs `failed`). M1-connect updates the transfer first, then the payout, in one
+  transaction.
+- **Gifts:** `subscriptions.gift_payment_id` must name a `gift = true` payment. Gift checkouts
+  lock the gifter's open pending gift (`FOR UPDATE`) before calling Stripe. They still expire after
+  `PAYMENT_PENDING_DAYS`; switching gift payments to `GIFT_PAYMENT_HOURS` is M1-gifts-refunds'.
+- **Auto-refund durability (M1-gifts-refunds):** the after-commit hook is best effort. Add a
+  durable trigger: a `refund-reconcile` sweep of ended subscriptions' booked payments, or an
+  outbox event written in the `invoice.paid` transaction.
+- **Refund requests** are `money.treasurer.refundRequests.{list,resolve}`. `money.treasurer.transfers`
+  filters by `periodStart`, not a payout-run id. The statement-facts variant is
+  `code: "staff_action"`.
+- **Stripe errors:** 4xx is `StripeRequestError`; network, timeout, 5xx, 409, 429 and
+  `idempotency_error` after retries are `StripeOutcomeUnknown`.
+- **stripe-mock** now runs in `scripts/infra.ts test`, so the stripe-mock integration tests run in
+  CI.
+- **Client TLS:** `createDb` reads `DATABASE_CA_FILE` and `createValkey` reads `VALKEY_CA_FILE`;
+  every raw BullMQ connection spreads `valkeyTls(url)`. Harness Bun `RedisClient` connections do
+  not (the harness targets the bundled stack). `pg_monitor` is **not** grantable by a
+  CREATEROLE owner on Postgres 17: the monitor role exists without it (no WAL size, no other
+  roles' `pg_stat_activity` state). The bundled stack gets the monitor role only once compose's
+  migrate service passes `POSTGRES_MONITOR_PASSWORD` (S1-b / L1-observability contract request).
+- **Federation:** `channel.federation {enabled:false}` queues the actor `Delete` plus
+  `FEDERATION_JOBS.followerCleanup`. A `federation.actor.disabled` written for a deleted account
+  finds no actor row and queues nothing; B8-server must not double-send on suspension, which
+  already sends a `Delete` through the fan-out.
+- **Web:** the prediction card receives `channel` from `$channel.tsx` (`stream` prop on
+  `ChatPanel`). The treasury page has `refunds` and `transfers` tabs; `refund-requests` and
+  `payout-transfers` are rendered (no longer pending ids).
+- **Page titles (design batch D4, on `main`):** `apps/web/tests/source-policy.test.ts` requires a
+  `head()` with an i18n title on every route file under `apps/web/src/routes/**`, except its
+  `PENDING_HEAD` list (B8-web's and B8-server's files only). Every route a batch 8 unit adds or
+  edits keeps or adds one. Where D4 already added a `head()` to a file you edit, keep it.
+- **Tofu:** production now requires `instance_origin` (no default) at stage 1.
+
 ## Waves
 
 At most six units at a time. Two agents never write the same file at the same time.
