@@ -128,10 +128,15 @@ function log(line: string): void {
 class StepError extends Error {}
 
 /** Runs a command, logging it and its output; throws on a non-zero exit unless `allowFail`. */
-function run(cmd: string[], opts: { input?: string; allowFail?: boolean; quiet?: boolean } = {}): string {
+function run(
+  cmd: string[],
+  opts: { input?: string; allowFail?: boolean; quiet?: boolean; env?: Record<string, string> } = {},
+): string {
   log(`$ ${cmd.join(" ")}`);
   const r = Bun.spawnSync(cmd, {
     cwd: REPO_ROOT,
+    // Values only here, never in cmd: the log and a failure's message quote cmd.
+    env: opts.env ? { ...process.env, ...opts.env } : undefined,
     stdin: opts.input === undefined ? "ignore" : new TextEncoder().encode(opts.input),
     stdout: "pipe",
     stderr: "pipe",
@@ -146,10 +151,15 @@ function run(cmd: string[], opts: { input?: string; allowFail?: boolean; quiet?:
 
 const podman = (args: string[], opts?: Parameters<typeof run>[1]) => run(["podman", ...args], opts);
 
-/** A shell command in the host container, as root or as the instance user with its session. */
+/**
+ * A shell command in the host container, as root or as the instance user with its session. `env`
+ * goes by name (`podman exec -e NAME` takes the value from podman's own environment), so the
+ * secrets in it (S3 keys, the external servers' passwords) reach neither the log nor CI's output.
+ */
 function inHost(script: string, opts: { user?: boolean; env?: Record<string, string>; allowFail?: boolean } = {}) {
-  const env = Object.entries(opts.env ?? {}).flatMap(([k, v]) => ["-e", `${k}=${v}`]);
-  if (!opts.user) return podman(["exec", ...env, HOST, "sh", "-c", script], { allowFail: opts.allowFail });
+  const env = execEnvArgs(opts.env);
+  const runOpts = { allowFail: opts.allowFail, env: opts.env };
+  if (!opts.user) return podman(["exec", ...env, HOST, "sh", "-c", script], runOpts);
   const uid = podman(["exec", HOST, "id", "-u", "commonair"]).trim();
   return podman(
     [
@@ -170,8 +180,16 @@ function inHost(script: string, opts: { user?: boolean; env?: Record<string, str
       "-c",
       script,
     ],
-    { allowFail: opts.allowFail },
+    runOpts,
   );
+}
+
+/** `-e NAME` for each variable: the names only, the values never on a command line. */
+export function execEnvArgs(env: Record<string, string> = {}): string[] {
+  return Object.keys(env).flatMap((k) => {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) throw new Error(`not an environment variable name: ${k}`);
+    return ["-e", k];
+  });
 }
 
 const timings: [string, number][] = [];
