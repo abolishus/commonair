@@ -1892,8 +1892,9 @@ state_secrets() {
     printf '%s' "$STATE_SET_VK_PW" | podman secret create --replace commonair-valkey-monitor-password - >/dev/null
   fi
   monitor_password_secret
-  if [ -n "$STATE_SET_DB_CA" ]; then podman secret create --replace "$STATE_PG_CA_SECRET" - <"$STATE_SET_DB_CA" >/dev/null; fi
-  if [ -n "$STATE_SET_VK_CA" ]; then podman secret create --replace "$STATE_VK_CA_SECRET" - <"$STATE_SET_VK_CA" >/dev/null; fi
+  # The file as podman's data argument: with "-" podman reads a pipe only and refuses a redirect.
+  if [ -n "$STATE_SET_DB_CA" ]; then podman secret create --replace "$STATE_PG_CA_SECRET" "$STATE_SET_DB_CA" >/dev/null; fi
+  if [ -n "$STATE_SET_VK_CA" ]; then podman secret create --replace "$STATE_VK_CA_SECRET" "$STATE_SET_VK_CA" >/dev/null; fi
   # A CA no unit mounts any more (--*-ca system, or a URL that no longer verifies).
   if [ "$STATE_MODE" = external ] && ! state_pg_ca_on && secret_exists "$STATE_PG_CA_SECRET"; then
     podman secret rm "$STATE_PG_CA_SECRET" >/dev/null 2>&1 || true

@@ -137,9 +137,16 @@ case "$1" in
       exists) [ -f "$STUB_STATE/secrets/$3" ] ;;
       rm) rm -f "$STUB_STATE/secrets/$3" ;;
       *)
-        # "secret create --replace <name> -": the name is the argument before "-".
+        # "secret create --replace <name> <file|->": the name is the argument before the data.
         name=$(printf '%s\n' "$@" | tail -n 2 | head -n 1)
-        cat > "$STUB_STATE/secrets/$name" ;;
+        data=$(printf '%s\n' "$@" | tail -n 1)
+        if [ "$data" = - ]; then
+          # As podman (cmd/podman/secrets/create.go): "-" reads a pipe only, never a redirected file.
+          [ -p /dev/stdin ] || { echo 'Error: if - is used, data must be passed into stdin' >&2; exit 125; }
+          cat > "$STUB_STATE/secrets/$name"
+        else
+          cat "$data" > "$STUB_STATE/secrets/$name"
+        fi ;;
     esac
     exit $?
     ;;

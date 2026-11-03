@@ -19,7 +19,7 @@ import {
   mirrorWanted,
   mirrorZotConfig,
 } from "../../scripts/selfhost/e2e-mirror.ts";
-import { ZOT_IMAGE, e2eOptions, timingsTable, withoutPorts } from "../../scripts/selfhost/e2e.ts";
+import { ZOT_IMAGE, e2eOptions, execEnvArgs, timingsTable, withoutPorts } from "../../scripts/selfhost/e2e.ts";
 import {
   E2E_STATE,
   MAKE_CERTS,
@@ -124,6 +124,17 @@ describe("--state external: external Postgres and Valkey on managed-service term
     }
     expect(externalStateFlags("acl")).toContain(`rediss://${E2E_STATE.aclUser}@${E2E_STATE.host}:`);
     expect(externalStateFlags("default")).toContain(`rediss://${E2E_STATE.host}:`);
+  });
+
+  test("that environment reaches the host by name: no value on podman's command line, which the log quotes", () => {
+    const env = { ...externalStateEnv("acl"), S3_SECRET_ACCESS_KEY: "s3-secret" };
+    const args = execEnvArgs(env);
+    expect(args).toEqual(["-e", "DATABASE_PASSWORD", "-e", "VALKEY_PASSWORD", "-e", "S3_SECRET_ACCESS_KEY"]);
+    for (const v of Object.values(env)) expect(args.join(" ")).not.toContain(v);
+    expect(execEnvArgs()).toEqual([]);
+    expect(() => execEnvArgs({ "A=B": "x" })).toThrow("not an environment variable name");
+    // inHost builds its -e flags from execEnvArgs only.
+    expect(E2E).not.toMatch(/\["-e", `\$\{k\}=\$\{v\}`\]/);
   });
 });
 
