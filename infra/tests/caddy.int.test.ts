@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createS3Storage } from "@commonair/storage";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
+import { retryPortRace } from "../../scripts/test-podman.ts";
 
 const CADDYFILE = new URL("../caddy/Caddyfile", import.meta.url).pathname;
 const IMAGE = /^Image=(.*)$/m.exec(
@@ -245,10 +246,16 @@ describe("caddy live: presigned object routes", () => {
   const front = `commonair-caddy-int-front-${id}`;
   let port = "";
 
-  const pm = (args: string[]) => {
-    const r = Bun.spawnSync(["podman", ...args], { stdout: "pipe", stderr: "pipe" });
-    return { code: r.exitCode ?? -1, out: r.stdout.toString(), err: r.stderr.toString() };
-  };
+  // The front's published port can be lost to another process before podman binds it: retried.
+  const pm = (args: string[]) =>
+    retryPortRace(
+      args,
+      () => {
+        const r = Bun.spawnSync(["podman", ...args], { stdout: "pipe", stderr: "pipe" });
+        return { code: r.exitCode ?? -1, out: r.stdout.toString(), err: r.stderr.toString() };
+      },
+      (r) => (r.code === 0 ? undefined : r.err),
+    );
   const must = (r: { code: number; err: string }) => {
     if (r.code !== 0) throw new Error(`podman exited ${r.code}: ${r.err}`);
   };

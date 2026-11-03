@@ -22,6 +22,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, test, vi } from "vite-plus/test";
+import { PORT_RACE_ATTEMPTS, isPortRace } from "../../scripts/test-podman.ts";
 import { testOwnerArgs } from "../../scripts/test-owner.ts";
 import {
   POSTGRES_IMAGE,
@@ -66,8 +67,17 @@ afterAll(() => {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function createPod(name: string): void {
-  podmanOk(["pod", "create", "--name", name, ...testOwnerArgs(), "-p", "127.0.0.1::9464", "-p", "127.0.0.1::8888"]);
   pods.push(name);
+  // Start the infra container now, so the published ports are bound here, where losing one to
+  // another process is retried, and not at the first member's start (scripts/test-podman.ts).
+  for (let attempt = 1; ; attempt++) {
+    podmanOk(["pod", "create", "--name", name, ...testOwnerArgs(), "-p", "127.0.0.1::9464", "-p", "127.0.0.1::8888"]);
+    const started = podman(["pod", "start", name]);
+    if (started.code === 0) return;
+    if (!isPortRace(started.out) || attempt >= PORT_RACE_ATTEMPTS)
+      throw new Error(`podman pod start ${name} failed (${started.code}):\n${started.out}`);
+    podman(["pod", "rm", "-f", "-t", "0", name]);
+  }
 }
 function podPort(pod: string, port: number): number {
   const out = podmanOk(["pod", "inspect", pod, "--format", "{{json .InfraConfig.PortBindings}}"]);

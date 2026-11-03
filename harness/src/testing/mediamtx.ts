@@ -10,6 +10,7 @@ import { createSocket } from "node:dgram";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { PORT_RACE_ATTEMPTS, isPortRace } from "../../../scripts/test-podman.ts";
 import { testOwnerArgs } from "../../../scripts/test-owner.ts";
 import { waitFor } from "../wait.ts";
 
@@ -124,8 +125,6 @@ export async function podmanAvailable(): Promise<boolean> {
   }
 }
 
-const PORT_ATTEMPTS = 5;
-
 function startContainer(name: string, configPath: string, udp: number, image: string) {
   return run([
     "podman",
@@ -162,13 +161,13 @@ export async function startMediaMtx(opts: MediaMtxOptions = {}): Promise<MediaMt
   const dir = mkdtempSync(join(tmpdir(), "harness-mediamtx-"));
   const configPath = join(dir, "mediamtx.yml");
   // The free UDP port is released before podman binds it, so a parallel test can take it first:
-  // pick another and try again.
+  // pick another and try again. The same goes for the ports podman picks (scripts/test-podman.ts).
   let started: Awaited<ReturnType<typeof run>> = { code: 1, stdout: "", stderr: "" };
-  for (let attempt = 1; attempt <= PORT_ATTEMPTS; attempt++) {
+  for (let attempt = 1; attempt <= PORT_RACE_ATTEMPTS; attempt++) {
     const udp = await freeUdpPort();
     writeFileSync(configPath, mediamtxConfig({ ...opts, webrtcUdpPort: udp }));
     started = await startContainer(name, configPath, udp, opts.image ?? MEDIAMTX_IMAGE);
-    if (started.code === 0 || !started.stderr.includes("address already in use")) break;
+    if (started.code === 0 || !isPortRace(started.stderr)) break;
     await run(["podman", "rm", "-f", "-i", name]);
   }
   if (started.code !== 0) {

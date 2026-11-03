@@ -8,6 +8,7 @@
  */
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { retryPortRace } from "../../../../scripts/test-podman.ts";
 import { testOwnerArgs } from "../../../../scripts/test-owner.ts";
 
 export const MEDIAMTX_IMAGE =
@@ -41,7 +42,14 @@ export interface Container {
 }
 
 function run(name: string, args: string[]): Container {
-  podman(["run", "-d", "--rm", "--name", name, ...testOwnerArgs(), ...args]);
+  // Host ports are podman's choice; a lost race for one is retried (scripts/test-podman.ts).
+  const argv = ["run", "-d", "--rm", "--name", name, ...testOwnerArgs(), ...args];
+  const started = retryPortRace(
+    argv,
+    () => Bun.spawnSync(["podman", ...argv], { stdout: "pipe", stderr: "pipe" }),
+    (p) => (p.exitCode === 0 ? undefined : p.stderr.toString()),
+  );
+  if (started.exitCode !== 0) throw new Error(`podman run failed: ${started.stderr.toString().trim()}`);
   const ports = new Map<string, number>();
   return {
     name,

@@ -10,6 +10,7 @@
 import { chmodSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { retryPortRace } from "../../../scripts/test-podman.ts";
 import { testOwnerArgs } from "../../../scripts/test-owner.ts";
 
 const ROOT = new URL("../../../", import.meta.url).pathname;
@@ -28,15 +29,24 @@ export interface Run {
   out: string;
 }
 
-/** `podman <args>`; spawnSync blocks the event loop, so every call carries its own timeout. */
+/**
+ * `podman <args>`; spawnSync blocks the event loop, so every call carries its own timeout. A `run`
+ * that publishes ports is retried when another process takes a port first (scripts/test-podman.ts).
+ */
 export function podman(args: string[], opts: { timeoutMs?: number; stdin?: Uint8Array } = {}): Run {
-  const p = Bun.spawnSync(["podman", ...args], {
-    stdout: "pipe",
-    stderr: "pipe",
-    stdin: opts.stdin ?? "ignore",
-    timeout: opts.timeoutMs ?? 120_000,
-  });
-  return { code: p.exitCode ?? -1, out: `${p.stdout.toString()}${p.stderr.toString()}` };
+  return retryPortRace(
+    args,
+    () => {
+      const p = Bun.spawnSync(["podman", ...args], {
+        stdout: "pipe",
+        stderr: "pipe",
+        stdin: opts.stdin ?? "ignore",
+        timeout: opts.timeoutMs ?? 120_000,
+      });
+      return { code: p.exitCode ?? -1, out: `${p.stdout.toString()}${p.stderr.toString()}` };
+    },
+    (r) => (r.code === 0 ? undefined : r.out),
+  );
 }
 
 export function podmanOk(args: string[], opts?: { timeoutMs?: number; stdin?: Uint8Array }): string {

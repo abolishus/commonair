@@ -18,6 +18,7 @@ import { schema, uuidv7 } from "@commonair/db";
 import { createTestDatabase, type TestDatabase } from "@commonair/db/testing";
 import { createValkey, type ValkeyClient } from "@commonair/service";
 import { generateSigningKey, randomSecret, sha256Hex, signPlaybackToken, type SigningKey } from "@commonair/tokens";
+import { retryPortRace } from "../../../scripts/test-podman.ts";
 import { testOwnerArgs } from "../../../scripts/test-owner.ts";
 import { minuteOf } from "../src/accounting.ts";
 import { cdnAuthValue } from "../src/auth.ts";
@@ -57,8 +58,13 @@ const ids = {
 };
 
 // spawnSync blocks the event loop, so vitest's hook timeout cannot interrupt it (e.g. a stuck image pull).
+// A `podman run` that loses a published port to another process is retried (scripts/test-podman.ts).
 function sh(args: string[], timeoutMs = 300_000): string {
-  const p = Bun.spawnSync(args, { stderr: "pipe", stdout: "pipe", timeout: timeoutMs, killSignal: "SIGKILL" });
+  const p = retryPortRace(
+    args[0] === "podman" ? args.slice(1) : [],
+    () => Bun.spawnSync(args, { stderr: "pipe", stdout: "pipe", timeout: timeoutMs, killSignal: "SIGKILL" }),
+    (r) => (r.exitCode === 0 ? undefined : r.stderr.toString()),
+  );
   if (p.exitedDueToTimeout) throw new Error(`${args.join(" ")} timed out after ${timeoutMs / 1000}s`);
   if (p.exitCode !== 0) throw new Error(`${args.join(" ")} failed: ${p.stderr.toString()}`);
   return p.stdout.toString().trim();
