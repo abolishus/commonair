@@ -94,19 +94,23 @@ external or neither is, and the choice is made at the first install: an instance
 between bundled and external, because that moves the data (a dump and restore, described in
 managed-services.md).
 
-| `install` flag              | Env key                   | Default and meaning                                                                    |
-| --------------------------- | ------------------------- | -------------------------------------------------------------------------------------- |
-| (either URL flag)           | `STATE_MODE`              | unset: bundled. `external` with `--database-url` and `--valkey-url`                    |
-| `--database-url <url>`      | `DATABASE_OWNER_URL`      | the owner's URL without a password: `postgres://<user>@<host>:<port>/<db>?sslmode=...` |
-| `--database-ca <file>`      | `DATABASE_CA_FILE`        | `/run/secrets/commonair-pg-ca` with the flag; empty: the system's trusted CAs          |
-| `--valkey-url <url>`        | `VALKEY_URL`              | `rediss://[<user>@]<host>:<port>[/<db>]`, without a password; no user: default user    |
-| `--valkey-ca <file>`        | `VALKEY_CA_FILE`          | `/run/secrets/commonair-valkey-ca` with the flag; empty: the system's trusted CAs      |
-| `--allow-insecure-database` | `DATABASE_ALLOW_INSECURE` | `false`: the URL must say `sslmode=verify-full`. `true` accepts a weaker `sslmode`     |
-| `--allow-insecure-valkey`   | `VALKEY_ALLOW_INSECURE`   | `false`: the URL must be `rediss://`. `true` accepts `redis://`                        |
-| (derived)                   | `DATABASE_URL`            | the app role's URL on the same server and database (password from the env file)        |
+| `install` flag              | Env key                   | Default and meaning                                                                          |
+| --------------------------- | ------------------------- | -------------------------------------------------------------------------------------------- |
+| (either URL flag)           | `STATE_MODE`              | unset: bundled. `external` with `--database-url` and `--valkey-url`                          |
+| `--database-url <url>`      | `DATABASE_OWNER_URL`      | the owner's URL without a password: `postgres://<user>@<host>:<port>/<db>?sslmode=...`       |
+| `--database-ca <file>`      | `DATABASE_CA_FILE`        | `/run/secrets/commonair-pg-ca` with the flag; empty: the system's trusted CAs (`system`)     |
+| `--valkey-url <url>`        | `VALKEY_URL`              | `rediss://[<user>@]<host>:<port>[/<db>]`, without a password; no user: default user          |
+| `--valkey-ca <file>`        | `VALKEY_CA_FILE`          | `/run/secrets/commonair-valkey-ca` with the flag; empty: the system's trusted CAs (`system`) |
+| `--allow-insecure-database` | `DATABASE_ALLOW_INSECURE` | `false`: the URL must say `sslmode=verify-full`. `true` accepts `require` or `disable`       |
+| `--allow-insecure-valkey`   | `VALKEY_ALLOW_INSECURE`   | `false`: the URL must be `rediss://`. `true` accepts `redis://`                              |
+| (derived)                   | `DATABASE_URL`            | the app role's URL on the same server and database (password from the env file)              |
 
 The insecure flags exist for a server on a private network you control. `install` warns when
-it takes one, and the env file records it.
+it takes one, and the env file records it. Of libpq's other modes, `sslmode=require` (TLS, the
+certificate not verified) and `sslmode=disable` (no TLS) are accepted; `prefer`, `allow` and
+`verify-ca` are refused. A CA is used only with `sslmode=verify-full` and `rediss://`: a
+re-install onto a weaker URL drops the recorded CA, and `--database-ca system` (or
+`--valkey-ca system`) drops it when the server moves to a publicly trusted certificate.
 
 **Passwords are never flags and never in the URL**, since every user on the host can read a
 command line. Export `DATABASE_PASSWORD` (the owner's) and `VALKEY_PASSWORD` in the shell that
@@ -136,7 +140,9 @@ On an external instance:
   role scripts are idempotent), and takes no WAL-G backup: the provider's point-in-time recovery
   covers the database (`managed-services.md`). `--database-ca` and
   `--valkey-ca` replace a CA, on `upgrade` and `install --reinstall` alike. If a CA's secret was
-  removed, both refuse to go on (or ask for the file at a terminal) rather than drop TLS.
+  removed, both refuse to go on (or ask for the file at a terminal) rather than drop TLS. If an
+  upgrade fails and rolls back, the database is restored, if it must be, with the provider's
+  point-in-time recovery: no WAL-G backup was taken.
 - `status` shows `external` in place of the two units' state, with what each server answers:
   reachable, TLS verified, the version, connections in use against what the server allows, and
   `PING`, each with how long it took. It uses the app role and never prints a password.
@@ -144,7 +150,7 @@ On an external instance:
 
 ### Secrets and the metrics collector's keys
 
-Contract step §3.7 of batch 8: `selfhost.sh` writes these, and the metrics collector reads them.
+`selfhost.sh` writes these, and the metrics collector reads them.
 The collector's keys are in `commonair.env` and hold no secret; the secrets are Podman secrets,
 recreated by `install` and `upgrade` (the external passwords only when given, as above).
 
@@ -161,15 +167,15 @@ recreated by `install` and `upgrade` (the external passwords only when given, as
 Every unit whose key list names `DATABASE_CA_FILE` or `VALKEY_CA_FILE` (the services that open
 a pool, and `migrate`) mounts the CA's secret at that path.
 
-| Key                        | Bundled             | External                                                                                    |
-| -------------------------- | ------------------- | ------------------------------------------------------------------------------------------- |
-| `PG_MONITOR_ENDPOINT`      | `postgres:5432`     | the database's `host:port`                                                                  |
-| `PG_MONITOR_USER`          | `commonair_monitor` | `commonair_monitor`                                                                         |
-| `PG_MONITOR_TLS`           | `disable`           | `verify-full`, or with `--allow-insecure-database` the URL's weaker `sslmode` (libpq names) |
-| `VALKEY_MONITOR_ENDPOINT`  | `valkey:6379`       | Valkey's `host:port`                                                                        |
-| `VALKEY_MONITOR_USER`      | empty (default)     | `--valkey-url`'s user; empty for the default user                                           |
-| `VALKEY_MONITOR_TLS`       | `off`               | `on` for `rediss://`, `off` for `redis://`                                                  |
-| `OBSERVABILITY_STATE_MODE` | `bundled`           | `external`                                                                                  |
+| Key                        | Bundled             | External                                                                            |
+| -------------------------- | ------------------- | ----------------------------------------------------------------------------------- |
+| `PG_MONITOR_ENDPOINT`      | `postgres:5432`     | the database's `host:port`                                                          |
+| `PG_MONITOR_USER`          | `commonair_monitor` | `commonair_monitor`                                                                 |
+| `PG_MONITOR_TLS`           | `disable`           | `verify-full`, or with `--allow-insecure-database` the URL's `require` or `disable` |
+| `VALKEY_MONITOR_ENDPOINT`  | `valkey:6379`       | Valkey's `host:port`                                                                |
+| `VALKEY_MONITOR_USER`      | empty (default)     | `--valkey-url`'s user; empty for the default user, named `default` or not           |
+| `VALKEY_MONITOR_TLS`       | `off`               | `on` for `rediss://`, `off` for `redis://`                                          |
+| `OBSERVABILITY_STATE_MODE` | `bundled`           | `external`                                                                          |
 
 ## How values are resolved
 

@@ -264,7 +264,8 @@ describe("external Postgres and Valkey", () => {
       PG_MONITOR_USER: "commonair_monitor",
       PG_MONITOR_TLS: "verify-full",
       VALKEY_MONITOR_ENDPOINT: "cache.example.com:25061",
-      VALKEY_MONITOR_USER: "default",
+      // DigitalOcean's URL names the default user, which §3.7 writes as empty.
+      VALKEY_MONITOR_USER: "",
       VALKEY_MONITOR_TLS: "on",
       OBSERVABILITY_STATE_MODE: "external",
     });
@@ -319,6 +320,15 @@ describe("external Postgres and Valkey", () => {
     );
     expect(args).toContain("-e STATE_POOL_MAX=10");
     expect(args).toMatch(/ bun infra\/selfhost\/state-check\.ts preflight$/m);
+    // First install: no commonair network yet, so a stand-in bridge network with the release's
+    // subnet (the route the services take, not Podman's default), removed afterwards.
+    const net = calls.find((x) => x.startsWith("podman network create"));
+    expect(net).toMatch(
+      /^podman network create --subnet 10\.89\.42\.0\/24 --ip-range 10\.89\.42\.128\/25 commonair-preflight-\d+$/,
+    );
+    const name = net!.split(" ").at(-1)!;
+    expect(args).toContain(`run --rm --network ${name} `);
+    expect(calls.indexOf(`podman network rm ${name}`)).toBeGreaterThan(preflight);
     const got = h.state("state-check-preflight.env");
     expect(decodeURIComponent(new URL(/^STATE_PG_URL=(.*)$/m.exec(got)![1]!).password)).toBe(DB_PASSWORD);
     expect(readFileSync(join(h.dir, "state/state-check-preflight.mount/pg-ca.pem"), "utf8")).toBe(PG_CA);
@@ -450,6 +460,48 @@ describe("external Postgres and Valkey", () => {
     TIMEOUT,
   );
 
+  test(
+    "a re-install that weakens sslmode drops the CA (packages/db refuses a CA without verify-full)",
+    () => {
+      expect(envOf(h).DATABASE_CA_FILE).toBe("/run/secrets/commonair-pg-ca");
+      const x = h.run(
+        [
+          "install",
+          "--reinstall",
+          "--database-url",
+          "postgres://commonair_owner@db.example.com:25060/commonair?sslmode=require",
+          "--allow-insecure-database",
+        ],
+        { DATABASE_PASSWORD: "new-owner-pass" },
+      );
+      expectOk(x);
+      expect(envOf(h)).toMatchObject({
+        DATABASE_CA_FILE: "",
+        PG_MONITOR_TLS: "require",
+        DATABASE_ALLOW_INSECURE: "true",
+      });
+      expect(h.state("state-check-preflight.args")).not.toContain("STATE_PG_CA");
+      expect(existsSync(secretPath(h, "commonair-pg-ca"))).toBe(false);
+      for (const u of installed(h))
+        expect(readFileSync(join(quadletDir(h), u), "utf8"), u).not.toContain("commonair-pg-ca");
+      // Valkey keeps its CA.
+      expect(envOf(h).VALKEY_CA_FILE).toBe("/run/secrets/commonair-valkey-ca");
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "--valkey-ca system drops a recorded CA for the system's trusted ones",
+    () => {
+      expectOk(h.run(["install", "--reinstall", "--valkey-ca", "system"]));
+      expect(envOf(h)).toMatchObject({ VALKEY_CA_FILE: "", VALKEY_MONITOR_TLS: "on" });
+      expect(existsSync(secretPath(h, "commonair-valkey-ca"))).toBe(false);
+      for (const u of installed(h))
+        expect(readFileSync(join(quadletDir(h), u), "utf8"), u).not.toContain("commonair-valkey-ca");
+    },
+    TIMEOUT,
+  );
+
   test("switching back to bundled is refused: an env file that lost STATE_MODE", () => {
     const before = readFileSync(envFile(h), "utf8");
     writeFileSync(envFile(h), before.replace(/^STATE_MODE=external\n/m, ""));
@@ -536,6 +588,18 @@ describe("flags and their refusals (nothing happens on the host)", () => {
       "sslmode=prefer",
     );
   });
+
+  test.each([["prefer"], ["allow"], ["verify-ca"]])(
+    "sslmode=%s is refused even with --allow-insecure-database (only require and disable are)",
+    (mode) => {
+      expectRefusedHere(
+        ["--database-url", DB_URL.replace("verify-full", mode), "--allow-insecure-database", "--valkey-url", VK_URL],
+        PASSWORDS,
+        `sslmode=${mode}, which selfhost.sh does not take`,
+        "sslmode=require",
+      );
+    },
+  );
 
   test("a CA with a weaker sslmode, and redis:// without --allow-insecure-valkey", () => {
     expectRefusedHere(

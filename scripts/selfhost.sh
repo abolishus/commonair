@@ -161,11 +161,12 @@ between bundled and external (that is a dump and restore, not a flag).
   --database-url <url>  The owner's URL, postgres://<user>@<host>[:port]/<database>?sslmode=verify-full.
                         The user needs CREATEROLE, not superuser; PostgreSQL 17 or 18.
   --database-ca <file>  The PEM CA that signed the server's certificate (DigitalOcean: "Download
-                        CA certificate"). Without it the system's trusted CAs are used.
+                        CA certificate"). Without it the system's trusted CAs are used; on a
+                        --reinstall or upgrade, "system" drops the CA install recorded.
   --valkey-url <url>    rediss://[<user>@]<host>[:port][/<db>]; no user: the default user.
-  --valkey-ca <file>    The PEM CA that signed Valkey's certificate.
+  --valkey-ca <file>    The PEM CA that signed Valkey's certificate ("system" as above).
   --allow-insecure-database
-                        Accept an sslmode other than verify-full (a server on a private network).
+                        Accept sslmode=require or disable (a server on a private network).
   --allow-insecure-valkey
                         Accept redis:// without TLS (a server on a private network).
   Passwords never go on the command line: export DATABASE_PASSWORD and VALKEY_PASSWORD, or
@@ -581,8 +582,8 @@ stage_for_service_user() {
   if [ -n "$MODEL_SRC" ]; then stage_copy "$MODEL_SRC" "$_st/model.onnx"; fi
   if [ -n "$CAPTIONS_MODEL_SRC" ]; then stage_copy "$CAPTIONS_MODEL_SRC" "$_st/captions-model.bin"; fi
   # Certificates only, public by nature: world-readable in the stage is fine.
-  if [ -n "$DB_OPT_CA" ]; then stage_copy "$DB_OPT_CA" "$_st/database-ca.pem"; fi
-  if [ -n "$VK_OPT_CA" ]; then stage_copy "$VK_OPT_CA" "$_st/valkey-ca.pem"; fi
+  if [ -n "$DB_OPT_CA" ] && [ "$DB_OPT_CA" != system ]; then stage_copy "$DB_OPT_CA" "$_st/database-ca.pem"; fi
+  if [ -n "$VK_OPT_CA" ] && [ "$VK_OPT_CA" != system ]; then stage_copy "$VK_OPT_CA" "$_st/valkey-ca.pem"; fi
   chmod 0644 "$_st"/*
   chmod 0755 "$_st"
   printf '%s' "$_st"
@@ -622,9 +623,9 @@ user_args() {
   # Postgres and Valkey: the URLs (validated, no spaces, no password) and the staged CAs. The
   # passwords reach that run through the environment, like the S3 keys.
   [ -n "$DB_OPT_URL" ] && _out="$_out --database-url $DB_OPT_URL"
-  [ -n "$DB_OPT_CA" ] && _out="$_out --database-ca $1/database-ca.pem"
+  case "$DB_OPT_CA" in "") ;; system) _out="$_out --database-ca system" ;; *) _out="$_out --database-ca $1/database-ca.pem" ;; esac
   [ -n "$VK_OPT_URL" ] && _out="$_out --valkey-url $VK_OPT_URL"
-  [ -n "$VK_OPT_CA" ] && _out="$_out --valkey-ca $1/valkey-ca.pem"
+  case "$VK_OPT_CA" in "") ;; system) _out="$_out --valkey-ca system" ;; *) _out="$_out --valkey-ca $1/valkey-ca.pem" ;; esac
   [ "$DB_ALLOW_INSECURE" = yes ] && _out="$_out --allow-insecure-database"
   [ "$VK_ALLOW_INSECURE" = yes ] && _out="$_out --allow-insecure-valkey"
   printf '%s' "$_out"
@@ -1488,6 +1489,16 @@ check_state_flags() {
         "fix: end the URL with ?sslmode=verify-full (and --database-ca <file> for a private CA), or pass" \
         "--allow-insecure-database for a server on a private network only"
     fi
+    # The metrics collector speaks three modes (contract §3.7): verify-full, require (TLS without
+    # verification) and disable. The others are libpq's in-betweens, refused rather than guessed.
+    case "$_ssl" in
+      verify-full | require | disable) ;;
+      *)
+        die "--database-url says sslmode=$_ssl, which selfhost.sh does not take" \
+          "fix: sslmode=verify-full; or, with --allow-insecure-database on a private network only," \
+          "sslmode=require (TLS, the certificate not verified) or sslmode=disable (no TLS)"
+        ;;
+    esac
     if [ -n "$DB_OPT_CA" ] && [ "$_ssl" != verify-full ]; then
       die "--database-ca is used with sslmode=verify-full only, and the URL says sslmode=$_ssl"
     fi
@@ -1512,8 +1523,9 @@ check_state_flags() {
   fi
   if [ "$DB_ALLOW_INSECURE" = yes ] && [ -z "$DB_OPT_URL" ]; then die "--allow-insecure-database goes with --database-url"; fi
   if [ "$VK_ALLOW_INSECURE" = yes ] && [ -z "$VK_OPT_URL" ]; then die "--allow-insecure-valkey goes with --valkey-url"; fi
-  if [ -n "$DB_OPT_CA" ]; then check_ca_file --database-ca "$DB_OPT_CA"; fi
-  if [ -n "$VK_OPT_CA" ]; then check_ca_file --valkey-ca "$VK_OPT_CA"; fi
+  # "system": verify against the system's trusted CAs, dropping a CA install recorded.
+  if [ -n "$DB_OPT_CA" ] && [ "$DB_OPT_CA" != system ]; then check_ca_file --database-ca "$DB_OPT_CA"; fi
+  if [ -n "$VK_OPT_CA" ] && [ "$VK_OPT_CA" != system ]; then check_ca_file --valkey-ca "$VK_OPT_CA"; fi
   return 0
 }
 
@@ -1672,17 +1684,21 @@ collect_state_secrets() {
     "fix: run selfhost.sh from a terminal, which asks for them (without echo), or export them in its" \
     "environment; never as flags or in the URL, which ps shows to every user. They are kept in Podman" \
     "secrets only, so later upgrades need them again only if a secret is removed."
-  if [ -n "$DB_OPT_CA" ]; then
+  if [ "$DB_OPT_CA" = system ]; then
+    STATE_SET_DB_CA=""
+  elif [ -n "$DB_OPT_CA" ]; then
     STATE_SET_DB_CA=$DB_OPT_CA
-  elif [ -n "$(env_get DATABASE_CA_FILE "$ENV_FILE")" ] && ! secret_exists "$STATE_PG_CA_SECRET"; then
+  elif state_pg_ca_on && ! secret_exists "$STATE_PG_CA_SECRET"; then
     STATE_SET_DB_CA=$(prompt_state "the Postgres CA file (the secret $STATE_PG_CA_SECRET is gone)") || STATE_SET_DB_CA=""
     [ -n "$STATE_SET_DB_CA" ] || die "the Podman secret $STATE_PG_CA_SECRET is missing, and the database is verified against it" \
       "fix: re-run with --database-ca <file> (the CA that signed the server's certificate), or from a terminal, which asks for it"
     check_ca_file "the Postgres CA" "$STATE_SET_DB_CA"
   fi
-  if [ -n "$VK_OPT_CA" ]; then
+  if [ "$VK_OPT_CA" = system ]; then
+    STATE_SET_VK_CA=""
+  elif [ -n "$VK_OPT_CA" ]; then
     STATE_SET_VK_CA=$VK_OPT_CA
-  elif [ -n "$(env_get VALKEY_CA_FILE "$ENV_FILE")" ] && ! secret_exists "$STATE_VK_CA_SECRET"; then
+  elif state_vk_ca_on && ! secret_exists "$STATE_VK_CA_SECRET"; then
     STATE_SET_VK_CA=$(prompt_state "the Valkey CA file (the secret $STATE_VK_CA_SECRET is gone)") || STATE_SET_VK_CA=""
     [ -n "$STATE_SET_VK_CA" ] || die "the Podman secret $STATE_VK_CA_SECRET is missing, and Valkey is verified against it" \
       "fix: re-run with --valkey-ca <file> (the CA that signed Valkey's certificate), or from a terminal, which asks for it"
@@ -1691,9 +1707,25 @@ collect_state_secrets() {
   return 0
 }
 
-# Whether the services verify against a CA of ours: one given now, or one install recorded.
-state_pg_ca_on() { [ -n "${STATE_SET_DB_CA:-}" ] || [ -n "$(env_get DATABASE_CA_FILE "$ENV_FILE")" ]; }
-state_vk_ca_on() { [ -n "${STATE_SET_VK_CA:-}" ] || [ -n "$(env_get VALKEY_CA_FILE "$ENV_FILE")" ]; }
+# Whether each server's certificate is verified: the URL this run uses, else the one install recorded.
+state_pg_verified() {
+  [ "$(url_sslmode "${STATE_SET_DB_URL:-$(env_get DATABASE_OWNER_URL "$ENV_FILE")}")" = verify-full ]
+}
+state_vk_verified() {
+  case "${STATE_SET_VK_URL:-$(env_get VALKEY_URL "$ENV_FILE")}" in rediss://*) return 0 ;; *) return 1 ;; esac
+}
+
+# Whether the services verify against a CA of ours: one given now, or one install recorded, and
+# only while the URL verifies at all (a CA with sslmode=require would stop every service:
+# packages/db refuses that pairing) and --*-ca system did not drop it for the system's CAs.
+state_pg_ca_on() {
+  state_pg_verified && [ "${DB_OPT_CA:-}" != system ] &&
+    { [ -n "${STATE_SET_DB_CA:-}" ] || [ -n "$(env_get DATABASE_CA_FILE "$ENV_FILE")" ]; }
+}
+state_vk_ca_on() {
+  state_vk_verified && [ "${VK_OPT_CA:-}" != system ] &&
+    { [ -n "${STATE_SET_VK_CA:-}" ] || [ -n "$(env_get VALKEY_CA_FILE "$ENV_FILE")" ]; }
+}
 
 # DATABASE_POOL_MAX: install's environment (the preflight's fix says so), else the env file's.
 state_pool_max() {
@@ -1716,9 +1748,12 @@ state_check_run() {
   chmod 755 "$_sc_dir"
   _sc_pg=""
   _sc_vk=""
-  set -- run --rm
-  # The instance's network once it exists (the route the services take), else Podman's default.
-  if podman network exists commonair >/dev/null 2>&1; then set -- "$@" --network commonair; fi
+  _sc_net=""
+  if ! podman network exists commonair >/dev/null 2>&1; then
+    _sc_net=$(preflight_network "$_sc_rel") || return 1
+  fi
+  # The route the services will take: the instance's network, or (first install) a stand-in.
+  set -- run --rm --network "${_sc_net:-commonair}"
   if [ "$_sc_mode" = status ]; then
     # The app role is enough to read the version and the connection count.
     set -- "$@" --secret "commonair-database-url,type=env,target=STATE_PG_URL" \
@@ -1760,7 +1795,23 @@ state_check_run() {
   _sc_rc=0
   STATE_PG_URL=$_sc_pg STATE_VALKEY_URL=$_sc_vk podman "$@" || _sc_rc=$?
   rm -rf "$_sc_dir"
+  if [ -n "$_sc_net" ]; then podman network rm "$_sc_net" >/dev/null 2>&1 || true; fi
   return "$_sc_rc"
+}
+
+# Before the first install the commonair network does not exist yet, and Podman's default (pasta
+# for a rootless run) is not the route the services take. A throwaway bridge network with the
+# release's subnet (quadlet/commonair.network) is, the same way; the caller removes it, so the
+# preflight still leaves nothing behind, and commonair-network.service creates the real one.
+preflight_network() {
+  _pn_file="$1/quadlet/commonair.network"
+  _pn_subnet=$(sed -n 's/^Subnet=//p' "$_pn_file" 2>/dev/null | head -n 1)
+  _pn_range=$(sed -n 's/^IPRange=//p' "$_pn_file" 2>/dev/null | head -n 1)
+  [ -n "$_pn_subnet" ] && [ -n "$_pn_range" ] || { warn "no Subnet= or IPRange= in $_pn_file"; return 1; }
+  _pn_name="commonair-preflight-$$"
+  podman network create --subnet "$_pn_subnet" --ip-range "$_pn_range" "$_pn_name" >/dev/null ||
+    { warn "could not create the preflight's network $_pn_name ($_pn_subnet)"; return 1; }
+  printf '%s' "$_pn_name"
 }
 
 # Before anything is installed or changed: TLS, the owner's rights, the version, the connection
@@ -1816,11 +1867,13 @@ state_env() {
   if [ "$STATE_SET_VK_INSECURE" = yes ]; then env_set VALKEY_ALLOW_INSECURE true; else env_set VALKEY_ALLOW_INSECURE false; fi
   if [ -n "${DATABASE_POOL_MAX:-}" ]; then env_set DATABASE_POOL_MAX "$(state_pool_max)"; fi
   env_set PG_MONITOR_ENDPOINT "$(url_endpoint "$STATE_SET_DB_URL" 5432)"
-  # libpq's sslmode names: verify-full or disable, or the weaker mode --allow-insecure-database took.
+  # verify-full, or with --allow-insecure-database require or disable (check_state_flags).
   env_set PG_MONITOR_TLS "$(url_sslmode "$STATE_SET_DB_URL")"
   env_set VALKEY_MONITOR_ENDPOINT "$(url_endpoint "$STATE_SET_VK_URL" 6379)"
   # The instance's own Valkey user (empty: the default user); no other exists without ACL.
-  env_set VALKEY_MONITOR_USER "$(url_user "$STATE_SET_VK_URL")"
+  _vmu=$(url_user "$STATE_SET_VK_URL")
+  [ "$_vmu" != default ] || _vmu=""
+  env_set VALKEY_MONITOR_USER "$_vmu"
   case "$STATE_SET_VK_URL" in rediss://*) env_set VALKEY_MONITOR_TLS on ;; *) env_set VALKEY_MONITOR_TLS off ;; esac
   env_set OBSERVABILITY_STATE_MODE external
   info "postgres: external, $(url_user "$STATE_SET_DB_URL")@$(pg_place "$STATE_SET_DB_URL"); valkey: external, $(url_endpoint "$STATE_SET_VK_URL" 6379)"
@@ -1841,6 +1894,13 @@ state_secrets() {
   monitor_password_secret
   if [ -n "$STATE_SET_DB_CA" ]; then podman secret create --replace "$STATE_PG_CA_SECRET" - <"$STATE_SET_DB_CA" >/dev/null; fi
   if [ -n "$STATE_SET_VK_CA" ]; then podman secret create --replace "$STATE_VK_CA_SECRET" - <"$STATE_SET_VK_CA" >/dev/null; fi
+  # A CA no unit mounts any more (--*-ca system, or a URL that no longer verifies).
+  if [ "$STATE_MODE" = external ] && ! state_pg_ca_on && secret_exists "$STATE_PG_CA_SECRET"; then
+    podman secret rm "$STATE_PG_CA_SECRET" >/dev/null 2>&1 || true
+  fi
+  if [ "$STATE_MODE" = external ] && ! state_vk_ca_on && secret_exists "$STATE_VK_CA_SECRET"; then
+    podman secret rm "$STATE_VK_CA_SECRET" >/dev/null 2>&1 || true
+  fi
   return 0
 }
 
@@ -2509,6 +2569,15 @@ cmd_install() {
   next_steps
 }
 
+# External state takes no pre-upgrade backup: the provider's point-in-time recovery is the net.
+rollback_last_resort() {
+  if [ "$STATE_MODE" = external ]; then
+    printf '%s' "last resort if the schema change broke it: restore the database to a point just before the upgrade with your provider's point-in-time recovery ($STATE_DOC)"
+  else
+    printf '%s' "last resort if the schema change broke it: restore the pre-upgrade backup (selfhost.sh backup lists it)"
+  fi
+}
+
 rollback() {
   _prev=$1
   warn "rolling back to $(env_get COMMONAIR_VERSION "$_prev/release.env")"
@@ -2517,7 +2586,7 @@ rollback() {
   if bring_up; then
     die "upgrade failed; rolled back to $(installed_version), which is healthy" \
       "the failed release stays in $RELEASES_DIR for inspection" \
-      "last resort if the schema change broke it: restore the pre-upgrade backup (selfhost.sh backup lists it)"
+      "$(rollback_last_resort)"
   fi
   die "upgrade failed and the rollback is not healthy either" "see: selfhost.sh status"
 }

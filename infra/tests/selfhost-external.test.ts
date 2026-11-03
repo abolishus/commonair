@@ -276,6 +276,19 @@ describe("state-check rules", () => {
     expect(() => valkeyTarget("http://cache")).toThrow("not a redis:// or rediss:// URL");
   });
 
+  test("a URL that does not parse: the error never quotes it (it holds the password)", () => {
+    const message = (f: () => unknown) => {
+      try {
+        f();
+      } catch (e) {
+        return (e as Error).message;
+      }
+      return "parsed";
+    };
+    expect(message(() => pgTarget("postgres://owner:s3cret-pw@[bad host/db"))).toBe("the Postgres URL does not parse");
+    expect(message(() => valkeyTarget("rediss://u:s3cret-pw@[bad host"))).toBe("the Valkey URL does not parse");
+  });
+
   test("input from the environment: the unit's own names work too", () => {
     expect(inputFromEnv({ DATABASE_URL: "postgres://a@b/c", VALKEY_URL: "rediss://d", STATE_POOL_MAX: "4" })).toEqual({
       pgUrl: "postgres://a@b/c",

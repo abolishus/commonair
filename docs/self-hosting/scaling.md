@@ -43,7 +43,9 @@ whole stack on one server, Postgres and Valkey in containers with WAL-G backups,
 and tested. The co-op's own instance is the exception: it launches at stage 1 below
 (DigitalOcean Managed PostgreSQL and managed Valkey, each with a standby, and objects in Spaces),
 because its availability target leaves no room for a database restore measured in hours (ADR
-0032). Its servers are created by `selfhost.sh install` with the same flags any operator has.
+0032). OpenTofu creates those clusters (`infra/tofu/digitalocean`), and `selfhost.sh install
+--database-url … --valkey-url …` points the instance at them, with the same flags any operator
+has.
 
 1. **Move state off the host.** Postgres and Valkey go to their own servers, or to managed
    services, so the database stops competing with FFmpeg for CPU and memory and can fail over.

@@ -406,9 +406,21 @@ export interface PgTarget {
   sslmode: string;
 }
 
+/**
+ * Parses a URL that may hold a password. The parser's own error quotes its input, password
+ * included, so it is replaced by one that names only what failed to parse.
+ */
+function parseSecretUrl(url: string, what: string): URL {
+  try {
+    return new URL(url);
+  } catch {
+    throw new Error(`the ${what} URL does not parse`);
+  }
+}
+
 /** Host, port, user, database and sslmode of a Postgres URL (never its password). */
 export function pgTarget(url: string): PgTarget {
-  const u = new URL(url);
+  const u = parseSecretUrl(url, "Postgres");
   return {
     url,
     host: u.hostname,
@@ -429,7 +441,7 @@ export interface ValkeyTarget {
 }
 
 export function valkeyTarget(url: string): ValkeyTarget {
-  const u = new URL(url);
+  const u = parseSecretUrl(url, "Valkey");
   const scheme = u.protocol.replace(/:$/, "");
   if (!["redis", "rediss", "valkey", "valkeys"].includes(scheme)) throw new Error("not a redis:// or rediss:// URL");
   return {

@@ -165,8 +165,9 @@ installed.
 - **Version 17 or 18** (the release is tested on 17). The preflight refuses any other.
 - **TLS with verification**: the URL says `sslmode=verify-full`, and `--database-ca` gives the
   provider's CA when it is not publicly trusted (DigitalOcean's Standard edition hands out its
-  own). The preflight names the certificate's subject and issuer when it does not verify. A
-  weaker `sslmode` needs `--allow-insecure-database`, for a private network only.
+  own). The preflight names the certificate's subject and issuer when it does not verify.
+  `sslmode=require` or `disable` needs `--allow-insecure-database`, for a private network only;
+  `prefer`, `allow` and `verify-ca` are refused.
 - **An owner role with `CREATEROLE`**, which owns the database (or may create in it and in its
   `public` schema). It creates the tables, functions and triggers, and the app and monitor roles
   (ADR 0004). **No superuser is needed** (S1-d proved the whole path without one), no extension
