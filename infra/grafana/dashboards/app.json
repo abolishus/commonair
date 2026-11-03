@@ -385,7 +385,7 @@
       "id": 6,
       "type": "timeseries",
       "title": "Outbox lag",
-      "description": "Time from an event to its publication on the bus (p95), and failed jobs per second.",
+      "description": "Time from an event to its publication on the bus (p95).",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"

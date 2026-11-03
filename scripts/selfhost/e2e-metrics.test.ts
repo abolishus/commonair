@@ -5,12 +5,14 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
 import {
+  CONFIGURED_GROUP,
   RULE_GROUPS,
   checkMetrics,
   metricQueries,
   promGet,
   queryPath,
   ruleGroups,
+  sloTargetQuery,
   vectorValue,
 } from "./e2e-metrics.ts";
 
@@ -67,7 +69,7 @@ describe("checkMetrics", () => {
     const calls: string[] = [];
     const inHost = (cmd: string) => {
       calls.push(cmd);
-      if (cmd.includes("/api/v1/rules")) return rules(RULE_GROUPS);
+      if (cmd.includes("/api/v1/rules")) return rules([...RULE_GROUPS, CONFIGURED_GROUP]);
       const a = answers(cmd, round);
       if (cmd.includes("redis")) round++;
       return a;
@@ -82,6 +84,29 @@ describe("checkMetrics", () => {
     await checkMetrics(inHost, (b, w) => seen.push([b, w]), "bundled", { sleep });
     expect(seen.every(([b]) => b)).toBe(true);
     expect(seen.map(([, w]) => w)).toContain('Prometheus has postgresql_* series with state_mode="bundled" (7)');
+    expect(seen.map(([, w]) => w)).toContain('commonair:slo_target:configured carries slo_target="0.995"');
+  });
+
+  test("fails when start.sh rendered another target, or none", async () => {
+    const answer = (has: string) => (cmd: string) =>
+      cmd.includes("/api/v1/rules")
+        ? rules(has ? [...RULE_GROUPS, CONFIGURED_GROUP] : RULE_GROUPS)
+        : cmd.includes(encodeURIComponent("slo_target:configured"))
+          ? ok(cmd.includes(encodeURIComponent(`"${has}"`)) ? 1 : null)
+          : ok(3);
+    const failed = async (has: string, sloTarget?: string) => {
+      const seen: [boolean, string][] = [];
+      await checkMetrics(answer(has), (b, w) => seen.push([b, w]), "bundled", { sleep, sloTarget });
+      return seen.filter(([b]) => !b).map(([, w]) => w);
+    };
+    expect(await failed("0.995")).toEqual([]);
+    expect(await failed("0.999", "0.999")).toEqual([]);
+    expect(await failed("0.999")).toEqual(['commonair:slo_target:configured carries slo_target="0.995"']);
+    expect(await failed("")).toEqual([
+      "Prometheus loaded the rules start.sh rendered (commonair-configured)",
+      'commonair:slo_target:configured carries slo_target="0.995"',
+    ]);
+    expect(() => sloTargetQuery('0.9"}')).toThrow(/not an SLO target/);
   });
 
   test("fails a family that never shows up, and a missing rule group", async () => {
@@ -92,6 +117,7 @@ describe("checkMetrics", () => {
     expect(seen.filter(([b]) => !b).map(([, w]) => w)).toEqual([
       'Prometheus has redis_* series with state_mode="external" (0)',
       "Prometheus loaded the CommonAir rule groups (missing: commonair-targets)",
+      "Prometheus loaded the rules start.sh rendered (commonair-configured)",
     ]);
   });
 });

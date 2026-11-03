@@ -14,7 +14,7 @@
 # VALKEY_MONITOR_* endpoints are the bundled containers (the defaults below), with external state
 # they are the managed services, reached over verified TLS with the read-only monitor role. A
 # remote that is down or refuses the login never stops the collector: each receiver logs the
-# failed scrape and counts it in otelcol_scraper_errored_metric_points_total (:8888), which the
+# failed scrape and counts it in otelcol_scraper_errored_metric_points (:8888; no _total), which the
 # CommonairStateScrapeFailing alert watches.
 extensions:
   health_check:

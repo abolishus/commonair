@@ -46,6 +46,21 @@ export const RULE_GROUPS = [
   "commonair-state",
 ] as const;
 
+/**
+ * The group infra/prometheus/start.sh renders from SLO_TARGET at every start. Without it the
+ * rules fall back to 0.995 silently, so its presence (and the target it carries) is checked apart.
+ */
+export const CONFIGURED_GROUP = "commonair-configured";
+
+/** The self-host default availability target (ADR 0032 stage 0), what an e2e install renders. */
+export const DEFAULT_SLO_TARGET = "0.995";
+
+/** Counts the rendered target series carrying `target` as its slo_target label. */
+export function sloTargetQuery(target: string): string {
+  if (!/^0\.\d+$/.test(target)) throw new Error(`not an SLO target: ${target}`);
+  return `count(commonair:slo_target:configured{slo_target="${target}"})`;
+}
+
 /** A shell line that prints Prometheus's answer to `path` from inside its container. */
 export function promGet(path: string): string {
   if (/['\s]/.test(path)) throw new Error(`unsafe Prometheus path: ${path}`);
@@ -76,7 +91,13 @@ export async function checkMetrics(
   inHost: InHost,
   expectThat: Expect,
   mode: StateMode,
-  opts: { timeoutMs?: number; pollMs?: number; sleep?: (ms: number) => Promise<void> } = {},
+  opts: {
+    timeoutMs?: number;
+    pollMs?: number;
+    sleep?: (ms: number) => Promise<void>;
+    /** The SLO_TARGET the install set; the e2e installs leave it unset. */
+    sloTarget?: string;
+  } = {},
 ): Promise<void> {
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const deadline = Date.now() + (opts.timeoutMs ?? METRICS_TIMEOUT_MS);
@@ -107,4 +128,13 @@ export async function checkMetrics(
     missing.length === 0,
     `Prometheus loaded the CommonAir rule groups${missing.length ? ` (missing: ${missing.join(", ")})` : ""}`,
   );
+  expectThat(groups.includes(CONFIGURED_GROUP), `Prometheus loaded the rules start.sh rendered (${CONFIGURED_GROUP})`);
+  const target = opts.sloTarget ?? DEFAULT_SLO_TARGET;
+  let rendered = 0;
+  try {
+    rendered = vectorValue(inHost(promGet(queryPath(sloTargetQuery(target))), { user: true, allowFail: true }));
+  } catch {
+    rendered = 0;
+  }
+  expectThat(rendered > 0, `commonair:slo_target:configured carries slo_target="${target}"`);
 }

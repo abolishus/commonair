@@ -28,14 +28,14 @@ On a development stack (`podman compose up`), Grafana is at `http://localhost:30
 `GRAFANA_ADMIN_PASSWORD` from `.env`, and Prometheus at `http://localhost:9090`. The dashboards are
 in the "CommonAir" folder:
 
-| Dashboard      | What it shows                                                                |
-| -------------- | ---------------------------------------------------------------------------- |
-| Stage triggers | One panel per ADR 0032 trigger, with the alert line (80%) and the trigger    |
-| Availability   | Availability over 30 days, the target, the error budget left, the burn rates |
-| Host           | CPU, memory, load, the root filesystem and disk I/O                          |
-| Postgres       | Connections, size, statement time, transactions, rows, the largest tables    |
-| Valkey         | Memory against `maxmemory`, clients, commands, hits and misses, evictions    |
-| App            | Origin egress, HTTP latency and errors, chat connections, queues, outbox lag |
+| Dashboard      | What it shows                                                                                      |
+| -------------- | -------------------------------------------------------------------------------------------------- |
+| Stage triggers | One panel per ADR 0032 trigger, with the alert line (80%) and the trigger                          |
+| Availability   | Availability over 30 days, the target, the error budget left, the burn rates, stage 0 budget spent |
+| Host           | CPU, memory, load, the root filesystem and disk I/O                                                |
+| Postgres       | Connections, size, statement time, transactions, rows, the largest tables                          |
+| Valkey         | Memory against `maxmemory`, clients, commands, hits and misses, evictions                          |
+| App            | Origin egress, HTTP latency and errors, chat connections, queues, outbox lag                       |
 
 Prometheus is not published on a self-hosted instance. To read its alerts, ask it from the host:
 `podman exec commonair-prometheus wget -qO- http://127.0.0.1:9090/api/v1/alerts`.
@@ -70,11 +70,23 @@ The passwords are Podman secrets, `commonair-pg-monitor-password` and
 file or a log. Every series from the state receivers carries a `state_mode` label.
 
 Unset keys take the bundled values above, but a key that is present and **empty** is used as it
-is: an empty `PG_MONITOR_TLS`, `PG_MONITOR_USER` or Postgres password makes the collector refuse
-its configuration and restart in a loop (the rest of the stack keeps running). On a development
-stack the collector gets the bundled values from `compose.yaml` and the password from
-`POSTGRES_MONITOR_PASSWORD` in `.env`; an `.env` older than that key needs
-`bun scripts/init-env.ts --merge`.
+is: an empty `PG_MONITOR_TLS`, `PG_MONITOR_USER` or Postgres password, an unknown TLS mode, or a
+missing monitor secret makes the collector refuse its configuration and restart in a loop.
+
+**That stops all telemetry, not only the state metrics.** There is one collector, so while it
+refuses its configuration no service's traces, logs or metrics reach Tempo, Loki or Prometheus
+either; the services themselves keep running (their units only want the collector, they do not
+require it) and retry their exports. `selfhost.sh` refuses to write an empty or unknown value for
+these keys, so this takes a hand edit of `commonair.env`. After one, check
+`podman logs commonair-otel-collector` before anything else.
+
+On a development stack the collector gets the bundled values from `compose.yaml` and the password
+from `POSTGRES_MONITOR_PASSWORD` in `.env`. There, an empty or missing password becomes
+`not-configured`, so the collector still starts (every service waits for its health): the login
+fails at each scrape and [CommonairStateScrapeFailing](#commonairstatescrapefailing) fires. An
+`.env` written before that key had a `__generate__` marker has `POSTGRES_MONITOR_PASSWORD=`, which
+`bun scripts/init-env.ts --merge` keeps; set a value by hand (`openssl rand -hex 24`), then rerun
+the `migrate` job so it creates the role.
 
 `PG_MONITOR_TLS` and `VALKEY_MONITOR_TLS` take exactly those two values each. They pick a file in
 `infra/otel-collector/tls/`; any other value makes the collector refuse to start rather than fall
@@ -172,8 +184,14 @@ this alert can fire early, not late. Check the Postgres dashboard for what grew,
 ### CommonairStage0ErrorBudget
 
 More than 80% of a 99.5% monthly error budget (about 2.9 of 3.6 hours) went in the last 30 days,
-whatever `SLO_TARGET` says: this is stage 0's own trigger. ADR 0032 moves on when the budget is
-spent in two months of a quarter. Look at the Availability dashboard for when the errors came.
+whatever `SLO_TARGET` says: this is stage 0's own trigger. Look at the Availability dashboard for
+when the errors came.
+
+**This approximates the trigger.** ADR 0032 moves on when the budget is spent in two months of a
+quarter; the alert watches one rolling 30-day window, so it fires on the first such month, a
+warning ahead of the trigger rather than the trigger itself. Whether a second month in the quarter
+followed is read off the Availability dashboard's "Stage 0 budget spent, rolling 30 days" panel
+with the time range set to 90 days.
 
 ### CommonairStage0RestoreTime
 

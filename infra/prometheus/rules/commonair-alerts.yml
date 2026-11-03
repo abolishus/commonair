@@ -19,7 +19,8 @@ groups:
           summary: Postgres load has peaked over 40% of the host every day for 7 days (stage 0 trigger at 50%)
           runbook: docs/operators/monitoring.md#commonairstage0postgrescpu
       - alert: CommonairStage0ErrorBudget
-        # Trigger: the 99.5% budget spent (in two months of a quarter).
+        # Trigger: the 99.5% budget spent in two months of a quarter. Approximated by one rolling
+        # 30-day window, so it warns on the first such month (monitoring.md says so).
         expr: commonair:stage0_budget_spent:30d > 0.8
         labels:
           severity: ticket

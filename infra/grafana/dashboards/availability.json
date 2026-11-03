@@ -135,7 +135,7 @@
       "id": 3,
       "type": "stat",
       "title": "Error budget left, 30 days",
-      "description": "1 − errors / (1 − target) over a rolling 30 days. Below 0 the target is missed.",
+      "description": "1 \u2212 errors / (1 \u2212 target) over a rolling 30 days. Below 0 the target is missed.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -194,7 +194,7 @@
       "id": 4,
       "type": "timeseries",
       "title": "Burn rates",
-      "description": "Error ratio divided by the budget (1 − target). The fast page fires at 14.4 on both 1 h and 5 min, the slow page at 6 on both 6 h and 30 min.",
+      "description": "Error ratio divided by the budget (1 \u2212 target). The fast page fires at 14.4 on both 1 h and 5 min, the slow page at 6 on both 6 h and 30 min.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -366,6 +366,80 @@
           "refId": "B",
           "expr": "commonair:sli_error_ratio:rate1h",
           "legendFormat": "1 h",
+          "range": true
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Stage 0 budget spent, rolling 30 days",
+      "description": "The share of a 99.5% monthly error budget spent in the 30 days before each point. ADR 0032's stage 0 trigger is this over 100% in two months of a quarter: set the time range to 90 days to read it.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 21,
+        "w": 24,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.8
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false,
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "noValue": "No data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "expr": "commonair:stage0_budget_spent:30d",
+          "legendFormat": "spent",
           "range": true
         }
       ]

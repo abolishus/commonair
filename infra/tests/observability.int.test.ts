@@ -160,6 +160,18 @@ const stateSeries = (mode: string) => [
   series("redis_memory_used_bytes", mode),
   series("redis_maxmemory_bytes", mode),
 ];
+
+/** The collector's own count of metric points a receiver failed to scrape (0 when never counted). */
+async function erroredPoints(internalPort: number, receiver: string): Promise<number> {
+  const res = await fetch(`http://127.0.0.1:${internalPort}/metrics`).catch(() => null);
+  const telemetry = res?.ok ? await res.text() : "";
+  return Number(
+    new RegExp(`^otelcol_scraper_errored_metric_points\\{[^}]*receiver="${receiver}"[^}]*\\} (\\S+)$`, "m").exec(
+      telemetry,
+    )?.[1] ?? 0,
+  );
+}
+
 function expectNoSecrets(text: string): void {
   for (const pw of [SUPER_PASSWORD, MONITOR_PASSWORD, VALKEY_PASSWORD]) expect(text.includes(pw)).toBe(false);
 }
@@ -351,6 +363,14 @@ describe.runIf(HAVE_PODMAN)("the collector against Postgres and Valkey", () => {
         "select count(*) filter (where not s.ssl) from pg_stat_ssl s join pg_stat_activity a using (pid) where a.usename = 'commonair_monitor'",
       );
       expect(ssl).toBe("0");
+      // Nothing the receiver queries needs pg_monitor: a permission error on any scrape would be
+      // counted here and fire CommonairStateScrapeFailing on every managed install.
+      const internal = podPort(pod, 8888);
+      const before = await erroredPoints(internal, "postgresql");
+      await sleep(65_000);
+      expect(before).toBe(0);
+      expect(await erroredPoints(internal, "postgresql")).toBe(0);
+      expect(podman(["logs", otel]).out).not.toMatch(/permission denied/i);
       podmanOk(["rm", "-f", "-t", "0", otel]);
     });
 
@@ -361,27 +381,19 @@ describe.runIf(HAVE_PODMAN)("the collector against Postgres and Valkey", () => {
       await waitForSeries(port, [series("system_cpu_time_seconds_total", "external")], otel);
       const internal = podPort(pod, 8888);
       const deadline = Date.now() + 150_000;
-      let telemetry = "";
-      for (;;) {
-        const res = await fetch(`http://127.0.0.1:${internal}/metrics`).catch(() => null);
-        telemetry = res?.ok ? await res.text() : "";
-        const errored = (receiver: string) =>
-          Number(
-            new RegExp(
-              `^otelcol_scraper_errored_metric_points\\{[^}]*receiver="${receiver}"[^}]*\\} (\\S+)$`,
-              "m",
-            ).exec(telemetry)?.[1] ?? 0,
-          );
-        // The redis receiver does not count its failures; its series are simply missing (below).
-        if (errored("postgresql") > 0) break;
-        if (Date.now() > deadline) throw new Error(`no scrape errors counted:\n${telemetry.slice(0, 3000)}`);
+      // The redis receiver does not count its failures; its series are simply missing (below).
+      while ((await erroredPoints(internal, "postgresql")) === 0) {
+        if (Date.now() > deadline) throw new Error("no postgresql scrape errors counted");
         await sleep(2_000);
       }
       const out = await scrape(port);
       expect(out).not.toMatch(/^postgresql_backends\{/m);
       expect(out).not.toMatch(/^redis_memory_used_bytes\{/m);
       expect(podmanOk(["inspect", otel, "--format", "{{.State.Running}} {{.RestartCount}}"]).trim()).toBe("true 0");
-      expect(podman(["logs", otel]).out).toMatch(/certificate|x509|tls/i);
+      const logs = podman(["logs", otel]).out;
+      expect(logs).toMatch(/certificate|x509|tls/i);
+      // The TLS failure path is where a driver would print its DSN, which holds the password.
+      expectNoSecrets(logs);
     });
   });
 });
