@@ -56,7 +56,7 @@ function MembershipPage(): React.JSX.Element {
     } catch (err) {
       if (errorCode(err) === "CONFLICT") toast.error(t("coop.share.conflict"));
       else if (errorRequirement(err) === "manual_shares") toast.error(t("coop.share.manualOnly"));
-      else if (card && errorCode(err) === "PRECONDITION_FAILED") toast.error(t("coopMoney.card.failed"));
+      else if (card && errorRequirement(err) === "payment_provider") toast.error(t("coopMoney.card.failed"));
       else toastCoopError(err);
     } finally {
       setBuying(false);

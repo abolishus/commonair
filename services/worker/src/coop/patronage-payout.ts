@@ -18,14 +18,25 @@
  *    job throws so BullMQ retries under the same key; after the last attempt the row carries a
  *    `patronage.payout_outcome_unknown` marker for the treasurer.
  *
+ * A row carrying that marker is never sent again, and neither is a maybe-sent row whose first send
+ * is older than `PAYOUT_TRANSFER_KEY_WINDOW_MS` (Stripe forgets idempotency keys after about a day,
+ * so a repeat could make a second transfer). A treasurer settles it from what Stripe shows: paid
+ * with the `tr_` id, or not sent (failed, with a manual row), in the API's `patronage-payouts.ts`.
+ *
  * The transfer request names the row as both our ids (`payout_id`, `transfer_id` metadata), so the
  * API's transfer webhook can find it (`coop/patronage-payouts.ts` `patronageTransferEvent`). Ids and
  * cents only reach Stripe, the logs and the audit rows.
  */
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { type Executor, schema, uuidv7 } from "@commonair/db";
 import { emitEvent, systemAudit } from "@commonair/governance";
-import { payeeHasHoldingFlag, patronagePayout, payoutTransferKey, post } from "@commonair/ledger";
+import {
+  PAYOUT_TRANSFER_KEY_WINDOW_MS,
+  payeeHasHoldingFlag,
+  patronagePayout,
+  payoutTransferKey,
+  post,
+} from "@commonair/ledger";
 import { type PaymentAdapter, StripeRequestError } from "@commonair/payments";
 import type { WorkerContext } from "../context.ts";
 
@@ -71,15 +82,21 @@ export function owedCents(
   return Math.max(0, out);
 }
 
-async function hasMarker(db: Executor, payoutId: string, action: string): Promise<boolean> {
+/** When the marker was first written, or null. The sending marker's time is the key's first use. */
+async function markerAt(db: Executor, payoutId: string, action: string): Promise<Date | null> {
   const [m] = await db
-    .select({ id: auditLog.id })
+    .select({ at: auditLog.createdAt })
     .from(auditLog)
     .where(
       and(eq(auditLog.subjectType, "patronage_payout"), eq(auditLog.subjectId, payoutId), eq(auditLog.action, action)),
     )
+    .orderBy(asc(auditLog.createdAt))
     .limit(1);
-  return m !== undefined;
+  return m?.at ?? null;
+}
+
+async function hasMarker(db: Executor, payoutId: string, action: string): Promise<boolean> {
+  return (await markerAt(db, payoutId, action)) !== null;
 }
 
 async function marker(ctx: WorkerContext, row: PayoutRow, action: string, details: Record<string, unknown> = {}) {
@@ -141,7 +158,14 @@ export async function runPatronagePayout(
   if (!row) return { outcome: "skipped", reason: "no_row" };
   if (row.provider !== "stripe") return { outcome: "skipped", reason: "manual_row" };
 
-  const maybeSent = await hasMarker(ctx.db, row.id, PAYOUT_SENDING);
+  // A row whose outcome is already unknown is a person's to settle (coop.patronage.markPaid with
+  // Stripe's tr_ reference, or markUnsent); a re-queued job never sends it again.
+  if (await hasMarker(ctx.db, row.id, PAYOUT_OUTCOME_UNKNOWN)) {
+    ctx.logger.warn("patronage payout outcome unknown; left for a person", { payoutId: row.id });
+    return { outcome: "unknown", payoutId: row.id };
+  }
+  const firstSent = await markerAt(ctx.db, row.id, PAYOUT_SENDING);
+  const maybeSent = firstSent !== null;
   const member = await readiness(ctx.db, row.userId);
   if (!member.ready) {
     if (maybeSent) {
@@ -154,6 +178,13 @@ export async function runPatronagePayout(
       return { outcome: "unknown", payoutId: row.id };
     }
     return toManual(ctx, row, member.reason);
+  }
+  // Stripe forgets an idempotency key after about a day: past M1-connect's window a repeat could
+  // create a second transfer, so it is never sent again (as runPayoutTransfer).
+  if (firstSent && ctx.now().getTime() - firstSent.getTime() > PAYOUT_TRANSFER_KEY_WINDOW_MS) {
+    await marker(ctx, row, PAYOUT_OUTCOME_UNKNOWN, { reason: "key_window" });
+    ctx.logger.warn("patronage payout: past the idempotency window, not sent again", { payoutId: row.id });
+    return { outcome: "unknown", payoutId: row.id };
   }
 
   await marker(ctx, row, PAYOUT_SENDING);

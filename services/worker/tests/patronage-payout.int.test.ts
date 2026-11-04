@@ -15,7 +15,15 @@ import { and, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vite-plus/test";
 import { B8_JOBS, QUEUES } from "@commonair/contracts/internal";
 import { schema, uuidv7 } from "@commonair/db";
-import { accounts, insertFraudFlag, patronageAllocation, payoutTransferKey, post, rawBalance } from "@commonair/ledger";
+import {
+  PAYOUT_TRANSFER_KEY_WINDOW_MS,
+  accounts,
+  insertFraudFlag,
+  patronageAllocation,
+  payoutTransferKey,
+  post,
+  rawBalance,
+} from "@commonair/ledger";
 import {
   StripeOutcomeUnknown,
   StripeRequestError,
@@ -263,6 +271,53 @@ describe("the patronage-payout job", () => {
     expect(await markers(r.payoutId)).toContain("patronage.payout_outcome_unknown");
     const [row] = await rowsOf(r.periodId);
     expect(row).toMatchObject({ status: "pending", provider: "stripe" });
+  });
+
+  test("a row whose outcome is unknown is never sent again, even when queued again", async () => {
+    const m = await member();
+    const r = await approvedWithRow(m.id, 450);
+    const { adapter, calls } = fakeAdapter((req, n) => {
+      if (n === 1) throw new StripeOutcomeUnknown("timeout", 504, null, null);
+      return ok(req);
+    });
+    await expect(runPatronagePayout(ctx(), { adapter }, r, LAST)).rejects.toThrow(StripeOutcomeUnknown);
+    expect(await runPatronagePayout(ctx(), { adapter }, r, NOT_LAST)).toEqual({
+      outcome: "unknown",
+      payoutId: r.payoutId,
+    });
+    expect(calls).toHaveLength(1);
+    const [row] = await rowsOf(r.periodId);
+    expect(row).toMatchObject({ status: "pending", provider: "stripe" });
+  });
+
+  test("past Stripe's idempotency window a maybe-sent row is not sent again", async () => {
+    const m = await member();
+    const r = await approvedWithRow(m.id, 650);
+    const { adapter, calls } = fakeAdapter((req, n) => {
+      if (n === 1) throw new StripeOutcomeUnknown("timeout", 504, null, null);
+      return ok(req);
+    });
+    await expect(runPatronagePayout(ctx(), { adapter }, r, NOT_LAST)).rejects.toThrow(StripeOutcomeUnknown);
+    const later = new Date(Date.now() + PAYOUT_TRANSFER_KEY_WINDOW_MS + 60_000);
+    const lateCtx = { ...ctx(), now: () => later };
+    expect(await runPatronagePayout(lateCtx, { adapter }, r, NOT_LAST)).toEqual({
+      outcome: "unknown",
+      payoutId: r.payoutId,
+    });
+    expect(calls).toHaveLength(1);
+    expect(await markers(r.payoutId)).toContain("patronage.payout_outcome_unknown");
+    const [row] = await rowsOf(r.periodId);
+    expect(row).toMatchObject({ status: "pending", provider: "stripe" });
+    expect(await owed(m.id)).toBe(650);
+  });
+
+  test("a row never sent is sent whatever its age", async () => {
+    const m = await member();
+    const r = await approvedWithRow(m.id, 350);
+    const { adapter, calls } = fakeAdapter(ok);
+    const lateCtx = { ...ctx(), now: () => new Date(Date.now() + PAYOUT_TRANSFER_KEY_WINDOW_MS + 60_000) };
+    expect(await runPatronagePayout(lateCtx, { adapter }, r, NOT_LAST)).toMatchObject({ outcome: "paid" });
+    expect(calls).toHaveLength(1);
   });
 
   test("a member whose account is not ready (or held, or deleted) goes to the manual path", async () => {

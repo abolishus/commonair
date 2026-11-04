@@ -39,7 +39,7 @@
   "coopMoney.markPaid.title": "¿Marcar este pago como pagado?",
   "coopMoney.markPaid.description": "Registra la transferencia bancaria que enviaste. Esto anota el pago en el libro contable y no se puede deshacer.",
   "coopMoney.markPaid.reference": "Referencia de la transferencia",
-  "coopMoney.markPaid.referenceHint": "Un código corto: letras, dígitos, espacios y . _ : / # -",
+  "coopMoney.markPaid.referenceHint": "Un código corto sin espacios: letras, dígitos y . _ : / # -",
   "coopMoney.markPaid.confirm": "Marcar como pagado",
   "coopMoney.mine.title": "Tu pago",
   "coopMoney.mine.pending": "Tu pago de {amount} está en camino.",

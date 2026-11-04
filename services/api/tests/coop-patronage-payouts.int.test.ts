@@ -9,7 +9,10 @@
  * Connect reversal returns the amount to the payable with a new manual row for it. Ledger checks
  * after each: balances, and each payable equals its allocation less what was paid out.
  *
- * `markPatronagePayoutPaid` and `memberPatronagePayout` are called directly: their procedures are a
+ * A Connect row whose outcome is unknown is settled by a treasurer (paid with its `tr_` id, or not
+ * sent with a manual follow-up), and nobody settles their own payout.
+ *
+ * `markPatronagePayoutPaid`, `markPatronagePayoutUnsent` and `memberPatronagePayout` are called directly: their procedures are a
  * contract request (`coop.patronage.markPaid`, `PatronageStatement.payout`). So is the transfer
  * webhook's patronage branch, driven here through `patronageTransferEvent` as the webhook will.
  */
@@ -20,7 +23,9 @@ import { accounts, patronageAllocation, post, rawBalance } from "@commonair/ledg
 import type { StripeAction } from "@commonair/payments";
 import {
   MANUAL_REFERENCE,
+  STRIPE_TRANSFER_REFERENCE,
   markPatronagePayoutPaid,
+  markPatronagePayoutUnsent,
   memberPatronagePayout,
   owedCents,
   patronageTransferEvent,
@@ -75,9 +80,25 @@ describe("pure rules", () => {
   });
 
   test("a manual reference is a short code, never free text", () => {
-    for (const ok of ["BANK-123", "chq 0042", "2026/11/03#7", "a"]) expect(MANUAL_REFERENCE.test(ok)).toBe(true);
-    for (const bad of ["", " lead", "x".repeat(65), "ada@example.test", "line\nbreak", "ünï"])
+    for (const ok of ["BANK-123", "chq-0042", "2026/11/03#7", "a", "tr_1AbC"])
+      expect(MANUAL_REFERENCE.test(ok)).toBe(true);
+    for (const bad of [
+      "",
+      " lead",
+      "x".repeat(65),
+      "ada@example.test",
+      "line\nbreak",
+      "ünï",
+      "Paid Jane Doe",
+      "chq 0042",
+    ])
       expect(MANUAL_REFERENCE.test(bad)).toBe(false);
+  });
+
+  test("a Connect row settled by hand takes a Stripe transfer id only", () => {
+    for (const ok of ["tr_1AbC", `tr_${"a".repeat(60)}`]) expect(STRIPE_TRANSFER_REFERENCE.test(ok)).toBe(true);
+    for (const bad of ["tr_", "BANK-123", "po_123", "tr_a-b", `tr_${"a".repeat(61)}`])
+      expect(STRIPE_TRANSFER_REFERENCE.test(bad)).toBe(false);
   });
 });
 
@@ -346,6 +367,158 @@ describe("patronage payouts", () => {
     await expect(over).rejects.toThrow(/./);
   });
 
+  /** A pending row on its own approved period, inserted as the app (the worker's shape). */
+  async function rowOn(userId: string, cents: number, provider: "stripe" | "manual") {
+    const pid = await approvedPeriod(owner(), [{ userId, cents }]);
+    const id = uuidv7();
+    await api.db.app.db.insert(schema.patronagePayouts).values({
+      id,
+      periodId: pid,
+      userId,
+      amountCents: cents,
+      currency: "usd",
+      provider,
+      idempotencyKey: `patronage-payout:${id}`,
+    });
+    return { periodId: pid, payoutId: id };
+  }
+  const outcomeUnknown = (payoutId: string) =>
+    owner()
+      .insert(schema.auditLog)
+      .values({
+        id: uuidv7(),
+        actorType: "system",
+        action: "patronage.payout_outcome_unknown",
+        subjectType: "patronage_payout",
+        subjectId: payoutId,
+        details: { reason: "no_answer" },
+      });
+  const refusal = (e: { code?: string; data?: { reason?: string; requirement?: string } }) =>
+    e.data?.reason ?? e.data?.requirement ?? e.code;
+
+  test("nobody marks their own payout paid or unsent", async () => {
+    const own = await rowOn(t1.userId, 120, "manual");
+    const mark = (actorId: string) =>
+      markPatronagePayoutPaid(api.deps, {
+        payoutId: own.payoutId,
+        reference: "BANK-9",
+        paidAt: new Date().toISOString(),
+        actorId,
+      }).then(() => "ok", refusal);
+    expect(await mark(t1.userId)).toBe("second_approver");
+    const ownStripe = await rowOn(t1.userId, 80, "stripe");
+    await outcomeUnknown(ownStripe.payoutId);
+    expect(
+      await markPatronagePayoutUnsent(api.deps, { payoutId: ownStripe.payoutId, actorId: t1.userId }).then(
+        () => "ok",
+        refusal,
+      ),
+    ).toBe("second_approver");
+    expect(await mark(t2.userId)).toBe("ok");
+    expect(await owed(t1.userId)).toBe(80);
+  });
+
+  describe("a Connect payout whose outcome is unknown", () => {
+    test("is the worker's until it carries the marker; then a tr_ id marks it paid (cash:stripe)", async () => {
+      const r = await rowOn(m1.userId, 250, "stripe");
+      const mark = (reference: string) =>
+        markPatronagePayoutPaid(api.deps, {
+          payoutId: r.payoutId,
+          reference,
+          paidAt: new Date().toISOString(),
+          actorId: t2.userId,
+        }).then((v) => v.status, refusal);
+      expect(await mark("tr_1Known")).toBe("CONFLICT");
+      await outcomeUnknown(r.payoutId);
+      expect(await mark("BANK-123")).toBe("BAD_REQUEST");
+      const before = await rawBalance(owner(), accounts.cash("stripe"), "usd");
+      expect(await mark("tr_1Known")).toBe("paid");
+      expect(await owed(m1.userId)).toBe(0);
+      expect(await rawBalance(owner(), accounts.cash("stripe"), "usd")).toBe(before - 250);
+      expect(await auditOf("patronage.payout_paid", r.payoutId)).toHaveLength(1);
+      await expectLedgerBalanced();
+    });
+
+    test("not sent: the row fails and a manual row opens for what is still owed", async () => {
+      const r = await rowOn(m1.userId, 175, "stripe");
+      const unsent = () =>
+        markPatronagePayoutUnsent(api.deps, { payoutId: r.payoutId, actorId: t2.userId }).then(
+          (v) => v,
+          (e) => refusal(e as never) ?? "error",
+        );
+      expect(await unsent()).toBe("CONFLICT");
+      await outcomeUnknown(r.payoutId);
+      const before = await owed(m1.userId);
+      const out = await unsent();
+      if (typeof out === "string") throw new Error(out);
+      expect(out.failed).toMatchObject({ status: "failed", provider: "stripe" });
+      expect(out.followUp).toMatchObject({ status: "pending", provider: "manual", amount: { cents: 175 } });
+      expect(await owed(m1.userId)).toBe(before);
+      const [a] = await auditOf("patronage.payout_unsent", r.payoutId);
+      expect(a?.actorId).toBe(t2.userId);
+      expect(await unsent()).toBe("CONFLICT");
+      await expectLedgerBalanced();
+    });
+
+    test("a reversal opens a follow-up for its own member only", async () => {
+      const pid = await approvedPeriod(owner(), [
+        { userId: m1.userId, cents: 90 },
+        { userId: m2.userId, cents: 60 },
+      ]);
+      const [a, b] = [uuidv7(), uuidv7()];
+      for (const [id, userId, cents] of [
+        [a, m1.userId, 90],
+        [b, m2.userId, 60],
+      ] as const)
+        await api.db.app.db.insert(schema.patronagePayouts).values({
+          id,
+          periodId: pid,
+          userId,
+          amountCents: cents,
+          currency: "usd",
+          provider: "stripe",
+          idempotencyKey: `patronage-payout:${id}`,
+        });
+      // A row starts pending (0049); m2's send failed.
+      await api.db.app.db
+        .update(schema.patronagePayouts)
+        .set({ status: "failed" })
+        .where(eq(schema.patronagePayouts.id, b));
+      const tr = `tr_${crypto.randomUUID().replace(/-/g, "").slice(0, 14)}`;
+      const ev = (type: "transfer.updated" | "transfer.reversed", amountReversed: number) =>
+        api.db.app.db.transaction((tx) =>
+          patronageTransferEvent(
+            tx,
+            {
+              type,
+              transferRef: tr,
+              destination: "acct_patronage",
+              amountCents: 90,
+              amountReversed,
+              currency: "usd",
+              payoutId: a,
+              transferId: a,
+            },
+            new Date(),
+          ),
+        );
+      expect((await ev("transfer.updated", 0))?.outcome).toBe("patronage_payout_paid");
+      expect((await ev("transfer.reversed", 90))?.outcome).toBe("patronage_payout_reversed");
+      const rows = await owner()
+        .select()
+        .from(schema.patronagePayouts)
+        .where(eq(schema.patronagePayouts.periodId, pid));
+      expect(rows.map((r) => [r.userId, r.status, r.provider]).toSorted(byJson)).toEqual(
+        [
+          [m1.userId, "reversed", "stripe"],
+          [m1.userId, "pending", "manual"],
+          [m2.userId, "failed", "stripe"],
+        ].toSorted(byJson),
+      );
+      await expectLedgerBalanced();
+    });
+  });
+
   describe("a Connect payout reversed", () => {
     let rowId = "";
     let reversedPeriod = "";
@@ -440,9 +613,10 @@ describe("patronage payouts", () => {
     });
 
     test("payables equal allocations less what was paid out", async () => {
-      // m2: 300 (first period, unpaid) + 400 (second period, reversed back) = 700.
-      expect(await owed(m2.userId)).toBe(700);
-      expect(await owed(m1.userId)).toBe(0);
+      // m2: 300 (first period, unpaid) + 60 (failed, owed) + 400 (reversed back) = 760.
+      expect(await owed(m2.userId)).toBe(760);
+      // m1: 175 (not sent, a manual row follows) + 90 (reversed back) = 265.
+      expect(await owed(m1.userId)).toBe(265);
       await expectLedgerBalanced();
     });
   });

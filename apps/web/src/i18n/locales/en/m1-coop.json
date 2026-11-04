@@ -39,7 +39,7 @@
   "coopMoney.markPaid.title": "Mark this payout paid?",
   "coopMoney.markPaid.description": "Record the bank transfer you sent. This posts the payout to the ledger and cannot be undone.",
   "coopMoney.markPaid.reference": "Transfer reference",
-  "coopMoney.markPaid.referenceHint": "A short code: letters, digits, spaces and . _ : / # -",
+  "coopMoney.markPaid.referenceHint": "A short code with no spaces: letters, digits and . _ : / # -",
   "coopMoney.markPaid.confirm": "Mark paid",
   "coopMoney.mine.title": "Your payout",
   "coopMoney.mine.pending": "Your payout of {amount} is on its way.",

@@ -277,8 +277,9 @@ describe("the payout section", () => {
   });
 
   it("the reference rule matches the API's", () => {
-    for (const ok of ["BANK-123", "chq 0042", "2026/11/03#7"]) expect(REFERENCE.test(ok)).toBe(true);
-    for (const bad of ["", " x", "a@b.c", "x".repeat(65)]) expect(REFERENCE.test(bad)).toBe(false);
+    for (const ok of ["BANK-123", "chq-0042", "2026/11/03#7"]) expect(REFERENCE.test(ok)).toBe(true);
+    for (const bad of ["", " x", "a@b.c", "x".repeat(65), "Paid Jane Doe", "chq 0042"])
+      expect(REFERENCE.test(bad)).toBe(false);
   });
 });
 

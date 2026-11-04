@@ -19,6 +19,9 @@
  *   account (and no fraud hold) gets a `stripe` row, and the `patronage-payout` job is enqueued
  *   after commit (the worker sends it through M1-connect's transfer service). Everyone else's row
  *   is `manual`.
+ * - **Unknown outcomes.** A Connect row the worker could not settle (`patronage.payout_outcome_unknown`)
+ *   is never sent again; a treasurer looks it up at Stripe and marks it paid with its `tr_` id, or
+ *   not sent (failed, with a manual follow-up row). Nobody settles their own payout.
  * - **Reversals.** A Connect reversal posts `patronagePayoutReversed` (the cash returns, the member
  *   is owed it again), marks the row `reversed`, and opens a new manual row for what is still owed.
  * - **Deleted accounts.** Their row stays `pending` and cannot be marked paid: the money stays in
@@ -56,10 +59,18 @@ export const PAYOUT_OPENED = "patronage.payout_open";
 export const PAYOUT_PAID = "patronage.payout_paid";
 export const PAYOUT_REVERSED = "patronage.payout_reversed";
 export const PAYOUT_ORPHANED = "patronage.payout_orphaned";
+/** The worker's marker on a Connect row whose transfer may or may not exist at Stripe. */
+export const PAYOUT_OUTCOME_UNKNOWN = "patronage.payout_outcome_unknown";
+export const PAYOUT_UNSENT = "patronage.payout_unsent";
 const PAID_PERIODS = ["approved", "distributed"] as const;
 
-/** A treasurer's manual reference: a short code (bank reference, cheque number), never free text. */
-export const MANUAL_REFERENCE = /^[A-Za-z0-9][A-Za-z0-9 ._:/#-]{0,63}$/;
+/**
+ * A treasurer's manual reference: a short code (bank reference, cheque number), never free text.
+ * No spaces, so a name ("Paid Jane Doe") cannot land in the write-once `provider_ref` (ADR 0004).
+ */
+export const MANUAL_REFERENCE = /^[A-Za-z0-9][A-Za-z0-9._:/#-]{0,63}$/;
+/** A Stripe transfer id, the only reference a Connect row settled by hand takes. */
+export const STRIPE_TRANSFER_REFERENCE = /^tr_[A-Za-z0-9]{1,60}$/;
 
 // ── Pure rules (unit-tested) ────────────────────────────────────────────────────────────────
 
@@ -223,12 +234,24 @@ async function membersOf(tx: Executor, userIds: readonly string[]): Promise<Map<
 export async function openMissingPayouts(
   tx: Executor,
   period: Pick<PeriodRow, "id" | "currency">,
-  o: { canTransfer: boolean; actor: { type: "admin" | "system"; id: string | null } },
+  o: {
+    canTransfer: boolean;
+    actor: { type: "admin" | "system"; id: string | null };
+    /** Only these members (a reversal or a settled row opens a follow-up for its own member only). */
+    userIds?: readonly string[];
+  },
 ): Promise<{ created: number; stripe: string[] }> {
+  if (o.userIds?.length === 0) return { created: 0, stripe: [] };
   const allocations = await tx
     .select({ userId: patronageAllocations.userId, amountCents: patronageAllocations.amountCents })
     .from(patronageAllocations)
-    .where(and(eq(patronageAllocations.periodId, period.id), sql`${patronageAllocations.amountCents} > 0`))
+    .where(
+      and(
+        eq(patronageAllocations.periodId, period.id),
+        sql`${patronageAllocations.amountCents} > 0`,
+        o.userIds ? inArray(patronageAllocations.userId, [...o.userIds]) : undefined,
+      ),
+    )
     .orderBy(asc(patronageAllocations.userId));
   if (allocations.length === 0) return { created: 0, stripe: [] };
   const rows = await tx.select().from(patronagePayouts).where(eq(patronagePayouts.periodId, period.id));
@@ -389,10 +412,30 @@ export async function memberPatronagePayout(
 
 // ── Manual mark-paid ─────────────────────────────────────────────────────────────────────────
 
+const ownPayout = () =>
+  apiError("FORBIDDEN", "Another treasurer or an admin settles your own payout", { reason: "second_approver" });
+
+async function hasOutcomeUnknown(tx: Executor, payoutId: string): Promise<boolean> {
+  const [m] = await tx
+    .select({ id: auditLog.id })
+    .from(auditLog)
+    .where(
+      and(
+        eq(auditLog.subjectType, "patronage_payout"),
+        eq(auditLog.subjectId, payoutId),
+        eq(auditLog.action, PAYOUT_OUTCOME_UNKNOWN),
+      ),
+    )
+    .limit(1);
+  return m !== undefined;
+}
+
 /**
- * A treasurer marks a manual row paid with their reference (`coop.patronage.markPaid` once the
- * contract carries it). Refused for a Connect row (the worker settles those), a deleted account,
- * a reference that is not a short code, and a time in the future or before the period was approved.
+ * A treasurer marks a row paid with their reference (`coop.patronage.markPaid` once the contract
+ * carries it). A manual row takes a short code. A Connect row is the worker's, except one whose
+ * outcome is unknown (the worker will never send it again): the treasurer looks it up at Stripe and
+ * marks it paid with its `tr_` id. Refused for the treasurer's own payout, a deleted account, a
+ * reference of the wrong shape, and a time in the future or before the period was approved.
  */
 export async function markPatronagePayoutPaid(
   deps: Deps,
@@ -413,20 +456,88 @@ export async function markPatronagePayoutPaid(
         .where(eq(patronagePayouts.id, input.payoutId))
         .for("update");
       if (!row) throw notFound("Payout not found");
+      if (row.userId === input.actorId) throw ownPayout();
       if (row.status !== "pending") throw conflict(`This payout is ${row.status}, not pending`);
-      if (row.provider !== "manual")
-        throw conflict("This payout is sent through the payment provider; it is not marked paid by hand");
+      if (row.provider !== "manual") {
+        if (!(await hasOutcomeUnknown(tx, row.id)))
+          throw conflict("This payout is sent through the payment provider; it is not marked paid by hand");
+        if (!STRIPE_TRANSFER_REFERENCE.test(reference))
+          throw badRequest("A payout sent through Stripe is marked paid with its transfer id (tr_…)");
+      }
       const [period] = await tx.select().from(patronagePeriods).where(eq(patronagePeriods.id, row.periodId));
       if (period?.approvedAt && paidAt.getTime() < period.approvedAt.getTime())
         throw badRequest("The payout cannot be paid before the period was approved");
       const [u] = await tx.select({ deletedAt: users.deletedAt }).from(users).where(eq(users.id, row.userId));
-      if (!u || u.deletedAt) throw precondition("account_deleted", "This member's account was deleted; it stays owed");
+      // A Connect transfer that exists left whatever happened to the account since; a manual one is not made.
+      if (row.provider === "manual" && (!u || u.deletedAt))
+        throw precondition("account_deleted", "This member's account was deleted; it stays owed");
       const done = await recordPaid(tx, row, { reference, paidAt, now, actor: { type: STAFF, id: input.actorId } });
       if (!done) throw conflict("This payout changed; reload and try again");
       return done;
     }),
   );
   return payoutView(paid, await peopleOf(deps.db, [paid.userId]));
+}
+
+/**
+ * A treasurer settles a Connect row whose outcome is unknown as never sent, after checking Stripe
+ * shows no transfer for it (`coop.patronage.markUnsent` once the contract carries it): the row
+ * fails (nothing was posted, the money is still in the payable) and a manual row opens for what the
+ * member is still owed. A transfer that turns up later anyway is recorded for the treasurer
+ * (`patronage.payout_orphaned`), never paid twice. Refused for the treasurer's own payout.
+ */
+export async function markPatronagePayoutUnsent(
+  deps: Deps,
+  input: { payoutId: string; actorId: string },
+): Promise<{ failed: PatronagePayoutDto; followUp: PatronagePayoutDto | null }> {
+  const actor = { type: STAFF, id: input.actorId } as const;
+  const r = await withCoopErrors(() =>
+    deps.db.transaction(async (tx) => {
+      const [row] = await tx
+        .select()
+        .from(patronagePayouts)
+        .where(eq(patronagePayouts.id, input.payoutId))
+        .for("update");
+      if (!row) throw notFound("Payout not found");
+      if (row.userId === input.actorId) throw ownPayout();
+      if (row.status !== "pending") throw conflict(`This payout is ${row.status}, not pending`);
+      if (row.provider !== "stripe" || !(await hasOutcomeUnknown(tx, row.id)))
+        throw conflict("Only a payout whose outcome at Stripe is unknown is settled as not sent");
+      const [failed] = await tx
+        .update(patronagePayouts)
+        .set({ status: "failed" })
+        .where(and(eq(patronagePayouts.id, row.id), eq(patronagePayouts.status, "pending")))
+        .returning();
+      if (!failed) throw conflict("This payout changed; reload and try again");
+      await audit(tx, {
+        actorType: actor.type,
+        actorId: actor.id,
+        action: PAYOUT_UNSENT,
+        subjectType: "patronage_payout",
+        subjectId: row.id,
+        details: { periodId: row.periodId, userId: row.userId, amountCents: row.amountCents },
+      });
+      const [period] = await tx
+        .select({ id: patronagePeriods.id, currency: patronagePeriods.currency })
+        .from(patronagePeriods)
+        .where(eq(patronagePeriods.id, row.periodId));
+      if (period) await openMissingPayouts(tx, period, { canTransfer: false, actor, userIds: [row.userId] });
+      const [followUp] = await tx
+        .select()
+        .from(patronagePayouts)
+        .where(
+          and(
+            eq(patronagePayouts.periodId, row.periodId),
+            eq(patronagePayouts.userId, row.userId),
+            eq(patronagePayouts.status, "pending"),
+          ),
+        )
+        .limit(1);
+      return { failed, followUp: followUp ?? null };
+    }),
+  );
+  const people = await peopleOf(deps.db, [r.failed.userId]);
+  return { failed: payoutView(r.failed, people), followUp: r.followUp ? payoutView(r.followUp, people) : null };
 }
 
 // ── Connect transfer events ──────────────────────────────────────────────────────────────────
@@ -566,7 +677,12 @@ async function recordReversal(
     .select({ id: patronagePeriods.id, currency: patronagePeriods.currency })
     .from(patronagePeriods)
     .where(eq(patronagePeriods.id, row.periodId));
-  if (period) await openMissingPayouts(tx, period, { canTransfer: false, actor: { type: "system", id: null } });
+  if (period)
+    await openMissingPayouts(tx, period, {
+      canTransfer: false,
+      actor: { type: "system", id: null },
+      userIds: [row.userId],
+    });
 }
 
 // ── Handlers ────────────────────────────────────────────────────────────────────────────────
@@ -671,10 +787,11 @@ export const patronagePayoutHandlers = {
           });
         const opened = await openMissingPayouts(tx, period, { canTransfer, actor });
         // Every Connect row still pending is queued (again): a repeat recovers a lost enqueue, and
-        // the job id keeps one job per member and period.
-        const waiting = canTransfer
+        // the job id keeps one job per member and period. A row whose outcome is unknown is a
+        // person's to settle, never sent again (the worker refuses it too).
+        const pendingStripe = canTransfer
           ? await tx
-              .select({ userId: patronagePayouts.userId })
+              .select({ id: patronagePayouts.id, userId: patronagePayouts.userId })
               .from(patronagePayouts)
               .where(
                 and(
@@ -684,6 +801,27 @@ export const patronagePayoutHandlers = {
                 ),
               )
           : [];
+        const unknown =
+          pendingStripe.length === 0
+            ? new Set<string>()
+            : new Set(
+                (
+                  await tx
+                    .select({ id: auditLog.subjectId })
+                    .from(auditLog)
+                    .where(
+                      and(
+                        eq(auditLog.subjectType, "patronage_payout"),
+                        inArray(
+                          auditLog.subjectId,
+                          pendingStripe.map((w) => w.id),
+                        ),
+                        eq(auditLog.action, PAYOUT_OUTCOME_UNKNOWN),
+                      ),
+                    )
+                ).map((m) => m.id),
+              );
+        const waiting = pendingStripe.filter((w) => !unknown.has(w.id));
         const stripe = [...new Set([...opened.stripe, ...waiting.map((w) => w.userId)])];
         return { state: "approved" as const, created: opened.created, stripe };
       }),

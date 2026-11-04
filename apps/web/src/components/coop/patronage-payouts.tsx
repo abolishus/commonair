@@ -60,7 +60,7 @@ export const canMarkPaid = (r: PatronagePayoutDto): boolean =>
   r.status === "pending" && r.provider === "manual" && !isDeletedMember(r);
 
 /** The treasurer's reference, as the API accepts it (`MANUAL_REFERENCE`). */
-export const REFERENCE = /^[A-Za-z0-9][A-Za-z0-9 ._:/#-]{0,63}$/;
+export const REFERENCE = /^[A-Za-z0-9][A-Za-z0-9._:/#-]{0,63}$/;
 
 function MarkPaid({
   row,
