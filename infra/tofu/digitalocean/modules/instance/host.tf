@@ -17,10 +17,12 @@ resource "digitalocean_droplet" "app" {
   ipv6       = true
   monitoring = true
   ssh_keys   = var.ssh_key_fingerprints
-  tags       = [for t in local.app_tags : digitalocean_tag.this[t].name]
+  tags       = local.app_tags
   user_data  = var.cloud_init_updates ? local.user_data : null
 
   graceful_shutdown = true
+
+  depends_on = [digitalocean_tag.this]
 
   lifecycle {
     # Operators manage their own keys in authorized_keys after first boot (deploy guide, §3),
@@ -54,7 +56,9 @@ resource "digitalocean_volume" "media" {
   size                    = var.media_volume_size_gb
   initial_filesystem_type = "ext4"
   description             = "MEDIA_WORK_DIR_* scratch space (VOD recording)"
-  tags                    = [digitalocean_tag.this[local.tag_all].name, digitalocean_tag.this[local.tag_env].name]
+  tags                    = local.state_tags
+
+  depends_on = [digitalocean_tag.this]
 }
 
 resource "digitalocean_volume_attachment" "media" {

@@ -22,6 +22,24 @@ variable "name_prefix" {
   default     = null
 }
 
+variable "extra_tags" {
+  description = "More tags for every droplet, volume and database cluster, e.g. a run tag that a cleanup deletes by. Referenced by name, never destroyed with the environment."
+  type        = list(string)
+  default     = []
+  nullable    = false
+
+  validation {
+    condition     = alltrue([for t in var.extra_tags : can(regex("^[a-z0-9][a-z0-9:_-]{0,254}$", t))])
+    error_message = "Tags are lowercase letters, digits, colons, dashes and underscores."
+  }
+}
+
+variable "project_id" {
+  description = "An existing project to assign this environment's resources to. Null creates a project named after name_prefix."
+  type        = string
+  default     = null
+}
+
 variable "region" {
   description = "Region of the app droplet(s), the VPC and, at stage 1, the managed databases and instance buckets."
   type        = string

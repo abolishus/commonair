@@ -27,7 +27,9 @@ resource "digitalocean_database_cluster" "pg" {
   region               = var.region
   node_count           = 2 # primary + one standby: 99.95% SLA, failover in 5-10 s
   private_network_uuid = digitalocean_vpc.app.id
-  tags                 = [digitalocean_tag.this[local.tag_all].name, digitalocean_tag.this[local.tag_env].name]
+  tags                 = local.state_tags
+
+  depends_on = [digitalocean_tag.this]
 }
 
 resource "digitalocean_database_firewall" "pg" {
@@ -52,7 +54,9 @@ resource "digitalocean_database_cluster" "valkey" {
   region               = var.region
   node_count           = 2 # primary + one standby
   private_network_uuid = digitalocean_vpc.app.id
-  tags                 = [digitalocean_tag.this[local.tag_all].name, digitalocean_tag.this[local.tag_env].name]
+  tags                 = local.state_tags
+
+  depends_on = [digitalocean_tag.this]
 }
 
 resource "digitalocean_database_valkey_config" "valkey" {

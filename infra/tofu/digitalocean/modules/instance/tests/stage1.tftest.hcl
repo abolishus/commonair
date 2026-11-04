@@ -130,3 +130,50 @@ run "stage2_still_off" {
     error_message = "Stage 1 alone adds no load balancer."
   }
 }
+
+run "shared_tags_are_never_tofu_resources" {
+  command = plan
+
+  variables {
+    extra_tags = ["commonair-agent-check"]
+  }
+
+  # Destroying a tag resource deletes the tag from everything that carries it, including other
+  # environments' droplets, so only the environment's own tags are managed.
+  assert {
+    condition     = toset(keys(digitalocean_tag.this)) == toset(["commonair-production", "commonair-production-app", "commonair-production-monitoring"])
+    error_message = "Only the environment's own tags are tag resources."
+  }
+
+  assert {
+    condition = alltrue([
+      contains(digitalocean_droplet.app[0].tags, "commonair-agent-check"),
+      contains(digitalocean_droplet.monitoring[0].tags, "commonair-agent-check"),
+      contains(digitalocean_database_cluster.pg[0].tags, "commonair-agent-check"),
+      contains(digitalocean_database_cluster.valkey[0].tags, "commonair-agent-check"),
+    ])
+    error_message = "Extra tags reach the droplets and the database clusters."
+  }
+}
+
+run "own_project_by_default" {
+  command = plan
+
+  assert {
+    condition     = length(digitalocean_project.this) == 1 && length(digitalocean_project_resources.existing) == 0
+    error_message = "Without project_id the environment gets its own project."
+  }
+}
+
+run "existing_project_is_only_assigned_to" {
+  command = plan
+
+  variables {
+    project_id = "00000000-0000-4000-8000-000000000001"
+  }
+
+  assert {
+    condition     = length(digitalocean_project.this) == 0 && digitalocean_project_resources.existing[0].project == "00000000-0000-4000-8000-000000000001"
+    error_message = "With project_id the resources are assigned to that project and no project is created."
+  }
+}

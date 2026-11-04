@@ -92,9 +92,12 @@ The tests in `modules/instance/tests/` plan against a mocked provider and check 
 ## What it creates
 
 **Every stage**: a project per environment; a VPC in the app region (and one in the monitoring
-region); tags `commonair`, `commonair-<env>`, `commonair-app` and `commonair-<env>-app`. Firewalls
-and database firewalls select on `commonair-<env>-app`, so a staging droplet never matches
-production's database firewall. SSH keys are looked up by fingerprint among the keys already on
+region); tags `commonair`, `commonair-<env>`, `commonair-app` and `commonair-<env>-app`, plus any
+`extra_tags`. Firewalls and database firewalls select on `commonair-<env>-app`, so a staging
+droplet never matches production's database firewall. Only the environment's own tags are tofu
+resources: deleting a tag removes it from everything that carries it, so the shared `commonair`
+and `commonair-app` (and `extra_tags`) are referenced by name and outlive a destroy.
+`project_id` assigns the resources to an existing project instead of creating one. SSH keys are looked up by fingerprint among the keys already on
 the account; tofu never creates one, and a missing fingerprint fails the plan.
 
 **Stage 0**:
