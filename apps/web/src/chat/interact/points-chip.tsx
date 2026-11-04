@@ -9,7 +9,7 @@ import { t } from "../../i18n/index.ts";
 import type { LoyaltyBalanceDto } from "./state.ts";
 
 /**
- * The viewer's channel points in the chat header (`chat-points`): signed-in viewers only, and
+ * The viewer's channel points in the chat input row (`chat-points`): signed-in viewers only, and
  * only while the channel's points are on. Points are a loyalty count, never money (ADR 0026).
  */
 /** The contract's default name (`packages/contracts` loyalty settings), stored in English. */

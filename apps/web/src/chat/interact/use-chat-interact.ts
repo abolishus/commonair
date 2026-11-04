@@ -47,6 +47,11 @@ export interface ChatInteract {
   giveaway: GiveawayDto | null;
   points: LoyaltyBalanceDto | null;
   raid: RaidBannerState | null;
+  /**
+   * True once this channel's first `current` calls (poll, prediction, giveaway) have settled, so
+   * the pinned strip can tell what was already there from what just happened.
+   */
+  loaded: boolean;
   /** True when the frame belonged to a card (handled or dropped); false sends it to the log. */
   onEvent: (type: string, data: unknown) => boolean;
   onRaid: (frame: ChatRaidFrame) => void;
@@ -63,10 +68,12 @@ interface InteractState {
   giveaway: GiveawayDto | null;
   points: LoyaltyBalanceDto | null;
   raid: RaidBannerState | null;
+  loaded: boolean;
 }
 
 type InteractAction =
   | { type: "reset" }
+  | { type: "loaded" }
   | { type: "resetPoints" }
   | { type: "pollLoaded"; poll: PollViewDto | null }
   | { type: "predictionLoaded"; prediction: PredictionViewDto | null }
@@ -79,12 +86,21 @@ type InteractAction =
   | { type: "points"; points: LoyaltyBalanceDto }
   | { type: "raid"; raid: RaidBannerState | null };
 
-const EMPTY: InteractState = { poll: null, prediction: null, giveaway: null, points: null, raid: null };
+const EMPTY: InteractState = {
+  poll: null,
+  prediction: null,
+  giveaway: null,
+  points: null,
+  raid: null,
+  loaded: false,
+};
 
 function interactReducer(state: InteractState, action: InteractAction): InteractState {
   switch (action.type) {
     case "reset":
       return { ...EMPTY, points: state.points };
+    case "loaded":
+      return state.loaded ? state : { ...state, loaded: true };
     case "resetPoints":
       return state.points === null ? state : { ...state, points: null };
     case "pollLoaded": {
@@ -178,24 +194,38 @@ export function useChatInteract({
   React.useEffect(() => {
     dispatch({ type: "reset" });
     let gone = false;
-    client.pollCurrent(channel).then(
-      (poll) => {
-        if (!gone) dispatch({ type: "pollLoaded", poll });
-      },
-      () => undefined,
-    );
-    client.predictionCurrent(channel).then(
-      (prediction) => {
-        if (!gone) dispatch({ type: "predictionLoaded", prediction });
-      },
-      () => undefined,
-    );
-    client.giveawayCurrent(channel).then(
-      (giveaway) => {
-        if (!gone) dispatch({ type: "giveaway", giveaway });
-      },
-      () => undefined,
-    );
+    let pending = 3;
+    const settled = () => {
+      pending -= 1;
+      if (!gone && pending === 0) dispatch({ type: "loaded" });
+    };
+    client
+      .pollCurrent(channel)
+      .then(
+        (poll) => {
+          if (!gone) dispatch({ type: "pollLoaded", poll });
+        },
+        () => undefined,
+      )
+      .finally(settled);
+    client
+      .predictionCurrent(channel)
+      .then(
+        (prediction) => {
+          if (!gone) dispatch({ type: "predictionLoaded", prediction });
+        },
+        () => undefined,
+      )
+      .finally(settled);
+    client
+      .giveawayCurrent(channel)
+      .then(
+        (giveaway) => {
+          if (!gone) dispatch({ type: "giveaway", giveaway });
+        },
+        () => undefined,
+      )
+      .finally(settled);
     return () => {
       gone = true;
     };
@@ -270,6 +300,7 @@ export function useChatInteract({
     giveaway: giveawayVisible(giveaway, now) ? giveaway : null,
     points: signedIn && state.points?.enabled ? state.points : null,
     raid: state.raid,
+    loaded: state.loaded,
     onEvent,
     onRaid,
     setPoll,

@@ -1,0 +1,23 @@
+/*
+ * SPDX-FileCopyrightText: 2026 CommonAir contributors
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * The chat column on `lg` (design review F6; `layout.ts` `chatColumnClass`): sticky and as tall
+ * as the viewport less the site header (`SiteHeader`, `min-h-14` = 3.5rem) and the page's `py-4`
+ * (1rem above, 1rem below). In theatre mode it docks at the top at the viewport less the header.
+ * Plain CSS because a calc() height is an arbitrary Tailwind value, which the source policy bans.
+ * Unlayered, so it wins over the `h-112` utility the column carries below `lg`.
+ */
+@media (min-width: 64rem) {
+  .chat-column {
+    position: sticky;
+    top: 1rem;
+    height: calc(100svh - 5.5rem);
+    min-height: 24rem;
+  }
+
+  .chat-column.chat-column-theatre {
+    top: 0;
+    height: calc(100svh - 3.5rem);
+  }
+}
