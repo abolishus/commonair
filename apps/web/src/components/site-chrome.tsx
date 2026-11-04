@@ -4,7 +4,7 @@
 import { ThemeToggle } from "@commonair/ui";
 import { Button } from "@commonair/ui/components/button";
 import { SidebarTrigger } from "@commonair/ui/components/sidebar";
-import { SiteFooter, SiteHeader, UserMenu, type NavItem, type UserMenuItem } from "@commonair/ui/layouts";
+import { SiteFooter, SiteHeader, type NavItem, type UserMenuItem } from "@commonair/ui/layouts";
 import { toast } from "@commonair/ui/toast";
 import {
   BankIcon,
@@ -42,6 +42,9 @@ import {
 import { ThemeContext } from "../lib/theme-context.ts";
 import { safeHttpUrl } from "../lib/url.ts";
 import { CookieSettingsButton } from "./consent/cookie-settings-button.tsx";
+import { AccountMenu } from "./discovery/account-menu.tsx";
+import { DiscoveryPalette, HeaderSearchField, MobileSearchSheet } from "./discovery/header-search.tsx";
+import { SheetDiscovery, SideRail } from "./discovery/rail.tsx";
 import { FooterLocaleSwitcher } from "./locale/footer-locale-switcher.tsx";
 import { NotificationBell } from "./notifications/bell.tsx";
 import { forgetPushSubscription } from "./pwa/push-client.ts";
@@ -168,13 +171,24 @@ function accountItem(entry: AccountEntry): UserMenuItem {
   }
 }
 
+/** Where Sign in / Sign up send the visitor back to (F17): this page, unless it is one of them. */
+function useAuthRedirect(): string | undefined {
+  const href = useLocation({ select: (location) => location.href });
+  const path = href.split("#")[0] ?? "/";
+  if (path === "/" || path.startsWith("/signin") || path.startsWith("/signup")) return undefined;
+  return path;
+}
+
 function AccountLink({ entry }: { entry: SignedOutEntry }): React.JSX.Element {
+  const redirect = useAuthRedirect();
   return (
     <Button
       variant={entry.id === "signUp" ? "default" : "ghost"}
       size="sm"
       nativeButton={false}
-      render={<Link to={entry.to} aria-current={entry.current ? "page" : undefined} />}
+      render={
+        <Link to={entry.to} search={redirect ? { redirect } : {}} aria-current={entry.current ? "page" : undefined} />
+      }
     >
       {entry.id === "signIn" ? t("nav.signIn") : t("nav.signUp")}
     </Button>
@@ -182,19 +196,24 @@ function AccountLink({ entry }: { entry: SignedOutEntry }): React.JSX.Element {
 }
 
 /**
- * The site header for every page with chrome. `studio` adds the sidebar toggle; it must then be
- * rendered inside the StudioShell (the toggle needs its SidebarProvider).
+ * The site header for every page with chrome (F14, F18): the logo, Browse, search and the account
+ * controls. The theme is in the account menu for members and at the bottom of the mobile sheet for
+ * visitors. `studio` adds the sidebar toggle; it must then be rendered inside the StudioShell (the
+ * toggle needs its SidebarProvider).
  *
- * Width at a 288 px content box (320 px minus the 16 px gutters), below md where the nav and the
- * desktop group collapse into the sheet: menu button 32 + two 12 px gaps, plus
- * - signed out: Sign in 65 → the brand keeps ~167 px;
- * - signed in: avatar-only UserMenu ~36 → ~196 px;
- * - studio: sidebar toggle 28 + 8 + UserMenu ~36 → ~160 px.
+ * Width at a 288 px content box (320 px minus the 16 px gutters), below md where the nav, the
+ * search field and the desktop group collapse into the sheet: search 32 + menu 32 + three 12 px
+ * gaps, plus
+ * - signed out: Sign in 65 → the brand keeps ~123 px;
+ * - signed in: bell 32 + avatar-only menu ~36 → ~120 px;
+ * - studio: sidebar toggle 28 + 8 + the above → ~84 px.
  */
 export function AppHeader({ studio = false }: { studio?: boolean }): React.JSX.Element {
   const { me, instance } = useBootstrap();
   const { theme, setTheme } = React.useContext(ThemeContext);
   const pathname = useLocation({ select: (location) => location.pathname });
+  const [searchOpen, setSearchOpen] = React.useState(false);
+  const [paletteOpen, setPaletteOpen] = React.useState(false);
 
   const nav: NavItem[] = siteNav(pathname).map((entry) =>
     entry.id === "coop"
@@ -208,68 +227,90 @@ export function AppHeader({ studio = false }: { studio?: boolean }): React.JSX.E
           id: entry.id,
           label: t("nav.directory"),
           current: entry.current,
-          render: <Link data-testid="nav-directory" to="/" />,
+          render: <Link data-testid="nav-directory" to="/directory" />,
         },
   );
 
   const signedOut = me ? [] : accountMenu(false, pathname);
   const signIn = signedOut.filter((entry) => entry.id === "signIn");
   const signUp = signedOut.filter((entry) => entry.id === "signUp");
-  const themeToggle = <ThemeToggle value={theme} onValueChange={setTheme} />;
 
   return (
-    <SiteHeader
-      brand={{
-        name: instance.name,
-        href: "/",
-        render: <Link to="/" />,
-        mark: <HugeiconsIcon icon={LiveStreaming02Icon} strokeWidth={2} aria-hidden />,
-      }}
-      nav={nav}
-      navLabel={t("nav.main")}
-      menuLabel={t("nav.menu")}
-      actions={studio ? <SidebarTrigger /> : undefined}
-      // The theme switch (84) and Sign up (65) do not fit next to the brand at 288 px: from md they
-      // sit in the bar, below md in the phone sheet.
-      desktopActions={
-        <>
-          {themeToggle}
-          {signUp.map((entry) => (
-            <AccountLink key={entry.id} entry={entry} />
-          ))}
-        </>
-      }
-      user={
-        me ? (
+    <>
+      <SiteHeader
+        brand={{
+          name: instance.name,
+          href: "/",
+          render: <Link to="/" />,
+          mark: <HugeiconsIcon icon={LiveStreaming02Icon} strokeWidth={2} aria-hidden />,
+        }}
+        nav={nav}
+        navLabel={t("nav.main")}
+        menuLabel={t("nav.menu")}
+        search={<HeaderSearchField />}
+        searchLabel={t("discovery.search.open")}
+        onOpenPalette={() => setSearchOpen(true)}
+        actions={studio ? <SidebarTrigger /> : undefined}
+        // Sign up (65) does not fit next to the brand at 288 px: from md it sits in the bar,
+        // below md in the phone sheet.
+        desktopActions={
+          signUp.length ? (
+            <>
+              {signUp.map((entry) => (
+                <AccountLink key={entry.id} entry={entry} />
+              ))}
+            </>
+          ) : undefined
+        }
+        user={
+          me ? (
+            <>
+              <NotificationBell />
+              <AccountMenu
+                data-testid="nav-user"
+                data-username={me.username}
+                username={me.username}
+                menuLabel={t("nav.accountMenu", { name: me.displayName })}
+                theme={theme}
+                onThemeChange={setTheme}
+                items={accountMenu(true, {
+                  treasurer: isTreasurer(me),
+                  safetyStaff: isSafetyStaff(me),
+                  legal: isLegal(me),
+                  admin: isAdmin(me),
+                }).map(accountItem)}
+              />
+            </>
+          ) : (
+            signIn.map((entry) => <AccountLink key={entry.id} entry={entry} />)
+          )
+        }
+        mobileActions={
           <>
-            <NotificationBell />
-            <UserMenu
-              data-testid="nav-user"
-              data-username={me.username}
-              username={me.username}
-              menuLabel={t("nav.accountMenu", { name: me.displayName })}
-              items={accountMenu(true, {
-                treasurer: isTreasurer(me),
-                safetyStaff: isSafetyStaff(me),
-                legal: isLegal(me),
-                admin: isAdmin(me),
-              }).map(accountItem)}
-            />
+            <SheetDiscovery />
+            <div className="flex w-full flex-wrap items-center gap-2 border-t pt-4">
+              {signUp.map((entry) => (
+                <AccountLink key={entry.id} entry={entry} />
+              ))}
+              {!me && (
+                <span data-testid="sheet-theme-switcher">
+                  <ThemeToggle value={theme} onValueChange={setTheme} />
+                </span>
+              )}
+              <FooterLocaleSwitcher>{t("preferences.footerLanguage")}</FooterLocaleSwitcher>
+            </div>
           </>
-        ) : (
-          signIn.map((entry) => <AccountLink key={entry.id} entry={entry} />)
-        )
-      }
-      mobileActions={
-        <>
-          {themeToggle}
-          {signUp.map((entry) => (
-            <AccountLink key={entry.id} entry={entry} />
-          ))}
-        </>
-      }
-    />
+        }
+      />
+      <MobileSearchSheet open={searchOpen} onOpenChange={setSearchOpen} />
+      <DiscoveryPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
+    </>
   );
+}
+
+/** The public pages' left rail (F7), for AppShell's `sidebar` with `sidebarPlacement="below"`. */
+export function AppRail(): React.JSX.Element {
+  return <SideRail />;
 }
 
 function footerLink(entry: FooterEntry): { label: string; render: React.ReactElement } {
