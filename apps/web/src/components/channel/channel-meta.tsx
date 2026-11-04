@@ -1,0 +1,197 @@
+// SPDX-FileCopyrightText: 2026 CommonAir contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+/**
+ * The live metadata under the title (F9, F12): the category as a link into the directory, tags as
+ * links, uptime from the broadcast's `startedAt`, Share (copies the canonical URL, confirms with a
+ * toast), "Just started" for a low verified count, and the phone overflow menu that holds Report.
+ * Category and tag URLs come from `lib/category-route.ts` (D1-web's), never written here.
+ */
+import { IconButton, StatusBadge } from "@commonair/ui";
+import { Dialog, DialogContent } from "@commonair/ui/components/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@commonair/ui/components/dropdown-menu";
+import { toast } from "@commonair/ui/toast";
+import { Clock01Icon, Flag01Icon, MoreHorizontalIcon, Share08Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { Link } from "@tanstack/react-router";
+import * as React from "react";
+import { t } from "../../i18n/index.ts";
+import { categoryHref, tagHref } from "../../lib/category-route.ts";
+import { reportClient, type ReportClient, type ReportSubject } from "../safety/client.ts";
+import { ReportForm } from "../safety/report-dialog.tsx";
+import { formatUptime, isoDuration, uptimeSeconds } from "./channel-data.ts";
+
+/** The category, linking to its directory page. */
+export function CategoryLink({ category }: { category: { slug: string; name: string } }): React.JSX.Element {
+  return (
+    <a
+      data-testid="channel-meta-category"
+      data-slug={category.slug}
+      href={categoryHref(category.slug)}
+      className="min-w-0 truncate font-medium text-foreground underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+    >
+      {category.name}
+    </a>
+  );
+}
+
+/** The element a tag `Badge` renders as (`ChannelHeader`'s `tagLink`): a link to the directory filtered by it. */
+export function tagLink(tag: string): React.ReactElement {
+  return <a data-testid="channel-meta-tag" data-tag={tag} href={tagHref(tag)} aria-label={tag} />;
+}
+
+/** Re-renders once a second while mounted, starting from `initial` (the request time). */
+function useSecondClock(initial: number): number {
+  const [now, setNow] = React.useState(initial);
+  React.useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  return now;
+}
+
+/**
+ * How long the broadcast has been live, as a clock (0:59, 1:00:00, 48:00:00). The server render
+ * and the first client render use `now` (the request time) so hydration matches; it ticks after.
+ * It is not a live region: a screen reader reads it when it reaches it, not every second.
+ */
+export function Uptime({ startedAt, now }: { startedAt: string; now: number }): React.JSX.Element {
+  const clock = useSecondClock(now);
+  const seconds = uptimeSeconds(startedAt, clock);
+  const text = formatUptime(seconds);
+  return (
+    <span data-testid="channel-meta-uptime" className="inline-flex items-center gap-1 tabular-nums">
+      <HugeiconsIcon icon={Clock01Icon} strokeWidth={2} aria-hidden className="size-3.5" />
+      <time dateTime={isoDuration(seconds)} suppressHydrationWarning>
+        <span className="sr-only">{t("channel.meta.uptimeLabel")} </span>
+        {text}
+      </time>
+    </span>
+  );
+}
+
+/** Beside `<LiveBadge>` while the verified count is below `JUST_STARTED_BELOW` (the count is not shown). */
+export function JustStartedBadge(): React.JSX.Element {
+  return (
+    <StatusBadge data-testid="channel-just-started" tone="neutral">
+      {t("channel.meta.justStarted")}
+    </StatusBadge>
+  );
+}
+
+export interface Clipboard {
+  writeText(text: string): Promise<void>;
+}
+
+const browserClipboard = (): Clipboard | null =>
+  typeof navigator !== "undefined" && navigator.clipboard ? navigator.clipboard : null;
+
+/** Copies the channel's canonical URL and confirms with a toast (or says it could not). */
+export function ShareButton({
+  url,
+  clipboard = browserClipboard(),
+}: {
+  url: string;
+  clipboard?: Clipboard | null;
+}): React.JSX.Element {
+  const share = async () => {
+    try {
+      if (!clipboard) throw new Error("no clipboard");
+      await clipboard.writeText(url);
+      toast.success(t("channel.meta.shareCopied"));
+    } catch {
+      toast.error(t("channel.meta.shareFailed"));
+    }
+  };
+  return (
+    <IconButton
+      data-testid="channel-share"
+      data-url={url}
+      variant="outline"
+      size="icon-sm"
+      icon={Share08Icon}
+      label={t("channel.meta.share")}
+      onClick={() => void share()}
+    />
+  );
+}
+
+/**
+ * Phones only (`sm:hidden`): the "More" menu that holds Report, so Follow and Support keep their
+ * room. Signed out, Report goes to sign-in, as the desktop button does.
+ */
+export function ChannelOverflowMenu({
+  signedIn,
+  subjectType,
+  subjectId,
+  client,
+  className,
+}: {
+  signedIn: boolean;
+  subjectType: ReportSubject;
+  subjectId: string;
+  client?: ReportClient;
+  className?: string;
+}): React.JSX.Element {
+  const [open, setOpen] = React.useState(false);
+  const [reports] = React.useState(() => client ?? reportClient());
+  const content = (
+    <>
+      <HugeiconsIcon icon={Flag01Icon} strokeWidth={2} aria-hidden />
+      {t("safety.report.open")}
+    </>
+  );
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <IconButton
+              data-testid="channel-overflow"
+              variant="outline"
+              size="icon-sm"
+              icon={MoreHorizontalIcon}
+              label={t("channel.meta.more")}
+              className={className}
+            />
+          }
+        />
+        <DropdownMenuContent align="end">
+          {signedIn ? (
+            <DropdownMenuItem data-testid="channel-overflow-report" onClick={() => setOpen(true)}>
+              {content}
+            </DropdownMenuItem>
+          ) : (
+            <DropdownMenuItem data-testid="channel-overflow-report" render={<Link to="/signin" />}>
+              {content}
+            </DropdownMenuItem>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {signedIn ? (
+        <Dialog open={open} onOpenChange={setOpen}>
+          {open && (
+            <DialogContent
+              data-testid="report-dialog"
+              data-subject-type={subjectType}
+              data-subject-id={subjectId}
+              className="max-h-svh overflow-y-auto sm:max-w-lg"
+            >
+              <ReportForm
+                onSubmit={async (reason, details) => {
+                  await reports.report({ subjectType, subjectId, reason, details });
+                  setOpen(false);
+                }}
+              />
+            </DialogContent>
+          )}
+        </Dialog>
+      ) : null}
+    </>
+  );
+}

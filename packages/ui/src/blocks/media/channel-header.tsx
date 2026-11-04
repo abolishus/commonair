@@ -4,6 +4,7 @@
 import type * as React from "react";
 import { ChannelAvatar, LiveBadge, StatusBadge, ViewerCount } from "@commonair/ui";
 import type { Accent, LiveBadgeProps } from "@commonair/ui";
+import { Badge } from "@commonair/ui/components/badge";
 import { cn } from "@commonair/ui/lib/utils";
 
 export interface ChannelHeaderProps extends React.ComponentProps<"section"> {
@@ -19,6 +20,15 @@ export interface ChannelHeaderProps extends React.ComponentProps<"section"> {
   title?: string;
   category?: React.ReactNode;
   tags?: string[];
+  /**
+   * The element each tag renders as (for example a router link to the directory filtered by it),
+   * passed to the tag `Badge`'s `render`. Without it tags are plain chips.
+   */
+  tagLink?: (tag: string) => React.ReactElement;
+  /** Accessible name of the tag list. */
+  tagsLabel?: string;
+  /** Shown after the viewer count, e.g. the broadcast's uptime. */
+  uptime?: React.ReactNode;
   badges?: React.ReactNode;
   actions?: React.ReactNode;
   viewerCount?: number;
@@ -42,6 +52,9 @@ export function ChannelHeader({
   title,
   category,
   tags = [],
+  tagLink,
+  tagsLabel,
+  uptime,
   badges,
   actions,
   viewerCount,
@@ -64,34 +77,52 @@ export function ChannelHeader({
       {...props}
     >
       <ChannelAvatar name={name} src={avatarUrl} accent={accent} size={compact ? "md" : "lg"} live={live} decorative />
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
+      {/*
+       * The text column keeps a 12rem basis (F4): when the row is too narrow for it and the actions,
+       * the actions wrap onto their own row instead of squeezing the name to one glyph.
+       */}
+      <div data-slot="channel-header-text" className="flex min-w-0 flex-1 basis-48 flex-col gap-1">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <Heading className="min-w-0 truncate text-base font-semibold">{name}</Heading>
+          <Heading className="min-w-0 max-w-full truncate text-base font-semibold">{name}</Heading>
           {live && <LiveBadge pulse {...liveBadgeProps} />}
           {badges}
           {variant === "offline" && offlineLabel && <StatusBadge tone="neutral">{offlineLabel}</StatusBadge>}
         </div>
-        {title && <p className="truncate text-sm text-muted-foreground">{title}</p>}
+        {title && <p className="line-clamp-2 text-sm break-words text-muted-foreground">{title}</p>}
         {(category || tags.length > 0) && (
           <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
             {category}
-            {tags.map((tag) => (
-              <span key={tag}>{tag}</span>
-            ))}
+            {tags.length > 0 && (
+              <ul aria-label={tagsLabel} className="flex min-w-0 flex-wrap items-center gap-1">
+                {tags.map((tag) => (
+                  <li key={tag} className="min-w-0">
+                    <Badge variant="outline" className="max-w-full" render={tagLink?.(tag)}>
+                      <span className="truncate">{tag}</span>
+                    </Badge>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         )}
         {meta && <div className="text-xs text-muted-foreground">{meta}</div>}
-        {(viewerCount !== undefined || catchingUp || followers || lastLive) && (
-          <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+        {(viewerCount !== undefined || catchingUp || uptime || followers || lastLive) && (
+          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
             {viewerCount !== undefined && <ViewerCount count={viewerCount} />}
             {catchingUp}
+            {uptime}
             {followers}
             {lastLive}
           </div>
         )}
       </div>
       {actions && (
-        <div className={cn("flex shrink-0 flex-wrap items-center gap-2", compact && "w-full")}>{actions}</div>
+        <div
+          data-slot="channel-header-actions"
+          className={cn("flex max-w-full min-w-0 flex-wrap items-center gap-2", compact && "w-full")}
+        >
+          {actions}
+        </div>
       )}
     </section>
   );
