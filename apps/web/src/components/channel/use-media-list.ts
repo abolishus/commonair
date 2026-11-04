@@ -35,6 +35,7 @@ export interface MediaList<T> {
   /** The last "Show more" failed (the items shown stay). */
   moreFailed: boolean;
   loadMore: () => void;
+  /** Asks for the first page again (after a failure, or when the list is known to be stale). Stable. */
   retry: () => void;
 }
 
@@ -66,6 +67,7 @@ export function useMediaList<T extends { id: string }>(
   const [moreFailed, setMoreFailed] = React.useState(false);
   // A double click in one frame must not ask for the same page twice.
   const inFlight = React.useRef(false);
+  const retry = React.useCallback(() => setStatus("loading"), []);
 
   React.useEffect(() => {
     if (status !== "loading") return;
@@ -109,6 +111,6 @@ export function useMediaList<T extends { id: string }>(
     loadingMore,
     moreFailed,
     loadMore,
-    retry: () => setStatus("loading"),
+    retry,
   };
 }

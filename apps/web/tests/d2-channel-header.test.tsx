@@ -215,6 +215,12 @@ describe("Report on phones (F4)", () => {
     const dialog = await screen.findByTestId("report-dialog");
     expect(dialog.getAttribute("data-subject-type")).toBe("channel");
     expect(dialog.getAttribute("data-subject-id")).toBe(page().summary.id);
+    // Closing it returns focus to "More" (the menu item that opened it is gone).
+    act(() => {
+      fireEvent.keyDown(dialog, { key: "Escape" });
+    });
+    await waitFor(() => expect(screen.queryByTestId("report-dialog")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId("channel-overflow")));
   });
 
   it("the owner gets Share but no Report and no More menu", async () => {

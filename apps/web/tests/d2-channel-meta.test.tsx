@@ -159,6 +159,13 @@ describe("uptime", () => {
     });
     expect(el.textContent).toBe("Live for 1:00:59");
   });
+
+  it("<Uptime> corrects a stale request time on mount (a client-side navigation hours later)", () => {
+    vi.useFakeTimers({ now: at(2 * 3600) });
+    // The bootstrap `now` is from before the broadcast started.
+    render(providers(<Uptime startedAt={START} now={at(-600)} />));
+    expect(screen.getByTestId("channel-meta-uptime").textContent).toBe("Live for 2:00:00");
+  });
 });
 
 describe("Just started (F12)", () => {
@@ -188,7 +195,9 @@ describe("Just started (F12)", () => {
 describe("category and tags (F9)", () => {
   it("the live header links the category and each tag into the directory", async () => {
     renderPage(livePage(10));
-    const category = await screen.findByTestId("channel-meta-category");
+    // The header's comes first (with no VODs or clips, Home's About card links it too).
+    const [category] = await screen.findAllByTestId("channel-meta-category");
+    if (!category) throw new Error("no category link");
     expect(category.textContent).toBe("Art");
     expect(category.getAttribute("href")).toBe("/directory/art");
     const tags = screen.getAllByTestId("channel-meta-tag");
@@ -197,7 +206,8 @@ describe("category and tags (F9)", () => {
       ["watercolor", "/directory?tag=watercolor"],
     ]);
     expect(tags[0]?.closest("ul")?.getAttribute("aria-label")).toBe("Tags");
-    expect(screen.getByTestId("channel-meta-uptime").textContent).toMatch(/^Live for 1:3\d$/);
+    // Started 90 s ago (to the ms); the clock reads whole seconds, so it may show 1:29.
+    expect(screen.getByTestId("channel-meta-uptime").textContent).toMatch(/^Live for 1:(29|3\d)$/);
   });
 
   it("CategoryLink encodes the slug", () => {

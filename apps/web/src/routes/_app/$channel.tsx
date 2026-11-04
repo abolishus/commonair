@@ -105,6 +105,14 @@ function ChannelView({
   const [client] = React.useState(maturityClient);
   const { theatre } = useTheatre();
   const vods = useChannelVods(channel.slug, page.vods);
+  // Live -> offline: the loaded list predates the broadcast that just ended (it was still recording,
+  // so it was left out); ask again so the hero and "Last live" are that broadcast.
+  const wasLive = React.useRef(live);
+  const refreshVods = vods.retry;
+  React.useEffect(() => {
+    if (wasLive.current && !live) refreshVods();
+    wasLive.current = live;
+  }, [live, refreshVods]);
   const clips = useChannelClips(channel.slug, page.clips);
   const videoTiles = vodTiles(vods.items);
   const clipTileList = clipTiles(clips.items);
@@ -248,12 +256,7 @@ function ChannelView({
   );
 
   const videosShelf = (heading: string, tiles = videoTiles) => (
-    <MediaShelf
-      kind="vods"
-      heading={heading}
-      tiles={tiles.slice(0, SHELF_SIZE)}
-      onViewAll={() => onTabChange("videos")}
-    />
+    <MediaShelf kind="vods" heading={heading} tiles={tiles.slice(0, SHELF_SIZE)} channel={channel.slug} />
   );
   const aboutSection = (withBanner: boolean) => (
     <ChannelAboutSection
@@ -265,16 +268,21 @@ function ChannelView({
     />
   );
   // Live, the player and chat stay above the tabs on every tab, so switching never restarts the stream.
+  // Live with nothing recorded or clipped yet, both shelves are empty: Home shows About instead of a blank panel.
   const home = live ? (
-    <div className="flex min-w-0 flex-col gap-8">
-      {videosShelf(t("channel.tabs.recentVideos"))}
-      <MediaShelf
-        kind="clips"
-        heading={t("channel.tabs.recentClips")}
-        tiles={clipTileList.slice(0, SHELF_SIZE)}
-        onViewAll={() => onTabChange("clips")}
-      />
-    </div>
+    videoTiles.length === 0 && clipTileList.length === 0 ? (
+      aboutSection(true)
+    ) : (
+      <div className="flex min-w-0 flex-col gap-8">
+        {videosShelf(t("channel.tabs.recentVideos"))}
+        <MediaShelf
+          kind="clips"
+          heading={t("channel.tabs.recentClips")}
+          tiles={clipTileList.slice(0, SHELF_SIZE)}
+          channel={channel.slug}
+        />
+      </div>
+    )
   ) : hero ? (
     <div className="flex min-w-0 flex-col gap-8">
       <OfflineHero tile={hero} />
@@ -339,41 +347,35 @@ function ChannelView({
     </>
   );
 
-  if (theatre && live) {
-    // Theatre (decision (b)): the player spans the viewport's width with chat docked on the right;
-    // the header and tabs follow at page width.
-    return (
-      <div data-testid="channel-page" data-layout="theatre" className="flex min-w-0 flex-col gap-4 pb-4">
-        <div className="flex min-w-0 flex-col lg:flex-row">
-          <div className="flex min-w-0 flex-1 flex-col gap-2">
-            <MovedNotice channelName={channel.displayName} movedTo={channel.movedTo} />
-            {stageNode}
-          </div>
-          <aside className="min-w-0 lg:w-80 lg:shrink-0">{chat}</aside>
-        </div>
-        <PageContainer width="wide" className="flex flex-col gap-4">
-          {details}
-        </PageContainer>
-      </div>
-    );
-  }
-
+  const theatreLayout = theatre && live;
+  // The player and chat keep their place in the tree in both layouts (only class names change), so
+  // toggling theatre never remounts them: no new `playback.start` or lost DVR position, and chat
+  // keeps its connection, scroll and draft. Only the header and tabs move.
+  // Default: page width, chat beside the stage and details. Theatre (decision (b)): the stage spans
+  // the viewport with chat docked right, and the details follow at page width.
   return (
-    <PageContainer width="wide" className="py-4" data-testid="channel-page" data-layout="default">
-      <SplitLayout
-        asideWidth="lg"
-        main={
-          <div className="flex min-w-0 flex-col gap-4">
-            <MovedNotice channelName={channel.displayName} movedTo={channel.movedTo} />
-            {/* Offline, the banner heads the page; live it sits in About so the player comes first. */}
-            {live ? null : banner}
-            {stageNode}
-            {details}
-          </div>
-        }
-        aside={chat}
-      />
-    </PageContainer>
+    <div
+      data-testid="channel-page"
+      data-layout={theatreLayout ? "theatre" : "default"}
+      className={cn(
+        "flex min-w-0 flex-col",
+        theatreLayout ? "w-full gap-4 pb-4" : "mx-auto w-full max-w-7xl px-4 py-4",
+      )}
+    >
+      <div className={cn("flex min-w-0 flex-col lg:flex-row", theatreLayout ? null : "gap-6")}>
+        <div className="flex min-w-0 flex-1 flex-col gap-4">
+          <MovedNotice channelName={channel.displayName} movedTo={channel.movedTo} />
+          {/* Offline, the banner heads the page; live it sits in About so the player comes first. */}
+          {live ? null : banner}
+          {stageNode}
+          {theatreLayout ? null : details}
+        </div>
+        <aside className="min-w-0 lg:w-80 lg:shrink-0">{chat}</aside>
+      </div>
+      {theatreLayout ? (
+        <div className="mx-auto flex w-full max-w-7xl min-w-0 flex-col gap-4 px-4">{details}</div>
+      ) : null}
+    </div>
   );
 }
 

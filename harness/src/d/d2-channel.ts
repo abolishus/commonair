@@ -113,7 +113,8 @@ export async function steps(ctx: DContext): Promise<void> {
       }
       s.check("Share is there", await page.locator(tid(T.channelShare)).isVisible());
       const title = await page.title();
-      s.check("the title says (live)", title.includes(dto.displayName), { title });
+      // en `pageTitle.channelLive` ("{name} (live)"): the plain name alone means the live title regressed.
+      s.check("the title says (live)", title.includes(`${dto.displayName} (live)`), { title });
     });
 
   await s.step("d2-channel: the header holds at 375 px", async () => {

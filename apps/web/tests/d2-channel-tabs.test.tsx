@@ -19,29 +19,45 @@ import {
   createRouter,
 } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import type * as React from "react";
+import * as React from "react";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { locale, uiMessages } from "../src/i18n/index.ts";
 
 const boot = vi.hoisted(() => ({
   me: null as null | { id: string; username: string; displayName: string; channelSlug: string | null; role: string },
 }));
+// How many times the stubs mounted: a layout change must never remount the player or chat.
+const mounts = vi.hoisted(() => ({ player: 0, chat: 0 }));
+// Stands in for the polled summary: when set, `useChannel` returns it instead of the loader's.
+const polled = vi.hoisted(() => ({ summary: null as unknown }));
 
 vi.mock("../src/lib/bootstrap.ts", () => ({
   getBootstrap: async () => null,
   getSessionUser: async () => null,
   useBootstrap: () => ({ me: boot.me, config: { publicUrl: "https://air.example.test" }, now: Date.now() }),
 }));
-vi.mock("../src/lib/use-channel.ts", () => ({ useChannel: (_slug: string, initial: unknown) => initial }));
+vi.mock("../src/lib/use-channel.ts", () => ({
+  useChannel: (_slug: string, initial: unknown) => polled.summary ?? initial,
+}));
 vi.mock("../src/player/player.tsx", () => ({
-  Player: ({ live, offline }: { live: boolean; offline?: React.ReactNode }) => (
-    <div data-testid="player" data-live={String(live)}>
-      {live ? null : offline}
-    </div>
-  ),
+  Player: ({ live, offline }: { live: boolean; offline?: React.ReactNode }) => {
+    React.useEffect(() => {
+      mounts.player += 1;
+    }, []);
+    return (
+      <div data-testid="player" data-live={String(live)}>
+        {live ? null : offline}
+      </div>
+    );
+  },
 }));
 vi.mock("../src/chat/chat-panel.tsx", () => ({
-  ChatPanel: ({ className }: { className?: string }) => <div data-testid="chat" className={className} />,
+  ChatPanel: ({ className }: { className?: string }) => {
+    React.useEffect(() => {
+      mounts.chat += 1;
+    }, []);
+    return <div data-testid="chat" className={className} />;
+  },
 }));
 vi.mock("../src/components/support/support-dialog.tsx", () => ({
   SupportButton: () => <span data-testid="support-stub" />,
@@ -51,6 +67,8 @@ const { Route } = await import("../src/routes/_app/$channel.tsx");
 const { parseChannelSearch, tabSearch, isChannelTab, CHANNEL_TABS } =
   await import("../src/components/channel/channel-data.ts");
 const { ChannelMediaClientContext } = await import("../src/components/channel/use-media-list.ts");
+const { TheatreContext } = await import("../src/player/theatre.ts");
+const { chatColumnClass } = await import("../src/chat/layout.ts");
 type ChannelPage = import("../src/components/channel/panels-loader.ts").ChannelPage;
 type MediaClient = import("../src/components/channel/use-media-list.ts").ChannelMediaClient;
 type Vod = import("../src/components/channel/channel-data.ts").VodItem;
@@ -59,6 +77,9 @@ type Clip = import("../src/components/channel/channel-data.ts").ClipItem;
 afterEach(() => {
   cleanup();
   boot.me = null;
+  mounts.player = 0;
+  mounts.chat = 0;
+  polled.summary = null;
 });
 
 const uuid = (n: number) => `0192f000-0000-7000-8000-${n.toString().padStart(12, "0")}`;
@@ -127,7 +148,12 @@ const neverClient: MediaClient = {
   clips: () => Promise.reject(new Error("unexpected")),
 };
 
-function renderPage(data: ChannelPage, path = "/fern", client: MediaClient = neverClient) {
+function renderPage(
+  data: ChannelPage,
+  path = "/fern",
+  client: MediaClient = neverClient,
+  wrap: (node: React.ReactNode) => React.ReactNode = (node) => node,
+) {
   const loader = vi.fn<() => ChannelPage>(() => data);
   const root = createRootRoute({ component: () => <Outlet /> });
   const app = createRoute({ getParentRoute: () => root, id: "_app", component: () => <Outlet /> });
@@ -145,7 +171,7 @@ function renderPage(data: ChannelPage, path = "/fern", client: MediaClient = nev
     <LocaleProvider locale={locale} messages={uiMessages}>
       <TooltipProvider>
         <ChannelMediaClientContext.Provider value={client}>
-          <RouterProvider router={router} />
+          {wrap(<RouterProvider router={router} />)}
         </ChannelMediaClientContext.Provider>
       </TooltipProvider>
     </LocaleProvider>,
@@ -368,11 +394,115 @@ describe("Home while live", () => {
     expect(screen.getByTestId("chat")).toBeTruthy();
     const shelves = screen.getAllByTestId("channel-shelf");
     expect(shelves.map((s) => s.getAttribute("data-kind"))).toEqual(["vods", "clips"]);
+    // "View all" is a real link (middle-click, open in a new tab).
+    const viewAll = screen.getAllByTestId("channel-shelf-view-all");
+    expect(viewAll.map((a) => [a.tagName, a.textContent, a.getAttribute("href")])).toEqual([
+      ["A", "View all", "/fern?tab=videos"],
+      ["A", "View all", "/fern?tab=clips"],
+    ]);
     act(() => {
-      fireEvent.click(screen.getAllByRole("button", { name: "View all" })[1] as HTMLElement);
+      fireEvent.click(viewAll[1] as HTMLElement);
     });
     await waitFor(() => expect(history.location.search).toBe("?tab=clips"));
     // The player is still mounted on another tab.
     expect(screen.getByTestId("player").getAttribute("data-live")).toBe("true");
+    expect(mounts.player).toBe(1);
+  });
+
+  it("with no ready VODs or clips, Home shows the About content instead of a blank panel", async () => {
+    const live = livePage();
+    live.vods = { items: [vod(1, { status: "processing" })], nextCursor: null };
+    live.clips = { items: [], nextCursor: null };
+    renderPage(live);
+    await waitFor(() => expect(tabs().getAttribute("data-tab")).toBe("home"));
+    expect(screen.queryAllByTestId("channel-shelf")).toHaveLength(0);
+    expect(screen.getByTestId("channel-about").textContent).toContain("I build villages.");
+  });
+});
+
+function livePage(): ChannelPage {
+  const live = page();
+  live.summary.live = {
+    id: uuid(50),
+    title: "Live now",
+    viewerCount: 40,
+    catchingUpCount: 0,
+    startedAt: new Date(Date.now() - 60_000).toISOString(),
+    mature: false,
+    restricted: null,
+  };
+  return live;
+}
+
+/** A theatre provider with a toggle (D2-player's `t` key and button stand in here). */
+function TheatreHost({ children }: { children: React.ReactNode }): React.JSX.Element {
+  const [theatre, setTheatre] = React.useState(false);
+  return (
+    <TheatreContext.Provider value={{ theatre, setTheatre }}>
+      <button type="button" data-testid="toggle-theatre" onClick={() => setTheatre(!theatre)}>
+        Theatre
+      </button>
+      {children}
+    </TheatreContext.Provider>
+  );
+}
+
+describe("the theatre layout", () => {
+  const layout = () => screen.getByTestId("channel-page").getAttribute("data-layout");
+
+  it("is theatre while live, and chat is sized for it", async () => {
+    renderPage(livePage(), "/fern", neverClient, (node) => (
+      <TheatreContext.Provider value={{ theatre: true, setTheatre: () => {} }}>{node}</TheatreContext.Provider>
+    ));
+    await waitFor(() => expect(layout()).toBe("theatre"));
+    expect(screen.getByTestId("chat").className).toBe(chatColumnClass({ theatre: true }));
+  });
+
+  it("stays default while offline, even with theatre on", async () => {
+    renderPage(page(), "/fern", neverClient, (node) => (
+      <TheatreContext.Provider value={{ theatre: true, setTheatre: () => {} }}>{node}</TheatreContext.Provider>
+    ));
+    await waitFor(() => expect(layout()).toBe("default"));
+    expect(screen.getByTestId("chat").className).toBe(chatColumnClass({ theatre: false }));
+  });
+
+  it("toggling it never remounts the player or chat (the stream and chat connection stay)", async () => {
+    renderPage(livePage(), "/fern", neverClient, (node) => <TheatreHost>{node}</TheatreHost>);
+    await waitFor(() => expect(layout()).toBe("default"));
+    const player = screen.getByTestId("player");
+    const chat = screen.getByTestId("chat");
+    for (const expected of ["theatre", "default", "theatre"]) {
+      act(() => {
+        fireEvent.click(screen.getByTestId("toggle-theatre"));
+      });
+      await waitFor(() => expect(layout()).toBe(expected));
+    }
+    expect(screen.getByTestId("player")).toBe(player);
+    expect(screen.getByTestId("chat")).toBe(chat);
+    expect(mounts).toEqual({ player: 1, chat: 1 });
+  });
+});
+
+describe("going offline", () => {
+  it("asks for the VOD list again, so the broadcast that just ended becomes the hero", async () => {
+    const live = livePage();
+    // While live, the broadcast is still recording: the loaded list has only an older VOD.
+    live.vods = { items: [vod(5)], nextCursor: null };
+    const vods = vi.fn<MediaClient["vods"]>(async () => ({ items: [vod(1), vod(5)], nextCursor: null }));
+    renderPage(live, "/fern", { ...neverClient, vods }, (node) => <TheatreHost>{node}</TheatreHost>);
+    await waitFor(() => expect(screen.getByTestId("player").getAttribute("data-live")).toBe("true"));
+    expect(vods).not.toHaveBeenCalled();
+
+    polled.summary = { ...live.summary, live: null };
+    // A theatre toggle re-renders the page, standing in for the next poll.
+    act(() => {
+      fireEvent.click(screen.getByTestId("toggle-theatre"));
+    });
+    await waitFor(() => expect(vods).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(screen.getByTestId("channel-offline-hero").querySelector("a")?.getAttribute("href")).toBe(
+        `/fern/vods/${uuid(101)}`,
+      ),
+    );
   });
 });

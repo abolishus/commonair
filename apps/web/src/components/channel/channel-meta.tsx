@@ -45,19 +45,25 @@ export function tagLink(tag: string): React.ReactElement {
   return <a data-testid="channel-meta-tag" data-tag={tag} href={tagHref(tag)} aria-label={tag} />;
 }
 
-/** Re-renders once a second while mounted, starting from `initial` (the request time). */
+const subscribeSeconds = (tick: () => void) => {
+  const id = setInterval(tick, 1000);
+  return () => clearInterval(id);
+};
+// Whole seconds, so repeated reads within one render agree.
+const currentSecond = () => Math.floor(Date.now() / 1000) * 1000;
+
+/**
+ * The time, re-read once a second while mounted. The server render and hydration use `initial`
+ * (the SSR request time) so they match; a client-side navigation, when that time is long stale,
+ * starts from the real clock.
+ */
 function useSecondClock(initial: number): number {
-  const [now, setNow] = React.useState(initial);
-  React.useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, []);
-  return now;
+  return React.useSyncExternalStore(subscribeSeconds, currentSecond, () => initial);
 }
 
 /**
  * How long the broadcast has been live, as a clock (0:59, 1:00:00, 48:00:00). The server render
- * and the first client render use `now` (the request time) so hydration matches; it ticks after.
+ * and hydration use `now` (the request time) so they match; it ticks after.
  * It is not a live region: a screen reader reads it when it reaches it, not every second.
  */
 export function Uptime({ startedAt, now }: { startedAt: string; now: number }): React.JSX.Element {
@@ -140,6 +146,8 @@ export function ChannelOverflowMenu({
 }): React.JSX.Element {
   const [open, setOpen] = React.useState(false);
   const [reports] = React.useState(() => client ?? reportClient());
+  // The menu item that opened the dialog is gone once it closes; focus goes back to "More".
+  const trigger = React.useRef<HTMLButtonElement>(null);
   const content = (
     <>
       <HugeiconsIcon icon={Flag01Icon} strokeWidth={2} aria-hidden />
@@ -152,6 +160,7 @@ export function ChannelOverflowMenu({
         <DropdownMenuTrigger
           render={
             <IconButton
+              ref={trigger}
               data-testid="channel-overflow"
               variant="outline"
               size="icon-sm"
@@ -180,6 +189,7 @@ export function ChannelOverflowMenu({
               data-testid="report-dialog"
               data-subject-type={subjectType}
               data-subject-id={subjectId}
+              finalFocus={trigger}
               className="max-h-svh overflow-y-auto sm:max-w-lg"
             >
               <ReportForm

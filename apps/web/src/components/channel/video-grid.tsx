@@ -25,7 +25,7 @@ import { Link } from "@tanstack/react-router";
 import type * as React from "react";
 import { t } from "../../i18n/index.ts";
 import { cn } from "@commonair/ui/lib/utils";
-import { playableClips, playableVods, type ClipItem, type VodItem } from "./channel-data.ts";
+import { playableClips, playableVods, tabSearch, type ClipItem, type VodItem } from "./channel-data.ts";
 import type { MediaList } from "./use-media-list.ts";
 
 export type MediaKind = "vods" | "clips";
@@ -292,17 +292,18 @@ export function MediaEmptyState({
   );
 }
 
-/** A Home shelf: a heading, the first few cards and "View all" (which opens the tab). Nothing when empty. */
+/** A Home shelf: a heading, the first few cards and "View all" (a link to the tab). Nothing when empty. */
 export function MediaShelf({
   kind,
   tiles,
   heading,
-  onViewAll,
+  channel,
 }: {
   kind: MediaKind;
   tiles: readonly VideoTile[];
   heading: string;
-  onViewAll: () => void;
+  /** The channel's slug: "View all" links to its Videos or Clips tab. */
+  channel: string;
 }): React.JSX.Element | null {
   if (tiles.length === 0) return null;
   return (
@@ -311,7 +312,13 @@ export function MediaShelf({
       data-kind={kind}
       heading={heading}
       action={
-        <Button variant="ghost" size="sm" onClick={onViewAll}>
+        <Button
+          data-testid="channel-shelf-view-all"
+          variant="ghost"
+          size="sm"
+          nativeButton={false}
+          render={<Link to="/$channel" params={{ channel }} search={tabSearch(kind === "vods" ? "videos" : "clips")} />}
+        >
           {t("channel.tabs.viewAll")}
         </Button>
       }
