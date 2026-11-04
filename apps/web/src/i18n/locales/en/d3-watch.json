@@ -1,1 +1,22 @@
-{}
+{
+  "watch.pageTitle.notAvailable": "Video not available",
+  "watch.pageTitle.clipNotAvailable": "Clip not available",
+  "watch.pageTitle.video": "Video",
+  "watch.pageTitle.clip": "Clip",
+  "watch.meta.recorded": "Recorded",
+  "watch.meta.clipped": "Clipped",
+  "watch.meta.views": "{count, plural, one {# view} other {# views}}",
+  "watch.share.label": "Share",
+  "watch.share.title": "Share this video",
+  "watch.share.linkLabel": "Link",
+  "watch.share.startAt": "Start at {time}",
+  "watch.share.copy": "Copy link",
+  "watch.share.copied": "Link copied",
+  "watch.share.failed": "Could not copy the link",
+  "watch.card.label": "{name}'s channel",
+  "watch.card.watchLive": "Watch live",
+  "watch.more.heading": "More from {name}",
+  "watch.more.loading": "Loading more videos",
+  "watch.notAvailable.description": "It may have been removed, or it is not public.",
+  "watch.notAvailable.back": "Back to {name}"
+}
