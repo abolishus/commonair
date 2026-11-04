@@ -67,8 +67,8 @@ arguments, and its outcome is the upgrade's: its exit status, its rollback. The 
 `handing the upgrade to release <version>'s selfhost.sh`. The new script verifies the same
 bundle again from its `SHA256SUMS` (and signature) rather than downloading it again, and hands
 off no further. Nothing has changed on the host before the hand-off. When the new script is
-identical to the running one there is no hand-off. With an external Postgres and Valkey the
-passwords are asked for (or read from the environment) after it, once.
+identical to the running one there is no hand-off. With an external Postgres and Valkey, what
+the first script asked for (passwords, a CA file) is handed over, not asked for again.
 
 Afterwards `~/commonair/selfhost.sh` is the new release's script, since `~/commonair` points at
 the new release.

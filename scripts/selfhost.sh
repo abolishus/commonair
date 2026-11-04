@@ -2674,6 +2674,7 @@ cmd_upgrade() {
   resolve_repository_url
   if [ -z "$REGISTRY" ] && [ -f "$SELFHOST_CONF" ]; then REGISTRY=$(env_get REGISTRY "$SELFHOST_CONF"); fi
   check_podman
+  collect_state_secrets
   handed_bundle
 
   # 1. download and verify
@@ -2683,10 +2684,8 @@ cmd_upgrade() {
     die "handed release $COMMONAIR_UPGRADE_HANDOFF's upgrade, but the bundle is $BUNDLE_VERSION"
   fi
   extract_bundle
-  # Nothing has changed yet: the target release's own script runs the rest (it asks for the
-  # external servers' passwords itself, so they are not collected before this).
+  # Nothing has changed yet: the target release's own script runs the rest.
   hand_off_upgrade "$@"
-  collect_state_secrets
   check_captions "$RELEASE_DIR"
   apply_registry "$RELEASE_DIR" "$REGISTRY"
   # 2. pull every image by digest (nothing has changed yet if this fails)
@@ -2746,9 +2745,18 @@ hand_off_upgrade() {
   # A copy: the target extracts the bundle again, replacing the release directory it would run from.
   cp "$_next" "$TMP_ROOT/selfhost-$BUNDLE_VERSION.sh"
   info "handing the upgrade to release $BUNDLE_VERSION's selfhost.sh"
+  # What collect_state_secrets already asked for is not asked again: a CA file the operator
+  # typed in becomes the flag, and the passwords reach the target's environment only, as the
+  # operator's own environment would have given them.
+  if [ -z "$DB_OPT_CA" ] && [ -n "$STATE_SET_DB_CA" ]; then set -- "$@" --database-ca "$STATE_SET_DB_CA"; fi
+  if [ -z "$VK_OPT_CA" ] && [ -n "$STATE_SET_VK_CA" ]; then set -- "$@" --valkey-ca "$STATE_SET_VK_CA"; fi
   _rc=0
-  COMMONAIR_UPGRADE_HANDOFF="$BUNDLE_VERSION" COMMONAIR_UPGRADE_BUNDLE="$BUNDLE_PATH" \
-    sh "$TMP_ROOT/selfhost-$BUNDLE_VERSION.sh" upgrade "$@" || _rc=$?
+  (
+    if [ -n "$STATE_SET_DB_PW" ]; then export DATABASE_PASSWORD="$STATE_SET_DB_PW"; fi
+    if [ -n "$STATE_SET_VK_PW" ]; then export VALKEY_PASSWORD="$STATE_SET_VK_PW"; fi
+    COMMONAIR_UPGRADE_HANDOFF="$BUNDLE_VERSION" COMMONAIR_UPGRADE_BUNDLE="$BUNDLE_PATH" \
+      exec sh "$TMP_ROOT/selfhost-$BUNDLE_VERSION.sh" upgrade "$@"
+  ) || _rc=$?
   exit "$_rc"
 }
 
