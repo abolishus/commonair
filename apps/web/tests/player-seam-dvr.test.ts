@@ -524,6 +524,60 @@ describe("dvrSwitchTo while DVR plays (hls.js)", () => {
   });
 });
 
+describe("a rewind right after enterDvr: the landing is kept while the source settles", () => {
+  const EDGE = T0;
+
+  async function rewound() {
+    const s = await hlsSession();
+    const model = startupModel(s.hls, s.video, { "https://play.example/dvr/": dvrWindow(EDGE, 92) });
+    const entering = s.c.enterDvr(DVR);
+    model.levelLoaded();
+    await entering;
+    expect(s.c.seekToWallclock(new Date(EDGE - 60_000))).toBe(true);
+    model.firstFragmentBuffered();
+    return { ...s, model };
+  }
+
+  it("a jump to live sync once the first fragments are in is undone (CI run 41834516797: 60 s became 15)", async () => {
+    const { c, video, model } = await rewound();
+    model.play(1);
+    // hls.js loaded from its live sync position anyway and moved the playhead there.
+    video.currentTime = model.liveSync();
+    model.play(1);
+    const at = c.playheadWallclock()?.getTime() ?? Number.NaN;
+    expect(Math.abs(at - (EDGE - 60_000 + 2_000))).toBeLessThan(1_000);
+    const trace = JSON.parse(video.dataset.dvrSwap ?? "{}") as Record<string, unknown>;
+    expect(trace).toMatchObject({ via: "rewind", target: EDGE - 60_000, corrections: 1 });
+    await c.stop();
+  });
+
+  it("a later seek of the viewer's, onto media already buffered, is not held", async () => {
+    const { c, video, model } = await rewound();
+    model.play(1);
+    expect(c.seekToWallclock(new Date(EDGE - 30_000))).toBe(true);
+    model.play(1);
+    video.currentTime = model.liveSync();
+    model.play(0.5);
+    expect(video.currentTime).toBeCloseTo(model.liveSync() + 0.5, 1);
+    await c.stop();
+  });
+
+  it("a wall-clock seek on the live playlist (watch rooms, alert history) is not held", async () => {
+    const { c, hls, video } = await hlsSession();
+    const model = startupModel(hls, video, { "https://play.example/hls/": dvrWindow(EDGE, 92) });
+    hls.loadSource(LIVE);
+    model.levelLoaded();
+    expect(c.playbackMode()).toBe("live");
+    expect(c.seekToWallclock(new Date(EDGE - 60_000))).toBe(true);
+    model.firstFragmentBuffered();
+    video.currentTime = model.liveSync();
+    model.play(0.5);
+    expect(video.currentTime).toBeCloseTo(model.liveSync() + 0.5, 1);
+    expect(video.dataset.dvrSwap).toBeUndefined();
+    await c.stop();
+  });
+});
+
 describe("enterDvr (native HLS)", () => {
   it("points the same element at the DVR playlist and waits for its metadata; an error returns to live", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("#EXTM3U", { status: 200 }));
