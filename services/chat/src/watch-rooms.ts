@@ -214,7 +214,15 @@ export class WatchRooms implements WatchRoomHandler {
   async sync(ws: ChatSocket, frame: RoomFrame<"room.sync">): Promise<Rejection | null> {
     const userId = ws.data.identity.userId;
     if (!userId || !ws.data.watchRooms.has(frame.roomId)) return null;
-    const report: RoomSyncReport = { playheadWallclock: frame.playheadWallclock, mode: frame.mode, at: Date.now() };
+    const report: RoomSyncReport = {
+      playheadWallclock: frame.playheadWallclock,
+      mode: frame.mode,
+      at: Date.now(),
+      // The member's live edge (batch 8); never kept for a DVR report, absent from older clients.
+      ...(frame.edgeWallclock !== undefined
+        ? { edgeWallclock: frame.mode === "live" ? frame.edgeWallclock : null }
+        : {}),
+    };
     const key = KEYS.roomSync(frame.roomId);
     await this.d.valkey.multi().hset(key, userId, JSON.stringify(report)).expire(key, ROOM_PRESENCE_TTL_SECONDS).exec();
     return null;

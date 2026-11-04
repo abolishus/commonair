@@ -107,6 +107,45 @@ export class DvrSeeker {
   }
 }
 
+/** What a DVR source swap needs of the controller (batch 8, the heartbeat's `dvrSwitchTo`). */
+export interface DvrSwapSeam {
+  playheadWallclock(): Date | null;
+  seekToWallclock(t: Date): boolean;
+  /**
+   * Load `url` as the DVR playlist being played; false when it fails or a newer load supersedes
+   * it. Without `autoplay` the element is not told to play, so a paused viewer hears nothing and
+   * sees no `playing` event while the new source loads.
+   */
+  loadDvr(url: string, opts: { autoplay: boolean }): Promise<boolean>;
+  paused(): boolean;
+  pause(): void;
+}
+
+export type DvrSwapOutcome = "swapped" | "failed";
+
+/**
+ * Move the DVR playlist being played to another source (the origin, after the session's relay left)
+ * at the current DVR position, never to live. A playing viewer lands where the playhead would be by
+ * then (the position plus the load time); a paused viewer is swapped silently and stays paused at
+ * the same position (decided over waiting for resume: the relay's playlist answers 403 from now
+ * on, so a resume on it would fail). The controller returns to live itself when the load fails,
+ * as `enterDvr` does.
+ */
+export async function swapDvrSource(
+  seam: DvrSwapSeam,
+  url: string,
+  now: () => number = Date.now,
+): Promise<DvrSwapOutcome> {
+  const at = seam.playheadWallclock();
+  const paused = seam.paused();
+  const started = now();
+  if (!(await seam.loadDvr(url, { autoplay: !paused }))) return "failed";
+  if (at) seam.seekToWallclock(new Date(paused ? at.getTime() : at.getTime() + (now() - started)));
+  // Belt and braces: an element that autoplays on a new source is paused again here.
+  if (paused && !seam.paused()) seam.pause();
+  return "swapped";
+}
+
 const seekers = new WeakMap<DvrSeam, DvrSeeker>();
 
 /** The controller's shared seeker. */

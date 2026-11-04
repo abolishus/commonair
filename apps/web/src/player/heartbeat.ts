@@ -142,3 +142,44 @@ export function withToken(url: string, token: string, param = "t"): string {
   u.searchParams.set(param, token);
   return u.toString();
 }
+
+/** The heartbeat answer's DVR fields. */
+export interface DvrHeartbeatResult {
+  dvrToken?: string | undefined;
+  dvrSwitchTo?: string | undefined;
+  throttled?: boolean | undefined;
+}
+
+/** A DVR move from the heartbeat: the new grant URL, and whether the playing DVR source swaps now. */
+export interface DvrSwitch {
+  /** The origin DVR playlist, carrying the fresh origin DVR token. */
+  url: string;
+  /** The DVR token in `url` (also the beat's `dvrToken`), null if the URL carries none. */
+  token: string | null;
+  /** True while DVR plays: swap the source at the current position. False: only the grant moves. */
+  swap: boolean;
+}
+
+/**
+ * Batch 8 (`dvrSwitchTo`, W3-dvr-relay request 8): the DVR move a heartbeat answer asks for, or
+ * null. The server sends it once, when the session's relay left the active set, and only ever
+ * towards the origin. A throttled beat was ignored and carries no move (nor does a session without
+ * a DVR grant, or an answer whose URL does not parse). At the live edge only the grant moves, so the
+ * next rewind starts on the origin; while DVR plays, the source swaps at the current position.
+ * `playingDvr` is the controller's mode being `dvr` (the DVR playlist loaded), never "a DVR load is
+ * pending": a rewind still loading on the relay gets only the grant move, fails there and falls
+ * back to live as any failed `enterDvr` does, rather than being swapped while the mode says live.
+ */
+export function heartbeatDvrSwitch(
+  res: DvrHeartbeatResult,
+  state: { hasGrant: boolean; playingDvr: boolean },
+): DvrSwitch | null {
+  if (res.throttled || !res.dvrSwitchTo || !state.hasGrant) return null;
+  let token: string | null;
+  try {
+    token = new URL(res.dvrSwitchTo).searchParams.get("t");
+  } catch {
+    return null;
+  }
+  return { url: res.dvrSwitchTo, token: token ?? res.dvrToken ?? null, swap: state.playingDvr };
+}

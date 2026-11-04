@@ -30,7 +30,14 @@ import { ROUTES } from "../../web/selectors.ts";
 import { WebSession } from "../../web/session.ts";
 import { type WatchRoomStep, watchRoomTitle } from "../steps.ts";
 import { directMemberInsert, reportRow, roomCounts } from "./db.ts";
-import { refusalCode, summarizeDelta, syncFrameOf, type PlayheadSample } from "./sync.ts";
+import {
+  refusalCode,
+  summarizeDelta,
+  syncFrameOf,
+  targetFrameOf,
+  type PlayheadSample,
+  type TargetSample,
+} from "./sync.ts";
 
 /** Watch-room test ids (docs/testing/b7-selectors.md "Watch rooms"). */
 export const WR = {
@@ -69,7 +76,7 @@ export interface LiveChannel {
   encoder: Streamer;
 }
 
-interface Member {
+export interface Member {
   label: string;
   user: SignedInUser;
   session: WebSession;
@@ -125,12 +132,17 @@ const sel = (id: string, data: Record<string, string> = {}) =>
     .join("");
 
 /** Open a signed-in browser session for `user`, recording its room sync frames into `samples`. */
-async function openMember(
+export async function openMember(
   run: WatchRoomRun,
   label: string,
   user: SignedInUser,
   engine: BrowserEngine,
-  record?: { roomId: () => string | null; samples: Record<string, PlayheadSample[]> },
+  record?: {
+    roomId: () => string | null;
+    samples: Record<string, PlayheadSample[]>;
+    /** Batch 8: also record the server's `room.sync {target}` frames this member receives. */
+    targets?: Record<string, TargetSample[]>;
+  },
 ): Promise<Member> {
   const { ctx } = run;
   const session = await WebSession.open({
@@ -154,6 +166,17 @@ async function openMember(
         const f = syncFrameOf(payload, roomId);
         if (f) list.push({ sentAt: Date.now(), ...f });
       });
+      const targets = record.targets;
+      if (targets) {
+        const received: TargetSample[] = [];
+        targets[label] = received;
+        ws.on("framereceived", ({ payload }) => {
+          const roomId = record.roomId();
+          if (!roomId) return;
+          const target = targetFrameOf(payload, roomId);
+          if (target !== null) received.push({ receivedAt: Date.now(), target });
+        });
+      }
     });
   }
   return { label, user, session, page };
@@ -167,7 +190,7 @@ async function openDrawer(page: Page): Promise<void> {
 }
 
 /** The host opens a room on `channel`; returns its id and the invite path (`/<slug>?room=&invite=`). */
-async function createRoom(run: WatchRoomRun, host: Member | SignedInUser, channel: string) {
+export async function createRoom(run: WatchRoomRun, host: Member | SignedInUser, channel: string) {
   const user = "user" in host ? host.user : host;
   if (run.via === "web" && "page" in host) {
     await host.session.goto(`/${channel}`);
@@ -186,7 +209,7 @@ async function createRoom(run: WatchRoomRun, host: Member | SignedInUser, channe
 }
 
 /** A member joins through the invite; resolves with null, or the refusal code. */
-async function joinRoom(
+export async function joinRoom(
   run: WatchRoomRun,
   member: Member | SignedInUser,
   room: { roomId: string; invitePath: string; nonce: string },
@@ -214,7 +237,7 @@ async function joinRoom(
 }
 
 /** A browser member watching the room: the channel page, playing live, the drawer on the room. */
-async function watchInRoom(member: Member, channel: string, roomId: string): Promise<void> {
+export async function watchInRoom(member: Member, channel: string, roomId: string): Promise<void> {
   if (!member.page.url().includes(`/${channel}`)) await member.session.goto(`/${channel}`);
   await member.page.locator(`[data-testid="player"][data-state="playing"]`).waitFor({ timeout: PLAYING_TIMEOUT_MS });
   await openDrawer(member.page);

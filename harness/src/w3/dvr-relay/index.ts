@@ -86,7 +86,7 @@ async function withDb<T>(
 }
 
 /** A new streamer, live, with VODs on (so the broadcast records and has DVR) unless told otherwise. */
-async function liveChannel(
+export async function liveChannel(
   ext: RelayW3Extension,
   prefix: string,
   opts: { vods: boolean },
@@ -154,6 +154,26 @@ async function purgeSeqOf(ext: RelayW3Extension): Promise<number | null> {
 }
 
 const uris = (playlist: string) => playlist.split(/\r?\n/).filter((l) => l.trim() !== "" && !l.startsWith("#"));
+
+/** Wait until `channel`'s DVR playlist lists at least `seconds` of 4 s segments. */
+export async function waitDvrWindow(ctx: ScenarioContext, channel: string, seconds: number): Promise<void> {
+  await waitFor(
+    "a long enough DVR window",
+    async () => {
+      const api = ctx.platform.api().client;
+      const p = await api.playback.start({ channel, deviceId: newDeviceId() });
+      await api.playback.end({ sessionId: p.sessionId, token: p.token }).catch(() => undefined);
+      if (!p.dvrPlaylistUrl) return null;
+      const res = await statusOf(p.dvrPlaylistUrl);
+      if (!res.ok) {
+        await res.body?.cancel();
+        return null;
+      }
+      return uris(await res.text()).length * 4 >= seconds || null;
+    },
+    { timeoutMs: (seconds + 120) * 1000, intervalMs: 4_000, signal: ctx.signal },
+  );
+}
 
 // ------------------------------------------------------------ dvr-relay
 

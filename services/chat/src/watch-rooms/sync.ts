@@ -10,13 +10,26 @@
  * a report is extrapolated to `now` before comparing. DVR-mode members and stale reports are left
  * out: a DVR member rejoins live before it syncs.
  *
- * The live edge is not reported to chat (contract request: an edge field on `room.sync`). The most
- * advanced member is a proxy, but not on its own: that member then steers back to the target, so
- * the "edge" would move back with it and a slow member could drag the room any distance behind
- * live. So the edge estimate is remembered between ticks (`EdgeEstimate`, shared in the sync hash)
- * and extrapolated with real time; it never falls back with the members, and it is bounded at
- * `edgeCapMs + EDGE_SLACK_MS` ahead of the most advanced member, so a stalled stream cannot push
- * the target past what players can reach for long.
+ * **The live edge** (batch 8, W3-watch-rooms review MEDIUM 1). Players since batch 8 report their
+ * own live edge as a wall-clock instant (`edgeWallclock`; null in DVR). The edge is then
+ * `max(edgeWallclock)` of the fresh live reports (the same staleness window as the playheads,
+ * extrapolated the same way: reports arrive every 2 s, so a 2 s window would race the tick).
+ * Members on different sources (a relay against the origin) have different latencies, but they
+ * report wall-clock edges, not offsets, so the maximum is the most current one. The edge is never
+ * below the most advanced playhead, so an older client on a faster source still counts.
+ *
+ * **A lying client must not drag the room forward.** A playhead or an edge more than
+ * `EDGE_SKEW_MS` ahead of chat's clock is dropped: no live edge is in the future. The target is
+ * never past the edge, so the room never goes past `now + EDGE_SKEW_MS`.
+ *
+ * **The fallback** (no fresh report carries an edge: older clients only, or every newer one in
+ * DVR). The most advanced member is a proxy, but not on its own: that member then steers back to
+ * the target, so the "edge" would move back with it and a slow member could drag the room any
+ * distance behind live. So the edge estimate is remembered between ticks (`EdgeEstimate`, shared
+ * in the sync hash) and extrapolated with real time; it never falls back with the members, and it
+ * is bounded at `edgeCapMs + EDGE_SLACK_MS` ahead of the most advanced member, so a stalled stream
+ * cannot push the target past what players can reach for long. A reported edge is remembered the
+ * same way, so the fallback carries on from the last edge a newer client reported.
  */
 import { ROOM_LIMITS } from "@commonair/contracts/enums";
 import type { RoomSyncReport } from "@commonair/contracts/internal";
@@ -31,6 +44,12 @@ export const EDGE_SLACK_MS = 2_000;
 export const EDGE_MEMORY_MS = 60_000;
 /** The `KEYS.roomSync` field the shared edge estimate is kept in (never a user id). */
 export const EDGE_FIELD = "_edge";
+/**
+ * How far ahead of chat's clock a reported playhead or edge may be before it is dropped. The PDT is
+ * stamped by our origin's clock and chat runs on ours, so an honest report is behind `now` by the
+ * stream's latency (seconds); this only absorbs clock skew between our own hosts.
+ */
+export const EDGE_SKEW_MS = 1_000;
 
 /** The edge estimate (epoch ms of the live edge) as of `at`. */
 export interface EdgeEstimate {
@@ -68,22 +87,31 @@ export function syncState({
   prevEdge = null,
 }: SyncInput): SyncResult | null {
   const heads: number[] = [];
+  const edges: number[] = [];
+  const ceiling = now + EDGE_SKEW_MS;
   for (const r of reports) {
     if (r.mode !== "live") continue;
     const age = now - r.at;
     if (age < 0 || age > staleMs) continue;
-    const head = Date.parse(r.playheadWallclock);
-    if (!Number.isFinite(head)) continue;
-    heads.push(head + age);
+    const head = Date.parse(r.playheadWallclock) + age;
+    if (!Number.isFinite(head) || head > ceiling) continue;
+    heads.push(head);
+    if (r.edgeWallclock) {
+      const edge = Date.parse(r.edgeWallclock) + age;
+      if (Number.isFinite(edge) && edge <= ceiling) edges.push(edge);
+    }
   }
   if (heads.length === 0) return null;
   const slowest = Math.min(...heads);
   const leader = Math.max(...heads);
   let edge = leader;
-  if (prevEdge && Number.isFinite(prevEdge.edge) && prevEdge.at <= now && now - prevEdge.at <= EDGE_MEMORY_MS) {
+  if (edges.length > 0) {
+    edge = Math.max(leader, ...edges);
+  } else if (prevEdge && Number.isFinite(prevEdge.edge) && prevEdge.at <= now && now - prevEdge.at <= EDGE_MEMORY_MS) {
     const carried = prevEdge.edge + (now - prevEdge.at);
-    edge = Math.max(leader, Math.min(carried, leader + edgeCapMs + EDGE_SLACK_MS));
+    edge = Math.max(leader, Math.min(carried, leader + edgeCapMs + EDGE_SLACK_MS, ceiling));
   }
+  // `edge >= leader >= slowest`, so the target is never past the edge (nor past `ceiling`).
   return { target: Math.max(slowest, edge - edgeCapMs), edge: { edge, at: now } };
 }
 

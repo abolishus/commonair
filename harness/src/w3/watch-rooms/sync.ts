@@ -17,10 +17,18 @@ export interface PlayheadSample {
   /** The reported PDT under the playhead (epoch ms). */
   pdt: number;
   mode: "live" | "dvr";
+  /**
+   * Batch 8: the reported live edge (`edgeWallclock`, epoch ms); null when the frame says null (DVR,
+   * or unknown), absent when the frame has no such field (a player before batch 8).
+   */
+  edge?: number | null;
 }
 
-/** A `room.sync` client frame's playhead, or null for any other frame. */
-export function syncFrameOf(payload: string | Buffer, roomId: string): { pdt: number; mode: "live" | "dvr" } | null {
+/** A `room.sync` client frame's playhead (and edge, when it carries the field), or null for any other frame. */
+export function syncFrameOf(
+  payload: string | Buffer,
+  roomId: string,
+): { pdt: number; mode: "live" | "dvr"; edge?: number | null } | null {
   const text = typeof payload === "string" ? payload : payload.toString("utf8");
   let frame: unknown;
   try {
@@ -33,7 +41,137 @@ export function syncFrameOf(payload: string | Buffer, roomId: string): { pdt: nu
   if (f.op !== "room.sync" || f.roomId !== roomId || typeof f.playheadWallclock !== "string") return null;
   const pdt = Date.parse(f.playheadWallclock);
   if (!Number.isFinite(pdt)) return null;
-  return { pdt, mode: f.mode === "dvr" ? "dvr" : "live" };
+  const mode = f.mode === "dvr" ? "dvr" : "live";
+  if (!("edgeWallclock" in f)) return { pdt, mode };
+  const edge = typeof f.edgeWallclock === "string" ? Date.parse(f.edgeWallclock) : Number.NaN;
+  return { pdt, mode, edge: Number.isFinite(edge) ? edge : null };
+}
+
+export interface EdgeSummary {
+  /** Live frames, and how many of them carried a usable edge. */
+  live: number;
+  withEdge: number;
+  /** Live frames whose edge was behind their own playhead (an edge is never behind the playhead). */
+  behindPlayhead: number;
+  /** DVR frames that still carried an edge (they must send null). */
+  dvrWithEdge: number;
+  /** Median distance from the playhead to the reported edge (ms), null without edges. */
+  medianLatencyMs: number | null;
+}
+
+/** What one member's frames say about its edge reports (batch 8, `edgeWallclock`). */
+export function edgeSummary(samples: readonly PlayheadSample[]): EdgeSummary {
+  let live = 0;
+  let withEdge = 0;
+  let behindPlayhead = 0;
+  let dvrWithEdge = 0;
+  const latencies: number[] = [];
+  for (const s of samples) {
+    const edge = s.edge ?? null;
+    if (s.mode === "dvr") {
+      if (edge !== null) dvrWithEdge++;
+      continue;
+    }
+    live++;
+    if (edge === null) continue;
+    withEdge++;
+    if (edge < s.pdt) behindPlayhead++;
+    latencies.push(edge - s.pdt);
+  }
+  latencies.sort((a, b) => a - b);
+  const medianLatencyMs = latencies.length === 0 ? null : Math.round(latencies[Math.floor(latencies.length / 2)]!);
+  return { live, withEdge, behindPlayhead, dvrWithEdge, medianLatencyMs };
+}
+
+/**
+ * How far each live member's playhead is behind the room's edge at `at` (ms): `max` of the
+ * members' reported edges (extrapolated like the playheads) minus the member's playhead. Chat caps
+ * it at `ROOM_LIMITS.edgeCapSeconds`; null when no member has a recent edge.
+ */
+export function behindRoomEdgeAt(
+  samples: Readonly<Record<string, readonly PlayheadSample[]>>,
+  at: number,
+  maxAgeMs = 4_500,
+): Record<string, number> | null {
+  let edge: number | null = null;
+  const heads: Record<string, number> = {};
+  for (const [member, list] of Object.entries(samples)) {
+    let latest: PlayheadSample | undefined;
+    for (const s of list) if (s.sentAt <= at && (!latest || s.sentAt > latest.sentAt)) latest = s;
+    if (!latest || latest.mode !== "live" || at - latest.sentAt > maxAgeMs) continue;
+    const age = at - latest.sentAt;
+    heads[member] = latest.pdt + age;
+    if (latest.edge !== undefined && latest.edge !== null)
+      edge = edge === null ? latest.edge + age : Math.max(edge, latest.edge + age);
+  }
+  if (edge === null) return null;
+  const out: Record<string, number> = {};
+  for (const [member, head] of Object.entries(heads)) out[member] = Math.round(edge - head);
+  return out;
+}
+
+/** A server `room.sync {target}` frame a member received (batch 8's edge-sync step). */
+export interface TargetSample {
+  /** Harness clock when the frame reached the page (epoch ms). */
+  receivedAt: number;
+  /** The room's target playhead (epoch ms). */
+  target: number;
+}
+
+/** A server `room.sync` frame's target for `roomId`, or null for any other frame. */
+export function targetFrameOf(payload: string | Buffer, roomId: string): number | null {
+  const text = typeof payload === "string" ? payload : payload.toString("utf8");
+  let frame: unknown;
+  try {
+    frame = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (typeof frame !== "object" || frame === null) return null;
+  const f = frame as Record<string, unknown>;
+  if (f.op !== "room.sync" || f.roomId !== roomId || typeof f.target !== "string") return null;
+  const target = Date.parse(f.target);
+  return Number.isFinite(target) ? target : null;
+}
+
+/**
+ * How far chat's target sits behind the room's reported edge (ms): for each target frame received
+ * in `[from, to]`, `max(edgeWallclock)` at that instant (`behindRoomEdgeAt`'s extrapolation) minus
+ * the target, and the median. Batch 8 caps the room from that edge, so with a member past the cap
+ * the lead is the cap itself; the batch 7 estimate (from the most advanced playhead) gives a lead
+ * set by the estimate instead, so this tells the two apart where `withinEdgeCap` cannot.
+ */
+export function targetLeadSummary(
+  samples: Readonly<Record<string, readonly PlayheadSample[]>>,
+  targets: readonly TargetSample[],
+  from: number,
+  to: number,
+  maxAgeMs = 4_500,
+): { measured: number; medianMs: number | null; minMs: number | null; maxMs: number | null } {
+  const leads: number[] = [];
+  for (const t of targets) {
+    if (t.receivedAt < from || t.receivedAt > to) continue;
+    let edge: number | null = null;
+    for (const list of Object.values(samples)) {
+      let latest: PlayheadSample | undefined;
+      for (const s of list) if (s.sentAt <= t.receivedAt && (!latest || s.sentAt > latest.sentAt)) latest = s;
+      if (!latest || latest.mode !== "live" || t.receivedAt - latest.sentAt > maxAgeMs) continue;
+      if (latest.edge === undefined || latest.edge === null) continue;
+      const e = latest.edge + (t.receivedAt - latest.sentAt);
+      edge = edge === null ? e : Math.max(edge, e);
+    }
+    if (edge !== null) leads.push(edge - t.target);
+  }
+  if (leads.length === 0) return { measured: 0, medianMs: null, minMs: null, maxMs: null };
+  const sorted = [...leads].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  const median = sorted.length % 2 === 1 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
+  return {
+    measured: sorted.length,
+    medianMs: Math.round(median),
+    minMs: Math.round(sorted[0]!),
+    maxMs: Math.round(sorted.at(-1)!),
+  };
 }
 
 /** Each live member's playhead at `at`, from its latest sample no older than `maxAgeMs`. */

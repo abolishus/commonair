@@ -11,8 +11,8 @@
  * for hls.js and native playback alike but cannot steer the hold-back.
  */
 import { prefersNativeHls } from "./controller.ts";
-import { playbackMode, playheadWallclock } from "./media-clock.ts";
-import type { RoomPlayer } from "./room-sync.ts";
+import { playbackMode, playheadWallclock, type PlaybackMode } from "./media-clock.ts";
+import { liveEdgeMs, roomReport, type RoomPlayer, type RoomReport } from "./room-sync.ts";
 
 /** What `player.tsx` registers: the controller's steering seam. */
 export interface RoomPlayerSource {
@@ -47,13 +47,43 @@ function nativePlayback(video: HTMLVideoElement): boolean {
   return prefersNativeHls(video, mse);
 }
 
+const PLAYER_VIDEO = '[data-testid="player-video"]';
+
+function seekableEnd(video: HTMLVideoElement | null): number | null {
+  const ranges = video?.seekable;
+  if (!ranges || ranges.length === 0) return null;
+  try {
+    return ranges.end(ranges.length - 1);
+  } catch {
+    return null;
+  }
+}
+
+/** The live edge from the player's latency, else from the video element's `seekable` (native HLS). */
+function edgeOf(
+  mode: PlaybackMode,
+  head: Date | null,
+  latency: number | null,
+  video: HTMLVideoElement | null,
+): Date | null {
+  const ms = liveEdgeMs({
+    mode,
+    playheadMs: head?.getTime() ?? null,
+    latencySeconds: latency,
+    seekableEnd: seekableEnd(video),
+    currentTime: video && Number.isFinite(video.currentTime) ? video.currentTime : null,
+  });
+  return ms === null ? null : new Date(ms);
+}
+
 /** The fallback: the media clock and a seek on the page's video element. */
 function domPlayer(channel: string, doc: Document): RoomPlayer | null {
-  const video = doc.querySelector<HTMLVideoElement>('[data-testid="player-video"]');
+  const video = doc.querySelector<HTMLVideoElement>(PLAYER_VIDEO);
   if (!video) return null;
   return {
     playheadWallclock: () => playheadWallclock(channel),
     playbackMode: () => playbackMode(channel),
+    edgeWallclock: () => edgeOf(playbackMode(channel), playheadWallclock(channel), null, video),
     seekToWallclock: (t) => {
       const head = playheadWallclock(channel);
       if (!head || video.readyState < 1) return false;
@@ -78,8 +108,30 @@ export function roomPlayer(channel: string, doc: Document | null = globalThis.do
       seekToWallclock: (t) => s.seekToWallclock(t),
       ...(top.native ? {} : { setTargetLatency: (sec: number) => s.setTargetLatency(sec) }),
       ...(s.latencySeconds ? { latencySeconds: () => s.latencySeconds?.() ?? null } : {}),
+      // hls.js knows its latency; native HLS (no latency) falls back to the element's `seekable`.
+      edgeWallclock: () =>
+        edgeOf(
+          s.playbackMode(),
+          s.playheadWallclock(),
+          s.latencySeconds?.() ?? null,
+          doc?.querySelector<HTMLVideoElement>(PLAYER_VIDEO) ?? null,
+        ),
       native: top.native,
     };
   }
   return doc ? domPlayer(channel, doc) : null;
+}
+
+/**
+ * What this member reports with every `room.sync` (batch 8): the playhead, the mode and the live
+ * edge (null in DVR). Without a mounted player, the media clock alone and no edge.
+ */
+export function roomSyncReport(channel: string, doc: Document | null = globalThis.document ?? null): RoomReport {
+  return (
+    roomReport(roomPlayer(channel, doc)) ?? {
+      at: playheadWallclock(channel),
+      mode: playbackMode(channel),
+      edge: null,
+    }
+  );
 }
