@@ -148,6 +148,9 @@ export class WebActor implements SocialActor {
         for (const s of DISCOVERY_SECTIONS) {
           if (await page.locator(cardIn(s, channel)).count()) return s;
         }
+        // D1-web's home: the Spotlight hero and the per-category live shelves hold live cards too.
+        if (await page.locator(heroCard(channel)).count()) return "spotlight";
+        if (await page.locator(cardIn("category", channel)).count()) return "live";
         await page.waitForTimeout(remainingMs(deadline, 1_000));
         await page.reload({ waitUntil: "domcontentloaded", timeout: remainingMs(deadline) });
         await byTestId(page, T.directory).waitFor({ timeout: remainingMs(deadline, 10_000) });
@@ -155,7 +158,9 @@ export class WebActor implements SocialActor {
       },
       { timeoutMs: b.timeoutMs, intervalMs: 0, signal: b.signal },
     );
-    const card = page.locator(cardIn(section, channel)).first();
+    const card = page
+      .locator(`${cardIn(section, channel)}, ${heroCard(channel)}, ${cardIn("category", channel)}`)
+      .first();
     const link = card.locator(`a[href$="${ROUTES.channel(channel)}"]`);
     await ((await link.count()) ? link.first() : card).click({ timeout: 10_000 });
     await page.waitForURL((u) => u.pathname === ROUTES.channel(channel), { timeout: 20_000 });
@@ -293,8 +298,12 @@ export class WebActor implements SocialActor {
   close(): void {}
 }
 
-function cardIn(section: LiveDirectorySection, channel: string): string {
+function cardIn(section: LiveDirectorySection | "category", channel: string): string {
   return `${tid(T.directorySection, { section })} ${tid(T.streamCard, { channel })}`;
+}
+
+function heroCard(channel: string): string {
+  return `${tid(T.homeHero)} ${tid(T.streamCard, { channel })}`;
 }
 
 // ---------------------------------------------------------------- API

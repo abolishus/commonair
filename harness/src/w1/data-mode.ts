@@ -135,11 +135,15 @@ async function openViewer(ext: IntegrityExtension, engine: BrowserEngine, sessio
 /** Turn data saver on and pick the Audio preset through the UI; wait until the token carries it. */
 async function chooseAudio(w: Watcher, ext: IntegrityExtension, throttleKbps: number | null): Promise<void> {
   const { page } = w;
+  // D2-player moved data saver into the player's settings panel: show the bar, open the gear.
+  await byW1Id(page, W.player).hover({ timeout: UI_TIMEOUT_MS });
+  await page.locator('[data-testid="player-settings"]').click({ timeout: UI_TIMEOUT_MS });
   const toggle = byW1Id(page, W.dataModeToggle);
   await toggle.waitFor({ timeout: UI_TIMEOUT_MS });
   if ((await toggle.getAttribute("data-state")) !== "on") await toggle.click({ timeout: UI_TIMEOUT_MS });
   await byW1Id(page, W.dataModeToggle, { state: "on" }).waitFor({ timeout: UI_TIMEOUT_MS });
   await byW1Id(page, W.dataModeBudget50).click({ timeout: UI_TIMEOUT_MS });
+  await page.keyboard.press("Escape");
   if (throttleKbps !== null) {
     const cdp = await page.context().newCDPSession(page);
     await cdp.send("Network.enable");

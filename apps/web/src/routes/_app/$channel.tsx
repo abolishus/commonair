@@ -268,7 +268,7 @@ function ChannelView({
     <ChannelAboutSection
       name={channel.displayName}
       about={about}
-      followers={<FollowerCount count={follow.state.count} />}
+      followers={<FollowerCount count={follow.state.count} testId="channel-about-followers" />}
       panels={panels}
       banner={withBanner ? banner : null}
     />

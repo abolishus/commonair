@@ -555,8 +555,10 @@ export function ChatPanel({
         aria-label={t("chat.title")}
         className={cn("flex min-h-0 min-w-0 flex-col border border-border bg-card", className)}
       >
-        <header className="border-b border-border px-3 py-2">
+        <header className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
           <h2 className="truncate text-sm font-semibold">{t("chat.title")}</h2>
+          {/* A room invite still opens here, so a refused join (e.g. a minor on a mature channel) says why. */}
+          <WatchRoomDrawer channel={channel} signedIn={signedIn} selfUsername={selfUsername} />
         </header>
         <EmptyState
           data-testid="chat-gated"
