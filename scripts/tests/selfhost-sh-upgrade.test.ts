@@ -231,4 +231,40 @@ describe("upgrade", () => {
     },
     TIMEOUT,
   );
+
+  test(
+    "images of releases older than the previous one are removed; kept, foreign and in-use ones stay",
+    () => {
+      const h = host();
+      expectOk(h.run(INSTALL));
+      expectOk(h.run(["upgrade", "--version", "v0.2.0"]));
+      // repo@digest of a unit's image in an installed release (0.1.0 is still on disk here).
+      const ref = (version: string, unit: string) => {
+        const file = join(h.home, ".local/share/commonair/releases", version, "quadlet", `${unit}.container`);
+        const image = /^Image=(.+)$/m.exec(readFileSync(file, "utf8"))?.[1] ?? "";
+        const [repo, dig] = image.replace(/:[^/@]*@/, "@").split("@");
+        return { repo: repo ?? "", dig: dig ?? "" };
+      };
+      const api1 = ref("0.1.0", "commonair-api");
+      const web1 = ref("0.1.0", "commonair-web");
+      const api2 = ref("0.2.0", "commonair-api");
+      expect(api1.dig).not.toBe(api2.dig);
+      const images = [
+        `old1 ${api1.repo} ${api1.dig}`,
+        `busy ${web1.repo} ${web1.dig}`,
+        `prev ${api2.repo} ${api2.dig}`,
+        `mine example.org/operator/tool sha256:${"e".repeat(64)}`,
+        `dang <none> <none>`,
+      ].join("\n");
+      Bun.spawnSync(["sh", "-c", `: > "${h.log}"`]);
+      const r = h.run(["upgrade", "--version", "v0.3.0"], { STUB_IMAGES: images, STUB_RMI_IN_USE: "busy" });
+      expect(r.code, r.err).toBe(0);
+      const rmis = h.calls().filter((c) => c.startsWith("podman rmi"));
+      // 0.2.0 is now the previous release, so its images stay; 0.1.0's go, unless a container uses one.
+      expect(rmis).toEqual(["podman rmi old1", "podman rmi busy"]);
+      expect(r.err).toContain(`removed an old release's image: ${api1.repo}@${api1.dig}`);
+      expect(r.err).not.toContain(web1.dig);
+    },
+    TIMEOUT,
+  );
 });

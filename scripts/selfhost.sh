@@ -2620,6 +2620,33 @@ prune_releases() {
   done
 }
 
+# Every image a unit of release $1 names, in any mode (seed mode's units too), as repo@digest.
+release_image_refs() {
+  for _u in "$1"/quadlet/*.container "$1/$OPTIONAL_UNIT_DIR"/*.container; do
+    [ -f "$_u" ] && sed -n 's/^Image=//p' "$_u"
+  done | sed 's/:[^/@]*@/@/' | sort -u
+}
+
+# Removes the images of releases older than the previous one. Each upgrade pulls several GB and
+# nothing else frees them: staging filled its 80 GB disk after eight upgrades. An image stays when
+# the current or previous release names it (a rollback needs the previous one's), when its
+# repository is none a kept release uses (the operator's own images), or when a container still
+# uses it (podman rmi refuses).
+prune_images() {
+  _prev=$(readlink "$PREVIOUS_LINK" 2>/dev/null || true)
+  _keep=$({
+    release_image_refs "$(readlink "$CURRENT_LINK")"
+    if [ -n "$_prev" ]; then release_image_refs "$_prev"; fi
+  } | sort -u)
+  _repos=$(printf '%s\n' "$_keep" | sed 's/@.*//' | sort -u)
+  podman images --format '{{.ID}} {{.Repository}} {{.Digest}}' 2>/dev/null |
+    while read -r _id _repo _dig; do
+      printf '%s\n' "$_repos" | grep -qxF "$_repo" || continue
+      printf '%s\n' "$_keep" | grep -qxF "$_repo@$_dig" && continue
+      if podman rmi "$_id" >/dev/null 2>&1; then info "removed an old release's image: $_repo@$_dig"; fi
+    done
+}
+
 # The instance lives in the service user's home and runs under its systemd user manager. Root
 # and a user reached by su/sudo (no user manager) get the fix, not an empty status.
 require_instance() {
@@ -2690,6 +2717,7 @@ cmd_upgrade() {
   info "upgrading $_curv -> $BUNDLE_VERSION"
   if ! bring_up; then rollback "$_cur"; fi
   prune_releases
+  prune_images
   info "upgraded to $(installed_version)"
 }
 

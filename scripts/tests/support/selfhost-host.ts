@@ -158,6 +158,9 @@ case "$1" in
     cat > "$STUB_STATE/secrets/$name"
     ;;
   inspect) echo healthy ;;
+  # The local images as "ID REPOSITORY DIGEST" lines; STUB_RMI_IN_USE: the ID a container uses.
+  images) [ -z "\${STUB_IMAGES:-}" ] || printf '%s\n' "\${STUB_IMAGES}" ;;
+  rmi) [ "$2" != "\${STUB_RMI_IN_USE:-none}" ] || exit 2 ;;
   ps) [ -z "\${STUB_NETWORK_FOREIGN:-}" ] || echo "\${STUB_NETWORK_FOREIGN}" ;;
   network)
     case "$2" in
