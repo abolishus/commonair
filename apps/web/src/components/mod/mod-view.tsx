@@ -63,6 +63,11 @@ export interface ModViewProps {
   client?: ModViewClient;
   /** The page header, rendered once access is confirmed (it lives in the route, F26). */
   header: React.ReactNode;
+  /**
+   * The route's page container around every state but "denied": the not-found state brings its own
+   * container, and nesting it in the route's doubles the side gutter at 320 px.
+   */
+  frame?: (children: React.ReactNode) => React.ReactNode;
   /** Timers, for tests. */
   refreshMs?: number;
 }
@@ -72,6 +77,7 @@ export function ModView({
   chat,
   client = apiModViewClient,
   header,
+  frame = (children) => children,
   refreshMs = HELD_REFRESH_MS,
 }: ModViewProps): React.JSX.Element {
   const [access, setAccess] = React.useState<Access>({ state: "checking" });
@@ -92,6 +98,43 @@ export function ModView({
   }, [channel, client, attempt]);
 
   if (access.state === "denied") return <NotFoundState data-testid="mod-view-denied" />;
+  return (
+    <>
+      {frame(
+        <ModViewBody
+          access={access}
+          channel={channel}
+          chat={chat}
+          client={client}
+          header={header}
+          refreshMs={refreshMs}
+          retry={() => {
+            setAccess({ state: "checking" });
+            setAttempt((n) => n + 1);
+          }}
+        />,
+      )}
+    </>
+  );
+}
+
+function ModViewBody({
+  access,
+  channel,
+  chat,
+  client,
+  header,
+  refreshMs,
+  retry,
+}: {
+  access: Exclude<Access, { state: "denied" }>;
+  channel: string;
+  chat: React.ReactNode;
+  client: ModViewClient;
+  header: React.ReactNode;
+  refreshMs: number;
+  retry: () => void;
+}): React.JSX.Element {
   if (access.state === "checking")
     return (
       <div data-testid="mod-view-checking" aria-busy="true">
@@ -108,14 +151,7 @@ export function ModView({
         title={t("studio.mod.loadFailed")}
         description={t("studio.mod.loadFailedHint")}
         action={
-          <Button
-            data-testid="empty-state-action"
-            size="sm"
-            onClick={() => {
-              setAccess({ state: "checking" });
-              setAttempt((n) => n + 1);
-            }}
-          >
+          <Button data-testid="empty-state-action" size="sm" onClick={retry}>
             {t("common.retry")}
           </Button>
         }
@@ -202,6 +238,10 @@ export function HeldPanel({
         </CardAction>
       </CardHeader>
       <CardContent>
+        {/* Only the count is live: the list is replaced on every refresh and would be re-read. */}
+        <output data-testid="mod-held-status" className="sr-only">
+          {t("studio.mod.heldCount", { count: state.items.length })}
+        </output>
         {state.items.length === 0 ? (
           <EmptyState
             data-testid="held-queue-empty"
@@ -211,7 +251,7 @@ export function HeldPanel({
             headingLevel={3}
           />
         ) : (
-          <ul aria-live="polite" className="flex flex-col divide-y divide-border">
+          <ul aria-label={t("held.title")} className="flex flex-col divide-y divide-border">
             {state.items.map((m) => (
               <HeldRow key={m.id} message={m} onResolve={(allow) => void resolve(m, allow)} />
             ))}
@@ -279,11 +319,7 @@ export function ModLogPanel({ channel, client }: { channel: string; client: ModV
                   <StatusBadge tone={actionTone(a.action)}>{t("studio.mod.action", { action: a.action })}</StatusBadge>
                   <RelativeTime date={a.createdAt} className="text-muted-foreground" />
                 </span>
-                <span className="break-words">
-                  {a.target
-                    ? t("studio.mod.byOn", { moderator: a.moderator?.username ?? "", target: a.target.username })
-                    : t("studio.mod.by", { moderator: a.moderator?.username ?? "" })}
-                </span>
+                <span className="break-words">{modActionLine(a)}</span>
                 {a.reason ? <span className="break-words text-muted-foreground">{a.reason}</span> : null}
               </li>
             ))}
@@ -292,6 +328,16 @@ export function ModLogPanel({ channel, client }: { channel: string; client: ModV
       </CardContent>
     </Card>
   );
+}
+
+/** Who acted on whom; an action without a moderator (filters, automatic expiry) says so. */
+export function modActionLine(a: Pick<ModActionDto, "moderator" | "target">): string {
+  const moderator = a.moderator?.username;
+  if (moderator)
+    return a.target
+      ? t("studio.mod.byOn", { moderator, target: a.target.username })
+      : t("studio.mod.by", { moderator });
+  return a.target ? t("studio.mod.autoOn", { target: a.target.username }) : t("studio.mod.auto");
 }
 
 function actionTone(action: ModActionDto["action"]): "danger" | "warning" | "neutral" {

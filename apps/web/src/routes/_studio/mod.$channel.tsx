@@ -29,14 +29,17 @@ function ModViewRoute(): React.JSX.Element {
   const { channel } = Route.useParams();
   if (!me) return <Navigate to="/signin" replace />;
   return (
-    // A board (chat beside two panels): wide (F26).
-    <PageContainer width="wide" className="flex flex-col gap-6 py-8">
-      <ModView
-        key={channel}
-        channel={channel}
-        header={<PageHeader title={t("studio.mod.title", { channel })} description={t("studio.mod.intro")} />}
-        chat={<ChatPanel channel={channel} signedIn selfUsername={me.username} className={CHAT_COLUMN_CLASS} />}
-      />
-    </PageContainer>
+    <ModView
+      key={channel}
+      channel={channel}
+      // A board (chat beside two panels): wide (F26). Not around the denied state, which has its own.
+      frame={(children) => (
+        <PageContainer width="wide" className="flex flex-col gap-6 py-8">
+          {children}
+        </PageContainer>
+      )}
+      header={<PageHeader title={t("studio.mod.title", { channel })} description={t("studio.mod.intro")} />}
+      chat={<ChatPanel channel={channel} signedIn selfUsername={me.username} className={CHAT_COLUMN_CLASS} />}
+    />
   );
 }

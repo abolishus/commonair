@@ -7,7 +7,7 @@
  * (docs/streamers/channel-bot.md).
  */
 import { EmptyState, IconButton, StatusBadge, formatNumber, useLocale } from "@commonair/ui";
-import { DataTable, type DataTableColumn } from "@commonair/ui/blocks/data";
+import { DataTable, type DataTableColumn, KeyValueList } from "@commonair/ui/blocks/data";
 import { ResponsiveRows, type StackedRow } from "../studio/stacked-rows.tsx";
 import { SelectField } from "@commonair/ui/blocks/forms";
 import { Button } from "@commonair/ui/components/button";
@@ -180,13 +180,18 @@ export function CommandsPanel({
                 <span className="font-mono">{c.aliases.map((a) => `!${a}`).join(", ")}</span>
               ) : null}
               <span>
-                {[
-                  userLevelLabel(c.userLevel),
-                  t("bot.command.seconds", { count: c.cooldownSeconds }),
-                  `${t("bot.command.cost")}: ${formatNumber(c.costPoints, locale)}`,
-                  `${t("bot.command.uses")}: ${formatNumber(c.useCount, locale)}`,
-                ].join(t("common.listSeparator"))}
+                {[userLevelLabel(c.userLevel), t("bot.command.seconds", { count: c.cooldownSeconds })].join(
+                  t("common.listSeparator"),
+                )}
               </span>
+              {/* Term/value pairs, not "label: value" strings, so no punctuation sits outside the catalog. */}
+              <KeyValueList
+                dense
+                rows={[
+                  { term: t("bot.command.cost"), value: formatNumber(c.costPoints, locale) },
+                  { term: t("bot.command.uses"), value: formatNumber(c.useCount, locale) },
+                ]}
+              />
             </>
           ),
           actions: canEdit ? (

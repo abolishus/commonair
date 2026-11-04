@@ -7,6 +7,7 @@
  * those columns off screen with no cue. From `sm` the table shows; the two never show together.
  * While loading or empty only the table renders (its skeleton and empty state serve both widths).
  */
+import { cn } from "@commonair/ui/lib/utils";
 import * as React from "react";
 
 export interface StackedRow {
@@ -36,7 +37,8 @@ export function ResponsiveRows({ table, rows, label, footer }: ResponsiveRowsPro
   if (rows === null || rows.length === 0) return table;
   return (
     <>
-      {React.cloneElement(table, { className: "hidden sm:block" })}
+      {/* `sm:grid`, not `sm:block`: DataTable's root is a grid (its gap to the footer); keep the caller's classes. */}
+      {React.cloneElement(table, { className: cn(table.props.className, "hidden sm:grid") })}
       <div data-slot="stacked-rows" className="flex flex-col gap-3 sm:hidden">
         <ul aria-label={label} className="flex flex-col divide-y divide-border rounded-md border border-border">
           {rows.map((row) => (

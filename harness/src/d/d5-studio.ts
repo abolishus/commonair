@@ -9,7 +9,8 @@
  * - F25: as `newbie` (empty everywhere), `/content` offers an `empty-state-action`.
  *
  * `newbie` is not one of the scenario's signed-in pages, so this file signs it in itself, the same
- * way the scenario signs in the others (the `seed full` password from `DEMO_SEED_PASSWORD`).
+ * way the scenario signs in the others (the `seed full` password from `DEMO_SEED_PASSWORD`), inside
+ * the step that needs it.
  */
 import type { Page } from "playwright";
 import { signInViaUi } from "../web/flows.ts";
@@ -36,12 +37,18 @@ async function open(ctx: DContext, page: Page, path: string): Promise<void> {
   await waitForHydration(page);
 }
 
-async function signedIn(ctx: DContext, handle: string): Promise<Page | string> {
-  const s = ctx.scenario;
+/** Who to sign in as, or why the step cannot run (checked before the step, so it can be skipped). */
+function account(ctx: DContext, handle: string): { email: string; password: string } | string {
   const user = ctx.store.users.find((u) => u.handle === handle);
   if (!user) return `the seed store has no ${handle} (run \`seed full\`)`;
   const password = process.env.DEMO_SEED_PASSWORD;
   if (!password) return "set DEMO_SEED_PASSWORD to the `seed full` run's password";
+  return { email: user.email, password };
+}
+
+/** A fresh browser signed in as `handle`; call it inside a step, so a failed sign-in fails that step. */
+async function signIn(ctx: DContext, handle: string, credentials: { email: string; password: string }): Promise<Page> {
+  const s = ctx.scenario;
   const session = await WebSession.open({
     fleet: s.platform.fleet,
     engine: "chromium",
@@ -52,7 +59,7 @@ async function signedIn(ctx: DContext, handle: string): Promise<Page | string> {
   });
   s.defer(() => session.close());
   const page = await session.goto(ROUTES.signin);
-  await signInViaUi(page, { email: user.email, password }, UI_TIMEOUT_MS, s.signal);
+  await signInViaUi(page, credentials, UI_TIMEOUT_MS, s.signal);
   await page.locator(tid(T.navUser)).first().waitFor({ timeout: UI_TIMEOUT_MS });
   return page;
 }
@@ -79,14 +86,15 @@ export async function steps(ctx: DContext): Promise<void> {
     s.check("the stream key is on /dashboard/settings", true);
   });
 
-  const newbie = await signedIn(ctx, "newbie");
+  const newbie = account(ctx, "newbie");
   if (typeof newbie === "string") {
     s.skipStep("d5-studio: newbie's /content offers an empty-state action", newbie);
     return;
   }
   await s.step("d5-studio: newbie's /content offers an empty-state action", async () => {
-    await open(ctx, newbie, "/content");
-    const action = newbie.locator(tid(T.emptyStateAction));
+    const page = await signIn(ctx, "newbie", newbie);
+    await open(ctx, page, "/content");
+    const action = page.locator(tid(T.emptyStateAction));
     await action.first().waitFor({ timeout: UI_TIMEOUT_MS });
     s.assert("an empty-state-action on /content", (await action.count()) >= 1);
     const href = await action.first().getAttribute("href");

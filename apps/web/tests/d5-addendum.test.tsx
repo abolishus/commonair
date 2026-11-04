@@ -19,7 +19,8 @@ import { CommandsPanel } from "../src/components/bot-studio/commands-panel.tsx";
 import type { StudioApi } from "../src/components/interact-studio/shared.tsx";
 import { CrewProposeForm } from "../src/components/money/crew.tsx";
 import { RevenueLedger, TierEditor } from "../src/components/money/revenue.tsx";
-import { EMPTY_DATE_TIME, dateTimeIso, upcomingYears } from "../src/components/studio/date-time.ts";
+import { DateTimeField } from "../src/components/studio/date-time-field.tsx";
+import { EMPTY_DATE_TIME, dateTimeIso, maxDay, upcomingYears, withPart } from "../src/components/studio/date-time.ts";
 import { locale, uiMessages } from "../src/i18n/index.ts";
 import type { BotCommandDto } from "../src/lib/bot-studio.ts";
 import type { RevenueLineDto } from "../src/lib/money.ts";
@@ -98,7 +99,9 @@ describe("F31: stacked rows below sm", () => {
     const stacked = container.querySelector('[data-slot="stacked-rows"]');
     expect(classes(stacked)).toContain("sm:hidden");
     const table = container.querySelector("table")?.closest('[class*="hidden"]');
-    expect(classes(table ?? null)).toEqual(expect.arrayContaining(["hidden", "sm:block"]));
+    // `sm:grid`, so DataTable keeps its grid gap to the footer.
+    expect(classes(table ?? null)).toEqual(expect.arrayContaining(["hidden", "sm:grid", "gap-2"]));
+    expect(classes(table ?? null)).not.toContain("sm:block");
     const rows = within(stacked as HTMLElement).getAllByTestId("revenue-ledger-stacked-row");
     expect(rows.map((r) => r.getAttribute("data-net"))).toEqual(["900", "400"]);
     expect(rows[0]?.querySelector('[data-slot="money-amount"]')).not.toBeNull();
@@ -219,6 +222,41 @@ describe("F33: crew's window uses the design-system date and time field", () => 
     const midnight = dateTimeIso({ day: 3, month: 1, year: 2027, hour: null, minute: null });
     expect("iso" in midnight && new Date(midnight.iso).getHours()).toBe(0);
     expect(dateTimeIso({ day: 29, month: 2, year: 2028, hour: 0, minute: 0 })).toHaveProperty("iso");
+  });
+
+  it("keeps the day inside the month when the month or year changes", () => {
+    const jan31 = { ...EMPTY_DATE_TIME, day: 31, month: 1 };
+    // No year yet: February offers 29 (a leap year stands in), so 31 becomes 29.
+    expect(withPart(jan31, "month", 2)).toMatchObject({ day: 29, month: 2 });
+    expect(withPart({ ...jan31, year: 2027 }, "month", 2)).toMatchObject({ day: 28 });
+    expect(withPart({ ...EMPTY_DATE_TIME, day: 29, month: 2, year: 2028 }, "year", 2027)).toMatchObject({ day: 28 });
+    expect(withPart(jan31, "month", 3)).toMatchObject({ day: 31 });
+    expect(withPart(EMPTY_DATE_TIME, "hour", 7)).toEqual({ ...EMPTY_DATE_TIME, hour: 7 });
+    expect(maxDay(EMPTY_DATE_TIME)).toBe(31);
+    expect(maxDay({ year: 0, month: 4 })).toBe(30);
+  });
+
+  it("reports a blur when focus leaves the field, not when it moves between its own selects", () => {
+    const onBlur = vi.fn<() => void>();
+    wrap(
+      <>
+        <DateTimeField
+          data-testid="dt"
+          legend="Starts"
+          value={EMPTY_DATE_TIME}
+          onValueChange={() => undefined}
+          onBlur={onBlur}
+          years={[2026]}
+        />
+        <button type="button" data-testid="outside">
+          Outside
+        </button>
+      </>,
+    );
+    fireEvent.focusOut(screen.getByTestId("dt-day"), { relatedTarget: screen.getByTestId("dt-month") });
+    expect(onBlur).not.toHaveBeenCalled();
+    fireEvent.focusOut(screen.getByTestId("dt-day"), { relatedTarget: screen.getByTestId("outside") });
+    expect(onBlur).toHaveBeenCalledTimes(1);
   });
 
   it("offers this year and the next five", () => {

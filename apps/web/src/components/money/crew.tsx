@@ -209,10 +209,11 @@ export function CrewProposeForm({
   const [startsAt, setStartsAt] = React.useState<DateTimeParts>(EMPTY_DATE_TIME);
   const [endsAt, setEndsAt] = React.useState<DateTimeParts>(EMPTY_DATE_TIME);
   const [submitted, setSubmitted] = React.useState(false);
+  const [touched, setTouched] = React.useState({ starts: false, ends: false });
   const [clock] = React.useState(() => now ?? Date.now());
   const years = upcomingYears(new Date(clock));
-  const startsError = windowError(startsAt, submitted);
-  const endsError = windowError(endsAt, submitted);
+  const startsError = windowError(startsAt, submitted || touched.starts);
+  const endsError = windowError(endsAt, submitted || touched.ends);
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -351,6 +352,7 @@ export function CrewProposeForm({
               hint={t("splits.startsAtHint")}
               value={startsAt}
               onValueChange={setStartsAt}
+              onBlur={() => setTouched((p) => ({ ...p, starts: true }))}
               years={years}
               error={startsError}
             />
@@ -360,6 +362,7 @@ export function CrewProposeForm({
               hint={t("splits.endsAtHint")}
               value={endsAt}
               onValueChange={setEndsAt}
+              onBlur={() => setTouched((p) => ({ ...p, ends: true }))}
               years={years}
               error={endsError}
             />

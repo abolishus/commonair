@@ -17,7 +17,13 @@ import type * as React from "react";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import type { ChatMessageFrame } from "../src/chat/connection.ts";
 import type { HeldClient } from "../src/components/mod/held-queue.tsx";
-import { ModView, deniesAccess, type ModActionDto, type ModViewClient } from "../src/components/mod/mod-view.tsx";
+import {
+  ModView,
+  deniesAccess,
+  modActionLine,
+  type ModActionDto,
+  type ModViewClient,
+} from "../src/components/mod/mod-view.tsx";
 import { locale, t, uiMessages } from "../src/i18n/index.ts";
 
 afterEach(cleanup);
@@ -183,5 +189,44 @@ describe("a moderator's view", () => {
   it("names every mod action the API can return", () => {
     for (const a of ["ban", "unban", "clear_chat", "emote_only", "add_vip", "end_stream", "warn"] as const)
       expect(t("studio.mod.action", { action: a })).not.toBe("Mod action");
+  });
+});
+
+describe("review follow-ups", () => {
+  const framed = (c: ModViewClient) => (
+    <ModView
+      channel="aurora"
+      client={c}
+      refreshMs={0}
+      frame={(children) => <div data-testid="route-frame">{children}</div>}
+      header={<h1 data-testid="mod-header">Mod view</h1>}
+      chat={<div data-testid="fake-chat" />}
+    />
+  );
+
+  it("renders the denied state outside the route's container, every other state inside it", async () => {
+    wrap(framed(client({ list: async () => Promise.reject(coded("FORBIDDEN")) })));
+    await waitFor(() => expect(screen.getByTestId("mod-view-denied")).toBeTruthy());
+    expect(screen.queryByTestId("route-frame")).toBeNull();
+    cleanup();
+    wrap(framed(client()));
+    await waitFor(() => expect(screen.getByTestId("mod-view")).toBeTruthy());
+    expect(screen.getByTestId("route-frame").contains(screen.getByTestId("mod-view"))).toBe(true);
+  });
+
+  it("names an action without a moderator as automatic, never an empty name", () => {
+    expect(modActionLine(action)).toBe("aurora_mod on spammer");
+    expect(modActionLine({ ...action, target: null })).toBe("By aurora_mod");
+    expect(modActionLine({ ...action, moderator: null })).toBe("Automatic, on spammer");
+    expect(modActionLine({ moderator: null, target: null })).toBe("Automatic action");
+  });
+
+  it("announces the held count, not the replaced list", async () => {
+    wrap(view(client()));
+    await waitFor(() => expect(screen.getByTestId("mod-held-panel")).toBeTruthy());
+    // An <output>: an implicit polite status region.
+    expect(screen.getByTestId("mod-held-status").tagName).toBe("OUTPUT");
+    expect(screen.getByTestId("mod-held-status").textContent).toBe("2 held messages");
+    expect(screen.getByTestId("mod-held-panel").querySelector("[aria-live]")).toBeNull();
   });
 });

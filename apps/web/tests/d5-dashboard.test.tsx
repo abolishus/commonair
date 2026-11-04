@@ -19,7 +19,13 @@ import type { ActivitySource } from "../src/components/studio/activity-feed.tsx"
 import { StreamManager } from "../src/components/studio/stream-manager.tsx";
 import { streamInfoError, type StreamInfo, type StreamInfoClient } from "../src/components/studio/stream-info.tsx";
 import { locale, uiMessages } from "../src/i18n/index.ts";
-import type { StreamHealthDto } from "../src/lib/stream-health.ts";
+import type { PollEnv, StreamHealthDto } from "../src/lib/stream-health.ts";
+
+// The control room's defaults are the real player and chat; these tests pass their own slots.
+vi.mock("../src/player/player.tsx", () => ({ Player: () => null }));
+vi.mock("../src/chat/chat-panel.tsx", () => ({ ChatPanel: () => null }));
+const { ControlRoom } = await import("../src/components/studio/control-room.tsx");
+type LiveChannel = import("../src/components/studio/control-room.tsx").LiveChannel;
 
 afterEach(cleanup);
 
@@ -312,5 +318,106 @@ describe("activity", () => {
     list = pushActivity(list, item("c"), 2);
     expect(list.map((i) => i.id)).toEqual(["c", "b"]);
     expect(pushActivity(list, item("b"), 2).map((i) => i.id)).toEqual(["c", "b"]);
+  });
+});
+
+describe("the control room follows the stream going live", () => {
+  /** A visible page whose interval fires only when the test says so. */
+  function fakePoll() {
+    const timers = new Map<number, () => void>();
+    let next = 1;
+    const env: PollEnv = {
+      isVisible: () => true,
+      onVisibilityChange: () => () => undefined,
+      setInterval: (fn) => {
+        const handle = next++;
+        timers.set(handle, fn);
+        return handle;
+      },
+      clearInterval: (handle) => {
+        timers.delete(handle as number);
+      },
+    };
+    return {
+      env,
+      tick: async () => {
+        await act(async () => {
+          for (const fn of timers.values()) fn();
+          await Promise.resolve();
+        });
+      },
+    };
+  }
+
+  it("turns the preview, uptime and chat's stream live without a reload", async () => {
+    const poll = fakePoll();
+    const offline: LiveChannel = { id: "ch-1", displayName: "Aurora", live: null };
+    const live: LiveChannel = { ...offline, live: { startedAt: "2026-11-04T09:00:00.000Z" } };
+    const load = vi.fn<(slug: string) => Promise<LiveChannel>>(async () => offline);
+    const chatStreams: unknown[] = [];
+    wrap(
+      <ControlRoom
+        slug="aurora"
+        username="aurora"
+        load={load}
+        pollEnv={poll.env}
+        renderPreview={(isLive) => <div data-testid="fake-player" data-live={String(isLive)} />}
+        renderChat={(stream) => {
+          chatStreams.push(stream);
+          return <div data-testid="fake-chat" data-live={String(stream?.live)} />;
+        }}
+        infoClient={infoClient(async (_c, info) => info)}
+        healthLoad={async () => liveHealth}
+        activitySource={quietSource}
+      />,
+    );
+    await waitFor(() => expect(screen.getByTestId("fake-player").getAttribute("data-live")).toBe("false"));
+    expect(screen.getByTestId("fake-chat").getAttribute("data-live")).toBe("false");
+    await waitFor(() => expect(screen.getByTestId("stream-health-numbers")).toBeTruthy());
+    expect(document.querySelector('[data-metric="uptime"]')).toBeNull();
+
+    // OBS starts: the next poll sees the broadcast.
+    load.mockResolvedValue(live);
+    await poll.tick();
+    await waitFor(() => expect(screen.getByTestId("fake-player").getAttribute("data-live")).toBe("true"));
+    expect(screen.getByTestId("fake-chat").getAttribute("data-live")).toBe("true");
+    await waitFor(() => expect(document.querySelector('[data-metric="uptime"]')).toBeTruthy());
+
+    // A poll with nothing new hands chat the same stream object.
+    const before = chatStreams.at(-1);
+    await poll.tick();
+    expect(chatStreams.at(-1)).toBe(before);
+
+    // And back offline.
+    load.mockResolvedValue(offline);
+    await poll.tick();
+    await waitFor(() => expect(screen.getByTestId("fake-player").getAttribute("data-live")).toBe("false"));
+    expect(document.querySelector('[data-metric="uptime"]')).toBeNull();
+  });
+
+  it("keeps the last answer when a later poll fails", async () => {
+    const poll = fakePoll();
+    const load = vi.fn<(slug: string) => Promise<LiveChannel>>(async () => ({
+      id: "ch-1",
+      displayName: "Aurora",
+      live: { startedAt: "2026-11-04T09:00:00.000Z" },
+    }));
+    wrap(
+      <ControlRoom
+        slug="aurora"
+        username="aurora"
+        load={load}
+        pollEnv={poll.env}
+        renderPreview={(isLive) => <div data-testid="fake-player" data-live={String(isLive)} />}
+        renderChat={() => null}
+        infoClient={infoClient(async (_c, info) => info)}
+        healthLoad={async () => liveHealth}
+        activitySource={quietSource}
+      />,
+    );
+    await waitFor(() => expect(screen.getByTestId("fake-player").getAttribute("data-live")).toBe("true"));
+    load.mockRejectedValue(new Error("down"));
+    await poll.tick();
+    expect(screen.getByTestId("fake-player").getAttribute("data-live")).toBe("true");
   });
 });

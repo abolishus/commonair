@@ -134,11 +134,23 @@ export function AnalyticsView({
   );
 }
 
-/** Follows in this period and, when the list reached back that far, in the one before. */
-function splitFollows(
+export interface FollowSplit {
+  current: number;
+  /** Null when the list did not reach back past this period's start. */
+  previous: number | null;
+  /** The paging cap stopped inside this period: `current` is a floor, not the figure. */
+  capped: boolean;
+}
+
+/**
+ * Follows in this period and, when the list reached back that far, in the one before. The list is
+ * newest first, so when the cap stopped it and its oldest entry is still inside the period, the
+ * count is only "at least".
+ */
+export function splitFollows(
   follows: { at: string[]; complete: boolean },
   period: { from: string; to: string },
-): { current: number; previous: number | null } {
+): FollowSplit {
   const from = Date.parse(period.from);
   const to = Date.parse(period.to);
   const current = follows.at.filter((a) => {
@@ -146,7 +158,9 @@ function splitFollows(
     return ms >= from && ms < to;
   }).length;
   const previous = follows.at.filter((a) => Date.parse(a) < from).length;
-  return { current, previous: follows.complete ? previous : null };
+  const oldest = follows.at.at(-1);
+  const capped = !follows.complete && (oldest === undefined || Date.parse(oldest) >= from);
+  return { current, previous: follows.complete ? previous : null, capped };
 }
 
 type TrendMetric = "hours" | "peak" | "followers";
@@ -328,7 +342,7 @@ function RangeSummary({
   range: AnalyticsRange;
   /** The period before, for the deltas; null while it loads or when it failed (no deltas then). */
   previous: AnalyticsRange | null;
-  follows: { current: number; previous: number | null } | null;
+  follows: FollowSplit | null;
 }): React.JSX.Element {
   const { locale } = useLocale();
   const hours = (s: number) => t("analytics.hours", { hours: hoursOf(s, locale) });
@@ -358,8 +372,15 @@ function RangeSummary({
             size="sm"
             data-testid="analytics-range-followers"
             label={t("studio.trend.followers")}
-            value={formatNumber(follows.current, locale)}
-            delta={periodDelta(follows.current, follows.previous, locale)}
+            data-capped={follows.capped || undefined}
+            value={
+              follows.capped
+                ? t("studio.trend.followersAtLeast", { count: formatNumber(follows.current, locale) })
+                : formatNumber(follows.current, locale)
+            }
+            // The list is today's followers: people who followed and left are not in either period.
+            hint={follows.capped ? t("studio.trend.followersCappedHint") : t("studio.trend.followersHint")}
+            delta={follows.capped ? undefined : periodDelta(follows.current, follows.previous, locale)}
           />
         ) : null}
         <StatCard

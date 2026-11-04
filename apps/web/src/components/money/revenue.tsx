@@ -16,6 +16,7 @@ import {
   BreakdownBar,
   DataTable,
   FilterBar,
+  KeyValueList,
   StatCard,
   StatGrid,
   TrendChart,
@@ -501,18 +502,23 @@ function ledgerStackedRow(line: RevenueLineDto): StackedRow {
       <>
         {detail && <span className="break-words">{detail}</span>}
         {(line.gross || line.deductions) && (
-          <span className="flex flex-wrap gap-x-3">
-            {line.gross && (
-              <span>
-                {t("revenue.ledger.gross")}: <MoneyAmount value={line.gross} colorNegative />
-              </span>
-            )}
-            {line.deductions && (
-              <span>
-                {t("revenue.ledger.deductions")}: <MoneyAmount value={line.deductions} colorNegative />
-              </span>
-            )}
-          </span>
+          // Term/value pairs, not "label: value" text, so no punctuation sits outside the catalog.
+          <KeyValueList
+            dense
+            rows={[
+              ...(line.gross
+                ? [{ term: t("revenue.ledger.gross"), value: <MoneyAmount value={line.gross} colorNegative /> }]
+                : []),
+              ...(line.deductions
+                ? [
+                    {
+                      term: t("revenue.ledger.deductions"),
+                      value: <MoneyAmount value={line.deductions} colorNegative />,
+                    },
+                  ]
+                : []),
+            ]}
+          />
         )}
       </>
     ),

@@ -49,5 +49,23 @@ export function dateTimeIso(parts: DateTimeParts): DateTimeResult {
   return { iso: date.toISOString() };
 }
 
-/** Two-digit clock text for the hour and minute selects ("07", "30"). */
+/** The days the chosen month has; a leap year stands in until a year is chosen, so February offers 29. */
+export function maxDay(parts: Pick<DateTimeParts, "year" | "month">): number {
+  return parts.month ? daysInMonth(parts.year || 2000, parts.month) : 31;
+}
+
+/**
+ * `parts` with one part set. A day the new month or year does not have (31, then February) becomes
+ * that month's last day, so the field never holds a date it cannot show.
+ */
+export function withPart(parts: DateTimeParts, part: keyof DateTimeParts, n: number): DateTimeParts {
+  const next = { ...parts, [part]: n };
+  const max = maxDay(next);
+  return next.day > max ? { ...next, day: max } : next;
+}
+
+/**
+ * Two-digit clock text for the hour and minute selects ("07", "30"). The hours stay on a 24-hour
+ * clock until `@commonair/ui` has a shared hour formatter (inline `Intl` is against the source policy).
+ */
 export const pad2 = (n: number): string => String(n).padStart(2, "0");

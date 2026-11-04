@@ -19,7 +19,7 @@ import { locale, uiMessages } from "../src/i18n/index.ts";
 vi.mock("../src/components/analytics/group-appeal.tsx", () => ({ GroupAppealAction: () => null }));
 vi.mock("../src/components/attestations/panel.tsx", () => ({ AttestationsPanel: () => null }));
 
-const { AnalyticsView } = await import("../src/components/analytics/analytics-page.tsx");
+const { AnalyticsView, splitFollows } = await import("../src/components/analytics/analytics-page.tsx");
 const { followsSince } = await import("../src/components/analytics/client.ts");
 type AnalyticsClient = import("../src/components/analytics/client.ts").AnalyticsClient;
 const { rangeFor } = await import("../src/components/analytics/data.ts");
@@ -270,6 +270,28 @@ describe("the analytics range trend", () => {
     expect(screen.getByTestId("analytics-range-verified").textContent).not.toContain("previous period");
   });
 
+  it("shows the followers count as a floor, without a delta, when the paging cap is hit in the period", async () => {
+    const c = client();
+    c.followsSince.mockResolvedValue({ at: ["2026-10-30T10:00:00.000Z", "2026-10-29T10:00:00.000Z"], complete: false });
+    wrap(<AnalyticsView channel="me" now={NOW} client={c} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("analytics-range-followers").getAttribute("data-capped")).toBe("true"),
+    );
+    const card = screen.getByTestId("analytics-range-followers").textContent ?? "";
+    expect(card).toContain("2+");
+    expect(card).toContain("More follows than this page reads");
+    expect(card).not.toContain("previous period");
+  });
+
+  it("says the followers figure counts current followers only", async () => {
+    wrap(<AnalyticsView channel="me" now={NOW} client={client()} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("analytics-range-followers").textContent).toContain(
+        "Counts people who still follow you",
+      ),
+    );
+  });
+
   it("offers no followers metric without a complete follower list", async () => {
     const c = client();
     c.followsSince.mockResolvedValue({ at: [], complete: false });
@@ -280,6 +302,29 @@ describe("the analytics range trend", () => {
       "hours",
       "peak",
     ]);
+  });
+});
+
+describe("splitFollows", () => {
+  const period = { from: "2026-10-01T00:00:00.000Z", to: "2026-10-31T00:00:00.000Z" };
+  it("counts both periods from a complete list", () => {
+    expect(
+      splitFollows(
+        { at: ["2026-10-20T00:00:00.000Z", "2026-10-02T00:00:00.000Z", "2026-09-10T00:00:00.000Z"], complete: true },
+        period,
+      ),
+    ).toEqual({ current: 2, previous: 1, capped: false });
+  });
+  it("keeps the current count but no previous when the cap stopped before this period", () => {
+    expect(
+      splitFollows({ at: ["2026-10-20T00:00:00.000Z", "2026-09-25T00:00:00.000Z"], complete: false }, period),
+    ).toEqual({ current: 1, previous: null, capped: false });
+  });
+  it("marks the count a floor when the cap stopped inside this period", () => {
+    expect(
+      splitFollows({ at: ["2026-10-20T00:00:00.000Z", "2026-10-05T00:00:00.000Z"], complete: false }, period),
+    ).toEqual({ current: 2, previous: null, capped: true });
+    expect(splitFollows({ at: [], complete: false }, period)).toEqual({ current: 0, previous: null, capped: true });
   });
 });
 
