@@ -42,6 +42,17 @@ describe("resolveSeedRoute", () => {
     });
   });
 
+  test("a fixed value and a single encoded query parameter (D1-web's routes)", () => {
+    expect(resolveSeedRoute("/directory/$category", SEED_ROUTES["/directory/$category"] as SeedRoute, store)).toEqual({
+      ok: true,
+      url: "/directory/art",
+    });
+    expect(resolveSeedRoute("/search", SEED_ROUTES["/search"] as SeedRoute, store)).toEqual({
+      ok: true,
+      url: "/search?q=demo_streamer1",
+    });
+  });
+
   test("names what is missing: an unpublished or empty key, an unknown channel, an unmapped param", () => {
     expect(
       resolveSeedRoute("/coop/proposals/$id/edit", SEED_ROUTES["/coop/proposals/$id/edit"] as SeedRoute, store),

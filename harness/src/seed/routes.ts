@@ -21,6 +21,8 @@ export interface SeedRoute {
   params?: Readonly<Record<string, SeedValue>>;
   /** A query string (without `?`) published by a unit. */
   query?: SeedValue;
+  /** One query parameter from a seed value, encoded (instead of `query`), e.g. `q` = a channel slug. */
+  queryParam?: readonly [string, SeedValue];
   /** False for forms and pages that hold no list data (only checked for errors). */
   expectData: boolean;
   /** Empty-state titles that are a valid result here (an all-clear drawn with the empty state). */
@@ -52,7 +54,8 @@ export const SEED_ROUTES: Readonly<Record<string, SeedRoute>> = {
   // D1-web: the directory, one seeded category (streamer1 is live in Art) and a search.
   "/directory/": viewer,
   "/directory/$category": { ...viewer, params: { category: { fixed: "art" } } },
-  "/search": { ...viewer, query: { fixed: "q=streamer" } },
+  // Slugs carry the run's prefix, and search matches a slug's start: search for streamer1's own.
+  "/search": { ...viewer, queryParam: ["q", ch("streamer1")] },
   "/embed/$channel": { as: "anonymous", params: { channel: ch("streamer1") }, expectData: true },
   "/signin": form,
   "/signup": form,

@@ -31,7 +31,7 @@ import {
   type RailEntry,
   type RailSection,
 } from "../../lib/directory-sections.ts";
-import { useHomeFeed } from "./feed.ts";
+import { feedViewer, useHomeFeed } from "./feed.ts";
 import { RAIL_KEY, readRail, writeTab } from "./tab-storage.ts";
 
 /** Expanded by default from here (Tailwind's `lg`); collapsed to avatars below it. */
@@ -52,7 +52,7 @@ function entryCategory(entry: RailEntry): string | null {
 /** The rail's sections from the shared feed, with the names that need a `@handle`. */
 function useRail(): { status: "loading" | "ready" | "error"; sections: RailSection[]; collisions: Set<string> } {
   const { me } = useBootstrap();
-  const feed = useHomeFeed();
+  const feed = useHomeFeed({ viewer: feedViewer(me) });
   return React.useMemo(() => {
     const sections = feed.home ? railSections(feed.home, me !== null) : [];
     const collisions = collidingNames(sections.flatMap((s) => s.entries.map(entryChannel)));
@@ -262,7 +262,7 @@ const SHEET_LIVE_LIMIT = 5;
  */
 export function SheetDiscovery(): React.JSX.Element | null {
   const { me } = useBootstrap();
-  const feed = useHomeFeed();
+  const feed = useHomeFeed({ viewer: feedViewer(me) });
   if (!feed.home) return null;
   const signedIn = me !== null;
   const followed = signedIn ? railSections(feed.home, true).find((s) => s.id === "followed") : undefined;

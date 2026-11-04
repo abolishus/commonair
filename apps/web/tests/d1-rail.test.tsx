@@ -26,7 +26,8 @@ vi.mock("../src/lib/api.ts", () => ({
 }));
 
 const { SideRail, SheetDiscovery } = await import("../src/components/discovery/rail.tsx");
-const { primeHomeFeed, resetHomeFeed } = await import("../src/components/discovery/feed.ts");
+const { FEED_CACHE_KEY, FEED_REFRESH_MS, primeHomeFeed, resetHomeFeed } =
+  await import("../src/components/discovery/feed.ts");
 const { RAIL_KEY } = await import("../src/components/discovery/tab-storage.ts");
 
 /** `matchMedia` with `lg` (min-width: 1024px) on or off; never the shadcn phone breakpoint. */
@@ -215,5 +216,53 @@ describe("collapsing", () => {
       fireEvent.click(screen.getByRole("button", { name: "Collapse the channel list" }));
     });
     expect(rail().getAttribute("data-state")).toBe("collapsed");
+  });
+});
+
+describe("the tab's cached copy", () => {
+  it("a full page load in the same tab reuses it instead of asking again", async () => {
+    const calls = vi.fn(async () => home({ live: [live("busy")] }));
+    fake.home = calls;
+    await renderInRouter(shell());
+    await waitFor(() => expect(rows()).toEqual([["busy", "true"]]));
+    expect(calls).toHaveBeenCalledTimes(1);
+    // The next page: module state is gone, the tab's storage is not.
+    cleanup();
+    resetHomeFeed();
+    await renderInRouter(shell());
+    await waitFor(() => expect(rows()).toEqual([["busy", "true"]]));
+    expect(calls).toHaveBeenCalledTimes(1);
+  });
+
+  it("never shows a copy made for another viewer, nor a stale one", async () => {
+    const at = Date.now();
+    const write = (viewer: string, age: number) =>
+      sessionStorage.setItem(
+        FEED_CACHE_KEY,
+        JSON.stringify({ at: at - age, viewer, home: home({ live: [live("cached")] }) }),
+      );
+    const calls = vi.fn(async () => home({ live: [live("fresh")] }));
+    fake.home = calls;
+    write("someone-else", 0);
+    await renderInRouter(shell());
+    await waitFor(() => expect(rows()).toEqual([["fresh", "true"]]));
+    cleanup();
+    resetHomeFeed();
+    write("anonymous", FEED_REFRESH_MS + 1);
+    await renderInRouter(shell());
+    await waitFor(() => expect(rows()).toEqual([["fresh", "true"]]));
+    expect(calls).toHaveBeenCalledTimes(2);
+  });
+
+  it("works when storage throws", async () => {
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    fake.home = async () => home({ live: [live("busy")] });
+    await renderInRouter(shell());
+    await waitFor(() => expect(rows()).toEqual([["busy", "true"]]));
   });
 });

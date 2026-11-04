@@ -36,6 +36,11 @@ export function resolveSeedRoute(path: string, route: SeedRoute, store: SeedStor
     const q = valueOf(route.query, store);
     if (q === null) return { ok: false, missing: describe(route.query) };
     url = `${url}?${q.replace(/^\?/, "")}`;
+  } else if (route.queryParam) {
+    const [name, v] = route.queryParam;
+    const got = valueOf(v, store);
+    if (got === null) return { ok: false, missing: describe(v) };
+    url = `${url}?${encodeURIComponent(name)}=${encodeURIComponent(got)}`;
   }
   return { ok: true, url };
 }

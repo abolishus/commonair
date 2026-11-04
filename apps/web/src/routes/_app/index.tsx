@@ -7,7 +7,7 @@ import { PageContainer } from "@commonair/ui/layouts";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import * as React from "react";
 import { Directory } from "../../components/directory.tsx";
-import { primeHomeFeed } from "../../components/discovery/feed.ts";
+import { feedViewer, primeHomeFeed } from "../../components/discovery/feed.ts";
 import { getHomeCategories } from "../../components/discovery/loaders.ts";
 import { WelcomeStrip } from "../../components/discovery/welcome-strip.tsx";
 import { t } from "../../i18n/index.ts";
@@ -35,9 +35,10 @@ function Home(): React.JSX.Element {
   const signedIn = me !== null;
   // The rail and the sheet read the same `directory.home`: hand them this copy. A layout effect,
   // so it lands before the header's and the rail's subscribe effects and they do not ask again.
+  const viewer = feedViewer(me);
   React.useLayoutEffect(() => {
-    if (home) primeHomeFeed(home);
-  }, [home]);
+    if (home) primeHomeFeed(home, viewer);
+  }, [home, viewer]);
   const layout = React.useMemo(() => (home ? homeLayout(home, signedIn) : null), [home, signedIn]);
   return (
     <PageContainer width="wide" className="flex flex-col gap-8 py-6">
