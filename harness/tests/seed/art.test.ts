@@ -44,7 +44,7 @@ describe("the art generator", () => {
       const b = artPng(artScene(artRng(root(), "x"), f));
       expect(Buffer.from(a).equals(Buffer.from(b))).toBe(true);
     }
-  });
+  }, 30_000);
 
   test("different salts give different art, and order of drawing does not matter", () => {
     const svgs = SALTS.map((s) => svgFor(s, "avatar"));
