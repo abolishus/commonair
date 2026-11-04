@@ -16,7 +16,7 @@ import { liveEdgeMs, roomReport, type RoomPlayer, type RoomReport } from "./room
 
 /** What `player.tsx` registers: the controller's steering seam. */
 export interface RoomPlayerSource {
-  setTargetLatency(seconds: number): number;
+  setTargetLatency(seconds: number, opts?: { seek?: boolean }): number;
   seekToWallclock(t: Date): boolean;
   playheadWallclock(): Date | null;
   playbackMode(): "live" | "dvr";
@@ -106,7 +106,7 @@ export function roomPlayer(channel: string, doc: Document | null = globalThis.do
       playheadWallclock: () => s.playheadWallclock(),
       playbackMode: () => s.playbackMode(),
       seekToWallclock: (t) => s.seekToWallclock(t),
-      ...(top.native ? {} : { setTargetLatency: (sec: number) => s.setTargetLatency(sec) }),
+      ...(top.native ? {} : { setTargetLatency: (sec: number, o?: { seek?: boolean }) => s.setTargetLatency(sec, o) }),
       ...(s.latencySeconds ? { latencySeconds: () => s.latencySeconds?.() ?? null } : {}),
       // hls.js knows its latency; native HLS (no latency) falls back to the element's `seekable`.
       edgeWallclock: () =>

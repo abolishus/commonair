@@ -117,7 +117,14 @@ function simulatedPlayer(opts: { offsetS: number; holdBackS: number; native?: bo
     ...(opts.native
       ? {}
       : {
-          setTargetLatency: (s: number) => {
+          setTargetLatency: (s: number, o?: { seek?: boolean }) => {
+            if (o?.seek === false) {
+              // Holds the new distance from here on, without moving the playhead now.
+              calls.push(`hold ${s.toFixed(2)}`);
+              seekOffsetMs += (s - holdBack) * 1000;
+              holdBack = s;
+              return s;
+            }
             calls.push(`latency ${s.toFixed(2)}`);
             holdBack = s;
             seekOffsetMs = 0;
@@ -142,38 +149,43 @@ function simulatedPlayer(opts: { offsetS: number; holdBackS: number; native?: bo
 }
 
 describe("RoomSyncDriver", () => {
-  it("hls.js converges into the deadband within two steps and stays there", () => {
+  it("hls.js lands in the deadband in one step and stays there", () => {
     // The encoder's offset (1.5 s) is unknown to the driver; the target is 1.5 s behind this member.
     const sim = simulatedPlayer({ offsetS: 1.5, holdBackS: 4 });
     const driver = new RoomSyncDriver({ player: () => sim.player, reducedMotion: () => false, now: sim.now });
     const target = () => new Date(sim.now() - 7000).toISOString();
     const drift = () => Math.abs(sim.player.playheadWallclock()!.getTime() - (sim.now() - 7000));
     expect(driver.onTarget(target()).kind).toBe("latency");
-    // The first step starts from the measured latency, so it lands off by the offset...
-    expect(drift()).toBe(1500);
-    sim.tick(2000);
-    // ...and the second, from the hold-back it applied, lands on the target.
-    expect(driver.onTarget(target()).kind).toBe("latency");
+    // The playhead lands from the PDT, so the offset plays no part.
     for (let i = 0; i < 5; i++) {
       expect(drift()).toBeLessThanOrEqual(DRIFT.deadbandMs);
       sim.tick(2000);
       expect(driver.onTarget(target()).kind).toBe("none");
     }
-    expect(sim.calls).toHaveLength(2);
+    // The hold-back is the wall-clock estimate (5.5 s) plus the drift; the playhead then seeks.
+    expect(sim.calls).toEqual(["hold 7.00", "seek"]);
   });
 
-  it("with the player's own latency, the first step lands on the target despite clock skew", () => {
+  it("with the player's own latency, the hold-back is that latency plus the drift", () => {
     const sim = simulatedPlayer({ offsetS: 1.5, holdBackS: 4 });
     let holdBack = 4;
     const player: RoomPlayer = {
       ...sim.player,
-      setTargetLatency: (sec) => (holdBack = sim.player.setTargetLatency!(sec)),
+      setTargetLatency: (sec, opts) => (holdBack = sim.player.setTargetLatency!(sec, opts)),
       latencySeconds: () => holdBack,
     };
     const driver = new RoomSyncDriver({ player: () => player, reducedMotion: () => false, now: sim.now });
     expect(driver.onTarget(new Date(sim.now() - 7000).toISOString()).kind).toBe("latency");
     expect(Math.abs(player.playheadWallclock()!.getTime() - (sim.now() - 7000))).toBeLessThanOrEqual(1);
-    expect(sim.calls).toEqual(["latency 5.50"]);
+    expect(sim.calls).toEqual(["hold 5.50", "seek"]);
+  });
+
+  it("hls.js: when the PDT seek finds no fragment, the step falls back to hls.js's sync position", () => {
+    const sim = simulatedPlayer({ offsetS: 1.5, holdBackS: 4 });
+    const player: RoomPlayer = { ...sim.player, seekToWallclock: () => false };
+    const driver = new RoomSyncDriver({ player: () => player, reducedMotion: () => false, now: sim.now });
+    expect(driver.onTarget(new Date(sim.now() - 7000).toISOString()).kind).toBe("latency");
+    expect(sim.calls).toEqual(["hold 7.00", "latency 7.00"]);
   });
 
   it("a member joining slower moves the target, and the driver follows; leaving moves it back", () => {
@@ -191,6 +203,68 @@ describe("RoomSyncDriver", () => {
     sim.tick(2000);
     driver.onTarget(at(6000));
     expect(Math.abs(sim.player.playheadWallclock()!.getTime() - (sim.now() - 6000))).toBeLessThanOrEqual(150);
+  });
+
+  it("hls.js lands on the target in PDT even when its own edge estimate moves between steps", () => {
+    // hls.js's sync position is measured from this member's own edge estimate (`edge + age`), which
+    // shifts by hundreds of ms between steps: a rendition switch, a playlist reload landing late,
+    // `edgeStalled`. CI run 41757992200 (edge-sync): one member read its own latency as ~4.9 s while
+    // it sat 5.7 s behind the room's edge, and the two stayed 0.5-1.1 s apart after 30 s. A step
+    // that seeks to the sync position lands off by the shift; one that lands from the playhead
+    // (PDT is linear in media time) does not.
+    let clock = NOW;
+    let edgeLagMs = 1500; // how far this member's own edge estimate trails the room's edge
+    let behindMs = 3000 + edgeLagMs; // the playhead, behind `clock`
+    let holdBack = 3;
+    const calls: string[] = [];
+    const player: RoomPlayer = {
+      playheadWallclock: () => new Date(clock - behindMs),
+      playbackMode: () => "live",
+      setTargetLatency: (s: number, opts?: { seek?: boolean }) => {
+        calls.push(opts?.seek === false ? `hold ${s.toFixed(2)}` : `latency ${s.toFixed(2)}`);
+        holdBack = s;
+        if (opts?.seek !== false) behindMs = edgeLagMs + s * 1000;
+        return s;
+      },
+      latencySeconds: () => (behindMs - edgeLagMs) / 1000,
+      seekToWallclock: (t: Date) => {
+        calls.push("seek");
+        behindMs = clock - t.getTime();
+        return true;
+      },
+      native: false,
+    };
+    const driver = new RoomSyncDriver({ player: () => player, reducedMotion: () => false, now: () => clock });
+    // The room's target moves by a second each tick (members joining, leaving, re-steering), so
+    // every tick is a correction, each made while the estimate sits somewhere else.
+    let roomBehindMs = 6500;
+    const drift = () => Math.abs(player.playheadWallclock()!.getTime() - (clock - roomBehindMs));
+    for (let i = 0; i < 8; i++) {
+      expect(driver.onTarget(new Date(clock - roomBehindMs).toISOString()).kind).toBe("latency");
+      expect(drift()).toBeLessThanOrEqual(DRIFT.deadbandMs);
+      clock += 2000;
+      // The estimate shifts by 700 ms and back (a rendition switch); the playhead does not move.
+      edgeLagMs = edgeLagMs === 1500 ? 2200 : 1500;
+      roomBehindMs = roomBehindMs === 6500 ? 7500 : 6500;
+    }
+    // Each step held the new distance and landed from the playhead.
+    expect(calls.slice(0, 4)).toEqual(["hold 5.00", "seek", "hold 6.00", "seek"]);
+    expect(Number.isFinite(holdBack)).toBe(true);
+  });
+
+  it("hls.js: a seek over 2 s also moves the hold-back, so hls.js does not keep the old one", () => {
+    const sim = simulatedPlayer({ offsetS: 0, holdBackS: 9 });
+    let holdBack = 9;
+    const player: RoomPlayer = {
+      ...sim.player,
+      setTargetLatency: (sec, opts) => (holdBack = sim.player.setTargetLatency!(sec, opts)),
+      latencySeconds: () => holdBack,
+    };
+    const driver = new RoomSyncDriver({ player: () => player, reducedMotion: () => false, now: sim.now });
+    expect(driver.onTarget(new Date(sim.now() - 5000).toISOString()).kind).toBe("seek");
+    expect(Math.abs(player.playheadWallclock()!.getTime() - (sim.now() - 5000))).toBeLessThanOrEqual(1);
+    expect(sim.calls).toEqual(["seek", "hold 5.00"]);
+    expect(holdBack).toBe(5);
   });
 
   it("native: seeks once into tolerance", () => {

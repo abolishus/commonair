@@ -218,7 +218,7 @@ export function Player({
     const unregisterRoom = registerRoomPlayer(
       channel,
       {
-        setTargetLatency: (seconds) => controller.setTargetLatency(seconds),
+        setTargetLatency: (seconds, opts) => controller.setTargetLatency(seconds, opts),
         seekToWallclock: (t) => controller.seekToWallclock(t),
         playheadWallclock: () => controller.playheadWallclock(),
         playbackMode: () => controller.playbackMode(),
