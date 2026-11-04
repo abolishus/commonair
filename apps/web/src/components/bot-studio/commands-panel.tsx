@@ -8,6 +8,7 @@
  */
 import { EmptyState, IconButton, StatusBadge, formatNumber, useLocale } from "@commonair/ui";
 import { DataTable, type DataTableColumn } from "@commonair/ui/blocks/data";
+import { ResponsiveRows, type StackedRow } from "../studio/stacked-rows.tsx";
 import { SelectField } from "@commonair/ui/blocks/forms";
 import { Button } from "@commonair/ui/components/button";
 import {
@@ -164,25 +165,86 @@ export function CommandsPanel({
         ) : undefined
       }
     >
-      <DataTable
-        caption={t("bot.command.title")}
-        columns={columns}
-        rows={sorted}
-        getRowId={(c) => c.name}
-        rowProps={(c) => ({
-          "data-testid": "command-row",
-          "data-name": c.name,
-          "data-uses": c.useCount,
-          "data-enabled": c.enabled ? "true" : "false",
-          "data-cost": c.costPoints,
-        })}
-        empty={
-          <EmptyState
-            data-testid="command-empty"
-            icon={CommandLineIcon}
-            headingLevel={3}
-            title={t("bot.command.empty")}
-            description={canEdit ? t("bot.command.emptyHint") : undefined}
+      <ResponsiveRows
+        label={t("bot.command.title")}
+        rows={sorted.map((c): StackedRow => ({
+          id: c.name,
+          attributes: { "data-testid": "command-stacked-row", "data-name": c.name },
+          title: <span className="font-mono">!{c.name}</span>,
+          value: (
+            <StatusBadge tone={c.enabled ? "success" : "neutral"}>{c.enabled ? t("bot.on") : t("bot.off")}</StatusBadge>
+          ),
+          details: (
+            <>
+              {c.aliases.length > 0 ? (
+                <span className="font-mono">{c.aliases.map((a) => `!${a}`).join(", ")}</span>
+              ) : null}
+              <span>
+                {[
+                  userLevelLabel(c.userLevel),
+                  t("bot.command.seconds", { count: c.cooldownSeconds }),
+                  `${t("bot.command.cost")}: ${formatNumber(c.costPoints, locale)}`,
+                  `${t("bot.command.uses")}: ${formatNumber(c.useCount, locale)}`,
+                ].join(t("common.listSeparator"))}
+              </span>
+            </>
+          ),
+          actions: canEdit ? (
+            <>
+              <IconButton
+                type="button"
+                icon={PencilEdit01Icon}
+                label={t("bot.command.edit", { name: c.name })}
+                data-testid="command-edit-stacked"
+                onClick={() => setEditing({ mode: "edit", command: c })}
+              />
+              <ConfirmIconButton
+                icon={Delete02Icon}
+                label={t("bot.command.remove", { name: c.name })}
+                data-testid="command-remove-stacked"
+                title={t("bot.command.removeTitle", { name: c.name })}
+                description={t("bot.command.removeBody")}
+                confirmLabel={t("bot.command.removeConfirm")}
+                onConfirm={() => remove(c.name)}
+                onError={(err) => toastActionError(err, t("bot.command.removeFailed"))}
+              />
+            </>
+          ) : undefined,
+        }))}
+        table={
+          <DataTable
+            caption={t("bot.command.title")}
+            columns={columns}
+            rows={sorted}
+            getRowId={(c) => c.name}
+            rowProps={(c) => ({
+              "data-testid": "command-row",
+              "data-name": c.name,
+              "data-uses": c.useCount,
+              "data-enabled": c.enabled ? "true" : "false",
+              "data-cost": c.costPoints,
+            })}
+            empty={
+              <EmptyState
+                data-testid="command-empty"
+                icon={CommandLineIcon}
+                headingLevel={3}
+                title={t("bot.command.empty")}
+                description={canEdit ? t("bot.command.emptyHint") : undefined}
+                action={
+                  canEdit ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      data-testid="empty-state-action"
+                      onClick={() => setEditing({ mode: "new" })}
+                    >
+                      {t("bot.command.new")}
+                    </Button>
+                  ) : undefined
+                }
+              />
+            }
           />
         }
       />

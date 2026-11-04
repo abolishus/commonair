@@ -11,6 +11,38 @@ export interface AnalyticsClient {
   shareLinks: (q: { channel: string }) => Promise<{ items: AnalyticsShareLink[]; nextCursor: string | null }>;
   createShareLink: (q: { channel: string; broadcastId: string }) => Promise<AnalyticsShareLink>;
   revokeShareLink: (q: { channel: string; id: string }) => Promise<unknown>;
+  /**
+   * When each follow since `since` was made (newest first), for the followers trend (F24).
+   * `complete` is false when the paging cap stopped before `since`. Absent: no followers trend.
+   */
+  followsSince?: (q: { channel: string; since: string }) => Promise<{ at: string[]; complete: boolean }>;
+}
+
+/** Follower pages the trend reads at most (100 each): enough for a small channel's quarter. */
+export const FOLLOWER_MAX_PAGES = 20;
+
+/**
+ * Follows newest first until one is older than `since`, from a cursor-paged `channels.followers`
+ * (the API orders by follow time, newest first).
+ */
+export async function followsSince(
+  fetchPage: (cursor: string | undefined) => Promise<{ items: { followedAt: string }[]; nextCursor: string | null }>,
+  since: string,
+  maxPages: number = FOLLOWER_MAX_PAGES,
+): Promise<{ at: string[]; complete: boolean }> {
+  const floor = Date.parse(since);
+  const at: string[] = [];
+  let cursor: string | undefined;
+  for (let i = 0; i < maxPages; i++) {
+    const p = await fetchPage(cursor);
+    for (const f of p.items) {
+      if (Date.parse(f.followedAt) < floor) return { at, complete: true };
+      at.push(f.followedAt);
+    }
+    if (p.nextCursor === null) return { at, complete: true };
+    cursor = p.nextCursor;
+  }
+  return { at, complete: false };
 }
 
 /** Share links one request lists (the contract's page maximum). */
@@ -45,6 +77,11 @@ export function analyticsClient(): AnalyticsClient {
       allPages((cursor) => api().analytics.shareLink.list({ channel: q.channel, limit: SHARE_LINK_PAGE, cursor })),
     createShareLink: (q) => api().analytics.shareLink.create({ ...q, expiresInDays: 30 }),
     revokeShareLink: (q) => api().analytics.shareLink.revoke(q),
+    followsSince: (q) =>
+      followsSince(
+        (cursor) => api().channels.followers({ channel: q.channel, limit: SHARE_LINK_PAGE, cursor }),
+        q.since,
+      ),
   };
 }
 

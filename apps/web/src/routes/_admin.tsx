@@ -28,11 +28,18 @@ import {
   requireAdminPage,
 } from "../components/safety/access.ts";
 import { AppFooter, AppHeader } from "../components/site-chrome.tsx";
-import { t } from "../i18n/index.ts";
+import { t, type MessageKey } from "../i18n/index.ts";
 import { getSessionUser, useBootstrap } from "../lib/bootstrap.ts";
 import { isTreasurer } from "../lib/money.ts";
 import { isAdmin } from "../lib/coop.ts";
-import { adminNav, type AdminEntry } from "../lib/nav.ts";
+import { adminNavGroups, type AdminEntry, type AdminGroupId } from "../lib/nav.ts";
+
+const GROUP_LABEL: Record<AdminGroupId, MessageKey> = {
+  safety: "studio.adminGroup.safety",
+  money: "studio.adminGroup.money",
+  coop: "studio.adminGroup.coop",
+  platform: "studio.adminGroup.platform",
+};
 
 /**
  * Platform tools: the treasury (treasurers), the mod queue (moderators, admins, `legal`), the
@@ -147,18 +154,19 @@ function AdminLayout(): React.JSX.Element {
   const pathname = useLocation({ select: (location) => location.pathname });
   // Client fallback for a session that changed after the guard ran.
   if (!mayOpenAdminPage(adminPageFor(pathname), me)) return <AdminNotFound />;
-  const items = adminNav(pathname, {
+  // Grouped (F22): Safety, Money, Co-op and Platform, each only with the pages the role may open.
+  const groups = adminNavGroups(pathname, {
     treasurer: isTreasurer(me),
     safetyStaff: isSafetyStaff(me),
     platformModerator: isPlatformModerator(me),
     legal: isLegal(me),
     admin: isAdmin(me),
     federation: instance.federation,
-  }).map(adminItem);
+  }).map((group) => ({ id: group.id, label: t(GROUP_LABEL[group.id]), items: group.items.map(adminItem) }));
   return (
     <AdminShell
       header={<AppHeader studio />}
-      groups={[{ id: "admin", items }]}
+      groups={groups}
       sidebarLabel={t("admin.nav")}
       skipLabel={t("nav.skipToContent")}
       footer={<AppFooter />}

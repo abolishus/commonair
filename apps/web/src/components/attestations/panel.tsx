@@ -17,7 +17,7 @@ import {
   SkeletonGroup,
   SkeletonText,
   StatusBadge,
-  formatNumber,
+  ViewerCount,
   useLocale,
 } from "@commonair/ui";
 import { KeyValueList } from "@commonair/ui/blocks/data";
@@ -178,7 +178,10 @@ function EntryRow({
           rows={[
             { term: t("attestations.entry.signed"), value: <RelativeTime date={e.signedAt} /> },
             { term: t("attestations.entry.verifiedHours"), value: hours(f.verifiedViewerSeconds) },
-            { term: t("attestations.entry.peak"), value: formatNumber(f.peakVerifiedConcurrent, locale) },
+            {
+              term: t("attestations.entry.peak"),
+              value: <ViewerCount count={f.peakVerifiedConcurrent} icon={false} />,
+            },
             { term: t("attestations.entry.excludedHours"), value: hours(f.excludedViewerSeconds) },
           ]}
         />

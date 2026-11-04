@@ -29,6 +29,8 @@ export interface LegendItem {
   label: string;
   value?: number;
   color?: ChartColor | LegendStatusColor;
+  /** A line chart's stroke pattern: the key draws a line sample with it instead of a swatch. */
+  dash?: "solid" | "dashed" | "dotted" | "dashDot";
   /** Set on the item's `<li>`. */
   attributes?: LegendItemAttributes;
 }
@@ -42,6 +44,14 @@ export interface LegendProps extends React.ComponentProps<"ul"> {
   /** Formats the defaults; defaults to the `LocaleProvider`'s locale. */
   locale?: string;
 }
+/** The legend's line samples, scaled to its 16-unit sample (the chart's own patterns, shorter). */
+const LEGEND_DASH: Record<NonNullable<LegendItem["dash"]>, string | undefined> = {
+  solid: undefined,
+  dashed: "4 2",
+  dotted: "1 2",
+  dashDot: "5 2 1 2",
+};
+
 export function getSegmentShares(segments: BreakdownSegment[]): number[] {
   const total = segments.reduce((sum, item) => sum + Math.max(0, item.value), 0);
   if (total === 0) return segments.map(() => 0);
@@ -80,13 +90,34 @@ export function Legend({
           {...item.attributes}
           key={item.id}
           data-key-only={item.value === undefined || undefined}
+          data-dash={item.dash}
           className="flex min-w-0 items-center gap-2 text-xs"
         >
-          <span
-            aria-hidden="true"
-            className="size-2 shrink-0 bg-(--segment-color)"
-            style={{ "--segment-color": `var(${item.color ?? `--chart-${(index % 8) + 1}`})` } as React.CSSProperties}
-          />
+          {item.dash ? (
+            <svg
+              aria-hidden="true"
+              data-slot="legend-line"
+              viewBox="0 0 16 4"
+              className="h-1 w-4 shrink-0 overflow-visible"
+            >
+              {/* The chart token as the stroke attribute, as the chart's own lines draw it. */}
+              <line
+                x1="0"
+                y1="2"
+                x2="16"
+                y2="2"
+                stroke={`var(${item.color ?? `--chart-${(index % 8) + 1}`})`}
+                strokeWidth="2"
+                strokeDasharray={LEGEND_DASH[item.dash]}
+              />
+            </svg>
+          ) : (
+            <span
+              aria-hidden="true"
+              className="size-2 shrink-0 bg-(--segment-color)"
+              style={{ "--segment-color": `var(${item.color ?? `--chart-${(index % 8) + 1}`})` } as React.CSSProperties}
+            />
+          )}
           <span className={cn("min-w-0", layout === "list" && "flex-1")}>{item.label}</span>
           {item.value === undefined ? null : (
             <span className="tabular-nums text-muted-foreground">

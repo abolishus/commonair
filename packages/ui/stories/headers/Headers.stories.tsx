@@ -34,6 +34,46 @@ export const PageHeaderStory: Story = {
     />
   ),
 };
+/** F29: three actions beside a two-word title; below `sm` they stack under it and the title never breaks mid-word. */
+const ManyActions = () => (
+  <PageHeader
+    title="Stream manager"
+    description="Your stream at a glance: preview, chat, activity and the stream's title, category and tags."
+    actions={
+      <>
+        <Button variant="outline" size="sm">
+          Stream settings
+        </Button>
+        <Button variant="outline" size="sm">
+          Rehearse
+        </Button>
+        <Button size="sm">View channel</Button>
+      </>
+    }
+  />
+);
+export const PageHeaderActions: Story = { name: "PageHeader with actions", render: ManyActions };
+export const PageHeaderActionsLight: Story = {
+  name: "PageHeader with actions (light)",
+  render: ManyActions,
+  globals: { theme: "light" },
+};
+export const PageHeaderActions320: Story = {
+  name: "PageHeader with actions (320 px)",
+  render: ManyActions,
+  globals: { viewport: { value: "mobile320" } },
+};
+export const PageHeaderLongTitle: Story = {
+  name: "PageHeader long title (320 px)",
+  render: () => (
+    <PageHeader
+      title="Supercalifragilisticexpialidocious channel analytics for the whole of the last ninety days"
+      description="A long title wraps between words; only a word longer than the line breaks."
+      actions={<Button size="sm">Export</Button>}
+    />
+  ),
+  globals: { viewport: { value: "mobile320" } },
+};
 export const CompactPageHeader: Story = {
   name: "PageHeader compact",
   render: () => <PageHeader title="Analytics" size="compact" description="Your recent performance." />,

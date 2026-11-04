@@ -27,7 +27,7 @@ function ChatSafetyPage(): React.JSX.Element {
   if (!instance.chatSafety) return <NotFoundState />;
   const channel = me.channelSlug ?? me.username;
   return (
-    <PageContainer width="wide" data-testid="chat-gate-page" className="flex flex-col gap-6 py-8">
+    <PageContainer data-testid="chat-gate-page" className="flex flex-col gap-6 py-8">
       <PageHeader title={t("chatGate.pageTitle")} description={t("chatGate.pageIntro")} />
       <ChatGateStudio key={channel} channel={channel} />
     </PageContainer>

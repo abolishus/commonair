@@ -26,6 +26,8 @@ import type { z } from "zod";
 import { LanguageLabel } from "../../components/locale/language-label.tsx";
 import { StudioLoadError, StudioSection } from "../../components/interact-studio/shared.tsx";
 import { useLoad } from "../../components/money/use-load.ts";
+import { FocusFormAction } from "../../components/studio/empty-action.tsx";
+import { StudioNote } from "../../components/studio/note.tsx";
 import { t } from "../../i18n/index.ts";
 import type { MessageKey } from "../../i18n/keys/index.gen.ts";
 import { toastActionError } from "../../lib/action-error.ts";
@@ -117,9 +119,6 @@ export function CaptionsStudio({ channel, client }: { channel: string; client?: 
   return (
     <div className="flex min-w-0 flex-col gap-6">
       <CaptionsSettingsForm channel={channel} client={c} loaded={loaded.data} onSaved={loaded.reload} />
-      <p data-testid="captions-privacy-note" className="text-sm text-muted-foreground">
-        {t("captions.studio.privacy")}
-      </p>
       <VodCueEditor channel={channel} client={c} />
     </div>
   );
@@ -211,7 +210,7 @@ function CaptionsSettingsForm({
           onCheckedChange={(enabled) => setDraft((d) => ({ ...d, enabled, own: true }))}
           switchProps={switchProps}
         />
-        {state === "queued" && <p className="text-sm">{t("captions.studio.track.queuedHint")}</p>}
+        {state === "queued" && <StudioNote>{t("captions.studio.track.queuedHint")}</StudioNote>}
         <div className="flex flex-col gap-1">
           <Label htmlFor={`${id}-language`}>{t("captions.studio.language")}</Label>
           <Select<string>
@@ -302,6 +301,8 @@ function VodCueEditor({ channel, client }: { channel: string; client: CaptionsAp
       title={t("captions.studio.vod.title")}
       description={t("captions.studio.vod.intro")}
     >
+      {/* F35: the drafts' privacy note belongs to the drafts, inside their card, in the note style. */}
+      <StudioNote data-testid="captions-privacy-note">{t("captions.studio.privacy")}</StudioNote>
       {vods.failed ? (
         <StudioLoadError
           data-testid="captions-vod-load-error"
@@ -322,6 +323,11 @@ function VodCueEditor({ channel, client }: { channel: string; client: CaptionsAp
           title={t("captions.studio.vod.emptyTitle")}
           description={t("captions.studio.vod.emptyDescription")}
           headingLevel={3}
+          action={
+            <FocusFormAction selector='[data-testid="captions-enabled"]'>
+              {t("studio.empty.turnOnCaptions")}
+            </FocusFormAction>
+          }
         />
       ) : (
         <div className="flex min-w-0 flex-col gap-4">

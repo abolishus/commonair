@@ -1,8 +1,6 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { ListPanel } from "@commonair/ui/blocks/data";
-import { FormSection } from "@commonair/ui/blocks/forms";
 import { PageHeader } from "@commonair/ui/blocks/headers";
 import { Button } from "@commonair/ui/components/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@commonair/ui/components/card";
@@ -13,6 +11,7 @@ import { toast } from "@commonair/ui/toast";
 import { Navigate, createFileRoute } from "@tanstack/react-router";
 import * as React from "react";
 import { FormError } from "../../components/form-error.tsx";
+import { FocusFormAction } from "../../components/studio/empty-action.tsx";
 import { NewRelayToken, RelayTable, type CreatedRelay } from "../../components/relays.tsx";
 import { t } from "../../i18n/index.ts";
 import { toastActionError } from "../../lib/action-error.ts";
@@ -113,30 +112,45 @@ function useMyRelays(): MyRelays {
   return { relays, failed, refresh, removed };
 }
 
+/** The three setup steps, numbered (F39): an ordered list, so the order is read out as well as seen. */
 function HowToRun(): React.JSX.Element {
   const { instance } = useBootstrap();
   const readme = safeHttpUrl(relayReadmeUrl(safeHttpUrl(instance.sourceUrl)));
+  const steps = [t("relays.howTo.step1"), t("relays.howTo.step2"), t("relays.howTo.step3")];
   return (
-    <ListPanel
-      title={t("relays.howTo.title")}
-      items={[
-        { id: "step1", title: t("relays.howTo.step1") },
-        { id: "step2", title: t("relays.howTo.step2") },
-        { id: "step3", title: t("relays.howTo.step3") },
-      ]}
-      footer={
-        readme ? (
-          // The label is Button's child; the lint rule cannot see through `render`, so it is named here too.
-          <Button
-            variant="link"
-            nativeButton={false}
-            render={<a href={readme} rel="noopener" aria-label={t("relays.howTo.readme")} />}
-          >
-            {t("relays.howTo.readme")}
-          </Button>
-        ) : undefined
-      }
-    />
+    <Card data-testid="relays-how-to">
+      <CardHeader>
+        <CardTitle>{t("relays.howTo.title")}</CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4">
+        <ol className="flex flex-col gap-3">
+          {steps.map((step, i) => (
+            <li key={step} data-testid="relays-how-to-step" className="flex min-w-0 items-start gap-3">
+              <span
+                aria-hidden
+                className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium tabular-nums"
+              >
+                {i + 1}
+              </span>
+              <span className="min-w-0 pt-0.5 text-sm break-words">{step}</span>
+            </li>
+          ))}
+        </ol>
+        {readme ? (
+          <div>
+            {/* The label is Button's child; the lint rule cannot see through `render`, so it is named here too. */}
+            <Button
+              variant="link"
+              className="px-0"
+              nativeButton={false}
+              render={<a href={readme} rel="noopener" aria-label={t("relays.howTo.readme")} />}
+            >
+              {t("relays.howTo.readme")}
+            </Button>
+          </div>
+        ) : null}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -170,31 +184,50 @@ function CreateRelay({ onCreated }: { onCreated: () => void }): React.JSX.Elemen
     }
   };
 
+  // A Card with the form inside its content (not FormSection, whose form wraps the card's parts and
+  // drops their spacing, F39: the title ran into the "Relay name" label).
   return (
     <>
-      <FormSection title={t("relays.create.title")} onSubmit={(e) => void onSubmit(e)} noValidate>
-        <Field>
-          <FieldLabel htmlFor="relay-create-name">{t("relays.create.name")}</FieldLabel>
-          <Input
-            id="relay-create-name"
-            data-testid="relay-create-name"
-            name="name"
-            autoComplete="off"
-            maxLength={RELAY_NAME_MAX}
-            required
-            aria-invalid={error ? true : undefined}
-            aria-describedby="relay-create-name-hint"
-          />
-          <FieldDescription id="relay-create-name-hint">{t("relays.create.nameHint")}</FieldDescription>
-        </Field>
-        {error && <FormError>{error}</FormError>}
-        {/* FormSection's own submit takes no test id (e3 `relay-create-submit`), so the button is ours. */}
-        <div>
-          <Button data-testid="relay-create-submit" type="submit" disabled={pending} aria-busy={pending || undefined}>
-            {t("relays.create.submit")}
-          </Button>
-        </div>
-      </FormSection>
+      <Card data-testid="relay-create">
+        <CardHeader>
+          <CardTitle id="relay-create-title">{t("relays.create.title")}</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form
+            aria-labelledby="relay-create-title"
+            className="flex flex-col gap-4"
+            onSubmit={(e) => void onSubmit(e)}
+            noValidate
+          >
+            <Field>
+              <FieldLabel htmlFor="relay-create-name">{t("relays.create.name")}</FieldLabel>
+              <Input
+                id="relay-create-name"
+                data-testid="relay-create-name"
+                name="name"
+                autoComplete="off"
+                maxLength={RELAY_NAME_MAX}
+                required
+                aria-invalid={error ? true : undefined}
+                aria-describedby="relay-create-name-hint"
+              />
+              <FieldDescription id="relay-create-name-hint">{t("relays.create.nameHint")}</FieldDescription>
+            </Field>
+            {error && <FormError>{error}</FormError>}
+            {/* FormSection's own submit takes no test id (e3 `relay-create-submit`), so the button is ours. */}
+            <div>
+              <Button
+                data-testid="relay-create-submit"
+                type="submit"
+                disabled={pending}
+                aria-busy={pending || undefined}
+              >
+                {t("relays.create.submit")}
+              </Button>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
       {created && <NewRelayToken created={created} publicUrl={config.publicUrl} onDismiss={() => setCreated(null)} />}
     </>
   );
@@ -209,7 +242,13 @@ function RelayList({ relays, failed, removed }: MyRelays): React.JSX.Element {
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         {failed && <FormError>{t("relays.loadFailed")}</FormError>}
-        {(relays !== null || !failed) && <RelayTable relays={relays} onRemoved={removed} />}
+        {(relays !== null || !failed) && (
+          <RelayTable
+            relays={relays}
+            onRemoved={removed}
+            emptyAction={<FocusFormAction selector="#relay-create-name">{t("studio.empty.addRelay")}</FocusFormAction>}
+          />
+        )}
       </CardContent>
     </Card>
   );

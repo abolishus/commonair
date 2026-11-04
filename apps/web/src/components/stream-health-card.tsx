@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { EmptyState, SkeletonText, StatusBadge } from "@commonair/ui";
+import { EmptyState, SkeletonText, StatusBadge, ViewerCount, formatNumber, formatUnit, useLocale } from "@commonair/ui";
 import { KeyValueList } from "@commonair/ui/blocks/data";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@commonair/ui/components/card";
 import { CheckmarkCircle02Icon, Tv01Icon } from "@hugeicons/core-free-icons";
@@ -18,13 +18,103 @@ import {
   healthBadge,
   type StreamHealthDto,
 } from "../lib/stream-health.ts";
+import { formatUptime, uptimeSeconds } from "./channel/channel-data.ts";
 import { FormError } from "./form-error.tsx";
+import { StudioLinkAction } from "./studio/empty-action.tsx";
+
+type Sample = StreamHealthDto["samples"][number];
+
+/** The newest sample while live (the API sorts oldest first, but this does not rely on it). */
+export function latestSample(health: Pick<StreamHealthDto, "live" | "samples">): Sample | null {
+  if (!health.live) return null;
+  let latest: Sample | null = null;
+  for (const s of health.samples) if (!latest || Date.parse(s.at) >= Date.parse(latest.at)) latest = s;
+  return latest;
+}
 
 /**
- * Warnings of the latest health sample, polled while the dashboard tab is visible. Render it with
- * `key={channel}` so switching channels starts from the loading state.
+ * The live numbers (F21): verified viewers, uptime and the newest sample's bitrate, frame rate,
+ * dropped frames and resolution. A figure the sample does not carry is left out, never guessed.
  */
-export function StreamHealthCard({ channel }: { channel: string }): React.JSX.Element {
+export function LiveNumbers({
+  health,
+  startedAt,
+  now,
+}: {
+  health: StreamHealthDto;
+  startedAt: string | null;
+  now: number;
+}): React.JSX.Element {
+  const { locale } = useLocale();
+  const s = latestSample(health);
+  const rows: { term: string; value: React.ReactNode; id: string; raw: string | number }[] = [
+    {
+      id: "viewers",
+      term: t("studio.health.viewers"),
+      value: <ViewerCount count={health.viewers.verified} />,
+      raw: health.viewers.verified,
+    },
+  ];
+  if (startedAt) {
+    const secs = uptimeSeconds(startedAt, now);
+    rows.push({ id: "uptime", term: t("studio.health.uptime"), value: formatUptime(secs), raw: secs });
+  }
+  if (s) {
+    rows.push({
+      id: "bitrate",
+      term: t("studio.health.bitrate"),
+      value: formatUnit(s.bitrateKbps, "kilobit-per-second", locale, { maximumFractionDigits: 0 }),
+      raw: s.bitrateKbps,
+    });
+    if (s.fps !== null)
+      rows.push({
+        id: "fps",
+        term: t("studio.health.fps"),
+        value: formatNumber(Math.round(s.fps * 10) / 10, locale),
+        raw: s.fps,
+      });
+    rows.push({
+      id: "dropped",
+      term: t("studio.health.dropped"),
+      value: formatNumber(s.droppedFrames, locale),
+      raw: s.droppedFrames,
+    });
+    if (s.width !== null && s.height !== null)
+      rows.push({
+        id: "resolution",
+        term: t("studio.health.resolution"),
+        value: t("studio.health.resolutionValue", { width: String(s.width), height: String(s.height) }),
+        raw: `${s.width}x${s.height}`,
+      });
+  }
+  return (
+    <dl data-testid="stream-health-numbers" className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3">
+      {rows.map((r) => (
+        <div key={r.id} data-testid="stream-health-number" data-metric={r.id} data-value={r.raw} className="min-w-0">
+          <dt className="text-xs text-muted-foreground">{r.term}</dt>
+          <dd className="text-sm font-medium tabular-nums">{r.value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+/**
+ * Live stats and health: the numbers above and the latest sample's warnings, polled while the
+ * dashboard tab is visible. Render it with `key={channel}` so switching channels starts from the
+ * loading state. `startedAt` (the live broadcast's) adds the uptime.
+ */
+export function StreamHealthCard({
+  channel,
+  startedAt = null,
+  load,
+}: {
+  channel: string;
+  startedAt?: string | null;
+  /** `stream.health`; tests pass a fake. */
+  load?: (channel: string) => Promise<StreamHealthDto>;
+}): React.JSX.Element {
+  const [now, setNow] = React.useState(() => Date.now());
   const [health, setHealth] = React.useState<StreamHealthDto | null>(null);
   const [failed, setFailed] = React.useState(false);
 
@@ -35,11 +125,11 @@ export function StreamHealthCard({ channel }: { channel: string }): React.JSX.El
       // A slow response must not pile requests up behind it.
       if (inFlight) return;
       inFlight = true;
-      api()
-        .stream.health({ channel })
+      (load ?? ((c: string) => api().stream.health({ channel: c })))(channel)
         .then((h) => {
           if (cancelled) return;
           setHealth(h);
+          setNow(Date.now());
           setFailed(false);
         })
         .catch(() => {
@@ -54,7 +144,7 @@ export function StreamHealthCard({ channel }: { channel: string }): React.JSX.El
       cancelled = true;
       stop();
     };
-  }, [channel]);
+  }, [channel, load]);
 
   const state = health ? healthState(health) : undefined;
   const warnings = health ? latestWarnings(health) : [];
@@ -75,12 +165,14 @@ export function StreamHealthCard({ channel }: { channel: string }): React.JSX.El
       <CardContent className="flex flex-col gap-4">
         {failed && <FormError>{t("dashboard.health.loadFailed")}</FormError>}
         {!health && !failed && <SkeletonText lines={2} />}
+        {health && state !== "offline" && <LiveNumbers health={health} startedAt={startedAt} now={now} />}
         {state === "offline" && (
           <EmptyState
             icon={Tv01Icon}
             title={t("dashboard.health.offline")}
             description={t("dashboard.health.offlineHint")}
             headingLevel={3}
+            action={<StudioLinkAction to="/dashboard/settings">{t("studio.empty.setUpStream")}</StudioLinkAction>}
           />
         )}
         {state === "healthy" && (

@@ -6,6 +6,7 @@ import { Section } from "@commonair/ui/blocks/headers";
 import { PageContainer } from "@commonair/ui/layouts";
 import { Navigate, createFileRoute } from "@tanstack/react-router";
 import type * as React from "react";
+import { FocusFormAction } from "../../components/studio/empty-action.tsx";
 import { FormError } from "../../components/form-error.tsx";
 import {
   CrewListSkeleton,
@@ -34,12 +35,22 @@ export const Route = createFileRoute("/_studio/crew")({
 const PAGE = 50;
 
 function CrewPage(): React.JSX.Element {
-  const { me, config } = useBootstrap();
+  const { me, config, now } = useBootstrap();
   if (!me) return <Navigate to="/signin" replace />;
-  return <CrewView meId={me.id} channel={me.channelSlug ?? me.username} currency={config.currency} />;
+  return <CrewView meId={me.id} channel={me.channelSlug ?? me.username} currency={config.currency} now={now} />;
 }
 
-function CrewView({ meId, channel, currency }: { meId: string; channel: string; currency: string }): React.JSX.Element {
+function CrewView({
+  meId,
+  channel,
+  currency,
+  now,
+}: {
+  meId: string;
+  channel: string;
+  currency: string;
+  now: number;
+}): React.JSX.Element {
   const owned = useLoad(`owned|${channel}`, () => api().money.splits.list({ channel, limit: PAGE }));
   const offered = useLoad(`offered|${meId}`, () => api().money.splits.list({ limit: PAGE }));
   const support = useLoad(`support|${channel}`, () => api().money.support({ channel }));
@@ -70,6 +81,7 @@ function CrewView({ meId, channel, currency }: { meId: string; channel: string; 
         currency={support.data?.currency ?? currency}
         streamerShare={support.data?.split.streamerShare ?? null}
         onPropose={propose}
+        now={now}
       />
       <Section heading={t("splits.mine.title")} description={t("splits.mine.hint")}>
         {owned.failed && !owned.data ? (
@@ -79,7 +91,15 @@ function CrewView({ meId, channel, currency }: { meId: string; channel: string; 
             splits={owned.data.items}
             meId={meId}
             canEnd
-            empty={{ title: "splits.mine.empty", hint: "splits.mine.emptyHint" }}
+            empty={{
+              title: "splits.mine.empty",
+              hint: "splits.mine.emptyHint",
+              action: (
+                <FocusFormAction selector='[data-testid="crew-recipient"]'>
+                  {t("studio.empty.proposeSplit")}
+                </FocusFormAction>
+              ),
+            }}
             onAnswer={answer}
             onEnd={end}
           />

@@ -25,9 +25,11 @@ export interface RelayTableProps {
   /** null while the first load is in flight. */
   relays: RelayNodeDto[] | null;
   onRemoved: (id: string) => void;
+  /** The empty state's way forward (F25): "Add a relay", focusing the form's name field. */
+  emptyAction?: React.ReactNode;
 }
 
-export function RelayTable({ relays, onRemoved }: RelayTableProps): React.JSX.Element {
+export function RelayTable({ relays, onRemoved, emptyAction }: RelayTableProps): React.JSX.Element {
   const { locale } = useLocale();
   const columns: DataTableColumn<RelayNodeDto>[] = [
     {
@@ -95,6 +97,7 @@ export function RelayTable({ relays, onRemoved }: RelayTableProps): React.JSX.El
           title={t("relays.empty.title")}
           description={t("relays.empty.hint")}
           headingLevel={3}
+          action={emptyAction}
         />
       }
     />

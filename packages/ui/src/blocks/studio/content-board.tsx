@@ -99,6 +99,8 @@ export interface ContentBoardProps extends Omit<React.ComponentProps<"div">, "ch
   onDeleteVod: (id: string) => void | Promise<void>;
   onDeleteClip: (id: string) => void | Promise<void>;
   onError?: (error: unknown) => void;
+  /** Each empty list's way forward (F25), e.g. "Open stream settings" to turn recording on. */
+  emptyActions?: { vods?: React.ReactNode; clips?: React.ReactNode };
 }
 
 const TITLE_MAX = 140;
@@ -241,6 +243,7 @@ export function ContentBoard({
   onDeleteVod,
   onDeleteClip,
   onError,
+  emptyActions,
   className,
   ...props
 }: ContentBoardProps): React.JSX.Element {
@@ -277,6 +280,7 @@ export function ContentBoard({
               title={labels.vodsEmptyTitle}
               description={labels.vodsEmptyDescription}
               headingLevel={3}
+              action={emptyActions?.vods}
             />
           ) : (
             <ItemGroup aria-label={labels.vodsListLabel} className="gap-2">
@@ -304,6 +308,7 @@ export function ContentBoard({
               title={labels.clipsEmptyTitle}
               description={labels.clipsEmptyDescription}
               headingLevel={3}
+              action={emptyActions?.clips}
             />
           ) : (
             <ItemGroup aria-label={labels.clipsListLabel} className="gap-2">

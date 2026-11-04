@@ -7,12 +7,8 @@ export type Key =
   | "nav.subscriptions"
   | "nav.treasury"
   | "studio.revenue"
-  | "dashboard.revenue"
   | "footer.transparency"
   | "admin.nav"
-  | "page.notFound"
-  | "page.notFoundHint"
-  | "page.notFoundHome"
   | "money.month.1"
   | "money.month.2"
   | "money.month.3"
@@ -248,4 +244,5 @@ export type Key =
   | "transparency.egress.title"
   | "transparency.egress.share"
   | "transparency.egress.caption"
-  | "transparency.egress.body";
+  | "transparency.egress.body"
+  | "page.notFound";

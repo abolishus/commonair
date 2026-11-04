@@ -170,7 +170,7 @@ export function HeldQueue({
   );
 }
 
-function HeldRow({
+export function HeldRow({
   message,
   onResolve,
 }: {

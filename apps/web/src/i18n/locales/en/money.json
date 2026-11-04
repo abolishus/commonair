@@ -2,12 +2,8 @@
   "nav.subscriptions": "Subscriptions",
   "nav.treasury": "Treasury",
   "studio.revenue": "Revenue",
-  "dashboard.revenue": "Revenue",
   "footer.transparency": "Transparency",
   "admin.nav": "Platform tools",
-  "page.notFound": "Page not found",
-  "page.notFoundHint": "This page does not exist, or you do not have access to it.",
-  "page.notFoundHome": "Back to the directory",
   "money.month.1": "January",
   "money.month.2": "February",
   "money.month.3": "March",
@@ -243,5 +239,6 @@
   "transparency.egress.title": "Member relays",
   "transparency.egress.share": "{share}%",
   "transparency.egress.caption": "Share of video traffic served by member relays",
-  "transparency.egress.body": "{relay} of {total}"
+  "transparency.egress.body": "{relay} of {total}",
+  "page.notFound": "Page not found"
 }

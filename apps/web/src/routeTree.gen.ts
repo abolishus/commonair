@@ -65,8 +65,10 @@ import { Route as AppSettingsCopyrightRouteImport } from './routes/_app/settings
 import { Route as AppSettingsPreferencesRouteImport } from './routes/_app/settings.preferences'
 import { Route as AppSettingsPrivacyRouteImport } from './routes/_app/settings.privacy'
 import { Route as AppSettingsSubscriptionsRouteImport } from './routes/_app/settings.subscriptions'
+import { Route as StudioDashboardSettingsRouteImport } from './routes/_studio/dashboard_.settings'
 import { Route as StudioDeveloperIndexRouteImport } from './routes/_studio/developer.index'
 import { Route as StudioDeveloperBotsRouteImport } from './routes/_studio/developer.bots'
+import { Route as StudioModChannelRouteImport } from './routes/_studio/mod.$channel'
 import { Route as AppChannelClipsClipIdRouteImport } from './routes/_app/$channel_.clips.$clipId'
 import { Route as AppChannelGiveawaysGiveawayIdRouteImport } from './routes/_app/$channel_.giveaways.$giveawayId'
 import { Route as AppChannelVodsVodIdRouteImport } from './routes/_app/$channel_.vods.$vodId'
@@ -359,6 +361,11 @@ const AppSettingsSubscriptionsRoute =
     path: '/settings/subscriptions',
     getParentRoute: () => AppRoute,
   } as any)
+const StudioDashboardSettingsRoute = StudioDashboardSettingsRouteImport.update({
+  id: '/dashboard_/settings',
+  path: '/dashboard/settings',
+  getParentRoute: () => StudioRoute,
+} as any)
 const StudioDeveloperIndexRoute = StudioDeveloperIndexRouteImport.update({
   id: '/developer/',
   path: '/developer/',
@@ -367,6 +374,11 @@ const StudioDeveloperIndexRoute = StudioDeveloperIndexRouteImport.update({
 const StudioDeveloperBotsRoute = StudioDeveloperBotsRouteImport.update({
   id: '/developer/bots',
   path: '/developer/bots',
+  getParentRoute: () => StudioRoute,
+} as any)
+const StudioModChannelRoute = StudioModChannelRouteImport.update({
+  id: '/mod/$channel',
+  path: '/mod/$channel',
   getParentRoute: () => StudioRoute,
 } as any)
 const AppChannelClipsClipIdRoute = AppChannelClipsClipIdRouteImport.update({
@@ -492,7 +504,9 @@ export interface FileRoutesByFullPath {
   '/settings/preferences': typeof AppSettingsPreferencesRoute
   '/settings/privacy': typeof AppSettingsPrivacyRoute
   '/settings/subscriptions': typeof AppSettingsSubscriptionsRoute
+  '/dashboard/settings': typeof StudioDashboardSettingsRoute
   '/developer/bots': typeof StudioDeveloperBotsRoute
+  '/mod/$channel': typeof StudioModChannelRoute
   '/coop/': typeof AppCoopIndexRoute
   '/directory/': typeof AppDirectoryIndexRoute
   '/developer/': typeof StudioDeveloperIndexRoute
@@ -562,7 +576,9 @@ export interface FileRoutesByTo {
   '/settings/preferences': typeof AppSettingsPreferencesRoute
   '/settings/privacy': typeof AppSettingsPrivacyRoute
   '/settings/subscriptions': typeof AppSettingsSubscriptionsRoute
+  '/dashboard/settings': typeof StudioDashboardSettingsRoute
   '/developer/bots': typeof StudioDeveloperBotsRoute
+  '/mod/$channel': typeof StudioModChannelRoute
   '/coop': typeof AppCoopIndexRoute
   '/directory': typeof AppDirectoryIndexRoute
   '/developer': typeof StudioDeveloperIndexRoute
@@ -636,7 +652,9 @@ export interface FileRoutesById {
   '/_app/settings/preferences': typeof AppSettingsPreferencesRoute
   '/_app/settings/privacy': typeof AppSettingsPrivacyRoute
   '/_app/settings/subscriptions': typeof AppSettingsSubscriptionsRoute
+  '/_studio/dashboard_/settings': typeof StudioDashboardSettingsRoute
   '/_studio/developer/bots': typeof StudioDeveloperBotsRoute
+  '/_studio/mod/$channel': typeof StudioModChannelRoute
   '/_app/coop/': typeof AppCoopIndexRoute
   '/_app/directory/': typeof AppDirectoryIndexRoute
   '/_studio/developer/': typeof StudioDeveloperIndexRoute
@@ -708,7 +726,9 @@ export interface FileRouteTypes {
     | '/settings/preferences'
     | '/settings/privacy'
     | '/settings/subscriptions'
+    | '/dashboard/settings'
     | '/developer/bots'
+    | '/mod/$channel'
     | '/coop/'
     | '/directory/'
     | '/developer/'
@@ -778,7 +798,9 @@ export interface FileRouteTypes {
     | '/settings/preferences'
     | '/settings/privacy'
     | '/settings/subscriptions'
+    | '/dashboard/settings'
     | '/developer/bots'
+    | '/mod/$channel'
     | '/coop'
     | '/directory'
     | '/developer'
@@ -851,7 +873,9 @@ export interface FileRouteTypes {
     | '/_app/settings/preferences'
     | '/_app/settings/privacy'
     | '/_app/settings/subscriptions'
+    | '/_studio/dashboard_/settings'
     | '/_studio/developer/bots'
+    | '/_studio/mod/$channel'
     | '/_app/coop/'
     | '/_app/directory/'
     | '/_studio/developer/'
@@ -1274,6 +1298,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsSubscriptionsRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_studio/dashboard_/settings': {
+      id: '/_studio/dashboard_/settings'
+      path: '/dashboard/settings'
+      fullPath: '/dashboard/settings'
+      preLoaderRoute: typeof StudioDashboardSettingsRouteImport
+      parentRoute: typeof StudioRoute
+    }
     '/_studio/developer/': {
       id: '/_studio/developer/'
       path: '/developer'
@@ -1286,6 +1317,13 @@ declare module '@tanstack/react-router' {
       path: '/developer/bots'
       fullPath: '/developer/bots'
       preLoaderRoute: typeof StudioDeveloperBotsRouteImport
+      parentRoute: typeof StudioRoute
+    }
+    '/_studio/mod/$channel': {
+      id: '/_studio/mod/$channel'
+      path: '/mod/$channel'
+      fullPath: '/mod/$channel'
+      preLoaderRoute: typeof StudioModChannelRouteImport
       parentRoute: typeof StudioRoute
     }
     '/_app/$channel_/clips/$clipId': {
@@ -1508,7 +1546,9 @@ interface StudioRouteChildren {
   StudioRehearseRoute: typeof StudioRehearseRoute
   StudioRelaysRoute: typeof StudioRelaysRoute
   StudioRevenueRoute: typeof StudioRevenueRoute
+  StudioDashboardSettingsRoute: typeof StudioDashboardSettingsRoute
   StudioDeveloperBotsRoute: typeof StudioDeveloperBotsRoute
+  StudioModChannelRoute: typeof StudioModChannelRoute
   StudioDeveloperIndexRoute: typeof StudioDeveloperIndexRoute
   StudioDeveloperAppsAppIdRoute: typeof StudioDeveloperAppsAppIdRoute
 }
@@ -1528,7 +1568,9 @@ const StudioRouteChildren: StudioRouteChildren = {
   StudioRehearseRoute: StudioRehearseRoute,
   StudioRelaysRoute: StudioRelaysRoute,
   StudioRevenueRoute: StudioRevenueRoute,
+  StudioDashboardSettingsRoute: StudioDashboardSettingsRoute,
   StudioDeveloperBotsRoute: StudioDeveloperBotsRoute,
+  StudioModChannelRoute: StudioModChannelRoute,
   StudioDeveloperIndexRoute: StudioDeveloperIndexRoute,
   StudioDeveloperAppsAppIdRoute: StudioDeveloperAppsAppIdRoute,
 }
