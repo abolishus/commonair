@@ -66,8 +66,10 @@ resource "digitalocean_droplet" "monitoring" {
   ipv6       = true
   monitoring = true
   ssh_keys   = var.ssh_key_fingerprints
-  tags       = [for t in local.monitoring_tags : digitalocean_tag.this[t].name]
+  tags       = local.monitoring_tags
   user_data  = local.monitoring_user_data
+
+  depends_on = [digitalocean_tag.this]
 
   lifecycle {
     # A changed config means re-provisioning the droplet (`tofu apply -replace`): it holds no

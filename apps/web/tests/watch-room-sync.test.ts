@@ -7,14 +7,7 @@
  * left alone. The driver is run against a simulated player to show convergence without overshoot.
  */
 import { describe, expect, it } from "vite-plus/test";
-import {
-  DRIFT,
-  nextCorrection,
-  RATE,
-  RoomSyncDriver,
-  type DriftInput,
-  type RoomPlayer,
-} from "../src/player/room-sync.ts";
+import { DRIFT, nextCorrection, RoomSyncDriver, type DriftInput, type RoomPlayer } from "../src/player/room-sync.ts";
 import { registerRoomPlayer, roomPlayer } from "../src/player/room-sync-registry.ts";
 
 const NOW = 1_800_000_000_000;
@@ -81,25 +74,10 @@ describe("nextCorrection", () => {
     });
   });
 
-  it("WebKit native: seek-only with a 0.7 s tolerance", () => {
+  it("WebKit native: seek-only with about 1 s tolerance", () => {
     const n = { ...base, native: true, steer: false };
-    expect(nextCorrection({ ...n, playheadMs: NOW - 7300 })).toMatchObject({ kind: "none", driftMs: 700 });
-    expect(nextCorrection({ ...n, playheadMs: NOW - 7200 })).toEqual({ kind: "seek", toMs: NOW - 8000, driftMs: 800 });
-    // A native player is never steered by rate, even if asked.
-    expect(nextCorrection({ ...n, rate: true, playheadMs: NOW - 7500 })).toMatchObject({ kind: "none" });
-  });
-
-  it("hls.js with the rate seam: small drifts by playback rate, a deadband back to 1, seeks over 2 s", () => {
-    const r = { ...base, rate: true };
-    expect(nextCorrection({ ...r, playheadMs: NOW - 8000 - 600 })).toEqual({ kind: "rate", rate: 1.3, driftMs: -600 });
-    expect(nextCorrection({ ...r, playheadMs: NOW - 8000 + 400 })).toEqual({ kind: "rate", rate: 0.8, driftMs: 400 });
-    // Bounded both ways.
-    expect(nextCorrection({ ...r, playheadMs: NOW - 9900 })).toMatchObject({ kind: "rate", rate: RATE.max });
-    expect(nextCorrection({ ...r, playheadMs: NOW - 6100 })).toMatchObject({ kind: "rate", rate: RATE.min });
-    expect(nextCorrection({ ...r, playheadMs: NOW - 8100 })).toEqual({ kind: "rate", rate: 1, driftMs: -100 });
-    expect(nextCorrection({ ...r, playheadMs: NOW - 10_500 })).toMatchObject({ kind: "seek" });
-    // While a seek settles, nothing changes.
-    expect(nextCorrection({ ...r, playheadMs: NOW - 8600, sinceLastMs: 100 })).toEqual({ kind: "none", driftMs: -600 });
+    expect(nextCorrection({ ...n, playheadMs: NOW - 7100 })).toMatchObject({ kind: "none", driftMs: 900 });
+    expect(nextCorrection({ ...n, playheadMs: NOW - 6900 })).toEqual({ kind: "seek", toMs: NOW - 8000, driftMs: 1100 });
   });
 
   it("without the steering seam: seek-only, tighter than native", () => {
@@ -412,68 +390,6 @@ describe("RoomSyncDriver", () => {
     expect(offsets.slice(2).every((d) => d <= DRIFT.deadbandMs)).toBe(true);
   });
 
-  it("hls.js with the rate seam: steers by rate without seeking, back to 1 in sync, on a seek, in DVR and on leaving", () => {
-    let clock = NOW;
-    let behindMs = 5800;
-    let mode: "live" | "dvr" = "live";
-    let refuse = false;
-    const calls: string[] = [];
-    const player: RoomPlayer = {
-      playheadWallclock: () => new Date(clock - behindMs),
-      playbackMode: () => mode,
-      setTargetLatency: (s: number, o?: { seek?: boolean }) => (
-        calls.push(`${o?.seek === false ? "hold" : "latency"} ${s}`),
-        s
-      ),
-      latencySeconds: () => behindMs / 1000,
-      seekBy: (ms: number) => {
-        calls.push(`seekBy ${ms}`);
-        behindMs -= ms;
-        return true;
-      },
-      seekToWallclock: () => false,
-      setPlaybackRate: (r: number) => {
-        calls.push(`rate ${r}`);
-        return !refuse;
-      },
-      native: false,
-    };
-    const driver = new RoomSyncDriver({ player: () => player, reducedMotion: () => false, now: () => clock });
-    const target = () => new Date(clock - 5200).toISOString();
-    expect(driver.onTarget(target())).toEqual({ kind: "rate", rate: 1.3, driftMs: -600 });
-    behindMs = 5250; // caught up
-    clock += 2000;
-    expect(driver.onTarget(target())).toMatchObject({ kind: "rate", rate: 1 });
-    clock += 2000;
-    driver.onTarget(target()); // still 1: no new call
-    behindMs = 8000; // far off: a seek, at normal speed
-    clock += 2000;
-    expect(driver.onTarget(target()).kind).toBe("seek");
-    expect(calls).toEqual(["rate 1.3", "rate 1", "seekBy 2800", "hold 5.2"]);
-    calls.length = 0;
-    behindMs = 5700;
-    clock += 2000;
-    driver.onTarget(target());
-    mode = "dvr";
-    clock += 2000;
-    driver.onTarget(target());
-    expect(calls).toEqual(["rate 1.25", "rate 1"]);
-    calls.length = 0;
-    // The element refuses the rate: this tick corrects by a hold-back step and a seek instead.
-    mode = "live";
-    refuse = true;
-    clock += 2000;
-    expect(driver.onTarget(target())).toMatchObject({ kind: "latency", driftMs: -500 });
-    expect(calls).toEqual(["rate 1.25", "hold 5.2", "seekBy 500"]);
-    refuse = false;
-    calls.length = 0;
-    behindMs = 5600;
-    clock += 2000;
-    driver.onTarget(target());
-    driver.reset();
-    expect(calls).toEqual(["rate 1.2", "rate 1"]);
-  });
-
   it("native: seeks once into tolerance", () => {
     const sim = simulatedPlayer({ offsetS: 1, holdBackS: 4, native: true });
     const driver = new RoomSyncDriver({ player: () => sim.player, reducedMotion: () => false, now: sim.now });
@@ -521,11 +437,10 @@ describe("RoomSyncDriver", () => {
       sim.tick(2000);
       misses.push(Math.abs(sim.behind() - 5200));
     }
-    // The first seek lands 1.3 s short; the next aims ahead by half the miss (a seek's stall varies,
-    // so the lead converges on the typical miss), lands inside the tolerance, and it stays there.
+    // The first seek lands short; the second aims ahead by the miss and lands; then it stays.
     expect(misses[0]).toBe(1300);
-    expect(misses.slice(1).every((m) => m <= DRIFT.nativeToleranceMs)).toBe(true);
-    expect(sim.aims).toEqual([5200, 4550]);
+    expect(misses.slice(1).every((m) => m <= 100)).toBe(true);
+    expect(sim.aims).toEqual([5200, 3900]);
   });
 
   it("native: a seek that lands where it aimed keeps no lead; the lead is bounded", () => {

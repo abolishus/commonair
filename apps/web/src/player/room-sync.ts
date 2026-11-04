@@ -19,14 +19,11 @@
  *   `edgeStalled`), so a step that seeks there lands off by however far it moved (CI run
  *   41757992200: two members stayed 0.5-1.1 s apart). A drift over 2 s is a plain seek, and the
  *   hold-back follows it. A correction then settles before the next one, so a seek still in
- *   flight is never corrected twice (no overshoot). **With a playback-rate seam** (the page's
- *   element), drifts up to 2 s are closed by playing faster or slower instead (`RATE`): every seek
- *   stalls, and on a loaded machine the stall undoes about as much as the seek corrected.
- * - **WebKit native** (`prefersNativeHls`) exposes no hold-back: seek only, with a 0.7 s tolerance.
- *   Its seeks land short (a keyframe snap, a flushing seek that resumes late; CI run 41768120276:
- *   ~1.3 s, so it re-seeked to the same miss every tick), so the driver learns the typical miss
- *   from where each seek ended up and aims the next one ahead by it. (Its rate is left alone: a
- *   GStreamer rate change may itself be a flushing seek, untested.)
+ *   flight is never corrected twice (no overshoot).
+ * - **WebKit native** (`prefersNativeHls`) exposes no hold-back: seek only, with about 1 s tolerance.
+ *   Its seeks land short by about the same amount each time (a keyframe snap, a flushing seek that
+ *   resumes late; CI run 41768120276: ~1.3 s, so it re-seeked to the same miss every tick), so the
+ *   driver learns that miss from where each seek ended up and aims the next one ahead by it.
  * - **Reduced motion** widens both bands so the picture jumps less often.
  * - **DVR** members are left alone (the server leaves them out of the target too).
  */
@@ -39,11 +36,8 @@ export const DRIFT = {
   reducedDeadbandMs: 400,
   /** hls.js: a drift over this is a seek instead of a hold-back step. */
   seekOverMs: 2000,
-  /**
-   * WebKit native: seek-only tolerance. Under the 1 s target with room for the hls.js members'
-   * own spread (1 s let WebKit sit just inside it while they wobbled around it).
-   */
-  nativeToleranceMs: 700,
+  /** WebKit native: seek-only tolerance. */
+  nativeToleranceMs: 1000,
   reducedNativeToleranceMs: 1500,
   /** hls.js without the steering seam (the page fallback): seek-only, tighter than native. */
   seekOnlyToleranceMs: 350,
@@ -56,25 +50,6 @@ export const DRIFT = {
    * that never gets there.
    */
   maxSeekLeadMs: 2500,
-  /**
-   * How much of each landing's miss the lead takes on. Half: a seek's stall varies (CI: 0.1-1.7 s),
-   * so taking all of the last miss chases the noise; half converges on the typical miss.
-   */
-  seekLeadGain: 0.5,
-} as const;
-
-/**
- * hls.js small drifts (deadband to 2 s) by playback rate. Every seek costs a stall while the decoder
- * refills, and on a loaded machine the stall is about the size of the correction: on CI the members
- * lost ~320 ms (one run) and ~750 ms (106-1702, another) between a correction and their next frame,
- * so seeking every tick kept them 0.3-1.7 s behind the target and 6.1/6.8 s behind the edge (run
- * 41771305439). A rate change does not flush. `1 - drift / horizon` closes the drift in about one
- * tick, bounded so speech stays intelligible.
- */
-export const RATE = {
-  horizonMs: 2000,
-  min: 0.75,
-  max: 1.33,
 } as const;
 
 export interface DriftInput {
@@ -97,14 +72,11 @@ export interface DriftInput {
   measuredLatency: number | null;
   /** Milliseconds since the last correction, null if none yet. */
   sinceLastMs: number | null;
-  /** hls.js: the player can change its playback rate (`setPlaybackRate`), so small drifts need no seek. */
-  rate?: boolean;
 }
 
 export type Correction =
   | { kind: "none"; driftMs: number | null }
   | { kind: "latency"; seconds: number; driftMs: number }
-  | { kind: "rate"; rate: number; driftMs: number }
   | { kind: "seek"; toMs: number; driftMs: number };
 
 const clampLatency = (s: number) => Math.min(TARGET_LATENCY_RANGE.max, Math.max(TARGET_LATENCY_RANGE.min, s));
@@ -125,12 +97,6 @@ export function nextCorrection(i: DriftInput): Correction {
   }
   if (abs > DRIFT.seekOverMs) return { kind: "seek", toMs: i.targetMs, driftMs };
   const deadband = i.reducedMotion ? DRIFT.reducedDeadbandMs : DRIFT.deadbandMs;
-  if (i.rate) {
-    // Close the drift over the next tick by playing faster or slower: no seek, so no stall.
-    if (abs <= deadband) return { kind: "rate", rate: 1, driftMs };
-    const rate = Math.min(RATE.max, Math.max(RATE.min, 1 - driftMs / RATE.horizonMs));
-    return { kind: "rate", rate, driftMs };
-  }
   if (abs <= deadband) return { kind: "none", driftMs };
   // Where the player is now, not where the last step meant it to be: steps land by seek, so the
   // applied hold-back is never checked against the playhead and drifts (CI run 41764916744: from a
@@ -165,8 +131,6 @@ export interface RoomPlayer {
    * is then missing from it (false) or mapped against stale fragment starts.
    */
   seekBy?(ms: number): boolean;
-  /** hls.js: set the element's playback rate (1 = normal); false when it cannot. */
-  setPlaybackRate?(rate: number): boolean;
   native: boolean;
   /**
    * Batch 8: the live edge as a wall-clock instant (the PDT at the end of the live playlist), null
@@ -253,8 +217,6 @@ export class RoomSyncDriver {
   private seekLeadMs = 0;
   /** When the last seek-only seek went out, until its landing is read. */
   private seekedAt: number | null = null;
-  /** The playback rate this driver last set (1 until it steers by rate). */
-  private rate = 1;
   /** The last drift seen (ms), for `data-*` and diagnostics. */
   lastDriftMs: number | null = null;
 
@@ -295,35 +257,22 @@ export class RoomSyncDriver {
       appliedLatency: this.applied,
       measuredLatency: measured,
       sinceLastMs: this.lastAt === null ? null : now - this.lastAt,
-      rate: p.setPlaybackRate !== undefined && p.setTargetLatency !== undefined,
     });
     this.lastDriftMs = c.driftMs;
-    // Normal speed again for a seek, and whenever the room no longer steers this player (DVR, no target).
-    if (c.kind === "seek" || c.driftMs === null) this.setRate(p, 1);
     // `nextCorrection` only corrects with a playhead and a target.
     if (head === null || targetMs === null) return c;
-    if (c.kind === "rate") {
-      if (this.setRate(p, c.rate) || c.rate === 1) return c;
-      // The element refused the rate: correct this tick with a hold-back step and a seek instead.
-      const base = measured ?? this.applied;
-      if (base === null || !p.setTargetLatency) return c;
-      const seconds = clampLatency(base + c.driftMs / 1000);
-      this.latencyStep(p, head, targetMs, seconds);
-      this.lastAt = now;
-      return { kind: "latency", seconds, driftMs: c.driftMs };
-    }
     const seekOnly = !p.setTargetLatency;
     // The first look after a seek-only seek has settled: where it ended up, against the target, is
     // how far the lead was off (the seek aimed at target + lead).
     if (seekOnly && this.seekedAt !== null && c.driftMs !== null && now - this.seekedAt >= DRIFT.settleMs) {
-      this.seekLeadMs = Math.min(
-        DRIFT.maxSeekLeadMs,
-        Math.max(-DRIFT.maxSeekLeadMs, this.seekLeadMs - DRIFT.seekLeadGain * c.driftMs),
-      );
+      this.seekLeadMs = Math.min(DRIFT.maxSeekLeadMs, Math.max(-DRIFT.maxSeekLeadMs, this.seekLeadMs - c.driftMs));
       this.seekedAt = null;
     }
     if (c.kind === "latency" && p.setTargetLatency) {
-      this.latencyStep(p, head, targetMs, c.seconds);
+      this.hold(p, c.seconds);
+      // Land from the playhead; hls.js's sync position hangs off its own (moving) edge estimate.
+      // Only when neither seek can, step there after all.
+      if (!this.land(p, head, targetMs)) this.remember(p.setTargetLatency(c.seconds), c.seconds);
       this.lastAt = now;
     } else if (c.kind === "seek") {
       // The hold-back follows the seek, so hls.js keeps the new distance rather than its old one.
@@ -340,22 +289,6 @@ export class RoomSyncDriver {
       }
     }
     return c;
-  }
-
-  /** A hold-back step: hold `seconds`, and land on the target from the playhead. */
-  private latencyStep(p: RoomPlayer, headMs: number, targetMs: number, seconds: number): void {
-    this.hold(p, seconds);
-    // Land from the playhead; hls.js's sync position hangs off its own (moving) edge estimate.
-    // Only when neither seek can, step there after all.
-    if (!this.land(p, headMs, targetMs) && p.setTargetLatency) this.remember(p.setTargetLatency(seconds), seconds);
-  }
-
-  /** Set the playback rate if it changes; true when the player now plays at `rate`. */
-  private setRate(p: RoomPlayer, rate: number): boolean {
-    if (this.rate === rate) return true;
-    if (!p.setPlaybackRate?.(rate)) return false;
-    this.rate = rate;
-    return true;
   }
 
   /** Move the playhead to `toMs`: relative to the playhead when the player can, else by its fragments. */
@@ -380,8 +313,5 @@ export class RoomSyncDriver {
     this.lastDriftMs = null;
     // The lead is the player's, not the room's: kept. A landing not yet read is dropped.
     this.seekedAt = null;
-    // Out of the room, the player plays at normal speed.
-    const p = this.deps.player();
-    if (p) this.setRate(p, 1);
   }
 }

@@ -27,7 +27,9 @@ resource "digitalocean_database_cluster" "pg" {
   region               = var.region
   node_count           = 2 # primary + one standby: 99.95% SLA, failover in 5-10 s
   private_network_uuid = digitalocean_vpc.app.id
-  tags                 = [digitalocean_tag.this[local.tag_all].name, digitalocean_tag.this[local.tag_env].name]
+  tags                 = local.state_tags
+
+  depends_on = [digitalocean_tag.this]
 }
 
 resource "digitalocean_database_firewall" "pg" {
@@ -52,7 +54,9 @@ resource "digitalocean_database_cluster" "valkey" {
   region               = var.region
   node_count           = 2 # primary + one standby
   private_network_uuid = digitalocean_vpc.app.id
-  tags                 = [digitalocean_tag.this[local.tag_all].name, digitalocean_tag.this[local.tag_env].name]
+  tags                 = local.state_tags
+
+  depends_on = [digitalocean_tag.this]
 }
 
 resource "digitalocean_database_valkey_config" "valkey" {
@@ -116,15 +120,27 @@ resource "digitalocean_spaces_bucket_cors_configuration" "media" {
   }
 }
 
+# Two keys: storage-init refuses an evidence key equal to the main one (ADR 0006 Q4), so a
+# leaked media key cannot read or erase sealed evidence.
 resource "digitalocean_spaces_key" "instance" {
   count = local.managed
   name  = "${local.prefix}-instance"
 
   dynamic "grant" {
-    for_each = local.instance_buckets
+    for_each = { for k, v in local.instance_buckets : k => v if k != "evidence" }
     content {
       bucket     = digitalocean_spaces_bucket.instance[grant.key].name
       permission = "readwrite"
     }
+  }
+}
+
+resource "digitalocean_spaces_key" "evidence" {
+  count = local.managed
+  name  = "${local.prefix}-evidence"
+
+  grant {
+    bucket     = digitalocean_spaces_bucket.instance["evidence"].name
+    permission = "readwrite"
   }
 }

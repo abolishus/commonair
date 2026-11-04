@@ -14,8 +14,15 @@ locals {
   tag_app        = "commonair-${var.environment}-app"
   tag_monitoring = "commonair-${var.environment}-monitoring"
 
-  app_tags        = [local.tag_all, local.tag_env, local.tag_role_app, local.tag_app]
-  monitoring_tags = [local.tag_all, local.tag_env, local.tag_monitoring]
+  app_tags        = concat([local.tag_all, local.tag_env, local.tag_role_app, local.tag_app], var.extra_tags)
+  monitoring_tags = concat([local.tag_all, local.tag_env, local.tag_monitoring], var.extra_tags)
+  state_tags      = concat([local.tag_all, local.tag_env], var.extra_tags)
+
+  # Only the environment's own tags are tofu resources. `commonair`, `commonair-app` and the
+  # extra tags are shared with other environments (and hand-made hosts): destroying a tag
+  # resource deletes the tag from every resource that carries it, so they are referenced by
+  # name and the API creates them on first use.
+  env_tags = [local.tag_env, local.tag_app, local.tag_monitoring]
 
   stage2 = var.app_count > 1
 
@@ -29,7 +36,7 @@ locals {
 }
 
 resource "digitalocean_tag" "this" {
-  for_each = toset(distinct(concat(local.app_tags, local.monitoring_tags)))
+  for_each = toset(local.env_tags)
   name     = each.value
 }
 
@@ -65,13 +72,8 @@ data "digitalocean_ssh_keys" "operators" {
   }
 }
 
-resource "digitalocean_project" "this" {
-  name        = local.prefix
-  description = "CommonAir ${var.environment} (infra/tofu/digitalocean)"
-  purpose     = "Web Application"
-  environment = title(var.environment)
-
-  resources = concat(
+locals {
+  project_resources = concat(
     digitalocean_droplet.app[*].urn,
     digitalocean_droplet.monitoring[*].urn,
     [digitalocean_reserved_ip.app.urn],
@@ -82,4 +84,21 @@ resource "digitalocean_project" "this" {
     digitalocean_database_cluster.valkey[*].urn,
     digitalocean_loadbalancer.app[*].urn,
   )
+}
+
+# A project per environment, unless project_id names an existing one: then the resources are
+# only assigned to it, and nothing else in that project is touched.
+resource "digitalocean_project" "this" {
+  count       = var.project_id == null ? 1 : 0
+  name        = local.prefix
+  description = "CommonAir ${var.environment} (infra/tofu/digitalocean)"
+  purpose     = "Web Application"
+  environment = title(var.environment)
+  resources   = local.project_resources
+}
+
+resource "digitalocean_project_resources" "existing" {
+  count     = var.project_id == null ? 0 : 1
+  project   = var.project_id
+  resources = local.project_resources
 }

@@ -88,7 +88,7 @@ Flakes seen, once each, all passing on rerun or the next run (for `docs/operator
 
 Follow-ups:
 
-- edge-sync rate-based correction (in flight);
+- edge-sync: rate-based correction (`b8d16571`, merge `8cecdab5`) failed its first CI run (run `41776964782`: Chromium p90 968 ms against 500) and was reverted to the seek-based `c42fe1a2` behaviour; a local repro against the real stack with browser-side diagnostics is the next step, since the step is load-sensitive on CI;
 - the DVR-swap root cause;
 - a product gap: issuance gives a relay nothing for DVR pulls, so a DVR session on a channel with
   no live viewer can never verify through a relay (ADR 0016 Amendment 1);
