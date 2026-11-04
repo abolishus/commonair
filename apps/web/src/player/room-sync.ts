@@ -10,8 +10,8 @@
  * so a target received at `t0` is `target + (now - t0)` later. Drift is `playhead - target`
  * (positive: this member is ahead).
  *
- * - **hls.js** steers with `setTargetLatency`: the new hold-back is the last one applied plus the
- *   drift, so hls.js keeps the new distance from then on. The playhead itself lands on the target
+ * - **hls.js** steers with `setTargetLatency`: the new hold-back is the player's own latency plus
+ *   the drift, so hls.js keeps the new distance from then on. The playhead itself lands on the target
  *   from the playhead (`seekBy` the drift, PDT being linear in media time; `seekToWallclock` when
  *   the player cannot, and hls.js's sync position only when neither can), not at hls.js's sync
  *   position: that one is measured from this member's own edge estimate (`edge + age`), which
@@ -56,7 +56,10 @@ export interface DriftInput {
   reducedMotion: boolean;
   /** The hold-back this driver last applied (seconds), null before its first step. */
   appliedLatency: number | null;
-  /** The player's latency in seconds (else `now - playhead`): the base for the first step. */
+  /**
+   * The player's own latency in seconds (hls.js `latency`; before any step, else `now - playhead`):
+   * the base for a step, the applied hold-back only when it is unknown.
+   */
   measuredLatency: number | null;
   /** Milliseconds since the last correction, null if none yet. */
   sinceLastMs: number | null;
@@ -86,12 +89,13 @@ export function nextCorrection(i: DriftInput): Correction {
   if (abs > DRIFT.seekOverMs) return { kind: "seek", toMs: i.targetMs, driftMs };
   const deadband = i.reducedMotion ? DRIFT.reducedDeadbandMs : DRIFT.deadbandMs;
   if (abs <= deadband) return { kind: "none", driftMs };
-  const base = i.appliedLatency ?? i.measuredLatency;
+  // Where the player is now, not where the last step meant it to be: steps land by seek, so the
+  // applied hold-back is never checked against the playhead and drifts (CI run 41764916744: from a
+  // 16 s start-up reading down to the 1 s floor).
+  const base = i.measuredLatency ?? i.appliedLatency;
   if (base === null) return { kind: "none", driftMs };
-  const seconds = clampLatency(base + driftMs / 1000);
-  // At the range's end: nothing left to steer with.
-  if (Math.abs(seconds - base) < 0.001) return { kind: "none", driftMs };
-  return { kind: "latency", seconds, driftMs };
+  // At the range's end the hold-back stays put, but the playhead still lands by seek.
+  return { kind: "latency", seconds: clampLatency(base + driftMs / 1000), driftMs };
 }
 
 /** What the driver needs from this channel's player. */
@@ -177,11 +181,15 @@ export function roomReport(p: RoomPlayer | null): RoomReport | null {
   return { at, mode, edge: edge && Number.isFinite(edge.getTime()) ? edge : null };
 }
 
-/** The player's own latency when it reports a usable one, else the wall-clock estimate. */
-function measuredLatency(p: RoomPlayer, head: number | null, now: number): number | null {
+/**
+ * The player's own latency when it reports a usable one. Otherwise the wall-clock estimate, but
+ * only before the first step: it mixes the viewer's clock with the encoder's, so once a hold-back
+ * was applied that one is the better base (null here lets `nextCorrection` use it).
+ */
+function measuredLatency(p: RoomPlayer, head: number | null, now: number, applied: number | null): number | null {
   const own = p.latencySeconds?.() ?? null;
   if (own !== null && Number.isFinite(own) && own > 0) return own;
-  return head === null ? null : (now - head) / 1000;
+  return head === null || applied !== null ? null : (now - head) / 1000;
 }
 
 export interface RoomSyncDriverDeps {
@@ -225,7 +233,7 @@ export class RoomSyncDriver {
     const now = this.now();
     const head = p.playheadWallclock()?.getTime() ?? null;
     const targetMs = this.targetNow();
-    const measured = measuredLatency(p, head, now);
+    const measured = measuredLatency(p, head, now, this.applied);
     const c = nextCorrection({
       playheadMs: head,
       targetMs,
@@ -248,7 +256,7 @@ export class RoomSyncDriver {
       this.lastAt = now;
     } else if (c.kind === "seek") {
       // The hold-back follows the seek, so hls.js keeps the new distance rather than its old one.
-      const base = this.applied ?? measured;
+      const base = measured ?? this.applied;
       const held = p.setTargetLatency && base !== null ? clampLatency(base + c.driftMs / 1000) : null;
       if (this.land(p, head, c.toMs)) {
         if (held !== null) this.hold(p, held);

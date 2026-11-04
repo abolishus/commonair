@@ -36,7 +36,7 @@ describe("nextCorrection", () => {
   });
 
   it("hls.js ahead: a longer hold-back by exactly the drift", () => {
-    const c = nextCorrection({ ...base, playheadMs: NOW - 7000, appliedLatency: 6 });
+    const c = nextCorrection({ ...base, playheadMs: NOW - 7000, measuredLatency: 6, appliedLatency: 9 });
     expect(c).toEqual({ kind: "latency", seconds: 7, driftMs: 1000 });
   });
 
@@ -57,17 +57,17 @@ describe("nextCorrection", () => {
   });
 
   it("the hold-back is capped to the controller's range", () => {
-    expect(nextCorrection({ ...base, playheadMs: NOW - 6500, targetMs: NOW - 8000, appliedLatency: 59.5 })).toEqual({
+    expect(nextCorrection({ ...base, playheadMs: NOW - 6500, targetMs: NOW - 8000, measuredLatency: 59.5 })).toEqual({
       kind: "latency",
       seconds: 60,
       driftMs: 1500,
     });
-    expect(nextCorrection({ ...base, playheadMs: NOW - 6500, targetMs: NOW - 8000, appliedLatency: 60 })).toMatchObject(
-      {
-        kind: "none",
-      },
-    );
-    expect(nextCorrection({ ...base, playheadMs: NOW - 2500, targetMs: NOW - 1000, appliedLatency: 1.2 })).toEqual({
+    expect(nextCorrection({ ...base, playheadMs: NOW - 6500, targetMs: NOW - 8000, measuredLatency: 60 })).toEqual({
+      kind: "latency",
+      seconds: 60,
+      driftMs: 1500,
+    });
+    expect(nextCorrection({ ...base, playheadMs: NOW - 2500, targetMs: NOW - 1000, measuredLatency: 1.2 })).toEqual({
       kind: "latency",
       seconds: 1,
       driftMs: -1500,
@@ -98,8 +98,32 @@ describe("nextCorrection", () => {
     });
   });
 
+  it("the hold-back starts from the player's own latency, not the one applied before", () => {
+    // CI run 41764916744 (edge-sync): steps landed by seek, so the applied hold-back was never checked
+    // against where the player sat; it walked from a 16 s start-up reading down to the 1 s floor.
+    expect(nextCorrection({ ...base, playheadMs: NOW - 8700, measuredLatency: 6, appliedLatency: 1 })).toEqual({
+      kind: "latency",
+      seconds: 5.3,
+      driftMs: -700,
+    });
+    expect(nextCorrection({ ...base, playheadMs: NOW - 7000, measuredLatency: null, appliedLatency: 6 })).toEqual({
+      kind: "latency",
+      seconds: 7,
+      driftMs: 1000,
+    });
+  });
+
+  it("at the range's end the step still corrects (the playhead lands by seek)", () => {
+    // Was `none`: with the hold-back pinned at 1 s, a member 0.3-0.9 s behind was never corrected.
+    expect(nextCorrection({ ...base, playheadMs: NOW - 2500, targetMs: NOW - 1000, measuredLatency: 1 })).toEqual({
+      kind: "latency",
+      seconds: 1,
+      driftMs: -1500,
+    });
+  });
+
   it("a correction settles before the next one (no overshoot)", () => {
-    const ahead = { ...base, playheadMs: NOW - 7000, appliedLatency: 7 };
+    const ahead = { ...base, playheadMs: NOW - 7000, measuredLatency: 7 };
     expect(nextCorrection({ ...ahead, sinceLastMs: DRIFT.settleMs - 1 })).toMatchObject({ kind: "none" });
     expect(nextCorrection({ ...ahead, sinceLastMs: DRIFT.settleMs })).toMatchObject({ kind: "latency", seconds: 8 });
   });
@@ -248,7 +272,8 @@ describe("RoomSyncDriver", () => {
       roomBehindMs = roomBehindMs === 6500 ? 7500 : 6500;
     }
     // Each step held the new distance and landed from the playhead.
-    expect(calls.slice(0, 4)).toEqual(["hold 5.00", "seek", "hold 6.00", "seek"]);
+    // (The second hold-back is its own latency to the moved edge, 4.3 s, plus the 1 s drift.)
+    expect(calls.slice(0, 4)).toEqual(["hold 5.00", "seek", "hold 5.30", "seek"]);
     expect(Number.isFinite(holdBack)).toBe(true);
   });
 
@@ -328,6 +353,41 @@ describe("RoomSyncDriver", () => {
     expect(driver.onTarget(new Date(sim.now() - 5000).toISOString()).kind).toBe("seek");
     expect(sim.calls).toEqual(["seekToWallclock", "latency 5.00"]);
     expect(sim.holdBack()).toBe(5);
+  });
+
+  it("replays edge-sync's near member: a junk start-up latency and slow playback do not strand it", () => {
+    // CI run 41764916744: near's first report read 16.1 s to its own edge (start-up), it lost
+    // 60-140 ms of playhead per second to real time, and the room's target sat ~5.2 s behind.
+    // The hold-back integrated from 16 s, so the sync-position step parked near at the window's
+    // start (6-7 s behind) for 20 s, then ran into the 1 s floor; p90 509 ms.
+    let clock = NOW;
+    let behindMs = 4300;
+    let reads = 0;
+    const WINDOW_MS = 7000;
+    const player: RoomPlayer = {
+      playheadWallclock: () => new Date(clock - behindMs),
+      playbackMode: () => "live",
+      // hls.js: the step to the sync position, clamped to the playlist window.
+      setTargetLatency: (s: number, o?: { seek?: boolean }) => {
+        if (o?.seek !== false) behindMs = Math.min(Math.max(s * 1000, 200), WINDOW_MS);
+        return s;
+      },
+      latencySeconds: () => (reads++ === 0 ? 16.112 : behindMs / 1000),
+      // Neither seek finds its mark (stale level, outside the buffer): the step is all there is.
+      seekBy: () => false,
+      seekToWallclock: () => false,
+      native: false,
+    };
+    const driver = new RoomSyncDriver({ player: () => player, reducedMotion: () => false, now: () => clock });
+    const offsets: number[] = [];
+    for (let i = 0; i < 15; i++) {
+      driver.onTarget(new Date(clock - 5200).toISOString());
+      offsets.push(Math.abs(behindMs - 5200));
+      clock += 2000;
+      behindMs += 160; // slow playback
+    }
+    // After the junk first step, every later one lands within the deadband.
+    expect(offsets.slice(2).every((d) => d <= DRIFT.deadbandMs)).toBe(true);
   });
 
   it("native: seeks once into tolerance", () => {
