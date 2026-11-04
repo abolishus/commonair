@@ -100,19 +100,21 @@ export const NO_SESSION_FEATURES: SessionFeatures = Object.freeze({
 
 /** How long `enterDvr` waits for the DVR playlist before it gives up and returns to live. */
 export const DVR_LOAD_TIMEOUT_MS = 10_000;
-/** How long after a DVR source swap the landing is held (the new source's start-up). */
+/** How long a DVR landing on a fresh source (a swap, a rewind) is held: the new source's start-up. */
 export const DVR_LANDING_GUARD_MS = 15_000;
 /** How far the playhead may drift from the landing (plus played time) before it is put back. */
 export const DVR_LANDING_TOLERANCE_MS = 5_000;
-/** Corrections per swap; past them the playhead stays wherever it went. */
+/** Corrections per landing; past them the playhead stays wherever it went. */
 export const DVR_LANDING_MAX_CORRECTIONS = 3;
 /** A `timeupdate` step longer than this is a jump, not playback. */
 const PLAYBACK_STEP_MAX_S = 1.5;
 
-/** A DVR swap's landing while the new source settles (`DVR_LANDING_GUARD_MS`). */
+/** Where a DVR swap or rewind sent the playhead, held while the new source settles (`DVR_LANDING_GUARD_MS`). */
 interface DvrLanding {
   generation: number;
-  /** Where the swap sent the playhead (epoch ms). */
+  /** A source swap (`dvrSwitchTo`) or a rewind right after `enterDvr`. */
+  via: "swap" | "rewind";
+  /** Where the playhead was sent (epoch ms). */
   target: number;
   until: number;
   /** Media seconds played since, counted from `timeupdate` steps (jumps excluded). */
@@ -343,7 +345,14 @@ export class PlayerController {
    */
   seekToWallclock(t: Date): boolean {
     this.landing = null;
-    return this.seekToWallclockAt(t);
+    // A rewind right after `enterDvr` meets the same start-up as a swap: nothing buffered yet, and
+    // hls.js may still move the playhead to the live sync position once the first fragments are in
+    // (relay-dvr CI run 41834516797: the relay loaded segments from 84 s with the playhead at 36 s,
+    // so it played 15 s behind live before the swap, which then kept that). So it is held as well.
+    const fresh = this.mode === "dvr" && this.hls !== null && !this.hls.hasEnoughToStart;
+    const ok = this.seekToWallclockAt(t);
+    if (ok && fresh) this.holdFrom("rewind", t.getTime(), true);
+    return ok;
   }
 
   private seekToWallclockAt(t: Date): boolean {
@@ -1052,17 +1061,7 @@ export class PlayerController {
         pause: () => video.pause(),
         landed: (target, seekOk) => {
           if (generation !== this.dvrGeneration || this.stopped) return;
-          this.landing = {
-            generation,
-            target: target.getTime(),
-            until: Date.now() + DVR_LANDING_GUARD_MS,
-            played: 0,
-            lastTime: null,
-            corrections: 0,
-            seekOk,
-            driftMs: null,
-          };
-          this.traceLanding();
+          this.holdFrom("swap", target.getTime(), seekOk);
         },
         loadDvr: async (url, { autoplay }) => {
           // Set first, so `tokenFor` hands the new directory its DVR token.
@@ -1082,12 +1081,29 @@ export class PlayerController {
     );
   }
 
+  /** Start holding a landing (`holdLanding`) for the current DVR generation. */
+  private holdFrom(via: DvrLanding["via"], target: number, seekOk: boolean): void {
+    this.landing = {
+      generation: this.dvrGeneration,
+      via,
+      target,
+      until: Date.now() + DVR_LANDING_GUARD_MS,
+      played: 0,
+      lastTime: null,
+      corrections: 0,
+      seekOk,
+      driftMs: null,
+    };
+    this.traceLanding();
+  }
+
   /**
-   * Hold a DVR swap's landing while the new source settles: the playhead should be where the swap
-   * sent it plus what has played since. hls.js can still move it on a new live playlist (to the
+   * Hold a DVR landing while the new source settles: the playhead should be where the swap or
+   * rewind sent it plus what has played since. hls.js can still move it on a new live playlist (to the
    * live sync position once the first fragments are in, CI run 41764916744: 60 s behind became 15);
    * a jump like that is put back, at most `DVR_LANDING_MAX_CORRECTIONS` times. A seek of the
-   * viewer's (any public seek), a new `enterDvr`/`exitDvr`/swap or the end of the window ends it.
+   * viewer's (any public seek but a rewind onto a fresh source, which starts its own), a new
+   * `enterDvr`/`exitDvr`/swap or the end of the window ends it.
    */
   private holdLanding = (): void => {
     const l = this.landing;
@@ -1116,11 +1132,12 @@ export class PlayerController {
     this.traceLanding();
   };
 
-  /** The last swap's landing on the element (`data-dvr-swap`), for the harness's relay-dvr diagnostics. */
+  /** The last landing on the element (`data-dvr-swap`), for the harness's relay-dvr diagnostics. */
   private traceLanding(): void {
     const l = this.landing;
     if (!l) return;
     this.opts.video.dataset.dvrSwap = JSON.stringify({
+      via: l.via,
       target: l.target,
       seekOk: l.seekOk,
       played: Math.round(l.played * 10) / 10,
