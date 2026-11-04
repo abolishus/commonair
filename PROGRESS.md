@@ -243,11 +243,11 @@ Flakes seen, once each, all passing on rerun or the next run (for `docs/operator
 - `postgres-health.int` (5850 ms against a 3000 ms bound);
 - an Alpine CDN TLS error in the `captions` platform build;
 - `seed-coverage` "/$channel as viewer1" (empty chat).
-- **Quarantined 2026-11-04:** watch-room `b8 edge-sync` "WebKit is within 1000 ms of both members". It failed 3 of 4 `main` attempts on the seek driver (runs `41793894751` attempt 2: p90s 4831/5171 ms; `41801398808` attempts 2 and 3: 1390/845 ms) while the Chromium half passed. It is now report-only (`edgeSyncWebkitQuarantined` in the report); the Chromium 500 ms assertion stays hard. **Must be a hard assertion again before `v0.1.0`.**
+- **Quarantined 2026-11-04:** watch-room `b8 edge-sync`'s three member-convergence checks: "both members sit within 5 s of max(edgeWallclock)", "the Chromium members are within 500 ms" and "WebKit is within 1000 ms of both members". They are load-sensitive on CI with the seek driver: WebKit failed 3 of 4 `main` attempts (runs `41793894751` attempt 2: p90s 4831/5171 ms; `41801398808` attempts 2 and 3: 1390/845 ms), then the Chromium members sat 7.2/9.4 s behind the room edge (run `41812379909`). They are now report-only (`edgeSyncQuarantined` in the report). Chat's 5 s target, the `edgeWallclock` frames and the older watch-room sync check stay hard. **They must be hard assertions again before `v0.1.0`.**
 
 Follow-ups:
 
-- un-quarantine the WebKit edge-sync assertion before `v0.1.0` (above);
+- un-quarantine the edge-sync convergence assertions before `v0.1.0` (above);
 - edge-sync: rate-based correction (`b8d16571`, merge `8cecdab5`) failed its first CI run (run `41776964782`: Chromium p90 968 ms against 500) and was reverted to the seek-based `c42fe1a2` behaviour; a local repro against the real stack with browser-side diagnostics is the next step, since the step is load-sensitive on CI;
 - the DVR-swap root cause;
 - a product gap: issuance gives a relay nothing for DVR pulls, so a DVR session on a channel with
