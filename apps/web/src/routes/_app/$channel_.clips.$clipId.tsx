@@ -3,23 +3,34 @@
 
 import { createFileRoute } from "@tanstack/react-router";
 import type * as React from "react";
+import { getWatchHead, watchPageTitle } from "../../components/vod-watch/watch-head.ts";
 import { ClipWatchPage } from "../../components/vod-watch/watch-page.tsx";
 import { useBootstrap } from "../../lib/bootstrap.ts";
+import { titleHead } from "../../lib/page-title.ts";
 
 /**
  * `/$channel/clips/$clipId`: the public clip watch page with the clip window's chat (decision
  * (e)). Public; what the caller may not watch answers not-found. `$channel_` keeps it out of the
  * channel page's route (which renders no outlet) while the URL stays `/$channel/clips/$clipId`.
- * The clip loads in the browser (`components/vod-watch/watch-page.tsx`).
+ * The clip loads in the browser (`components/vod-watch/watch-page.tsx`); the loader fetches only
+ * the title, for "<clip> · <channel> · <site>" (F11).
  */
 export const Route = createFileRoute("/_app/$channel_/clips/$clipId")({
+  loader: ({ params }) => getWatchHead({ data: { kind: "clip", id: params.clipId, channel: params.channel } }),
+  head: ({ loaderData, params }) => titleHead(watchPageTitle(loaderData, "clip", params.channel)),
   component: ClipRoute,
 });
 
 function ClipRoute(): React.JSX.Element {
   const { channel, clipId } = Route.useParams();
-  const { me } = useBootstrap();
+  const { me, config } = useBootstrap();
   return (
-    <ClipWatchPage key={clipId} channel={channel} clipId={clipId} viewer={me ? { username: me.username } : null} />
+    <ClipWatchPage
+      key={clipId}
+      channel={channel}
+      clipId={clipId}
+      viewer={me ? { username: me.username } : null}
+      publicUrl={config.publicUrl}
+    />
   );
 }

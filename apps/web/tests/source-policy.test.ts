@@ -469,8 +469,6 @@ describe("detectors", () => {
  * shrinks: an entry that has gained a `head` fails until it is removed here.
  */
 export const PENDING_HEAD: Readonly<Record<string, string>> = {
-  "src/routes/_app/$channel_.vods.$vodId.tsx": "D3-watch",
-  "src/routes/_app/$channel_.clips.$clipId.tsx": "D3-watch",
   "src/routes/_studio/import.tsx": "B8-server (owns components/twitch-import), then D5-studio",
 };
 

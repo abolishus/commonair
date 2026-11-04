@@ -1,1 +1,21 @@
-{}
+{
+  "watch.pageTitle.notAvailable": "Vídeo no disponible",
+  "watch.pageTitle.video": "Vídeo",
+  "watch.pageTitle.clip": "Clip",
+  "watch.meta.recorded": "Grabado",
+  "watch.meta.clipped": "Recortado",
+  "watch.meta.views": "{count, plural, one {# visualización} other {# visualizaciones}}",
+  "watch.share.label": "Compartir",
+  "watch.share.title": "Compartir este vídeo",
+  "watch.share.linkLabel": "Enlace",
+  "watch.share.startAt": "Empezar en {time}",
+  "watch.share.copy": "Copiar enlace",
+  "watch.share.copied": "Enlace copiado",
+  "watch.share.failed": "No se pudo copiar el enlace",
+  "watch.card.label": "Canal de {name}",
+  "watch.card.watchLive": "Ver en directo",
+  "watch.more.heading": "Más de {name}",
+  "watch.more.loading": "Cargando más vídeos",
+  "watch.notAvailable.description": "Puede que se haya eliminado o que no sea público.",
+  "watch.notAvailable.back": "Volver a {name}"
+}
