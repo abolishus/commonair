@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# Nightly. Enabled at install for an external Postgres; with the bundled one, the first
+# successful `selfhost.sh backup --dump` enables it (an opt-in second copy beside WAL-G).
+[Unit]
+Description=Nightly CommonAir logical database dump
+
+[Timer]
+# Before the WAL-G base backup (03:00) and the object copy (04:00), at a random minute.
+OnCalendar=*-*-* 02:00:00 UTC
+RandomizedDelaySec=50m
+# Runs at the next boot if the server was off at that time.
+Persistent=true
+Unit=commonair-dump.service
+
+[Install]
+WantedBy=timers.target

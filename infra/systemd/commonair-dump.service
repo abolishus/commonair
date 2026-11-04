@@ -1,0 +1,19 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# A logical dump of the database to the offsite store (selfhost.sh backup --dump, ADR 0032 §4,
+# docs/self-hosting/backups.md "Logical dumps"): pg_dump as the owner in the Postgres image,
+# streamed through rclone on the host, keeping 30. The backup for an external Postgres, where
+# WAL-G cannot run; beside WAL-G, an opt-in second copy.
+[Unit]
+Description=CommonAir logical database dump (offsite)
+# After, not Requires: an external Postgres has no unit here, and a timer must never start
+# Postgres that an operator stopped.
+After=commonair-postgres.service commonair-backup.service
+
+[Service]
+Type=oneshot
+# Background work: it yields the CPU and the disk to the instance.
+Nice=10
+IOSchedulingClass=idle
+ExecStart=/bin/sh %h/commonair/selfhost.sh backup --dump

@@ -20,6 +20,25 @@ most the last minute or so of writes.
 The objects (avatars, thumbnails, clips, VODs, sealed evidence) are copied to another S3 store
 by `selfhost.sh backup --objects`, daily once you have set it up ([Objects](#objects)).
 
+Beside WAL-G, `selfhost.sh backup --dump` takes a **logical dump** of the database to the same
+offsite store ([Logical dumps](#logical-dumps)). With an external Postgres
+([managed-services.md](managed-services.md)) WAL-G cannot run, and the nightly dump is the
+backup; with the bundled one it is an optional second copy. A weekly **restore drill** restores
+the newest backup into a throwaway container and checks it, in both modes
+([Automatic restore drills](#automatic-restore-drills)).
+
+### Which backup, when
+
+| Instance                       | Database backup                                   | Its restore                                                           | Drill (weekly timer)               |
+| ------------------------------ | ------------------------------------------------- | --------------------------------------------------------------------- | ---------------------------------- |
+| Bundled Postgres (the default) | WAL-G: continuous WAL plus a daily base backup    | [Restore](#restore-from-wal-g): any point in time, to the last minute | `commonair-drill-walg.timer` (on)  |
+| Bundled, with dumps too        | WAL-G, plus a nightly dump (opt-in)               | WAL-G first; a dump for another host, version or provider             | both                               |
+| External Postgres              | the provider's point-in-time recovery, plus dumps | the provider's first; a dump when it cannot help                      | `commonair-drill.timer` (the dump) |
+
+WAL-G restores to a point in time and is the fast path on the same kind of host. A dump restores
+only to the night it was taken, but into any Postgres 17 or later, as an owner with no superuser:
+another provider, a managed cluster, or a newer major version.
+
 ## Where backups go
 
 By default, to the `commonair-backups` bucket of the local Garage, under `wal/`, or of the
@@ -63,22 +82,31 @@ backup bucket only all the same.
 ## `selfhost.sh backup`
 
 ```sh
-sh ~/commonair/selfhost.sh backup                    # the database (same as --database)
+sh ~/commonair/selfhost.sh backup                    # the database: WAL-G, or a dump with an external Postgres
 sh ~/commonair/selfhost.sh backup --objects          # media and evidence, offsite
 sh ~/commonair/selfhost.sh backup --database --objects
+sh ~/commonair/selfhost.sh backup --dump             # a logical dump, offsite
+sh ~/commonair/selfhost.sh backup --drill            # restore the newest dump into a throwaway container
+sh ~/commonair/selfhost.sh backup --drill --walg     # the same for the newest WAL-G base backup
 sh ~/commonair/selfhost.sh backup --restore-objects  # the offsite copy back into the buckets
 ```
 
-- **`--database`** (the default) runs `commonair-backup.service` now (a base backup, then the
-  retention cleanup) and lists every base backup with its name and time. `upgrade` takes one
-  before it changes anything.
+- **`--database`** (the default with the bundled Postgres) runs `commonair-backup.service` now
+  (a base backup, then the retention cleanup) and lists every base backup with its name and
+  time. `upgrade` takes one before it changes anything. With an external Postgres it is refused:
+  WAL-G cannot run there.
+- **`--dump`** (the default with an external Postgres) takes a logical dump to the offsite store
+  ([Logical dumps](#logical-dumps)). With `--database`, the base backup goes first.
+- **`--drill`** restores the newest dump into a throwaway container and checks it; **`--drill
+  --walg`** does the same with the newest WAL-G base backup (bundled Postgres only). Each runs on
+  its own ([Automatic restore drills](#automatic-restore-drills)).
 - **`--objects`** copies the media and evidence buckets to the offsite store
   ([Objects](#objects)). With `--database` too, the database goes first.
 - **`--restore-objects`** copies the offsite copy back ([Restore objects](#restore-objects)). It
   runs on its own.
-- **`--bwlimit <rate>`** limits the bandwidth of `--objects` and `--restore-objects`, in rclone's
-  syntax: `20M` (bytes per second), or a timetable such as `"08:00,4M 23:00,off"`. Without it,
-  `BACKUP_OBJECTS_BWLIMIT` in the env file applies, if set.
+- **`--bwlimit <rate>`** limits the bandwidth of `--objects`, `--restore-objects`, `--dump` and
+  `--drill`'s fetch, in rclone's syntax: `20M` (bytes per second), or a timetable such as
+  `"08:00,4M 23:00,off"`. Without it, `BACKUP_OBJECTS_BWLIMIT` in the env file applies, if set.
 - **`--max-delete <n|off>`** (with `--objects`) overrides `BACKUP_OBJECTS_MAX_DELETE` for this
   run ([Guards](#guards-against-emptying-the-copy)).
 - **`--allow-empty-source`** (with `--objects`) copies a bucket that is empty although its
@@ -95,7 +123,14 @@ last object backup: 2026-10-26T04:21:07Z (to https://ams3.digitaloceanspaces.com
 
 The object backup's time comes from `~/.local/state/commonair/object-backup`, which a run
 rewrites only when every bucket was copied. A monitor can read its `LAST_SUCCESS=` line and alert
-when it is older than a day and a half.
+when it is older than a day and a half. Dumps and drills have their own lines and state files:
+
+```text
+last dump: 2026-11-03T02:31:12Z, 1.4 GiB (https://ams3.digitaloceanspaces.com/stream-example-org-offsite/objects/dumps/2026-11-03)
+last restore drill: dump 2026-11-02T05:40:09Z success in 412s
+```
+
+(`~/.local/state/commonair/db-dump`, and `restore-drill-dump` and `restore-drill-walg`.)
 
 ## What is not backed up
 
@@ -227,21 +262,22 @@ An example for an instance on a droplet in `NYC3`, with the copy in Amsterdam:
 
 Every setting:
 
-| Key                                       | Meaning                                                                                 |
-| ----------------------------------------- | --------------------------------------------------------------------------------------- |
-| `BACKUP_OBJECTS_REMOTE_ENDPOINT`          | The offsite store's S3 endpoint, `https://host[:port]`. Required                        |
-| `BACKUP_OBJECTS_REMOTE_REGION`            | The region it signs requests for (`ams3`, or `garage` for a Garage). Required           |
-| `BACKUP_OBJECTS_REMOTE_BUCKET`            | Its bucket. Required                                                                    |
-| `BACKUP_OBJECTS_REMOTE_ACCESS_KEY_ID`     | A key for that bucket with read, write and delete. Required                             |
-| `BACKUP_OBJECTS_REMOTE_SECRET_ACCESS_KEY` | Its secret. Required                                                                    |
-| `BACKUP_OBJECTS_REMOTE_PREFIX`            | A path inside the bucket. Default: none (`<bucket>/media`, `<bucket>/evidence`)         |
-| `BACKUP_OBJECTS_REMOTE_PATH_STYLE`        | `true` (default) or `false`: path-style or virtual-hosted URLs. Spaces accepts both     |
-| `BACKUP_OBJECTS_REMOTE_ALLOW_HTTP`        | `true` accepts an `http://` endpoint, for a store on a trusted network. Default refused |
-| `BACKUP_OBJECTS_BWLIMIT`                  | rclone's bandwidth limit for every run, as for `--bwlimit`. Default: none               |
-| `BACKUP_OBJECTS_MAX_DELETE`               | Most objects a run may delete from each bucket's copy, or `off`. Default: 1000          |
-| `BACKUP_OBJECTS_SOURCE_ACCESS_KEY_ID`     | The key that reads the instance's buckets (Garage: created by the first run)            |
-| `BACKUP_OBJECTS_SOURCE_SECRET_ACCESS_KEY` | Its secret                                                                              |
-| `BACKUP_OBJECTS_SOURCE_ENDPOINT`          | External store only: where the server reaches it, if not at `S3_ENDPOINT`               |
+| Key                                       | Meaning                                                                                  |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `BACKUP_OBJECTS_REMOTE_ENDPOINT`          | The offsite store's S3 endpoint, `https://host[:port]`. Required                         |
+| `BACKUP_OBJECTS_REMOTE_REGION`            | The region it signs requests for (`ams3`, or `garage` for a Garage). Required            |
+| `BACKUP_OBJECTS_REMOTE_BUCKET`            | Its bucket. Required                                                                     |
+| `BACKUP_OBJECTS_REMOTE_ACCESS_KEY_ID`     | A key for that bucket with read, write and delete. Required                              |
+| `BACKUP_OBJECTS_REMOTE_SECRET_ACCESS_KEY` | Its secret. Required                                                                     |
+| `BACKUP_OBJECTS_REMOTE_PREFIX`            | A path inside the bucket. Default: none (`<bucket>/media`, `<bucket>/evidence`)          |
+| `BACKUP_OBJECTS_REMOTE_PATH_STYLE`        | `true` (default) or `false`: path-style or virtual-hosted URLs. Spaces accepts both      |
+| `BACKUP_OBJECTS_REMOTE_ALLOW_HTTP`        | `true` accepts an `http://` endpoint, for a store on a trusted network. Default refused  |
+| `BACKUP_OBJECTS_BWLIMIT`                  | rclone's bandwidth limit for every run, as for `--bwlimit`. Default: none                |
+| `BACKUP_OBJECTS_MAX_DELETE`               | Most objects a run may delete from each bucket's copy, or `off`. Default: 1000           |
+| `BACKUP_OBJECTS_SOURCE_ACCESS_KEY_ID`     | The key that reads the instance's buckets (Garage: created by the first run)             |
+| `BACKUP_OBJECTS_SOURCE_SECRET_ACCESS_KEY` | Its secret                                                                               |
+| `BACKUP_OBJECTS_SOURCE_ENDPOINT`          | External store only: where the server reaches it, if not at `S3_ENDPOINT`                |
+| `BACKUP_DUMP_KEEP`                        | Complete logical dumps kept ([Logical dumps](#logical-dumps)). Default 30; fewer refused |
 
 No container receives these keys: only `selfhost.sh` reads them. A
 second Garage node works as the offsite store as well, with its own endpoint, region `garage` and
@@ -346,7 +382,62 @@ RCLONE_CONFIG_GARAGE_SECRET_ACCESS_KEY=$(sed -n 's/^S3_EVIDENCE_SECRET_ACCESS_KE
   rclone copy offsite:<bucket>/evidence garage:commonair-evidence
 ```
 
+## Logical dumps
+
+`selfhost.sh backup --dump` runs `pg_dump` (custom format) as the database's owner, from the
+release's Postgres image, over the same verified TLS the services use, and streams it through
+rclone into the offsite store of [Objects](#objects):
+
+```text
+<bucket>[/<prefix>]/dumps/<UTC date>/commonair.dump          the dump
+<bucket>[/<prefix>]/dumps/<UTC date>/counts.json             row counts, ledger balances, follower check
+<bucket>[/<prefix>]/dumps/<UTC date>/commonair.dump.sha256   its SHA-256, written last
+```
+
+- **Consistent.** The counts and the dump are taken in one snapshot, so the drill compares a
+  restore with exactly what was dumped, on a live instance.
+- **Streamed, never staged.** The checksum and the size are taken on the way. If `pg_dump` or the
+  upload fails, the partial object is deleted and nothing stays on the server; the previous dumps
+  are untouched. A directory without its `.sha256` is an incomplete dump and never counts.
+- **30 kept** (ADR 0032 §4). After each dump, retention deletes the dumps older than the newest
+  30 complete ones, and leftovers of failed runs older than those. While 30 or fewer exist it
+  deletes nothing. It counts dumps, not days, so gaps (a server that was off) never shorten the
+  history. `BACKUP_DUMP_KEEP` keeps more; fewer than 30 is refused. With versioning on the
+  bucket (the tofu module's `object_backups` bucket has it), a deleted dump stays recoverable as a
+  noncurrent version for `backup_noncurrent_days`.
+- **Private.** A dump holds personal data. `--dump` refuses a bucket that lists its contents
+  without a key, and one whose objects can be read without a key (it writes and reads back a
+  probe object first). Keep the bucket private, in another region than the server, with a key
+  limited to it.
+- **One at a time.** A dump, a drill and an upgrade take one lock
+  (`~/.local/state/commonair/db-backup.lock`): a schema change while `pg_dump` runs can fail it,
+  so the nightly dump never overlaps a migration. A lock left by a killed run is taken over.
+- **Nightly.** `commonair-dump.timer` runs it at 02:00 UTC plus up to 50 minutes. It is enabled at
+  install with an external Postgres; with the bundled one, the first successful `--dump` turns it
+  on (and `systemctl --user disable --now commonair-dump.timer` turns it off). A failed run shows
+  in `systemctl --user status commonair-dump.service` and its journal; `status` keeps the last
+  success.
+
+It needs the [Objects](#objects) settings and rclone, nothing else: no key goes to the container
+but the owner's URL, from its Podman secret. With the bundled Postgres the owner is `commonair`;
+with an external one, the `--database-url` user. The image's `pg_dump` is version 17, which
+refuses to dump a newer server: an external Postgres 18 needs a release built on 18 first.
+
 ## Restore
+
+Two ways back, one per kind of backup:
+
+- **From WAL-G** (the bundled Postgres): below. It restores the newest base backup and replays the
+  archive, to the last minute or to a point in time, into this instance's own volume.
+- **From a dump** (an external Postgres, another provider, or a bundled instance that lost its
+  WAL-G backups): [managed-services.md, "Restore into a new cluster"](managed-services.md#restore-into-a-new-cluster).
+  It restores the night's dump as an owner with no superuser, through the owner-only order, into
+  a new, empty database, and checks the counts before the instance uses it.
+
+With an external Postgres, the provider's point-in-time recovery comes first, and a dump is for
+when it cannot help.
+
+### Restore from WAL-G
 
 `commonair-restore` (in the `postgres` image) fetches a base backup into an **empty** data
 directory and prepares WAL replay. The next Postgres start replays the archive and promotes.
@@ -419,7 +510,7 @@ When the old server is gone:
 2. As `commonair`, replace `~/.config/commonair/commonair.env` with your offline copy. It holds
    the database passwords the restored database expects, the `AWS_*` settings of your off-host
    backups and the `BACKUP_OBJECTS_REMOTE_*` settings of your object backups.
-3. Run the [restore](#restore) from step 1 on.
+3. Run the [restore](#restore-from-wal-g) from step 1 on.
 4. As root, install rclone; then, as `commonair`, restore the objects
    ([Restore objects](#restore-objects)):
    `sh ~/commonair/selfhost.sh backup --restore-objects`.
@@ -437,15 +528,63 @@ Then point DNS at the new server.
 
 ## The restore drill
 
-**An untested backup does not count.** Restore onto a scratch server regularly (at least before
-launch and after changing anything about backups), and check that your data is there.
+**An untested backup does not count.** Two drills run on their own every week, on the instance's
+own server, and a full drill onto a scratch server proves the rest: run that one at least before
+launch and after changing anything about backups.
+
+### Automatic restore drills
+
+Each restores the newest backup into a **throwaway** Postgres container on this server, checks
+it, and removes the container and its volume. Neither ever connects to the live database: the
+throwaway server listens on no TCP port (only on a Unix socket inside its container, and refuses
+host logins), and every check runs inside that container, after it has proved that the server it
+reaches is the one whose data directory holds the drill's marker.
+
+| Drill                        | Timer                                                                       | What it restores, and how                                                                                                                  |
+| ---------------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `selfhost.sh backup --drill` | `commonair-drill.timer`, weekly (Sunday 05:00 UTC +1h)                      | the newest complete dump: its SHA-256 first, then the owner-only order as an owner with no superuser, in a container with no network       |
+| `backup --drill --walg`      | `commonair-drill-walg.timer`, weekly (Saturday 05:00 UTC +1h, bundled only) | the newest WAL-G base backup and its archive, replayed with archiving off; on the `commonair` network only to fetch from the backup bucket |
+
+Then the checks, as `infra/postgres/dump-drill.sh` runs them, printing check names and numbers,
+never a row:
+
+- **row counts per table**, against the dump's `counts.json` (dump drill only);
+- **`follows.count_mismatch` = 0**: every channel's `follower_count` equals its counted follows
+  that are not excluded. A restore that loaded the data with the triggers on would double them;
+- **each ledger transaction balances per currency**, and every currency's balance is 0;
+- **no `SECURITY DEFINER` function is executable by `PUBLIC`**: the grants came back, not
+  dropped;
+- for WAL-G, that the restored database has its migrations.
+
+Before it starts, a drill checks the free disk where Podman keeps volumes: three times the dump's
+size, or twice the live data directory's for WAL-G, and refuses with a `fix:` line if there is
+not enough. A dump whose checksum fails is never restored. A failed check fails the drill.
+
+Each drill records its result in `~/.local/state/commonair/restore-drill-dump` or
+`restore-drill-walg` (`status` shows them), and pushes two gauges to the metrics collector, with
+`kind="dump"` or `kind="walg"`: `commonair_restore_drill_success` (1 or 0) and, after a success,
+`commonair_restore_drill_seconds`, which the restore-time alert reads
+([monitoring.md](../operators/monitoring.md#metrics-pushed-by-jobs)).
+
+`commonair-drill-walg.timer` is on with the bundled Postgres. `commonair-drill.timer` is on with
+an external one; with the bundled one, the first successful `backup --drill` turns it on. The
+two run on different days (Saturday and Sunday), since one drill at a time holds the database
+lock. Like `commonair-backup.timer`, the drill timer for your mode is turned on again by every
+`install --reinstall` and `upgrade`: `systemctl --user disable --now commonair-drill-walg.timer`
+lasts until then.
+
+### The full drill onto a scratch server
+
+It checks what the automatic drills cannot: the whole instance, objects included, on another
+server, and how long that takes. With an external Postgres, the restore into a new managed
+cluster is in [managed-services.md](managed-services.md#restore-into-a-new-cluster).
 
 The drill reads the backups over the network, so they must be [off the server](#off-host-s3):
 production's local Garage listens only on its own `127.0.0.1`. The drill runs a full copy of
 production: real accounts, queued notifications and simulcast targets. Keep it from reaching
 anyone, and keep it from writing to your backups.
 
-### Read-only keys for the drill
+#### Read-only keys for the drill
 
 Create keys that can read the backups and do nothing else: one for the WAL-G bucket (the bucket
 of your `WALG_S3_PREFIX`) and, if the object copy is in another bucket, one for that
@@ -475,7 +614,7 @@ provider, create a key with read access to the bucket only, if it offers one. If
 the drill uses your production key, and only the steps below that turn off archiving and the
 backup timers protect your backups: do not skip them.
 
-### Run the drill
+#### Run the drill
 
 Write down the time at each step marked **(time)**: the drill's record is how long the database
 restore, the object restore and the whole drill took.
@@ -514,7 +653,7 @@ restore, the object restore and the whole drill took.
    `selfhost.sh install` keeps drop-in directories, so this one stays through the reinstall
    below.
 
-4. **(time: database restore starts)** Run the [restore](#restore) from step 1 on, but replace
+4. **(time: database restore starts)** Run the [restore](#restore-from-wal-g) from step 1 on, but replace
    its step 5 with a reinstall that keeps the drill's hostname and TLS mode (the copied env file
    holds production's):
 

@@ -41,6 +41,8 @@ const REMOTE_KEYS = {
   BACKUP_OBJECTS_REMOTE_ACCESS_KEY_ID: "DO00OFFSITEKEY0000001",
   BACKUP_OBJECTS_REMOTE_SECRET_ACCESS_KEY: "offsite/Secret+Value=0123456789abcdefOFF",
 };
+/** The release's Postgres image, which the dumps and drills run. */
+const PG_IMAGE = `ghcr.io/example/commonair/postgres@sha256:${"ab".repeat(32)}`;
 /** What the podman stub's `garage key create` prints (Garage v2's layout). */
 const GARAGE_KEY = { id: "GK00aa11bb22cc33dd44ee55ff", secret: "5e".repeat(32) };
 const REMOTE = {
@@ -79,6 +81,14 @@ const REAL_TOOLS = [
   "tail",
   "tr",
   "wc",
+  // The dumps and drills (S1-h).
+  "tee",
+  "sha256sum",
+  "df",
+  "mkfifo",
+  "od",
+  "sleep",
+  "dirname",
 ];
 
 const STUBS: Record<string, string> = {
@@ -93,8 +103,38 @@ esac
 exit 0
 `,
   podman: String.raw`
+if [ "$1" = run ]; then
+  case "$*" in
+    *"--entrypoint /usr/local/bin/commonair-dump "*)
+      # The dump: counts.json into the -v <dir>:/out mount, the dump's bytes on stdout.
+      out=""; prev=""
+      for a in "$@"; do
+        if [ "$prev" = -v ]; then case "$a" in *:/out:Z) out=\${a%:/out:Z} ;; esac; fi
+        prev=$a
+      done
+      [ -z "\${STUB_DUMP_FAIL:-}" ] || { echo "commonair-dump: pg_dump failed (exit 1)" >&2; exit 1; }
+      printf '{\n  "format": "commonair-dump-counts/1",\n  "checks": {\n    "rows.public.channels": 2\n  }\n}\n' > "$out/counts.json"
+      printf 'PGDMP-fixture-dump\n'
+      exit 0 ;;
+    *"--network none --user postgres"*) [ -z "\${STUB_DRILL_START_FAIL:-}" ] || exit 1 ;;
+  esac
+  exit 0
+fi
+if [ "$1 $2" = "container exists" ]; then [ -z "\${STUB_NO_COLLECTOR:-}" ] || exit 1; exit 0; fi
 [ "$1" = exec ] || exit 0
 case "$*" in
+  *"sh -c cat > "*) cat > "$STUB_STATE/fetched.dump"; exit 0 ;;
+  *"commonair-dump-drill ready"*) exit 0 ;;
+  *"commonair-dump-drill restore"*) echo "commonair-dump-restore: 5/5 post-data"; exit "\${STUB_RESTORE_RC:-0}" ;;
+  *"commonair-dump-drill check-walg"*) echo "all 7 checks match"; exit "\${STUB_CHECK_RC:-0}" ;;
+  *"commonair-dump-drill check"*)
+    cat > "$STUB_STATE/check-input"
+    if [ "\${STUB_CHECK_RC:-0}" = 0 ]; then echo "all 3 checks match"; else echo "  follows.count_mismatch: dump 0, restored 4"; fi
+    exit "\${STUB_CHECK_RC:-0}" ;;
+  *"commonair-otel-collector"*)
+    n=$(ls "$STUB_STATE" | grep -c '^metrics-' || true)
+    printf '%s\n' "$*" > "$STUB_STATE/metrics-$((n + 1))"
+    exit 0 ;;
   *"/garage key info"*) [ -e "$STUB_STATE/garage-key" ] || { echo "Error: no such key" >&2; exit 1; } ;;
   *"/garage key create"*)
     [ -z "\${STUB_GARAGE_DOWN:-}" ] || { echo "Error: connection refused" >&2; exit 1; }
@@ -108,6 +148,42 @@ esac
 exit 0
 `,
   rclone: String.raw`
+last=""
+for a in "$@"; do last=$a; done
+if [ -n "\${RCLONE_CONFIG_CAANON_TYPE:-}" ]; then
+  # Without a key: refused unless the test made the store public.
+  case " $* " in
+    *" lsf "*) [ -z "\${STUB_PUBLIC_LIST:-}" ] || { echo "dumps/"; exit 0; } ;;
+    *" cat "*) [ -z "\${STUB_PUBLIC_READ:-}" ] || { echo "probe"; exit 0; } ;;
+  esac
+  echo "ERROR : AccessDenied" >&2
+  exit 1
+fi
+case "$last" in
+  *"/dumps" | *"/dumps/"*)
+    case "$1" in
+      lsf)
+        case "$*" in
+          *--dirs-only*) [ -f "$STUB_STATE/dump-dirs" ] && cat "$STUB_STATE/dump-dirs" ;;
+          *) [ -f "$STUB_STATE/dump-files" ] && cat "$STUB_STATE/dump-files" ;;
+        esac
+        exit 0 ;;
+      rcat)
+        b=\${last##*/}
+        cat > "$STUB_STATE/rcat-$b"
+        [ "$b" != "\${STUB_RCAT_FAIL:-none}" ] || { echo "ERROR : connection refused" >&2; exit 5; }
+        exit 0 ;;
+      cat)
+        case "$last" in
+          *.sha256) cat "$STUB_STATE/remote-sha" ;;
+          */counts.json) printf '{\n  "format": "commonair-dump-counts/1",\n  "checks": {\n    "rows.public.channels": 2\n  }\n}\n' ;;
+          *) cat "$STUB_STATE/remote-dump" ;;
+        esac
+        exit 0 ;;
+      lsjson) printf '[{"Path":"commonair.dump","Size":%s}]\n' "\${STUB_DUMP_SIZE:-19}"; exit 0 ;;
+      *) exit 0 ;;
+    esac ;;
+esac
 if [ "$1" = lsf ]; then
   # Every place lists one object, except those named in STUB_EMPTY (nothing), STUB_LSF_MISSING
   # (rclone's "directory not found", exit 3) and STUB_LSF_FAIL (an error).
@@ -185,9 +261,19 @@ function host(env: Record<string, string>, opts: { rclone?: boolean; recordArgv?
     join(home, ".config/commonair"),
   ])
     mkdirSync(d, { recursive: true });
-  // One installed unit, for status's unit list.
-  writeFileSync(join(quadlets, "commonair-postgres.container"), "[Container]\nContainerName=commonair-postgres\n");
+  // One installed unit, for status's unit list (and the WAL-G drill's POSTGRES_USER and _DB).
+  writeFileSync(
+    join(quadlets, "commonair-postgres.container"),
+    "[Container]\nContainerName=commonair-postgres\nEnvironment=POSTGRES_USER=commonair\nEnvironment=POSTGRES_DB=commonair\n",
+  );
   writeFileSync(join(dir, "release/release.env"), "COMMONAIR_VERSION=0.1.0\n");
+  // What the dumps and drills read from the release: the Postgres image, and the env renderer
+  // and key list the WAL-G drill renders the Postgres unit's keys with.
+  for (const d of ["quadlet", "scripts/selfhost", "infra/selfhost/env"])
+    mkdirSync(join(dir, "release", d), { recursive: true });
+  writeFileSync(join(dir, "release/quadlet/commonair-postgres.container"), `[Container]\nImage=${PG_IMAGE}\n`);
+  for (const f of ["scripts/selfhost/render-env.sh", "infra/selfhost/env/commonair-postgres.keys"])
+    writeFileSync(join(dir, "release", f), readFileSync(join(ROOT, f)));
   symlinkSync(join(dir, "release"), join(home, "commonair"));
   const envFile = join(home, ".config/commonair/commonair.env");
   writeFileSync(
@@ -338,8 +424,8 @@ describe("flags", () => {
     [["--restore-objects", "--objects"], "--restore-objects runs on its own"],
     [["--database", "--restore-objects"], "--restore-objects runs on its own"],
     [["--bwlimit"], "--bwlimit needs a value"],
-    [["--bwlimit", "10M"], "--bwlimit applies to --objects and --restore-objects only"],
-    [["--database", "--bwlimit", "10M"], "--bwlimit applies to --objects and --restore-objects only"],
+    [["--bwlimit", "10M"], "--bwlimit applies to --objects, --restore-objects, --dump and --drill only"],
+    [["--database", "--bwlimit", "10M"], "--bwlimit applies to --objects, --restore-objects, --dump and --drill only"],
     [["--max-delete"], "--max-delete needs a value"],
     [["--max-delete", "5"], "--max-delete applies to --objects only"],
     [["--restore-objects", "--max-delete", "5"], "--max-delete applies to --objects only"],
@@ -886,5 +972,477 @@ describe("the daily timer's units", () => {
     const enables = [...sh.matchAll(/enable --now ([^\n]*)/g)].map((m) => m[1]);
     expect(enables.filter((e) => e?.includes("commonair-object-backup.timer"))).toEqual([]);
     expect(sh).toContain('systemctl --user enable --now "$OBJECT_TIMER"');
+  });
+});
+
+// --- logical dumps and restore drills (S1-h) ----------------------------------------------------
+
+/** An external Postgres (S1-b's env file keys), with the provider's CA unless told otherwise. */
+const EXTERNAL_STATE = {
+  STATE_MODE: "external",
+  DATABASE_OWNER_URL: "postgres://doadmin@db-pg.example.ondigitalocean.com:25060/commonair?sslmode=verify-full",
+  DATABASE_CA_FILE: "/run/secrets/commonair-pg-ca",
+};
+const DUMP_BYTES = "PGDMP-fixture-dump\n";
+const sha256 = (s: string) => new Bun.CryptoHasher("sha256").update(s).digest("hex");
+const DUMPS = "caoffsite:ca-objects/prod/dumps";
+const TODAY = new Date().toISOString().slice(0, 10);
+const dumpState = (h: Host) => join(h.home, ".local/state/commonair/db-dump");
+const drillState = (h: Host, kind: "dump" | "walg") => join(h.home, ".local/state/commonair", `restore-drill-${kind}`);
+const dbLock = (h: Host) => join(h.home, ".local/state/commonair/db-backup.lock");
+const podmanCalls = (h: Host) => h.calls().filter((c) => c.startsWith("podman "));
+const dumpRun = (h: Host) => podmanCalls(h).filter((c) => c.includes("--entrypoint /usr/local/bin/commonair-dump "));
+const purges = (h: Host) =>
+  h
+    .calls()
+    .filter((c) => c.startsWith(`rclone purge ${DUMPS}/`))
+    .map((c) => c.slice(`rclone purge ${DUMPS}/`.length));
+const metrics = (h: Host) =>
+  readdirSync(h.state)
+    .filter((f) => f.startsWith("metrics-"))
+    .sort()
+    .map((f) => readFileSync(join(h.state, f), "utf8"));
+
+/** `count` dates ending at `end`, `step` days apart, oldest first. */
+function dates(count: number, step = 1, end = TODAY): string[] {
+  const last = Date.parse(`${end}T00:00:00Z`);
+  return Array.from({ length: count }, (_v, i) =>
+    new Date(last - (count - 1 - i) * step * 86_400_000).toISOString().slice(0, 10),
+  );
+}
+
+/** What the store lists under dumps/: complete dumps (with a sidecar) and directories only. */
+function storeHas(h: Host, complete: string[], partial: string[] = []) {
+  writeFileSync(
+    join(h.state, "dump-files"),
+    [
+      ...complete.flatMap((d) => [`${d}/commonair.dump`, `${d}/commonair.dump.sha256`, `${d}/counts.json`]),
+      ...partial.map((d) => `${d}/commonair.dump.part`),
+    ]
+      .map((l) => `${l}\n`)
+      .join(""),
+  );
+  writeFileSync(
+    join(h.state, "dump-dirs"),
+    [...complete, ...partial]
+      .sort()
+      .map((d) => `${d}/\n`)
+      .join(""),
+  );
+}
+
+/** The newest dump at the store, its bytes and (unless told otherwise) its sidecar. */
+function remoteDump(h: Host, opts: { sha?: string } = {}) {
+  storeHas(h, dates(3));
+  writeFileSync(join(h.state, "remote-dump"), DUMP_BYTES);
+  writeFileSync(join(h.state, "remote-sha"), `${opts.sha ?? sha256(DUMP_BYTES)}  commonair.dump\n`);
+}
+
+describe("backup --dump: flags and the default", () => {
+  test("no flag with an external Postgres: a dump, never WAL-G", () => {
+    const h = host({ ...EXTERNAL_ENV, ...REMOTE, ...EXTERNAL_STATE });
+    const dbg = h.run(["backup"]);
+    expectOk(dbg);
+    expect(dumpRun(h).length).toBe(1);
+    expect(h.calls()).not.toContain("systemctl --user start commonair-backup.service");
+  });
+
+  test("--database with an external Postgres is refused with the way to back it up", () => {
+    const h = host({ ...EXTERNAL_ENV, ...REMOTE, ...EXTERNAL_STATE });
+    const r = h.run(["backup", "--database"]);
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("WAL-G cannot run against an external Postgres");
+    expect(r.err).toContain("fix: selfhost.sh backup --dump");
+    expect(dumpRun(h)).toEqual([]);
+  });
+
+  test("with the bundled Postgres a dump is a second copy beside WAL-G: --database first", () => {
+    const h = host({ ...GARAGE_ENV, ...REMOTE });
+    expectOk(h.run(["backup", "--dump", "--database"]));
+    const calls = h.calls();
+    const walg = calls.indexOf("systemctl --user start commonair-backup.service");
+    const dump = calls.findIndex((c) => c.includes("--entrypoint /usr/local/bin/commonair-dump "));
+    expect(walg).toBeGreaterThanOrEqual(0);
+    expect(dump).toBeGreaterThan(walg);
+  });
+
+  test.each([
+    [["--walg"], "--walg applies to --drill only"],
+    [["--drill", "--dump"], "--drill runs on its own"],
+    [["--drill", "--objects"], "--drill runs on its own"],
+    [["--restore-objects", "--dump"], "--restore-objects runs on its own"],
+    [["--drill", "--walg", "--bwlimit", "4M"], "--bwlimit does not apply to --drill --walg"],
+    [["--database", "--bwlimit", "4M"], "--bwlimit applies to --objects, --restore-objects, --dump and --drill only"],
+  ])("backup %j is refused", (args, message) => {
+    const h = host({ ...GARAGE_ENV, ...REMOTE });
+    const r = h.run(["backup", ...args]);
+    expect(r.code).toBe(1);
+    expect(r.err).toContain(message);
+    expect(podmanCalls(h)).toEqual([]);
+  });
+
+  test("BACKUP_DUMP_KEEP below 30 is refused before anything runs", () => {
+    const h = host({ ...EXTERNAL_ENV, ...REMOTE, ...EXTERNAL_STATE, BACKUP_DUMP_KEEP: "7" });
+    const r = h.run(["backup", "--dump"]);
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("keep at least 30 dumps");
+    expect(dumpRun(h)).toEqual([]);
+  });
+});
+
+describe("backup --dump", () => {
+  test("streams pg_dump from the Postgres image as the owner, then the sidecars, the checksum last", () => {
+    const h = host({ ...EXTERNAL_ENV, ...REMOTE, ...EXTERNAL_STATE }, { recordArgv: true });
+    const r = h.run(["backup", "--dump"]);
+    expectOk(r);
+    const [run] = dumpRun(h);
+    // passthrough: the dump never passes through a log driver into the journal.
+    expect(run).toContain("podman run --rm --log-driver passthrough --network commonair --user 0:0");
+    // The owner's URL only through its secret; the provider's CA as the services get it.
+    expect(run).toContain("--secret commonair-owner-database-url,type=env,target=DUMP_PG_URL");
+    expect(run).toContain("--secret commonair-pg-ca,type=mount,target=/run/secrets/commonair-pg-ca,mode=0444");
+    expect(run).toContain("-e PGSSLROOTCERT=/run/secrets/commonair-pg-ca");
+    expect(run).toContain(PG_IMAGE);
+    const dir = `${DUMPS}/${TODAY}`;
+    const writes = h
+      .calls()
+      .filter((c) => /^rclone (rcat|moveto|deletefile) /.test(c))
+      .map((c) => c.replace(/ --s3-\S+/g, ""));
+    expect(writes).toEqual([
+      `rclone rcat ${dir}/.private-check`,
+      `rclone deletefile ${dir}/.private-check`,
+      `rclone rcat ${dir}/commonair.dump.part`,
+      `rclone deletefile ${dir}/commonair.dump.sha256`,
+      `rclone rcat ${dir}/counts.json`,
+      `rclone moveto ${dir}/commonair.dump.part ${dir}/commonair.dump`,
+      `rclone rcat ${dir}/commonair.dump.sha256`,
+    ]);
+    expect(readFileSync(join(h.state, "rcat-commonair.dump.part"), "utf8")).toBe(DUMP_BYTES);
+    expect(readFileSync(join(h.state, "rcat-commonair.dump.sha256"), "utf8")).toBe(
+      `${sha256(DUMP_BYTES)}  commonair.dump\n`,
+    );
+    expect(readFileSync(join(h.state, "rcat-counts.json"), "utf8")).toContain('"rows.public.channels": 2');
+    const state = parseEnv(readFileSync(dumpState(h), "utf8"));
+    expect(state.DUMP).toBe(TODAY);
+    expect(state.SIZE).toBe(String(DUMP_BYTES.length));
+    expect(state.SHA256).toBe(sha256(DUMP_BYTES));
+    expect(state.REMOTE).toBe("https://ams3.digitaloceanspaces.com/ca-objects/prod/dumps");
+    expect(r.out).toContain(`dump done: 19 B to https://ams3.digitaloceanspaces.com/ca-objects/prod/dumps/${TODAY}`);
+    noSecretIn(h.argv());
+    noSecretIn(h.calls().join("\n"));
+    noSecretIn(r.out + r.err);
+  });
+
+  test("no CA of its own: verify-full against the system's trusted CAs", () => {
+    const h = host({ ...EXTERNAL_ENV, ...REMOTE, ...EXTERNAL_STATE, DATABASE_CA_FILE: "" });
+    expectOk(h.run(["backup", "--dump"]));
+    const [run] = dumpRun(h);
+    expect(run).toContain("-e PGSSLROOTCERT=system");
+    expect(run).not.toContain("commonair-pg-ca");
+  });
+
+  test("the first success enables the nightly timer; a later one leaves it as it is", () => {
+    const h = host({ ...EXTERNAL_ENV, ...REMOTE, ...EXTERNAL_STATE });
+    expectOk(h.run(["backup", "--dump"]));
+    expect(h.calls()).toContain("systemctl --user enable --now commonair-dump.timer");
+    const h2 = host({ ...EXTERNAL_ENV, ...REMOTE, ...EXTERNAL_STATE });
+    mkdirSync(join(h2.home, ".local/state/commonair"), { recursive: true });
+    writeFileSync(dumpState(h2), "LAST_SUCCESS=2026-11-01T02:10:00Z\n");
+    expectOk(h2.run(["backup", "--dump"]));
+    expect(h2.calls()).not.toContain("systemctl --user enable --now commonair-dump.timer");
+  });
+
+  test("a failed pg_dump keeps nothing: the part is deleted, no sidecar, the last success stays", () => {
+    const h = host({ ...EXTERNAL_ENV, ...REMOTE, ...EXTERNAL_STATE });
+    const r = h.run(["backup", "--dump"], { STUB_DUMP_FAIL: "1" });
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("the dump failed (exit 1); nothing was kept");
+    expect(r.err).toContain("commonair-dump: pg_dump failed");
+    expect(h.calls()).toContain(`rclone deletefile ${DUMPS}/${TODAY}/commonair.dump.part`);
+    expect(h.calls().filter((c) => c.includes("commonair.dump.sha256") || c.includes("moveto"))).toEqual([]);
+    expect(existsSync(dumpState(h))).toBe(false);
+    expect(purges(h)).toEqual([]);
+    expect(existsSync(dbLock(h))).toBe(false);
+  });
+
+  test("an unreachable bucket fails the dump and leaves nothing behind, here or there", () => {
+    const h = host({ ...EXTERNAL_ENV, ...REMOTE, ...EXTERNAL_STATE });
+    const r = h.run(["backup", "--dump"], { STUB_RCAT_FAIL: "commonair.dump.part" });
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("uploading the dump to https://ams3.digitaloceanspaces.com/ca-objects/prod failed");
+    expect(h.calls()).toContain(`rclone deletefile ${DUMPS}/${TODAY}/commonair.dump.part`);
+    expect(existsSync(dumpState(h))).toBe(false);
+    // Streamed, not staged: the run's temporary directory is gone.
+    expect(readdirSync(join(h.home, "..", "tmp"))).toEqual([]);
+  });
+
+  test("a bucket anyone can list is refused before anything is written", () => {
+    const h = host({ ...EXTERNAL_ENV, ...REMOTE, ...EXTERNAL_STATE });
+    const r = h.run(["backup", "--dump"], { STUB_PUBLIC_LIST: "1" });
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("lists its contents to anyone, without a key: a dump holds personal data");
+    expect(r.err).toContain("fix: make the bucket private");
+    expect(h.calls().filter((c) => c.startsWith("rclone rcat"))).toEqual([]);
+    expect(dumpRun(h)).toEqual([]);
+  });
+
+  test("a bucket whose objects anyone can read is refused, and its probe deleted", () => {
+    const h = host({ ...EXTERNAL_ENV, ...REMOTE, ...EXTERNAL_STATE });
+    const r = h.run(["backup", "--dump"], { STUB_PUBLIC_READ: "1" });
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("can be read without a key");
+    expect(h.calls()).toContain(`rclone deletefile ${DUMPS}/${TODAY}/.private-check`);
+    expect(dumpRun(h)).toEqual([]);
+  });
+});
+
+describe("dump retention: 30, never fewer", () => {
+  const run = (complete: string[], partial: string[] = [], env: Record<string, string> = {}) => {
+    const h = host({ ...EXTERNAL_ENV, ...REMOTE, ...EXTERNAL_STATE, ...env });
+    storeHas(h, complete, partial);
+    const r = h.run(["backup", "--dump"]);
+    expectOk(r);
+    return { h, r };
+  };
+
+  test("fewer than 30 complete dumps: nothing is deleted", () => {
+    const { h, r } = run(dates(29), dates(3, 40, "2026-01-01"));
+    expect(purges(h)).toEqual([]);
+    expect(r.err).toContain("29 dumps kept (retention deletes only beyond the newest 30)");
+  });
+
+  test("exactly 30: nothing is deleted", () => {
+    const { h } = run(dates(30));
+    expect(purges(h)).toEqual([]);
+  });
+
+  test("31: the oldest goes, the newest 30 stay", () => {
+    const all = dates(31);
+    const { h } = run(all);
+    expect(purges(h)).toEqual([all[0]]);
+  });
+
+  test("gaps in the dates: it counts dumps, not days, and removes failed runs' leftovers older than the 30th", () => {
+    // 33 dumps three days apart, with a failed run long ago and one yesterday (not a dump date).
+    const all = dates(33, 3);
+    const oldPartial = "2025-01-01";
+    const [yesterday = ""] = dates(2);
+    const { h } = run(all, [oldPartial, yesterday]);
+    const gone = purges(h);
+    expect(gone).toEqual([oldPartial, ...all.slice(0, 3)].sort());
+    for (const kept of [...all.slice(3), yesterday]) expect(gone).not.toContain(kept);
+  });
+
+  test("an incomplete directory newer than the 30th complete dump stays", () => {
+    const all = dates(31);
+    const recentPartial = all[20] ?? "";
+    const h = host({ ...EXTERNAL_ENV, ...REMOTE, ...EXTERNAL_STATE });
+    // The same date twice: complete in one listing would be wrong, so take a date between.
+    storeHas(
+      h,
+      all.filter((d) => d !== recentPartial),
+      [recentPartial],
+    );
+    expectOk(h.run(["backup", "--dump"]));
+    expect(purges(h)).toEqual([]);
+  });
+
+  test("BACKUP_DUMP_KEEP keeps more, never fewer", () => {
+    const all = dates(41);
+    const { h } = run(all, [], { BACKUP_DUMP_KEEP: "40" });
+    expect(purges(h)).toEqual([all[0]]);
+  });
+});
+
+describe("one dump, drill or upgrade at a time", () => {
+  test("a lock held by a running upgrade refuses a dump and a drill, and stays", () => {
+    const h = host({ ...EXTERNAL_ENV, ...REMOTE, ...EXTERNAL_STATE });
+    mkdirSync(join(h.home, ".local/state/commonair"), { recursive: true });
+    symlinkSync(`${process.pid}:upgrade`, dbLock(h));
+    for (const args of [["--dump"], ["--drill"]]) {
+      const r = h.run(["backup", ...args]);
+      expect(r.code).toBe(1);
+      expect(r.err).toContain(
+        `a database upgrade is running (pid ${process.pid}): one dump, drill or upgrade at a time`,
+      );
+    }
+    expect(dumpRun(h)).toEqual([]);
+    expect(readlinkSync(dbLock(h))).toBe(`${process.pid}:upgrade`);
+  });
+
+  test("a stale lock is taken over, and every run releases its own", () => {
+    const h = host({ ...EXTERNAL_ENV, ...REMOTE, ...EXTERNAL_STATE });
+    mkdirSync(join(h.home, ".local/state/commonair"), { recursive: true });
+    symlinkSync("999999:dump", dbLock(h));
+    const r = h.run(["backup", "--dump"]);
+    expectOk(r);
+    expect(r.err).toContain("taking over the lock of a database dump that is no longer running (pid 999999)");
+    expect(existsSync(dbLock(h))).toBe(false);
+    // The takeover renames the stale link aside, never leaving the renamed copy behind.
+    expect(readdirSync(join(h.home, ".local/state/commonair")).filter((f) => f.startsWith("db-backup.lock"))).toEqual(
+      [],
+    );
+    expect(h.run(["backup", "--dump"], { STUB_DUMP_FAIL: "1" }).code).toBe(1);
+    expect(existsSync(dbLock(h))).toBe(false);
+  });
+});
+
+describe("backup --drill (the dump)", () => {
+  const drillCalls = (h: Host) => podmanCalls(h).filter((c) => c.includes("commonair-drill-"));
+
+  test("restores the newest dump in a container with no network and checks it against counts.json", () => {
+    const h = host({ ...EXTERNAL_ENV, ...REMOTE, ...EXTERNAL_STATE });
+    remoteDump(h);
+    const r = h.run(["backup", "--drill"]);
+    expectOk(r);
+    const start = podmanCalls(h).find((c) => c.startsWith("podman run -d --name commonair-drill-dump-"));
+    expect(start).toBeDefined();
+    expect(start).toContain("--network none --user postgres");
+    expect(start).toContain("--entrypoint /usr/local/bin/commonair-dump-drill");
+    expect(start).toMatch(/ serve$/);
+    // Nothing that could reach the live database: no published port, no secret, no URL.
+    for (const c of drillCalls(h)) {
+      expect(c).not.toMatch(/ (-p|--publish|--secret|--network commonair)\b/);
+      expect(c).not.toMatch(/DATABASE_URL|DUMP_PG_URL|commonair-postgres\b/);
+    }
+    expect(podmanCalls(h).filter((c) => c.includes("commonair-owner-database-url"))).toEqual([]);
+    const execs = podmanCalls(h).filter((c) => c.startsWith("podman exec "));
+    for (const e of execs)
+      expect(e).toMatch(/^podman exec (-i )?--user postgres commonair-drill-dump-\d+ |commonair-otel-collector/);
+    expect(execs.some((e) => e.endsWith("commonair-dump-drill restore /var/lib/postgresql/data/commonair.dump"))).toBe(
+      true,
+    );
+    expect(readFileSync(join(h.state, "fetched.dump"), "utf8")).toBe(DUMP_BYTES);
+    expect(readFileSync(join(h.state, "check-input"), "utf8")).toContain('"format": "commonair-dump-counts/1"');
+    // Gone afterwards, container and volume.
+    expect(podmanCalls(h).some((c) => /^podman rm -f -v -t 0 commonair-drill-dump-\d+$/.test(c))).toBe(true);
+    expect(podmanCalls(h).some((c) => /^podman volume rm -f commonair-drill-dump-\d+$/.test(c))).toBe(true);
+    const state = parseEnv(readFileSync(drillState(h, "dump"), "utf8"));
+    expect(state.RESULT).toBe("success");
+    expect(state.SOURCE).toBe(`dump ${TODAY}`);
+    expect(r.out).toMatch(new RegExp(`restore drill passed \\(dump, dump ${TODAY}\\) in \\d+s`));
+    const [m] = metrics(h);
+    expect(m).toContain('"name":"commonair_restore_drill_success"');
+    expect(m).toContain('"asDouble":1,');
+    expect(m).toContain('"name":"commonair_restore_drill_seconds","unit":"s"');
+    expect(m).toContain('"key":"kind","value":{"stringValue":"dump"}');
+    expect(h.calls()).toContain("systemctl --user enable --now commonair-drill.timer");
+  });
+
+  test("a corrupt or truncated dump fails its checksum before any restore", () => {
+    const h = host({ ...EXTERNAL_ENV, ...REMOTE, ...EXTERNAL_STATE });
+    remoteDump(h, { sha: sha256("something else") });
+    const r = h.run(["backup", "--drill"]);
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("does not match its SHA-256 (corrupt or truncated): nothing was restored");
+    expect(podmanCalls(h).filter((c) => c.includes("commonair-dump-drill restore"))).toEqual([]);
+    expect(parseEnv(readFileSync(drillState(h, "dump"), "utf8")).RESULT).toBe("failure");
+    expect(metrics(h)).toHaveLength(1);
+    expect(metrics(h)[0]).toContain('"asDouble":0,');
+    expect(metrics(h)[0]).not.toContain("commonair_restore_drill_seconds");
+    expect(podmanCalls(h).some((c) => c.startsWith("podman volume rm -f commonair-drill-dump-"))).toBe(true);
+    expect(h.calls()).not.toContain("systemctl --user enable --now commonair-drill.timer");
+  });
+
+  test("counts that do not match fail the drill and say which", () => {
+    const h = host({ ...EXTERNAL_ENV, ...REMOTE, ...EXTERNAL_STATE });
+    remoteDump(h);
+    const r = h.run(["backup", "--drill"], { STUB_CHECK_RC: "1" });
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("follows.count_mismatch: dump 0, restored 4");
+    expect(r.err).toContain("the restored copy of the dump of");
+    expect(r.err).toContain("the dump restore drill FAILED");
+    expect(parseEnv(readFileSync(drillState(h, "dump"), "utf8")).RESULT).toBe("failure");
+    expect(podmanCalls(h).some((c) => c.startsWith("podman rm -f -v -t 0 commonair-drill-dump-"))).toBe(true);
+  });
+
+  test("too little disk: refused with a fix: line before any container starts", () => {
+    const h = host({ ...EXTERNAL_ENV, ...REMOTE, ...EXTERNAL_STATE });
+    remoteDump(h);
+    const r = h.run(["backup", "--drill"], { STUB_DUMP_SIZE: String(4 * 1024 ** 5) });
+    expect(r.code).toBe(1);
+    // Three times the dump's size, in TiB (the largest unit it names).
+    expect(r.err).toContain("not enough free disk for the drill: it needs 12288.0 TiB (the dump, 4096.0 TiB, times 3)");
+    expect(r.err).toContain("fix: free disk space there");
+    expect(podmanCalls(h).filter((c) => c.startsWith("podman run"))).toEqual([]);
+  });
+
+  test("no complete dump yet: refused with the way to take one", () => {
+    const h = host({ ...EXTERNAL_ENV, ...REMOTE, ...EXTERNAL_STATE });
+    storeHas(h, [], [TODAY]);
+    const r = h.run(["backup", "--drill"]);
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("no complete dump at https://ams3.digitaloceanspaces.com/ca-objects/prod/dumps to drill");
+    expect(r.err).toContain("fix: selfhost.sh backup --dump first");
+  });
+
+  test("a collector that is not running costs a warning, not the drill", () => {
+    const h = host({ ...EXTERNAL_ENV, ...REMOTE, ...EXTERNAL_STATE });
+    remoteDump(h);
+    const r = h.run(["backup", "--drill"], { STUB_NO_COLLECTOR: "1" });
+    expectOk(r);
+    expect(r.err).toContain("commonair-otel-collector is not running");
+    expect(metrics(h)).toEqual([]);
+  });
+});
+
+describe("backup --drill --walg", () => {
+  test("restores the newest base backup into a throwaway volume, replays it without archiving or TCP, checks it", () => {
+    const h = host({ ...GARAGE_ENV, ...REMOTE });
+    const r = h.run(["backup", "--drill", "--walg"]);
+    expectOk(r);
+    const runs = podmanCalls(h).filter((c) => c.startsWith("podman run"));
+    expect(runs[0]).toMatch(
+      /^podman run --rm --network commonair --env-file \S+\/drill\/postgres\.env -v commonair-drill-walg-\d+:\/var\/lib\/postgresql\/data \S+ commonair-restore$/,
+    );
+    expect(runs[1]).toContain("--network none");
+    expect(runs[2]).toMatch(/^podman run -d --name commonair-drill-walg-\d+ --network commonair /);
+    expect(runs[2]).toContain("-e POSTGRES_USER=commonair -e POSTGRES_DB=commonair");
+    expect(runs[2]).toMatch(/ postgres -c listen_addresses= -c archive_mode=off$/);
+    // Never the live container's volume, never its secrets.
+    for (const c of runs) {
+      expect(c).not.toContain("commonair-postgres-data:");
+      expect(c).not.toContain("--secret");
+    }
+    expect(podmanCalls(h).some((c) => c.endsWith("commonair-dump-drill check-walg"))).toBe(true);
+    expect(parseEnv(readFileSync(drillState(h, "walg"), "utf8")).RESULT).toBe("success");
+    expect(metrics(h)[0]).toContain('"key":"kind","value":{"stringValue":"walg"}');
+    noSecretIn(h.calls().join("\n"));
+  });
+
+  test("with an external Postgres it is refused: WAL-G does not run there", () => {
+    const h = host({ ...EXTERNAL_ENV, ...REMOTE, ...EXTERNAL_STATE });
+    const r = h.run(["backup", "--drill", "--walg"]);
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("fix: selfhost.sh backup --drill (the dump drill)");
+  });
+});
+
+describe("the dump and drill units", () => {
+  const unit = (f: string) => readFileSync(join(ROOT, "infra/systemd", f), "utf8");
+  const keys = (u: string, key: string) => [...u.matchAll(new RegExp(`^${key}=(.*)$`, "gm"))].map((m) => m[1]);
+
+  test.each([
+    ["commonair-dump", "backup --dump"],
+    ["commonair-drill", "backup --drill"],
+    ["commonair-drill-walg", "backup --drill --walg"],
+  ])("%s.service runs selfhost.sh %s as a oneshot that starts nothing else", (name, args) => {
+    const s = unit(`${name}.service`);
+    expect(keys(s, "Type")).toEqual(["oneshot"]);
+    expect(keys(s, "ExecStart")).toEqual([`/bin/sh %h/commonair/selfhost.sh ${args}`]);
+    expect(keys(s, "Requires")).toEqual([]);
+    expect(keys(s, "Requisite")).toEqual([]);
+    expect(s).not.toMatch(/^\[Install\]$/m);
+    const t = unit(`${name}.timer`);
+    expect(keys(t, "Unit")).toEqual([`${name}.service`]);
+    expect(keys(t, "Persistent")).toEqual(["true"]);
+    expect(keys(t, "RandomizedDelaySec")).toHaveLength(1);
+    expect(keys(t, "WantedBy")).toEqual(["timers.target"]);
+  });
+
+  test("the dump runs nightly, the drills weekly", () => {
+    expect(keys(unit("commonair-dump.timer"), "OnCalendar")).toEqual(["*-*-* 02:00:00 UTC"]);
+    expect(keys(unit("commonair-drill.timer"), "OnCalendar")).toEqual(["Sun *-*-* 05:00:00 UTC"]);
+    expect(keys(unit("commonair-drill-walg.timer"), "OnCalendar")).toEqual(["Sat *-*-* 05:00:00 UTC"]);
   });
 });

@@ -2698,10 +2698,44 @@ OBJECT_LOCK="$OBJECT_STATE_DIR/object-backup.lock"
 OBJECT_RESTORE_MARK="$OBJECT_STATE_DIR/object-restore-incomplete"
 OBJECT_MAX_DELETE_DEFAULT=1000
 
+# Logical dumps (S1-h, ADR 0032 §4): `backup --dump` streams pg_dump (custom format, as the owner,
+# in the stack's Postgres image) through rclone to the offsite store above, under
+# <bucket>[/<prefix>]/dumps/<UTC date>/: commonair.dump, counts.json (what the drill compares)
+# and commonair.dump.sha256, written last, so a dump without it is incomplete and never counted.
+# The default backup with an external Postgres, where WAL-G cannot run; beside WAL-G, an opt-in
+# second copy. `backup --drill` restores the newest one into a throwaway container with no
+# network (infra/postgres/dump-drill.sh) and checks it; `--drill --walg` does the same for the
+# newest WAL-G base backup. One dump, drill or upgrade at a time (DB_BACKUP_LOCK): a schema
+# change mid-dump can fail it.
+DUMP_STATE="$OBJECT_STATE_DIR/db-dump"
+DRILL_STATE="$OBJECT_STATE_DIR/restore-drill"
+DB_BACKUP_LOCK="$OBJECT_STATE_DIR/db-backup.lock"
+DUMP_TIMER="commonair-dump.timer"
+DRILL_TIMER="commonair-drill.timer"
+# ADR 0032 §4: 30 daily dumps. A run deletes only beyond the newest DUMP_KEEP complete ones.
+DUMP_KEEP_DEFAULT=30
+DUMP_FILE="commonair.dump"
+# In the stack's Postgres image (infra/postgres/Containerfile).
+DUMP_BIN=/usr/local/bin/commonair-dump
+DUMP_DRILL_BIN=/usr/local/bin/commonair-dump-drill
+# Inside the drill container: the volume, the cluster in it and the fetched dump beside it.
+DRILL_MOUNT=/var/lib/postgresql/data
+DRILL_PGDATA="$DRILL_MOUNT/drill"
+# A dump needs its file, the restored tables and their indexes; a WAL-G restore a copy of the
+# data directory plus the WAL it replays.
+DRILL_DISK_FACTOR_DUMP=3
+DRILL_DISK_FACTOR_WALG=2
+DRILL_READY_TIMEOUT=${COMMONAIR_DRILL_READY_TIMEOUT:-300}
+DRILL_WALG_TIMEOUT=${COMMONAIR_DRILL_WALG_TIMEOUT:-43200}
+
 parse_backup_flags() {
   BACKUP_DATABASE=no
   BACKUP_OBJECTS=no
   RESTORE_OBJECTS=no
+  BACKUP_DUMP=no
+  BACKUP_DRILL=no
+  DRILL_WALG=no
+  BACKUP_DEFAULT=no
   OBJ_BWLIMIT=""
   OBJ_MAX_DELETE=""
   ALLOW_EMPTY_SOURCE=no
@@ -2710,6 +2744,9 @@ parse_backup_flags() {
       --database) BACKUP_DATABASE=yes && shift ;;
       --objects) BACKUP_OBJECTS=yes && shift ;;
       --restore-objects) RESTORE_OBJECTS=yes && shift ;;
+      --dump) BACKUP_DUMP=yes && shift ;;
+      --drill) BACKUP_DRILL=yes && shift ;;
+      --walg) DRILL_WALG=yes && shift ;;
       --bwlimit)
         [ $# -ge 2 ] || die "--bwlimit needs a value"
         OBJ_BWLIMIT=$2
@@ -2727,16 +2764,24 @@ parse_backup_flags() {
       *) die "unknown backup option: $1" "see: selfhost.sh --help" ;;
     esac
   done
-  if [ "$RESTORE_OBJECTS" = yes ] && { [ "$BACKUP_DATABASE" = yes ] || [ "$BACKUP_OBJECTS" = yes ]; }; then
-    die "--restore-objects runs on its own, not with --database or --objects"
+  if [ "$RESTORE_OBJECTS" = yes ] && { [ "$BACKUP_DATABASE" = yes ] || [ "$BACKUP_OBJECTS" = yes ] || [ "$BACKUP_DUMP" = yes ]; }; then
+    die "--restore-objects runs on its own, not with --database, --dump or --objects"
   fi
+  if [ "$BACKUP_DRILL" = yes ] && { [ "$BACKUP_DATABASE" = yes ] || [ "$BACKUP_OBJECTS" = yes ] || [ "$BACKUP_DUMP" = yes ] || [ "$RESTORE_OBJECTS" = yes ]; }; then
+    die "--drill runs on its own, not with --database, --dump, --objects or --restore-objects"
+  fi
+  [ "$DRILL_WALG" = no ] || [ "$BACKUP_DRILL" = yes ] || die "--walg applies to --drill only (selfhost.sh backup --drill --walg)"
   if [ "$BACKUP_OBJECTS" = no ]; then
     [ -z "$OBJ_MAX_DELETE" ] || die "--max-delete applies to --objects only"
     [ "$ALLOW_EMPTY_SOURCE" = no ] || die "--allow-empty-source applies to --objects only"
   fi
-  if [ "$BACKUP_OBJECTS" = no ] && [ "$RESTORE_OBJECTS" = no ]; then
-    [ -z "$OBJ_BWLIMIT" ] || die "--bwlimit applies to --objects and --restore-objects only"
-    BACKUP_DATABASE=yes
+  if [ "$DRILL_WALG" = yes ]; then
+    [ -z "$OBJ_BWLIMIT" ] || die "--bwlimit does not apply to --drill --walg (WAL-G fetches its own backups)"
+  fi
+  if [ "$BACKUP_OBJECTS" = no ] && [ "$RESTORE_OBJECTS" = no ] && [ "$BACKUP_DUMP" = no ] && [ "$BACKUP_DRILL" = no ]; then
+    [ -z "$OBJ_BWLIMIT" ] || die "--bwlimit applies to --objects, --restore-objects, --dump and --drill only"
+    # The database's own backup, whichever the instance has: decided once its state is known.
+    [ "$BACKUP_DATABASE" = yes ] || BACKUP_DEFAULT=yes
   fi
   return 0
 }
@@ -2934,8 +2979,53 @@ object_lock() {
     rm -f "$OBJECT_LOCK"
     ln -s "$$" "$OBJECT_LOCK" 2>/dev/null || die "another object backup or restore just started" "re-run once it is done"
   fi
-  trap 'object_unlock; cleanup' EXIT
+  trap 'backup_exit' EXIT
   trap 'exit 1' INT TERM
+}
+
+# Everything a backup run holds, released on any exit: a drill's container and volume, the
+# locks, the temporary directory. Never dies (it runs from the EXIT trap).
+backup_exit() {
+  drill_teardown
+  object_unlock
+  db_backup_unlock
+  cleanup
+}
+
+# One dump, drill or upgrade at a time: the timers' runs and a run by hand. The link's target is
+# "<pid>:<what>", so a refusal can say what holds it; a holder that is gone is taken over.
+db_backup_lock() {
+  mkdir -p "$OBJECT_STATE_DIR"
+  if ! ln -s "$$:$1" "$DB_BACKUP_LOCK" 2>/dev/null; then
+    _holder=$(readlink "$DB_BACKUP_LOCK" 2>/dev/null || true)
+    _hpid=${_holder%%:*}
+    if [ -n "$_hpid" ] && [ "$_hpid" != "$$" ] && kill -0 "$_hpid" 2>/dev/null; then
+      die "a database ${_holder#*:} is running (pid $_hpid): one dump, drill or upgrade at a time" \
+        "wait for it to finish (systemctl --user list-units 'commonair-*'), then re-run"
+    fi
+    if [ "$_hpid" != "$$" ]; then
+      info "taking over the lock of a database ${_holder#*:} that is no longer running (pid ${_hpid:-unknown})"
+      # Not rm then ln: two runs taking over at once could each remove the other's fresh lock.
+      # A rename has one winner; one that moved someone else's new lock puts it back and stops.
+      if mv -f "$DB_BACKUP_LOCK" "$DB_BACKUP_LOCK.$$" 2>/dev/null; then
+        if [ "$(readlink "$DB_BACKUP_LOCK.$$" 2>/dev/null || true)" = "$_holder" ]; then
+          rm -f "$DB_BACKUP_LOCK.$$"
+        else
+          mv -f "$DB_BACKUP_LOCK.$$" "$DB_BACKUP_LOCK" 2>/dev/null || rm -f "$DB_BACKUP_LOCK.$$"
+          die "another dump, drill or upgrade just started" "re-run once it is done"
+        fi
+      fi
+      ln -s "$$:$1" "$DB_BACKUP_LOCK" 2>/dev/null || die "another dump, drill or upgrade just started" "re-run once it is done"
+    fi
+  fi
+  trap 'backup_exit' EXIT
+  trap 'exit 1' INT TERM
+}
+
+db_backup_unlock() {
+  _l=$(readlink "$DB_BACKUP_LOCK" 2>/dev/null || true)
+  if [ -n "$_l" ] && [ "${_l%%:*}" = "$$" ]; then rm -f "$DB_BACKUP_LOCK"; fi
+  return 0
 }
 
 object_unlock() {
@@ -2948,6 +3038,11 @@ require_rclone() {
 }
 
 backup_database() {
+  if [ "$STATE_MODE" = external ]; then
+    die "--database is WAL-G's base backup, and WAL-G cannot run against an external Postgres" \
+      "fix: selfhost.sh backup --dump (a logical dump to the offsite store); the provider's" \
+      "point-in-time recovery is the first line (docs/self-hosting/managed-services.md)"
+  fi
   info "running commonair-backup.service"
   systemctl --user start commonair-backup.service || die "the backup failed" "see: journalctl --user -u commonair-backup"
   podman exec --user postgres commonair-postgres \
@@ -3073,14 +3168,482 @@ restore_objects() {
   say "sealed evidence opens only with the EVIDENCE_PRIVATE_KEY it was sealed with (this env file's, if restored from your copy)"
 }
 
+# --- logical dumps and restore drills -------------------------------------------------------
+
+# The installed release's Postgres image, which also holds pg_dump, pg_restore and the dump and
+# drill scripts. An external-state instance runs no unit from it, so it is pulled (by digest) the
+# first time a dump or drill needs it.
+dump_image() {
+  DUMP_IMAGE=$(sed -n 's/^Image=//p' "$CURRENT_LINK/quadlet/commonair-postgres.container" 2>/dev/null | head -n 1)
+  [ -n "$DUMP_IMAGE" ] || die "the installed release names no Postgres image ($CURRENT_LINK/quadlet/commonair-postgres.container)"
+  podman image exists "$DUMP_IMAGE" >/dev/null 2>&1 || pull_one "$DUMP_IMAGE"
+}
+
+dump_keep() {
+  DUMP_KEEP=$(env_get BACKUP_DUMP_KEEP "$ENV_FILE")
+  DUMP_KEEP=${DUMP_KEEP:-$DUMP_KEEP_DEFAULT}
+  if ! printf '%s' "$DUMP_KEEP" | grep -Eq '^[0-9]{1,4}$' || [ "$DUMP_KEEP" -lt "$DUMP_KEEP_DEFAULT" ]; then
+    die "BACKUP_DUMP_KEEP=$DUMP_KEEP: keep at least $DUMP_KEEP_DEFAULT dumps (ADR 0032 §4), or leave it unset"
+  fi
+}
+
+dumps_base() { offsite_path dumps; }
+
+# The offsite store, as for objects (object_remote). A dump has no source store: rclone's
+# `cainstance` remote stays empty and unused.
+dump_remote() {
+  object_remote
+  OBJ_SRC_ENDPOINT="" OBJ_SRC_REGION="" OBJ_SRC_PATH_STYLE=true OBJ_SRC_KEY="" OBJ_SRC_SECRET=""
+}
+
+# Bytes, for people: 1536 -> 1.5 KiB.
+human_bytes() {
+  awk -v b="$1" 'BEGIN { split("B KiB MiB GiB TiB", u, " "); i = 1; while (b >= 1024 && i < 5) { b /= 1024; i++ }
+    if (i == 1) printf "%d B", b; else printf "%.1f %s", b, u[i] }'
+}
+
+# rclone against the offsite store with no key at all: what anyone on the internet can do there.
+rclone_anonymous() {
+  make_tmp
+  : >"$TMP_ROOT/rclone-anon.conf"
+  # No key here, so the remote goes in rclone's environment alone, with no subshell needed.
+  env RCLONE_CONFIG="$TMP_ROOT/rclone-anon.conf" \
+    RCLONE_CONFIG_CAANON_TYPE=s3 RCLONE_CONFIG_CAANON_PROVIDER=Other RCLONE_CONFIG_CAANON_ENV_AUTH=false \
+    RCLONE_CONFIG_CAANON_NO_CHECK_BUCKET=true RCLONE_CONFIG_CAANON_ENDPOINT="$OBJ_DST_ENDPOINT" \
+    RCLONE_CONFIG_CAANON_REGION="$OBJ_DST_REGION" RCLONE_CONFIG_CAANON_FORCE_PATH_STYLE="$OBJ_DST_PATH_STYLE" \
+    rclone --retries 1 --low-level-retries 1 "$@"
+}
+
+# A dump holds personal data, so its bucket must be private. Two checks the provider lets anyone
+# make, before the dump is written: listing the bucket without a key, and reading back a probe
+# object written into today's directory (a public-read default ACL or bucket policy).
+refuse_public_store() {
+  if rclone_anonymous lsf --max-depth 1 "caanon:$OBJ_DST_BUCKET" >/dev/null 2>&1; then
+    die "the offsite bucket $OBJ_DST_BUCKET lists its contents to anyone, without a key: a dump holds personal data" \
+      "fix: make the bucket private at the provider (file listing restricted, no public-read ACL or policy), then re-run"
+  fi
+  _probe="$1/.private-check"
+  printf 'commonair: a dump store must be private\n' | rclone_with_remotes rcat "$_probe" >/dev/null 2>&1 ||
+    die "could not write to $(object_remote_name)/dumps" "fix: check the store's endpoint and keys in $ENV_FILE (the key needs read, write and delete)"
+  if rclone_anonymous cat "caanon:${_probe#caoffsite:}" >/dev/null 2>&1; then
+    rclone_with_remotes deletefile "$_probe" >/dev/null 2>&1 || true
+    die "objects written to $OBJ_DST_BUCKET can be read without a key: a dump holds personal data" \
+      "fix: make the bucket private at the provider (no public-read default ACL or bucket policy), then re-run"
+  fi
+  rclone_with_remotes deletefile "$_probe" >/dev/null 2>&1 || true
+}
+
+# Dump dates (YYYY-MM-DD) at the store, oldest first: $1 = complete (a .sha256 sidecar, the last
+# file a dump writes) or all (every dump directory, failed runs' included).
+dump_dates() {
+  make_tmp
+  _which=$1
+  if [ "$_which" = all ]; then
+    set -- lsf --dirs-only --max-depth 1 "$(dumps_base)"
+  else
+    set -- lsf -R --files-only --max-depth 2 "$(dumps_base)"
+  fi
+  if _dl=$(rclone_with_remotes "$@" 2>"$TMP_ROOT/rclone-dumps.err"); then
+    :
+  else
+    _rc=$?
+    [ "$_rc" -eq 3 ] || die "could not list the dumps at $(object_remote_name)/dumps: $(tail -n 1 "$TMP_ROOT/rclone-dumps.err")" \
+      "fix: check the store's endpoint and keys in $ENV_FILE, then re-run"
+    _dl=""
+  fi
+  if [ "$_which" = all ]; then
+    printf '%s\n' "$_dl" | sed -n 's|^\([0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}\)/$|\1|p' | sort -u
+  else
+    printf '%s\n' "$_dl" | sed -n 's|^\([0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}\)/commonair\.dump\.sha256$|\1|p' | sort -u
+  fi
+}
+
+# Which dump directories retention deletes, from "<date> complete" and "<date> dir" lines on
+# stdin: everything older than the oldest of the newest $1 complete dumps, which are never touched,
+# and nothing at all while $1 or fewer complete dumps exist. Gaps in the dates do not matter: it
+# counts dumps, not days.
+dump_retention_select() {
+  sort -u | awk -v keep="$1" '
+    $2 == "complete" { c[++n] = $1 }
+    { all[++m] = $1 }
+    END {
+      if (n <= keep) exit 0
+      cut = c[n - keep + 1]
+      for (i = 1; i <= m; i++) if (all[i] < cut) print all[i]
+    }' | sort -u
+}
+
+dump_retention() {
+  _complete=$(dump_dates complete)
+  _all=$(dump_dates all)
+  _n=$(printf '%s\n' "$_complete" | grep -c . || true)
+  _gone=$({
+    printf '%s\n' "$_complete" | sed -n 's/^\(.\{1,\}\)$/\1 complete/p'
+    printf '%s\n' "$_all" | sed -n 's/^\(.\{1,\}\)$/\1 dir/p'
+  } | dump_retention_select "$DUMP_KEEP")
+  if [ -z "$_gone" ]; then
+    info "$_n dumps kept (retention deletes only beyond the newest $DUMP_KEEP)"
+    return 0
+  fi
+  for _d in $_gone; do
+    info "deleting the dump of $_d (beyond the newest $DUMP_KEEP)"
+    rclone_with_remotes purge "$(dumps_base)/$_d" >/dev/null 2>&1 || warn "could not delete the dump of $_d; the next run tries again"
+  done
+}
+
+record_dump() {
+  mkdir -p "$OBJECT_STATE_DIR"
+  printf 'LAST_SUCCESS=%s\nDUMP=%s\nSIZE=%s\nSHA256=%s\nSECONDS=%s\nREMOTE=%s\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$2" "$3" "$4" "$(object_remote_name)/dumps" >"$DUMP_STATE.tmp"
+  mv "$DUMP_STATE.tmp" "$DUMP_STATE"
+}
+
+# For status: the last dump's time and size, and where, or why there is none.
+dump_backup_summary() {
+  if [ -f "$DUMP_STATE" ]; then
+    printf '%s, %s (%s/%s)' "$(env_get LAST_SUCCESS "$DUMP_STATE")" "$(human_bytes "$(env_get SIZE "$DUMP_STATE")")" \
+      "$(env_get REMOTE "$DUMP_STATE")" "$(env_get DUMP "$DUMP_STATE")"
+  elif [ -n "$(env_get BACKUP_OBJECTS_REMOTE_BUCKET "$ENV_FILE")" ]; then
+    printf 'never (selfhost.sh backup --dump)'
+  else
+    printf 'not configured (docs/self-hosting/backups.md, "Logical dumps")'
+  fi
+}
+
+# For status: each drill's last run, its result and how long it took.
+drill_summary() {
+  _ds=""
+  for _k in dump walg; do
+    _f="$DRILL_STATE-$_k"
+    [ -f "$_f" ] || continue
+    _ds="$_ds${_ds:+; }$_k $(env_get LAST_RUN "$_f") $(env_get RESULT "$_f")"
+    [ -z "$(env_get SECONDS "$_f")" ] || _ds="$_ds in $(env_get SECONDS "$_f")s"
+  done
+  printf '%s' "${_ds:-never (selfhost.sh backup --drill)}"
+}
+
+# The drill's result as gauges, over OTLP to the collector (docs/operators/monitoring.md, "Metrics
+# pushed by jobs"): commonair_restore_drill_success (1 or 0) and, after a success,
+# commonair_restore_drill_seconds, each with kind=dump|walg. A collector that is not running
+# costs a warning, not the drill.
+drill_metrics() {
+  if ! podman container exists commonair-otel-collector >/dev/null 2>&1; then
+    warn "commonair-otel-collector is not running: the drill's result is not in Prometheus"
+    return 0
+  fi
+  _now="$(date +%s)000000000"
+  _attr='"attributes":[{"key":"kind","value":{"stringValue":"'"$1"'"}}]'
+  _m='{"name":"commonair_restore_drill_success","gauge":{"dataPoints":[{"asDouble":'"$2"',"timeUnixNano":"'"$_now"'",'"$_attr"'}]}}'
+  if [ -n "$3" ]; then
+    _m="$_m"',{"name":"commonair_restore_drill_seconds","unit":"s","gauge":{"dataPoints":[{"asDouble":'"$3"',"timeUnixNano":"'"$_now"'",'"$_attr"'}]}}'
+  fi
+  _body='{"resourceMetrics":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"commonair-selfhost"}}]},"scopeMetrics":[{"scope":{"name":"commonair.selfhost"},"metrics":['"$_m"']}]}]}'
+  podman exec commonair-otel-collector /usr/local/bin/busybox wget -q -O - --header 'Content-Type: application/json' \
+    --post-data "$_body" http://127.0.0.1:4318/v1/metrics >/dev/null 2>&1 ||
+    warn "could not push the drill's result to commonair-otel-collector"
+}
+
+record_drill() {
+  mkdir -p "$OBJECT_STATE_DIR"
+  printf 'LAST_RUN=%s\nRESULT=%s\nSECONDS=%s\nSOURCE=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$2" "$3" "$4" >"$DRILL_STATE-$1.tmp"
+  mv "$DRILL_STATE-$1.tmp" "$DRILL_STATE-$1"
+}
+
+# Free disk where Podman keeps volumes, against $1 bytes ($2 says what they are).
+drill_disk_check() {
+  _vp=$(podman info --format '{{.Store.VolumePath}}' 2>/dev/null || true)
+  if [ -z "$_vp" ] || [ ! -d "$_vp" ]; then _vp="$HOME/.local/share/containers/storage/volumes"; fi
+  [ -d "$_vp" ] || _vp=$HOME
+  _avail=$(df -Pk "$_vp" 2>/dev/null | awk 'NR == 2 { printf "%.0f", $4 * 1024 }')
+  if [ -z "$_avail" ]; then
+    warn "could not read the free disk space at $_vp"
+    return 0
+  fi
+  if awk -v a="$_avail" -v n="$1" 'BEGIN { exit !(a < n) }'; then
+    die "not enough free disk for the drill: it needs $(human_bytes "$1") ($2), and $(human_bytes "$_avail") are free at $_vp" \
+      "fix: free disk space there (podman image prune removes unused images), or drill on a host with more disk"
+  fi
+}
+
+# The throwaway container and volume, named after this run; drill_teardown removes both.
+drill_names() {
+  DRILL_NAME="commonair-drill-$1-$$"
+  DRILL_VOLUME="commonair-drill-$1-$$"
+  DRILL_TOKEN=$(od -An -tx1 -N16 /dev/urandom | tr -d ' \n')
+  podman volume create "$DRILL_VOLUME" >/dev/null || die "could not create the drill's volume $DRILL_VOLUME"
+  DRILL_STARTED=yes
+}
+
+# Waits up to $1 seconds for the drill's server to take connections out of recovery.
+drill_wait_ready() {
+  _end=$(($(date +%s) + $1))
+  until podman exec --user postgres "$DRILL_NAME" "$DUMP_DRILL_BIN" ready >/dev/null 2>&1; do
+    if [ "$(podman inspect --format '{{.State.Running}}' "$DRILL_NAME" 2>/dev/null || true)" != true ]; then
+      podman logs --tail 5 "$DRILL_NAME" 2>&1 | sed 's/^/  /' >&2 || true
+      die "the drill's Postgres stopped before it was ready (its last lines above)"
+    fi
+    [ "$(date +%s)" -lt "$_end" ] || die "the drill's Postgres was not ready after $1 s"
+    sleep 2
+  done
+}
+
+# From the EXIT trap: the container and its volume go, and a drill that did not finish is
+# recorded and reported as failed. Never dies.
+drill_teardown() {
+  if [ "${DRILL_STARTED:-no}" = yes ]; then
+    DRILL_STARTED=no
+    podman rm -f -v -t 0 "$DRILL_NAME" >/dev/null 2>&1 || true
+    podman volume rm -f "$DRILL_VOLUME" >/dev/null 2>&1 || true
+  fi
+  if [ "${DRILL_RUNNING:-no}" = yes ]; then
+    DRILL_RUNNING=no
+    record_drill "$DRILL_KIND" failure "" "${DRILL_SOURCE:-}" 2>/dev/null || true
+    drill_metrics "$DRILL_KIND" 0 "" || true
+    warn "the $DRILL_KIND restore drill FAILED (selfhost.sh status shows it; the lines above say why)"
+  fi
+  return 0
+}
+
+drill_passed() {
+  _secs=$(($(date +%s) - DRILL_T0))
+  DRILL_RUNNING='done'
+  record_drill "$DRILL_KIND" success "$_secs" "$DRILL_SOURCE"
+  drill_metrics "$DRILL_KIND" 1 "$_secs"
+  say "restore drill passed ($DRILL_KIND, $DRILL_SOURCE) in ${_secs}s"
+}
+
+backup_dump() {
+  require_rclone
+  dump_remote
+  dump_keep
+  db_backup_lock dump
+  dump_image
+  make_tmp
+  _w="$TMP_ROOT/dump"
+  rm -rf "$_w"
+  (umask 077 && mkdir -p "$_w")
+  _date=$(date -u +%Y-%m-%d)
+  _dir="$(dumps_base)/$_date"
+  refuse_public_store "$_dir"
+  _first=yes
+  [ ! -f "$DUMP_STATE" ] || _first=no
+  _t0=$(date +%s)
+  # The owner's URL reaches pg_dump from its Podman secret, never a command line. The CA as the
+  # services get it; verify-full with no CA of our own means the system's trusted ones. The dump's
+  # bytes are the container's stdout: passthrough hands it to the pipe directly, so no log driver
+  # ever copies personal data into the journal.
+  set -- run --rm --log-driver passthrough --network commonair --user 0:0 \
+    --secret "commonair-owner-database-url,type=env,target=DUMP_PG_URL" \
+    -e DUMP_COUNTS_OUT=/out/counts.json -v "$_w:/out:Z"
+  if [ -n "$(env_get DATABASE_CA_FILE "$ENV_FILE")" ]; then
+    set -- "$@" --secret "$STATE_PG_CA_SECRET,type=mount,target=$STATE_PG_CA_PATH,mode=0444" -e "PGSSLROOTCERT=$STATE_PG_CA_PATH"
+  else
+    case "$(env_get DATABASE_OWNER_URL "$ENV_FILE")" in *sslmode=verify-full*) set -- "$@" -e PGSSLROOTCERT=system ;; esac
+  fi
+  set -- "$@" --entrypoint "$DUMP_BIN" "$DUMP_IMAGE"
+  info "dumping the database to $(object_remote_name)/dumps/$_date (pg_dump, custom format, streamed)"
+  # Streamed, never staged: the checksum and size are taken on the way, and a failure on either
+  # side leaves only the .part object, which is deleted.
+  mkfifo "$_w/sha.fifo" "$_w/size.fifo"
+  sha256sum <"$_w/sha.fifo" >"$_w/sha.out" &
+  _shapid=$!
+  wc -c <"$_w/size.fifo" >"$_w/size.out" &
+  _sizepid=$!
+  _up=0
+  {
+    _inrc=0
+    podman "$@" 2>"$_w/dump.err" || _inrc=$?
+    echo "$_inrc" >"$_w/dump.rc"
+  } | tee "$_w/sha.fifo" "$_w/size.fifo" |
+    rclone_with_remotes rcat --s3-chunk-size=16M --s3-upload-concurrency=2 ${OBJ_BWLIMIT:+"--bwlimit=$OBJ_BWLIMIT"} \
+      "$_dir/$DUMP_FILE.part" || _up=$?
+  wait "$_shapid" || true
+  wait "$_sizepid" || true
+  _drc=$(cat "$_w/dump.rc" 2>/dev/null || echo 1)
+  if [ "$_drc" != 0 ] || [ "$_up" != 0 ]; then
+    rclone_with_remotes deletefile "$_dir/$DUMP_FILE.part" >/dev/null 2>&1 || true
+    if [ "$_drc" != 0 ]; then
+      sed 's/^/  /' "$_w/dump.err" | tail -n 5 >&2
+      die "the dump failed (exit $_drc); nothing was kept, and the previous dumps are untouched" \
+        "see the lines above; selfhost.sh status still shows the last successful dump"
+    fi
+    die "uploading the dump to $(object_remote_name) failed (rclone exit $_up); nothing was kept" \
+      "see the rclone lines above; selfhost.sh status still shows the last successful dump"
+  fi
+  _sha=$(cut -d' ' -f1 "$_w/sha.out" 2>/dev/null || true)
+  _size=$(tr -d ' \n' <"$_w/size.out" 2>/dev/null || true)
+  printf '%s' "$_sha" | grep -Eq '^[0-9a-f]{64}$' || die "could not checksum the dump"
+  [ -n "$_size" ] && [ "$_size" -gt 0 ] || die "the dump is empty"
+  [ -s "$_w/counts.json" ] || die "the dump wrote no counts.json"
+  # The sidecar goes last: until it is there, the directory is an incomplete dump.
+  rclone_with_remotes deletefile "$_dir/$DUMP_FILE.sha256" >/dev/null 2>&1 || true
+  rclone_with_remotes rcat "$_dir/counts.json" <"$_w/counts.json" || die "could not upload counts.json"
+  rclone_with_remotes moveto "$_dir/$DUMP_FILE.part" "$_dir/$DUMP_FILE" || die "could not finish the dump's upload"
+  printf '%s  %s\n' "$_sha" "$DUMP_FILE" | rclone_with_remotes rcat "$_dir/$DUMP_FILE.sha256" ||
+    die "could not upload the dump's checksum"
+  record_dump "$_date" "$_size" "$_sha" "$(($(date +%s) - _t0))"
+  say "dump done: $(human_bytes "$_size") to $(object_remote_name)/dumps/$_date (sha256 $_sha)"
+  dump_retention
+  # The first success turns on the nightly run; later runs leave the timer as the operator set it.
+  if [ "$_first" = yes ]; then
+    if systemctl --user enable --now "$DUMP_TIMER" >/dev/null 2>&1; then
+      info "nightly dump on ($DUMP_TIMER); turn it off with: systemctl --user disable --now $DUMP_TIMER"
+    else
+      warn "could not enable $DUMP_TIMER: run 'systemctl --user enable --now $DUMP_TIMER' for nightly dumps"
+    fi
+  fi
+}
+
+# The newest complete dump into a throwaway container on this host, with no network: the
+# checksum first, then the owner-only restore as an owner with no superuser, then the counts.
+drill_dump() {
+  require_rclone
+  dump_remote
+  db_backup_lock drill
+  DRILL_KIND=dump
+  DRILL_SOURCE=""
+  DRILL_RUNNING=yes
+  DRILL_T0=$(date +%s)
+  dump_image
+  make_tmp
+  _w="$TMP_ROOT/drill"
+  rm -rf "$_w"
+  (umask 077 && mkdir -p "$_w")
+  _last=$(dump_dates complete | tail -n 1)
+  [ -n "$_last" ] || die "no complete dump at $(object_remote_name)/dumps to drill" "fix: selfhost.sh backup --dump first"
+  DRILL_SOURCE="dump $_last"
+  _dir="$(dumps_base)/$_last"
+  rclone_with_remotes cat "$_dir/$DUMP_FILE.sha256" >"$_w/sha256" 2>/dev/null || die "could not read the checksum of the dump of $_last"
+  _want=$(cut -d' ' -f1 "$_w/sha256")
+  printf '%s' "$_want" | grep -Eq '^[0-9a-f]{64}$' || die "the checksum file of the dump of $_last is not a SHA-256"
+  rclone_with_remotes cat "$_dir/counts.json" >"$_w/counts.json" 2>/dev/null || die "could not read counts.json of the dump of $_last"
+  _size=$(rclone_with_remotes lsjson "$_dir/$DUMP_FILE" 2>/dev/null | sed -n 's/.*"Size":\([0-9][0-9]*\).*/\1/p' | head -n 1)
+  [ -n "$_size" ] || die "could not read the size of the dump of $_last"
+  drill_disk_check "$(awk -v s="$_size" -v f="$DRILL_DISK_FACTOR_DUMP" 'BEGIN { printf "%.0f", s * f }')" \
+    "the dump, $(human_bytes "$_size"), times $DRILL_DISK_FACTOR_DUMP"
+  drill_names dump
+  info "starting a throwaway Postgres ($DRILL_NAME: no network, no TCP listener)"
+  COMMONAIR_DRILL_TOKEN=$DRILL_TOKEN podman run -d --name "$DRILL_NAME" --network none --user postgres \
+    -e COMMONAIR_DRILL_TOKEN -e "PGDATA=$DRILL_PGDATA" -v "$DRILL_VOLUME:$DRILL_MOUNT" \
+    --entrypoint "$DUMP_DRILL_BIN" "$DUMP_IMAGE" serve >/dev/null || die "could not start the drill's Postgres"
+  drill_wait_ready "$DRILL_READY_TIMEOUT"
+  info "fetching the dump of $_last ($(human_bytes "$_size")) into it"
+  mkfifo "$_w/sha.fifo"
+  sha256sum <"$_w/sha.fifo" >"$_w/sha.out" &
+  _shapid=$!
+  {
+    _frc=0
+    rclone_with_remotes cat ${OBJ_BWLIMIT:+"--bwlimit=$OBJ_BWLIMIT"} "$_dir/$DUMP_FILE" 2>"$_w/fetch.err" || _frc=$?
+    echo "$_frc" >"$_w/fetch.rc"
+  } | tee "$_w/sha.fifo" | podman exec -i --user postgres "$DRILL_NAME" sh -c "cat > $DRILL_MOUNT/$DUMP_FILE" ||
+    die "could not copy the dump into the drill's container"
+  wait "$_shapid" || true
+  [ "$(cat "$_w/fetch.rc" 2>/dev/null || echo 1)" = 0 ] ||
+    die "fetching the dump of $_last failed: $(tail -n 1 "$_w/fetch.err" 2>/dev/null || true)"
+  _got=$(cut -d' ' -f1 "$_w/sha.out" 2>/dev/null || true)
+  if [ "$_got" != "$_want" ]; then
+    die "the dump of $_last does not match its SHA-256 (corrupt or truncated): nothing was restored" \
+      "fix: take a new dump (selfhost.sh backup --dump) and drill it; if dumps keep failing the check, the store is corrupting them"
+  fi
+  info "restoring it as an owner with no superuser (the owner-only order, ADR 0032 §4)"
+  podman exec --user postgres "$DRILL_NAME" "$DUMP_DRILL_BIN" restore "$DRILL_MOUNT/$DUMP_FILE" >"$_w/restore.out" 2>&1 || {
+    sed 's/^/  /' "$_w/restore.out" >&2
+    die "the restore of the dump of $_last failed"
+  }
+  info "checking the counts against the dump's counts.json"
+  _crc=0
+  podman exec -i --user postgres "$DRILL_NAME" "$DUMP_DRILL_BIN" check - <"$_w/counts.json" >"$_w/check.out" 2>&1 || _crc=$?
+  sed 's/^/  /' "$_w/check.out" >&2
+  [ "$_crc" = 0 ] || die "the restored copy of the dump of $_last does not match it"
+  drill_passed
+  # As for dumps: the first passing drill turns on the weekly one (failures are recorded too, so
+  # a marker of its own says whether one ever passed).
+  if [ ! -e "$DRILL_STATE-dump.passed" ]; then
+    : >"$DRILL_STATE-dump.passed"
+    if systemctl --user enable --now "$DRILL_TIMER" >/dev/null 2>&1; then
+      info "weekly dump drill on ($DRILL_TIMER); turn it off with: systemctl --user disable --now $DRILL_TIMER"
+    else
+      warn "could not enable $DRILL_TIMER: run 'systemctl --user enable --now $DRILL_TIMER' for weekly drills"
+    fi
+  fi
+}
+
+# The newest WAL-G base backup and its WAL into a throwaway volume, replayed by a throwaway
+# Postgres with archiving off and no TCP listener (backups.md's restore, on a timer). It is on
+# the commonair network only to fetch from the backup bucket (Garage or your AWS_* store); the
+# checks run over its own socket, never against the live database.
+drill_walg() {
+  if [ "$STATE_MODE" = external ]; then
+    die "--drill --walg drills WAL-G, which runs only with the bundled Postgres" \
+      "fix: selfhost.sh backup --drill (the dump drill)"
+  fi
+  db_backup_lock drill
+  DRILL_KIND=walg
+  DRILL_SOURCE="newest base backup"
+  DRILL_RUNNING=yes
+  DRILL_T0=$(date +%s)
+  dump_image
+  make_tmp
+  _w="$TMP_ROOT/drill"
+  rm -rf "$_w"
+  (umask 077 && mkdir -p "$_w")
+  _mp=$(podman volume inspect commonair-postgres-data --format '{{.Mountpoint}}' 2>/dev/null || true)
+  _live=""
+  if [ -n "$_mp" ]; then _live=$(podman unshare du -sk "$_mp" 2>/dev/null | awk 'NR == 1 { printf "%.0f", $1 * 1024 }'); fi
+  if [ -n "$_live" ]; then
+    drill_disk_check "$(awk -v s="$_live" -v f="$DRILL_DISK_FACTOR_WALG" 'BEGIN { printf "%.0f", s * f }')" \
+      "the live data directory, $(human_bytes "$_live"), times $DRILL_DISK_FACTOR_WALG"
+  else
+    warn "could not size commonair-postgres-data: the drill starts without a disk check"
+  fi
+  # The Postgres unit's keys, rendered as backups.md's restore does: WAL-G's store and its key.
+  _env="$_w/postgres.env"
+  sh "$CURRENT_LINK/scripts/selfhost/render-env.sh" "$CURRENT_LINK/infra/selfhost/env/commonair-postgres.keys" \
+    "$ENV_FILE" "$_env" || die "could not render the Postgres unit's keys for the drill"
+  _pgu=$(sed -n 's/^Environment=POSTGRES_USER=//p' "$QUADLET_DIR/commonair-postgres.container" 2>/dev/null | head -n 1)
+  _pgd=$(sed -n 's/^Environment=POSTGRES_DB=//p' "$QUADLET_DIR/commonair-postgres.container" 2>/dev/null | head -n 1)
+  drill_names walg
+  info "fetching the newest base backup into $DRILL_VOLUME (commonair-restore)"
+  podman run --rm --network commonair --env-file "$_env" -v "$DRILL_VOLUME:$DRILL_MOUNT" "$DUMP_IMAGE" commonair-restore \
+    >"$_w/restore.out" 2>&1 || {
+    tail -n 5 "$_w/restore.out" | sed 's/^/  /' >&2
+    die "commonair-restore failed: the newest base backup could not be fetched"
+  }
+  COMMONAIR_DRILL_TOKEN=$DRILL_TOKEN podman run --rm --network none -e COMMONAIR_DRILL_TOKEN -v "$DRILL_VOLUME:$DRILL_MOUNT" \
+    --entrypoint /bin/sh "$DUMP_IMAGE" -c "printf '%s\n' \"\$COMMONAIR_DRILL_TOKEN\" > $DRILL_MOUNT/commonair-drill.token" ||
+    die "could not mark the drill's data directory"
+  info "replaying the archived WAL in $DRILL_NAME (archiving off, no TCP listener; up to $DRILL_WALG_TIMEOUT s)"
+  COMMONAIR_DRILL_TOKEN=$DRILL_TOKEN podman run -d --name "$DRILL_NAME" --network commonair --env-file "$_env" \
+    -e COMMONAIR_DRILL_TOKEN -e "POSTGRES_USER=${_pgu:-commonair}" -e "POSTGRES_DB=${_pgd:-commonair}" \
+    -v "$DRILL_VOLUME:$DRILL_MOUNT" "$DUMP_IMAGE" postgres -c listen_addresses= -c archive_mode=off >/dev/null ||
+    die "could not start the drill's Postgres"
+  drill_wait_ready "$DRILL_WALG_TIMEOUT"
+  info "checking the restored database"
+  _crc=0
+  podman exec --user postgres "$DRILL_NAME" "$DUMP_DRILL_BIN" check-walg >"$_w/check.out" 2>&1 || _crc=$?
+  sed 's/^/  /' "$_w/check.out" >&2
+  [ "$_crc" = 0 ] || die "the restored base backup failed its checks"
+  drill_passed
+}
+
 cmd_backup() {
   parse_backup_flags "$@"
   require_instance backup
+  read_state_mode "$ENV_FILE"
   if [ "$RESTORE_OBJECTS" = yes ]; then
     restore_objects
     return 0
   fi
+  if [ "$BACKUP_DRILL" = yes ]; then
+    if [ "$DRILL_WALG" = yes ]; then drill_walg; else drill_dump; fi
+    return 0
+  fi
+  # No flag: WAL-G's base backup with the bundled Postgres, a dump with an external one.
+  if [ "$BACKUP_DEFAULT" = yes ]; then
+    if [ "$STATE_MODE" = external ]; then BACKUP_DUMP=yes; else BACKUP_DATABASE=yes; fi
+  fi
   if [ "$BACKUP_DATABASE" = yes ]; then backup_database; fi
+  if [ "$BACKUP_DUMP" = yes ]; then backup_dump; fi
   if [ "$BACKUP_OBJECTS" = yes ]; then backup_objects; fi
   return 0
 }
