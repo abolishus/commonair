@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { readFileSync } from "node:fs";
 import { decodeCue, decodeLiveTrack } from "@commonair/captions";
 import { describe, expect, test } from "vite-plus/test";
 import {
@@ -140,4 +141,44 @@ test("the three steps are real (no stub left)", async () => {
   const src = await Bun.file(new URL("../../src/w3/dvr-relay/index.ts", import.meta.url)).text();
   expect(src).not.toContain("not merged");
   expect([stepDvrRelay, stepDvrPurge, stepRelayVtt].every((f) => typeof f === "function")).toBe(true);
+});
+
+/**
+ * Run 41757992200 (`relay-dvr` alone): the DVR session stayed `pending` (`fetch_unjudged`,
+ * `media_unconfirmed`) for the whole 300 s. The origin's relay issuance counts only the live media
+ * it pulled from MediaMTX (`services/origin/src/issuance.ts`), so a minute whose only relay session
+ * is a DVR one on a channel nobody watches live is an issuance gap: the receipt verifies as
+ * issuance-unknown, proves nothing, and the session has no receipt coverage. Inside `e2e-relay` the
+ * relay's live audience hid that. The step keeps a live viewer on its own channel from before the
+ * DVR viewer starts until that viewer stops (`dvr-purge`), and judges the verdict once, in between.
+ */
+describe("dvr-relay keeps its channel's live production recorded while it judges the DVR session", () => {
+  const read = (rel: string) => readFileSync(new URL(rel, import.meta.url), "utf8");
+  const src = read("../../src/w3/dvr-relay/index.ts");
+  const body = (name: string) => {
+    const from = src.indexOf(`export async function ${name}(`);
+    const to = src.indexOf("\nexport async function ", from + 1);
+    return src.slice(from, to === -1 ? undefined : to);
+  };
+  const relay = body("stepDvrRelay");
+  const purge = body("stepDvrPurge");
+  const VERDICT = '"the session verifies (scored, on receipts)"';
+
+  test("a live HTTP viewer of the DVR channel starts before the DVR viewer", () => {
+    const live = relay.search(/new HttpViewer\(\{[^}]*target: \{ channel: ch\.channel \}/);
+    expect(live).toBeGreaterThan(-1);
+    expect(live).toBeLessThan(relay.indexOf("new DvrHttpViewer("));
+  });
+
+  test("it is still watching when the verdict is judged, and leaves with the DVR viewer", () => {
+    expect(relay).toContain(VERDICT);
+    expect(relay).not.toMatch(/\blive\.stop\(\)/);
+    expect(purge).toMatch(/run\.viewer\.stop\(\)[\s\S]{0,80}run\.live\.stop\(\)/);
+  });
+
+  test("the verdict is judged only in dvr-relay, never after relay-dvr's teardown", () => {
+    expect(src.split(VERDICT).length - 1).toBe(relay.split(VERDICT).length - 1);
+    // The scenario's own body after the extensions is teardown only (no verdict read there).
+    expect(read("../../scenarios/relay-dvr.ts")).not.toMatch(/playback_sessions|verdict|\(scored/);
+  });
 });

@@ -6,7 +6,11 @@
  *
  * - `dvr-relay`: a relay-assigned viewer rewinds on its own channel (VODs on, so it records). Its
  *   DVR playlist is on the relay, the segments come from the relay (the relay's receipts credit
- *   the session; the origin served the session nothing), and the session verifies.
+ *   the session; the origin served the session nothing), and the session verifies. A live viewer
+ *   watches the channel meanwhile: the origin's relay issuance counts only live media it pulled
+ *   (`services/origin/src/issuance.ts`), so a relay minute whose only session is a DVR one on an
+ *   unwatched channel is an issuance gap, its receipt proves nothing and the DVR session stays
+ *   `media_unconfirmed` (run 41757992200; inside `e2e-relay` the relay's live audience hid it).
  * - `dvr-purge` (after `dvr-relay`): the streamer removes the recording mid-stream. The relay
  *   answers 404 for a DVR segment it had cached within 5 s, and the purge row reached it (its
  *   `/healthz` `purgeSeq` advanced past the row's `seq`).
@@ -22,6 +26,7 @@ import { RedisClient } from "bun";
 import { createDb } from "@commonair/db";
 import type { ApiClient } from "../../api/client.ts";
 import { newDeviceId } from "../../fingerprint.ts";
+import { HttpViewer } from "../../http-viewer.ts";
 import { parsePlaylist, resolveUri } from "../../hls.ts";
 import { valkeyUrl } from "../../multi/replicas.ts";
 import type { ScenarioContext } from "../../scenario.ts";
@@ -61,6 +66,8 @@ interface DvrRelayState {
   streamer: SignedInUser;
   vodId: string;
   viewer: DvrHttpViewer;
+  /** The channel's live viewer, so its production (and the relay's issuance) is recorded. */
+  live: HttpViewer;
   sessionId: string;
 }
 
@@ -188,6 +195,18 @@ export async function stepDvrRelay(ext: RelayW3Extension): Promise<void> {
     liveChannel(ext, "w3dvrr", { vods: true }),
   );
   const vodId = ch.vodId ?? "";
+  // Live production is what the origin issues the relay against; DVR pulls issue nothing.
+  const live = await ctx.step(t(s, "a live viewer watches the channel"), async () => {
+    const v = new HttpViewer({
+      id: "w3dvrr-live",
+      target: { channel: ch.channel },
+      api: ctx.platform.api().client,
+      log: ctx.log,
+    });
+    ctx.defer(() => v.stop());
+    await v.start();
+    return v;
+  });
   // Enough recording behind the live edge to rewind into.
   await ctx.step(t(s, `the DVR window reaches ${behindSeconds + 12} s`), () =>
     waitFor(
@@ -216,7 +235,7 @@ export async function stepDvrRelay(ext: RelayW3Extension): Promise<void> {
   });
   const sessionId = viewer.started.sessionId;
   ctx.defer(() => viewer.v.stop());
-  runs.set(ctx, { channel: ch.channel, streamer: ch.user, vodId, viewer: viewer.v, sessionId });
+  runs.set(ctx, { channel: ch.channel, streamer: ch.user, vodId, viewer: viewer.v, live, sessionId });
   ctx.assert(
     t(s, "the DVR playlist is on the relay, not the origin"),
     servedBy(viewer.started.dvrPlaylistUrl, ext.relay.url),
@@ -388,6 +407,7 @@ export async function stepDvrPurge(ext: RelayW3Extension): Promise<void> {
     ext.relay.logs.lines().some((l) => l.includes("purged") && l.includes(dvrPurgePrefix(run.vodId))),
   );
   await run.viewer.stop();
+  await run.live.stop();
 }
 
 // ------------------------------------------------------------ relay-vtt
