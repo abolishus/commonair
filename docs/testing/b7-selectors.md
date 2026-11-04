@@ -39,7 +39,7 @@ its unit merges (a pending id that is already rendered fails, so the list only s
 | `/coop/jury`                      | jury opt-in, and a seated juror's cases and votes                                     | W3-jury                      |
 | `/admin/federation`               | admins: the domain block list and key rotation                                        | N4-web                       |
 | `/dashboard/settings`             | gains the federation section (`FederationSettings` mount)                             | N4-web                       |
-| `/settings/privacy`               | gains the portability grants (`PortabilityGrants` mount)                              | W3-portability               |
+| `/settings/notifications`         | gains the portability grants (`PortabilityGrants` mount)                              | W3-portability               |
 | `/transparency`                   | gains the jury results (`JuryResults` slot)                                           | W3-jury                      |
 | `/admin/moderation`               | a `watch_room` report's detail gains its evidence (`WatchRoomEvidence`)               | W3-watch-rooms               |
 | `/$channel`                       | gains the "moved to" notice (`MovedNotice`)                                           | W3-portability               |
@@ -148,7 +148,7 @@ Units build on these and never edit `chat/interact/{state,client,use-chat-intera
 | `move-landing-follow`       | Follows through the link (`channels.follow` with `moveLink`)                                                                            |
 | `move-landing-gone`         | `EmptyState` for a revoked or expired link                                                                                              |
 | `moved-notice`              | The channel page's "moved to" notice; `data-url`                                                                                        |
-| `portability-grants`        | The `/settings/privacy` section                                                                                                         |
+| `portability-grants`        | The `/settings/notifications` section; `portability-grants-search` filters it                                                           |
 | `portability-grant`         | A followed channel's grant row; `data-channel`, `data-state` `on`/`off`                                                                 |
 | `portability-grant-toggle`  | A row's switch (`portability.grants.set`)                                                                                               |
 

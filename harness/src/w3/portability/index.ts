@@ -4,7 +4,7 @@
 /**
  * `portability` steps 1–5 (docs/testing/b7-selectors.md, "Scenarios"; ADR 0037) and their run
  * state. Each step uses its own actors (a streamer and a fan for 1–2, a source and destinations for
- * 3–5). `--set via=web` (the default) drives `/move`, the landing page and `/settings/privacy` in a
+ * 3–5). `--set via=web` (the default) drives `/move`, the landing page and `/settings/notifications` in a
  * browser; `via=api` the same through the API.
  *
  * 1. A link converts: a follow through it records `source = move_link`, the link counts it, and
@@ -49,7 +49,8 @@ const ROLE_CLI_TIMEOUT_MS = 60_000;
 const EMOTE = "ptwave";
 const T0_EMOTE = "ptbad";
 
-export const PORTABILITY_ROUTES = { move: "/move", privacy: "/settings/privacy" } as const;
+/** Move notices live on notifications since D5-settings (F37), in a searchable, paged list. */
+export const PORTABILITY_ROUTES = { move: "/move", notifications: "/settings/notifications" } as const;
 
 export interface PortabilityRun {
   ctx: ScenarioContext;
@@ -191,8 +192,10 @@ async function grantThenMove(run: PortabilityRun): Promise<void> {
   if (run.via === "web") {
     const s =
       run.sessions.find((x) => x.label === "w3-portability-fan") ?? (await webSession(run, fan, "w3-portability-fan"));
-    const page = await s.goto(PORTABILITY_ROUTES.privacy);
-    await ctx.step(title(2, "the fan asks to be told on /settings/privacy"), async () => {
+    const page = await s.goto(PORTABILITY_ROUTES.notifications);
+    await ctx.step(title(2, "the fan asks to be told on /settings/notifications"), async () => {
+      // The list shows 20 channels per page; search puts this one on the first.
+      await page.locator(tid("portability-grants-search")).fill(channel, { timeout: UI_TIMEOUT_MS });
       const row = page.locator(tid("portability-grant", { channel }));
       await row.waitFor({ timeout: UI_TIMEOUT_MS });
       await row.locator(tid("portability-grant-toggle")).click({ timeout: UI_TIMEOUT_MS });

@@ -84,6 +84,6 @@ describe("the scenario", () => {
     const runners = Object.values(PORTABILITY_STEP_RUNNERS);
     expect(runners).toHaveLength(5);
     expect(new Set(runners).size).toBe(5);
-    expect(PORTABILITY_ROUTES).toEqual({ move: "/move", privacy: "/settings/privacy" });
+    expect(PORTABILITY_ROUTES).toEqual({ move: "/move", notifications: "/settings/notifications" });
   });
 });
