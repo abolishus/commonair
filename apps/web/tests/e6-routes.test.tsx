@@ -484,7 +484,8 @@ describe("/overlays", () => {
     fns.overlayRevoke.mockResolvedValue({ ok: true });
     wrap(React.createElement(component(OverlaysRoute)));
     await screen.findByTestId("overlay-token");
-    expect(screen.getByTestId("overlay-expiry").getAttribute("data-value")).toBe("none");
+    // The card shows skeletons until the channel loads; the expiry select renders after.
+    expect((await screen.findByTestId("overlay-expiry")).getAttribute("data-value")).toBe("none");
     fireEvent.click(screen.getByTestId("overlay-token-create"));
     await waitFor(() => expect(fns.overlayToken).toHaveBeenCalledWith({ channel: "rivertide", expiresAt: null }));
     const url = await screen.findByTestId("overlay-url");
