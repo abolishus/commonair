@@ -309,6 +309,11 @@ export class PlayerController {
   /** Bumped by every `enterDvr`/`exitDvr`, so a superseded DVR load does nothing when it settles. */
   private dvrGeneration = 0;
   private landing: DvrLanding | null = null;
+  /**
+   * hls.js: a DVR playlist loaded with its start held back (`loadDvrHls`), until the rewind or swap
+   * that follows gives `startLoad` its position, or a fallback starts it where hls.js would.
+   */
+  private dvrStartPending: Hls | null = null;
 
   constructor(private readonly opts: PlayerControllerOptions) {
     const t = opts.targetLatency;
@@ -349,7 +354,8 @@ export class PlayerController {
     // hls.js may still move the playhead to the live sync position once the first fragments are in
     // (relay-dvr CI run 41834516797: the relay loaded segments from 84 s with the playhead at 36 s,
     // so it played 15 s behind live before the swap, which then kept that). So it is held as well.
-    const fresh = this.mode === "dvr" && this.hls !== null && !this.hls.hasEnoughToStart;
+    const fresh =
+      this.mode === "dvr" && this.hls !== null && (this.dvrStartPending !== null || !this.hls.hasEnoughToStart);
     const ok = this.seekToWallclockAt(t);
     if (ok && fresh) this.holdFrom("rewind", t.getTime(), true);
     return ok;
@@ -374,10 +380,12 @@ export class PlayerController {
     }
     if (target === null) return false;
     // Right after `loadSource` (a rewind, a DVR source swap) the MediaSource is new and nothing is
-    // buffered: hls.js has taken the live sync position as its start (the DVR playlist is a live
-    // one without EXT-X-START) and moves the playhead there once the first fragment lands, unless
-    // the element is seeking just then. Giving hls.js the target as its start position wins that race.
-    if (this.hls && !this.hls.hasEnoughToStart) this.hls.startLoad(target);
+    // buffered. `loadDvrHls` held hls.js's start back, so the target becomes the position its
+    // first fragment is loaded from (see there).
+    if (this.hls && (this.dvrStartPending === this.hls || !this.hls.hasEnoughToStart)) {
+      this.dvrStartPending = null;
+      this.hls.startLoad(target);
+    }
     video.currentTime = target;
     return true;
   }
@@ -540,7 +548,18 @@ export class PlayerController {
     if (this.playlistUrl && session) this.reload(withToken(this.playlistUrl, session.token));
   }
 
-  /** hls.js: load the DVR playlist and wait for its level, so `seekToWallclock` has fragments. */
+  /**
+   * hls.js: load the DVR playlist and wait for its level, so `seekToWallclock` has fragments.
+   *
+   * The load starts held back (`autoStartLoad` off until the level is in). Otherwise hls.js starts
+   * a live playlist without EXT-X-START at its live sync position, and requests that fragment
+   * inside its own `LEVEL_LOADED` handler, before this one runs: the rewind or swap that follows
+   * comes too late, so its `startLoad(target)` met a first fragment already on the way and the
+   * playhead followed it toward live (relay-dvr CI run 41834516797: a rewind 60 s back loaded
+   * segments 21-23 of a 94 s window and played 15 s behind). The seek that follows starts the
+   * load from its target; without one (a failed seek, a fallback to live) it starts on the next
+   * task where hls.js would have.
+   */
   private loadDvrHls(hls: Hls, url: string, autoplay = true): Promise<boolean> {
     const ctor = this.hlsCtor;
     return new Promise<boolean>((resolve) => {
@@ -550,12 +569,23 @@ export class PlayerController {
         done = true;
         clearTimeout(timer);
         if (ctor) hls.off(ctor.Events.LEVEL_LOADED, onLevel);
+        hls.config.autoStartLoad = true;
+        if (ok) {
+          this.dvrStartPending = hls;
+          setTimeout(() => {
+            if (this.dvrStartPending !== hls) return;
+            this.dvrStartPending = null;
+            if (this.hls === hls && !this.stopped) hls.startLoad();
+          }, 0);
+        } else if (this.dvrStartPending === hls) this.dvrStartPending = null;
         resolve(ok);
       };
       const onLevel = () => finish(true);
       const timer = setTimeout(() => finish(false), DVR_LOAD_TIMEOUT_MS);
       if (ctor) hls.on(ctor.Events.LEVEL_LOADED, onLevel);
       this.resetQuality();
+      this.dvrStartPending = null;
+      hls.config.autoStartLoad = false;
       hls.loadSource(url);
       if (autoplay) void this.opts.video.play().catch(() => undefined);
     });
@@ -1156,6 +1186,7 @@ export class PlayerController {
     if (this.dvrUrl !== null) return;
     // The new playlist's level list may differ, so the pick goes back to Auto.
     this.resetQuality();
+    this.dvrStartPending = null;
     if (this.hls) this.hls.loadSource(url);
     else video.src = url;
     void video.play().catch(() => undefined);

@@ -335,20 +335,24 @@ type Frag = ReturnType<typeof dvrWindow>[number];
  * MediaSource (the playhead is 0, nothing buffered), the level arrives with `LEVEL_LOADED`, and
  * once the first fragment is buffered hls.js moves the playhead forward to its start position
  * (`seekToStartPos`): the one given to `startLoad`, else, on a live playlist without
- * EXT-X-START, the live sync position (three segments from the end). Real hls.js skips that move
- * when the element is seeking at that moment, which is why CI saw it only sometimes; the model
- * always takes the losing branch.
+ * EXT-X-START, the live sync position (three segments from the end). With `autoStartLoad` on,
+ * hls.js has already started at -1 when the manifest arrived and requests the live sync fragment
+ * inside its own `LEVEL_LOADED` handler, before the player's runs: a later `startLoad(target)`
+ * no longer decides where the first fragment comes from (relay-dvr CI run 41834516797).
  */
 function startupModel(hls: DvrHls, video: HTMLVideoElement, windows: Record<string, Frag[]>) {
   let fragments: Frag[] = [];
   let pending: Frag[] = [];
   let startAt = -1;
+  /** The first fragment's position once hls.js requested it on its own (autostart), else null. */
+  let committed: number | null = null;
   let buffered = false;
   hls.loadSource.mockImplementation((url: string) => {
     const dir = Object.keys(windows).find((d) => url.startsWith(d));
     pending = dir === undefined ? [] : (windows[dir] ?? []);
     hls.levels = [];
     startAt = -1;
+    committed = null;
     buffered = false;
     video.currentTime = 0;
   });
@@ -367,12 +371,13 @@ function startupModel(hls: DvrHls, video: HTMLVideoElement, windows: Record<stri
     levelLoaded() {
       fragments = pending;
       hls.levels = [{ uri: "level", details: { fragments } } as never];
+      if (hls.config.autoStartLoad !== false) committed = this.liveSync();
       hls.emit(DvrHls.Events.LEVEL_LOADED, LEVEL);
     },
     firstFragmentBuffered() {
       if (buffered) return;
       buffered = true;
-      const start = startAt >= 0 ? startAt : this.liveSync();
+      const start = committed ?? (startAt >= 0 ? startAt : this.liveSync());
       if (video.currentTime < start) video.currentTime = start;
     },
     /** hls.js's live sync position: three segments from the end. */
@@ -521,6 +526,55 @@ describe("dvrSwitchTo while DVR plays (hls.js)", () => {
     model.firstFragmentBuffered();
     expect(c.playheadWallclock()?.getTime()).toBe(EDGE - 60_000);
     await c.stop();
+  });
+});
+
+describe("a DVR load holds hls.js's start back for the seek that follows", () => {
+  const EDGE = T0;
+
+  it("the rewind's position is where loading starts: no jump for the guard to undo", async () => {
+    const { c, hls, video } = await hlsSession();
+    const model = startupModel(hls, video, { "https://play.example/dvr/": dvrWindow(EDGE, 92) });
+    let autoStartAtLoad: unknown;
+    const load = hls.loadSource.getMockImplementation();
+    hls.loadSource.mockImplementation((url: string) => {
+      autoStartAtLoad = hls.config.autoStartLoad;
+      load?.(url);
+    });
+    const entering = c.enterDvr(DVR);
+    model.levelLoaded();
+    expect(await entering).toBe(true);
+    expect(autoStartAtLoad).toBe(false);
+    // Restored for the next source (back to live loads with hls.js's own start).
+    expect(hls.config.autoStartLoad).toBe(true);
+    expect(c.seekToWallclock(new Date(EDGE - 60_000))).toBe(true);
+    expect(hls.startLoad).toHaveBeenLastCalledWith(32);
+    model.firstFragmentBuffered();
+    model.play(2);
+    expect(Math.abs((c.playheadWallclock()?.getTime() ?? Number.NaN) - (EDGE - 58_000))).toBeLessThan(500);
+    const trace = JSON.parse(video.dataset.dvrSwap ?? "{}") as Record<string, unknown>;
+    expect(trace).toMatchObject({ via: "rewind", corrections: 0 });
+    await c.stop();
+  });
+
+  it("without a seek the load starts on the next task, where hls.js would have", async () => {
+    const { c, hls, video } = await hlsSession();
+    const model = startupModel(hls, video, { "https://play.example/dvr/": dvrWindow(EDGE, 92) });
+    const entering = c.enterDvr(DVR);
+    model.levelLoaded();
+    expect(await entering).toBe(true);
+    expect(hls.startLoad).not.toHaveBeenCalled();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(hls.startLoad).toHaveBeenCalledTimes(1);
+    expect(hls.startLoad).toHaveBeenLastCalledWith();
+    await c.stop();
+  });
+
+  it("the swap's landing is where the origin's loading starts too", async () => {
+    const { video, hls } = await swappedSession();
+    expect(hls.startLoad).toHaveBeenLastCalledWith(60);
+    const trace = JSON.parse(video.dataset.dvrSwap ?? "{}") as Record<string, unknown>;
+    expect(trace).toMatchObject({ via: "swap", corrections: 0 });
   });
 });
 
