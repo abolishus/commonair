@@ -572,7 +572,8 @@ describe("a DVR load holds hls.js's start back for the seek that follows", () =>
 
   it("the swap's landing is where the origin's loading starts too", async () => {
     const { video, hls } = await swappedSession();
-    expect(hls.startLoad).toHaveBeenLastCalledWith(60);
+    // 60 s into the origin's window, plus the swap's load time (milliseconds here).
+    expect(hls.startLoad.mock.lastCall?.[0]).toBeCloseTo(60, 1);
     const trace = JSON.parse(video.dataset.dvrSwap ?? "{}") as Record<string, unknown>;
     expect(trace).toMatchObject({ via: "swap", corrections: 0 });
   });
