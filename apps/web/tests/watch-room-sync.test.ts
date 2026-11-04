@@ -399,6 +399,68 @@ describe("RoomSyncDriver", () => {
     expect(sim.calls).toEqual(["seek"]);
   });
 
+  /**
+   * WebKit native HLS: a seek lands short of where it aimed (it snaps back to a keyframe, and the
+   * pipeline flushes and resumes late), by about the same amount each time.
+   */
+  function shortLandingNative(shortMs: number, startBehindMs: number) {
+    let clock = NOW;
+    let behindMs = startBehindMs;
+    const aims: number[] = [];
+    const player: RoomPlayer = {
+      playheadWallclock: () => new Date(clock - behindMs),
+      playbackMode: () => "live",
+      seekToWallclock: (t: Date) => {
+        aims.push(clock - t.getTime());
+        behindMs = clock - t.getTime() + shortMs;
+        return true;
+      },
+      seekBy: (ms: number) => {
+        aims.push(behindMs - ms);
+        behindMs = behindMs - ms + shortMs;
+        return true;
+      },
+      native: true,
+    };
+    return { player, aims, behind: () => behindMs, tick: (ms: number) => (clock += ms), now: () => clock };
+  }
+
+  it("native: learns how short its seeks land and aims ahead by that (CI run 41768120276)", () => {
+    // edge-sync: the room was capped 5 s behind the edge, so WebKit had to seek forward (in W3's
+    // check it was the slowest member, so the room followed it and it never seeked). Each seek
+    // landed ~1.3 s short, the next one aimed at the target again: 1.6 s apart at p90 (target 1 s).
+    const sim = shortLandingNative(1300, 7500);
+    const driver = new RoomSyncDriver({ player: () => sim.player, reducedMotion: () => false, now: sim.now });
+    const misses: number[] = [];
+    for (let i = 0; i < 8; i++) {
+      driver.onTarget(new Date(sim.now() - 5200).toISOString());
+      sim.tick(2000);
+      misses.push(Math.abs(sim.behind() - 5200));
+    }
+    // The first seek lands short; the second aims ahead by the miss and lands; then it stays.
+    expect(misses[0]).toBe(1300);
+    expect(misses.slice(1).every((m) => m <= 100)).toBe(true);
+    expect(sim.aims).toEqual([5200, 3900]);
+  });
+
+  it("native: a seek that lands where it aimed keeps no lead; the lead is bounded", () => {
+    const exact = shortLandingNative(0, 8000);
+    const d1 = new RoomSyncDriver({ player: () => exact.player, reducedMotion: () => false, now: exact.now });
+    for (let i = 0; i < 4; i++) {
+      d1.onTarget(new Date(exact.now() - 5000).toISOString());
+      exact.tick(2000);
+    }
+    expect(exact.aims).toEqual([5000]);
+    // A player that never gets there: the lead stops at its bound instead of running away.
+    const stuck = shortLandingNative(6000, 12_000);
+    const d2 = new RoomSyncDriver({ player: () => stuck.player, reducedMotion: () => false, now: stuck.now });
+    for (let i = 0; i < 6; i++) {
+      d2.onTarget(new Date(stuck.now() - 5000).toISOString());
+      stuck.tick(2000);
+    }
+    expect(Math.min(...stuck.aims)).toBeGreaterThanOrEqual(5000 - DRIFT.maxSeekLeadMs);
+  });
+
   it("targets age with real time; a malformed target or no player does nothing", () => {
     const sim = simulatedPlayer({ offsetS: 1, holdBackS: 4 });
     const driver = new RoomSyncDriver({ player: () => sim.player, reducedMotion: () => false, now: sim.now });

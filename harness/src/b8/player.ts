@@ -186,6 +186,8 @@ export async function stepEdgeSync(run: WatchRoomB8Extension): Promise<void> {
   });
   await ctx.step(t("the WebKit member plays live in the room"), () => watchInRoom(webkit, ch.channel, room.roomId));
   await ctx.step(t(`play together for ${SYNC_SETTLE_MS / 1000} s`), () => sleep(SYNC_SETTLE_MS, ctx.signal));
+  // Diagnostics again, now with the WebKit member's frames (and the Chromium ones since).
+  ctx.data("edgeSyncWebkitTrajectory", edgeSyncTrajectory(samples, targets));
   const webkitEdges = edgeSummary(samples.webkit ?? []);
   ctx.data("edgeSyncWebkitEdges", webkitEdges);
   // Native HLS reports its edge from `seekable`; a WebKit build without it still syncs on the others' edges.
