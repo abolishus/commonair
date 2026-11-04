@@ -20,6 +20,7 @@ import { steps as d2Chat } from "../src/d/d2-chat.ts";
 import { steps as d2Player } from "../src/d/d2-player.ts";
 import { steps as d3Watch } from "../src/d/d3-watch.ts";
 import { steps as d4 } from "../src/d/d4.ts";
+import { steps as d5Settings } from "../src/d/d5-settings.ts";
 import { steps as d5Studio } from "../src/d/d5-studio.ts";
 import { DEFAULT_REPORT_DIR } from "../src/report.ts";
 import { defineScenario, type ScenarioContext } from "../src/scenario.ts";
@@ -42,6 +43,7 @@ const UNITS: readonly [string, DSteps][] = [
   ["d2-chat", d2Chat],
   ["d3-watch", d3Watch],
   ["d5-studio", d5Studio],
+  ["d5-settings", d5Settings],
 ];
 
 /** The separate `seed full` run's store and password, or why there is none. */

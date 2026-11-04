@@ -18,6 +18,20 @@ read:
 Do not look outside the repository. This is **wave 3**: work on branch `d/d3-watch`, cut from the
 sha with wave 2 merged.
 
+## Re-checked against `main` at wave 3 (2026-11-04)
+
+- `components/channel/video-grid.tsx` exports `VideoGrid`, `VideoCard`, `vodTiles`, `clipTiles`,
+  `VideoTileList`, `MediaShelf` and `MediaEmptyState`. Use those as they are; a missing prop is a
+  contract request.
+- D4's `NotFoundState` is `components/not-found.tsx` (props `title`, `description`, `icon`,
+  `action`, `secondaryAction`; give the action `data-testid="empty-state-action"`). Not the older
+  `components/money/not-found.tsx`.
+- The two routes are thin (about 25 lines each) and render `components/vod-watch/watch-page.tsx`.
+- `PENDING_HEAD` (`apps/web/tests/source-policy.test.ts`) lists your two routes and D5-studio's
+  `import.tsx`. You may delete **only your two lines** there; D5-studio edits the same file
+  beside you and the orchestrator merges both.
+- The `d3-watch` namespace exists and is empty (`en`, `es`). `en-XA` is generated.
+
 ## You own (write only these)
 
 - `apps/web/src/routes/_app/$channel_.vods.$vodId.tsx` and `$channel_.clips.$clipId.tsx`.
@@ -25,6 +39,7 @@ sha with wave 2 merged.
 - `apps/web/src/components/watch/**` (new).
 - The `d3-watch` namespace.
 - `apps/web/tests/d3-*.test.tsx` and `harness/src/d/d3-watch.ts`.
+- In `apps/web/tests/source-policy.test.ts`: only the two D3-watch `PENDING_HEAD` lines (delete them).
 
 **Read-only:**
 

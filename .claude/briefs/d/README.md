@@ -42,22 +42,23 @@ Planned at `8b48841e` (2026-11-03). Line numbers in the briefs are from that com
 
 ## Units
 
-| Unit                        | Findings                                                           | Wave | Gated on                          |
-| --------------------------- | ------------------------------------------------------------------ | ---- | --------------------------------- |
-| [D0](D0-contract-step.md)   | namespaces, test ids, the `d-surfaces` scenario skeleton           | 0    | none (orchestrator)               |
-| [D4](D4-polish.md)          | F13, F14 (no-flash half), F15, F16, F17, F19 (UI half)             | 1    | D0                                |
-| [D1-seed](D1-seed.md)       | F10 (seed half), F12 (seed half), F19 (seed half), avatars and art | 1    | D0                                |
-| [D1-api](D1-api.md)         | F20                                                                | 1    | D0                                |
-| [D5-capture](D5-capture.md) | the signed-in visual pass; evidence for F21–F28                    | 1    | D0; the user signs in (see unit)  |
-| [D1-web](D1-web.md)         | F1, F7, F8, F10 (fallback tile), F14 (switcher move), F18          | 2    | D4, D1-api merged                 |
-| [D2-channel](D2-channel.md) | F2, F4, F9, F12 (UI half), F13 for the channel page                | 2    | D4 and batch 8's B8-web merged    |
-| [D2-player](D2-player.md)   | F3, F5                                                             | 2    | D4 and batch 8's B8-player merged |
-| [D2-chat](D2-chat.md)       | F6                                                                 | 2    | D4 and batch 8's B8-web merged    |
-| [D3-watch](D3-watch.md)     | F11                                                                | 3    | D2-channel and D2-player merged   |
-| [D5-studio](D5-studio.md)   | F21–F28                                                            | 3    | D5-capture's evidence; D4 merged  |
+| Unit                          | Findings                                                           | Wave | Gated on                          |
+| ----------------------------- | ------------------------------------------------------------------ | ---- | --------------------------------- |
+| [D0](D0-contract-step.md)     | namespaces, test ids, the `d-surfaces` scenario skeleton           | 0    | none (orchestrator)               |
+| [D4](D4-polish.md)            | F13, F14 (no-flash half), F15, F16, F17, F19 (UI half)             | 1    | D0                                |
+| [D1-seed](D1-seed.md)         | F10 (seed half), F12 (seed half), F19 (seed half), avatars and art | 1    | D0                                |
+| [D1-api](D1-api.md)           | F20                                                                | 1    | D0                                |
+| [D5-capture](D5-capture.md)   | the signed-in visual pass; evidence for F21–F28                    | 1    | D0; the user signs in (see unit)  |
+| [D1-web](D1-web.md)           | F1, F7, F8, F10 (fallback tile), F14 (switcher move), F18          | 2    | D4, D1-api merged                 |
+| [D2-channel](D2-channel.md)   | F2, F4, F9, F12 (UI half), F13 for the channel page                | 2    | D4 and batch 8's B8-web merged    |
+| [D2-player](D2-player.md)     | F3, F5                                                             | 2    | D4 and batch 8's B8-player merged |
+| [D2-chat](D2-chat.md)         | F6                                                                 | 2    | D4 and batch 8's B8-web merged    |
+| [D3-watch](D3-watch.md)       | F11                                                                | 3    | D2-channel and D2-player merged   |
+| [D5-studio](D5-studio.md)     | F21–F26, F28; F29, F31–F33, F35, F38, F39 (studio)                 | 3    | D5-capture's evidence; D4 merged  |
+| [D5-settings](D5-settings.md) | F25 (co-op), F27, F28; F31, F33–F39 (settings and admin)           | 3    | split from D5-studio at wave 3    |
 
 At most six units run at once (AGENTS.md). Wave 1 is four units. It may run beside batch 8's
-wave 2 because the paths are disjoint (see the matrix). Wave 2 is four units, wave 3 is two.
+wave 2 because the paths are disjoint (see the matrix). Wave 2 is four units, wave 3 is three (D5 was split at the wave 3 re-check).
 
 ## Why this order
 
@@ -104,12 +105,13 @@ that removes each one. The list must be empty when wave 3 merges.
 | D2-player  | `apps/web/src/player/**` except `player/p2p/**`; `packages/ui/src/blocks/media/player-chrome.tsx` and its stories; `components/vod-watch/vod-player.tsx`; the `d2-player` namespace (plus `w1-data-mode`)                                                                                                                                                                                                                            |
 | D2-chat    | `apps/web/src/chat/**`; the `d2-chat` namespace                                                                                                                                                                                                                                                                                                                                                                                      |
 
-**Wave 3**
+**Wave 3** (re-checked 2026-11-04; the briefs list each path exactly)
 
-| Unit      | Owns                                                                                                                                                                                                                                                                                                                                                                                                      |
-| --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| D3-watch  | `routes/_app/$channel_.vods.$vodId.tsx`, `routes/_app/$channel_.clips.$clipId.tsx`, `components/vod-watch/**` except `vod-player.tsx`, `components/watch/**` (new), the `d3-watch` namespace                                                                                                                                                                                                              |
-| D5-studio | `routes/_studio/**`, `routes/_admin.tsx`, `routes/_admin/**` (not moderation), `routes/_app/settings.*`, `components/{analytics,money,relays.tsx,stream-health-card.tsx,mod,attestations,coop/council.tsx,coop/proposal.tsx}`, `components/settings/**` (new), `lib/nav.ts` (the studio and admin lists only), `packages/ui/src/blocks/studio/**`, `packages/ui/src/charts/**`, the `d5-studio` namespace |
+| Unit        | Owns                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D3-watch    | `routes/_app/$channel_.vods.$vodId.tsx`, `routes/_app/$channel_.clips.$clipId.tsx`, `components/vod-watch/**` except `vod-player.tsx`, `components/watch/**` (new), the `d3-watch` namespace, its two `PENDING_HEAD` lines                                                                                                                                                                                                                                                                                                                                                                          |
+| D5-studio   | `routes/_studio/**`, `routes/_studio.tsx`, `routes/_admin.tsx`, `routes/_app/mod.$channel.tsx` (new), `components/{analytics,mod,attestations,studio}/**`, `components/money/**` except `treasury.tsx` and `fraud-review.tsx`, `components/{relays,stream-health-card,content-manager}.tsx`, `components/bot-studio/**`, `twitch-import/import-page.tsx`, the studio and admin parts of `lib/nav.ts` and `site-chrome.tsx`, `packages/ui` `blocks/studio/**`, `blocks/data/{trend-chart,breakdown}.tsx`, `blocks/headers/page-header.tsx`, the `d5-studio` namespace, the source-policy width check |
+| D5-settings | `routes/_app/settings.*`, `routes/_admin/**` except moderation, `components/settings/**` (new), the settings and admin pages' components (listed in its brief), `components/coop/{council,proposal}.tsx`, `components/money/treasury.tsx`, the `d5-settings` namespace                                                                                                                                                                                                                                                                                                                              |
 
 `lib/nav.ts` is split by section. D1-web and D5-studio are in different waves, so they never
 hold it at the same time.

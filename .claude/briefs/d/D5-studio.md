@@ -20,24 +20,52 @@ start, read:
 Do not look outside the repository. This is **wave 3**: work on branch `d/d5-studio`, cut from the
 sha with wave 2 merged. D3-watch runs beside you.
 
+## Re-checked against `main` at wave 3 (2026-11-04)
+
+- **D5 is split in two units that run side by side**, so each fits one context: this unit (the
+  studio, its navigation, the mod view, analytics and money) and [D5-settings](D5-settings.md)
+  (the seven settings pages, the admin pages and the co-op council and proposal empties). Their
+  paths are disjoint; anything across the line is a contract request.
+- The shared charts are `packages/ui/src/blocks/data/trend-chart.tsx` and `breakdown.tsx` (there
+  is no `packages/ui/src/charts`). `components/chart.tsx` is shadcn's; leave it.
+- D5-capture's addendum (`docs/design/2026-11-design-review.md`, "Addendum: signed-in pass"):
+  F21, F22, F24–F26 confirmed; F23 and F28 "not reproduced" on staging, **but both code findings
+  stand**, so do them. Of the new findings, this unit takes F29, F31 (the revenue ledger and the
+  bot's commands table), F32, F33 (crew), F35 (studio pages), F38 (the dashboard avatar preview)
+  and F39 (relays). F36's captions paging is a follow-up, not this wave.
+- D4's request: `components/money/not-found.tsx` becomes a re-export of D4's shared
+  `NotFoundState` (`components/not-found.tsx`), so the studio and admin pages that import it get
+  the shared state with its action. Keep the export name; check the callers still type-check.
+- The studio sidebar is rendered by `components/site-chrome.tsx` from `lib/nav.ts`; both studio
+  and admin layouts use it.
+- Line numbers below are still right on `main` (`analytics-page.tsx:289` and `:317`,
+  `money/revenue.tsx:400`, `twitch-import/import-page.tsx:213`). `coop/council.tsx` and
+  `coop/proposal.tsx` moved to D5-settings.
+- `PENDING_HEAD` lists D3-watch's two routes and your `import.tsx`. Remove only the `import.tsx`
+  line; D3-watch deletes its own two lines beside you.
+
 ## You own (write only these)
 
-- `apps/web/src/routes/_studio/**`, `routes/_studio.tsx`, `routes/_admin.tsx`,
-  `routes/_admin/**` and `routes/_app/settings.*`.
-- `apps/web/src/components/{analytics,money,mod,attestations}/**`, `components/relays.tsx`,
-  `components/stream-health-card.tsx`, `components/coop/council.tsx`,
-  `components/coop/proposal.tsx`, `components/twitch-import/import-page.tsx` (its empty state
-  only), and `components/settings/**` (new) and `components/studio/**` (new).
+- `apps/web/src/routes/_studio/**`, `routes/_studio.tsx`, `routes/_admin.tsx` (the layout, for
+  its navigation), and a new `routes/_app/mod.$channel.tsx` if the mod view lives outside the
+  studio layout.
+- `apps/web/src/components/{analytics,mod,attestations,studio}/**` (`studio` is new),
+  `components/money/**` **except** `money/treasury.tsx` and `money/fraud-review.tsx`,
+  `components/relays.tsx`, `components/stream-health-card.tsx`, `components/content-manager.tsx`
+  (its empty state), `components/bot-studio/**` (the F31 table only),
+  `components/twitch-import/import-page.tsx` (its empty state only), and in
+  `components/site-chrome.tsx` the studio and admin sidebars only.
 - `apps/web/src/lib/nav.ts`: the studio and admin sections only.
-- `packages/ui/src/blocks/studio/**` and the chart components in `packages/ui`, with their
-  stories.
+- `packages/ui/src/blocks/studio/**`, `packages/ui/src/blocks/data/{trend-chart,breakdown}.tsx`,
+  `packages/ui/src/blocks/headers/page-header.tsx` (F29), with their stories.
 - The `d5-studio` namespace.
-- `apps/web/tests/d5-*.test.tsx`, `harness/src/d/d5-studio.ts`, and the width and `PageHeader`
-  check added to `tests/source-policy.test.ts`.
+- `apps/web/tests/d5-*.test.tsx` **except** `d5-settings*.test.tsx`, `harness/src/d/d5-studio.ts`,
+  and in `tests/source-policy.test.ts` the width and `PageHeader` check and the `import.tsx`
+  `PENDING_HEAD` line.
 
 **Read-only:** `player/**` (you embed `<Player>` muted), `chat/**` (you embed `<ChatPanel>`),
-`components/channel/**`, contracts and services. A missing API field is a **contract request**,
-with the exact field.
+`components/channel/**`, D5-settings' paths, contracts and services. A missing API field is a
+**contract request**, with the exact field.
 
 ## Build
 
@@ -89,13 +117,22 @@ with the exact field.
    - Grids and boards use `wide`; everything else uses `default`.
    - `PageHeader` always lives in the route, always with a description.
    - A source-policy test enforces both for `_studio/**`.
-7. **Settings navigation (F27).** A shared settings layout with a `Tabs` row, a `Select` at
-   375 px, and one width for all seven pages.
+7. **Settings navigation (F27)** is D5-settings'.
 8. **Primitive slips (F28).**
    - Use `<ViewerCount>` for peak viewers (`analytics-page.tsx:289`, `attestations/panel.tsx:181`).
    - Use `<Skeleton*>` with `aria-busy` instead of the plain "Loading" text.
-9. **Titles.** Every studio, admin and settings route gets a title. If `PENDING_HEAD` still lists
-   `admin.moderation.tsx`, remove it; the list ends empty.
+9. **Titles.** Every studio route gets a title (`import.tsx` is the last one missing).
+10. **Addendum findings (F29, F31–F33, F35, F38, F39):**
+    - F29: `PageHeader` stacks its actions under the title below `sm`, and a title never breaks
+      inside a word.
+    - F31: the revenue ledger and the bot's commands table render as stacked rows at 375 px, with
+      the amount or actions on each row.
+    - F32: revenue tier fields show errors after blur or submit, never on mount.
+    - F33: crew's `datetime-local` becomes D4's date field (`components/birth-date-field.tsx` is
+      the pattern; a general date field is yours to build in `components/studio/`) plus a time field.
+    - F35: one note style inside cards on the studio pages.
+    - F38: the dashboard avatar preview takes `<ChannelAvatar>`'s initial from the display name.
+    - F39: relays' "Add a relay" spacing and numbered setup steps.
 
 ## Tests you must add
 
@@ -107,7 +144,8 @@ with the exact field.
   non-colour series cues.
 - `d5-empty.test.tsx`: every owner-fillable `<EmptyState>` has an action (a test over the
   components).
-- The source-policy check for width and `PageHeader`, and `PENDING_HEAD` ending empty.
+- The source-policy check for width and `PageHeader`, and `import.tsx` out of `PENDING_HEAD`.
+- `d5-addendum.test.tsx`: F29's header stacking, F32 (no error on mount), F33, F31's stacked rows.
 - `harness/src/d/d5-studio.ts`, on the seeded stack:
   - as `demo_streamer1`, `/dashboard` shows the preview and chat;
   - as `newbie`, `/content` shows an `empty-state-action`.

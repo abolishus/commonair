@@ -12,6 +12,7 @@ import type { Key as D2Chat } from "./d2-chat.gen.ts";
 import type { Key as D2Player } from "./d2-player.gen.ts";
 import type { Key as D3Watch } from "./d3-watch.gen.ts";
 import type { Key as D4Polish } from "./d4-polish.gen.ts";
+import type { Key as D5Settings } from "./d5-settings.gen.ts";
 import type { Key as D5Studio } from "./d5-studio.gen.ts";
 import type { Key as E7Admin } from "./e7-admin.gen.ts";
 import type { Key as E7Appeals } from "./e7-appeals.gen.ts";
@@ -69,6 +70,7 @@ export type MessageKey =
   | D2Player
   | D3Watch
   | D4Polish
+  | D5Settings
   | D5Studio
   | E7Admin
   | E7Appeals
@@ -125,6 +127,7 @@ export const NAMESPACES = [
   "d2-player",
   "d3-watch",
   "d4-polish",
+  "d5-settings",
   "d5-studio",
   "e7-admin",
   "e7-appeals",
