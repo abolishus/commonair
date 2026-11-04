@@ -221,7 +221,7 @@ describe("shares by card", () => {
       select transaction_id from ledger_entries group by transaction_id, currency having sum(amount_cents) <> 0`);
     expect([...off]).toEqual([]);
   }
-  const memberShareOwed = async (userId: string) => -(await rawBalance(db(), accounts.memberShare(userId), "usd"));
+  const memberShareOwed = async (userId: string) => 0 - (await rawBalance(db(), accounts.memberShare(userId), "usd"));
 
   beforeAll(async () => {
     fake = startFakeStripe(stripeCalls);
@@ -307,14 +307,17 @@ describe("shares by card", () => {
     // The share is the co-op's liability to the member, in Stripe cash; no name in the metadata.
     expect(await memberShareOwed(viewer.userId)).toBe(p.amountCents);
     expect(posting?.metadata).toEqual({ userId: viewer.userId });
-    // Posting, share, membership and their events share one database transaction.
-    const [txids] = await db().execute<{ n: string }>(sql`
-      select count(distinct xmin::text)::text as n from (
-        select xmin from ledger_transactions where idempotency_key = ${`share-purchase:${s.id}`}
-        union all select xmin from membership_shares where id = ${s.id}
-        union all select xmin from memberships where id = ${m?.id ?? null}
-        union all select xmin from payments where id = ${p.id}) x`);
-    expect(txids?.n).toBe("1");
+    // One top-level transaction: the ledger records it (`txid_current()`), and the payment row carries
+    // it; the share and membership rows, written after the posting's savepoint, carry one subtransaction
+    // id of it (always above the top-level id).
+    const [tx] = await db().execute<{ ledger: string; payment: string; share: string; membership: string }>(sql`
+      select (select txid::text from ledger_transactions where idempotency_key = ${`share-purchase:${s.id}`}) as ledger,
+             (select xmin::text from payments where id = ${p.id}) as payment,
+             (select xmin::text from membership_shares where id = ${s.id}) as share,
+             (select xmin::text from memberships where id = ${m?.id ?? null}) as membership`);
+    expect(tx?.ledger).toBe(tx?.payment);
+    expect(tx?.share).toBe(tx?.membership);
+    expect(Number(tx?.share)).toBeGreaterThanOrEqual(Number(tx?.ledger));
     const events = await db().select().from(schema.events).where(eq(schema.events.type, "coop.membership.update"));
     expect(events.some((e) => (e.payload as Record<string, unknown>).membership_id === m?.id)).toBe(true);
     const audits = await db()

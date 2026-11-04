@@ -386,7 +386,7 @@ export async function stepPatronagePayout(ext: CoopB8Extension): Promise<void> {
     );
 
   for (const m of [manual, express]) {
-    const owed = -(await rawBalance(db.db, accounts.patronagePayable(m.id), ext.currency));
+    const owed = 0 - (await rawBalance(db.db, accounts.patronagePayable(m.id), ext.currency));
     ctx.check(`${m.username}: nothing left in the patronage payable`, owed === 0, { owed });
   }
   const off = await unbalanced(db.sql, periodId);

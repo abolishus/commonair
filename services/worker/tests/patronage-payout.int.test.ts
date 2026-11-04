@@ -149,7 +149,7 @@ const ok = (r: TransferRequest): TransferResult => ({
 
 const rowsOf = (periodId: string) =>
   db().select().from(schema.patronagePayouts).where(eq(schema.patronagePayouts.periodId, periodId));
-const owed = async (userId: string) => -(await rawBalance(db(), accounts.patronagePayable(userId), "usd"));
+const owed = async (userId: string) => 0 - (await rawBalance(db(), accounts.patronagePayable(userId), "usd"));
 const markers = async (payoutId: string) =>
   (
     await db()
@@ -221,7 +221,7 @@ describe("the patronage-payout job", () => {
     const m = await member();
     const r = await approvedWithRow(m.id, 800);
     const { adapter } = fakeAdapter(() => {
-      throw new StripeRequestError("refused", 400, "account_invalid", null);
+      throw new StripeRequestError("refused", 400, "invalid_request_error", "account_invalid");
     });
     const out = await runPatronagePayout(ctx(), { adapter }, r, NOT_LAST);
     expect(out).toMatchObject({ outcome: "failed", payoutId: r.payoutId, code: "account_invalid" });

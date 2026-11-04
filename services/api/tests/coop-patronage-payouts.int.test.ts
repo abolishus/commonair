@@ -149,7 +149,7 @@ describe("patronage payouts", () => {
       `/api/coop/patronage/${id}/pay`,
     );
   const list = (as: Account, id = periodId) => as.client.call<Row[]>("GET", `/api/coop/patronage/${id}/payouts`);
-  const owed = async (userId: string) => -(await rawBalance(owner(), accounts.patronagePayable(userId), "usd"));
+  const owed = async (userId: string) => 0 - (await rawBalance(owner(), accounts.patronagePayable(userId), "usd"));
   async function expectLedgerBalanced() {
     const off = await owner().execute<{ transaction_id: string }>(sql`
       select transaction_id from ledger_entries group by transaction_id, currency having sum(amount_cents) <> 0`);
