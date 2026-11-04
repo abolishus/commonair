@@ -110,6 +110,11 @@ export function playerOrigin(source: WatchSource, video: HTMLVideoElement, hls: 
   return nativeOrigin(video);
 }
 
+// The live player's Data saver choice (it is changed there, never on this page).
+const subscribeNothing = () => () => {};
+const readDataSaverOn = () => readDataModeChoice(localStore(), null).choice.on;
+const serverDataSaverOff = () => false;
+
 export function VodPlayer({
   source,
   variant,
@@ -274,7 +279,8 @@ export function VodPlayer({
       }))
       .sort((a, b) => (b.height ?? 0) - (a.height ?? 0) || b.bitrate - a.bitrate)
       .map((l) => ({ value: l.index, label: qualityLabel(l, locale) }));
-    setQualityState({ options, value: hls.autoLevelEnabled ? -1 : hls.nextLevel });
+    // The viewer's pick (-1 for Auto), not `nextLevel`, which follows ABR's switches.
+    setQualityState({ options, value: hls.manualLevel });
   }, [locale]);
   const { hold } = bar;
   const settings = useSettings({
@@ -290,9 +296,8 @@ export function VodPlayer({
     ),
   });
   // Data saver applies to live streams only (ADR 0018 decision 7): say so where it would be.
-  const [dataSaverOn] = React.useState(
-    () => typeof window !== "undefined" && readDataModeChoice(localStore(), null).choice.on,
-  );
+  // False on the server and while hydrating, so the first client render matches the server's.
+  const dataSaverOn = React.useSyncExternalStore(subscribeNothing, readDataSaverOn, serverDataSaverOff);
   const openShortcuts = () => {
     if (modes.fullscreen.active) modes.fullscreen.toggle();
     settings.setOpen(false);
@@ -459,7 +464,7 @@ export function VodPlayer({
       <ShortcutsDialog
         open={shortcutsOpen}
         onOpenChange={setShortcutsOpen}
-        entries={shortcutsFor({ seek: true, dvr: false })}
+        entries={shortcutsFor({ seek: true, dvr: false, theatre: theatreAvailable })}
       />
     </>
   );

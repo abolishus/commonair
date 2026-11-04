@@ -339,6 +339,8 @@ export function useSettings({
 }): {
   open: boolean;
   setOpen: (open: boolean) => void;
+  /** The one-time hint is on screen: the bar holds while it is, so the gear it points at stays. */
+  hintOpen: boolean;
   props: (children: React.ReactNode, badge?: React.ReactNode) => Settings;
 } {
   const [open, setOpenState] = React.useState(false);
@@ -369,6 +371,7 @@ export function useSettings({
   return {
     open,
     setOpen,
+    hintOpen,
     props: (children, badge) => ({
       label: t("player.settings.label"),
       icon: Settings02Icon,
@@ -398,9 +401,11 @@ export function ShortcutsButton({ onOpen }: { onOpen: () => void }): React.JSX.E
 }
 
 /** Which shortcuts apply to this player. */
-export function shortcutsFor(kind: { seek: boolean; dvr: boolean }): ShortcutEntry[] {
+export function shortcutsFor(kind: { seek: boolean; dvr: boolean; theatre: boolean }): ShortcutEntry[] {
   return PLAYER_SHORTCUTS.filter(
-    (s) => s.when === "all" || (s.when === "seek" && kind.seek) || (s.when === "dvr" && kind.dvr),
+    (s) =>
+      (s.action !== "theatre" || kind.theatre) &&
+      (s.when === "all" || (s.when === "seek" && kind.seek) || (s.when === "dvr" && kind.dvr)),
   );
 }
 

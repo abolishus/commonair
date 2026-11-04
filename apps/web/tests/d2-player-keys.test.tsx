@@ -270,6 +270,25 @@ describe("the live player's shortcuts", () => {
     expect(screen.getByTestId("player").getAttribute("data-theatre")).toBe("off");
   });
 
+  it("below md there is no theatre button, so t does nothing and the dialog leaves it out", async () => {
+    window.matchMedia = ((q: string) => ({
+      matches: q === "(pointer: fine)" || q === "(max-width: 47.99rem)",
+    })) as typeof window.matchMedia;
+    await playing(
+      <TheatreProvider>
+        <Player channel="rivertide" live />
+      </TheatreProvider>,
+    );
+    expect(screen.queryByTestId("player-theatre")).toBeNull();
+    press("t");
+    expect(screen.getByTestId("player").getAttribute("data-theatre")).toBe("off");
+    press("?", document.body, { shiftKey: true });
+    const dialog = await screen.findByTestId("player-shortcuts-dialog");
+    const actions = [...dialog.querySelectorAll("dd")].map((d) => d.getAttribute("data-action"));
+    expect(actions).not.toContain("theatre");
+    expect(actions).toContain("fullscreen");
+  });
+
   it("c presses the captions toggle", async () => {
     await playing();
     press("c");
@@ -332,7 +351,11 @@ describe("the live player's shortcuts", () => {
   });
 
   it("? opens the dialog listing the shortcuts, DVR's included while rewinding is possible", async () => {
-    await playing();
+    await playing(
+      <TheatreProvider>
+        <Player channel="rivertide" live />
+      </TheatreProvider>,
+    );
     press("?", document.body, { shiftKey: true });
     const dialog = await screen.findByTestId("player-shortcuts-dialog");
     const actions = [...dialog.querySelectorAll("dd")].map((d) => d.getAttribute("data-action"));

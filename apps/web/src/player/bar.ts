@@ -96,6 +96,10 @@ export function usePlayerBar({ playing }: { playing: boolean }): PlayerBar {
   }, [playing]);
 
   const inBar = (t: EventTarget | null) => t instanceof Node && bar.current !== null && bar.current.contains(t);
+  // The settings panel and its hint sit outside the bar but belong to it: a tap there is a tap on a control.
+  const inBarUi = (t: EventTarget | null) =>
+    inBar(t) ||
+    (t instanceof Element && t.closest('[data-slot="player-settings"], [data-slot="player-hint"]') !== null);
 
   const rootProps: PlayerBar["rootProps"] = {
     onPointerMove: (e) => {
@@ -104,7 +108,7 @@ export function usePlayerBar({ playing }: { playing: boolean }): PlayerBar {
     onPointerDown: (e) => {
       pressedAt.current = Date.now();
       // A tap on the picture toggles the bar; a tap on a control keeps it up.
-      if (e.pointerType === "touch" && !inBar(e.target) && active && playingRef.current) {
+      if (e.pointerType === "touch" && !inBarUi(e.target) && active && playingRef.current) {
         clear();
         setActive(false);
         return;

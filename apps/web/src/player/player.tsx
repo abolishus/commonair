@@ -342,6 +342,10 @@ export function Player({
     suggested: !dataChosen && savedDataMode?.saved === false && savedDataMode.suggested !== null,
     onOpenChange: onSettingsOpen,
   });
+  const hintOpen = settings.hintOpen;
+  React.useEffect(() => {
+    hold("hint", hintOpen);
+  }, [hold, hintOpen]);
 
   const dvrShown = features.dvr !== null && features.dvr.windowSeconds > 0 && !(dataModeOn || appliedCeiling !== null);
   const openShortcuts = () => {
@@ -536,7 +540,7 @@ export function Player({
         <ShortcutsDialog
           open={shortcutsOpen}
           onOpenChange={setShortcutsOpen}
-          entries={shortcutsFor({ seek: dvrShown, dvr: dvrShown })}
+          entries={shortcutsFor({ seek: dvrShown, dvr: dvrShown, theatre: theatreAvailable })}
         />
       )}
     </>

@@ -251,6 +251,29 @@ describe("the one-time hint", () => {
     expect(screen.queryByTestId("player-settings-hint")).toBeNull();
   });
 
+  it("holds the bar while it is on screen, so the gear it points at stays; a tap on it keeps the bar", async () => {
+    wrap(<Player channel="rivertide" live />);
+    await waitFor(() => expect(FakeController.instances).toHaveLength(1));
+    vi.useFakeTimers();
+    try {
+      act(() => last().opts.onState("playing"));
+      const hint = screen.getByTestId("player-settings-hint");
+      const shown = () => screen.getByTestId("player-controls").getAttribute("data-visible");
+      act(() => void vi.advanceTimersByTime(3_000));
+      expect(shown()).toBe("true");
+      const gotIt = within(hint).getByRole("button", { name: "Got it" });
+      fireEvent.pointerDown(gotIt, { pointerType: "touch" });
+      expect(shown()).toBe("true");
+      fireEvent.click(gotIt);
+      expect(screen.queryByTestId("player-settings-hint")).toBeNull();
+      // Released: the bar hides again after the usual inactivity.
+      act(() => void vi.advanceTimersByTime(3_000));
+      expect(shown()).toBe("false");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("opening the menu dismisses it too", async () => {
     await playing();
     await screen.findByTestId("player-settings-hint");

@@ -546,6 +546,7 @@ export class PlayerController {
       const onLevel = () => finish(true);
       const timer = setTimeout(() => finish(false), DVR_LOAD_TIMEOUT_MS);
       if (ctor) hls.on(ctor.Events.LEVEL_LOADED, onLevel);
+      this.resetQuality();
       hls.loadSource(url);
       if (autoplay) void this.opts.video.play().catch(() => undefined);
     });
@@ -642,6 +643,11 @@ export class PlayerController {
     const valid = hls !== null && Number.isInteger(index) && index >= 0 && index < hls.levels.length;
     this.qualityPick = valid ? index : -1;
     if (hls) hls.nextLevel = this.qualityPick;
+  }
+
+  /** Back to Auto: hls.js drops a manual level on `loadSource`, and the new renditions may differ. */
+  private resetQuality(): void {
+    this.qualityPick = -1;
   }
 
   /** hls.js: cap ABR at the wanted ceiling (the origin's filter does it for native HLS). */
@@ -802,6 +808,8 @@ export class PlayerController {
   };
 
   private attachHls(HlsCtor: typeof Hls, url: string, plan: P2PPlan | null): void {
+    // A new hls.js starts on Auto, and its levels may differ: a remembered pick would mislabel the menu.
+    this.resetQuality();
     const xhrSetup: HlsConfig["xhrSetup"] = (xhr, requestUrl) => {
       // Heartbeats refresh the playback token and the DVR token; every request uses the current one.
       const token = this.tokenFor(requestUrl);
@@ -1129,6 +1137,8 @@ export class PlayerController {
     const { video } = this.opts;
     this.playlistUrl = url;
     if (this.dvrUrl !== null) return;
+    // The new playlist's level list may differ, so the pick goes back to Auto.
+    this.resetQuality();
     if (this.hls) this.hls.loadSource(url);
     else video.src = url;
     void video.play().catch(() => undefined);

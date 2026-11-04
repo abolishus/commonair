@@ -24,9 +24,39 @@ export function useTheatre(): Theatre {
   return React.useContext(TheatreContext);
 }
 
-/** Whether a page offers theatre mode (a provider is mounted): the player hides its button otherwise. */
+/**
+ * Below Tailwind's `md` (48rem) the theatre button is hidden, so the `t` key and the `?` dialog
+ * must not offer theatre there either: there would be no visible way back out.
+ */
+export const THEATRE_NARROW_QUERY = "(max-width: 47.99rem)";
+
+function narrowQuery(): MediaQueryList | null {
+  try {
+    return typeof window.matchMedia === "function" ? window.matchMedia(THEATRE_NARROW_QUERY) : null;
+  } catch {
+    return null;
+  }
+}
+
+function subscribeNarrow(cb: () => void): () => void {
+  const q = narrowQuery();
+  // Some environments (and tests) hand back a bare `{ matches }`.
+  if (!q || typeof q.addEventListener !== "function") return () => {};
+  q.addEventListener("change", cb);
+  return () => q.removeEventListener("change", cb);
+}
+
+const readNarrow = () => narrowQuery()?.matches === true;
+const serverWide = () => false;
+
+/**
+ * Whether theatre mode is on offer here: a provider is mounted (the page lays out from it) and the
+ * viewport is at least `md`. The player hides its button and ignores `t` otherwise.
+ */
 export function useTheatreAvailable(): boolean {
-  return React.useContext(TheatreContext) !== OFF;
+  const provided = React.useContext(TheatreContext) !== OFF;
+  const narrow = React.useSyncExternalStore(subscribeNarrow, readNarrow, serverWide);
+  return provided && !narrow;
 }
 
 export interface TheatreChat {
