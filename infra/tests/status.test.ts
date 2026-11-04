@@ -1184,7 +1184,7 @@ describe("runbooks", () => {
       "infra/status/render.ts",
       "infra/status/rules.yml",
       "infra/status/place-secret.sh",
-      "infra/grafana/provisioning/alerting/commonair.yaml",
+      "infra/grafana/provisioning/alerting/commonair.yaml.tmpl",
       "infra/grafana/provisioning/alerting/route-env.sh",
       "infra/tofu/digitalocean/modules/instance/monitoring.tf",
       "infra/tofu/digitalocean/modules/instance/variables.tf",
@@ -1245,18 +1245,64 @@ interface Provisioning {
 }
 
 describe("Grafana alerting provisioning", () => {
-  const text = read("infra/grafana/provisioning/alerting/commonair.yaml");
-  const p = parse(text) as Provisioning;
+  const SRC = join(ROOT, "infra/grafana/provisioning");
   const datasources = parse(read("infra/grafana/provisioning/datasources/datasources.yaml")) as {
     datasources: { uid: string; type: string }[];
   };
 
-  test("parses: contact points by email and webhook, from env", () => {
+  /** Sources route-env.sh as Grafana's entrypoint does, into a temporary provisioning copy. */
+  const routeEnv = (env: Record<string, string>) => {
+    const out = join(tmp(), "provisioning");
+    const r = Bun.spawnSync(["sh", "-c", `. "${join(SRC, "alerting/route-env.sh")}" && env`], {
+      env: {
+        PATH: process.env.PATH ?? "/usr/bin:/bin",
+        COMMONAIR_PROVISIONING_SRC: SRC,
+        COMMONAIR_PROVISIONING_OUT: out,
+        ...env,
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    expect(r.exitCode).toBe(0);
+    const file = join(out, "alerting/commonair.yaml");
+    return {
+      env: parseEnvFile(r.stdout.toString()),
+      log: r.stderr.toString(),
+      out,
+      text: existsSync(file) ? readFileSync(file, "utf8") : "",
+    };
+  };
+  const rendered = routeEnv({
+    ALERT_EMAIL_TO: "oncall@ops.test",
+    ALERT_WEBHOOK_URL: "https://hooks.ops.test/x?a=1&b=$c'd",
+  });
+  const p = parse(rendered.text) as Provisioning;
+
+  test("the template is not provisioning on its own (Grafana reads only .yaml/.yml/.json)", () => {
+    expect(readdirSync(join(SRC, "alerting")).sort((a, b) => a.localeCompare(b))).toEqual([
+      "commonair.yaml.tmpl",
+      "route-env.sh",
+    ]);
+  });
+
+  test("rendered: a copy of the provisioning, with the route in it, and Grafana pointed at it", () => {
+    expect(rendered.env.GF_PATHS_PROVISIONING).toBe(rendered.out);
+    expect(readdirSync(join(rendered.out, "alerting"))).toEqual(["commonair.yaml"]);
+    expect(existsSync(join(rendered.out, "datasources/datasources.yaml"))).toBe(true);
+    expect(existsSync(join(rendered.out, "dashboards/dashboards.yaml"))).toBe(true);
     expect(p.apiVersion).toBe(1);
     const [cp] = p.contactPoints;
     expect(cp?.receivers.map((r) => r.type)).toEqual(["email", "webhook"]);
-    expect(cp?.receivers[0]?.settings.addresses).toBe("${ALERT_EMAIL_TO}");
-    expect(cp?.receivers[1]?.settings.url).toBe("${ALERT_WEBHOOK_URL}");
+    expect(cp?.receivers[0]?.settings.addresses).toBe("oncall@ops.test");
+    // Quoted for YAML, and $ doubled for Grafana's env expansion of settings.
+    expect(cp?.receivers[1]?.settings.url).toBe("https://hooks.ops.test/x?a=1&b=$$c'd");
+  });
+
+  test("rendered with no webhook: the email integration only", () => {
+    const r = routeEnv({ ALERT_EMAIL_TO: "oncall@ops.test" });
+    const cp = (parse(r.text) as Provisioning).contactPoints[0];
+    expect(cp?.receivers.map((x) => x.type)).toEqual(["email"]);
+    expect(r.text).not.toContain("@WEBHOOK@");
   });
 
   test("one policy: page now, ticket in a daily digest", () => {
@@ -1292,37 +1338,38 @@ describe("Grafana alerting provisioning", () => {
     expect([...severities].sort((a, b) => String(a).localeCompare(String(b)))).toEqual(["page", "ticket"]);
   });
 
-  test("every $ is escaped except the two env references", () => {
-    const body = text
-      .split("\n")
-      .filter((l) => !l.trimStart().startsWith("#"))
-      .join("\n")
-      .replaceAll("$$", "");
-    expect([...body.matchAll(/\$\{?([A-Za-z_0-9]+)/g)].map((m) => m[1])).toEqual([
-      "ALERT_EMAIL_TO",
-      "ALERT_WEBHOOK_URL",
-    ]);
+  test("rules are not env-expanded by Grafana: `$` stays single", () => {
+    const [rule] = p.groups[0]?.rules ?? [];
+    expect(rule?.data[0]?.model.expr).toBe(
+      'label_replace(ALERTS{alertstate="firing"}, "prometheus_alert", "$1", "alertname", "(.+)")',
+    );
+    expect(rule?.annotations.summary).toBe('{{ index $labels "summary" }}');
   });
 
-  const routeEnv = (env: Record<string, string>) => {
-    const r = Bun.spawnSync(
-      ["sh", "-c", `. "${join(ROOT, "infra/grafana/provisioning/alerting/route-env.sh")}" && env`],
-      {
-        env: { PATH: process.env.PATH ?? "/usr/bin:/bin", ...env },
-        stdout: "pipe",
-        stderr: "pipe",
-      },
-    );
-    expect(r.exitCode).toBe(0);
-    return { env: parseEnvFile(r.stdout.toString()), log: r.stderr.toString() };
-  };
-
-  test("route-env.sh: no route is loud, placeholders keep Grafana provisioning", () => {
+  test("route-env.sh: no route is loud, and a placeholder address keeps Grafana provisioning", () => {
     const none = routeEnv({});
     expect(none.log).toContain("NO ALERT ROUTE");
-    expect(none.env.ALERT_EMAIL_TO).toBe("no-route@alerts.invalid");
-    expect(none.env.ALERT_WEBHOOK_URL).toBe("http://127.0.0.1:9/no-webhook-configured");
+    const cp = (parse(none.text) as Provisioning).contactPoints[0];
+    expect(cp?.receivers.map((r) => [r.type, r.settings.addresses])).toEqual([["email", "no-route@alerts.invalid"]]);
     expect(routeEnv({ ALERT_EMAIL_TO: "you@example.com" }).log).toContain("NO ALERT ROUTE");
+    expect(routeEnv({ ALERT_EMAIL_TO: "a@ops.test", ALERT_WEBHOOK_URL: "https://h.example.com/x" }).text).not.toContain(
+      "type: webhook",
+    );
+  });
+
+  test("route-env.sh: a failed render leaves Grafana's own provisioning", () => {
+    const r = Bun.spawnSync(["sh", "-c", `. "${join(SRC, "alerting/route-env.sh")}" && env`], {
+      env: {
+        PATH: process.env.PATH ?? "/usr/bin:/bin",
+        COMMONAIR_PROVISIONING_SRC: join(tmp(), "missing"),
+        COMMONAIR_PROVISIONING_OUT: join(tmp(), "out"),
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    expect(r.exitCode).toBe(0);
+    expect(parseEnvFile(r.stdout.toString()).GF_PATHS_PROVISIONING).toBeUndefined();
+    expect(r.stderr.toString()).toContain("could not render");
   });
 
   test("route-env.sh: the instance's relay becomes Grafana's SMTP, STARTTLS required with a user", () => {
@@ -1340,10 +1387,10 @@ describe("Grafana alerting provisioning", () => {
       GF_SMTP_USER: "resend",
       GF_SMTP_FROM_ADDRESS: "alerts@ops.test",
       GF_SMTP_STARTTLS_POLICY: "MandatoryStartTLS",
-      ALERT_EMAIL_TO: "oncall@ops.test",
     });
     expect(r.log).toContain("alert route: mail");
     expect(r.log).not.toContain("secret-not-real");
+    expect(r.text).not.toContain("secret-not-real");
     // Explicit GF_SMTP_* win.
     expect(
       routeEnv({

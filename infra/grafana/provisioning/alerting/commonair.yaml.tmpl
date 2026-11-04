@@ -6,10 +6,12 @@
 # reads ALERTS{alertstate="firing"} and carries severity, summary and runbook through; `page`
 # alerts go out at once and `ticket` alerts in one daily digest.
 #
-# Recipients come from the environment: ALERT_EMAIL_TO (comma-separated) through Grafana's SMTP
-# settings (GF_SMTP_*, the instance's relay), and ALERT_WEBHOOK_URL (optional). route-env.sh,
-# sourced before Grafana starts, puts a placeholder in for an unset one and logs that there is
-# no route. `$$` is a literal `$`: Grafana expands environment variables in this file.
+# A template, not provisioning: Grafana reads only .yaml/.yml/.json here, so without route-env.sh
+# no alerting is provisioned and Grafana still starts. route-env.sh, sourced before Grafana
+# starts, renders it into its own provisioning copy (GF_PATHS_PROVISIONING) with the route from
+# the environment: ALERT_EMAIL_TO (comma-separated; a placeholder address and a loud log line when
+# unset) through Grafana's SMTP settings (the instance's relay), and the webhook integration only
+# when ALERT_WEBHOOK_URL is set. Grafana expands $VARS in contact point settings, not in rules.
 apiVersion: 1
 
 contactPoints:
@@ -19,13 +21,13 @@ contactPoints:
       - uid: commonair-email
         type: email
         settings:
-          addresses: ${ALERT_EMAIL_TO}
+          addresses: '@ALERT_EMAIL_TO@'
           singleEmail: true
-      - uid: commonair-webhook
-        type: webhook
-        settings:
-          url: ${ALERT_WEBHOOK_URL}
-          httpMethod: POST
+#@WEBHOOK@      - uid: commonair-webhook
+#@WEBHOOK@        type: webhook
+#@WEBHOOK@        settings:
+#@WEBHOOK@          url: '@ALERT_WEBHOOK_URL@'
+#@WEBHOOK@          httpMethod: POST
 
 policies:
   - orgId: 1
@@ -72,7 +74,7 @@ groups:
               range: false
               # Grafana sets alertname to this rule's title, so the Prometheus alert's name is
               # copied to prometheus_alert first; severity, summary and runbook pass as labels.
-              expr: label_replace(ALERTS{alertstate="firing"}, "prometheus_alert", "$$1", "alertname", "(.+)")
+              expr: label_replace(ALERTS{alertstate="firing"}, "prometheus_alert", "$1", "alertname", "(.+)")
           - refId: C
             datasourceUid: __expr__
             model:
@@ -88,9 +90,9 @@ groups:
         execErrState: Error
         for: 0s
         annotations:
-          summary: '{{ index $$labels "summary" }}'
-          runbook_url: '{{ index $$labels "runbook" }}'
-          description: 'Prometheus alert {{ index $$labels "prometheus_alert" }} ({{ index $$labels "severity" }}). Runbook: {{ index $$labels "runbook" }}'
+          summary: '{{ index $labels "summary" }}'
+          runbook_url: '{{ index $labels "runbook" }}'
+          description: 'Prometheus alert {{ index $labels "prometheus_alert" }} ({{ index $labels "severity" }}). Runbook: {{ index $labels "runbook" }}'
         labels:
           source: prometheus
         isPaused: false

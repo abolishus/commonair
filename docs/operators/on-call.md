@@ -43,9 +43,12 @@ has an email and a webhook integration, from the instance's settings:
 | `ALERT_WEBHOOK_URL`   | optional: a URL that takes Grafana's webhook JSON                                                               |
 | `SMTP_*`, `MAIL_FROM` | the instance's relay, which Grafana uses unless `GF_SMTP_*` are set; with `SMTP_USER` set, STARTTLS is required |
 
-`route-env.sh` runs before Grafana starts. With no usable route it prints a banner,
-`commonair grafana: NO ALERT ROUTE`, in Grafana's log at every start, and Grafana still starts, so
-the dashboards keep working. Check with:
+`route-env.sh` runs before Grafana starts (the unit's entrypoint sources it). It renders
+`commonair.yaml.tmpl` with these settings into a copy of the provisioning and points Grafana at it;
+the webhook integration exists only when `ALERT_WEBHOOK_URL` is set. With no usable route it
+prints a banner, `commonair grafana: NO ALERT ROUTE`, in Grafana's log at every start, and Grafana
+still starts, so the dashboards keep working. A Grafana started without `route-env.sh` has no
+alerting provisioned at all. Check with:
 
 ```sh
 journalctl --user -u commonair-grafana -b | grep -i "alert route"
