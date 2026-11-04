@@ -1,0 +1,6 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# Caddy's ACME account and the status host's certificate.
+[Volume]
+VolumeName=commonair-status-caddy

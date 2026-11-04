@@ -1,0 +1,15 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# The series the status page's daily figures average (render.ts DAY_QUERY): each component's probe
+# result, kept only while at least one canary answers. When every canary fails too, the
+# monitoring droplet has lost its own network, and that time counts for nobody
+# (docs/operators/status-page.md#when-the-monitor-is-blind). Planned maintenance still counts.
+groups:
+  - name: commonair-status
+    interval: 30s
+    rules:
+      - record: commonair_status:probe_success:sighted
+        expr: |
+          probe_success{job="status",role="component"}
+            and on () (max(probe_success{job="status",role="canary"}) == 1)

@@ -1,0 +1,32 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# One run of render.ts (the timer starts it every minute): reads Prometheus, sends the outside-in
+# alerts, writes the page. /config holds alert.env, readable only by uid 65534 (status-page.md).
+[Unit]
+Description=CommonAir status: render the page and send alerts
+Wants=commonair-status-prometheus.service
+After=commonair-status-prometheus.service
+
+[Container]
+Image=docker.io/oven/bun:1.4.3-slim@sha256:14a223fa35747ec728bce300ef85888bc5f7958164d15bbba6a54b22b52a3288
+ContainerName=commonair-status-render
+Network=commonair-status.network
+User=65534
+Group=65534
+ReadOnly=true
+NoNewPrivileges=true
+DropCapability=ALL
+Environment=HOME=/tmp
+Environment=BUN_RUNTIME_TRANSPILER_CACHE_PATH=0
+Environment=STATUS_CONFIG=/config/status.json
+Environment=STATUS_ALERT_ENV=/config/alert.env
+Environment=STATUS_DATA=/data
+Environment=STATUS_PROMETHEUS_URL=http://prometheus:9090
+Volume=/etc/commonair-status:/config:ro
+Volume=/var/lib/commonair-status:/data
+Exec=bun /config/render.ts
+
+[Service]
+Type=oneshot
+TimeoutStartSec=120

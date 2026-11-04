@@ -1,0 +1,29 @@
+#cloud-config
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# The monitoring droplet (monitoring.tf): Podman, then the status page's units from infra/status
+# (blackbox, Prometheus, Caddy, the renderer and its timer), started at once. No secret is in
+# here: user data is readable from the droplet and sits in tofu state. The alert route's
+# credentials are placed over SSH afterwards (infra/status/place-secret.sh). A change to any of
+# these files reaches the droplet only by re-provisioning it (docs/operators/status-page.md).
+%{ if updates ~}
+package_update: true
+package_upgrade: true
+%{ endif ~}
+packages:
+  - podman
+write_files:
+%{ for f in files ~}
+  - path: ${f.path}
+    owner: root:root
+    permissions: "0644"
+    encoding: gz+b64
+    content: ${f.content}
+%{ endfor ~}
+runcmd:
+  - [mkdir, -p, /var/lib/commonair-status/site, /var/lib/commonair-status/state, /var/lib/commonair-status/targets, /var/lib/commonair-status/notes]
+  - [chown, "65534:65534", /var/lib/commonair-status/site, /var/lib/commonair-status/state, /var/lib/commonair-status/targets]
+  - [systemctl, daemon-reload]
+  - [systemctl, start, commonair-status-blackbox.service, commonair-status-prometheus.service, commonair-status-caddy.service]
+  - [systemctl, enable, --now, commonair-status-render.timer]

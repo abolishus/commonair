@@ -171,6 +171,82 @@ variable "monitoring_size" {
   nullable    = false
 }
 
+variable "monitoring_cloud_init" {
+  description = "Install the outside probes, the status page and the outside-in alerts on the monitoring droplet with cloud-init (infra/status). Needs instance_origin; without it the droplet gets package updates only."
+  type        = bool
+  default     = true
+  nullable    = false
+}
+
+variable "status_domain" {
+  description = "Host name of the status page, served by the monitoring droplet with ACME. Defaults to status.<instance_origin's host>; point its A and AAAA records at monitoring_dns_records."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.status_domain == null || can(regex("^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$", var.status_domain))
+    error_message = "status_domain is a lowercase host name, e.g. status.stream.example.org."
+  }
+}
+
+variable "status_site_name" {
+  description = "The instance name the status page and alert mails show: set it to the instance's INSTANCE_NAME (packages/config, instanceSite()). Null shows instance_origin's host instead, so no name is written here twice."
+  type        = string
+  default     = null
+}
+
+variable "status_locale" {
+  description = "Language of the public status page: en or es, as the web app's catalog. Alert mails stay English."
+  type        = string
+  default     = "en"
+  nullable    = false
+
+  validation {
+    condition     = contains(["en", "es"], var.status_locale)
+    error_message = "status_locale is en or es."
+  }
+}
+
+variable "status_rtmp" {
+  description = "host:port of RTMP ingest for the status probe. Defaults to instance_origin's host on 1935."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.status_rtmp == null || can(regex("^[A-Za-z0-9.-]+:[0-9]{1,5}$", var.status_rtmp))
+    error_message = "status_rtmp is host:port, e.g. stream.example.org:1935."
+  }
+}
+
+variable "status_canaries" {
+  description = "host:port of well-known external targets the monitoring droplet also probes. When every one fails with every component, the droplet has lost its own network: no alert is sent and that time is not counted (docs/operators/status-page.md). Defaults to Quad9's and Cloudflare's anycast DNS over TCP."
+  type        = list(string)
+  default     = ["9.9.9.9:53", "1.1.1.1:53"]
+  nullable    = false
+
+  validation {
+    condition     = length(var.status_canaries) >= 1 && alltrue([for c in var.status_canaries : can(regex("^[A-Za-z0-9.-]+:[0-9]{1,5}$", c))])
+    error_message = "Give at least one canary, each host:port."
+  }
+}
+
+variable "status_extra_components" {
+  description = "More components for the status page beyond the defaults (web, API, chat, video, ingest, certificate): id, name, a blackbox module (http_web, http_ready, websocket_chat, tcp_connect) and its target."
+  type = list(object({
+    id     = string
+    name   = string
+    module = string
+    target = string
+  }))
+  default  = []
+  nullable = false
+
+  validation {
+    condition     = alltrue([for c in var.status_extra_components : contains(["http_web", "http_ready", "websocket_chat", "tcp_connect"], c.module) && can(regex("^[a-z][a-z0-9-]{0,31}$", c.id))])
+    error_message = "Each extra component has a lowercase id (a-z, 0-9, -) and one of the modules http_web, http_ready, websocket_chat or tcp_connect."
+  }
+}
+
 # ---------------------------------------------------------------------------------------------
 # Stage 1: managed Postgres and Valkey, instance buckets in Spaces
 # ---------------------------------------------------------------------------------------------

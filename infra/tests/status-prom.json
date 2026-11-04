@@ -1,0 +1,140 @@
+{
+  "note": "Prometheus 3 /api/v1/query answers, in the shape the monitoring Prometheus returns them, at 2026-11-03T14:00:00Z: the API failing its last two probes, chat flapping, everything else up, the certificate 10 days from expiry. status.test.ts replays them.",
+  "answers": {
+    "time()": {
+      "status": "success",
+      "data": { "resultType": "scalar", "result": [1793714400, "1793714400"] }
+    },
+    "probe_success{job=\"status\"}[120s]": {
+      "status": "success",
+      "data": {
+        "resultType": "matrix",
+        "result": [
+          {
+            "metric": {
+              "__name__": "probe_success",
+              "component": "web",
+              "instance": "https://stream.example.org/",
+              "job": "status",
+              "module": "http_web",
+              "role": "component"
+            },
+            "values": [
+              [1793714310.123, "1"],
+              [1793714340.123, "1"],
+              [1793714370.123, "1"],
+              [1793714400, "1"]
+            ]
+          },
+          {
+            "metric": {
+              "__name__": "probe_success",
+              "component": "api",
+              "instance": "https://stream.example.org/readyz/api",
+              "job": "status",
+              "module": "http_ready",
+              "role": "component"
+            },
+            "values": [
+              [1793714311.456, "1"],
+              [1793714341.456, "1"],
+              [1793714371.456, "0"],
+              [1793714399.456, "0"]
+            ]
+          },
+          {
+            "metric": {
+              "__name__": "probe_success",
+              "component": "chat",
+              "instance": "wss://stream.example.org/chat",
+              "job": "status",
+              "module": "websocket_chat",
+              "role": "component"
+            },
+            "values": [
+              [1793714312, "1"],
+              [1793714342, "0"],
+              [1793714372, "1"],
+              [1793714398, "0"]
+            ]
+          },
+          {
+            "metric": {
+              "__name__": "probe_success",
+              "component": "video",
+              "instance": "https://stream.example.org/readyz/origin",
+              "job": "status",
+              "module": "http_ready",
+              "role": "component"
+            },
+            "values": [
+              [1793714370.5, "1"],
+              [1793714399.5, "1"]
+            ]
+          },
+          {
+            "metric": {
+              "__name__": "probe_success",
+              "component": "ingest",
+              "instance": "stream.example.org:1935",
+              "job": "status",
+              "module": "tcp_connect",
+              "role": "component"
+            },
+            "values": [
+              [1793714371, "1"],
+              [1793714397, "1"]
+            ]
+          },
+          {
+            "metric": {
+              "__name__": "probe_success",
+              "component": "canary-0",
+              "instance": "9.9.9.9:53",
+              "job": "status",
+              "module": "tcp_connect",
+              "role": "canary"
+            },
+            "values": [
+              [1793714371, "1"],
+              [1793714396, "1"]
+            ]
+          }
+        ]
+      }
+    },
+    "min by (component) (probe_ssl_earliest_cert_expiry{job=\"status\",role=\"cert\"})": {
+      "status": "success",
+      "data": {
+        "resultType": "vector",
+        "result": [{ "metric": { "component": "certificate" }, "value": [1793714400, "1794578400"] }]
+      }
+    },
+    "avg by (component) (avg_over_time(commonair_status:probe_success:sighted[50400s]))": {
+      "status": "success",
+      "data": {
+        "resultType": "vector",
+        "result": [
+          { "metric": { "component": "web" }, "value": [1793714400, "1"] },
+          { "metric": { "component": "api" }, "value": [1793714400, "0.9952380952380953"] },
+          { "metric": { "component": "chat" }, "value": [1793714400, "0.9"] },
+          { "metric": { "component": "video" }, "value": [1793714400, "1"] },
+          { "metric": { "component": "ingest" }, "value": [1793714400, "1"] }
+        ]
+      }
+    },
+    "avg by (component) (avg_over_time(commonair_status:probe_success:sighted[86400s]))": {
+      "status": "success",
+      "data": {
+        "resultType": "vector",
+        "result": [
+          { "metric": { "component": "web" }, "value": [1793664000, "1"] },
+          { "metric": { "component": "api" }, "value": [1793664000, "0.9993055555555556"] },
+          { "metric": { "component": "chat" }, "value": [1793664000, "1"] },
+          { "metric": { "component": "video" }, "value": [1793664000, "1"] },
+          { "metric": { "component": "ingest" }, "value": [1793664000, "1"] }
+        ]
+      }
+    }
+  }
+}

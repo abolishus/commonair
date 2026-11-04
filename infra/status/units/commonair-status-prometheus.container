@@ -1,0 +1,32 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# The monitoring Prometheus: scrapes the probes every 30 s and keeps 30 days (prometheus.yml).
+# Loopback only, for an SSH tunnel; the renderer reaches it on the status network.
+[Unit]
+Description=CommonAir status: Prometheus
+StartLimitIntervalSec=0
+Wants=commonair-status-blackbox.service
+After=commonair-status-blackbox.service
+
+[Container]
+Image=quay.io/prometheus/prometheus:v3.15.0@sha256:efd719c99d83b060d9daefdcf00360461adf279f45ef5391f8d111892118753e
+ContainerName=commonair-status-prometheus
+Network=commonair-status.network
+NetworkAlias=prometheus
+PublishPort=127.0.0.1:9090:9090
+ReadOnly=true
+NoNewPrivileges=true
+DropCapability=ALL
+Volume=/etc/commonair-status/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+Volume=/etc/commonair-status/rules.yml:/etc/prometheus/rules.yml:ro
+Volume=/var/lib/commonair-status/targets:/etc/prometheus/targets:ro
+Volume=commonair-status-prometheus.volume:/prometheus
+Exec=--config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/prometheus --storage.tsdb.retention.time=30d
+
+[Service]
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
