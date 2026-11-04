@@ -164,6 +164,26 @@ describe("seekToWallclock", () => {
     await c.stop();
   });
 
+  it("hls.js: before the first fragment of a source is buffered, the target is also hls.js's start position", async () => {
+    const { c, hls, video } = await hlsSession();
+    hls.levels = [{ uri: "x", details: { fragments } }];
+    let buffered = false;
+    Object.defineProperty(hls, "hasEnoughToStart", { get: () => buffered, configurable: true });
+    expect(c.seekToWallclock(new Date(T0 + 1_000))).toBe(true);
+    expect(hls.startLoad).toHaveBeenLastCalledWith(101);
+    expect(video.currentTime).toBe(101);
+    hls.startLoad.mockClear();
+    buffered = true;
+    expect(c.seekToWallclock(new Date(T0 + 3_000))).toBe(true);
+    expect(hls.startLoad).not.toHaveBeenCalled();
+    expect(video.currentTime).toBe(103);
+    // Out of range: nothing moves, nothing restarts.
+    buffered = false;
+    expect(c.seekToWallclock(new Date(T0 + 60_000))).toBe(false);
+    expect(hls.startLoad).not.toHaveBeenCalled();
+    await c.stop();
+  });
+
   it("native: currentTime from getStartDate(), within seekable", () => {
     const video = nativeVideo({ start: T0, readyState: 4, seekable: [[10, 40]] });
     const c = nativeController(video);

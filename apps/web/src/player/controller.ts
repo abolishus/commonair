@@ -323,6 +323,11 @@ export class PlayerController {
       }
     }
     if (target === null) return false;
+    // Right after `loadSource` (a rewind, a DVR source swap) the MediaSource is new and nothing is
+    // buffered: hls.js has taken the live sync position as its start (the DVR playlist is a live
+    // one without EXT-X-START) and moves the playhead there once the first fragment lands, unless
+    // the element is seeking just then. Giving hls.js the target as its start position wins that race.
+    if (this.hls && !this.hls.hasEnoughToStart) this.hls.startLoad(target);
     video.currentTime = target;
     return true;
   }
