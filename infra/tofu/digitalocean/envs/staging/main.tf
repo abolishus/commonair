@@ -65,10 +65,11 @@ module "instance" {
 
   environment = "staging"
 
-  # Where commonair-rc-test runs today (PROGRESS, session thirteen, section 5). Confirm these
-  # slugs with doctl before the first plan (README, "Running it").
-  region       = "mkc1"
-  droplet_size = "s5-4vcpu-8gb-80gb"
+  # Not mkc1, where commonair-rc-test runs: mkc1 offers only the s5 family, whose 4 vCPU / 8 GB
+  # sizes stop at 80 GB of disk, and staging filled that with release images (2026-11-04).
+  # Confirm these slugs with doctl before the first plan (README, "Running it").
+  region       = "tor1"
+  droplet_size = "s-4vcpu-8gb-240gb-intel"
 
   backup_region = "nyc3"
 
