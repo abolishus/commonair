@@ -157,6 +157,16 @@ export interface PlayerControllerOptions {
   onFeatures?: (features: SessionFeatures) => void;
 }
 
+/** One rendition in the settings menu's quality list. */
+export interface QualityLevel {
+  /** hls.js's level index (`setQuality`). */
+  index: number;
+  height: number | null;
+  frameRate: number | null;
+  bitrate: number;
+  audioOnly: boolean;
+}
+
 /** hls.js levels as the budget controller sees them (audio-only: no video codec, no picture size). */
 function levelInfos(hls: Pick<Hls, "levels">): LevelInfo[] {
   return hls.levels.map((l) => ({
@@ -285,6 +295,8 @@ export class PlayerController {
   /** The playlist being played (its token is replaced on reload). */
   private playlistUrl: string | null = null;
   private renditions: readonly string[] = [];
+  /** The viewer's rendition pick (`setQuality`), -1 for Auto. */
+  private qualityPick = -1;
   private readonly meter = new DataUsageMeter();
   /** The DVR grant from `playback.start` (its URL as granted), null without one. */
   private dvr: { windowSeconds: number; playlistUrl: string } | null = null;
@@ -601,6 +613,35 @@ export class PlayerController {
   playableLevels(): LevelInfo[] {
     const levels = this.hls ? levelInfos(this.hls) : [];
     return levels.length > 0 ? levels : nominalLevels(this.renditions);
+  }
+
+  /**
+   * The renditions the viewer may pick in the settings menu (D2-player), in hls.js's order. None on
+   * native HLS, where the browser picks and exposes no levels.
+   */
+  qualityLevels(): QualityLevel[] {
+    const hls = this.hls;
+    if (!hls) return [];
+    return hls.levels.map((l, index) => ({
+      index,
+      height: l.height > 0 ? l.height : null,
+      frameRate: Number.isFinite(l.frameRate) && l.frameRate > 0 ? l.frameRate : null,
+      bitrate: Number.isFinite(l.bitrate) ? l.bitrate : 0,
+      audioOnly: !l.videoCodec && !((l.width ?? 0) > 0),
+    }));
+  }
+
+  /** The picked rendition's index, or -1 for Auto (hls.js's ABR, capped in data mode). */
+  quality(): number {
+    return this.qualityPick;
+  }
+
+  /** Pick a rendition (from the next fragment on), or -1 for Auto. */
+  setQuality(index: number): void {
+    const hls = this.hls;
+    const valid = hls !== null && Number.isInteger(index) && index >= 0 && index < hls.levels.length;
+    this.qualityPick = valid ? index : -1;
+    if (hls) hls.nextLevel = this.qualityPick;
   }
 
   /** hls.js: cap ABR at the wanted ceiling (the origin's filter does it for native HLS). */

@@ -1,9 +1,10 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { useLocale } from "@commonair/ui";
 import { PlayerChrome, PlayerControl } from "@commonair/ui/blocks/media";
 import { cn } from "@commonair/ui/lib/utils";
-import { VolumeHighIcon, VolumeOffIcon } from "@hugeicons/core-free-icons";
+import { PauseIcon, PlayIcon } from "@hugeicons/core-free-icons";
 import * as React from "react";
 import type { LegalDoc } from "../components/legal-document-link.tsx";
 import { t } from "../i18n/index.ts";
@@ -17,7 +18,21 @@ import {
   type DataModeChoice,
   type LevelInfo,
 } from "./budget.ts";
+import { usePlayerBar } from "./bar.ts";
 import { CaptionsToggle } from "./captions-toggle.tsx";
+import {
+  DataSaverChip,
+  QualitySection,
+  ScreenButtons,
+  ShortcutsButton,
+  ShortcutsDialog,
+  qualityLabel,
+  shortcutsFor,
+  useSettings,
+  useVideoVolume,
+  useVolumeProps,
+  type QualityOption,
+} from "./controls.tsx";
 import {
   NO_SESSION_FEATURES,
   P2P_STATUS_OFF,
@@ -30,6 +45,10 @@ import {
 } from "./controller.ts";
 import { DataModePanel } from "./data-mode.tsx";
 import { DvrControls, DvrScrubber } from "./dvr-controls.tsx";
+import { behindLiveSeconds, DVR_LIVE_EDGE_SECONDS, seekerFor } from "./dvr.ts";
+import { useScreenModes } from "./fullscreen.ts";
+import { SEEK_STEP_SECONDS, VOLUME_STEP, usePlayerShortcuts } from "./shortcuts.ts";
+import { useTheatre, useTheatreAvailable } from "./theatre.ts";
 import { pageLifecycle } from "./lifecycle.ts";
 import { registerMediaClock, type PlaybackMode } from "./media-clock.ts";
 import { registerRoomPlayer } from "./room-sync-registry.ts";
@@ -82,8 +101,8 @@ export function Player({
   onStartError,
 }: PlayerProps): React.JSX.Element {
   const videoRef = React.useRef<HTMLVideoElement>(null);
+  const containerRef = React.useRef<HTMLElement>(null);
   const [state, setState] = React.useState<PlayerState>(live ? "loading" : "offline");
-  const [muted, setMuted] = React.useState(true);
   // Unknown until `playback.start` answers; each new session reports its own.
   const [source, setSource] = React.useState<PlayerSource | undefined>(undefined);
   // Bumped to start a fresh session after a failure (e.g. the stream is not ready yet).
@@ -270,13 +289,134 @@ export function Player({
     return () => clearInterval(timer);
   }, [state, env, dataModeOn]);
 
-  const toggleMute = () => {
+  const volume = useVideoVolume(videoRef, true);
+  const volumeProps = useVolumeProps(volume);
+  const [paused, setPaused] = React.useState(false);
+  const playing = state === "playing" && !paused;
+  const bar = usePlayerBar({ playing });
+  const modes = useScreenModes(containerRef, videoRef);
+  const { theatre, setTheatre } = useTheatre();
+  const theatreAvailable = useTheatreAvailable() && !embed;
+  const [shortcutsOpen, setShortcutsOpen] = React.useState(false);
+
+  // Quality: Auto plus hls.js's renditions, read when the menu opens (levels arrive with the playlist).
+  const [quality, setQualityState] = React.useState<{ options: QualityOption[]; value: number }>({
+    options: [],
+    value: -1,
+  });
+  const { locale } = useLocale();
+  const readQuality = React.useCallback(() => {
+    const c = controllerRef.current;
+    // A controller without the seam (an older fake in tests) simply offers no quality menu.
+    if (!c || typeof c.qualityLevels !== "function") return;
+    const options = [...c.qualityLevels()]
+      .sort((a, b) => (b.height ?? 0) - (a.height ?? 0) || b.bitrate - a.bitrate)
+      .map((l) => ({ value: l.index, label: qualityLabel(l, locale) }));
+    setQualityState({ options, value: c.quality() });
+  }, [locale]);
+  React.useEffect(() => {
+    if (state === "playing") readQuality();
+  }, [state, readQuality]);
+  const pickQuality = (index: number) => {
+    controllerRef.current?.setQuality(index);
+    readQuality();
+  };
+  const inDvr = playbackMode === "dvr";
+  const qualityLocked = dataModeOn ? t("player.settings.qualityDataSaver") : inDvr ? t("dvr.sourceOnly") : undefined;
+  // Data saver picks the quality while it is on, so a manual pick goes back to Auto.
+  React.useEffect(() => {
+    if (dataModeOn && typeof controllerRef.current?.setQuality === "function") controllerRef.current.setQuality(-1);
+  }, [dataModeOn]);
+
+  const { hold } = bar;
+  const onSettingsOpen = React.useCallback(
+    (open: boolean) => {
+      hold("settings", open);
+      if (open) readQuality();
+    },
+    [hold, readQuality],
+  );
+  const settings = useSettings({
+    ready: state === "playing",
+    hintEnabled: live && !embed && dataChoice !== null,
+    suggested: !dataChosen && savedDataMode?.saved === false && savedDataMode.suggested !== null,
+    onOpenChange: onSettingsOpen,
+  });
+
+  const dvrShown = features.dvr !== null && features.dvr.windowSeconds > 0 && !(dataModeOn || appliedCeiling !== null);
+  const openShortcuts = () => {
+    if (modes.fullscreen.active) modes.fullscreen.toggle();
+    settings.setOpen(false);
+    setShortcutsOpen(true);
+  };
+
+  const togglePlay = () => {
     const video = videoRef.current;
     if (!video) return;
-    video.muted = !video.muted;
-    setMuted(video.muted);
-    if (!video.muted) void video.play().catch(() => undefined);
+    if (video.paused) void video.play().catch(() => undefined);
+    else video.pause();
   };
+
+  usePlayerShortcuts(
+    containerRef,
+    (action) => {
+      const video = videoRef.current;
+      const c = controllerRef.current;
+      const handled = ((): boolean => {
+        switch (action) {
+          case "playPause":
+            if (state !== "playing") return false;
+            togglePlay();
+            return true;
+          case "mute":
+            volume.toggleMute();
+            return true;
+          case "volumeUp":
+          case "volumeDown": {
+            if (!video) return false;
+            const from = video.muted ? 0 : video.volume;
+            volume.setVolume(from + (action === "volumeUp" ? VOLUME_STEP : -VOLUME_STEP));
+            return true;
+          }
+          case "fullscreen":
+            if (modes.fullscreen.support === "none") return false;
+            modes.fullscreen.toggle();
+            return true;
+          case "theatre":
+            if (!theatreAvailable) return false;
+            setTheatre(!theatre);
+            return true;
+          case "captions": {
+            const toggle = containerRef.current?.querySelector<HTMLElement>('[data-testid="player-captions-toggle"]');
+            if (!toggle) return false;
+            toggle.click();
+            return true;
+          }
+          case "back":
+          case "forward": {
+            if (!dvrShown || !c || state !== "playing") return false;
+            const behind = behindLiveSeconds(c, Date.now());
+            if (action === "forward") {
+              if (c.playbackMode() !== "dvr") return false;
+              void seekerFor(c).seek(behind - SEEK_STEP_SECONDS);
+            } else {
+              // From the live edge, the first step back lands just past it (closer plays live).
+              void seekerFor(c).seek(Math.max(behind, DVR_LIVE_EDGE_SECONDS) + SEEK_STEP_SECONDS);
+            }
+            return true;
+          }
+          case "help":
+            openShortcuts();
+            return true;
+          case "backToLive":
+            return false;
+        }
+      })();
+      if (handled) bar.poke();
+      return handled;
+    },
+    live,
+  );
 
   const onNoticeShown = React.useCallback(() => {
     noticeShown.current = true;
@@ -306,9 +446,32 @@ export function Player({
       <p role="alert">{t("player.error")}</p>
     ) : undefined;
 
+  const menu = (
+    <>
+      <QualitySection options={quality.options} value={quality.value} onChange={pickQuality} locked={qualityLocked} />
+      {/* Data saver (ADR 0018) lives here since F5; kept mounted with the menu, so its state stays. */}
+      {live && !embed && dataChoice && (
+        <DataModePanel
+          compact
+          choice={dataChoice}
+          onChoice={onDataChoice}
+          applied={appliedCeiling}
+          wanted={state === "playing" ? wantedCeiling : appliedCeiling}
+          native={env?.native ?? false}
+          suggested={!dataChosen && savedDataMode?.saved === false && savedDataMode.suggested !== null}
+          levels={levels}
+          usage={state === "playing" && dataModeOn ? usage : undefined}
+          dvr={inDvr}
+        />
+      )}
+      <ShortcutsButton onOpen={openShortcuts} />
+    </>
+  );
+
   return (
     <>
       <PlayerChrome
+        ref={containerRef}
         data-testid="player"
         data-state={state}
         data-source={source}
@@ -317,18 +480,25 @@ export function Player({
         data-data-mode={appliedCeiling === null ? "" : String(appliedCeiling)}
         data-dvr-window={String(features.dvr?.windowSeconds ?? 0)}
         data-captions={features.captions.state}
+        data-theatre={theatre ? "on" : "off"}
         variant={live ? "live" : "offline"}
         liveBadgeProps={{ "data-testid": "live-badge" }}
         stage={stage}
         scrubber={slot ? <DvrScrubber {...slot.dvr} /> : undefined}
+        controlsVisible={bar.visible}
+        controlsProps={{ "data-testid": "player-controls", ...bar.barProps }}
+        {...bar.rootProps}
+        volume={state === "playing" ? volumeProps : undefined}
         controls={
           state === "playing" ? (
             <>
-              {/* The label names the action (Mute / Unmute), so no `pressed` state on top of it. */}
               <PlayerControl
-                label={muted ? t("player.unmute") : t("player.mute")}
-                icon={muted ? VolumeOffIcon : VolumeHighIcon}
-                onClick={toggleMute}
+                data-testid="player-play"
+                label={paused ? t("player.bar.play") : t("player.bar.pause")}
+                tooltip={withKey(paused ? t("player.bar.play") : t("player.bar.pause"), "K")}
+                icon={paused ? PlayIcon : PauseIcon}
+                shortcut="K"
+                onClick={togglePlay}
               />
               {p2p.available && <P2PIndicator status={p2p} onOpen={() => setDialogOpen(true)} />}
               {slot && <CaptionsToggle controller={slot.controller} captions={features.captions} />}
@@ -336,6 +506,12 @@ export function Player({
             </>
           ) : undefined
         }
+        settings={
+          live && state !== "offline"
+            ? settings.props(menu, !embed && dataChoice ? <DataSaverChip choice={dataChoice} /> : undefined)
+            : undefined
+        }
+        controlsEnd={state === "playing" ? <ScreenButtons modes={modes} embed={embed} /> : undefined}
         className={cn("w-full", className)}
       >
         <video
@@ -345,28 +521,27 @@ export function Player({
           autoPlay
           playsInline
           crossOrigin="anonymous"
-          onVolumeChange={(e) => setMuted(e.currentTarget.muted)}
+          onVolumeChange={(e) => volume.sync(e.currentTarget)}
+          onPlay={() => setPaused(false)}
+          onPause={() => setPaused(true)}
         />
         {live && showNotice && (
           <P2PNotice onShown={onNoticeShown} onDismiss={markP2PNoticeSeen} onTurnOff={() => setP2PPreference("off")} />
         )}
       </PlayerChrome>
-      {live && !embed && dataChoice && (
-        <DataModePanel
-          choice={dataChoice}
-          onChoice={onDataChoice}
-          applied={appliedCeiling}
-          wanted={state === "playing" ? wantedCeiling : appliedCeiling}
-          native={env?.native ?? false}
-          suggested={!dataChosen && savedDataMode?.saved === false && savedDataMode.suggested !== null}
-          levels={levels}
-          usage={state === "playing" && dataModeOn ? usage : undefined}
-          dvr={playbackMode === "dvr"}
-        />
-      )}
       {(p2p.available || dialogOpen) && (
         <P2PDialog open={dialogOpen} onOpenChange={setDialogOpen} status={p2p} loadPrivacyPolicy={loadPrivacyPolicy} />
+      )}
+      {live && (
+        <ShortcutsDialog
+          open={shortcutsOpen}
+          onOpenChange={setShortcutsOpen}
+          entries={shortcutsFor({ seek: dvrShown, dvr: dvrShown })}
+        />
       )}
     </>
   );
 }
+
+/** "Label (K)": the tooltip names the shortcut. */
+const withKey = (label: string, key: string) => t("player.bar.withKey", { label, key });
