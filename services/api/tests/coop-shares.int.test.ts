@@ -20,7 +20,7 @@ import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { schema, uuidv7 } from "@commonair/db";
 import { accounts, rawBalance } from "@commonair/ledger";
 import { type PaymentAdapter, type StripeAction, createAdapter, loadStripeSignature } from "@commonair/payments";
-import { setShareAdapter, shareCheckoutMode } from "../src/coop/shares.ts";
+import { setShareAdapter, shareAdapter, shareCheckoutMode } from "../src/coop/shares.ts";
 import { shareChargeRefundedAction, shareCheckoutFailed } from "../src/money/stripe-events/shares.ts";
 import { signUpAndSignIn, startApi, type TestApi } from "./harness.ts";
 
@@ -282,6 +282,27 @@ describe("shares by card", () => {
       .from(schema.membershipShares)
       .where(eq(schema.membershipShares.userId, racer.userId));
     expect(rows).toHaveLength(1);
+  });
+
+  test("a provider that refuses the checkout is a clear 412, and nothing is left pending", async () => {
+    const someone = await signUpAndSignIn(api);
+    const working = shareAdapter(api.deps);
+    setShareAdapter(api.deps, {
+      ...working,
+      startCheckout: () => Promise.reject(new RangeError("member shares are not sold through Stripe")),
+    });
+    try {
+      const r = await someone.client.call<Err>("POST", "/api/coop/shares", { returnPath: "/coop/membership" });
+      expect(r.status).toBe(412);
+      expect(r.body.data).toEqual({ requirement: "payment_provider" });
+    } finally {
+      setShareAdapter(api.deps, working);
+    }
+    const rows = await db()
+      .select()
+      .from(schema.membershipShares)
+      .where(eq(schema.membershipShares.userId, someone.userId));
+    expect(rows).toHaveLength(0);
   });
 
   test("a signed checkout.completed books the share and activates the membership in one transaction", async () => {

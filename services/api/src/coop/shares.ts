@@ -23,6 +23,7 @@
  * Lock order, as everywhere in the co-op: payment → share → membership. Ids and cents only in
  * audit details, events and ledger metadata (ADR 0004).
  */
+import { ORPCError } from "@orpc/server";
 import { and, desc, eq, gte, inArray, isNotNull } from "drizzle-orm";
 import { SharesCardPaymentsSetting } from "@commonair/contracts/shapes";
 import { type Executor, schema, uuidv7 } from "@commonair/db";
@@ -76,6 +77,24 @@ export function shareAdapter(deps: Deps): PaymentAdapter {
 export function setShareAdapter(deps: Deps, adapter: PaymentAdapter | null): void {
   if (adapter) adapters.set(deps, adapter);
   else adapters.delete(deps);
+}
+
+/**
+ * Start (or show again) a share checkout. A provider that refuses or does not answer is a clear
+ * PRECONDITION_FAILED, never a 500; the caller's transaction then rolls back, so nothing is left
+ * pending (a session Stripe may have opened is never paid against a payment we do not hold).
+ */
+export async function startShareCheckout(
+  adapter: PaymentAdapter,
+  request: Parameters<PaymentAdapter["startCheckout"]>[0],
+): Promise<Awaited<ReturnType<PaymentAdapter["startCheckout"]>>> {
+  try {
+    return await adapter.startCheckout(request);
+  } catch (err) {
+    if (err instanceof Error && !(err instanceof ORPCError))
+      throw precondition("payment_provider", "The payment provider could not start the checkout; try again");
+    throw err;
+  }
 }
 
 // ── Events ──────────────────────────────────────────────────────────────────────────────────

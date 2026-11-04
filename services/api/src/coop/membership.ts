@@ -22,7 +22,7 @@ import {
   subscriptionQualifies,
 } from "@commonair/governance";
 import { loadMoneySettings, post, shareRefund } from "@commonair/ledger";
-import { createAdapter, manualInstructions } from "@commonair/payments";
+import { type PaymentAdapter, createAdapter, manualInstructions } from "@commonair/payments";
 import type { Deps } from "../deps.ts";
 import { audit } from "../events/audit.ts";
 import { decodeCursor, encodeCursor, isKeyCursor, pageOf } from "../lib/cursor.ts";
@@ -41,6 +41,7 @@ import {
   shareAdapter,
   shareCheckoutMode,
   shareEvent,
+  startShareCheckout,
 } from "./shares.ts";
 import { eligibility, type MembershipViewDto } from "./views.ts";
 
@@ -156,6 +157,10 @@ export async function confirmShareTx(
   await bookShareTx(tx, p, { receivedAt: o.receivedAt, now: o.now, actor: { type: STAFF, id: o.actorId } });
 }
 
+/** The manual adapter's checkout, as before (its errors are ours, not a provider's). */
+const manualStart = (adapter: PaymentAdapter, r: Parameters<PaymentAdapter["startCheckout"]>[0]) =>
+  adapter.startCheckout(r);
+
 export const membershipHandlers = {
   membership: os.coop.membership.handler(async ({ context }) => {
     const caller = requireCaller(context);
@@ -193,7 +198,7 @@ export const membershipHandlers = {
           } else if (p.status === "pending" && p.provider !== "manual" && mode === "card") {
             // The same open checkout again: the provider's idempotent create returns the same session.
             if (p.provider !== adapter.provider) throw conflict("Your checkout is still open with another provider");
-            const again = await adapter.startCheckout({
+            const again = await startShareCheckout(adapter, {
               paymentId: p.id,
               kind: "membership_share",
               amountCents: p.amountCents,
@@ -223,7 +228,7 @@ export const membershipHandlers = {
         if (viewer) throw conflict("You are already a viewer member");
         const paymentId = uuidv7();
         const shareId = uuidv7();
-        const start = await adapter.startCheckout({
+        const start = await (mode === "card" ? startShareCheckout : manualStart)(adapter, {
           paymentId,
           kind: "membership_share",
           amountCents: shareCents,
