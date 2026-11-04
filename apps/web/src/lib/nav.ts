@@ -59,6 +59,8 @@ export interface SignedOutEntry {
 export interface StudioEntry {
   id:
     | "streamManager"
+    | "streamSettings"
+    | "modView"
     | "rehearse"
     | "overlays"
     | "interact"
@@ -75,6 +77,8 @@ export interface StudioEntry {
     | "developer";
   to:
     | "/dashboard"
+    | "/dashboard/settings"
+    | "/mod/$channel"
     | "/rehearse"
     | "/overlays"
     | "/interact"
@@ -89,7 +93,25 @@ export interface StudioEntry {
     | "/move"
     | "/import"
     | "/developer";
+  /** `modView` only: the channel the mod view opens (the member's own). */
+  params?: { channel: string };
   current: boolean;
+}
+
+/** The studio sidebar's groups (F22), in order. */
+export type StudioGroupId = "stream" | "community" | "content" | "money" | "tools";
+
+export interface StudioGroup {
+  id: StudioGroupId;
+  items: StudioEntry[];
+}
+
+/** The platform-tools sidebar's groups (F22, admin), in order. */
+export type AdminGroupId = "safety" | "money" | "coop" | "platform";
+
+export interface AdminGroup {
+  id: AdminGroupId;
+  items: AdminEntry[];
 }
 
 /** The co-op section's tabs (`/coop/*`, and the public transparency page). */
@@ -250,6 +272,66 @@ export function studioNav(pathname: string, options: StudioNavOptions = {}): Stu
     ...(options.twitchImport === true ? [{ id: "import", to: "/import", current: path === "/import" } as const] : []),
     { id: "developer", to: "/developer", current: path === "/developer" || path.startsWith("/developer/") },
   ];
+}
+
+export interface StudioNavGroupOptions extends StudioNavOptions {
+  /** The member's own channel slug, for the mod view link (`/mod/<channel>`). */
+  channel: string;
+}
+
+/**
+ * The studio sidebar grouped (F22): Stream, Community, Content, Money and Tools. The stream
+ * manager is current only on `/dashboard` itself (its settings page has its own entry); the mod
+ * view is current on any `/mod/<channel>`.
+ */
+export function studioNavGroups(pathname: string, options: StudioNavGroupOptions): StudioGroup[] {
+  const path = normalize(pathname);
+  const flat = new Map(studioNav(pathname, options).map((entry) => [entry.id, entry]));
+  const pick = (...ids: StudioEntry["id"][]): StudioEntry[] =>
+    ids.flatMap((id) => {
+      const entry = flat.get(id);
+      return entry ? [entry] : [];
+    });
+  const streamSettings: StudioEntry = {
+    id: "streamSettings",
+    to: "/dashboard/settings",
+    current: path === "/dashboard/settings",
+  };
+  const modView: StudioEntry = {
+    id: "modView",
+    to: "/mod/$channel",
+    params: { channel: options.channel },
+    current: path.startsWith("/mod/") && path.split("/").length === 3,
+  };
+  const [manager, ...stream] = pick("streamManager", "rehearse", "overlays", "captions", "relays");
+  const groups: StudioGroup[] = [
+    { id: "stream", items: [...(manager ? [manager, streamSettings] : [streamSettings]), ...stream] },
+    { id: "community", items: [...pick("chat", "bot", "interact"), modView] },
+    { id: "content", items: pick("content", "analytics") },
+    { id: "money", items: pick("revenue", "crew") },
+    { id: "tools", items: pick("move", "import", "developer") },
+  ];
+  return groups.filter((group) => group.items.length > 0);
+}
+
+/**
+ * The platform-tools sidebar grouped (F22): Safety (the queues), Money (the treasury), Co-op and
+ * Platform. Only the pages the role may open; a group with none is left out.
+ */
+export function adminNavGroups(pathname: string, options: AdminNavOptions): AdminGroup[] {
+  const entries = new Map(adminNav(pathname, options).map((entry) => [entry.id, entry]));
+  const pick = (...ids: AdminEntry["id"][]): AdminEntry[] =>
+    ids.flatMap((id) => {
+      const entry = entries.get(id);
+      return entry ? [entry] : [];
+    });
+  const groups: AdminGroup[] = [
+    { id: "safety", items: pick("moderation", "appeals", "dmca", "legal") },
+    { id: "money", items: pick("treasury") },
+    { id: "coop", items: pick("coop") },
+    { id: "platform", items: pick("integrity", "egress", "incidents", "apps", "federation") },
+  ];
+  return groups.filter((group) => group.items.length > 0);
 }
 
 /** The co-op section's tabs, in order (the jury sits beside the council: ADR 0038). */

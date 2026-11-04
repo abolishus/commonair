@@ -16,10 +16,13 @@ import {
   BreakdownBar,
   DataTable,
   FilterBar,
+  KeyValueList,
   StatCard,
   StatGrid,
+  TrendChart,
   type DataTableColumn,
 } from "@commonair/ui/blocks/data";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@commonair/ui/components/collapsible";
 import { AmountField, FormSection } from "@commonair/ui/blocks/forms";
 import { Section } from "@commonair/ui/blocks/headers";
 import { Button } from "@commonair/ui/components/button";
@@ -50,6 +53,8 @@ import {
   type TierDraft,
 } from "../../lib/money.ts";
 import { safeHttpUrl } from "../../lib/url.ts";
+import { ResponsiveRows, type StackedRow } from "../studio/stacked-rows.tsx";
+import { formatDayLabel, revenueTrend } from "../studio/trends.ts";
 import { BreakdownOpenButton } from "./breakdown-dialog.tsx";
 
 /**
@@ -143,6 +148,82 @@ export function RevenueStats({ summary }: { summary: RevenueSummaryDto }): React
   );
 }
 
+/**
+ * The month's revenue by day (F24): gross and net lines, told apart by stroke as well as colour,
+ * with a table of the same numbers for screen readers and anyone who wants the figures.
+ */
+export function RevenueTrend({ summary }: { summary: RevenueSummaryDto }): React.JSX.Element {
+  const { locale } = useLocale();
+  const currency = summary.net.currency;
+  const rows = revenueTrend({ from: summary.periodStart, to: summary.periodEnd }, summary.daily).map((d) => ({
+    ...d,
+    day: formatDayLabel(d.date, locale),
+  }));
+  const any = rows.some((r) => r.gross !== 0 || r.net !== 0);
+  type Row = (typeof rows)[number];
+  const columns: DataTableColumn<Row>[] = [
+    { id: "day", header: t("studio.trend.day"), cell: ({ row }) => row.original.day },
+    {
+      id: "gross",
+      header: t("revenue.ledger.gross"),
+      align: "numeric",
+      cell: ({ row }) => formatMoney(row.original.gross, currency, locale),
+    },
+    {
+      id: "net",
+      header: t("revenue.ledger.net"),
+      align: "numeric",
+      cell: ({ row }) => formatMoney(row.original.net, currency, locale),
+    },
+  ];
+  return (
+    <Card data-testid="revenue-trend" data-days={rows.length}>
+      <CardHeader>
+        <CardTitle>{t("studio.trend.revenueTitle")}</CardTitle>
+        <CardDescription>{t("studio.trend.revenueHint")}</CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        {any ? (
+          <>
+            <TrendChart
+              data={rows}
+              xKey="day"
+              legend="bottom"
+              directLabels
+              ariaLabel={t("studio.trend.revenueLabel")}
+              formatValue={(cents) => formatMoney(cents, currency, locale)}
+              series={[
+                { key: "gross", label: t("revenue.ledger.gross"), color: "--chart-2", dash: "dashed" },
+                { key: "net", label: t("revenue.ledger.net"), color: "--chart-1", dash: "solid" },
+              ]}
+            />
+            <Collapsible>
+              <CollapsibleTrigger render={<Button variant="outline" size="sm" />}>
+                {t("studio.trend.showTable")}
+              </CollapsibleTrigger>
+              <CollapsibleContent className="pt-3">
+                <DataTable
+                  caption={t("studio.trend.revenueTitle")}
+                  columns={columns}
+                  rows={rows}
+                  getRowId={(r) => r.date}
+                />
+              </CollapsibleContent>
+            </Collapsible>
+          </>
+        ) : (
+          <EmptyState
+            icon={Invoice01Icon}
+            title={t("studio.trend.revenueEmpty")}
+            description={t("studio.trend.revenueEmptyHint")}
+            headingLevel={3}
+          />
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 const SOURCES = ["subscriptions", "gifts", "tips"] as const;
 
 export function RevenueSources({ summary }: { summary: RevenueSummaryDto }): React.JSX.Element {
@@ -219,12 +300,36 @@ export function RevenueTiers({ summary }: { summary: RevenueSummaryDto }): React
             "data-active": row.active,
             "data-cents": row.monthlyShare.cents,
           })}
-          empty={<EmptyState title={t("revenue.subscribersEmpty")} headingLevel={3} />}
+          empty={
+            <EmptyState
+              title={t("revenue.subscribersEmpty")}
+              description={t("studio.empty.subscribersHint")}
+              headingLevel={3}
+              action={<SetUpTiersButton />}
+            />
+          }
         />
       </CardContent>
     </Card>
   );
 }
+
+/** The revenue empties' way forward: the subscription tiers form below (F25). */
+function SetUpTiersButton(): React.JSX.Element {
+  return (
+    <Button
+      data-testid="empty-state-action"
+      size="sm"
+      nativeButton={false}
+      render={<a href={`#${TIERS_FORM_ID}`} aria-label={t("studio.empty.setUpTiers")} />}
+    >
+      {t("studio.empty.setUpTiers")}
+    </Button>
+  );
+}
+
+/** The tier form's id, the target of "Set up subscription tiers". */
+export const TIERS_FORM_ID = "revenue-tiers-form";
 
 export interface RevenueLedgerProps {
   /** null while the first page loads. */
@@ -310,36 +415,14 @@ export function RevenueLedger({
         </Button>
       }
     >
-      <DataTable
-        caption={t("revenue.ledger.title")}
-        columns={columns}
-        rows={lines ?? []}
-        loading={lines === null}
-        loadingRows={3}
-        getRowId={(line) => line.id}
-        rowProps={(line) => ({
-          "data-testid": "revenue-ledger-row",
-          "data-transaction-id": line.id,
-          "data-type": line.type,
-          "data-tier": line.tier ?? "",
-          "data-quantity": line.quantity,
-          "data-gross": signed(line.gross?.cents),
-          "data-deductions": signed(line.deductions?.cents),
-          "data-net": line.net.cents,
-        })}
-        empty={
-          <EmptyState
-            icon={Invoice01Icon}
-            title={t("revenue.ledger.empty")}
-            description={t("revenue.ledger.emptyHint")}
-            headingLevel={3}
-          />
-        }
+      <ResponsiveRows
+        label={t("revenue.ledger.title")}
+        rows={lines?.map((line) => ledgerStackedRow(line)) ?? null}
         footer={
           hasMore ? (
             <Button
-              data-testid="revenue-ledger-more"
-              variant="ghost"
+              data-testid="revenue-ledger-more-stacked"
+              variant="outline"
               size="sm"
               disabled={loadingMore}
               aria-busy={loadingMore || undefined}
@@ -349,9 +432,98 @@ export function RevenueLedger({
             </Button>
           ) : undefined
         }
+        table={
+          <DataTable
+            caption={t("revenue.ledger.title")}
+            columns={columns}
+            rows={lines ?? []}
+            loading={lines === null}
+            loadingRows={3}
+            getRowId={(line) => line.id}
+            rowProps={(line) => ({
+              "data-testid": "revenue-ledger-row",
+              "data-transaction-id": line.id,
+              "data-type": line.type,
+              "data-tier": line.tier ?? "",
+              "data-quantity": line.quantity,
+              "data-gross": signed(line.gross?.cents),
+              "data-deductions": signed(line.deductions?.cents),
+              "data-net": line.net.cents,
+            })}
+            empty={
+              <EmptyState
+                icon={Invoice01Icon}
+                title={t("revenue.ledger.empty")}
+                description={t("revenue.ledger.emptyHint")}
+                headingLevel={3}
+                action={<SetUpTiersButton />}
+              />
+            }
+            footer={
+              hasMore ? (
+                <Button
+                  data-testid="revenue-ledger-more"
+                  variant="ghost"
+                  size="sm"
+                  disabled={loadingMore}
+                  aria-busy={loadingMore || undefined}
+                  onClick={onLoadMore}
+                >
+                  {t("revenue.ledger.more")}
+                </Button>
+              ) : undefined
+            }
+          />
+        }
       />
     </Section>
   );
+}
+
+/** One ledger line as a stacked row at phone width (F31): date and type, detail, net, breakdown. */
+function ledgerStackedRow(line: RevenueLineDto): StackedRow {
+  const badge = revenueLineBadge(line.type);
+  const detail = ledgerDetail(line);
+  return {
+    id: line.id,
+    attributes: {
+      "data-testid": "revenue-ledger-stacked-row",
+      "data-transaction-id": line.id,
+      "data-net": line.net.cents,
+    },
+    title: (
+      <span className="flex flex-wrap items-center gap-2">
+        <StatusBadge tone={badge.tone}>{badge.label}</StatusBadge>
+        <RelativeTime date={line.occurredAt} className="font-normal text-muted-foreground" />
+      </span>
+    ),
+    value: <MoneyAmount value={line.net} colorNegative />,
+    details: (
+      <>
+        {detail && <span className="break-words">{detail}</span>}
+        {(line.gross || line.deductions) && (
+          // Term/value pairs, not "label: value" text, so no punctuation sits outside the catalog.
+          <KeyValueList
+            dense
+            rows={[
+              ...(line.gross
+                ? [{ term: t("revenue.ledger.gross"), value: <MoneyAmount value={line.gross} colorNegative /> }]
+                : []),
+              ...(line.deductions
+                ? [
+                    {
+                      term: t("revenue.ledger.deductions"),
+                      value: <MoneyAmount value={line.deductions} colorNegative />,
+                    },
+                  ]
+                : []),
+            ]}
+          />
+        )}
+      </>
+    ),
+    actions: line.paymentId ? <BreakdownOpenButton paymentId={line.paymentId} /> : undefined,
+  };
 }
 
 function ledgerDetail(line: RevenueLineDto): string {
@@ -397,7 +569,13 @@ export function PayoutAccountCard({ account }: { account: PayoutAccountDto }): R
           </div>
         )}
         {!account.instructions && !onboarding && (
-          <p className="text-sm text-muted-foreground">{t("revenue.payout.none")}</p>
+          <EmptyState
+            data-testid="revenue-payout-none"
+            icon={Invoice01Icon}
+            title={t("revenue.payout.none")}
+            description={t("studio.empty.payoutHint")}
+            headingLevel={3}
+          />
         )}
       </CardContent>
     </Card>
@@ -420,6 +598,20 @@ export function TierEditor({ tiers, currency, onSave }: TierEditorProps): React.
   const [generation, setGeneration] = React.useState(0);
   const errors = validateTiers(drafts);
   const valid = Object.keys(errors).length === 0 && unparsed.size === 0;
+  // F32: a field's error shows once the field has been left (blur) or the form submitted, never
+  // on first load (a new streamer's empty tiers are not a mistake yet).
+  const [touched, setTouched] = React.useState<ReadonlySet<string>>(() => new Set());
+  const [submitted, setSubmitted] = React.useState(false);
+  const touch = (key: string) => setTouched((prev) => (prev.has(key) ? prev : new Set(prev).add(key)));
+  const shown = (tier: TierDraft["tier"]): { name?: string; price?: string; benefits?: string } => {
+    const all = errors[tier] ?? {};
+    const visible = (field: "name" | "price" | "benefits") => submitted || touched.has(`${tier}.${field}`);
+    return {
+      ...(all.name && visible("name") ? { name: all.name } : {}),
+      ...(all.price && visible("price") ? { price: all.price } : {}),
+      ...(all.benefits && visible("benefits") ? { benefits: all.benefits } : {}),
+    };
+  };
   const onPriceValidity = (tier: TierDraft["tier"], ok: boolean) =>
     setUnparsed((prev) => {
       if (prev.has(tier) !== ok) return prev;
@@ -433,12 +625,15 @@ export function TierEditor({ tiers, currency, onSave }: TierEditorProps): React.
 
   const onSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    setSubmitted(true);
     if (!valid || pending) return;
     setPending(true);
     try {
       const saved = await onSave(tiersInput(drafts, currency));
       setDrafts(tierDrafts(saved));
       setGeneration((g) => g + 1);
+      setTouched(new Set());
+      setSubmitted(false);
       toast.success(t("revenue.tiers.saved"));
     } catch (err) {
       toastActionError(err, t("revenue.tiers.saveFailed"));
@@ -454,6 +649,8 @@ export function TierEditor({ tiers, currency, onSave }: TierEditorProps): React.
       description={t("revenue.tiers.hint")}
       onSubmit={(e) => void onSubmit(e)}
       noValidate
+      id={TIERS_FORM_ID}
+      tabIndex={-1}
     >
       <ResponsiveGrid cols={3}>
         {drafts.map((draft) => (
@@ -461,7 +658,8 @@ export function TierEditor({ tiers, currency, onSave }: TierEditorProps): React.
             key={`${draft.tier}-${generation}`}
             draft={draft}
             currency={currency}
-            errors={errors[draft.tier] ?? {}}
+            errors={shown(draft.tier)}
+            onBlurField={(field) => touch(`${draft.tier}.${field}`)}
             onChange={(patch) => update(draft.tier, patch)}
             onPriceValidity={(ok) => onPriceValidity(draft.tier, ok)}
           />
@@ -472,7 +670,9 @@ export function TierEditor({ tiers, currency, onSave }: TierEditorProps): React.
         <Button
           data-testid="revenue-tiers-save"
           type="submit"
-          disabled={!valid || pending}
+          // Invalid fields do not disable it: submitting shows what to fix (F32). A price that does
+          // not parse yet does, since its cents are stale until it does.
+          disabled={unparsed.size > 0 || pending}
           aria-busy={pending || undefined}
         >
           {t("revenue.tiers.save")}
@@ -494,12 +694,14 @@ function TierFields({
   currency,
   errors,
   onChange,
+  onBlurField,
   onPriceValidity,
 }: {
   draft: TierDraft;
   currency: string;
   errors: { name?: string; price?: string; benefits?: string };
   onChange: (patch: Partial<TierDraft>) => void;
+  onBlurField: (field: "name" | "price" | "benefits") => void;
   onPriceValidity: (valid: boolean) => void;
 }): React.JSX.Element {
   const { locale } = useLocale();
@@ -519,28 +721,32 @@ function TierFields({
           maxLength={MONEY_LIMITS.tierNameMaxLength}
           autoComplete="off"
           aria-invalid={errors.name ? true : undefined}
+          onBlur={() => onBlurField("name")}
           onChange={(e) => onChange({ name: e.currentTarget.value })}
         />
         {errors.name && <FieldError>{errors.name}</FieldError>}
       </Field>
-      <AmountField
-        label={t("revenue.tiers.price")}
-        currency={currency}
-        locale={locale}
-        value={draft.priceCents}
-        min={MONEY_LIMITS.tierMinCents}
-        max={MONEY_LIMITS.tierMaxCents}
-        rangeError={null}
-        formatError={t("money.amountFormat")}
-        onValidityChange={onPriceValidity}
-        errors={errors.price}
-        hint={t("revenue.tiers.priceHint", {
-          min: formatMoney(MONEY_LIMITS.tierMinCents, currency, locale),
-          max: formatMoney(MONEY_LIMITS.tierMaxCents, currency, locale),
-        })}
-        inputProps={priceInput}
-        onValueChange={(priceCents) => onChange({ priceCents })}
-      />
+      {/* AmountField owns its input's blur; the wrapper hears it bubble (React focus events do). */}
+      <div className="contents" onBlur={() => onBlurField("price")}>
+        <AmountField
+          label={t("revenue.tiers.price")}
+          currency={currency}
+          locale={locale}
+          value={draft.priceCents}
+          min={MONEY_LIMITS.tierMinCents}
+          max={MONEY_LIMITS.tierMaxCents}
+          rangeError={null}
+          formatError={t("money.amountFormat")}
+          onValidityChange={onPriceValidity}
+          errors={errors.price}
+          hint={t("revenue.tiers.priceHint", {
+            min: formatMoney(MONEY_LIMITS.tierMinCents, currency, locale),
+            max: formatMoney(MONEY_LIMITS.tierMaxCents, currency, locale),
+          })}
+          inputProps={priceInput}
+          onValueChange={(priceCents) => onChange({ priceCents })}
+        />
+      </div>
       <Field data-invalid={errors.benefits ? true : undefined}>
         <FieldLabel htmlFor={benefitsId}>{t("revenue.tiers.benefits")}</FieldLabel>
         <Textarea
@@ -549,6 +755,8 @@ function TierFields({
           value={draft.benefits}
           maxLength={MONEY_LIMITS.tierBenefitsMaxLength}
           rows={3}
+          aria-invalid={errors.benefits ? true : undefined}
+          onBlur={() => onBlurField("benefits")}
           onChange={(e) => onChange({ benefits: e.currentTarget.value })}
         />
         <FieldDescription>{t("revenue.tiers.benefitsHint")}</FieldDescription>

@@ -1,31 +1,24 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { ConfirmDialog, SkeletonText } from "@commonair/ui";
-import { KeyValueList } from "@commonair/ui/blocks/data";
 import { PageHeader } from "@commonair/ui/blocks/headers";
 import { Button } from "@commonair/ui/components/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@commonair/ui/components/card";
-import { FieldGroup } from "@commonair/ui/components/field";
 import { PageContainer } from "@commonair/ui/layouts";
-import { toast } from "@commonair/ui/toast";
 import { Link, Navigate, createFileRoute } from "@tanstack/react-router";
-import * as React from "react";
-import { ChannelAppearanceCard } from "../../components/channel-appearance.tsx";
-import { DiscordWebhookSection } from "../../components/discord-webhook-section.tsx";
-import { DvrSettings } from "../../components/dvr-settings.tsx";
-import { FederationSettings } from "../../components/federation/settings.tsx";
-import { FormError } from "../../components/form-error.tsx";
-import { IngestServerUrl, NewStreamKey } from "../../components/ingest-values.tsx";
+import type * as React from "react";
 import { DashboardLabelNotices } from "../../components/safety/appeals.tsx";
-import { SimulcastSection } from "../../components/simulcast-section.tsx";
-import { StreamHealthCard } from "../../components/stream-health-card.tsx";
+import { ControlRoom } from "../../components/studio/control-room.tsx";
 import { t } from "../../i18n/index.ts";
-import { api } from "../../lib/api.ts";
 import { getSessionUser, useBootstrap } from "../../lib/bootstrap.ts";
 import { requireSession } from "../../lib/guard.ts";
 import { titleHead } from "../../lib/page-title.ts";
 
+/**
+ * `/dashboard`, the stream manager (F21): a control room, not a settings page. The preview plays
+ * muted (the player autoplays muted), chat has its moderation actions, and the setup cards live on
+ * `/dashboard/settings`. A board: `wide` (F26). Header actions that repeat the sidebar are gone;
+ * "View channel" is the one place the sidebar does not go.
+ */
 export const Route = createFileRoute("/_studio/dashboard")({
   head: () => titleHead(t("pageTitle.studioDashboard")),
   // Server-side guard (SSR and client navigation); the component keeps a client fallback.
@@ -36,148 +29,26 @@ export const Route = createFileRoute("/_studio/dashboard")({
 function DashboardPage(): React.JSX.Element {
   const { me } = useBootstrap();
   if (!me) return <Navigate to="/signin" replace />;
-  const channel = me.channelSlug ?? me.username;
+  const slug = me.channelSlug ?? me.username;
   return (
-    <PageContainer width="narrow" className="flex flex-col gap-6 py-8">
+    <PageContainer width="wide" data-testid="dashboard-page" className="flex flex-col gap-6 py-8">
       <PageHeader
-        title={t("dashboard.title")}
+        title={t("studio.manager.title")}
+        description={t("studio.manager.intro")}
         actions={
-          <>
-            <Button
-              data-testid="revenue-link"
-              variant="outline"
-              size="sm"
-              nativeButton={false}
-              render={<Link to="/revenue" />}
-            >
-              {t("dashboard.revenue")}
-            </Button>
-            <Button
-              data-testid="relays-link"
-              variant="outline"
-              size="sm"
-              nativeButton={false}
-              render={<Link to="/relays" />}
-            >
-              {t("dashboard.relays")}
-            </Button>
-            <Button
-              data-testid="channel-link"
-              variant="outline"
-              size="sm"
-              nativeButton={false}
-              render={<Link to="/$channel" params={{ channel }} />}
-            >
-              {t("dashboard.viewChannel")}
-            </Button>
-          </>
+          <Button
+            data-testid="channel-link"
+            variant="outline"
+            size="sm"
+            nativeButton={false}
+            render={<Link to="/$channel" params={{ channel: slug }} />}
+          >
+            {t("dashboard.viewChannel")}
+          </Button>
         }
       />
       <DashboardLabelNotices />
-      <StreamHealthCard key={channel} channel={channel} />
-      <StreamSetup channel={channel} />
-      <DvrSettings key={`dvr:${channel}`} channel={channel} />
-      <SimulcastSection key={`simulcast-${channel}`} channel={channel} />
-      <DiscordWebhookSection key={`discord-${channel}`} channel={channel} />
-      <ChannelAppearanceCard key={`appearance-${channel}`} channel={channel} />
-      <FederationSettings key={`fed:${channel}`} channel={channel} />
+      <ControlRoom key={slug} slug={slug} username={me.username} />
     </PageContainer>
-  );
-}
-
-interface Ingest {
-  rtmpUrl: string;
-  activeKeyPrefix: string | null;
-}
-
-function StreamSetup({ channel }: { channel: string }): React.JSX.Element {
-  const { config } = useBootstrap();
-  const [ingest, setIngest] = React.useState<Ingest | null>(null);
-  const [loadError, setLoadError] = React.useState(false);
-  const [newKey, setNewKey] = React.useState<string | null>(null);
-  const [rotating, setRotating] = React.useState(false);
-
-  React.useEffect(() => {
-    let cancelled = false;
-    api()
-      .stream.ingest({ channel })
-      .then((info) => {
-        if (!cancelled) setIngest({ rtmpUrl: info.rtmpUrl, activeKeyPrefix: info.activeKeyPrefix });
-      })
-      .catch(() => {
-        if (!cancelled) setLoadError(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [channel]);
-
-  const rotate = async () => {
-    setRotating(true);
-    try {
-      const created = await api().stream.rotateKey({ channel });
-      setNewKey(created.key);
-      setIngest((prev) => (prev ? { ...prev, activeKeyPrefix: created.prefix } : prev));
-      toast.success(t("dashboard.keyRotated"));
-    } finally {
-      setRotating(false);
-    }
-  };
-
-  const serverUrl = ingest?.rtmpUrl ?? config.ingestRtmpUrl;
-  const rotateButton = (
-    <Button data-testid="stream-key-rotate" variant="outline" disabled={!ingest || rotating}>
-      {ingest?.activeKeyPrefix ? t("dashboard.rotateKey") : t("dashboard.createKey")}
-    </Button>
-  );
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{t("dashboard.streamSetup")}</CardTitle>
-        <CardDescription>{t("dashboard.streamSetupHint")}</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <FieldGroup>
-          {loadError && <FormError>{t("dashboard.loadFailed")}</FormError>}
-          <IngestServerUrl value={serverUrl} />
-          {ingest ? (
-            <KeyValueList
-              rows={[
-                {
-                  term: t("dashboard.activeKey"),
-                  value: (
-                    <>
-                      <span data-testid="stream-key-prefix">{ingest.activeKeyPrefix ?? ""}</span>
-                      {ingest.activeKeyPrefix ? t("dashboard.keyTruncated") : t("dashboard.noKey")}
-                    </>
-                  ),
-                },
-              ]}
-            />
-          ) : (
-            <SkeletonText lines={1} />
-          )}
-          {newKey && <NewStreamKey value={newKey} />}
-          <div>
-            {ingest?.activeKeyPrefix ? (
-              <ConfirmDialog
-                trigger={rotateButton}
-                title={t("dashboard.rotateConfirmTitle")}
-                description={t("dashboard.rotateConfirmBody")}
-                confirmLabel={t("dashboard.rotateKey")}
-                variant="destructive"
-                onConfirm={rotate}
-                onError={() => toast.error(t("dashboard.rotateFailed"))}
-              />
-            ) : (
-              React.cloneElement(rotateButton, {
-                onClick: () => void rotate().catch(() => toast.error(t("dashboard.rotateFailed"))),
-              })
-            )}
-          </div>
-        </FieldGroup>
-      </CardContent>
-    </Card>
   );
 }

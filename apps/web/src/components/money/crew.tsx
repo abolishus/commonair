@@ -25,7 +25,7 @@ import { Section } from "@commonair/ui/blocks/headers";
 import { Alert, AlertDescription } from "@commonair/ui/components/alert";
 import { Button } from "@commonair/ui/components/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@commonair/ui/components/card";
-import { Field, FieldDescription, FieldLabel } from "@commonair/ui/components/field";
+import { Field, FieldLabel } from "@commonair/ui/components/field";
 import { Input } from "@commonair/ui/components/input";
 import {
   Item,
@@ -45,6 +45,8 @@ import type { z } from "zod";
 import { t, type MessageKey } from "../../i18n/index.ts";
 import { isSessionExpired, toastActionError } from "../../lib/action-error.ts";
 import { errorCode } from "../../lib/api.ts";
+import { DateTimeField } from "../studio/date-time-field.tsx";
+import { EMPTY_DATE_TIME, dateTimeIso, upcomingYears, type DateTimeParts } from "../studio/date-time.ts";
 
 export type SplitDto = z.infer<typeof dto.RevenueSplit>;
 export type SplitBasis = (typeof SPLIT_BASES)[number];
@@ -172,11 +174,18 @@ export interface ProposeInput {
   endsAt?: string;
 }
 
-/** Local `datetime-local` value → ISO instant, or undefined when empty or invalid. */
-function isoOf(local: string): string | undefined {
-  if (!local) return undefined;
-  const d = new Date(local);
-  return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
+/** The chosen instant as ISO; undefined when left empty or not yet a whole date. */
+function isoOf(parts: DateTimeParts): string | undefined {
+  const r = dateTimeIso(parts);
+  return "iso" in r ? r.iso : undefined;
+}
+
+/** The field's error once it has been touched or the form submitted (F32 timing), else null. */
+function windowError(parts: DateTimeParts, show: boolean): string | null {
+  if (!show) return null;
+  const r = dateTimeIso(parts);
+  if ("error" in r) return r.error === "incomplete" ? t("studio.dateTime.incomplete") : t("studio.dateTime.invalid");
+  return null;
 }
 
 /** The owner's propose form with its live preview. */
@@ -184,18 +193,27 @@ export function CrewProposeForm({
   currency,
   streamerShare,
   onPropose,
+  now,
 }: {
   currency: string;
   /** The creator's share of a payment; null while it loads (the example is not priced on a guess). */
   streamerShare: number | null;
   onPropose: (input: ProposeInput) => Promise<void>;
+  /** The request time, for the year list (server render and hydration agree). */
+  now?: number;
 }): React.JSX.Element {
   const { locale } = useLocale();
   const id = React.useId();
   const [basis, setBasis] = React.useState<SplitBasis>("tips");
   const [rows, setRows] = React.useState<CrewRow[]>([{ username: "", bps: "" }]);
-  const [startsAt, setStartsAt] = React.useState("");
-  const [endsAt, setEndsAt] = React.useState("");
+  const [startsAt, setStartsAt] = React.useState<DateTimeParts>(EMPTY_DATE_TIME);
+  const [endsAt, setEndsAt] = React.useState<DateTimeParts>(EMPTY_DATE_TIME);
+  const [submitted, setSubmitted] = React.useState(false);
+  const [touched, setTouched] = React.useState({ starts: false, ends: false });
+  const [clock] = React.useState(() => now ?? Date.now());
+  const years = upcomingYears(new Date(clock));
+  const startsError = windowError(startsAt, submitted || touched.starts);
+  const endsError = windowError(endsAt, submitted || touched.ends);
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -214,7 +232,8 @@ export function CrewProposeForm({
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!canSubmit) return;
+    setSubmitted(true);
+    if (!canSubmit || "error" in dateTimeIso(startsAt) || "error" in dateTimeIso(endsAt)) return;
     setPending(true);
     setError(null);
     try {
@@ -227,8 +246,9 @@ export function CrewProposeForm({
         ...(ends ? { endsAt: ends } : {}),
       });
       setRows([{ username: "", bps: "" }]);
-      setStartsAt("");
-      setEndsAt("");
+      setStartsAt(EMPTY_DATE_TIME);
+      setEndsAt(EMPTY_DATE_TIME);
+      setSubmitted(false);
       toast.success(t("splits.propose.done"));
     } catch (err) {
       if (isSessionExpired(err)) toastActionError(err, t("splits.propose.failed"));
@@ -325,34 +345,34 @@ export function CrewProposeForm({
               </Button>
             </div>
           )}
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <Field>
-              <FieldLabel htmlFor={`${id}-starts`}>{t("splits.startsAt")}</FieldLabel>
-              <Input
-                id={`${id}-starts`}
-                type="datetime-local"
-                value={startsAt}
-                onChange={(e) => setStartsAt(e.currentTarget.value)}
-              />
-              <FieldDescription>{t("splits.startsAtHint")}</FieldDescription>
-            </Field>
-            <Field>
-              <FieldLabel htmlFor={`${id}-ends`}>{t("splits.endsAt")}</FieldLabel>
-              <Input
-                id={`${id}-ends`}
-                type="datetime-local"
-                value={endsAt}
-                onChange={(e) => setEndsAt(e.currentTarget.value)}
-              />
-              <FieldDescription>{t("splits.endsAtHint")}</FieldDescription>
-            </Field>
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <DateTimeField
+              data-testid="crew-starts"
+              legend={t("splits.startsAt")}
+              hint={t("splits.startsAtHint")}
+              value={startsAt}
+              onValueChange={setStartsAt}
+              onBlur={() => setTouched((p) => ({ ...p, starts: true }))}
+              years={years}
+              error={startsError}
+            />
+            <DateTimeField
+              data-testid="crew-ends"
+              legend={t("splits.endsAt")}
+              hint={t("splits.endsAtHint")}
+              value={endsAt}
+              onValueChange={setEndsAt}
+              onBlur={() => setTouched((p) => ({ ...p, ends: true }))}
+              years={years}
+              error={endsError}
+            />
           </div>
           <section
             data-testid="crew-preview"
             data-example-cents={PREVIEW_EXAMPLE_CENTS}
             data-recipient-cents={preview?.crew[0]?.cents ?? ""}
             aria-live="polite"
-            className="flex flex-col gap-1 rounded-md border border-border p-3 text-sm"
+            className="flex flex-col gap-1 rounded-md border border-border p-3 text-xs/relaxed"
           >
             <h3 className="font-medium">{t("splits.preview.title")}</h3>
             {preview ? (
@@ -542,12 +562,22 @@ export function CrewSplitList({
   splits: readonly SplitDto[];
   meId: string;
   canEnd: boolean;
-  empty: { title: MessageKey; hint: MessageKey };
+  /** `action`: the owner's way to fill it (F25); a list others fill has none. */
+  empty: { title: MessageKey; hint: MessageKey; action?: React.ReactNode };
   onAnswer: (id: string, accept: boolean) => Promise<void>;
   onEnd: (id: string) => Promise<void>;
 }): React.JSX.Element {
   if (splits.length === 0)
-    return <EmptyState icon={UserGroupIcon} title={t(empty.title)} description={t(empty.hint)} />;
+    return (
+      <EmptyState
+        data-testid="crew-empty"
+        icon={UserGroupIcon}
+        title={t(empty.title)}
+        description={t(empty.hint)}
+        headingLevel={3}
+        action={empty.action}
+      />
+    );
   return (
     <ItemGroup className="gap-3">
       {splits.map((s) => (

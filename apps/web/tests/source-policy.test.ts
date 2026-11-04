@@ -469,7 +469,6 @@ describe("detectors", () => {
  * shrinks: an entry that has gained a `head` fails until it is removed here.
  */
 export const PENDING_HEAD: Readonly<Record<string, string>> = {
-  "src/routes/_studio/import.tsx": "B8-server (owns components/twitch-import), then D5-studio",
 };
 
 /** Pathless layouts: no page of their own (the root's tagline title is the fallback). */
@@ -554,5 +553,65 @@ describe("page titles (F15)", () => {
     expect(
       hasHead("export const Route = createRootRoute({\n  loader: () => 1,\n  head: () => ({ meta: [] }),\n});"),
     ).toBe(true);
+  });
+});
+
+/**
+ * F26 (D5-studio): one width and header rule for the studio. Grids and boards use `wide`, every
+ * other page the default width (no `narrow` or `form` page in the studio); the `PageHeader` lives
+ * in the route file, always with a description. STUDIO_WIDE lists the boards; a page that renders
+ * its header inside a component another unit owns waits in PENDING_ROUTE_HEADER (the list only
+ * shrinks: an entry whose route has gained its header fails until it is removed here).
+ */
+export const STUDIO_WIDE: ReadonlySet<string> = new Set([
+  "src/routes/_studio/dashboard.tsx",
+  "src/routes/_studio/mod.$channel.tsx",
+  "src/routes/_studio/overlays.tsx",
+  "src/routes/_studio/interact.tsx",
+  "src/routes/_studio/bot.tsx",
+  "src/routes/_studio/captions.tsx",
+  "src/routes/_studio/content.tsx",
+]);
+
+export const PENDING_ROUTE_HEADER: Readonly<Record<string, string>> = {
+  "src/routes/_studio/rehearse.tsx": "components/rehearsal (RehearsalPanel, RehearsalWatchView) renders it",
+  "src/routes/_studio/move.tsx": "components/portability/move-panel.tsx renders it",
+};
+
+describe("studio widths and headers (F26)", () => {
+  const studio = sources(join(SRC, "routes/_studio"))
+    .filter((f) => f.endsWith(".tsx"))
+    .map((f) => relative(WEB, f));
+  const read = (f: string) => lex(readFileSync(join(WEB, f), "utf8"));
+
+  it("finds the studio pages", () => {
+    expect(studio).toContain("src/routes/_studio/dashboard.tsx");
+    expect(studio.length).toBeGreaterThanOrEqual(18);
+  });
+
+  it.each(studio)("%s uses wide for a board and the default width otherwise", (file) => {
+    const widths = [...read(file).matchAll(/<PageContainer\b[^>]*?\bwidth="(\w+)"/g)].map((m) => m[1]);
+    expect(widths).toEqual(STUDIO_WIDE.has(file) ? ["wide"] : []);
+    expect(read(file)).toMatch(/<PageContainer\b/);
+  });
+
+  it.each(studio.filter((f) => !(f in PENDING_ROUTE_HEADER)))(
+    "%s renders its PageHeader in the route, with a description",
+    (file) => {
+      const code = read(file);
+      const headers = [...code.matchAll(/<PageHeader\b/g)].map((m) => m.index ?? 0);
+      expect(headers.length).toBeGreaterThanOrEqual(1);
+      // The element's props up to its first JSX child or the next element: `description=` is among them.
+      for (const at of headers) expect(code.slice(at, at + 400).split(/<(?!PageHeader)/)[0]).toMatch(/\bdescription=/);
+    },
+  );
+
+  it.each(Object.entries(PENDING_ROUTE_HEADER))("PENDING_ROUTE_HEADER %s (%s) has no route header yet", (file) => {
+    expect(existsSync(join(WEB, file))).toBe(true);
+    expect(read(file)).not.toMatch(/<PageHeader\b/);
+  });
+
+  it("STUDIO_WIDE names only studio pages that exist", () => {
+    for (const file of STUDIO_WIDE) expect(existsSync(join(WEB, file))).toBe(true);
   });
 });

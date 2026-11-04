@@ -17,6 +17,7 @@ import {
   RevenueStats,
   RevenueStatsSkeleton,
   RevenueTiers,
+  RevenueTrend,
   TierEditor,
 } from "../../components/money/revenue.tsx";
 import { useLoad } from "../../components/money/use-load.ts";
@@ -85,6 +86,7 @@ function RevenueView({
       {summary.data ? (
         <>
           <RevenueStats summary={summary.data} />
+          <RevenueTrend summary={summary.data} />
           <ResponsiveGrid cols={2}>
             <RevenueSources summary={summary.data} />
             <RevenueTiers summary={summary.data} />

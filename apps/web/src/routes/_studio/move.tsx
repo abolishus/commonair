@@ -27,7 +27,7 @@ function MoveRoute(): React.JSX.Element {
   if (!me) return <Navigate to="/signin" replace />;
   const channel = ownChannel(me);
   return (
-    <PageContainer width="narrow" className="flex flex-col gap-6 py-8">
+    <PageContainer className="flex flex-col gap-6 py-8">
       <MovePage key={channel} channel={channel} />
     </PageContainer>
   );

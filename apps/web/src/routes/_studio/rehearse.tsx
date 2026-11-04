@@ -31,7 +31,7 @@ function RehearseRoute(): React.JSX.Element {
   const own = ownChannel(me);
   const channel = search.channel ?? own;
   return (
-    <PageContainer width="narrow" className="flex flex-col gap-6 py-8">
+    <PageContainer className="flex flex-col gap-6 py-8">
       {channel === own ? (
         <RehearsePage key={channel} channel={channel} />
       ) : (

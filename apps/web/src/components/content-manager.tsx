@@ -21,6 +21,7 @@ import {
   type VodDto,
 } from "../lib/content.ts";
 import { useLoad } from "./money/use-load.ts";
+import { StudioLinkAction } from "./studio/empty-action.tsx";
 
 function labels(): ContentBoardLabels {
   return {
@@ -125,6 +126,11 @@ export function ContentManager({ channel }: { channel: string }): React.JSX.Elem
       onDeleteVod={deleteVod}
       onDeleteClip={deleteClip}
       onError={(err) => toastActionError(err, t("content.actionFailed"))}
+      // F25: recording is a stream setting; clips come from live viewers, so both go to the stream.
+      emptyActions={{
+        vods: <StudioLinkAction to="/dashboard/settings">{t("studio.empty.turnOnRecording")}</StudioLinkAction>,
+        clips: <StudioLinkAction to="/dashboard">{t("studio.empty.openStreamManager")}</StudioLinkAction>,
+      }}
     />
   );
 }

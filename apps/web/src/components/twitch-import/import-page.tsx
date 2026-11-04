@@ -13,7 +13,6 @@
  */
 import { EmptyState, RelativeTime, SkeletonGroup, SkeletonText, StatusBadge } from "@commonair/ui";
 import { AlertCallout } from "@commonair/ui/blocks/feedback";
-import { PageHeader } from "@commonair/ui/blocks/headers";
 import { Button } from "@commonair/ui/components/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@commonair/ui/components/card";
 import { Checkbox } from "@commonair/ui/components/checkbox";
@@ -82,7 +81,6 @@ export function TwitchImportView(props: TwitchImportViewProps): React.JSX.Elemen
   const { status } = props;
   return (
     <div data-testid="import-page" className="flex min-w-0 flex-col gap-6">
-      <PageHeader title={t("twitchImport.pageTitle")} description={t("twitchImport.pageIntro")} />
       {props.loadFailed && <FormError>{t("twitchImport.loadFailed")}</FormError>}
       {status === null ? (
         !props.loadFailed && (
@@ -261,7 +259,12 @@ function PreviewBody(
           {t("twitchImport.emotes.heading")}
         </h3>
         {emotes.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{t("twitchImport.emotes.none")}</p>
+          <EmptyState
+            data-testid="import-emotes-none"
+            icon={FileImportIcon}
+            headingLevel={4}
+            title={t("twitchImport.emotes.none")}
+          />
         ) : (
           <ul className="flex min-w-0 flex-col gap-2" aria-label={t("twitchImport.emotes.heading")}>
             {emotes.map((item) => (
