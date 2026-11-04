@@ -141,6 +141,20 @@ describe("what the rail lists", () => {
   });
 });
 
+describe("the shared feed", () => {
+  it("does not ask again when the home page primed it first (its layout effect runs before subscribers)", async () => {
+    let calls = 0;
+    fake.home = () => {
+      calls++;
+      return new Promise(() => {});
+    };
+    primeHomeFeed(home({ live: [live("a")] }));
+    await renderInRouter(shell());
+    expect(rows()).toEqual([["a", "true"]]);
+    expect(calls).toBe(0);
+  });
+});
+
 describe("collapsing", () => {
   beforeEach(() => primeHomeFeed(home({ live: [live("a")] })));
 
@@ -165,6 +179,26 @@ describe("collapsing", () => {
     // Wide again, but the tab remembers.
     await renderInRouter(shell());
     await waitFor(() => expect(rail().getAttribute("data-state")).toBe("collapsed"));
+  });
+
+  it("keeps a ⌘B / Ctrl-B choice too, the sidebar's own shortcut", async () => {
+    await renderInRouter(shell());
+    expect(rail().getAttribute("data-state")).toBe("expanded");
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "b", ctrlKey: true });
+    });
+    expect(rail().getAttribute("data-state")).toBe("collapsed");
+    expect(sessionStorage.getItem(RAIL_KEY)).toBe("collapsed");
+    cleanup();
+    await renderInRouter(shell());
+    await waitFor(() => expect(rail().getAttribute("data-state")).toBe("collapsed"));
+  });
+
+  it("does not store the width-driven state as a choice", async () => {
+    screenWidth(false);
+    await renderInRouter(shell());
+    await waitFor(() => expect(rail().getAttribute("data-state")).toBe("collapsed"));
+    expect(sessionStorage.getItem(RAIL_KEY)).toBeNull();
   });
 
   it("still renders and toggles when storage throws", async () => {

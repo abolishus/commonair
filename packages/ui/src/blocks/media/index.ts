@@ -5,11 +5,6 @@ export { StreamGrid, type StreamGridProps, type StreamGridCardProps } from "./st
 export {
   CategoryTile,
   CategoryGrid,
-  CategoryArt,
-  categoryFallback,
-  categoryKind,
-  type CategoryArtProps,
-  type CategoryKind,
   type CategoryTileData,
   type CategoryTileProps,
   type CategoryGridProps,

@@ -13,10 +13,17 @@ import * as React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { ART, boot, category, home, live, renderInRouter } from "./d1-fixtures.tsx";
 
-const fake = vi.hoisted(() => ({ boot: null as unknown }));
+const fake = vi.hoisted(() => ({ boot: null as unknown, homeCalls: 0 }));
 vi.mock("../src/lib/bootstrap.ts", () => ({ useBootstrap: () => fake.boot }));
 vi.mock("../src/lib/api.ts", () => ({
-  api: () => ({ directory: { home: async () => new Promise(() => {}) } }),
+  api: () => ({
+    directory: {
+      home: async () => {
+        fake.homeCalls++;
+        return new Promise(() => {});
+      },
+    },
+  }),
   errorCode: () => null,
   serverApi: () => {
     throw new Error("no server api in tests");
@@ -32,6 +39,7 @@ const { searchSearch } = await import("../src/components/discovery/search-params
 
 beforeEach(() => {
   fake.boot = boot();
+  fake.homeCalls = 0;
   resetHomeFeed();
   sessionStorage.clear();
 });
@@ -172,6 +180,14 @@ describe("recent searches (this tab only)", () => {
     expect(readRecentSearches()).toEqual(["f", "e", "d", "A", "c"]);
   });
 
+  it("keeps one entry for a query typed with pauses (a prefix gives way to the longer query)", () => {
+    for (const q of ["cozy", "str", "strea", "Streamer"]) rememberSearch(q);
+    expect(readRecentSearches()).toEqual(["Streamer", "cozy"]);
+    // A shorter query after a longer one is a new search; the longer one stays.
+    rememberSearch("stream");
+    expect(readRecentSearches()).toEqual(["stream", "Streamer", "cozy"]);
+  });
+
   it("survives storage that throws", () => {
     const spy = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
       throw new Error("blocked");
@@ -215,6 +231,16 @@ describe("the ⌘K palette", () => {
       fireEvent.keyDown(document, { key: "K", ctrlKey: true });
     });
     expect(await screen.findByRole("dialog")).toBeTruthy();
+  });
+
+  it("asks for directory.home only while open (it is mounted on every page for its hotkey)", async () => {
+    await renderInRouter(<Palette />);
+    expect(fake.homeCalls).toBe(0);
+    await act(async () => {
+      fireEvent.keyDown(document, { key: "k", ctrlKey: true });
+    });
+    await screen.findByRole("dialog");
+    expect(fake.homeCalls).toBe(1);
   });
 
   it("choosing a live channel goes to it", async () => {

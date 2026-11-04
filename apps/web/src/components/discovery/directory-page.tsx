@@ -73,7 +73,7 @@ export function DirectoryPage({ data, view, tag }: DirectoryPageProps): React.JS
           {view === "categories" ? (
             <CategoriesView key="categories" initial={data.categories} live={data.live} />
           ) : (
-            <LiveView key={tag ?? ""} initial={data.live} tag={tag} />
+            <LiveView key={tag ?? ""} initial={(tag ? data.tagged : undefined) ?? data.live} tag={tag} />
           )}
         </>
       )}
@@ -81,7 +81,10 @@ export function DirectoryPage({ data, view, tag }: DirectoryPageProps): React.JS
   );
 }
 
-/** Filter by tag (a combobox of the tags on live channels). Picking one lists the live channels with it. */
+/**
+ * Filter by tag (a combobox of the tags on every live channel, not only the filtered ones, so the
+ * viewer can switch tags directly). Picking one lists the live channels with it.
+ */
 export function TagFilter({ options, tag }: { options: string[]; tag?: string }): React.JSX.Element {
   const navigate = useNavigate();
   const id = React.useId();

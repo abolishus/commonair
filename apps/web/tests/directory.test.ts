@@ -43,14 +43,14 @@ const home = (over: Partial<DirectoryHome> = {}): DirectoryHome => ({
 const ids = (h: DirectoryHome, signedIn: boolean) => directorySections(h, signedIn).map((s) => s.id);
 
 describe("directorySections", () => {
-  it("orders spotlight, new, following, live (D1: following before live, so dedupe keeps it)", () => {
+  it("orders spotlight, new, live, following", () => {
     const h = home({
       following: [card("f", "following")],
       live: [card("l")],
       newAndLive: [card("n", "new")],
       spotlight: [card("s", "spotlight")],
     });
-    expect(ids(h, true)).toEqual(["spotlight", "new", "following", "live"]);
+    expect(ids(h, true)).toEqual(["spotlight", "new", "live", "following"]);
   });
 
   it("drops empty sections", () => {
@@ -71,11 +71,11 @@ describe("directorySections", () => {
     expect(directorySections(home({ following: [card("f")] }), false)).toEqual([]);
   });
 
-  it("keeps the API's card order and shows each channel once (D1, F8: the first section wins)", () => {
+  it("keeps the API's card order and lets a channel appear in several sections", () => {
     const a = card("a");
     const b = card("b");
     const sections = directorySections(home({ spotlight: [a], live: [b, a] }), false);
-    expect(sections.map((s) => s.cards.map((c) => c.channel.slug))).toEqual([["a"], ["b"]]);
+    expect(sections.map((s) => s.cards.map((c) => c.channel.slug))).toEqual([["a"], ["b", "a"]]);
   });
 });
 

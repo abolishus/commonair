@@ -6,7 +6,6 @@
  * D1-web (F1, F10): `/directory`. Categories sorted by live channels then viewers, the tag filter,
  * the generated fallback tile (the same for the same slug, every time), and "Show more".
  */
-import { categoryFallback, categoryKind } from "@commonair/ui/blocks/media";
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { ART, GAMES, MUSIC, boot, category, home, live, offline, renderInRouter } from "./d1-fixtures.tsx";
@@ -117,31 +116,67 @@ describe("the category grid", () => {
   });
 });
 
+/** The generated tile's tone and glyph kind for each slug, read off a rendered grid. */
+async function fallbacks(slugs: string[]): Promise<Map<string, [string | null, string | null]>> {
+  const view = await renderInRouter(
+    <CategoriesView
+      initial={{ items: slugs.map((slug) => category({ id: `cat-${slug}`, slug, name: slug }, 1)), nextCursor: null }}
+      live={{ items: [], nextCursor: null }}
+    />,
+    "/directory",
+  );
+  const out = new Map<string, [string | null, string | null]>();
+  for (const slug of slugs) {
+    const art = document.querySelector(`[data-category="${slug}"] [data-slot="category-art"]`);
+    out.set(slug, [art?.getAttribute("data-tone") ?? null, art?.getAttribute("data-fallback") ?? null]);
+  }
+  view.unmount();
+  return out;
+}
+
 describe("the fallback tile (F10)", () => {
-  it("is the same for the same slug, every time", () => {
-    expect(categoryFallback("art")).toEqual(categoryFallback("art"));
-    expect(categoryFallback("hollow-depths")).toEqual(categoryFallback("hollow-depths"));
+  it("is the same for the same slug, every time", async () => {
+    const first = await fallbacks(["art", "hollow-depths"]);
+    const second = await fallbacks(["hollow-depths", "art"]);
+    expect(second.get("art")).toEqual(first.get("art"));
+    expect(second.get("hollow-depths")).toEqual(first.get("hollow-depths"));
   });
 
-  it("spreads slugs over the tones", () => {
-    const tones = new Set(
-      ["art", "music", "games", "just-chatting", "speedrunning", "food-drink", "retro", "chess", "podcasts"].map(
-        (s) => categoryFallback(s).tone,
-      ),
-    );
+  it("spreads slugs over the tones", async () => {
+    const slugs = [
+      "art",
+      "music",
+      "games",
+      "just-chatting",
+      "speedrunning",
+      "food-drink",
+      "retro",
+      "chess",
+      "podcasts",
+    ];
+    const tones = new Set([...(await fallbacks(slugs)).values()].map(([tone]) => tone));
     expect(tones.size).toBeGreaterThan(2);
-    for (const tone of tones) expect(tone).toBeGreaterThanOrEqual(0);
+    for (const tone of tones) expect(Number(tone)).toBeGreaterThanOrEqual(0);
   });
 
-  it("picks a glyph by the kind its slug names, by word, else a neutral one", () => {
-    expect(categoryKind("art")).toBe("art");
-    expect(categoryKind("music")).toBe("music");
-    expect(categoryKind("just-chatting")).toBe("talk");
-    expect(categoryKind("software-game-dev")).toBe("tech");
-    expect(categoryKind("tabletop-rpgs")).toBe("games");
-    // "starfall" contains "art" but is not art.
-    expect(categoryKind("starfall")).toBe("other");
-    expect(categoryKind("")).toBe("other");
+  it("picks a glyph by the kind its slug names, by word, else a neutral one", async () => {
+    const kinds = await fallbacks([
+      "art",
+      "music",
+      "just-chatting",
+      "software-game-dev",
+      "tabletop-rpgs",
+      // "starfall" contains "art" but is not art.
+      "starfall",
+    ]);
+    expect([...kinds].map(([slug, [, kind]]) => [slug, kind])).toEqual([
+      ["art", "art"],
+      ["music", "music"],
+      ["just-chatting", "talk"],
+      ["software-game-dev", "tech"],
+      ["tabletop-rpgs", "games"],
+      ["starfall", "other"],
+    ]);
   });
 
   it("renders the same tone and glyph on two renders, and art instead when there is box art", async () => {
@@ -157,7 +192,8 @@ describe("the fallback tile (F10)", () => {
     const first = await renderInRouter(view(), "/directory");
     const art = () => document.querySelector('[data-category="art"] [data-slot="category-art"]');
     const before = [art()?.getAttribute("data-tone"), art()?.getAttribute("data-fallback")];
-    expect(before).toEqual([String(categoryFallback("art").tone), "art"]);
+    expect(before[0]).toMatch(/^\d+$/);
+    expect(before[1]).toBe("art");
     expect(document.querySelector('[data-category="music"] img')?.getAttribute("src")).toBe("/art/music.svg");
     first.unmount();
     await renderInRouter(view(), "/directory");
@@ -196,6 +232,25 @@ describe("the tag filter and the Live channels view", () => {
       fireEvent.click(option);
     });
     await waitFor(() => expect(router.state.location.search).toEqual({ view: "live", tag: "pixel" }));
+  });
+
+  it("with a tag picked, still offers every live tag and lists only the tagged channels", async () => {
+    const data = {
+      categories: { items: [category(ART, 2)], nextCursor: null },
+      live: {
+        items: [live("a1", { category: ART, tags: ["cozy"] }), live("a2", { category: ART, tags: ["pixel"] })],
+        nextCursor: null,
+      },
+      tagged: { items: [live("a1", { category: ART, tags: ["cozy"] })], nextCursor: null },
+    };
+    await renderInRouter(<DirectoryPage data={data} view="live" tag="cozy" />, "/directory?tag=cozy");
+    expect([...document.querySelectorAll('[data-testid="stream-card"]')]).toHaveLength(1);
+    const input = screen.getByRole("combobox");
+    await act(async () => {
+      input.focus();
+      fireEvent.keyDown(input, { key: "ArrowDown" });
+    });
+    expect(await screen.findByRole("option", { name: "pixel" })).toBeTruthy();
   });
 
   it("the live view lists the tag's channels and says so when none are live", async () => {
@@ -281,6 +336,16 @@ describe("the home page directory (F8)", () => {
     const recent = screen.getByTestId("home-recent-tile");
     expect(recent.textContent).toContain("solo (@napper)");
     expect(recent.querySelector('[data-testid="channel-card"]')?.getAttribute("href")).toBe("/napper");
+  });
+
+  it("has one Spotlight heading: the rest of Spotlight after the hero is 'More in Spotlight'", async () => {
+    const layout = homeLayout(home({ spotlight: [live("hero"), live("second")] }), false);
+    await renderInRouter(
+      <Directory sections={layout.sections} hero={layout.hero} categoryShelves={[]} offline={[]} categories={[]} />,
+    );
+    const headings = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
+    expect(headings.filter((h) => h === "Spotlight")).toHaveLength(1);
+    expect(headings).toContain("More in Spotlight");
   });
 
   it("offers a way forward when nothing is live", async () => {

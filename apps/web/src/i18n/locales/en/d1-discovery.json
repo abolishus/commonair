@@ -1,5 +1,6 @@
 {
   "discovery.card.links": "Category and tags",
+  "discovery.card.nameWithHandle": "{name} (@{handle})",
   "discovery.card.tag": "Live channels tagged {tag}",
   "discovery.card.tagText": "#{tag}",
   "discovery.category.browseOthers": "Browse other categories",
@@ -29,6 +30,7 @@
   "discovery.directory.views": "Browse by",
   "discovery.home.allCategories": "All categories",
   "discovery.home.categories": "Categories",
+  "discovery.home.moreSpotlight": "More in Spotlight",
   "discovery.home.showAll": "Show all",
   "discovery.home.showAllIn": "Show all live channels in {category}",
   "discovery.home.spotlightHint": "A smaller channel the fair-discovery ranking puts first.",

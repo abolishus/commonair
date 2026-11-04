@@ -61,22 +61,38 @@ function useRail(): { status: "loading" | "ready" | "error"; sections: RailSecti
 }
 
 /**
- * Follows the screen (`lg` and up expanded) until the viewer toggles it, then keeps their choice
- * for the tab. Storage that throws just means the choice is not remembered.
+ * Follows the screen (`lg` and up expanded) until the viewer changes it, then keeps their choice
+ * for the tab. "The viewer" is any change this hook did not make itself: the toggle button, or
+ * SidebarProvider's own ⌘B / Ctrl-B. Storage that throws just means the choice is not remembered.
  */
 function useRailOpenState(): { open: boolean; toggle: () => void } {
   const { open, setOpen } = useSidebar();
   const setOpenRef = React.useRef(setOpen);
   const openRef = React.useRef(open);
   const auto = React.useRef(true);
+  // The value this hook last asked for, until the provider reports it back.
+  const applied = React.useRef<boolean | null>(null);
+  const seen = React.useRef(open);
   React.useEffect(() => {
     setOpenRef.current = setOpen;
     openRef.current = open;
   });
 
   React.useEffect(() => {
+    if (open === seen.current) return;
+    seen.current = open;
+    const ours = open === applied.current;
+    applied.current = null;
+    if (ours) return;
+    auto.current = false;
+    writeTab(RAIL_KEY, open ? "expanded" : "collapsed");
+  }, [open]);
+
+  React.useEffect(() => {
     const apply = (next: boolean) => {
-      if (next !== openRef.current) setOpenRef.current(next);
+      if (next === openRef.current) return;
+      applied.current = next;
+      setOpenRef.current(next);
     };
     const stored = readRail();
     if (stored) {
@@ -94,11 +110,8 @@ function useRailOpenState(): { open: boolean; toggle: () => void } {
     return () => mql.removeEventListener("change", sync);
   }, []);
 
-  const toggle = React.useCallback(() => {
-    auto.current = false;
-    writeTab(RAIL_KEY, openRef.current ? "collapsed" : "expanded");
-    setOpenRef.current(!openRef.current);
-  }, []);
+  // A viewer's change: the effect on `open` above stores it and stops following the screen.
+  const toggle = React.useCallback(() => setOpenRef.current(!openRef.current), []);
   return { open, toggle };
 }
 

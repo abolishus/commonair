@@ -9,10 +9,10 @@
 import type { Category, StreamCard } from "@commonair/contracts/dto";
 import { EmptyState, formatCompactNumber, useLocale } from "@commonair/ui";
 import { PageTabs } from "@commonair/ui/blocks/headers";
-import { CategoryArt } from "@commonair/ui/blocks/media";
 import { Button } from "@commonair/ui/components/button";
 import { PageContainer } from "@commonair/ui/layouts";
 import { GridViewIcon, LiveStreaming02Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { Link } from "@tanstack/react-router";
 import type * as React from "react";
 import { t } from "../../i18n/index.ts";
@@ -35,7 +35,7 @@ export function CategoryPage({ category, live }: { category: Category; live: Pag
     >
       <header className="flex min-w-0 gap-4">
         <span className="block aspect-3/4 w-20 shrink-0 overflow-hidden bg-muted sm:w-28">
-          <CategoryArt slug={category.slug} imageUrl={category.boxArtUrl} iconSize="lg" />
+          <HeaderArt imageUrl={category.boxArtUrl} />
         </span>
         <div className="flex min-w-0 flex-1 flex-col gap-2">
           <h1 dir="auto" className="text-2xl font-semibold tracking-tight break-words">
@@ -83,6 +83,25 @@ export function CategoryPage({ category, live }: { category: Category; live: Pag
         ]}
       />
     </PageContainer>
+  );
+}
+
+/**
+ * The header's box art, or a neutral glyph tile without it. Interim: `CategoryArt` (the tile's
+ * token-coloured fallback, F10) is not exported from `@commonair/ui/blocks/media` yet (a contract
+ * request); once it is, this becomes `<CategoryArt slug imageUrl iconSize="lg" />`.
+ */
+function HeaderArt({ imageUrl }: { imageUrl: string | null | undefined }): React.JSX.Element {
+  if (imageUrl)
+    return (
+      <span data-slot="category-art" className="block size-full">
+        <img src={imageUrl} alt="" decoding="async" className="size-full object-cover" />
+      </span>
+    );
+  return (
+    <span data-slot="category-art" aria-hidden className="grid size-full place-items-center text-muted-foreground">
+      <HugeiconsIcon icon={GridViewIcon} strokeWidth={1.5} aria-hidden className="size-10" />
+    </span>
   );
 }
 

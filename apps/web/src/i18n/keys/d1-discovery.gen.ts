@@ -5,6 +5,7 @@
 
 export type Key =
   | "discovery.card.links"
+  | "discovery.card.nameWithHandle"
   | "discovery.card.tag"
   | "discovery.card.tagText"
   | "discovery.category.browseOthers"
@@ -34,6 +35,7 @@ export type Key =
   | "discovery.directory.views"
   | "discovery.home.allCategories"
   | "discovery.home.categories"
+  | "discovery.home.moreSpotlight"
   | "discovery.home.showAll"
   | "discovery.home.showAllIn"
   | "discovery.home.spotlightHint"

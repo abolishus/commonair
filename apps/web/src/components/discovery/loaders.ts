@@ -29,7 +29,10 @@ export const LIVE_PAGE = 24;
 
 export interface DirectoryPageData {
   categories: Page<Category>;
+  /** Every live channel, unfiltered: the category totals and the tag filter's options. */
   live: Page<StreamCard>;
+  /** With `?tag=`, the live channels carrying it (the Live channels view); otherwise absent. */
+  tagged?: Page<StreamCard>;
 }
 
 export interface SearchData {
@@ -64,15 +67,13 @@ export const getDirectoryPage = createServerFn({ method: "GET" })
   .handler(async ({ data }): Promise<DirectoryPageData | null> => {
     try {
       const api = serverApi(loadWebEnv().API_INTERNAL_URL, cookieHeaders(getRequestHeader("cookie")));
-      const [categories, live] = await Promise.all([
+      // The tag list comes from the unfiltered page, so a picked tag does not narrow the choices.
+      const [categories, live, tagged] = await Promise.all([
         api.categories.list({ limit: CATEGORY_PAGE }),
-        api.directory.live({
-          limit: DIRECTORY_LIVE_PAGE,
-          sort: "viewers_desc",
-          ...(data.tag ? { tag: data.tag } : {}),
-        }),
+        api.directory.live({ limit: DIRECTORY_LIVE_PAGE, sort: "viewers_desc" }),
+        data.tag ? api.directory.live({ limit: LIVE_PAGE, sort: "viewers_desc", tag: data.tag }) : undefined,
       ]);
-      return { categories, live };
+      return tagged ? { categories, live, tagged } : { categories, live };
     } catch {
       return null;
     }

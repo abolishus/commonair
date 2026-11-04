@@ -1,5 +1,6 @@
 {
   "discovery.card.links": "Categoría y etiquetas",
+  "discovery.card.nameWithHandle": "{name} (@{handle})",
   "discovery.card.tag": "Canales en directo con la etiqueta {tag}",
   "discovery.card.tagText": "#{tag}",
   "discovery.category.browseOthers": "Explorar otras categorías",
@@ -29,6 +30,7 @@
   "discovery.directory.views": "Explorar por",
   "discovery.home.allCategories": "Todas las categorías",
   "discovery.home.categories": "Categorías",
+  "discovery.home.moreSpotlight": "Más destacados",
   "discovery.home.showAll": "Ver todo",
   "discovery.home.showAllIn": "Ver todos los canales en directo de {category}",
   "discovery.home.spotlightHint": "Un canal más pequeño que la clasificación de descubrimiento justo pone primero.",

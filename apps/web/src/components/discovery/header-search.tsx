@@ -122,7 +122,8 @@ export function DiscoveryPalette({
 }): React.JSX.Element {
   const navigate = useNavigate();
   const submit = useSubmitSearch();
-  const feed = useHomeFeed();
+  // The palette is mounted on every page for its hotkey: fetch and poll only while it is open.
+  const feed = useHomeFeed({ enabled: open });
   // Read when it opens, so a search made a moment ago is there.
   const recent = React.useMemo(() => (open ? readRecentSearches() : []), [open]);
 

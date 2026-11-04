@@ -6,6 +6,7 @@
  * with every channel shown once. Pure, so the shelf rules are tested without rendering.
  */
 import type { Category, ChannelCard, StreamCard } from "@commonair/contracts/dto";
+import { t } from "../i18n/index.ts";
 
 export type DirectorySectionId = "spotlight" | "new" | "live" | "following";
 
@@ -167,7 +168,7 @@ export function needsHandle(collisions: ReadonlySet<string>, displayName: string
 /** "Name (@handle)" when the name collides, else the name. */
 export function displayLabel(collisions: ReadonlySet<string>, channel: { slug: string; displayName: string }): string {
   return needsHandle(collisions, channel.displayName)
-    ? `${channel.displayName} (@${channel.slug})`
+    ? t("discovery.card.nameWithHandle", { name: channel.displayName, handle: channel.slug })
     : channel.displayName;
 }
 

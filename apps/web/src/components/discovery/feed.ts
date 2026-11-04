@@ -3,8 +3,10 @@
 
 /**
  * `directory.home` for the chrome (the side rail, the mobile sheet and the ⌘K palette): one
- * shared, browser-side copy, fetched when the first of them mounts and refreshed every minute
- * while any is mounted. The home page primes it with its own loader data, so `/` asks once.
+ * shared, browser-side copy, fetched when the first of them subscribes and refreshed every minute
+ * while any is subscribed. The palette subscribes only while it is open. The home page primes it
+ * with its own loader data in a layout effect, which runs before any subscriber's (passive) effect,
+ * so `/` asks once.
  */
 import * as React from "react";
 import { api } from "../../lib/api.ts";
@@ -73,10 +75,18 @@ function subscribe(listener: () => void): () => void {
   };
 }
 
-/** The shared feed; `loading` on the server and until the first answer. */
-export function useHomeFeed(): FeedState {
+/** Reads the current copy without fetching or polling (a closed palette). */
+function subscribeIdle(): () => void {
+  return () => {};
+}
+
+/**
+ * The shared feed; `loading` on the server and until the first answer. With `enabled: false` it
+ * returns whatever copy is there and neither fetches nor polls.
+ */
+export function useHomeFeed({ enabled = true }: { enabled?: boolean } = {}): FeedState {
   return React.useSyncExternalStore(
-    subscribe,
+    enabled ? subscribe : subscribeIdle,
     () => state,
     () => LOADING,
   );

@@ -23,10 +23,11 @@ import {
 import { DiscoveryCategoryGrid } from "./discovery/category-tiles.tsx";
 import { CardLinks, DiscoveryStreamCard, DiscoveryStreamGrid } from "./discovery/stream-cards.tsx";
 
-function sectionTitle(id: DirectorySectionId): string {
+/** With the hero shown, the rest of Spotlight gets its own heading, so the outline has one "Spotlight". */
+function sectionTitle(id: DirectorySectionId, hasHero: boolean): string {
   switch (id) {
     case "spotlight":
-      return t("directory.section.spotlight");
+      return hasHero ? t("discovery.home.moreSpotlight") : t("directory.section.spotlight");
     case "new":
       return t("directory.section.new");
     case "live":
@@ -119,7 +120,7 @@ export function Directory({
           key={section.id}
           data-testid="directory-section"
           data-section={section.id}
-          heading={sectionTitle(section.id)}
+          heading={sectionTitle(section.id, Boolean(hero))}
         >
           <DiscoveryStreamGrid cards={section.cards} collisions={collisions} showReason={section.id !== "following"} />
         </Section>

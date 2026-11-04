@@ -15,6 +15,13 @@ import { D_TEST_IDS as D, ROUTES, tid } from "../web/selectors.ts";
 import { waitForHydration } from "../web/session.ts";
 import type { DContext } from "./context.ts";
 
+/**
+ * Whether `routes/_app.tsx` mounts `AppRail` (D1-web's contract request 1; that file is not
+ * D1-web's). Until then the rail step is skipped; once it is mounted, a missing rail fails.
+ * TODO(wave 2 integration): set this to true in the commit that applies contract request 1.
+ */
+const RAIL_MOUNTED = false;
+
 const UI_TIMEOUT_MS = 15_000;
 const STREAMERS = ["streamer1", "streamer2", "streamer3"] as const;
 
@@ -106,17 +113,11 @@ export async function steps(ctx: DContext): Promise<void> {
   });
 
   await s.step("d1-web: the left rail shows a live row", async () => {
-    await open(ctx, page, ROUTES.browse);
-    const rail = page.locator(tid(D.sideRail));
-    const mounted = await rail
-      .waitFor({ timeout: 5_000 })
-      .then(() => true)
-      .catch(() => false);
-    if (!mounted) {
-      // `routes/_app.tsx` is not D1-web's: it mounts `AppRail` (contract request).
+    if (!RAIL_MOUNTED) {
       s.skipStep("d1-web: rail", "waiting on _app.tsx passing sidebar={<AppRail />} to AppShell");
       return;
     }
+    await open(ctx, page, ROUTES.browse);
     const row = page.locator(`${tid(D.sideRail)} ${tid(D.sideRailItem)}[data-live="true"]`);
     await row.first().waitFor({ timeout: UI_TIMEOUT_MS });
     s.assert("the rail has a live row", (await row.count()) > 0);

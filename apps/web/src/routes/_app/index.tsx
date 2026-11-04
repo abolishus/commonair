@@ -33,8 +33,9 @@ function Home(): React.JSX.Element {
   const { home, categories } = Route.useLoaderData();
   const { me } = useBootstrap();
   const signedIn = me !== null;
-  // The rail and the sheet read the same `directory.home`: hand them this copy.
-  React.useEffect(() => {
+  // The rail and the sheet read the same `directory.home`: hand them this copy. A layout effect,
+  // so it lands before the header's and the rail's subscribe effects and they do not ask again.
+  React.useLayoutEffect(() => {
     if (home) primeHomeFeed(home);
   }, [home]);
   const layout = React.useMemo(() => (home ? homeLayout(home, signedIn) : null), [home, signedIn]);

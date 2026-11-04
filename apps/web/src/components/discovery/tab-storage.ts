@@ -61,11 +61,16 @@ export function readRecentSearches(): string[] {
   }
 }
 
-/** Puts `query` first (case-insensitive dedupe) and returns the new list. Blank queries are not kept. */
+/**
+ * Puts `query` first and returns the new list. Blank queries are not kept. An entry equal to it, or
+ * a prefix of it (case-insensitive), is dropped: the search page searches as the viewer types, and
+ * "str", "strea", "streamer" should leave one recent search, not three.
+ */
 export function rememberSearch(query: string, list: readonly string[] = readRecentSearches()): string[] {
   const q = query.trim();
   if (q === "") return [...list];
-  const next = [q, ...list.filter((item) => item.toLowerCase() !== q.toLowerCase())].slice(0, RECENT_SEARCH_LIMIT);
+  const lower = q.toLowerCase();
+  const next = [q, ...list.filter((item) => !lower.startsWith(item.toLowerCase()))].slice(0, RECENT_SEARCH_LIMIT);
   writeTab(RECENT_SEARCHES_KEY, JSON.stringify(next));
   return next;
 }
