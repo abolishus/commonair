@@ -53,6 +53,20 @@ function nativePlayback(video: HTMLVideoElement): boolean {
 
 const PLAYER_VIDEO = '[data-testid="player-video"]';
 
+/** Media buffered ahead of the element's playhead (ms): 0 outside every buffered range. */
+export function bufferAheadMs(video: HTMLVideoElement | null): number | null {
+  const ranges = video?.buffered;
+  if (!video || !ranges || !Number.isFinite(video.currentTime)) return null;
+  const t = video.currentTime;
+  try {
+    for (let i = 0; i < ranges.length; i++)
+      if (ranges.start(i) <= t + 0.1 && ranges.end(i) >= t) return Math.round((ranges.end(i) - t) * 1000);
+  } catch {
+    return null;
+  }
+  return 0;
+}
+
 function seekableEnd(video: HTMLVideoElement | null): number | null {
   const ranges = video?.seekable;
   if (!ranges || ranges.length === 0) return null;
@@ -88,6 +102,7 @@ function domPlayer(channel: string, doc: Document): RoomPlayer | null {
     playheadWallclock: () => playheadWallclock(channel),
     playbackMode: () => playbackMode(channel),
     edgeWallclock: () => edgeOf(playbackMode(channel), playheadWallclock(channel), null, video),
+    bufferAheadMs: () => bufferAheadMs(video),
     seekToWallclock: (t) => {
       const head = playheadWallclock(channel);
       if (!head || video.readyState < 1) return false;
@@ -131,6 +146,7 @@ export function roomPlayer(channel: string, doc: Document | null = globalThis.do
           s.latencySeconds?.() ?? null,
           doc?.querySelector<HTMLVideoElement>(PLAYER_VIDEO) ?? null,
         ),
+      bufferAheadMs: () => bufferAheadMs(doc?.querySelector<HTMLVideoElement>(PLAYER_VIDEO) ?? null),
       native: top.native,
     };
   }

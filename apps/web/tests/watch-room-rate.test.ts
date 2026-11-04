@@ -65,6 +65,21 @@ describe("nextCorrection with a rate seam", () => {
     expect(at(-RATE.seekOverMs)).toMatchObject({ kind: "rate" });
   });
 
+  it("behind with a thin buffer: normal speed, never faster than the media arrives", () => {
+    expect(at(-1000, { aheadMs: RATE.minAheadMs - 1 })).toEqual({ kind: "rate", rate: 1, driftMs: -1000 });
+    expect(at(-1000, { aheadMs: RATE.minAheadMs })).toMatchObject({ kind: "rate", rate: 1.25 });
+    // Ahead of the target, slowing down needs no buffer.
+    expect(at(1000, { aheadMs: 0 })).toMatchObject({ kind: "rate", rate: 0.8 });
+  });
+
+  it("a forward seek only into buffered media, with a second to spare; else rate steering", () => {
+    expect(at(-4000, { aheadMs: 5000 })).toMatchObject({ kind: "seek" });
+    expect(at(-4000, { aheadMs: 4999 })).toMatchObject({ kind: "rate", rate: RATE.max });
+    expect(at(-4000, { aheadMs: 1000 })).toMatchObject({ kind: "rate", rate: 1 });
+    // Backward seeks land on media already played through: no limit.
+    expect(at(4000, { aheadMs: 0 })).toMatchObject({ kind: "seek" });
+  });
+
   it("native WebKit ignores the rate seam (seek only)", () => {
     expect(at(-1500, { native: true, steer: false })).toMatchObject({ kind: "seek" });
   });
@@ -199,20 +214,24 @@ class Member {
     behindMs: number,
   ) {
     this.pos = sim.clock - behindMs;
-    let hold = behindMs / 1000;
     const player: RoomPlayer = {
       playheadWallclock: () => new Date(this.pos),
       playbackMode: () => "live",
-      setTargetLatency: (s: number) => (hold = s),
-      latencySeconds: () => (sim.edge() - this.pos) / 1000 + (sim.random() - 0.5) * 0.6 + hold * 0,
+      // The hold-back only matters to hls.js's own start-up and stalls, which the model leaves out.
+      setTargetLatency: (s: number) => s,
+      // hls.js's latency, from its own (noisy) edge estimate.
+      latencySeconds: () => (sim.edge() - this.pos) / 1000 + (sim.random() - 0.5) * 0.6,
       seekToWallclock: (t: Date) => this.seek(t.getTime()),
       seekBy: (ms: number) => this.seek(this.pos + ms),
       ...(sim.rateSeam ? { setPlaybackRate: (r: number) => ((this.rate = r), true) } : {}),
+      bufferAheadMs: () => Math.max(0, sim.available() - this.pos),
       native: false,
     };
     this.driver = new RoomSyncDriver({ player: () => player, reducedMotion: () => false, now: () => sim.clock });
     this.phase = Math.floor((sim.random() * TICK) / STEP) * STEP;
   }
+
+  waitedMs = 0;
 
   seek(to: number): boolean {
     this.pos = Math.min(to, this.sim.edge() - 500);
@@ -224,7 +243,12 @@ class Member {
 
   advance(): void {
     if (this.sim.clock < this.stallUntil) return;
-    this.pos = Math.min(this.pos + STEP * this.rate, this.sim.edge());
+    // Nothing to play past what has arrived: the element waits.
+    if (this.pos >= this.sim.available()) {
+      this.waitedMs += STEP;
+      return;
+    }
+    this.pos = Math.min(this.pos + STEP * this.rate, this.sim.available());
   }
 }
 
@@ -243,6 +267,10 @@ class Sim {
   }
   edge(): number {
     return this.clock - 1000;
+  }
+  /** The newest media the player has: delivery trails the edge by 1.5 s. */
+  available(): number {
+    return this.edge() - 1500;
   }
   join(behindMs: number): Member {
     const m = new Member(this, behindMs);
@@ -298,16 +326,26 @@ function edgeSync(seed: number, rateSeam = true) {
   const webkit = sim.join(6500);
   sim.run(30_000);
   const withWebkit = Math.max(p90Spread([near, webkit], sim.clock), p90Spread([far, webkit], sim.clock));
-  return { chromium, withWebkit, behind, seeks: sim.members.map((m) => m.seeks) };
+  return {
+    chromium,
+    withWebkit,
+    behind,
+    seeks: sim.members.map((m) => m.seeks),
+    waited: sim.members.map((m) => m.waitedMs),
+  };
 }
 
 describe("edge-sync, simulated on the busy runner's numbers", () => {
   const SEEDS = Array.from({ length: 30 }, (_, i) => i + 1);
 
-  it("every seed: Chromium under 500 ms, WebKit under 1 s, both within the cap, at most one seek each", () => {
+  it("every seed: Chromium under 500 ms, WebKit under 1 s, both within the cap, one seek and 1 s waiting at most", () => {
     const bad = SEEDS.map((s) => ({ s, o: edgeSync(s) })).filter(
       ({ o }) =>
-        o.chromium >= 500 || o.withWebkit >= 1000 || o.behind.some((b) => b > CAP + 1500) || o.seeks.some((n) => n > 1),
+        o.chromium >= 500 ||
+        o.withWebkit >= 1000 ||
+        o.behind.some((b) => b > CAP + 1500) ||
+        o.seeks.some((n) => n > 1) ||
+        o.waited.some((w) => w > 1000),
     );
     expect(bad).toEqual([]);
   });

@@ -78,6 +78,15 @@ export const RATE = {
   /** A drift over this is a seek (a member joining far off), at most once per cooldown. */
   seekOverMs: 3000,
   seekCooldownMs: 10_000,
+  /**
+   * Faster than normal only with this much buffered ahead, and a forward seek only to media
+   * buffered with `seekSpareMs` to spare. Chat's target follows hls.js's edge estimate (the
+   * playlist's end plus its age), which runs ahead of what has arrived when delivery is late; on a
+   * busy CI runner (exp/sync-diag-2, run 41909793712) members playing 1.25x toward it drained
+   * their buffers to nothing and waited, which put them further behind than staying put.
+   */
+  minAheadMs: 1500,
+  seekSpareMs: 1000,
 } as const;
 
 /** How many of the latest targets the median takes. */
@@ -107,6 +116,8 @@ export interface DriftInput {
   rate?: boolean;
   /** Rate players: milliseconds since the last seek, null if none yet. */
   sinceSeekMs?: number | null;
+  /** Media buffered ahead of the playhead (ms), null when unknown (no limit then). */
+  aheadMs?: number | null;
 }
 
 export type Correction =
@@ -125,10 +136,14 @@ export function nextCorrection(i: DriftInput): Correction {
   if (i.rate && !i.native) {
     // No settle: a rate is set afresh with every target, and only a seek needs time to land.
     const sinceSeek = i.sinceSeekMs ?? null;
-    if (abs > RATE.seekOverMs && (sinceSeek === null || sinceSeek >= RATE.seekCooldownMs))
+    const ahead = i.aheadMs ?? null;
+    // Behind: forward only as far as the media that has arrived.
+    const reachable = driftMs > 0 || ahead === null || ahead >= abs + RATE.seekSpareMs;
+    if (abs > RATE.seekOverMs && reachable && (sinceSeek === null || sinceSeek >= RATE.seekCooldownMs))
       return { kind: "seek", toMs: i.targetMs, driftMs };
     const deadband = i.reducedMotion ? RATE.reducedDeadbandMs : RATE.deadbandMs;
     if (abs <= deadband) return { kind: "rate", rate: 1, driftMs };
+    if (driftMs < 0 && ahead !== null && ahead < RATE.minAheadMs) return { kind: "rate", rate: 1, driftMs };
     const rate = Math.min(RATE.max, Math.max(RATE.min, 1 - driftMs / RATE.horizonMs));
     return { kind: "rate", rate: Math.round(rate * 100) / 100, driftMs };
   }
@@ -179,6 +194,8 @@ export interface RoomPlayer {
   seekBy?(ms: number): boolean;
   /** Set the element's playback rate (1 = normal) for live playback; false when it cannot. */
   setPlaybackRate?(rate: number): boolean;
+  /** Media buffered ahead of the playhead in ms (0 outside every buffered range), null when unknown. */
+  bufferAheadMs?(): number | null;
   native: boolean;
   /**
    * Batch 8: the live edge as a wall-clock instant (the PDT at the end of the live playlist), null
@@ -322,6 +339,7 @@ export class RoomSyncDriver {
       sinceLastMs: this.lastAt === null ? null : now - this.lastAt,
       rate,
       sinceSeekMs: this.seekAt === null ? null : now - this.seekAt,
+      aheadMs: p.bufferAheadMs?.() ?? null,
     });
     this.lastDriftMs = c.driftMs;
     // Normal speed whenever the room does not steer this player now (DVR, no playhead or target).
