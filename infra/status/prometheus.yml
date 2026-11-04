@@ -1,0 +1,35 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# The monitoring droplet's Prometheus (docs/operators/status-page.md). It only runs the outside
+# probes, every 30 s, and keeps them 30 days (the unit's --storage.tsdb.retention.time). The
+# targets come from render.ts (file_sd), so status.json is their one source.
+global:
+  scrape_interval: 30s
+  scrape_timeout: 15s
+  evaluation_interval: 30s
+
+rule_files:
+  - /etc/prometheus/rules.yml
+
+scrape_configs:
+  - job_name: status
+    metrics_path: /probe
+    file_sd_configs:
+      - files: [/etc/prometheus/targets/*.json]
+        refresh_interval: 1m
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [module]
+        target_label: __param_module
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox:9115
+  - job_name: blackbox
+    static_configs:
+      - targets: ["blackbox:9115"]
+  - job_name: prometheus
+    static_configs:
+      - targets: ["127.0.0.1:9090"]

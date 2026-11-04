@@ -1,0 +1,49 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# blackbox_exporter modules for the status page's outside probes (docs/operators/status-page.md).
+# render.ts writes the targets (one per component) and picks each one's module. IPv4 first: the
+# instance's reserved IP is IPv4, and the container network has no IPv6.
+modules:
+  # The web origin: TLS required, any 2xx after redirects. Its TLS gives the certificate expiry.
+  http_web:
+    prober: http
+    timeout: 10s
+    http:
+      preferred_ip_protocol: ip4
+      fail_if_not_ssl: true
+      follow_redirects: true
+      headers:
+        User-Agent: commonair-status-probe
+
+  # A service's readiness (packages/service/src/server.ts /readyz, behind Caddy's /readyz/<svc>):
+  # 200 only when every check passes, so Postgres and Valkey are behind it.
+  http_ready:
+    prober: http
+    timeout: 10s
+    http:
+      preferred_ip_protocol: ip4
+      fail_if_not_ssl: true
+      follow_redirects: false
+      valid_status_codes: [200]
+      fail_if_body_not_matches_regexp:
+        - '"ok":\s*true'
+      headers:
+        User-Agent: commonair-status-probe
+
+  # The chat WebSocket: a successful upgrade at wss://<host>/chat is the check.
+  websocket_chat:
+    prober: websocket
+    timeout: 10s
+    websocket:
+      preferred_ip_protocol: ip4
+      headers:
+        User-Agent:
+          values: [commonair-status-probe]
+
+  # RTMP ingest and the canaries: a TCP connection opens.
+  tcp_connect:
+    prober: tcp
+    timeout: 5s
+    tcp:
+      preferred_ip_protocol: ip4

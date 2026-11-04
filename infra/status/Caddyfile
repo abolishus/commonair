@@ -1,0 +1,22 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# The status page on the monitoring droplet (docs/operators/status-page.md): the static files
+# render.ts writes, over HTTPS with an ACME certificate for STATUS_DOMAIN (from caddy.env).
+# Nothing is proxied and nothing third-party loads: the CSP allows only the page's inline CSS.
+{
+	admin off
+}
+
+{$STATUS_DOMAIN} {
+	root * /srv/status
+	encode zstd gzip
+	header {
+		Content-Security-Policy "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		Cache-Control "public, max-age=30"
+		-Server
+	}
+	file_server
+}

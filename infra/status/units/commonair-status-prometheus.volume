@@ -1,0 +1,6 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# 30 days of probe history: the only state on the monitoring droplet besides the renderer's.
+[Volume]
+VolumeName=commonair-status-prometheus

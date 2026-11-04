@@ -1,0 +1,96 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# Inside alerts (docs/operators/on-call.md): Grafana routes L1-observability's Prometheus alerts
+# (infra/prometheus/rules) to a human, with no Alertmanager image. One Grafana-managed rule
+# reads ALERTS{alertstate="firing"} and carries severity, summary and runbook through; `page`
+# alerts go out at once and `ticket` alerts in one daily digest.
+#
+# Recipients come from the environment: ALERT_EMAIL_TO (comma-separated) through Grafana's SMTP
+# settings (GF_SMTP_*, the instance's relay), and ALERT_WEBHOOK_URL (optional). route-env.sh,
+# sourced before Grafana starts, puts a placeholder in for an unset one and logs that there is
+# no route. `$$` is a literal `$`: Grafana expands environment variables in this file.
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: commonair-oncall
+    receivers:
+      - uid: commonair-email
+        type: email
+        settings:
+          addresses: ${ALERT_EMAIL_TO}
+          singleEmail: true
+      - uid: commonair-webhook
+        type: webhook
+        settings:
+          url: ${ALERT_WEBHOOK_URL}
+          httpMethod: POST
+
+policies:
+  - orgId: 1
+    receiver: commonair-oncall
+    # Grafana's own alerts (a datasource error, no severity) go out within a minute.
+    group_by: ["grafana_folder", "alertname"]
+    group_wait: 30s
+    group_interval: 5m
+    repeat_interval: 4h
+    routes:
+      - receiver: commonair-oncall
+        object_matchers: [["severity", "=", "page"]]
+        group_by: ["prometheus_alert"]
+        group_wait: 10s
+        group_interval: 1m
+        repeat_interval: 1h
+      # One group for every ticket: the first waits an hour for company, then at most one mail
+      # a day lists what is firing.
+      - receiver: commonair-oncall
+        object_matchers: [["severity", "=", "ticket"]]
+        group_by: ["severity"]
+        group_wait: 1h
+        group_interval: 24h
+        repeat_interval: 24h
+
+groups:
+  - orgId: 1
+    name: commonair-prometheus
+    folder: CommonAir
+    interval: 1m
+    rules:
+      - uid: commonair-prometheus-alerts
+        title: CommonairPrometheusAlert
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              range: false
+              # Grafana sets alertname to this rule's title, so the Prometheus alert's name is
+              # copied to prometheus_alert first; severity, summary and runbook pass as labels.
+              expr: label_replace(ALERTS{alertstate="firing"}, "prometheus_alert", "$$1", "alertname", "(.+)")
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+        # No firing Prometheus alert is no data, and that is the healthy case.
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          summary: '{{ index $$labels "summary" }}'
+          runbook_url: '{{ index $$labels "runbook" }}'
+          description: 'Prometheus alert {{ index $$labels "prometheus_alert" }} ({{ index $$labels "severity" }}). Runbook: {{ index $$labels "runbook" }}'
+        labels:
+          source: prometheus
+        isPaused: false

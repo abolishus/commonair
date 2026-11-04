@@ -1,0 +1,58 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# promtool unit tests for infra/status/rules.yml (status.test.ts runs them): a component's probes
+# count while a canary answers, and time when every canary fails (the monitor is blind) does not.
+rule_files:
+  - ../status/rules.yml
+
+evaluation_interval: 30s
+
+tests:
+  - interval: 30s
+    input_series:
+      # Up for 5 min, then down.
+      - series: 'probe_success{job="status",role="component",component="web",module="http_web"}'
+        values: "1x9 0x10"
+      # Both canaries fail from 2m30s to 5m: the droplet lost its network.
+      - series: 'probe_success{job="status",role="canary",component="canary-0",module="tcp_connect"}'
+        values: "1x4 0x5 1x10"
+      - series: 'probe_success{job="status",role="canary",component="canary-1",module="tcp_connect"}'
+        values: "1x4 0x5 1x10"
+    promql_expr_test:
+      - expr: commonair_status:probe_success:sighted
+        eval_time: 1m
+        exp_samples:
+          - labels: 'commonair_status:probe_success:sighted{job="status",role="component",component="web",module="http_web"}'
+            value: 1
+      # Blind: no sample, so the day's average ignores this stretch.
+      - expr: commonair_status:probe_success:sighted
+        eval_time: 3m
+        exp_samples: []
+      - expr: commonair_status:probe_success:sighted
+        eval_time: 6m
+        exp_samples:
+          - labels: 'commonair_status:probe_success:sighted{job="status",role="component",component="web",module="http_web"}'
+            value: 0
+      # A canary is not a component.
+      - expr: count(commonair_status:probe_success:sighted)
+        eval_time: 6m
+        exp_samples:
+          - labels: "{}"
+            value: 1
+
+  - interval: 30s
+    input_series:
+      - series: 'probe_success{job="status",role="component",component="api",module="http_ready"}'
+        values: "1x10"
+      # One canary is enough to see.
+      - series: 'probe_success{job="status",role="canary",component="canary-0",module="tcp_connect"}'
+        values: "0x10"
+      - series: 'probe_success{job="status",role="canary",component="canary-1",module="tcp_connect"}'
+        values: "1x10"
+    promql_expr_test:
+      - expr: commonair_status:probe_success:sighted
+        eval_time: 2m
+        exp_samples:
+          - labels: 'commonair_status:probe_success:sighted{job="status",role="component",component="api",module="http_ready"}'
+            value: 1

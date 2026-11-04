@@ -1,0 +1,25 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# blackbox_exporter: runs each probe when the monitoring Prometheus scrapes it (blackbox.yml).
+[Unit]
+Description=CommonAir status: blackbox_exporter
+StartLimitIntervalSec=0
+
+[Container]
+Image=quay.io/prometheus/blackbox-exporter:v0.29.1@sha256:ea1c7aa3ef3f307cd03e85f34abb604478ccb90b567fc690da0cd9776da76b13
+ContainerName=commonair-status-blackbox
+Network=commonair-status.network
+NetworkAlias=blackbox
+ReadOnly=true
+NoNewPrivileges=true
+DropCapability=ALL
+Volume=/etc/commonair-status/blackbox.yml:/etc/blackbox_exporter/config.yml:ro
+Exec=--config.file=/etc/blackbox_exporter/config.yml
+
+[Service]
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
