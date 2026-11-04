@@ -1072,7 +1072,7 @@ describe("what the droplet runs", () => {
     expect(imports.every((i) => i?.startsWith("node:"))).toBe(true);
   });
 
-  const units = readdirSync(join(ROOT, "infra/status/units"));
+  const units = readdirSync(join(ROOT, "infra/status/units")).sort(); // readdir order is the filesystem's (hashed on CI's ext4)
   const unit = (f: string) => read(`infra/status/units/${f}`);
   const imageOf = (text: string) => /^Image=(.*)$/m.exec(text)?.[1] ?? "";
 
