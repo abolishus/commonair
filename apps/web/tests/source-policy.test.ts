@@ -468,8 +468,7 @@ describe("detectors", () => {
  * unit is rebuilding wait in PENDING_HEAD, with the unit that adds the title; the list only
  * shrinks: an entry that has gained a `head` fails until it is removed here.
  */
-export const PENDING_HEAD: Readonly<Record<string, string>> = {
-};
+export const PENDING_HEAD: Readonly<Record<string, string>> = {};
 
 /** Pathless layouts: no page of their own (the root's tagline title is the fallback). */
 const LAYOUT_ROUTES = new Set(["src/routes/_app.tsx", "src/routes/_studio.tsx", "src/routes/_admin.tsx"]);
