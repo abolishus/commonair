@@ -22,6 +22,104 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
 
 ## In flight
 
+**Release follow-ups toward `v0.1.0` (2026-11-04).** Six items, each on `main`. The calls
+below were made without the user, as asked. Experiment branches `exp/sync-diag`, `-2` and `-3`
+ran only the `w3` and `relay-dvr` shards, three of each, and uploaded every report; they are
+never merged.
+
+1. **Edge-sync is a hard check again** (`eb2c14f4`, `0e51a26d`, `888848ff`; assertions
+   `851cb665`).
+   - **Cause, from page diagnostics** (exp run 41905217763): with the seek driver every 2 s
+     target was a correction. Each correction landed by seek, and each seek left the element
+     waiting (`readyState` 1, nothing buffered at the new position) for about 1.6 s. The member
+     was behind again by the next target, which seeked again. Members spent ~80 % of the time
+     waiting, decoded ~6 frames a second, and sat 1-3 s behind the target and 6-7 s behind the
+     edge.
+   - **Driver:** hls.js members with a rate seam (the registered player and the page fallback;
+     not native WebKit) steer by playback rate: `1 - drift / 4 s`, within [0.8, 1.25], normal
+     speed inside 80 ms (300 ms with reduced motion). They seek only past 3 s, at most once per
+     10 s, and steer to the median of the last five targets (chat's target jumped up to 1.4 s
+     between frames). Behind the target, a member speeds up only with 1.5 s buffered ahead and
+     seeks forward only into buffered media. hls.js's edge estimate runs ahead of late media, and
+     members chasing it at 1.25x drained their buffers (exp run 41909793712).
+   - **Harness:** watch-room closes the eight steps' browsers and encoders before the B8
+     extensions. They were all still playing and publishing during edge-sync, and media
+     reached its players at ~0.7x real time.
+   - **Evidence, hard assertions** (limits 500 ms Chromium p90, 1000 ms WebKit p90, cap 5 s
+     - 1.5 s):
+     * exp run 41915209807: both w3 runs that reached the scenario passed (Chromium p90 53 and
+       46 ms, WebKit 329/311 and 165/229 ms, members 4.4-5.0 s behind the edge). The third failed
+       before any scenario: a GitHub 502 fetching wal-g for the Postgres image.
+     * `main` run 41922495854 (`71f6f169`), every job green on attempt 1 (Chromium p90
+       107 ms, WebKit 371 ms). The w3 job was rerun: attempt 2 passed (70 ms, 118 ms). Attempt 3
+       failed before WebKit was measured: its page threw during start-up
+       (`t.t=new Map(n.map(e=>[e.key,e.fromSerializable]))`, the router's hydration; flakes
+       below), and Chromium had passed at 58 ms. Attempt 4 passed (32 ms, 307 ms). Every run that
+       reached the checks passed them.
+   - `71f6f169` fixed a test of item 2 that expected `startLoad(60)` exactly (the swap adds its
+     load time: 60.002 on a slow runner, run 41918197708 attempt 2).
+   - Unit tests in `watch-room-rate.test.ts`. A simulation on the runner's numbers passes 30
+     of 30 seeds with at most one seek and 1 s of waiting per member; with a seek per tick it
+     fails most of them, as CI did.
+2. **DVR swap position: root cause found and fixed** (`7d6f3cd0`). hls.js auto-starts a new
+   source at -1. On a live playlist without EXT-X-START it requests the live-sync fragment inside
+   its own `LEVEL_LOADED` handler, which runs before the player's, so the rewind's
+   `startLoad(target)` came too late (run 41834516797: segments 21-23 of a 94 s window, never
+   segment 9). `loadDvrHls` now holds `autoStartLoad` off until the level is in; the seek starts
+   loading from its target, and a fallback starts it on the next task. In nine relay-dvr runs
+   over the three experiments, the first segment after the rewind was the target's (9), the
+   readout went 60 -> 60, and the landing guard corrected nothing.
+   - **Call:** the guard stays as a safety net. relay-dvr-switch now fails if the guard has to
+     act, reads the position 3 s after the rewind, and allows 5 s instead of 20 (`851cb665`).
+3. **`selfhost.sh upgrade` hands off to the target release's script** (`a197c4a7`, `63f93de2`).
+   - After `obtain_bundle` and `extract_bundle`, it runs the bundle's `selfhost.sh` (a copy)
+     with the same arguments and exits with its status.
+   - `COMMONAIR_UPGRADE_HANDOFF` stops a second hand-off. `COMMONAIR_UPGRADE_BUNDLE` passes the
+     verified bundle, which the target verifies again from its SHA256SUMS and signature instead
+     of downloading it again.
+   - An identical script needs no hand-off. External servers' passwords and a prompted CA are
+     handed over, not asked for twice, and they are still collected before the download:
+     `63f93de2` fixed `a197c4a7`'s reorder, which `selfhost-external.test.ts` caught in run
+     41906328523.
+   - `~/commonair` is the release, so `~/commonair/selfhost.sh` is the target's script
+     afterwards.
+   - Tests: `selfhost-sh-upgrade-handoff.test.ts` (7). Docs: upgrades.md, "The new release's
+     script runs the upgrade", including the manual path from rc.11 and older, whose scripts
+     have no hand-off.
+   - `main` run 41909095653 green, with the four self-host e2e jobs.
+4. **`shards.ts` timings** re-measured for every shard (`5266a9b1`), from runs 41894534066 and
+   41883112744; captions and seed from 41827726573. **seed is 15m33s (12m19s on another run),
+   over the ~12 min cap**: a follow-up under decision (o) (split or trim `seed-coverage`).
+5. **`## [0.1.0]` is not dated.** `changelog --check` accepts only `YYYY-MM-DD` on a
+   non-prerelease (`release/changelog.ts`, "not dated"), and a placeholder date would be wrong.
+   It is left to the release, which writes the day it tags.
+6. **The chat-filter flake is fixed at the cause** (`69e242ad`). The worker's hard timeout
+   (budget + 25 ms, from dispatch) included sending a new set to the worker and compiling it.
+   On a loaded runner a fine set was held (`msg_held` for `msg_rejected`) and quarantined for
+   five minutes, as a busy chat host would do to a real channel. The worker now reports
+   `started` once the set is compiled, and the hard timer (budget + 100 ms) starts there. A 2 s
+   start timer replaces a worker that never answers, without quarantine. Both new tests fail
+   with the timer armed at dispatch.
+
+Flakes seen:
+
+- watch-room edge-sync, WebKit page start-up: `undefined is not an object (evaluating
+  't.t=new Map(n.map(e=>[e.key,e.fromSerializable]))')` and no player (run 41922495854 attempt
+  3; new candidate, in the web app's hydration, not room sync; step 2's WebKit page in the same
+  run was fine);
+- `e7-admin.test.tsx` "egress page" timed out at 5 s (run 41918197708 attempt 2; D wave 3's
+  file, changed in `46f9ca55`; passed on the next run);
+- `relay` Go test `TestGracefulStopSendsOneDrainingHeartbeat`, "bad payload": a duplicate
+  receipt nonce, the relay re-sending a receipt under load (run 41918197708 attempt 1; new
+  candidate, not related to these changes).
+
+Still open:
+
+- seed shard over the cap (item 4);
+- the relay drain test's duplicate receipt (above): its fake API should accept a resent
+  nonce the way the server does;
+- `## [0.1.0]`'s date, at the release.
+
 **D wave 3 merged (2026-11-04): D3-watch, D5-studio and D5-settings on `main`. The D plan is
 complete in code; what is left is the user's visual checks and the follow-ups below** (briefs in
 `.claude/briefs/d/`). The orchestrator made every call below without the user. Each unit was
@@ -356,22 +454,22 @@ Differs from the briefs:
 Flakes seen, once each, all passing on rerun or the next run (for `docs/operators/flakes.md`):
 
 - `chat.int` "regex filters run in the filter worker" (`msg_held`, the watch-list chat-filter
-  test);
+  test; **fixed** by `69e242ad`, release follow-ups item 6);
 - `rtsp-publish-proxy.int` (first segment's PDT null, not the port-race signature);
 - chat `upgrade-deadline.int` (websocket failed);
 - `postgres-health.int` (5850 ms against a 3000 ms bound);
 - an Alpine CDN TLS error in the `captions` platform build;
 - `seed-coverage` "/$channel as viewer1" (empty chat).
-- **Quarantined 2026-11-04:** watch-room `b8 edge-sync`'s three member-convergence checks: "both members sit within 5 s of max(edgeWallclock)", "the Chromium members are within 500 ms" and "WebKit is within 1000 ms of both members". They are load-sensitive on CI with the seek driver: WebKit failed 3 of 4 `main` attempts (runs `41793894751` attempt 2: p90s 4831/5171 ms; `41801398808` attempts 2 and 3: 1390/845 ms), then the Chromium members sat 7.2/9.4 s behind the room edge (run `41812379909`). They are now report-only (`edgeSyncQuarantined` in the report). Chat's 5 s target, the `edgeWallclock` frames and the older watch-room sync check stay hard. **They must be hard assertions again before `v0.1.0`.**
+- **Quarantined 2026-11-04:** watch-room `b8 edge-sync`'s three member-convergence checks: "both members sit within 5 s of max(edgeWallclock)", "the Chromium members are within 500 ms" and "WebKit is within 1000 ms of both members". They are load-sensitive on CI with the seek driver: WebKit failed 3 of 4 `main` attempts (runs `41793894751` attempt 2: p90s 4831/5171 ms; `41801398808` attempts 2 and 3: 1390/845 ms), then the Chromium members sat 7.2/9.4 s behind the room edge (run `41812379909`). They are now report-only (`edgeSyncQuarantined` in the report). Chat's 5 s target, the `edgeWallclock` frames and the older watch-room sync check stay hard. **Lifted:** hard assertions again since `851cb665` (release follow-ups, item 1).
 
 Follow-ups:
 
-- un-quarantine the edge-sync convergence assertions before `v0.1.0` (above);
+- ~~un-quarantine the edge-sync convergence assertions before `v0.1.0`~~ done (release follow-ups, item 1);
 - edge-sync: rate-based correction (`b8d16571`, merge `8cecdab5`) failed its first CI run (run `41776964782`: Chromium p90 968 ms against 500) and was reverted to the seek-based `c42fe1a2` behaviour; a local repro against the real stack with browser-side diagnostics is the next step, since the step is load-sensitive on CI;
-- the DVR-swap root cause;
+- ~~the DVR-swap root cause~~ found and fixed (release follow-ups, item 2);
 - a product gap: issuance gives a relay nothing for DVR pulls, so a DVR session on a channel with
   no live viewer can never verify through a relay (ADR 0016 Amendment 1);
-- `shards.ts` timings from the first push run's PASS lines;
+- ~~`shards.ts` timings from the first push run's PASS lines~~ done (release follow-ups, item 4);
 - dating `## [0.1.0]` in CHANGELOG.md before the tag;
 - the units' undone items (card-share chargebacks, the automatic `distributed` flip, the
   outcome-unknown settle UI, status history persistence).
