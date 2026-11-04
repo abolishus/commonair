@@ -37,7 +37,7 @@ function MembershipPage(): React.JSX.Element {
   const settings = useCoopLoad("settings", () => api().coop.settings());
   // Batch 8 (M1-coop-money): card payment for shares needs Stripe on the instance and the setting
   // on. A failed read only hides "Pay by card"; the bank-transfer path stays.
-  const instance = useCoopLoad("instance", () => api().instance.info());
+  const instance = useCoopLoad("instance", () => Promise.resolve().then(() => api().instance.info()));
   const card = cardSharesAllowed(instance.data?.features.payments ?? null, settings.data);
   const [instructions, setInstructions] = React.useState<ShareInstructionsDto | null>(null);
   const [buying, setBuying] = React.useState(false);

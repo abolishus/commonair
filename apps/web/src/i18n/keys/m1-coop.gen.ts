@@ -46,7 +46,6 @@ export type Key =
   | "coopMoney.markPaid.reference"
   | "coopMoney.markPaid.referenceHint"
   | "coopMoney.markPaid.confirm"
-  | "coopMoney.markPaid.done"
   | "coopMoney.mine.title"
   | "coopMoney.mine.pending"
   | "coopMoney.mine.paid"

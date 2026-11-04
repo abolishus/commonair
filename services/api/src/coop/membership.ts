@@ -249,7 +249,8 @@ export const membershipHandlers = {
         });
         const [share] = await tx
           .insert(membershipShares)
-          .values({ id: shareId, userId: caller.user.id, amountCents: shareCents, currency, paymentId })
+          // On the API's clock, as an exit's `exited_at`: "left during the checkout" compares the two.
+          .values({ id: shareId, userId: caller.user.id, amountCents: shareCents, currency, paymentId, createdAt: now })
           .returning();
         if (!share) throw new Error("share insert returned nothing");
         await audit(tx, {

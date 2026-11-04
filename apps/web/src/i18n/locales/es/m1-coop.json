@@ -41,7 +41,6 @@
   "coopMoney.markPaid.reference": "Referencia de la transferencia",
   "coopMoney.markPaid.referenceHint": "Un código corto: letras, dígitos, espacios y . _ : / # -",
   "coopMoney.markPaid.confirm": "Marcar como pagado",
-  "coopMoney.markPaid.done": "Pago marcado como pagado.",
   "coopMoney.mine.title": "Tu pago",
   "coopMoney.mine.pending": "Tu pago de {amount} está en camino.",
   "coopMoney.mine.paid": "Tu pago de {amount} se ha pagado.",
