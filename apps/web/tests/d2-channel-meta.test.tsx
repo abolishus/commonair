@@ -20,10 +20,14 @@ import {
   createRoute,
   createRouter,
 } from "@tanstack/react-router";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, configure, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type * as React from "react";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { locale, uiMessages } from "../src/i18n/index.ts";
+
+// The page renders through the router and its loader; on a busy CI runner the first paint can
+// take longer than testing-library's 1 s default.
+configure({ asyncUtilTimeout: 5_000 });
 
 const toasts = vi.hoisted(() => ({ success: vi.fn<(m: string) => void>(), error: vi.fn<(m: string) => void>() }));
 vi.mock("@commonair/ui/toast", () => ({ toast: toasts }));

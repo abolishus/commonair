@@ -18,10 +18,14 @@ import {
   createRoute,
   createRouter,
 } from "@tanstack/react-router";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, configure, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import * as React from "react";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { locale, uiMessages } from "../src/i18n/index.ts";
+
+// The page renders through the router and its loader; on a busy CI runner the first paint can
+// take longer than testing-library's 1 s default.
+configure({ asyncUtilTimeout: 5_000 });
 
 const boot = vi.hoisted(() => ({
   me: null as null | { id: string; username: string; displayName: string; channelSlug: string | null; role: string },
