@@ -209,6 +209,81 @@ export interface DvrFetch {
   origin: string;
   status: number;
   at: number;
+  /** The file (`index.m3u8`, a segment), for the diagnostics; never the query (it holds the token). */
+  file?: string;
+}
+
+/** The fetches for the report: source, file, status, ms since `since` (the last `limit`). */
+export function dvrFetchLog(
+  fetches: readonly DvrFetch[],
+  hosts: { relay: string; origin: string },
+  since: number,
+  limit = 60,
+): string[] {
+  const relay = new URL(hosts.relay).origin;
+  const origin = new URL(hosts.origin).origin;
+  return fetches.slice(Math.max(0, fetches.length - limit)).map((f) => {
+    const src = f.origin === relay ? "relay" : f.origin === origin ? "origin" : "other";
+    return `${f.at - since}ms ${src} ${f.file ?? "?"} ${f.status}`;
+  });
+}
+
+/** What the page shows and plays at one moment (relay-dvr-switch diagnostics). */
+export interface PlayerSnapshot {
+  at: number;
+  behind: number | null;
+  attrs: Record<string, string>;
+  scrubber: Record<string, string>;
+  video: {
+    currentTime: number;
+    readyState: number;
+    paused: boolean;
+    seeking: boolean;
+    buffered: [number, number][];
+    seekable: [number, number][];
+    dvrSwap: unknown;
+  } | null;
+}
+
+/** The player's data-* attributes, the DVR readout and scrubber, and its video element's state. */
+export async function playerSnapshot(page: Page): Promise<PlayerSnapshot | { error: string }> {
+  return page
+    .evaluate(() => {
+      const data = (el: Element | null): Record<string, string> =>
+        el instanceof HTMLElement ? Object.fromEntries(Object.entries(el.dataset).map(([k, v]) => [k, v ?? ""])) : {};
+      const ranges = (r: TimeRanges): [number, number][] =>
+        Array.from({ length: r.length }, (_, i) => [
+          Math.round(r.start(i) * 100) / 100,
+          Math.round(r.end(i) * 100) / 100,
+        ]);
+      const root = document.querySelector('[data-testid="player"]');
+      const v = root?.querySelector("video") ?? document.querySelector("video");
+      const behind = Number(document.querySelector('[data-testid="player-dvr-behind"]')?.getAttribute("data-seconds"));
+      let dvrSwap: unknown = null;
+      try {
+        dvrSwap = v?.dataset.dvrSwap ? JSON.parse(v.dataset.dvrSwap) : null;
+      } catch {
+        dvrSwap = v?.dataset.dvrSwap ?? null;
+      }
+      return {
+        at: Date.now(),
+        behind: Number.isFinite(behind) ? behind : null,
+        attrs: data(root),
+        scrubber: data(document.querySelector('[data-testid="player-dvr-scrubber"]')),
+        video: v
+          ? {
+              currentTime: Math.round(v.currentTime * 100) / 100,
+              readyState: v.readyState,
+              paused: v.paused,
+              seeking: v.seeking,
+              buffered: ranges(v.buffered),
+              seekable: ranges(v.seekable),
+              dvrSwap,
+            }
+          : null,
+      };
+    })
+    .catch((err: unknown) => ({ error: String(err) }));
 }
 
 /** What a page's DVR fetches say since `since`: by source, 403s, and the last one from each source. */
@@ -303,7 +378,8 @@ export async function stepRelayDvrSwitch(ext: RelayDvrB8Extension): Promise<void
   });
   page.on("response", (r: Response) => {
     const u = new URL(r.url());
-    if (u.pathname.includes("/dvr/")) fetches.push({ origin: u.origin, status: r.status(), at: Date.now() });
+    if (u.pathname.includes("/dvr/"))
+      fetches.push({ origin: u.origin, status: r.status(), at: Date.now(), file: u.pathname.split("/").pop() ?? "" });
   });
   page.on("requestfailed", (r) => {
     const u = new URL(r.url());
@@ -323,6 +399,8 @@ export async function stepRelayDvrSwitch(ext: RelayDvrB8Extension): Promise<void
   });
   const before = await behindReadout(page);
   ctx.data("relayDvrSwitchBehindBefore", before);
+  // Diagnostics (the position check failed twice in CI with 60 -> 15): the page at each stage.
+  const snapshots: Record<string, unknown> = { rewound: await playerSnapshot(page) };
 
   const t0 = Date.now();
   const exited = ext.relay.terminate();
@@ -336,13 +414,25 @@ export async function stepRelayDvrSwitch(ext: RelayDvrB8Extension): Promise<void
     );
   });
   ctx.metric("relay_dvr_switch_ms", Date.now() - t0, "ms");
-  await ctx.step(t(`DVR keeps playing for ${AFTER_SWITCH_MS / 1000} s`), () => sleep(AFTER_SWITCH_MS, ctx.signal));
+  snapshots.switched = await playerSnapshot(page);
+  await ctx.step(t(`DVR keeps playing for ${AFTER_SWITCH_MS / 1000} s`), async () => {
+    await sleep(AFTER_SWITCH_MS / 4, ctx.signal);
+    snapshots.settling = await playerSnapshot(page);
+    await sleep(AFTER_SWITCH_MS - AFTER_SWITCH_MS / 4, ctx.signal);
+  });
+  snapshots.after = await playerSnapshot(page);
 
   const summary = dvrFetchSummary(fetches, { relay: ext.relay.url, origin: ctx.env.HARNESS_ORIGIN_URL }, t0);
   const after = await behindReadout(page);
   const mode = await player(page).getAttribute("data-playback-mode");
   const state = await player(page).getAttribute("data-state");
   ctx.data("relayDvrSwitch", { summary, before, after, mode, state, failedRequests: failed.length });
+  ctx.data("relayDvrSwitchDiagnostics", {
+    t0,
+    snapshots,
+    fetches: dvrFetchLog(fetches, { relay: ext.relay.url, origin: ctx.env.HARNESS_ORIGIN_URL }, t0),
+    failed: failed.map((f) => `${f.at - t0}ms ${f.origin}`),
+  });
   ctx.assert(t("no DVR fetch answered 403"), summary.forbidden === 0, summary);
   ctx.assert(t("the player is still playing DVR (no jump to live)"), mode === "dvr" && state === "playing", {
     mode,

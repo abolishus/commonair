@@ -6,7 +6,7 @@
  * off a departed relay to the origin. While DVR plays, the source swaps at the current position
  * (never to live); a paused viewer is swapped silently and stays paused where they were.
  */
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { swapDvrSource, type DvrSwapSeam } from "../src/player/dvr.ts";
 import { heartbeatDvrSwitch } from "../src/player/heartbeat.ts";
 
@@ -110,6 +110,17 @@ describe("swapDvrSource", () => {
     const f = fakeSeam({ at: AT, paused: true, loads: false });
     expect(await swapDvrSource(f.seam, ORIGIN_DVR, f.now)).toBe("failed");
     expect(f.log).toEqual([`load ${ORIGIN_DVR} autoplay=false`]);
+  });
+
+  it("reports where it sent the playhead and whether the seek took, for the controller's landing guard", async () => {
+    const f = fakeSeam({ at: AT, paused: false, loadMs: 700 });
+    const landed = vi.fn<(t: Date, ok: boolean) => void>();
+    expect(await swapDvrSource({ ...f.seam, landed }, ORIGIN_DVR, f.now)).toBe("swapped");
+    expect(landed).toHaveBeenCalledWith(new Date(AT + 700), true);
+    const g = fakeSeam({ at: AT, paused: true });
+    const refused = vi.fn<(t: Date, ok: boolean) => void>();
+    await swapDvrSource({ ...g.seam, seekToWallclock: () => false, landed: refused }, ORIGIN_DVR, g.now);
+    expect(refused).toHaveBeenCalledWith(new Date(AT), false);
   });
 
   it("no known position: the new source plays, with no seek", async () => {
