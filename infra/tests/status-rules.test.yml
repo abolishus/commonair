@@ -14,6 +14,9 @@ tests:
       # Up for 5 min, then down.
       - series: 'probe_success{job="status",role="component",component="web",module="http_web"}'
         values: "1x9 0x10"
+      # The certificate's own probe: its success never counts as availability.
+      - series: 'probe_success{job="status",role="cert",component="certificate",module="http_cert"}'
+        values: "0x20"
       # Both canaries fail from 2m30s to 5m: the droplet lost its network.
       - series: 'probe_success{job="status",role="canary",component="canary-0",module="tcp_connect"}'
         values: "1x4 0x5 1x10"
@@ -34,7 +37,7 @@ tests:
         exp_samples:
           - labels: 'commonair_status:probe_success:sighted{job="status",role="component",component="web",module="http_web"}'
             value: 0
-      # A canary is not a component.
+      # A canary, or the certificate's probe, is not a component.
       - expr: count(commonair_status:probe_success:sighted)
         eval_time: 6m
         exp_samples:

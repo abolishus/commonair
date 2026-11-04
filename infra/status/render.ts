@@ -16,9 +16,11 @@
  *   30;
  * - renders index.html and status.json from that, plus the operator's notes and maintenance file.
  *
- * Every time comes from Prometheus (its `time()` and sample timestamps), never this host's clock,
- * so skew between droplets cannot move a state or a day boundary. Nothing personal is written:
- * the page and the mails name components, states and times only.
+ * Every time comes from Prometheus (its `time()` and sample timestamps), so skew between droplets
+ * cannot move a state or a day boundary. The one exception is a run that cannot read Prometheus
+ * at all (`runFailed`): it uses this host's clock, which is the clock that Prometheus, on the same
+ * droplet, would have answered with. Nothing personal is written: the page and the mails name
+ * components, states and times only.
  */
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { connect as netConnect, type Socket } from "node:net";
@@ -28,7 +30,13 @@ import { join } from "node:path";
 // ---------------------------------------------------------------- config
 
 export type ProbeModule = "http_web" | "http_ready" | "websocket_chat" | "tcp_connect";
+/** The modules an extra component may use. */
 export const PROBE_MODULES: readonly ProbeModule[] = ["http_web", "http_ready", "websocket_chat", "tcp_connect"];
+/**
+ * A certificate's own probe: TLS without verification, so an expired certificate still reports
+ * its expiry (http_web fails verification and reports none).
+ */
+export const CERT_MODULE = "http_cert";
 
 export interface ProbeComponent {
   id: string;
@@ -37,17 +45,22 @@ export interface ProbeComponent {
   module: ProbeModule;
   target: string;
 }
-/** A certificate's expiry, read from the TLS of another component's probe. */
+/** A certificate's expiry, probed (CERT_MODULE) at another component's https target. */
 export interface CertComponent {
   id: string;
   name: string;
   kind: "cert";
   from: string;
 }
+
+export type Locale = "en" | "es";
+export const LOCALES: readonly Locale[] = ["en", "es"];
 export type Component = ProbeComponent | CertComponent;
 
 export interface StatusConfig {
   siteName: string;
+  /** The page's language (its strings are in TEXT, en and es like the web app's catalog). */
+  locale: Locale;
   statusDomain: string;
   components: Component[];
   /** host:port of well-known external targets: all of them down means this droplet is blind. */
@@ -64,24 +77,19 @@ const ID_RE = /^[a-z][a-z0-9-]{0,31}$/;
 const HOST_PORT_RE = /^[A-Za-z0-9.-]+:\d{1,5}$|^\[[0-9a-fA-F:]+\]:\d{1,5}$/;
 
 /** The default components for an instance origin (https://host) and its RTMP host:port. */
-export function defaultComponents(origin: string, rtmp: string): Component[] {
+export function defaultComponents(origin: string, rtmp: string, locale: Locale = "en"): Component[] {
   const host = new URL(origin).host;
+  const n = TEXT[locale].component;
   return [
-    { id: "web", name: "Website", kind: "probe", module: "http_web", target: `https://${host}/` },
+    { id: "web", name: n.web, kind: "probe", module: "http_web", target: `https://${host}/` },
     // The API's readiness checks Postgres and Valkey, so a managed-cluster outage shows here.
-    { id: "api", name: "API and database", kind: "probe", module: "http_ready", target: `https://${host}/readyz/api` },
-    { id: "chat", name: "Chat", kind: "probe", module: "websocket_chat", target: `wss://${host}/chat` },
+    { id: "api", name: n.api, kind: "probe", module: "http_ready", target: `https://${host}/readyz/api` },
+    { id: "chat", name: n.chat, kind: "probe", module: "websocket_chat", target: `wss://${host}/chat` },
     // The origin's readiness (Postgres, Valkey and its HLS source), not a live playlist: no
     // channel is guaranteed to be live (status-page.md, "What is probed").
-    {
-      id: "video",
-      name: "Video playback",
-      kind: "probe",
-      module: "http_ready",
-      target: `https://${host}/readyz/origin`,
-    },
-    { id: "ingest", name: "Stream ingest (RTMP)", kind: "probe", module: "tcp_connect", target: rtmp },
-    { id: "certificate", name: "TLS certificate", kind: "cert", from: "web" },
+    { id: "video", name: n.video, kind: "probe", module: "http_ready", target: `https://${host}/readyz/origin` },
+    { id: "ingest", name: n.ingest, kind: "probe", module: "tcp_connect", target: rtmp },
+    { id: "certificate", name: n.certificate, kind: "cert", from: "web" },
   ];
 }
 
@@ -106,9 +114,11 @@ export function parseConfig(raw: unknown): StatusConfig {
   const host = new URL(origin).host;
   const rtmp = r.rtmp === undefined || r.rtmp === null ? `${host}:1935` : str(r.rtmp, "rtmp");
   if (!HOST_PORT_RE.test(rtmp)) fail("rtmp must be host:port");
+  const locale = (r.locale === undefined || r.locale === null ? "en" : r.locale) as Locale;
+  if (!LOCALES.includes(locale)) fail(`locale must be one of ${LOCALES.join(", ")}`);
   const extra = r.extraComponents ?? [];
   if (!Array.isArray(extra)) fail("extraComponents must be a list");
-  const components = [...defaultComponents(origin, rtmp)];
+  const components = [...defaultComponents(origin, rtmp, locale)];
   for (const e of extra as unknown[]) {
     const c = (typeof e === "object" && e !== null ? e : fail("each extra component is an object")) as Record<
       string,
@@ -140,7 +150,9 @@ export function parseConfig(raw: unknown): StatusConfig {
     r.statusDomain === undefined || r.statusDomain === null ? `status.${host}` : str(r.statusDomain, "statusDomain");
   if (!/^[a-z0-9.-]+$/i.test(statusDomain)) fail("statusDomain must be a host name");
   return {
-    siteName: str(r.siteName, "siteName"),
+    // No name given: the instance's host, never a literal (the name lives in SITE / INSTANCE_NAME).
+    siteName: r.siteName === undefined || r.siteName === null ? host : str(r.siteName, "siteName"),
+    locale,
     statusDomain,
     components,
     canaries: canaries as string[],
@@ -153,13 +165,23 @@ export function parseConfig(raw: unknown): StatusConfig {
 }
 
 const probes = (cfg: StatusConfig) => cfg.components.filter((c): c is ProbeComponent => c.kind === "probe");
+const certs = (cfg: StatusConfig) => cfg.components.filter((c): c is CertComponent => c.kind === "cert");
 
-/** Prometheus file_sd groups: one per component and one per canary (prometheus.yml relabels). */
+/**
+ * Prometheus file_sd groups: one per component, one per certificate (at its component's target)
+ * and one per canary (prometheus.yml relabels).
+ */
 export function probeTargets(cfg: StatusConfig): { targets: string[]; labels: Record<string, string> }[] {
   return [
     ...probes(cfg).map((c) => ({
       targets: [c.target],
       labels: { component: c.id, module: c.module, role: "component" },
+    })),
+    ...certs(cfg).map((c) => ({
+      targets: [
+        probes(cfg).find((p) => p.id === c.from)?.target ?? fail(`certificate ${c.id}: no component ${c.from}`),
+      ],
+      labels: { component: c.id, module: CERT_MODULE, role: "cert" },
     })),
     ...cfg.canaries.map((t, i) => ({
       targets: [t],
@@ -202,7 +224,7 @@ function resultOf(a: PromAnswer, want: "matrix" | "vector" | "scalar", expr: str
 
 export const SAMPLE_QUERY = (cfg: StatusConfig) =>
   `probe_success{job="status"}[${cfg.probeIntervalSeconds * (cfg.confirmSamples + 2)}s]`;
-export const CERT_QUERY = `min by (component) (probe_ssl_earliest_cert_expiry{job="status"})`;
+export const CERT_QUERY = `min by (component) (probe_ssl_earliest_cert_expiry{job="status",role="cert"})`;
 /** Daily availability; blind periods (canaries down too) are not counted (status-rules.yml). */
 export const DAY_QUERY = (seconds: number) =>
   `avg by (component) (avg_over_time(commonair_status:probe_success:sighted[${seconds}s]))`;
@@ -212,7 +234,7 @@ export interface Observation {
   now: number;
   /** probe_success samples per component id (canaries as canary-<n>), oldest first. */
   samples: Record<string, Sample[]>;
-  /** probe_ssl_earliest_cert_expiry per component id, Unix seconds. */
+  /** probe_ssl_earliest_cert_expiry per certificate component id, Unix seconds. */
   certExpiry: Record<string, number>;
 }
 
@@ -297,7 +319,7 @@ export function judge(cfg: StatusConfig, obs: Observation, prev: Persisted): Jud
     raw[c.id] = j;
     states[c.id] = j ?? prev.components[c.id]?.state ?? "unknown";
   }
-  for (const c of cfg.components) if (c.kind === "cert") states[c.id] = judgeCert(obs.certExpiry[c.from], obs.now, cfg);
+  for (const c of cfg.components) if (c.kind === "cert") states[c.id] = judgeCert(obs.certExpiry[c.id], obs.now, cfg);
   const canaries = cfg.canaries.map((_, i) => judgeProbe(obs.samples[`canary-${i}`] ?? [], obs.now, cfg));
   const blind =
     cfg.canaries.length > 0 && canaries.every((s) => s === "down") && probes(cfg).every((c) => raw[c.id] === "down");
@@ -479,14 +501,6 @@ export function routeFrom(env: Record<string, string | undefined>, cfg: StatusCo
   return { mail, webhook, problems };
 }
 
-const STATE_WORD: Record<Shown, string> = {
-  up: "Operational",
-  degraded: "Degraded",
-  down: "Down",
-  unknown: "No data",
-  maintenance: "Maintenance",
-};
-
 export const iso = (s: number) => `${new Date(s * 1000).toISOString().slice(0, 16).replace("T", " ")} UTC`;
 export const duration = (seconds: number) => {
   const m = Math.max(0, Math.round(seconds / 60));
@@ -505,7 +519,8 @@ export function alertText(cfg: StatusConfig, m: AlertMessage): { subject: string
     m.kind === "recovery"
       ? [`${m.name} is operational again as of ${iso(m.at)}.`, `It had been ${m.from}.`]
       : [
-          `${m.name}: ${STATE_WORD[m.state].toLowerCase()} since ${iso(m.since)}, seen from the monitoring droplet.`,
+          // Alerts are for the operator and stay English; the page follows cfg.locale.
+          `${m.name}: ${TEXT.en.state[m.state].toLowerCase()} since ${iso(m.since)}, seen from the monitoring droplet.`,
           ...(m.component === PROBES_ID
             ? ["The probes have no fresh results: check blackbox and Prometheus on the monitoring droplet."]
             : []),
@@ -525,60 +540,93 @@ export function alertText(cfg: StatusConfig, m: AlertMessage): { subject: string
 }
 
 export interface Transport {
-  mail(settings: MailSettings, msg: { subject: string; text: string; date: number; id: string }): Promise<void>;
-  webhook(url: string, body: unknown): Promise<void>;
+  mail(
+    settings: MailSettings,
+    msg: { subject: string; text: string; date: number; id: string },
+    signal: AbortSignal,
+  ): Promise<void>;
+  webhook(url: string, body: unknown, signal: AbortSignal): Promise<void>;
 }
 
-/** Delivers each intent on every configured channel; returns the components delivered on any. */
+/**
+ * How long one run may spend delivering, all intents and channels together. Well under the
+ * unit's TimeoutStartSec (120 s), so a hung relay never gets the run killed.
+ */
+export const DELIVERY_BUDGET_MS = 60_000;
+
+/** Rejects when the signal aborts, even if `p` ignores it. */
+function untilAbort<T>(p: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason instanceof Error ? signal.reason : new Error("aborted"));
+    if (signal.aborted) return onAbort();
+    signal.addEventListener("abort", onAbort, { once: true });
+    p.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+  });
+}
+
+/**
+ * Delivers every intent on every configured channel at once (mail and webhook in parallel, so a
+ * dead relay never holds back the webhook) within `budgetMs`; returns the components delivered
+ * on any channel. `onDelivered` runs as each one lands, so the caller can save it straight away.
+ */
 export async function deliver(
   cfg: StatusConfig,
   plan: AlertPlan,
   route: Route,
   transport: Transport,
   log: Log,
+  opts: { budgetMs?: number; onDelivered?: (component: string) => void } = {},
 ): Promise<Set<string>> {
   const delivered = new Set<string>();
-  for (const { message: m } of plan.intents) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(new Error("delivery budget spent")), opts.budgetMs ?? DELIVERY_BUDGET_MS);
+  const one = async (m: AlertMessage) => {
     const { subject, text } = alertText(cfg, m);
-    let ok = false;
+    const channels: Promise<void>[] = [];
     if (route.mail) {
-      try {
-        await transport.mail(route.mail, {
-          subject,
-          text,
-          date: m.at,
-          id: `${m.component}.${m.kind}.${m.at}@${cfg.statusDomain}`,
-        });
-        ok = true;
-      } catch (err) {
-        log("error", "alert mail failed", { component: m.component, kind: m.kind, err: errText(err) });
-      }
+      const msg = { subject, text, date: m.at, id: `${m.component}.${m.kind}.${m.at}@${cfg.statusDomain}` };
+      channels.push(
+        untilAbort(transport.mail(route.mail, msg, ctl.signal), ctl.signal).catch((err: unknown) => {
+          log("error", "alert mail failed", { component: m.component, kind: m.kind, err: errText(err) });
+          throw err;
+        }),
+      );
     }
     if (route.webhook) {
-      try {
-        await transport.webhook(route.webhook, {
-          site: cfg.siteName,
-          component: m.component,
-          name: m.name,
-          kind: m.kind,
-          state: m.state,
-          from: m.from,
-          since: new Date(m.since * 1000).toISOString(),
-          at: new Date(m.at * 1000).toISOString(),
-          page: `https://${cfg.statusDomain}/`,
-          subject,
-        });
-        ok = true;
-      } catch (err) {
-        log("error", "alert webhook failed", { component: m.component, kind: m.kind, err: errText(err) });
-      }
+      const body = {
+        site: cfg.siteName,
+        component: m.component,
+        name: m.name,
+        kind: m.kind,
+        state: m.state,
+        from: m.from,
+        since: new Date(m.since * 1000).toISOString(),
+        at: new Date(m.at * 1000).toISOString(),
+        page: `https://${cfg.statusDomain}/`,
+        subject,
+      };
+      channels.push(
+        untilAbort(transport.webhook(route.webhook, body, ctl.signal), ctl.signal).catch((err: unknown) => {
+          log("error", "alert webhook failed", { component: m.component, kind: m.kind, err: errText(err) });
+          throw err;
+        }),
+      );
     }
-    if (ok) delivered.add(m.component);
+    const ok = (await Promise.allSettled(channels)).some((r) => r.status === "fulfilled");
+    if (ok) {
+      delivered.add(m.component);
+      opts.onDelivered?.(m.component);
+    }
     log(ok ? "info" : "warn", ok ? "alert sent" : "alert not delivered, retried next run", {
       component: m.component,
       kind: m.kind,
       state: m.state,
     });
+  };
+  try {
+    await Promise.allSettled(plan.intents.map((i) => one(i.message)));
+  } finally {
+    clearTimeout(timer);
   }
   return delivered;
 }
@@ -656,26 +704,65 @@ class SmtpSession {
   close() {
     this.socket.end();
   }
+
+  destroy(err: Error) {
+    this.socket.destroy(err);
+  }
 }
 
 const header = (v: string) =>
   /^[\x20-\x7e]*$/.test(v) ? v : `=?UTF-8?B?${Buffer.from(v, "utf8").toString("base64")}?=`;
 
+export interface SmtpLimits {
+  /** Opening the connection (and implicit TLS): the OS would wait about two minutes. */
+  connectTimeoutMs?: number;
+  /** Silence from the relay once connected. */
+  idleTimeoutMs?: number;
+  /** Aborting destroys the connection wherever the conversation is. */
+  signal?: AbortSignal;
+}
+
 export async function smtpSend(
   s: MailSettings,
   msg: { subject: string; text: string; date: number; id: string },
-  timeoutMs = 30_000,
+  limits: SmtpLimits = {},
 ): Promise<void> {
-  const socket = await new Promise<Socket | TLSSocket>((resolve, reject) => {
-    const sock = s.secure
-      ? tlsConnect({ host: s.host, port: s.port, servername: s.host, ...(s.ca ? { ca: s.ca } : {}) }, () =>
-          resolve(sock),
-        )
-      : netConnect({ host: s.host, port: s.port }, () => resolve(sock));
-    sock.once("error", reject);
-  });
-  socket.setTimeout(timeoutMs, () => socket.destroy(new Error("smtp: timed out")));
-  const smtp = new SmtpSession(socket);
+  const { connectTimeoutMs = 10_000, idleTimeoutMs = 20_000, signal } = limits;
+  signal?.throwIfAborted();
+  let kill: (err: Error) => void = () => undefined;
+  const onAbort = () => kill(new Error("smtp: delivery budget spent"));
+  signal?.addEventListener("abort", onAbort, { once: true });
+  try {
+    const socket = await new Promise<Socket | TLSSocket>((resolve, reject) => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const connected = () => {
+        clearTimeout(timer);
+        resolve(sock);
+      };
+      const sock = s.secure
+        ? tlsConnect({ host: s.host, port: s.port, servername: s.host, ...(s.ca ? { ca: s.ca } : {}) }, connected)
+        : netConnect({ host: s.host, port: s.port }, connected);
+      kill = (err) => sock.destroy(err);
+      timer = setTimeout(() => sock.destroy(new Error("smtp: connect timed out")), connectTimeoutMs);
+      sock.once("error", (err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+    });
+    socket.setTimeout(idleTimeoutMs, () => socket.destroy(new Error("smtp: timed out")));
+    const smtp = new SmtpSession(socket);
+    kill = (err) => smtp.destroy(err);
+    await converse(smtp, s, msg);
+  } finally {
+    signal?.removeEventListener("abort", onAbort);
+  }
+}
+
+async function converse(
+  smtp: SmtpSession,
+  s: MailSettings,
+  msg: { subject: string; text: string; date: number; id: string },
+): Promise<void> {
   try {
     await smtp.reply(220);
     smtp.send(`EHLO ${s.helo}`);
@@ -730,13 +817,13 @@ export async function smtpSend(
 }
 
 export const defaultTransport: Transport = {
-  mail: (settings, msg) => smtpSend(settings, msg),
-  async webhook(url, body) {
+  mail: (settings, msg, signal) => smtpSend(settings, msg, { signal }),
+  async webhook(url, body, signal) {
     const res = await fetch(url, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(10_000),
+      signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
     });
     await res.body?.cancel();
     if (!res.ok) throw new Error(`webhook: HTTP ${res.status}`);
@@ -990,20 +1077,146 @@ export function percent(v: number): string {
   return `${(Math.floor(Math.max(0, v) * 10_000) / 100).toFixed(2)}%`;
 }
 
-const OVERALL_TEXT: Record<Shown, string> = {
-  up: "All systems operational",
-  degraded: "Some systems are degraded",
-  down: "Some systems are down",
-  unknown: "Some systems have no recent data",
-  maintenance: "Planned maintenance in progress",
+/**
+ * Every string the page shows, per locale (en and es, as the web app's catalog). The page runs
+ * no script and cloud-init copies this file alone, so the table lives here, not in apps/web.
+ * Notes and maintenance text are the operator's own words and are shown as written.
+ */
+export interface PageText {
+  state: Record<Shown, string>;
+  overall: Record<Shown, string>;
+  note: Record<NoteStatus, string>;
+  component: Record<"web" | "api" | "chat" | "video" | "ingest" | "certificate", string>;
+  title: (site: string) => string;
+  checked: (seconds: number, updated: string) => string;
+  since: string;
+  noData90: string;
+  available90: (percent: string) => string;
+  noDataDay: string;
+  dailyFor: (name: string) => string;
+  dayUtc: string;
+  available: string;
+  maintenance: string;
+  maintenanceDefault: string;
+  blind: (at: string | null) => string;
+  blindAfter: string;
+  stale: (updated: string) => string;
+  staleAfter: string;
+  currentIncidents: string;
+  components: string;
+  pastIncidents: string;
+  noIncidents: string;
+  machineReadable: string;
+  footer: string;
+}
+
+export const TEXT: Record<Locale, PageText> = {
+  en: {
+    state: { up: "Operational", degraded: "Degraded", down: "Down", unknown: "No data", maintenance: "Maintenance" },
+    overall: {
+      up: "All systems operational",
+      degraded: "Some systems are degraded",
+      down: "Some systems are down",
+      unknown: "Some systems have no recent data",
+      maintenance: "Planned maintenance in progress",
+    },
+    note: {
+      investigating: "Investigating",
+      identified: "Identified",
+      monitoring: "Monitoring",
+      resolved: "Resolved",
+      maintenance: "Maintenance",
+    },
+    component: {
+      web: "Website",
+      api: "API and database",
+      chat: "Chat",
+      video: "Video playback",
+      ingest: "Stream ingest (RTMP)",
+      certificate: "TLS certificate",
+    },
+    title: (site) => `${site} status`,
+    checked: (seconds, updated) => `Checked from outside, every ${seconds} seconds. Updated ${updated}.`,
+    since: "Since",
+    noData90: "No data in the last 90 days",
+    available90: (p) => `${p} available over the last 90 days`,
+    noDataDay: "no data",
+    dailyFor: (name) => `Daily figures for ${name}`,
+    dayUtc: "Day (UTC)",
+    available: "Available",
+    maintenance: "Planned maintenance.",
+    maintenanceDefault: "The service may be briefly unavailable.",
+    blind: (at) => `The status monitor lost its own network${at ? ` at ${at}` : ""}.`,
+    blindAfter: "The states below are from before then.",
+    stale: (updated) => `This page has not been updated since ${updated}.`,
+    staleAfter: "The status monitor cannot read its own probe results; the states below are from then.",
+    currentIncidents: "Current incidents",
+    components: "Components",
+    pastIncidents: "Past incidents",
+    noIncidents: "No incidents in the last 90 days.",
+    machineReadable: "Machine-readable:",
+    footer:
+      "Times are UTC. Availability is the share of successful probes each day, not counting time the monitor itself was offline.",
+  },
+  es: {
+    state: {
+      up: "Operativo",
+      degraded: "Degradado",
+      down: "Caído",
+      unknown: "Sin datos",
+      maintenance: "Mantenimiento",
+    },
+    overall: {
+      up: "Todos los sistemas funcionan",
+      degraded: "Algunos sistemas están degradados",
+      down: "Algunos sistemas están caídos",
+      unknown: "Algunos sistemas no tienen datos recientes",
+      maintenance: "Mantenimiento programado en curso",
+    },
+    note: {
+      investigating: "Investigando",
+      identified: "Identificado",
+      monitoring: "En observación",
+      resolved: "Resuelto",
+      maintenance: "Mantenimiento",
+    },
+    component: {
+      web: "Sitio web",
+      api: "API y base de datos",
+      chat: "Chat",
+      video: "Reproducción de vídeo",
+      ingest: "Ingesta de emisiones (RTMP)",
+      certificate: "Certificado TLS",
+    },
+    title: (site) => `Estado de ${site}`,
+    checked: (seconds, updated) => `Comprobado desde fuera, cada ${seconds} segundos. Actualizado: ${updated}.`,
+    since: "Desde",
+    noData90: "Sin datos en los últimos 90 días",
+    available90: (p) => `${p} de disponibilidad en los últimos 90 días`,
+    noDataDay: "sin datos",
+    dailyFor: (name) => `Cifras diarias de ${name}`,
+    dayUtc: "Día (UTC)",
+    available: "Disponible",
+    maintenance: "Mantenimiento programado.",
+    maintenanceDefault: "Puede que el servicio no esté disponible durante un momento.",
+    blind: (at) => `El monitor de estado perdió su propia red${at ? ` (${at})` : ""}.`,
+    blindAfter: "Los estados de abajo son de antes de ese momento.",
+    stale: (updated) => `Esta página no se actualiza desde ${updated}.`,
+    staleAfter: "El monitor de estado no puede leer sus propias comprobaciones; los estados de abajo son de entonces.",
+    currentIncidents: "Incidentes en curso",
+    components: "Componentes",
+    pastIncidents: "Incidentes anteriores",
+    noIncidents: "Ningún incidente en los últimos 90 días.",
+    machineReadable: "Legible por máquina:",
+    footer:
+      "Las horas están en UTC. La disponibilidad es la proporción de comprobaciones correctas de cada día, sin contar el tiempo en que el propio monitor estuvo sin conexión.",
+  },
 };
-const NOTE_WORD: Record<NoteStatus, string> = {
-  investigating: "Investigating",
-  identified: "Identified",
-  monitoring: "Monitoring",
-  resolved: "Resolved",
-  maintenance: "Maintenance",
-};
+
+/** The stale banner's slot in index.html, filled by a run that cannot read Prometheus. */
+const STALE_SLOT = /<!--stale-->[\s\S]*?<!--\/stale-->/;
+export const staleBanner = (t: PageText, updatedAt: number) =>
+  `<!--stale--><div class="banner s-unknown"><p><strong>${t.stale(iso(updatedAt))}</strong> ${t.staleAfter}</p></div><!--/stale-->`;
 
 const dayClass = (v: number | null) => (v === null ? "none" : v >= 0.999 ? "ok" : v >= 0.99 ? "minor" : "major");
 
@@ -1046,11 +1259,12 @@ footer{margin-block-start:2rem}
   .replace(/\n/g, "");
 
 function noteHtml(n: Note, cfg: StatusConfig): string {
+  const t = TEXT[cfg.locale];
   const names = n.components.map((id) => cfg.components.find((c) => c.id === id)?.name ?? id);
   return [
     `<article>`,
     `<h3>${escapeHtml(n.title)}</h3>`,
-    `<p class="muted">${NOTE_WORD[n.status]} · <time datetime="${new Date(n.date * 1000).toISOString()}">${iso(n.date)}</time>${
+    `<p class="muted">${t.note[n.status]} · <time datetime="${new Date(n.date * 1000).toISOString()}">${iso(n.date)}</time>${
       names.length ? ` · ${escapeHtml(names.join(", "))}` : ""
     }</p>`,
     renderMarkdown(n.body),
@@ -1059,38 +1273,38 @@ function noteHtml(n: Note, cfg: StatusConfig): string {
 }
 
 export function renderHtml(p: PageModel, cfg: StatusConfig): string {
-  const title = `${p.siteName} status`;
+  const t = TEXT[cfg.locale];
+  const title = t.title(p.siteName);
   const comp = (c: PageComponent) => {
-    const head = `<div class="row"><h3>${escapeHtml(c.name)}</h3><span class="state s-${c.shown}">${STATE_WORD[c.shown]}</span></div>`;
+    const head = `<div class="row"><h3>${escapeHtml(c.name)}</h3><span class="state s-${c.shown}">${t.state[c.shown]}</span></div>`;
     const since =
       c.since !== null && c.state !== "up"
-        ? `<p class="muted">Since <time datetime="${new Date(c.since * 1000).toISOString()}">${iso(c.since)}</time></p>`
+        ? `<p class="muted">${t.since} <time datetime="${new Date(c.since * 1000).toISOString()}">${iso(c.since)}</time></p>`
         : "";
     if (!c.days) return `<li>${head}${since}</li>`;
     const bars = `<div class="bars" aria-hidden="true">${c.days.map((d) => `<span class="${dayClass(d.availability)}"></span>`).join("")}</div>`;
-    const avail = `<p class="muted">${c.availability === null ? "No data in the last 90 days" : `${percent(c.availability)} available over the last 90 days`}</p>`;
+    const avail = `<p class="muted">${c.availability === null ? t.noData90 : t.available90(percent(c.availability))}</p>`;
     const rows = [...c.days]
       .reverse()
       .map(
-        (d) => `<tr><td>${d.date}</td><td>${d.availability === null ? "no data" : percent(d.availability)}</td></tr>`,
+        (d) => `<tr><td>${d.date}</td><td>${d.availability === null ? t.noDataDay : percent(d.availability)}</td></tr>`,
       )
       .join("");
-    const table = `<details><summary>Daily figures for ${escapeHtml(c.name)}</summary><table><thead><tr><th scope="col">Day (UTC)</th><th scope="col">Available</th></tr></thead><tbody>${rows}</tbody></table></details>`;
+    const table = `<details><summary>${escapeHtml(t.dailyFor(c.name))}</summary><table><thead><tr><th scope="col">${t.dayUtc}</th><th scope="col">${t.available}</th></tr></thead><tbody>${rows}</tbody></table></details>`;
     return `<li>${head}${since}${bars}${avail}${table}</li>`;
   };
   const banners = [
-    `<div class="banner s-${p.overall}"><p><strong>${OVERALL_TEXT[p.overall]}</strong></p></div>`,
+    "<!--stale--><!--/stale-->",
+    `<div class="banner s-${p.overall}"><p><strong>${t.overall[p.overall]}</strong></p></div>`,
     p.maintenance.active
-      ? `<div class="banner s-maintenance"><p><strong>Planned maintenance.</strong> ${escapeHtml(p.maintenance.note) || "The service may be briefly unavailable."}</p></div>`
+      ? `<div class="banner s-maintenance"><p><strong>${t.maintenance}</strong> ${escapeHtml(p.maintenance.note) || t.maintenanceDefault}</p></div>`
       : "",
     p.blind.active
-      ? `<div class="banner s-unknown"><p><strong>The status monitor lost its own network${
-          p.blind.since !== null ? ` at ${iso(p.blind.since)}` : ""
-        }.</strong> The states below are from before then.</p></div>`
+      ? `<div class="banner s-unknown"><p><strong>${t.blind(p.blind.since !== null ? iso(p.blind.since) : null)}</strong> ${t.blindAfter}</p></div>`
       : "",
   ].join("");
   return `<!doctype html>
-<html lang="en">
+<html lang="${cfg.locale}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -1104,25 +1318,25 @@ export function renderHtml(p: PageModel, cfg: StatusConfig): string {
 <div class="wrap">
 <header>
 <h1>${escapeHtml(title)}</h1>
-<p class="muted">Checked from outside, every ${cfg.probeIntervalSeconds} seconds. Updated <time datetime="${new Date(p.now * 1000).toISOString()}">${iso(p.now)}</time>.</p>
+<p class="muted">${t.checked(cfg.probeIntervalSeconds, `<time datetime="${new Date(p.now * 1000).toISOString()}">${iso(p.now)}</time>`)}</p>
 </header>
 <main>
 ${banners}
 ${
   p.incidents.open.length
-    ? `<section aria-labelledby="open"><h2 id="open">Current incidents</h2>\n${p.incidents.open.map((n) => noteHtml(n, cfg)).join("\n")}</section>`
+    ? `<section aria-labelledby="open"><h2 id="open">${t.currentIncidents}</h2>\n${p.incidents.open.map((n) => noteHtml(n, cfg)).join("\n")}</section>`
     : ""
 }
-<section aria-labelledby="components"><h2 id="components">Components</h2>
+<section aria-labelledby="components"><h2 id="components">${t.components}</h2>
 <ul class="components">
 ${p.components.map(comp).join("\n")}
 </ul>
 </section>
-<section aria-labelledby="past"><h2 id="past">Past incidents</h2>
-${p.incidents.past.length ? p.incidents.past.map((n) => noteHtml(n, cfg)).join("\n") : `<p class="muted">No incidents in the last 90 days.</p>`}
+<section aria-labelledby="past"><h2 id="past">${t.pastIncidents}</h2>
+${p.incidents.past.length ? p.incidents.past.map((n) => noteHtml(n, cfg)).join("\n") : `<p class="muted">${t.noIncidents}</p>`}
 </section>
 </main>
-<footer><p class="muted">Machine-readable: <a href="status.json">status.json</a>. Times are UTC. Availability is the share of successful probes each day, not counting time the monitor itself was offline.</p></footer>
+<footer><p class="muted">${t.machineReadable} <a href="status.json">status.json</a>. ${t.footer}</p></footer>
 </div>
 </body>
 </html>
@@ -1134,6 +1348,8 @@ export function renderJson(p: PageModel): string {
     {
       site: p.siteName,
       updatedAt: new Date(p.now * 1000).toISOString(),
+      // True while the monitor cannot read its probes (runFailed): every state below is old.
+      stale: false,
       overall: p.overall,
       maintenance: p.maintenance,
       monitorOffline: p.blind.active,
@@ -1180,6 +1396,8 @@ export interface RunDeps {
   alertEnv: Record<string, string | undefined>;
   transport: Transport;
   log: Log;
+  /** DELIVERY_BUDGET_MS unless a test shortens it. */
+  deliveryBudgetMs?: number;
 }
 
 export interface RunResult {
@@ -1190,6 +1408,55 @@ export interface RunResult {
   model: PageModel;
 }
 
+function readState(path: string, log: Log): Persisted {
+  if (!existsSync(path)) return emptyState();
+  try {
+    const p = JSON.parse(readFileSync(path, "utf8")) as Persisted;
+    if (p.version === 1) return { ...emptyState(), ...p };
+  } catch (err) {
+    log("warn", "state unreadable, starting fresh", { err: errText(err) });
+  }
+  return emptyState();
+}
+
+function readMaintenance(dataDir: string): string | null {
+  const path = join(dataDir, "maintenance");
+  return existsSync(path) ? readFileSync(path, "utf8").trim().slice(0, 500) : null;
+}
+
+function alertRoute(d: RunDeps): Route {
+  const route = routeFrom(d.alertEnv, d.cfg);
+  if (!route.mail && !route.webhook)
+    d.log("error", "NO ALERT ROUTE: outages will not reach anyone (docs/operators/status-page.md#the-alert-route)", {
+      problems: route.problems,
+    });
+  else if (route.problems.length) d.log("warn", "alert route incomplete", { problems: route.problems });
+  return route;
+}
+
+/**
+ * Saves the state before delivering (the base records, so an interrupted run retries every
+ * intent), then again as each intent lands, so a run killed mid-delivery never resends what
+ * was already accepted.
+ */
+async function deliverAndSave(
+  d: RunDeps,
+  plan: AlertPlan,
+  route: Route,
+  save: (records: Record<string, ComponentRecord>) => void,
+): Promise<Set<string>> {
+  save(plan.records);
+  if (!plan.intents.length) return new Set();
+  const landed = new Set<string>();
+  return deliver(d.cfg, plan, route, d.transport, d.log, {
+    budgetMs: d.deliveryBudgetMs,
+    onDelivered: (id) => {
+      landed.add(id);
+      save(applyDelivered(plan, landed));
+    },
+  });
+}
+
 export async function runOnce(d: RunDeps): Promise<RunResult> {
   const { cfg, dataDir, log } = d;
   for (const sub of ["site", "state", "targets"]) mkdirSync(join(dataDir, sub), { recursive: true });
@@ -1197,67 +1464,134 @@ export async function runOnce(d: RunDeps): Promise<RunResult> {
   writeAtomic(join(dataDir, "targets", "status.json"), `${JSON.stringify(probeTargets(cfg), null, 2)}\n`);
 
   const statePath = join(dataDir, "state", "state.json");
-  let prev = emptyState();
-  if (existsSync(statePath)) {
-    try {
-      const p = JSON.parse(readFileSync(statePath, "utf8")) as Persisted;
-      if (p.version === 1) prev = { ...emptyState(), ...p };
-    } catch (err) {
-      log("warn", "state unreadable, starting fresh", { err: errText(err) });
-    }
-  }
-
-  const route = routeFrom(d.alertEnv, cfg);
-  if (!route.mail && !route.webhook)
-    log("error", "NO ALERT ROUTE: outages will not reach anyone (docs/operators/status-page.md#the-alert-route)", {
-      problems: route.problems,
-    });
-  else if (route.problems.length) log("warn", "alert route incomplete", { problems: route.problems });
+  const prev = readState(statePath, log);
+  const route = alertRoute(d);
 
   const obs = await observe(d.prom, cfg);
   const judgement = judge(cfg, obs, prev);
-  const maintPath = join(dataDir, "maintenance");
-  const maintenance = existsSync(maintPath) ? readFileSync(maintPath, "utf8").trim().slice(0, 500) : null;
+  const maintenance = readMaintenance(dataDir);
   const plan = planAlerts(cfg, prev.components, judgement, obs.now, { maintenance: maintenance !== null });
-  const delivered = plan.intents.length ? await deliver(cfg, plan, route, d.transport, log) : new Set<string>();
-  const records = applyDelivered(plan, delivered);
   if (judgement.blind) log("warn", "monitoring is blind: every component and every canary failing", {});
 
   const history = await updateHistory(d.prom, cfg, prev.days, obs.now);
   const blindSince = judgement.blind ? (prev.blindSince ?? obs.now) : null;
-  const next: Persisted = { version: 1, components: records, days: history.days, blindSince };
-  writeAtomic(statePath, `${JSON.stringify(next)}\n`);
 
+  // The page before any delivery: a slow relay must never hold back what the public sees.
+  // It reads only each record's state and since, which delivery does not change.
   const notes = readNotes(join(dataDir, "notes"), log);
-  const model = pageModel(cfg, obs.now, judgement.states, records, history.days, history.today, notes, maintenance, {
-    active: judgement.blind,
-    since: blindSince,
-  });
+  const model = pageModel(
+    cfg,
+    obs.now,
+    judgement.states,
+    plan.records,
+    history.days,
+    history.today,
+    notes,
+    maintenance,
+    {
+      active: judgement.blind,
+      since: blindSince,
+    },
+  );
   writeAtomic(join(dataDir, "site", "index.html"), renderHtml(model, cfg));
   writeAtomic(join(dataDir, "site", "status.json"), renderJson(model));
+
+  const save = (records: Record<string, ComponentRecord>) =>
+    writeAtomic(
+      statePath,
+      `${JSON.stringify({ version: 1, components: records, days: history.days, blindSince } satisfies Persisted)}\n`,
+    );
+  const delivered = await deliverAndSave(d, plan, route, save);
   log("info", "rendered", { overall: model.overall, blind: judgement.blind, alerts: plan.intents.length });
   return { now: obs.now, judgement, plan, delivered, model };
+}
+
+export interface FailedRun {
+  plan: AlertPlan;
+  delivered: Set<string>;
+  /** Whether a page was there to mark stale. */
+  markedStale: boolean;
+}
+
+/**
+ * A run that could not read Prometheus (crashed, disk full, bad config). The probes then report
+ * nothing at all, so this is the "probes are not reporting" problem: mailed once it has lasted
+ * PROBES_SETTLE_SECONDS, with its recovery sent by the first good run. `now` is this host's
+ * clock (see the file comment). The last page stays up, marked stale.
+ */
+export async function runFailed(d: RunDeps, now: number): Promise<FailedRun> {
+  const { cfg, dataDir, log } = d;
+  mkdirSync(join(dataDir, "state"), { recursive: true });
+  const statePath = join(dataDir, "state", "state.json");
+  const prev = readState(statePath, log);
+  const route = alertRoute(d);
+  const states: Record<string, State> = Object.fromEntries(
+    Object.entries(prev.components).map(([id, r]) => [id, r.state]),
+  );
+  states[PROBES_ID] = "down";
+  const all = planAlerts(cfg, prev.components, { states, blind: false }, now, {
+    maintenance: readMaintenance(dataDir) !== null,
+  });
+  const probesRecord = all.records[PROBES_ID] as ComponentRecord;
+  // Only the probes' own alert: every other state is as old as the last good run.
+  const plan: AlertPlan = {
+    records: { ...prev.components, [PROBES_ID]: probesRecord },
+    intents: all.intents.filter((i) => i.message.component === PROBES_ID),
+  };
+
+  const markedStale = markStale(dataDir, cfg);
+  const save = (records: Record<string, ComponentRecord>) =>
+    writeAtomic(statePath, `${JSON.stringify({ ...prev, components: records } satisfies Persisted)}\n`);
+  const delivered = await deliverAndSave(d, plan, route, save);
+  return { plan, delivered, markedStale };
+}
+
+/** Puts the stale banner on the last page and `stale: true` in its status.json. */
+function markStale(dataDir: string, cfg: StatusConfig): boolean {
+  const htmlPath = join(dataDir, "site", "index.html");
+  const jsonPath = join(dataDir, "site", "status.json");
+  if (!existsSync(htmlPath) || !existsSync(jsonPath)) return false;
+  const json = JSON.parse(readFileSync(jsonPath, "utf8")) as { updatedAt: string; stale?: boolean };
+  const updatedAt = Math.floor(Date.parse(json.updatedAt) / 1000);
+  const html = readFileSync(htmlPath, "utf8");
+  if (!STALE_SLOT.test(html)) return false;
+  writeAtomic(htmlPath, html.replace(STALE_SLOT, staleBanner(TEXT[cfg.locale], updatedAt)));
+  writeAtomic(jsonPath, `${JSON.stringify({ ...json, stale: true }, null, 2)}\n`);
+  return true;
 }
 
 export async function main(env: Record<string, string | undefined>): Promise<number> {
   const configPath = env.STATUS_CONFIG ?? "/config/status.json";
   const alertPath = env.STATUS_ALERT_ENV ?? "/config/alert.env";
+  let deps: RunDeps;
   try {
     const cfg = parseConfig(JSON.parse(readFileSync(configPath, "utf8")));
     const alertEnv = existsSync(alertPath) ? parseEnvFile(readFileSync(alertPath, "utf8")) : {};
     if (alertEnv.SMTP_CA_FILE) alertEnv.SMTP_CA_PEM = readFileSync(alertEnv.SMTP_CA_FILE, "utf8");
-    await runOnce({
+    deps = {
       cfg,
       prom: httpProm(env.STATUS_PROMETHEUS_URL ?? "http://prometheus:9090"),
       dataDir: env.STATUS_DATA ?? "/data",
       alertEnv,
       transport: defaultTransport,
       log: jsonLog,
-    });
+    };
+  } catch (err) {
+    jsonLog("error", "render failed: unreadable config", { err: errText(err) });
+    return 1;
+  }
+  try {
+    await runOnce(deps);
     return 0;
   } catch (err) {
-    // The last page stays up; the timer tries again in a minute.
+    // The timer tries again in a minute; meanwhile the page says it is stale, and a failure
+    // that lasts is mailed as the probes not reporting.
     jsonLog("error", "render failed", { err: errText(err) });
+    try {
+      await runFailed(deps, Math.floor(Date.now() / 1000));
+    } catch (err2) {
+      jsonLog("error", "could not record the failed run", { err: errText(err2) });
+    }
     return 1;
   }
 }

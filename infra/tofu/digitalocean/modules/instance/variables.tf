@@ -190,10 +190,21 @@ variable "status_domain" {
 }
 
 variable "status_site_name" {
-  description = "The instance name the status page and alert mails show (SITE.name in packages/config/src/site.ts)."
+  description = "The instance name the status page and alert mails show: set it to the instance's INSTANCE_NAME (packages/config, instanceSite()). Null shows instance_origin's host instead, so no name is written here twice."
   type        = string
-  default     = "CommonAir"
+  default     = null
+}
+
+variable "status_locale" {
+  description = "Language of the public status page: en or es, as the web app's catalog. Alert mails stay English."
+  type        = string
+  default     = "en"
   nullable    = false
+
+  validation {
+    condition     = contains(["en", "es"], var.status_locale)
+    error_message = "status_locale is en or es."
+  }
 }
 
 variable "status_rtmp" {

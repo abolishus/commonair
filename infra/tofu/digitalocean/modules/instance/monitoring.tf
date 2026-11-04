@@ -19,6 +19,7 @@ locals {
   # render.ts validates this (parseConfig); names and the domain come from here, never literals.
   status_config = jsonencode({
     siteName        = var.status_site_name
+    locale          = var.status_locale
     origin          = var.instance_origin
     statusDomain    = local.status_domain
     rtmp            = var.status_rtmp

@@ -22,7 +22,7 @@ optionally, a JSON webhook (no proprietary paging service is needed; a webhook c
 
 | Path                                                              | Runs on                               | Pages when                                                                                                                                                                                                | Survives the app droplet going down |
 | ----------------------------------------------------------------- | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
-| **Outside-in** ([status-page.md](status-page.md#the-alert-route)) | the monitoring droplet, second region | a component (website, API and database, chat, video, ingest) is down for two probes; the certificate is expiring or expired; the probes stop                                                              | yes                                 |
+| **Outside-in** ([status-page.md](status-page.md#the-alert-route)) | the monitoring droplet, second region | a component (website, API and database, chat, video, ingest) is down for two probes; the certificate is expiring or expired; the probes stop, or Prometheus on that droplet fails for 5 minutes           | yes                                 |
 | **Inside** (Grafana)                                              | the app droplet                       | a `page` alert from `infra/prometheus/rules` fires: the error-budget burn rates [CommonairSloBurnFast](monitoring.md#commonairsloburnfast) and [CommonairSloBurnSlow](monitoring.md#commonairsloburnslow) | no                                  |
 
 `ticket` alerts (the stage triggers, connections, memory, disk, scrape failures) do not page: they
@@ -99,5 +99,7 @@ Fill in, in the instance's private runbook:
 - who holds SSH access to the app and monitoring droplets, the DigitalOcean account, the
   tofu state passphrase, and the relay accounts;
 - the maintainers for step 3.
+- who looks at the status page once a day: a dead monitoring droplet sends no mail at all
+  ([status-page.md](status-page.md#when-prometheus-itself-fails)).
 
 Review the rota monthly, and after every incident that paged.

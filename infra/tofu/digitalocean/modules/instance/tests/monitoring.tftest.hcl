@@ -78,6 +78,11 @@ run "status_cloud_init_installs_the_stack" {
   }
 
   assert {
+    condition     = jsondecode(local.status_config).siteName == null && jsondecode(local.status_config).locale == "en"
+    error_message = "No name literal: with status_site_name unset the page shows the origin's host; the page is English by default."
+  }
+
+  assert {
     condition     = jsondecode(local.status_config).canaries == ["9.9.9.9:53", "1.1.1.1:53"]
     error_message = "The blind-monitor canaries default to two anycast resolvers."
   }
@@ -137,6 +142,30 @@ run "status_cloud_init_can_be_turned_off" {
     condition     = local.monitoring_user_data == null
     error_message = "monitoring_cloud_init = false with cloud_init_updates = false passes no user data."
   }
+}
+
+run "status_name_and_locale" {
+  command = plan
+
+  variables {
+    status_site_name = "Example Streams"
+    status_locale    = "es"
+  }
+
+  assert {
+    condition     = jsondecode(local.status_config).siteName == "Example Streams" && jsondecode(local.status_config).locale == "es"
+    error_message = "status_site_name and status_locale reach status.json."
+  }
+}
+
+run "bad_status_locale_is_rejected" {
+  command = plan
+
+  variables {
+    status_locale = "fr"
+  }
+
+  expect_failures = [var.status_locale]
 }
 
 run "bad_extra_component_is_rejected" {

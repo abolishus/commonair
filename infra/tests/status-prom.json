@@ -103,11 +103,11 @@
         ]
       }
     },
-    "min by (component) (probe_ssl_earliest_cert_expiry{job=\"status\"})": {
+    "min by (component) (probe_ssl_earliest_cert_expiry{job=\"status\",role=\"cert\"})": {
       "status": "success",
       "data": {
         "resultType": "vector",
-        "result": [{ "metric": { "component": "web" }, "value": [1793714400, "1794578400"] }]
+        "result": [{ "metric": { "component": "certificate" }, "value": [1793714400, "1794578400"] }]
       }
     },
     "avg by (component) (avg_over_time(commonair_status:probe_success:sighted[50400s]))": {

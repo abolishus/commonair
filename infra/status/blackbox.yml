@@ -3,9 +3,10 @@
 #
 # blackbox_exporter modules for the status page's outside probes (docs/operators/status-page.md).
 # render.ts writes the targets (one per component) and picks each one's module. IPv4 first: the
-# instance's reserved IP is IPv4, and the container network has no IPv6.
+# instance's reserved IP is IPv4. (The container network has IPv6 for Caddy's published ports;
+# the probes still prefer IPv4.)
 modules:
-  # The web origin: TLS required, any 2xx after redirects. Its TLS gives the certificate expiry.
+  # The web origin: a valid certificate and any 2xx after redirects.
   http_web:
     prober: http
     timeout: 10s
@@ -13,6 +14,21 @@ modules:
       preferred_ip_protocol: ip4
       fail_if_not_ssl: true
       follow_redirects: true
+      headers:
+        User-Agent: commonair-status-probe
+
+  # The certificate's expiry, at the web origin's target: verification off, so an expired or
+  # otherwise invalid certificate still reports probe_ssl_earliest_cert_expiry. Only that series
+  # is read from it (render.ts CERT_QUERY, role="cert"); http_web is what checks the TLS.
+  http_cert:
+    prober: http
+    timeout: 10s
+    http:
+      preferred_ip_protocol: ip4
+      fail_if_not_ssl: true
+      follow_redirects: false
+      tls_config:
+        insecure_skip_verify: true
       headers:
         User-Agent: commonair-status-probe
 

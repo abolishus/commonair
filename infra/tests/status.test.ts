@@ -32,6 +32,7 @@ import { afterAll, describe, expect, test } from "vite-plus/test";
 import { CAN_RUN_PROMTOOL, requirePromtool, runPromtool } from "./observability-promtool.ts";
 import {
   CERT_QUERY,
+  TEXT,
   DAY_QUERY,
   PROBES_ID,
   PROBES_SETTLE_SECONDS,
@@ -54,6 +55,7 @@ import {
   judgeCert,
   judgeProbe,
   last90,
+  main,
   parseConfig,
   parseEnvFile,
   parseNote,
@@ -62,6 +64,7 @@ import {
   probeTargets,
   renderMarkdown,
   routeFrom,
+  runFailed,
   runOnce,
   smtpSend,
   updateHistory,
@@ -125,7 +128,7 @@ function fakeProm(s: Scenario, calls: string[] = []): PromQuery {
         "vector",
         s.certExpiry === null
           ? []
-          : [{ metric: { component: "web" }, value: [s.now, String(s.certExpiry ?? s.now + 60 * 86_400)] }],
+          : [{ metric: { component: "certificate" }, value: [s.now, String(s.certExpiry ?? s.now + 60 * 86_400)] }],
       );
     const m = /\[(\d+)s\]\)\)$/.exec(expr);
     if (m && expr === DAY_QUERY(Number(m[1]))) {
@@ -219,9 +222,20 @@ describe("status.json", () => {
     expect(() => parseConfig({ ...RAW_CONFIG, confirmSamples: 0 })).toThrow(/confirmSamples/);
   });
 
-  test("file_sd targets: one group per probed component and per canary, never the certificate", () => {
+  test("file_sd targets: one group per probed component, per certificate and per canary", () => {
     const groups = probeTargets(CFG);
-    expect(groups.map((g) => g.labels.component)).toEqual([...PROBE_IDS, "canary-0", "canary-1"]);
+    expect(groups.map((g) => g.labels.component)).toEqual([...PROBE_IDS, "certificate", "canary-0", "canary-1"]);
+    // The certificate has its own unverified probe at the web target, so an expired one still
+    // reports its expiry (http_web, which verifies, reports none).
+    expect(groups.find((g) => g.labels.component === "certificate")).toEqual({
+      targets: ["https://stream.example.org/"],
+      labels: { component: "certificate", module: "http_cert", role: "cert" },
+    });
+    const bb = parse(read("infra/status/blackbox.yml")) as {
+      modules: Record<string, { http?: { tls_config?: { insecure_skip_verify?: boolean } } }>;
+    };
+    expect(bb.modules.http_cert?.http?.tls_config?.insecure_skip_verify).toBe(true);
+    expect(bb.modules.http_web?.http?.tls_config?.insecure_skip_verify).toBeUndefined();
     expect(groups.every((g) => g.targets.length === 1)).toBe(true);
     expect(groups.find((g) => g.labels.component === "canary-1")).toEqual({
       targets: ["1.1.1.1:53"],
@@ -269,7 +283,7 @@ describe("judging probes", () => {
         v.map((x, i): [number, number] => [NOW - (v.length - 1 - i) * 30, x]),
       ]),
     ),
-    certExpiry: { web: cert },
+    certExpiry: { certificate: cert },
   });
 
   test("a disagreeing probe keeps the previous state", () => {
@@ -781,7 +795,7 @@ function htmlProblems(html: string): string[] {
   if (!/<meta charset="utf-8">/.test(html)) problems.push("no charset");
   if (!/<title>[^<]+<\/title>/.test(html)) problems.push("no title");
   const stack: string[] = [];
-  const body = html.replace(/<style>[\s\S]*?<\/style>/, "<style></style>");
+  const body = html.replace(/<style>[\s\S]*?<\/style>/, "<style></style>").replace(/<!--[\s\S]*?-->/g, "");
   for (const m of body.matchAll(/<(\/?)([a-z][a-z0-9]*)((?:\s+[a-z-]+(?:="[^"]*")?)*)\s*>|<(?!!doctype)[^>]*>/g)) {
     if (!m[2]) {
       problems.push(`malformed tag ${m[0]}`);
@@ -1428,5 +1442,280 @@ describe.runIf(CAN_RUN_PROMTOOL)("promtool", () => {
     expect(r.code, r.out).toBe(0);
     expect(r.out).toContain("SUCCESS");
     expect(r.out).not.toContain("FAILED");
+  });
+});
+
+// ---------------------------------------------------------------- a slow or dead route
+
+/** A relay that accepts the connection and never says a word. */
+async function silentRelay() {
+  const socks: Socket[] = [];
+  const server = createServer((sock) => void socks.push(sock));
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  return {
+    port: (server.address() as AddressInfo).port,
+    close: () => {
+      for (const s of socks) s.destroy();
+      server.close();
+    },
+  };
+}
+
+const mailSettings = (port: number, host = "127.0.0.1"): MailSettings => ({
+  host,
+  port,
+  secure: false,
+  user: null,
+  password: null,
+  from: "Status <status@status.test>",
+  to: ["oncall@ops.test"],
+  helo: "status.test",
+  ca: null,
+});
+const MSG = { subject: "s", text: "t", date: NOW, id: "x@status.test" };
+
+/** A transport whose mail never returns and ignores the abort, like a relay that hangs. */
+function hangingMail(sent: Sent = { mails: [], hooks: [] }, seen?: () => void): Transport & Sent {
+  return {
+    ...sent,
+    mail: () => {
+      seen?.();
+      return new Promise<void>(() => undefined);
+    },
+    async webhook(_url, body) {
+      sent.hooks.push(body as Record<string, unknown>);
+    },
+  };
+}
+
+describe("a slow or dead alert route never stalls a run", () => {
+  test("SMTP: a relay that never answers times out; an abort ends the conversation", async () => {
+    const relay = await silentRelay();
+    try {
+      const t0 = performance.now();
+      await expect(smtpSend(mailSettings(relay.port), MSG, { idleTimeoutMs: 200 })).rejects.toThrow(/timed out/);
+      expect(performance.now() - t0).toBeLessThan(2_000);
+      const ctl = new AbortController();
+      setTimeout(() => ctl.abort(), 100);
+      await expect(smtpSend(mailSettings(relay.port), MSG, { signal: ctl.signal })).rejects.toThrow(/budget/);
+    } finally {
+      relay.close();
+    }
+  });
+
+  test("SMTP: a blocked address gives up after the connect timeout, not the OS's two minutes", async () => {
+    const t0 = performance.now();
+    // TEST-NET-1: routed nowhere, so the connect either hangs (timed out) or fails at once.
+    await expect(smtpSend(mailSettings(25, "192.0.2.1"), MSG, { connectTimeoutMs: 300 })).rejects.toThrow(
+      /timed out|EHOSTUNREACH|ENETUNREACH|EADDRNOTAVAIL|ECONNREFUSED|unreachable|connect/i,
+    );
+    expect(performance.now() - t0).toBeLessThan(3_000);
+  });
+
+  test("deliver: a hung mail does not hold back the webhook, and the budget ends the wait", async () => {
+    const t = hangingMail();
+    const logs: string[] = [];
+    const plan = planAlerts(CFG, {}, { states: { web: "down", api: "down", chat: "down" }, blind: false }, NOW, {
+      maintenance: false,
+    });
+    const landed: string[] = [];
+    const t0 = performance.now();
+    const delivered = await deliver(CFG, plan, routeFrom(ALERT_ENV, CFG), t, (_l, msg) => void logs.push(msg), {
+      budgetMs: 200,
+      onDelivered: (id) => void landed.push(id),
+    });
+    expect(performance.now() - t0).toBeLessThan(1_500);
+    expect([...delivered].sort()).toEqual(["api", "chat", "web"]);
+    expect(landed.sort()).toEqual(["api", "chat", "web"]);
+    expect(t.hooks).toHaveLength(3);
+    expect(logs.filter((m) => m === "alert mail failed")).toHaveLength(3);
+  });
+
+  test("a run with a hung relay writes the page first and saves the state, so the next run retries", async () => {
+    const data = setupData();
+    const mailOnly = { ...ALERT_ENV, ALERT_WEBHOOK_URL: "" };
+    await runOnce({
+      cfg: CFG,
+      prom: fakeProm({ now: NOW, probes: allUp() }),
+      dataDir: data,
+      alertEnv: mailOnly,
+      transport: fakeTransport(),
+      log: quiet,
+    });
+    let pageAtMail = "";
+    const t = hangingMail(undefined, () => {
+      pageAtMail = readFileSync(join(data, "site", "index.html"), "utf8");
+    });
+    const down = { ...allUp(), chat: [0, 0, 0, 0] };
+    const r = await runOnce({
+      cfg: CFG,
+      prom: fakeProm({ now: NOW + 60, probes: down }),
+      dataDir: data,
+      alertEnv: mailOnly,
+      transport: t,
+      log: quiet,
+      deliveryBudgetMs: 200,
+    });
+    expect(r.delivered.size).toBe(0);
+    // The public page already said so when the relay was tried.
+    expect(pageAtMail).toMatch(/<h3>Chat<\/h3><span class="state s-down">Down<\/span>/);
+    const state = JSON.parse(readFileSync(join(data, "state", "state.json"), "utf8")) as {
+      components: Record<string, ComponentRecord>;
+    };
+    expect(state.components.chat).toMatchObject({ state: "down", since: NOW + 60, alerted: null });
+    // Relay back: the problem goes out now.
+    const t2 = fakeTransport();
+    await runOnce({
+      cfg: CFG,
+      prom: fakeProm({ now: NOW + 120, probes: down }),
+      dataDir: data,
+      alertEnv: mailOnly,
+      transport: t2,
+      log: quiet,
+    });
+    expect(t2.mails.map((m) => m.subject)).toEqual(["[CommonAir status] Chat is down"]);
+  });
+
+  test("each delivered intent is saved as it lands: a later hang does not lose it", async () => {
+    const data = setupData();
+    let calls = 0;
+    const t: Transport & Sent = {
+      mails: [],
+      hooks: [],
+      async mail(_s, msg) {
+        if (calls++ > 0) return new Promise<void>(() => undefined);
+        t.mails.push({ to: [], subject: msg.subject, text: msg.text, date: msg.date });
+      },
+      async webhook() {
+        throw new Error("webhook down");
+      },
+    };
+    const down = { ...allUp(), chat: [0, 0, 0, 0], api: [0, 0, 0, 0] };
+    await runOnce({
+      cfg: CFG,
+      prom: fakeProm({ now: NOW, probes: down }),
+      dataDir: data,
+      alertEnv: ALERT_ENV,
+      transport: t,
+      log: quiet,
+      deliveryBudgetMs: 200,
+    });
+    expect(t.mails).toHaveLength(1);
+    const state = JSON.parse(readFileSync(join(data, "state", "state.json"), "utf8")) as {
+      components: Record<string, ComponentRecord>;
+    };
+    const alerted = ["api", "chat"].filter((id) => state.components[id]?.alerted === "down");
+    expect(alerted).toHaveLength(1);
+  });
+});
+
+describe("Prometheus on the monitoring droplet failing", () => {
+  const broken: PromQuery = async () => ({ status: "error", error: "tsdb: no space left" });
+
+  test("the page is marked stale, and five minutes of failures mail the probes problem once", async () => {
+    const data = setupData();
+    const t = fakeTransport();
+    const deps = { cfg: CFG, prom: broken, dataDir: data, alertEnv: ALERT_ENV, transport: t, log: quiet };
+    await runOnce({ ...deps, prom: fakeProm({ now: NOW, probes: allUp() }) });
+    const at = NOW + 60;
+    const f1 = await runFailed(deps, at);
+    expect(f1.markedStale).toBe(true);
+    expect(t.mails).toEqual([]);
+    const html = readFileSync(join(data, "site", "index.html"), "utf8");
+    expect(html).toContain("This page has not been updated since 2026-11-03 14:00 UTC.");
+    expect(htmlProblems(html)).toEqual([]);
+    const json = JSON.parse(readFileSync(join(data, "site", "status.json"), "utf8")) as { stale: boolean };
+    expect(json.stale).toBe(true);
+
+    await runFailed(deps, at + PROBES_SETTLE_SECONDS - 60);
+    expect(t.mails).toEqual([]);
+    await runFailed(deps, at + PROBES_SETTLE_SECONDS);
+    expect(t.mails.map((m) => m.subject)).toEqual(["[CommonAir status] Status probes are not reporting"]);
+    expect(t.hooks.map((h) => h.component)).toEqual([PROBES_ID]);
+    await runFailed(deps, at + PROBES_SETTLE_SECONDS + 60);
+    expect(t.mails).toHaveLength(1);
+    // The marker is replaced, not stacked.
+    expect(readFileSync(join(data, "site", "index.html"), "utf8").match(/not been updated since/g)).toHaveLength(1);
+
+    // Prometheus back: the recovery goes out and the banner is gone.
+    const r = await runOnce({ ...deps, prom: fakeProm({ now: at + PROBES_SETTLE_SECONDS + 120, probes: allUp() }) });
+    expect(r.plan.intents.map((i) => `${i.message.component}:${i.message.kind}`)).toEqual([`${PROBES_ID}:recovery`]);
+    expect(t.mails.at(-1)?.subject).toBe("[CommonAir status] Status probes has recovered");
+    expect(readFileSync(join(data, "site", "index.html"), "utf8")).not.toContain("not been updated since");
+  });
+
+  test("a single failed run between good ones mails nothing; maintenance mutes it", async () => {
+    const data = setupData({}, "Disk swap.\n");
+    const t = fakeTransport();
+    const deps = { cfg: CFG, prom: broken, dataDir: data, alertEnv: ALERT_ENV, transport: t, log: quiet };
+    await runOnce({ ...deps, prom: fakeProm({ now: NOW, probes: allUp() }) });
+    for (let i = 1; i <= 10; i++) await runFailed(deps, NOW + i * 60);
+    expect(t.mails).toEqual([]);
+    rmSync(join(data, "maintenance"));
+    await runOnce({ ...deps, prom: fakeProm({ now: NOW + 660, probes: allUp() }) });
+    await runFailed(deps, NOW + 720);
+    await runOnce({ ...deps, prom: fakeProm({ now: NOW + 780, probes: allUp() }) });
+    expect(t.mails).toEqual([]);
+  });
+
+  test("main: an unreachable Prometheus exits 1 and leaves the last page, marked stale", async () => {
+    const data = setupData();
+    await runOnce({
+      cfg: CFG,
+      prom: fakeProm({ now: NOW, probes: allUp() }),
+      dataDir: data,
+      alertEnv: {},
+      transport: fakeTransport(),
+      log: quiet,
+    });
+    const conf = join(tmp(), "status.json");
+    writeFileSync(conf, JSON.stringify(RAW_CONFIG));
+    const write = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (() => true) as typeof process.stdout.write;
+    let code: number;
+    try {
+      code = await main({
+        STATUS_CONFIG: conf,
+        STATUS_ALERT_ENV: join(data, "absent.env"),
+        STATUS_DATA: data,
+        STATUS_PROMETHEUS_URL: "http://127.0.0.1:9",
+      });
+    } finally {
+      process.stdout.write = write;
+    }
+    expect(code).toBe(1);
+    expect(readFileSync(join(data, "site", "index.html"), "utf8")).toContain("not been updated since");
+  });
+});
+
+describe("the page's language and name", () => {
+  test("es: lang, the strings and the default component names; en and es have the same keys", async () => {
+    const cfg = parseConfig({ ...RAW_CONFIG, locale: "es" });
+    expect(cfg.components.find((c) => c.id === "web")?.name).toBe("Sitio web");
+    const data = setupData();
+    const r = await runOnce({
+      cfg,
+      prom: fakeProm({ now: NOW, probes: allUp() }),
+      dataDir: data,
+      alertEnv: {},
+      transport: fakeTransport(),
+      log: quiet,
+    });
+    expect(r.model.overall).toBe("up");
+    const html = readFileSync(join(data, "site", "index.html"), "utf8");
+    expect(html).toContain('<html lang="es">');
+    expect(html).toContain("Todos los sistemas funcionan");
+    expect(html).toContain("Estado de CommonAir");
+    expect(html).not.toContain("All systems operational");
+    expect(htmlProblems(html)).toEqual([]);
+    const shape = (o: object): unknown =>
+      Object.fromEntries(Object.entries(o).map(([k, v]) => [k, typeof v === "object" && v ? shape(v) : typeof v]));
+    expect(shape(TEXT.es)).toEqual(shape(TEXT.en));
+    expect(() => parseConfig({ ...RAW_CONFIG, locale: "fr" })).toThrow(/locale/);
+  });
+
+  test("no site name: the page shows the instance's host, not a literal", () => {
+    const cfg = parseConfig({ ...RAW_CONFIG, siteName: null });
+    expect(cfg.siteName).toBe("stream.example.org");
   });
 });

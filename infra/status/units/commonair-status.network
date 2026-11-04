@@ -4,3 +4,6 @@
 # The monitoring droplet's own network: blackbox, Prometheus, the renderer and Caddy.
 [Network]
 NetworkName=commonair-status
+# IPv6 too (Podman picks a ULA subnet), so the ports Caddy publishes answer on the droplet's IPv6
+# address and the status page's AAAA record works (status-page.md, "Bringing it up").
+IPv6=true

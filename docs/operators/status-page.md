@@ -40,7 +40,15 @@ Each minute the renderer:
    `/var/lib/commonair-status/notes/` and the maintenance file.
 
 Every time it uses is Prometheus's: its `time()`, the sample timestamps, and the UTC day boundaries
-derived from them. The droplets' clocks can drift apart without moving a state or a day.
+derived from them. The droplets' clocks can drift apart without moving a state or a day. The one
+exception is a run that cannot read Prometheus at all; see
+[When Prometheus itself fails](#when-prometheus-itself-fails).
+
+The page is written before any alert is sent, and delivery has a budget: each SMTP connection
+gives up after 10 s of connecting or 20 s of silence, mail and webhook go out in parallel, and a
+run stops waiting after 60 s in all (the unit's limit is 120 s). The state is saved before
+delivery and again as each alert lands, so a hung relay never freezes the page and never causes
+a mail that was already accepted to be sent again.
 
 The page is static HTML with an inline stylesheet: no script, no font, no image, no external URL.
 It reads the same without CSS, follows `prefers-color-scheme` for dark and light, fits 320 px, and
@@ -52,14 +60,19 @@ data; the notes are written by operators and must not name people either.
 
 From the monitoring droplet, over IPv4, every 30 s (`blackbox.yml` has the modules):
 
-| Component            | Target                                | Module           | Down means                                                        |
-| -------------------- | ------------------------------------- | ---------------- | ----------------------------------------------------------------- |
-| Website              | `https://<host>/`                     | `http_web`       | no 2xx over TLS                                                   |
-| API and database     | `https://<host>/readyz/api`           | `http_ready`     | the API's readiness failed: Postgres, Valkey or its subscribers   |
-| Chat                 | `wss://<host>/chat`                   | `websocket_chat` | the WebSocket upgrade failed                                      |
-| Video playback       | `https://<host>/readyz/origin`        | `http_ready`     | the origin's readiness failed: Postgres, Valkey or its HLS source |
-| Stream ingest (RTMP) | `<host>:1935`                         | `tcp_connect`    | no TCP connection                                                 |
-| TLS certificate      | the website probe's certificate chain | (none)           | expired; **degraded** within 14 days of expiry                    |
+| Component            | Target                         | Module           | Down means                                                        |
+| -------------------- | ------------------------------ | ---------------- | ----------------------------------------------------------------- |
+| Website              | `https://<host>/`              | `http_web`       | no 2xx over TLS                                                   |
+| API and database     | `https://<host>/readyz/api`    | `http_ready`     | the API's readiness failed: Postgres, Valkey or its subscribers   |
+| Chat                 | `wss://<host>/chat`            | `websocket_chat` | the WebSocket upgrade failed                                      |
+| Video playback       | `https://<host>/readyz/origin` | `http_ready`     | the origin's readiness failed: Postgres, Valkey or its HLS source |
+| Stream ingest (RTMP) | `<host>:1935`                  | `tcp_connect`    | no TCP connection                                                 |
+| TLS certificate      | `https://<host>/`, unverified  | `http_cert`      | expired; **degraded** within 14 days of expiry                    |
+
+The certificate has its own probe. `http_web` verifies the certificate, and a failed verification
+reports no expiry at all, so the certificate's probe skips verification and only reads the expiry.
+An expired certificate therefore shows twice: the website as down (verification fails), and the
+certificate as down (expired).
 
 **Video is the origin's readiness, not a live playlist.** No channel is guaranteed to be live, and
 a synthetic always-on test channel would need an ingest client running somewhere, which is one
@@ -101,8 +114,9 @@ What is sent:
 - at most one problem mail per component per 10 minutes, so a flapping component sends one mail
   per window, not one per flap;
 - **always the recovery** mail once a component that was mailed is operational again;
-- "Status probes are not reporting" when no probe has a fresh result for 5 minutes (blackbox or
-  Prometheus on the droplet is broken);
+- "Status probes are not reporting" when no probe has a fresh result for 5 minutes (blackbox is
+  broken), or when the renderer cannot read Prometheus for 5 minutes
+  ([When Prometheus itself fails](#when-prometheus-itself-fails));
 - nothing during [maintenance](#planned-maintenance) or while
   [the monitor is blind](#when-the-monitor-is-blind).
 
@@ -117,6 +131,29 @@ JSON: `site`, `component`, `name`, `kind` (`problem` or `recovery`), `state`, `f
 ```sh
 ssh root@<monitoring> journalctl -u commonair-status-render -n 50 -o cat | grep -i route
 ```
+
+## When Prometheus itself fails
+
+If Prometheus on the monitoring droplet stops answering (it is crash-looping, its disk is full, or
+its config is bad), the renderer cannot judge anything. Each failed run then:
+
+- keeps the last page, with a banner at the top: "This page has not been updated since …". It
+  also sets `"stale": true` in `status.json`;
+- counts the failure as the probes not reporting. After 5 minutes of failed runs it mails
+  "Status probes are not reporting" through the same route (once, as for any component). The
+  first good run sends the recovery and removes the banner.
+
+These runs cannot ask Prometheus the time, so they use the droplet's own clock. That is the same
+clock Prometheus on this droplet would have answered with, so nothing is lost. Check with:
+
+```sh
+ssh root@<monitoring> systemctl status commonair-status-prometheus
+ssh root@<monitoring> journalctl -u commonair-status-render -n 20 -o cat
+```
+
+A dead monitoring droplet sends nothing at all. The app side watches for that only once it probes
+the page's `status.json` (a post-launch item); until then, the on-call checks the page as part of
+the [rota](on-call.md#rota).
 
 ## When the monitor is blind
 
@@ -192,10 +229,20 @@ The tofu module creates the droplet with this stack when `enable_monitoring_drop
 `monitoring_cloud_init` (default on) and `instance_origin` are set; without `instance_origin` it
 gets package updates only. Then:
 
-1. Point `status.<domain>` (or `status_domain`) at the `monitoring_dns_records` output, A and AAAA.
-   Caddy gets its certificate once DNS resolves.
+1. Point `status.<domain>` (or `status_domain`) at the `monitoring_dns_records` output: the A
+   record, and the AAAA record once the IPv6 check in step 3 passes. Caddy gets its certificate
+   once DNS resolves.
 2. Place the route: [The alert route](#the-alert-route).
-3. Check: `https://status.<domain>/` shows every component operational within two minutes.
+3. Check: `https://status.<domain>/` shows every component operational within two minutes. Then
+   check IPv6 from a host that has it: `curl -6 -sI https://status.<domain>/`. The status network
+   has IPv6 turned on (`commonair-status.network`), so Caddy's ports answer on the droplet's IPv6
+   address. If that check fails, delete the AAAA record: IPv6-only visitors would get no answer,
+   and ACME validation over IPv6 would fail.
+
+Set `status_site_name` to the instance's `INSTANCE_NAME`. Without it the page and the mails show
+the instance's host name, because the tofu module cannot read the name from
+`packages/config`. `status_locale` (`en` or `es`) sets the page's language. Alert mails stay in
+English.
 
 ## Re-provisioning
 
@@ -207,9 +254,16 @@ variable, reaches the droplet only by replacing it:
 tofu -chdir=infra/tofu/digitalocean/envs/production apply -replace='module.instance.digitalocean_droplet.monitoring[0]'
 ```
 
-That is cheap: the droplet holds no state but 30 days of probe history and the page's daily figures
-(lost, so the page starts again with "no data" days), the notes, and `alert.env` (place it again).
-The DNS records follow the new addresses from `monitoring_dns_records`.
+The droplet holds no state except the following, and replacing it loses all of it:
+
+- 30 days of probe history;
+- **the page's 90-day availability history**. The page starts again with "no data" days. Keeping
+  `state.json` somewhere that outlives the droplet is a post-launch item;
+- the notes (copy them off first, then back);
+- `alert.env` (place it again).
+
+**The replacement gets new IP addresses.** Update the A and AAAA records by hand to the new
+`monitoring_dns_records` output. The status page is unreachable until they resolve.
 
 ## Seeing an alert land
 
