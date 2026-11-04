@@ -16,9 +16,10 @@ sh ~/commonair/selfhost.sh status
 
 It shows the installed and previous version, the hostname and TLS mode (and the internal CA's
 root path), the certificate's expiry, the object store (with an external one, each bucket and
-whether it is ready), every unit with its state, sub-state and container health, the socket
-units, the last base backup and its result, the last object backup, and the size of every
-volume.
+whether it is ready), external Postgres and Valkey when the instance uses them (each server's
+reachability, TLS, version and load), coturn and whether the TURN relay is on, whether live
+captions are on, every unit with its state, sub-state and container health, the socket units,
+the last base backup and its result, the last object backup, and the size of every volume.
 
 A healthy instance has every long-running unit `active running healthy` and every socket
 (`commonair-caddy.socket`, `commonair-irc.socket`, `commonair-ircs.socket`) `active listening`.
@@ -109,6 +110,8 @@ Each check prints the problem and the fix. The ones you are most likely to meet:
 | `ports already in use`                              | Stop what listens there (`sudo ss -ltnup`), usually another web server on 80/443                                                                           |
 | `an instance is already installed`                  | `install --reinstall` to reinstall, or `upgrade` for a new version                                                                                         |
 | `checksum mismatch` / `signature … does not verify` | Download again. If it persists, do not install; report it to the project                                                                                   |
+| `say which release: --version vX.Y.Z or --bundle`   | `upgrade` always takes a release. To change a flag (`--captions`, `--web-push`, `--turn-relay`) on the installed release, use `install --reinstall`        |
+| `live captions need a CPU with …`                   | The CPU lacks AVX2, FMA or F16C ([captions.md](captions.md#cpu-requirements)). Re-run with `--no-captions`; on a VM, ask for CPU passthrough               |
 | `the instance did not become healthy`               | `selfhost.sh status`, then the logs of the units that are not healthy                                                                                      |
 | `could not pull <image>`                            | Podman's error is printed above it. A registry's 5xx, 429 or timeout is retried four times first; if it persists, try later or use a mirror (`--registry`) |
 

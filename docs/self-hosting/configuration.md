@@ -38,7 +38,9 @@ back up: no container reads it whole. Each unit gets a copy of just the keys it 
 you pass `--public-ip`) and `DATABASE_URL`, and the object store's settings
 ([below](#object-storage)), and with external Postgres and Valkey their settings and the metrics
 collector's keys ([Postgres and Valkey](#postgres-and-valkey)). The contacts (`CONTACT_EMAIL` and the others) are set from `--email`
-only while they are empty. Keys you add yourself are carried across upgrades.
+only while they are empty. The optional features' flags write their own keys when you pass them
+and leave them alone when you do not ([below](#features-that-are-off-by-default)). Keys you add
+yourself are carried across upgrades.
 
 ## Object storage
 
@@ -285,6 +287,73 @@ setting and the API refuses to turn it on, so leave both off on a public instanc
 VOD is kept `CHAT_RETENTION_DAYS` (30), chat attached to a VOD at most `CHAT_REPLAY_MAX_DAYS`
 (60, never less than the retention). The privacy policy states these figures from the same
 variables, so changing them changes what your policy says.
+
+## Features that are off by default
+
+A fresh install runs none of these. Each one costs something (CPU, egress, moderation work, a
+third party in the path) that an operator should choose, so each is turned on by name.
+
+| Feature                    | Turn it on                                                    | Key it sets        | Page                                                          |
+| -------------------------- | ------------------------------------------------------------- | ------------------ | ------------------------------------------------------------- |
+| Live captions (whisper)    | `--captions` on `install`, `install --reinstall` or `upgrade` | `WHISPER_URL`      | [captions.md](captions.md)                                    |
+| The TURN relay for P2P     | `--turn-relay` (STUN on 3478/udp always runs)                 | `P2P_TURN_URLS`    | [p2p.md](p2p.md)                                              |
+| Browser push notifications | `--web-push`                                                  | `WEB_PUSH_ENABLED` | [web-push.md](web-push.md)                                    |
+| ActivityPub federation     | `FEDERATION_ENABLED=true` in `commonair.env`                  | (you set it)       | below                                                         |
+| The Twitch import          | `TWITCH_IMPORT_ENABLED=true` and the Twitch OAuth app         | (you set them)     | below                                                         |
+| Giveaways                  | `GIVEAWAYS_ENABLED=true` in `commonair.env`                   | (you set it)       | [ADR 0039](../decisions/0039-fair-draws-predictions-raids.md) |
+
+The three flags each have a `--no-` form that turns the feature off again, and the choice is
+kept across upgrades and reinstalls until you pass the other one. `upgrade` takes them only with
+a release to upgrade to (`--version` or `--bundle`); on the installed release use
+`install --reinstall`. The keys you set yourself take effect when the units that read them
+restart: `systemctl --user restart commonair-api commonair-worker`, or
+`sh ~/commonair/selfhost.sh install --reinstall` ([Changing a value](#changing-a-value)).
+
+### Federation (ActivityPub)
+
+With `FEDERATION_ENABLED=true`, a channel can be followed from Mastodon and other ActivityPub
+servers as `@<channel>@<your host>`, and its followers there see a post when it goes live and
+when a VOD or clip is published. Nothing comes back in: no remote replies, likes or follows by
+your members. The design and its limits are [ADR 0030](../decisions/0030-federation.md).
+
+Turning it on needs:
+
+- **The flag on the API and the worker**, then a restart of both. Off, every federation route
+  (WebFinger, NodeInfo, `/ap/*`) answers 404.
+- **Each streamer's opt-in.** A channel stays off until its streamer turns federation on in the
+  studio; that is when its actor and signing key are created.
+- **A hostname you will keep.** Actor ids are `https://<PUBLIC_HOSTNAME>/ap/channels/<id>`, and
+  every follower on another server stores them. Changing the hostname later orphans those
+  followers.
+- **Outbound HTTPS from the worker** to any server that follows a channel, and inbound requests
+  from them to `/.well-known/webfinger`, `/.well-known/nodeinfo`, `/nodeinfo/*` and `/ap/*`,
+  which Caddy already routes.
+- **Someone to moderate it.** The admin pages hold the instance's domain block list and each
+  actor's key rotation; a suspended channel sends its followers a `Delete`.
+
+Turning it off again (`FEDERATION_ENABLED=false` and a restart) stops every route and delivery.
+A channel that turns federation off sends a `Delete` for its actor and drops its remote
+followers.
+
+### The Twitch import
+
+The import copies a streamer's public Twitch profile, panels and emotes into their channel (the
+streamer picks which fields), after they prove they own the Twitch account. It uses the Twitch API, a proprietary
+service, so it is an optional adapter (AGENTS.md rule 3) and off by default. The design is
+[ADR 0031](../decisions/0031-twitch-import.md).
+
+It needs **both switches**:
+
+- **A Twitch application**: `OAUTH_TWITCH_CLIENT_ID` and `OAUTH_TWITCH_CLIENT_SECRET` (the same
+  app as sign-in with Twitch, [authEnv](#authenv)), with
+  `https://<your host>/api/twitch-import/callback` registered as one of its redirect URLs, beside
+  sign-in's `https://<your host>/api/auth/callback/twitch`;
+- **`TWITCH_IMPORT_ENABLED=true`** on the API and the worker, then a restart of both.
+
+The authorization asks Twitch for no scopes, and the token is used once and revoked. The import
+page says which switch is missing. The public Twitch data an import holds is cleared 30 days
+after it finishes. Whether the Twitch Developer Agreement allows the import on your instance is
+yours to check before you turn it on (ADR 0031, "Decisions at acceptance").
 
 ## Reference
 

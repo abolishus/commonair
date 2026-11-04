@@ -85,8 +85,8 @@ Open these inbound, in the host firewall and in any provider firewall in front o
 | 22   | TCP      | SSH, ideally restricted to your own addresses           |
 
 Only if you turn the TURN relay on (`--turn-relay`, off by default): UDP 49160-49199
-(`TURN_RELAY_PORT_MIN`-`MAX`), the relay's range. DigitalOcean's cloud firewall from the
-Terraform module opens single ports only, so open the range there by hand ([p2p.md](p2p.md)).
+(`TURN_RELAY_PORT_MIN`-`MAX`), the relay's range. The DigitalOcean cloud firewall that the
+OpenTofu module creates does not open it; [p2p.md](p2p.md#ports-and-firewalls) says how.
 
 Each public port listens on IPv6 and IPv4 (IPv4 alone on a host without IPv6). Ports 80 and
 443 are held by systemd (`commonair-caddy.socket`) and handed to Caddy, and 6667 and 6697 the
@@ -154,7 +154,8 @@ The default runs Postgres and Valkey in containers on the instance's host, with 
 and needs nothing below. As an option, `selfhost.sh install --database-url … --valkey-url …`
 uses external servers instead, such as a managed service (ADR 0032 §3,
 [configuration.md](configuration.md#postgres-and-valkey), and
-`managed-services.md` for DigitalOcean's). Both are external or neither, and
+[managed-services.md](managed-services.md) for DigitalOcean's). Optional: use managed Postgres
+and Valkey; the bundled ones stay the default and are fully supported. Both are external or neither, and
 an instance never switches afterwards. The preflight checks what it can before anything is
 installed.
 
@@ -176,7 +177,7 @@ installed.
 - `commonair_monitor` gets `pg_monitor` only where the owner can grant it, which a managed
   provider's owner cannot. The collector then reads the statistics any role can read.
 - Daily backups with point-in-time recovery are the provider's: WAL-G does not run against an
-  external database. `managed-services.md` covers backups and the drill.
+  external database. [managed-services.md](managed-services.md) covers backups and the drill.
 
 **Valkey or Redis-compatible:**
 

@@ -57,6 +57,30 @@ ID=(--certificate-identity-regexp '^https://github\.com/abolishus/commonair/\.gi
 
 That is bash or zsh array syntax. In POSIX `sh`, write the flags out.
 
+Use cosign 3.x ([install.md](install.md#1-prepare-the-server) installs the version the release
+workflow signs with); the project checks these commands with 3.x only.
+
+### Why these strings, and checking them yourself
+
+The identity is what Fulcio wrote into the signing certificate: the workflow file and the ref it
+ran for. The release workflow is `.github/workflows/release.yml`, and it runs only for a pushed
+`v*` tag (its `on: push: tags: ["v*"]`), with `id-token: write` for keyless signing. Check that in
+the release you are verifying, with a clone of the repository:
+
+```sh
+git show v0.1.0:.github/workflows/release.yml | grep -A2 '^on:'
+```
+
+`selfhost.sh` builds the same regular expression from the repository URL and checks the same
+issuer.
+
+**An older release whose workflow differs.** The identity is the one that was right when that tag
+was signed. Every release so far was signed by `.github/workflows/release.yml`. If the workflow
+file is ever renamed, the releases signed before the change still carry the old path: verify each
+one with the exact identity of its own tag (the `--certificate-identity` form above, with the
+workflow path that tag had), not with the newer regular expression. The release notes of the
+first release signed differently will say so.
+
 ## Release assets
 
 Verify `SHA256SUMS` once, then every asset against it:

@@ -32,7 +32,7 @@ relay and copy the token (`relay_…`). It is shown once.
 ### Binary
 
 ```sh
-VERSION=0.1.0-rc.1
+VERSION=0.1.0
 BIN=commonair-relay_${VERSION}_linux_amd64
 BASE=https://github.com/abolishus/commonair/releases/download/v$VERSION
 curl -fsSLO "$BASE/$BIN"
