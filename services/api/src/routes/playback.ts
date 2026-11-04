@@ -181,6 +181,13 @@ async function surgeActive(deps: Deps, channelId: string): Promise<boolean> {
 // token refresh mints a DVR token for it after re-checking the same rules.
 
 const dvrKey = (sid: string) => `playback-dvr:${sid}`;
+/**
+ * Batch 8: set when data mode moved a relay session to the origin. Data mode carries no DVR token,
+ * so that move sends no `dvrSwitchTo`, and the player's DVR grant still names the relay; the
+ * switch is owed until the player holds a plain (no `dm`) origin token, which arrives in the same
+ * answer as the switch.
+ */
+const dvrSwitchOwedKey = (sid: string) => `playback-dvr-switch-owed:${sid}`;
 
 type BroadcastRow = typeof broadcasts.$inferSelect;
 
@@ -296,14 +303,19 @@ async function refreshDvr(
  * move's target, which the heartbeat sets to the origin and never to a relay, and the DVR URL is
  * built on `PLAYBACK_PUBLIC_URL`, never `CDN_BASE_URL` (ADR 0016: no CDN serves DVR). From then on the
  * session's tokens are origin tokens, so the grant stays on the origin and the switch is sent once.
+ * A data-mode move off a relay has no DVR token to send, so the switch is `owed` and goes out with
+ * the first refreshed origin DVR grant once data mode is off (`a` is then the origin).
  */
 export function dvrSwitchFor(
   deps: Deps,
   from: PlaybackClaims["src"],
   moved: Assignment | null,
   dvr: { token: string; vodId: string } | undefined,
+  owed: { owed: boolean; a: Assignment } = { owed: false, a: { source: "origin" } },
 ): string | undefined {
-  if (from !== "relay" || moved?.source !== "origin" || !dvr) return undefined;
+  if (!dvr) return undefined;
+  const relayLeft = from === "relay" && moved?.source === "origin";
+  if (!relayLeft && !(owed.owed && owed.a.source === "origin")) return undefined;
   return dvrPlaylistUrl(deps, dvr.vodId, dvr.token, { source: "origin" });
 }
 
@@ -505,7 +517,11 @@ export const playback = {
       .expire(verifyKey(s.id), VERIFY_STATE_TTL_SECONDS)
       .zadd(KEYS.viewers(s.channelId), now.getTime(), s.id)
       // The DVR grant lives as long as the session keeps beating.
-      .expire(dvrKey(s.id), VERIFY_STATE_TTL_SECONDS);
+      .expire(dvrKey(s.id), VERIFY_STATE_TTL_SECONDS)
+      .expire(dvrSwitchOwedKey(s.id), VERIFY_STATE_TTL_SECONDS);
+    // A plain origin token is only ever handed out beside an owed switch, so a beat on one proves
+    // the player got it.
+    if (claims.src === "origin" && claims.dm === undefined) tx.del(dvrSwitchOwedKey(s.id));
     if (granted) {
       // Data mode loses P2P as a gated stream does (ADR 0018 decision 6).
       if (gate || dataMode !== null) tx.del(KEYS.p2pGrant(s.id));
@@ -525,6 +541,7 @@ export const playback = {
     // decision 4); turning it off leaves the session where it is.
     if (dataMode !== null && claims.src !== "origin") {
       assignment = { source: "origin" };
+      if (claims.src === "relay") await deps.valkey.set(dvrSwitchOwedKey(s.id), "1", "EX", VERIFY_STATE_TTL_SECONDS);
       await deps.db
         .update(playbackSessions)
         .set({ assignedSource: "origin", relayId: null })
@@ -561,7 +578,8 @@ export const playback = {
     const { token } = await signFor(deps, s.id, s.channelId, claims.path, a, dataMode, claims.rb);
     // The DVR token is refreshed beside the live one (same lifetime and source); none in data mode.
     const dvr = await refreshDvr(deps, s, dataMode, a);
-    const dvrSwitchTo = dvrSwitchFor(deps, claims.src, assignment, dvr);
+    const owed = dvr !== undefined && (await deps.valkey.exists(dvrSwitchOwedKey(s.id))) === 1;
+    const dvrSwitchTo = dvrSwitchFor(deps, claims.src, assignment, dvr, { owed, a });
     return {
       ok: true as const,
       token,
@@ -583,7 +601,12 @@ export const playback = {
       await deps.valkey
         .multi()
         .zrem(KEYS.viewers(s.channelId), input.sessionId)
-        .del(verifyKey(input.sessionId), dvrKey(input.sessionId), KEYS.viewerCount(s.channelId))
+        .del(
+          verifyKey(input.sessionId),
+          dvrKey(input.sessionId),
+          dvrSwitchOwedKey(input.sessionId),
+          KEYS.viewerCount(s.channelId),
+        )
         // The tracker closes an ended session's socket at its next re-check.
         .del(KEYS.p2pGrant(input.sessionId))
         .exec();

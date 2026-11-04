@@ -115,6 +115,7 @@ async function beat(
   s: Start,
   token: string,
   advanceSeconds = PLAYBACK_TOKEN_TTL_SECONDS - 60,
+  extra: Record<string, unknown> = {},
 ): Promise<Beat> {
   clock += advanceSeconds * 1000;
   const res = await viewer.call<Beat>("POST", "/api/playback/heartbeat", {
@@ -132,6 +133,7 @@ async function beat(
     muted: false,
     playbackMode: "dvr",
     behindLiveSeconds: 60,
+    ...extra,
   });
   expect(res.status, JSON.stringify(res.body)).toBe(200);
   return res.body;
@@ -404,6 +406,43 @@ describe("heartbeat: dvrSwitchTo moves DVR off a departed relay, to the origin o
     expect([ignored.switchTo, ignored.dvrSwitchTo, ignored.dvrToken]).toEqual([undefined, undefined, undefined]);
     const moved = await beat(viewer, s, s.token, 10);
     await expectOriginSwitch(moved.dvrSwitchTo, s, live, moved.dvrToken);
+  });
+
+  test("a data-mode move off a relay owes the switch: it goes out once data mode is off", async () => {
+    const live = await liveRecording();
+    const viewer = client(api);
+    const s = await relaySession(live, viewer);
+    // Data mode on: the live source moves to the origin; no DVR in data mode, so no switch yet.
+    const on = await beat(viewer, s, s.token, 10, { playbackMode: "live", dataMode: dataModeCeilingBps(800) });
+    expect(on.switchTo?.startsWith(ORIGIN())).toBe(true);
+    expect([on.dvrToken, on.dvrSwitchTo]).toEqual([undefined, undefined]);
+    const still = await beat(viewer, s, on.token ?? "", PLAYBACK_TOKEN_TTL_SECONDS - 60, { playbackMode: "live" });
+    expect([still.dvrToken, still.dvrSwitchTo]).toEqual([undefined, undefined]);
+
+    // Off: the session stays on the origin, and the owed switch carries the origin DVR grant.
+    const dmToken = still.token ?? on.token ?? "";
+    const off = await beat(viewer, s, dmToken, 10, { playbackMode: "live", dataMode: null });
+    expect(off.switchTo).toBeUndefined();
+    await expectOriginSwitch(off.dvrSwitchTo, s, live, off.dvrToken);
+    // A lost answer: the data-mode token turning it off again gets the switch again.
+    const retry = await beat(viewer, s, dmToken, 10, { playbackMode: "live", dataMode: null });
+    await expectOriginSwitch(retry.dvrSwitchTo, s, live, retry.dvrToken);
+    // Once the player beats on the plain origin token, the debt is paid.
+    const paid = await beat(viewer, s, retry.token ?? "", 10);
+    expect(paid.dvrSwitchTo).toBeUndefined();
+    const later = await beat(viewer, s, retry.token ?? "");
+    expect([later.switchTo, later.dvrSwitchTo]).toEqual([undefined, undefined]);
+    expect(await claimsOf(later.dvrToken ?? "")).toMatchObject({ src: "origin", path: dvrTokenPath(live.vodId) });
+  });
+
+  test("a data-mode move off the origin or CDN owes nothing", async () => {
+    const live = await liveRecording();
+    const viewer = client(api);
+    const s = await startOn("origin", () => viewer, live.owner.username);
+    const on = await beat(viewer, s, s.token, 10, { playbackMode: "live", dataMode: dataModeCeilingBps(800) });
+    const off = await beat(viewer, s, on.token ?? "", 10, { playbackMode: "live", dataMode: null });
+    expect(off.dvrToken).toBeDefined();
+    expect(off.dvrSwitchTo).toBeUndefined();
   });
 
   test("a relay session without a DVR grant gets the live move only", async () => {

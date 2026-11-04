@@ -34,7 +34,14 @@ import {
   watchInRoom,
   WEBKIT_DELTA_MS,
 } from "../w3/watch-rooms/index.ts";
-import { behindRoomEdgeAt, edgeSummary, summarizeDelta, type PlayheadSample } from "../w3/watch-rooms/sync.ts";
+import {
+  behindRoomEdgeAt,
+  edgeSummary,
+  summarizeDelta,
+  targetLeadSummary,
+  type PlayheadSample,
+  type TargetSample,
+} from "../w3/watch-rooms/sync.ts";
 import { WebSession } from "../web/session.ts";
 import type { RelayDvrB8Extension, WatchRoomB8Extension } from "./kit.ts";
 import { b8ExtensionTitle } from "./steps.ts";
@@ -45,6 +52,17 @@ export const EDGE_CAP_SLACK_MS = 1_500;
 /** Batch 8 checks on one member's frames: it reports an edge on (nearly) every live frame, never behind its playhead, never in DVR. */
 export function edgeReportsOk(s: ReturnType<typeof edgeSummary>): boolean {
   return s.live > 0 && s.withEdge >= Math.ceil(s.live * 0.8) && s.behindPlayhead === 0 && s.dvrWithEdge === 0;
+}
+
+/**
+ * Whether chat's target sits the cap behind `max(edgeWallclock)` (within the slack), the batch 8
+ * path: the far member is past the cap, so the target is the edge minus the cap. The batch 7
+ * estimate, measured from the most advanced playhead, would put the target nearer the playheads
+ * and the lead elsewhere. Needs a handful of frames, so one late frame does not decide it.
+ */
+export function targetLeadOk(s: ReturnType<typeof targetLeadSummary>): boolean {
+  if (s.measured < 3 || s.medianMs === null) return false;
+  return Math.abs(s.medianMs - ROOM_LIMITS.edgeCapSeconds * 1000) <= EDGE_CAP_SLACK_MS;
 }
 
 /** Whether every member sits no further behind the room's edge than the cap (plus slack). */
@@ -66,7 +84,8 @@ export async function stepEdgeSync(run: WatchRoomB8Extension): Promise<void> {
   if (!hostUser || !guestUser || !webkitUser) throw new Error("sign-up returned too few users");
   let roomId: string | null = null;
   const samples: Record<string, PlayheadSample[]> = {};
-  const record = { roomId: () => roomId, samples };
+  const targets: Record<string, TargetSample[]> = {};
+  const record = { roomId: () => roomId, samples, targets };
   const [near, far] = await ctx.step(t("the Chromium members sign in"), () =>
     Promise.all([
       openMember(run, "near", hostUser, "chromium", record),
@@ -88,6 +107,7 @@ export async function stepEdgeSync(run: WatchRoomB8Extension): Promise<void> {
     },
   );
   await ctx.step(t(`play together for ${SYNC_SETTLE_MS / 1000} s`), () => sleep(SYNC_SETTLE_MS, ctx.signal));
+  const settledAt = Date.now();
 
   const chromiumEdges = { near: edgeSummary(samples.near ?? []), far: edgeSummary(samples.far ?? []) };
   ctx.data("edgeSyncChromiumEdges", chromiumEdges);
@@ -99,6 +119,15 @@ export async function stepEdgeSync(run: WatchRoomB8Extension): Promise<void> {
     t(`both members sit within ${ROOM_LIMITS.edgeCapSeconds} s of max(edgeWallclock) (the far one was pulled up)`),
     withinEdgeCap(behind, ["near", "far"]),
     { behind },
+  );
+  // The target chat sends, against the edges the members report: the cap from max(edgeWallclock).
+  const lead = targetLeadSummary(samples, targets.near ?? [], settledAt - 10_000, settledAt);
+  ctx.data("edgeSyncTargetLead", lead);
+  ctx.metric("edge_sync_target_lead_ms", lead.medianMs, "ms");
+  ctx.assert(
+    t(`chat's target sits ${ROOM_LIMITS.edgeCapSeconds} s behind max(edgeWallclock) (the batch 8 cap)`),
+    targetLeadOk(lead),
+    lead,
   );
   const chromium = summarizeDelta(samples, ["near", "far"], Date.now());
   ctx.data("edgeSyncChromiumDelta", chromium);

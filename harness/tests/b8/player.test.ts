@@ -3,8 +3,16 @@
 
 /** B8-player's harness checks: the edge reports in `room.sync` frames, and the DVR fetch summary. */
 import { describe, expect, it } from "vite-plus/test";
-import { dvrFetchSummary, EDGE_CAP_SLACK_MS, edgeReportsOk, withinEdgeCap } from "../../src/b8/player.ts";
-import { behindRoomEdgeAt, edgeSummary, syncFrameOf, type PlayheadSample } from "../../src/w3/watch-rooms/sync.ts";
+import { ROOM_LIMITS } from "@commonair/contracts/enums";
+import { dvrFetchSummary, EDGE_CAP_SLACK_MS, edgeReportsOk, targetLeadOk, withinEdgeCap } from "../../src/b8/player.ts";
+import {
+  behindRoomEdgeAt,
+  edgeSummary,
+  syncFrameOf,
+  targetFrameOf,
+  targetLeadSummary,
+  type PlayheadSample,
+} from "../../src/w3/watch-rooms/sync.ts";
 
 const ROOM = "01890000-0000-7000-8000-00000000a001";
 const T0 = 1_800_000_000_000;
@@ -114,5 +122,57 @@ describe("dvrFetchSummary", () => {
     const sum = dvrFetchSummary([{ origin: "http://localhost:3003", status: 404, at: T0 }], hosts, T0);
     expect(sum.firstOriginOkAt).toBeNull();
     expect(sum.origin).toBe(1);
+  });
+});
+
+describe("targetFrameOf", () => {
+  it("reads the server's target for this room only", () => {
+    expect(targetFrameOf(JSON.stringify({ op: "room.sync", roomId: ROOM, target: iso(T0) }), ROOM)).toBe(T0);
+    expect(targetFrameOf(JSON.stringify({ op: "room.sync", roomId: "other", target: iso(T0) }), ROOM)).toBeNull();
+    // A client frame (playheadWallclock, no target), junk, a bad date.
+    expect(
+      targetFrameOf(JSON.stringify({ op: "room.sync", roomId: ROOM, playheadWallclock: iso(T0) }), ROOM),
+    ).toBeNull();
+    expect(targetFrameOf("not json", ROOM)).toBeNull();
+    expect(targetFrameOf(JSON.stringify({ op: "room.sync", roomId: ROOM, target: "nope" }), ROOM)).toBeNull();
+  });
+});
+
+describe("targetLeadSummary and targetLeadOk", () => {
+  const CAP = ROOM_LIMITS.edgeCapSeconds * 1000;
+  // Both members synced near the target; the edges they report sit ahead of it.
+  const samples = {
+    near: [s(T0, T0 - 5000, T0), s(T0 + 2000, T0 - 3000, T0 + 2000)],
+    far: [s(T0 + 500, T0 - 4500, T0 - 3500), s(T0 + 2500, T0 - 2500, T0 - 1500)],
+  };
+
+  it("batch 8: the target sits the cap behind max(edgeWallclock)", () => {
+    const targets = [1000, 2000, 3000].map((d) => ({ receivedAt: T0 + d, target: T0 + d - CAP }));
+    const lead = targetLeadSummary(samples, targets, T0, T0 + 3000);
+    expect(lead).toEqual({ measured: 3, medianMs: CAP, minMs: CAP, maxMs: CAP });
+    expect(targetLeadOk(lead)).toBe(true);
+  });
+
+  it("the batch 7 estimate (a target set from the playheads, 3 s nearer the edge) fails", () => {
+    const targets = [1000, 2000, 3000].map((d) => ({ receivedAt: T0 + d, target: T0 + d - CAP + 3000 }));
+    const lead = targetLeadSummary(samples, targets, T0, T0 + 3000);
+    expect(lead.medianMs).toBe(CAP - 3000);
+    expect(targetLeadOk(lead)).toBe(false);
+  });
+
+  it("frames outside the window, or without an edge, are not measured; too few fail", () => {
+    const targets = [
+      { receivedAt: T0 + 1000, target: T0 - 4000 },
+      { receivedAt: T0 + 60_000, target: T0 },
+    ];
+    expect(targetLeadSummary(samples, targets, T0, T0 + 3000).measured).toBe(1);
+    expect(targetLeadOk(targetLeadSummary(samples, targets, T0, T0 + 3000))).toBe(false);
+    const noEdges = { near: [s(T0, T0 - 5000)] };
+    expect(targetLeadSummary(noEdges, targets, T0, T0 + 3000)).toEqual({
+      measured: 0,
+      medianMs: null,
+      minMs: null,
+      maxMs: null,
+    });
   });
 });

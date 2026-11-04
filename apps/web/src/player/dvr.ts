@@ -111,8 +111,12 @@ export class DvrSeeker {
 export interface DvrSwapSeam {
   playheadWallclock(): Date | null;
   seekToWallclock(t: Date): boolean;
-  /** Load `url` as the DVR playlist being played; false when it fails or a newer load supersedes it. */
-  loadDvr(url: string): Promise<boolean>;
+  /**
+   * Load `url` as the DVR playlist being played; false when it fails or a newer load supersedes
+   * it. Without `autoplay` the element is not told to play, so a paused viewer hears nothing and
+   * sees no `playing` event while the new source loads.
+   */
+  loadDvr(url: string, opts: { autoplay: boolean }): Promise<boolean>;
   paused(): boolean;
   pause(): void;
 }
@@ -135,9 +139,10 @@ export async function swapDvrSource(
   const at = seam.playheadWallclock();
   const paused = seam.paused();
   const started = now();
-  if (!(await seam.loadDvr(url))) return "failed";
+  if (!(await seam.loadDvr(url, { autoplay: !paused }))) return "failed";
   if (at) seam.seekToWallclock(new Date(paused ? at.getTime() : at.getTime() + (now() - started)));
-  if (paused) seam.pause();
+  // Belt and braces: an element that autoplays on a new source is paused again here.
+  if (paused && !seam.paused()) seam.pause();
   return "swapped";
 }
 

@@ -166,6 +166,9 @@ export interface DvrSwitch {
  * towards the origin. A throttled beat was ignored and carries no move (nor does a session without
  * a DVR grant, or an answer whose URL does not parse). At the live edge only the grant moves, so the
  * next rewind starts on the origin; while DVR plays, the source swaps at the current position.
+ * `playingDvr` is the controller's mode being `dvr` (the DVR playlist loaded), never "a DVR load is
+ * pending": a rewind still loading on the relay gets only the grant move, fails there and falls
+ * back to live as any failed `enterDvr` does, rather than being swapped while the mode says live.
  */
 export function heartbeatDvrSwitch(
   res: DvrHeartbeatResult,

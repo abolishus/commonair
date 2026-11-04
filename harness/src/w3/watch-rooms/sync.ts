@@ -110,6 +110,70 @@ export function behindRoomEdgeAt(
   return out;
 }
 
+/** A server `room.sync {target}` frame a member received (batch 8's edge-sync step). */
+export interface TargetSample {
+  /** Harness clock when the frame reached the page (epoch ms). */
+  receivedAt: number;
+  /** The room's target playhead (epoch ms). */
+  target: number;
+}
+
+/** A server `room.sync` frame's target for `roomId`, or null for any other frame. */
+export function targetFrameOf(payload: string | Buffer, roomId: string): number | null {
+  const text = typeof payload === "string" ? payload : payload.toString("utf8");
+  let frame: unknown;
+  try {
+    frame = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (typeof frame !== "object" || frame === null) return null;
+  const f = frame as Record<string, unknown>;
+  if (f.op !== "room.sync" || f.roomId !== roomId || typeof f.target !== "string") return null;
+  const target = Date.parse(f.target);
+  return Number.isFinite(target) ? target : null;
+}
+
+/**
+ * How far chat's target sits behind the room's reported edge (ms): for each target frame received
+ * in `[from, to]`, `max(edgeWallclock)` at that instant (`behindRoomEdgeAt`'s extrapolation) minus
+ * the target, and the median. Batch 8 caps the room from that edge, so with a member past the cap
+ * the lead is the cap itself; the batch 7 estimate (from the most advanced playhead) gives a lead
+ * set by the estimate instead, so this tells the two apart where `withinEdgeCap` cannot.
+ */
+export function targetLeadSummary(
+  samples: Readonly<Record<string, readonly PlayheadSample[]>>,
+  targets: readonly TargetSample[],
+  from: number,
+  to: number,
+  maxAgeMs = 4_500,
+): { measured: number; medianMs: number | null; minMs: number | null; maxMs: number | null } {
+  const leads: number[] = [];
+  for (const t of targets) {
+    if (t.receivedAt < from || t.receivedAt > to) continue;
+    let edge: number | null = null;
+    for (const list of Object.values(samples)) {
+      let latest: PlayheadSample | undefined;
+      for (const s of list) if (s.sentAt <= t.receivedAt && (!latest || s.sentAt > latest.sentAt)) latest = s;
+      if (!latest || latest.mode !== "live" || t.receivedAt - latest.sentAt > maxAgeMs) continue;
+      if (latest.edge === undefined || latest.edge === null) continue;
+      const e = latest.edge + (t.receivedAt - latest.sentAt);
+      edge = edge === null ? e : Math.max(edge, e);
+    }
+    if (edge !== null) leads.push(edge - t.target);
+  }
+  if (leads.length === 0) return { measured: 0, medianMs: null, minMs: null, maxMs: null };
+  const sorted = [...leads].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  const median = sorted.length % 2 === 1 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
+  return {
+    measured: sorted.length,
+    medianMs: Math.round(median),
+    minMs: Math.round(sorted[0]!),
+    maxMs: Math.round(sorted.at(-1)!),
+  };
+}
+
 /** Each live member's playhead at `at`, from its latest sample no older than `maxAgeMs`. */
 export function playheadsAt(
   samples: Readonly<Record<string, readonly PlayheadSample[]>>,
