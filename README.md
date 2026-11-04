@@ -113,6 +113,7 @@ flowchart LR
   M --> MEDIA["services/media<br/>transcode · VOD · simulcast"]
   MEDIA --> O["services/origin<br/>HLS edge · signed segments"]
   O --> V(["👀 Viewers<br/>hls.js + P2P"])
+  T["services/tracker<br/>P2P peer discovery"] <--> V
   O --> R["Member relays<br/>Go"] --> V
   API <--> DB[("Postgres<br/>ledger · governance")]
   API <--> K[("Valkey<br/>pub/sub · presence")]
@@ -136,7 +137,7 @@ Download the latest release's bundle and
 [verify it](docs/self-hosting/install.md#2-download-and-verify-the-release), then install as root:
 
 ```sh
-VERSION=0.1.0-rc.2   # the latest on the releases page
+VERSION=0.1.0-rc.11  # the latest on the releases page
 sh commonair-selfhost_$VERSION/selfhost.sh install --yes \
   --bundle "$PWD/commonair-selfhost_$VERSION.tar.gz" \
   --domain stream.example.org --email ops@example.org
@@ -159,7 +160,8 @@ shows how to check them. Maintainers cut releases as described in
 
 You need [Bun](https://bun.sh) 1.4.3, [Podman](https://podman.io) 5+ with `podman-compose`,
 [Go](https://go.dev) 1.27 for the relay, FFmpeg for the harness, and
-[`reuse`](https://reuse.software).
+[`reuse`](https://reuse.software). [OpenTofu](https://opentofu.org) 1.13.1 is optional: the gate
+skips the `infra/tofu` checks without it, but CI runs them.
 
 ```sh
 git clone https://github.com/abolishus/commonair.git
@@ -230,6 +232,7 @@ Check that `podman compose version` reports a provider. Containers reach your ho
 | `services/chat`, `services/irc`     | Chat service and the Twitch-compatible IRC gateway                       |
 | `services/origin`, `services/media` | HLS edge and the media pipeline (MediaMTX, FFmpeg)                       |
 | `services/worker`                   | Background jobs (webhooks, exports, patronage, integrity)                |
+| `services/tracker`                  | WebTorrent tracker for viewer-to-viewer segment sharing                  |
 | `packages/*`                        | Shared libraries: contracts, database schema, UI, ledger, governance, …  |
 | `relay/`                            | Member relay node (Go, single static binary)                             |
 | `harness/`                          | Local simulation harness: streamers, viewers, bots, viewbots, load tests |

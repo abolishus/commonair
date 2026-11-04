@@ -55,6 +55,7 @@ You need:
 | [Go](https://go.dev)                              | 1.27    | The member relay          |
 | [FFmpeg](https://ffmpeg.org)                      | any     | Harness streamers         |
 | [`reuse`](https://reuse.software)                 | any     | License header check      |
+| [OpenTofu](https://opentofu.org) (optional)       | 1.13.1  | `infra/tofu` checks       |
 
 The [README](README.md#developing) covers installing Podman on Linux and macOS.
 
@@ -63,7 +64,7 @@ git clone https://github.com/abolishus/commonair.git
 cd commonair
 bun install
 bun scripts/init-env.ts          # a local .env with fresh secrets; never committed
-bun scripts/infra.ts test        # Postgres, Valkey, Mailpit, Garage; waits for health
+bun scripts/infra.ts test        # Postgres, Valkey, Mailpit, Garage, stripe-mock; waits for health
 bun run verify --quick           # fast checks: your inner loop
 ```
 
@@ -74,7 +75,7 @@ bun run verify --quick           # fast checks: your inner loop
 ```mermaid
 flowchart LR
   A[format] --> B[lint] --> C[typecheck] --> D[unit] --> E[infra] --> F[migrations] --> G[integration]
-  G --> H[licenses] --> I[supply chain] --> J[domains] --> K[reuse] --> L[relay]
+  G --> H[licenses] --> I[supply chain] --> J[domains] --> K[reuse] --> T[tofu] --> L[relay]
 ```
 
 | Command                             | When                                                                                                           |

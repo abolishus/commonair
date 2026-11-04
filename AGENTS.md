@@ -39,26 +39,26 @@ they are the source of truth across sessions. Architecture: [docs/architecture.m
 
 ## Commands
 
-| Command                                                 | What it does                                                                                                                          |
-| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `bun install`                                           | Install all workspaces (Bun isolated linker)                                                                                          |
-| `bun scripts/init-env.ts`                               | Write `.env` with fresh random secrets (never overwrites)                                                                             |
-| `bun scripts/infra.ts test`                             | Start Postgres, Valkey, Mailpit (and Garage) under Podman, wait for health                                                            |
-| `bun run verify`                                        | **The gate**: format → lint → typecheck → unit → infra → migrations → integration → licenses → supply chain → domains → reuse → relay |
-| `bun scripts/vet-package.ts <name>[@ver]`               | Vet a package **before** `bun add`: age, advisories, license, install scripts, provenance, publisher                                  |
-| `bun scripts/pin-images.ts [--write]`                   | Report (or write) digest pins for every third-party container image                                                                   |
-| `bun run verify --quick`                                | Same without integration tests (inner loop only, never the commit gate)                                                               |
-| `bun run verify --serial`                               | One step at a time, streaming (by default independent groups run side by side, logs printed per step)                                 |
-| `bun run verify --only static,unit`                     | Only those step groups (static, unit, integration, relay, harness); CI runs one job per group                                         |
-| `bun run verify --scenario <name>`                      | Gate plus a named harness scenario                                                                                                    |
-| `bun run verify:full`                                   | Gate plus the full harness scenario (end of every phase)                                                                              |
-| `bun run verify --full --only harness --shard <name>`   | One shard of the full harness scenario (`relay`, `long`, `rest`), as CI runs it                                                       |
-| `vp fmt`                                                | Format everything (Oxfmt)                                                                                                             |
-| `vp lint --deny-warnings`                               | Lint with type-aware rules (Oxlint)                                                                                                   |
-| `vp run -r test` / `vp run -r test:int`                 | Unit / integration tests in every workspace                                                                                           |
-| `bun run --filter @commonair/db generate --name <name>` | Generate a named migration from schema changes                                                                                        |
-| `podman compose up`                                     | The whole platform                                                                                                                    |
-| `bun harness/src/cli.ts run <scenario>`                 | One harness scenario against the running stack                                                                                        |
+| Command                                                 | What it does                                                                                                                                 |
+| ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bun install`                                           | Install all workspaces (Bun isolated linker)                                                                                                 |
+| `bun scripts/init-env.ts`                               | Write `.env` with fresh random secrets (never overwrites)                                                                                    |
+| `bun scripts/infra.ts test`                             | Start Postgres, Valkey, Mailpit, Garage and stripe-mock under Podman, run migrations, wait for health                                        |
+| `bun run verify`                                        | **The gate**: format → lint → typecheck → unit → infra → migrations → integration → licenses → supply chain → domains → reuse → tofu → relay |
+| `bun scripts/vet-package.ts <name>[@ver]`               | Vet a package **before** `bun add`: age, advisories, license, install scripts, provenance, publisher                                         |
+| `bun scripts/pin-images.ts [--write]`                   | Report (or write) digest pins for every third-party container image                                                                          |
+| `bun run verify --quick`                                | Same without integration tests (inner loop only, never the commit gate)                                                                      |
+| `bun run verify --serial`                               | One step at a time, streaming (by default independent groups run side by side, logs printed per step)                                        |
+| `bun run verify --only static,unit`                     | Only those step groups (static, unit, integration, relay, harness); CI runs one job per group                                                |
+| `bun run verify --scenario <name>`                      | Gate plus a named harness scenario                                                                                                           |
+| `bun run verify:full`                                   | Gate plus the full harness scenario (end of every phase)                                                                                     |
+| `bun run verify --full --only harness --shard <name>`   | One shard of the full harness scenario (`harness/src/shards.ts` lists them), as CI runs it                                                   |
+| `vp fmt`                                                | Format everything (Oxfmt)                                                                                                                    |
+| `vp lint --deny-warnings`                               | Lint with type-aware rules (Oxlint)                                                                                                          |
+| `vp run -r test` / `vp run -r test:int`                 | Unit / integration tests in every workspace                                                                                                  |
+| `bun run --filter @commonair/db generate --name <name>` | Generate a named migration from schema changes                                                                                               |
+| `podman compose up`                                     | The whole platform                                                                                                                           |
+| `bun harness/src/cli.ts run <scenario>`                 | One harness scenario against the running stack                                                                                               |
 
 Tests run under the Bun runtime (`bun --bun vp test run`), so services can use `Bun.*` APIs in
 code under test. Unit test files are `*.test.ts`; integration tests are `*.int.test.ts` and may
