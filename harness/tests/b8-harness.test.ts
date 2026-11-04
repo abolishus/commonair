@@ -140,6 +140,10 @@ describe("the e2e-relay / relay-dvr split", () => {
     for (const t of ["counts: verified = honest", "liar relay active", "the relay exits after its drain"])
       expect(dvr).not.toContain(t);
   });
+
+  test("e2e-relay refuses a stale --set w3= instead of passing without the DVR steps", () => {
+    expect(e2e).toMatch(/if \(ctx\.param\("w3", ""\) !== ""\)\s*throw new Error\(/);
+  });
 });
 
 // ------------------------------------------------------------ clock-skew
@@ -249,6 +253,15 @@ describe("the rate-limited form error through the catalog", () => {
     expect(warnings[0]).toMatchObject({ fields: { locale: "fr", key: RATE_LIMITED_KEY } });
     expect(rateLimitedMessage("en", () => warnings.push("en"))).toBe(en);
     expect(warnings).toHaveLength(1);
+  });
+
+  test("the fallback warning goes to the run's logger when one is passed", () => {
+    const warnings: unknown[] = [];
+    // A tag no other test builds, since patterns are cached per tag.
+    rateLimitedPattern("de", { warn: (msg, fields) => warnings.push({ msg, fields }) });
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatchObject({ fields: { locale: "de", key: RATE_LIMITED_KEY } });
+    expect(source("src/web/flows.ts")).toContain("rateLimitedPattern(await pageLocale(page), log)");
   });
 
   test("literal text is escaped and placeholders become wildcards", () => {

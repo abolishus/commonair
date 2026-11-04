@@ -147,6 +147,9 @@ export default defineScenario({
   inFull: true,
   timeoutMs: 30 * 60_000,
   async run(ctx) {
+    // An old `--set w3=dvr-relay` would otherwise run no DVR step and still pass.
+    if (ctx.param("w3", "") !== "")
+      throw new Error("e2e-relay has no W3 extensions since batch 8: run relay-dvr with --set w3=");
     const plan = buildRelayPlan(ctx.params);
     ctx.data("plan", plan);
     await runRelayScenario(ctx, (run) => e2eRelay(ctx, plan, run));
@@ -424,7 +427,7 @@ async function e2eRelay(ctx: ScenarioContext, plan: RelayPlan, run: RelayRun): P
         if (signedIn) {
           const fan = await p.signUp({ prefix: "e3_fan" });
           const page = await s.goto(ROUTES.signin);
-          await signInViaUi(page, fan, UI_TIMEOUT_MS, signal);
+          await signInViaUi(page, fan, UI_TIMEOUT_MS, signal, ctx.log);
         }
         const page = await s.goto(ROUTES.channel(channel));
         const w: BrowserWatcher = { label, session: s, page, source: null, attempts: 0 };

@@ -3,7 +3,7 @@
 
 /**
  * The relay's DVR, purge feed and captions, split out of `e2e-relay` (batch 8 decision (o): the
- * two together ran 14 min, over the ~12 min shard cap). It stands up its own relay with
+ * two together ran 15m01s on push run 41736761538, over the ~12 min shard cap). It stands up its own relay with
  * `e2e-relay`'s `setUpRelay` (a streamer live over RTMP, a member's relay registered and active on
  * the LAN address), so it runs alone on a fresh stack, then runs:
  *

@@ -107,12 +107,20 @@ export function rateLimitedMessage(
 
 const patterns = new Map<string, RegExp>();
 
-/** The rate-limited form error's pattern for a locale (cached per tag). */
-export function rateLimitedPattern(locale: string | null | undefined): RegExp {
+/** Where a flow's warnings go: the run's logger, so the line carries its run and scenario. */
+export interface FlowLog {
+  warn(msg: string, fields: Record<string, unknown>): void;
+}
+
+/**
+ * The rate-limited form error's pattern for a locale (cached per tag). `log` takes the fallback
+ * warning (the module logger when a caller has no run logger to hand).
+ */
+export function rateLimitedPattern(locale: string | null | undefined, log?: FlowLog): RegExp {
   const tag = locale?.trim() || "en";
   let p = patterns.get(tag);
   if (!p) {
-    p = messagePattern(rateLimitedMessage(tag));
+    p = messagePattern(rateLimitedMessage(tag, log ? (m, f) => log.warn(m, f) : undefined));
     patterns.set(tag, p);
   }
   return p;
@@ -132,13 +140,15 @@ const RATE_LIMITED_RETRY_MS = 5_000;
 /**
  * Fill and submit the sign-in form on the current page; resolves once `nav-user` shows. Scenarios
  * in one shard share an address and so the `auth` bucket (10 a minute): a rate-limited submit is
- * retried every few seconds until the window frees a slot.
+ * retried every few seconds until the window frees a slot. Pass the run's `log` (`ctx.log`) so a
+ * locale-fallback warning is tied to the run.
  */
 export async function signInViaUi(
   page: Page,
   creds: { email: string; password: string },
   timeoutMs: number,
   signal: AbortSignal,
+  log?: FlowLog,
 ): Promise<void> {
   const ui = { timeout: timeoutMs };
   await byTestId(page, T.signinEmail).fill(creds.email, ui);
@@ -151,7 +161,7 @@ export async function signInViaUi(
       await leftSignin(page, timeoutMs);
       return;
     } catch (err) {
-      const limited = err instanceof Error && rateLimitedPattern(await pageLocale(page)).test(err.message);
+      const limited = err instanceof Error && rateLimitedPattern(await pageLocale(page), log).test(err.message);
       if (!limited || Date.now() + RATE_LIMITED_RETRY_MS > deadline) throw err;
       await sleep(RATE_LIMITED_RETRY_MS, signal);
       // A stale error can outlive a submit that went through: signed in is signed in.

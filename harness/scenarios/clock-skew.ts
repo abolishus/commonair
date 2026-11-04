@@ -223,6 +223,10 @@ async function broadcast(ctx: ScenarioContext, protocol: ClockProtocol): Promise
     ctx.check(`${tag}: the recorder's ffmpeg was ended once`, r.signalled === 1, r);
     // RTMP's ladder runs on through the stop hysteresis below (sampled all along), which covers
     // the 2 min; WHIP has no ladder restart, so it measures here until the 2 min are covered.
+    // RTMP's 2 min therefore rest on media's 120 s stop hysteresis (`transcodeStopAfterMs`,
+    // services/media/src/settings.ts) and are mostly sampled with no viewers: ~30 s under load
+    // here, then the hysteresis. Nothing waits for that total; the coverage check still asserts
+    // it. Raise `beforeRestartSeconds` for more samples under load.
     if (!ladderRestart) {
       const total = await covered(
         "every rendition covered for 2 min",
