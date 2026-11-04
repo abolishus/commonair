@@ -221,7 +221,7 @@ describe("collapsing", () => {
 
 describe("the tab's cached copy", () => {
   it("a full page load in the same tab reuses it instead of asking again", async () => {
-    const calls = vi.fn(async () => home({ live: [live("busy")] }));
+    const calls = vi.fn<() => Promise<unknown>>(async () => home({ live: [live("busy")] }));
     fake.home = calls;
     await renderInRouter(shell());
     await waitFor(() => expect(rows()).toEqual([["busy", "true"]]));
@@ -241,7 +241,7 @@ describe("the tab's cached copy", () => {
         FEED_CACHE_KEY,
         JSON.stringify({ at: at - age, viewer, home: home({ live: [live("cached")] }) }),
       );
-    const calls = vi.fn(async () => home({ live: [live("fresh")] }));
+    const calls = vi.fn<() => Promise<unknown>>(async () => home({ live: [live("fresh")] }));
     fake.home = calls;
     write("someone-else", 0);
     await renderInRouter(shell());
