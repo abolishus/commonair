@@ -51,7 +51,7 @@ sha with D4 and batch 8 merged.
 
 2. **The settings menu (F5).**
    - It holds quality (from the source's renditions, with "Auto"), Data saver (moved from the
-     permanent card at `player/player.tsx:354`), and speed on VOD.
+     permanent `DataModePanel` card at `player/player.tsx:355`), and speed on VOD.
    - While a data budget is on, a small "Data saver · <level>" chip shows in the bar
      (`player-data-saver-chip`).
    - The first-run explanation becomes a one-time hint `Popover` anchored to the settings button.

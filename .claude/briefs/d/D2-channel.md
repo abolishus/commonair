@@ -78,9 +78,11 @@ sha with D4 and all of batch 8's web units merged. D1-web, D2-player and D2-chat
    exported `useTheatre()` hook. If D2-player hasn't merged when you start, agree on the hook's
    shape through the orchestrator: a `{ theatre: boolean, setTheatre }` context in
    `player/theatre.ts`.
-6. **Not found (F13).** The unknown-channel state uses D4's `NotFoundState`, with "Browse live
-   channels" and a Live now shelf below it. Remove `$channel.tsx` from `PENDING_HEAD` and give
-   the route a title from loader data: "<name> (live) · <site>" or "<name> · <site>".
+6. **Not found (F13).** The unknown-channel state (`ChannelNotFound` in `$channel.tsx`, an
+   `EmptyState` today) adopts D4's `ChannelNotFoundState` from `components/not-found.tsx` (D4's
+   open request), with a Live now shelf below it. `$channel.tsx` already has a `head()` (batch 8's
+   integration added `titleHead(t("channelPage.title", …))`) and is no longer in `PENDING_HEAD`;
+   make the title live-aware from loader data: "<name> (live) · <site>" or "<name> · <site>".
 
 ## Tests you must add
 

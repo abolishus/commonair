@@ -97,12 +97,12 @@ that removes each one. The list must be empty when wave 3 merges.
 
 **Wave 2**
 
-| Unit       | Owns                                                                                                                                                                                                                                                                                                                                                                                                          |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| D1-web     | `routes/_app/index.tsx`; `routes/_app/directory.*` and `routes/_app/search.tsx` (new); `components/directory.tsx`; `components/discovery/**` (new); `lib/directory-sections.ts`; `components/site-chrome.tsx`; `lib/nav.ts` (the public and account menus only, not the studio list); `packages/ui/src/layouts/app-shell.tsx`; `packages/ui/src/blocks/media/category-tile.tsx`; the `d1-discovery` namespace |
-| D2-channel | `routes/_app/$channel.tsx`; `components/channel/**` (B8-web's panels and banner included); `packages/ui/src/blocks/media/channel-header.tsx` and its stories; the `d2-channel` namespace (plus B8-web's `b8-channel`)                                                                                                                                                                                         |
-| D2-player  | `apps/web/src/player/**` except `player/p2p/**`; `packages/ui/src/blocks/media/player-chrome.tsx` and its stories; `components/vod-watch/vod-player.tsx`; the `d2-player` namespace (plus `w1-data-mode`)                                                                                                                                                                                                     |
-| D2-chat    | `apps/web/src/chat/**`; the `d2-chat` namespace                                                                                                                                                                                                                                                                                                                                                               |
+| Unit       | Owns                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| D1-web     | `routes/_app/index.tsx`; `routes/_app/directory.*` and `routes/_app/search.tsx` (new); `components/directory.tsx`; `components/discovery/**` (new); `lib/directory-sections.ts`; `lib/browse-route.ts`; `components/site-chrome.tsx`; `lib/nav.ts` (the public and account menus only, not the studio list); `packages/ui/src/layouts/app-shell.tsx`; `packages/ui/src/blocks/media/category-tile.tsx`; the `d1-discovery` namespace |
+| D2-channel | `routes/_app/$channel.tsx`; `components/channel/**` (B8-web's panels and banner included); `packages/ui/src/blocks/media/channel-header.tsx` and its stories; the `d2-channel` namespace (plus B8-web's `b8-channel`)                                                                                                                                                                                                                |
+| D2-player  | `apps/web/src/player/**` except `player/p2p/**`; `packages/ui/src/blocks/media/player-chrome.tsx` and its stories; `components/vod-watch/vod-player.tsx`; the `d2-player` namespace (plus `w1-data-mode`)                                                                                                                                                                                                                            |
+| D2-chat    | `apps/web/src/chat/**`; the `d2-chat` namespace                                                                                                                                                                                                                                                                                                                                                                                      |
 
 **Wave 3**
 
@@ -155,3 +155,19 @@ hold it at the same time.
 - **(d) Generated art: CC0 SVGs made in the harness** from a seeded RNG, uploaded through the
   normal media API. Abstract only (gradients and geometric shapes). Never faces, and nothing that
   could pass for a real person or brand. No fetched images.
+
+## Wave 2 seams (orchestrator, 2026-11-04)
+
+Three stubs land before wave 2 so the units can code against each other without waiting:
+
+- `apps/web/src/player/theatre.ts`: `TheatreContext` and `useTheatre(): { theatre, setTheatre }`.
+  D2-player owns it (adds a provider with per-tab storage and the `t` key). D2-channel reads it
+  and mounts D2-player's provider around the page; D2-chat reads it.
+- `apps/web/src/chat/layout.ts`: `chatColumnClass({ theatre })`. D2-chat owns it; D2-channel
+  applies it to `ChatPanel` and to the pending skeleton instead of `h-112 lg:h-160`.
+- `apps/web/src/lib/category-route.ts`: `categoryHref(slug)` and `tagHref(tag)`. D1-web owns it.
+  D2-channel links categories and tags through it.
+
+`$channel.tsx` already has a `head()` from batch 8's integration, so no `PENDING_HEAD` entry is
+D2's. The two entries batch 8 left behind (`coop.jury.tsx`, `$channel_.giveaways.$giveawayId.tsx`)
+get their titles at the wave 2 integration.

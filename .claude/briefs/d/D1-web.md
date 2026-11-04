@@ -25,7 +25,7 @@ sha with D4 and D1-api merged. D2-channel, D2-player and D2-chat run beside you.
 - `apps/web/src/routes/_app/index.tsx`.
 - `apps/web/src/routes/_app/directory.*` and `routes/_app/search.tsx` (new), named per decision (a).
 - `apps/web/src/components/directory.tsx` and `components/discovery/**` (new).
-- `apps/web/src/lib/directory-sections.ts`.
+- `apps/web/src/lib/directory-sections.ts` and `apps/web/src/lib/browse-route.ts`.
 - `apps/web/src/components/site-chrome.tsx`.
 - `apps/web/src/lib/nav.ts`: the public, header and account-menu sections only.
 - `packages/ui/src/layouts/app-shell.tsx`.
@@ -89,7 +89,10 @@ sha with D4 and D1-api merged. D2-channel, D2-player and D2-chat run beside you.
    - The header holds the logo, Browse (now `/directory`), search, and the account controls.
    - The Sheet holds search, Browse, Following (signed in), Live now, Categories, then the theme
      and language.
-   - Repoint D4's "Browse live channels" route constant to `/directory`.
+   - Repoint D4's "Browse live channels" route constant (`BROWSE_LIVE_ROUTE` in
+     `lib/browse-route.ts`, yours for this change) to `/directory`.
+   - D4's open request: the header's Sign in and Sign up links set `?redirect=` to the current
+     path (`lib/auth-return.ts`'s `safeRedirect` limits it to same-origin paths on the way in).
 7. **Links everywhere.** Category names and tags on every card you render link to their category
    page or a tag filter. `StreamCard` in `packages/ui` is read-only for you: if it needs a link
    slot, that is a **contract request** for the orchestrator.

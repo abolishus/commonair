@@ -25,7 +25,7 @@ sha with D4 and batch 8 merged.
   a string changes.
 - `apps/web/tests/d2-chat*.test.tsx` and `harness/src/d/d2-chat.ts`.
 
-**Read-only:** `$channel.tsx`. The fixed `h-112 lg:h-160` at `:153` is D2-channel's to remove;
+**Read-only:** `$channel.tsx`. The fixed `h-112 lg:h-160` at `:178` (and the pending skeleton's at `:204`) is D2-channel's to remove;
 agree through the orchestrator that it becomes a `className` you control, or that D2-channel
 applies your exported `CHAT_COLUMN_CLASS`. Also read-only: `player/**`, contracts, services.
 
