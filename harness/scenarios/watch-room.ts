@@ -67,6 +67,11 @@ export default defineScenario({
     }
     const run = await newWatchRoomRun(ctx, { via });
     for (const n of steps) await ctx.step(watchRoomTitle(n, "run"), () => WATCH_ROOM_STEP_RUNNERS[n](run));
+    if (b8.run.length > 0 && steps.length > 0) {
+      // The extensions measure sync on their own channel and members: the steps' are let go first.
+      const released = await run.release();
+      ctx.log.info("released the steps' browsers and encoders before the B8 extensions", { released });
+    }
     for (const name of b8.run) await ctx.step(b8ExtensionTitle(name, "run"), () => B8_STEPS[name](run));
   },
 });

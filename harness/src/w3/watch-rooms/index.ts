@@ -92,19 +92,46 @@ export interface WatchRoomRun {
   newChannel(prefix: string, opts?: { mature?: boolean }): Promise<LiveChannel>;
   /** Step 1's room, members and playhead samples (step 2 joins them). */
   sync: { roomId: string; members: Member[]; samples: Record<string, PlayheadSample[]> } | null;
+  /** What is open so far: members' browsers and channels' encoders (`release`). */
+  open: { sessions: WebSession[]; encoders: { stop(): Promise<void> }[] };
+  /**
+   * Close every member's browser and stop every channel opened so far. The B8 extensions run
+   * after the eight steps, whose browsers (four Chromium members, a WebKit one, …) and encoders,
+   * each with its transcode ladder, otherwise keep playing and publishing until the scenario ends:
+   * on a CI runner that starved edge-sync's players of media (exp/sync-diag-2, run 41909793712:
+   * media arriving at ~0.7x real time). Returns how many it closed.
+   */
+  release(): Promise<number>;
 }
 
 /** Set up what the selected steps share (channels start on first use, so any step runs alone). */
 export async function newWatchRoomRun(ctx: ScenarioContext, opts: { via: Via }): Promise<WatchRoomRun> {
   let syncCh: Promise<LiveChannel> | null = null;
   let plainCh: Promise<LiveChannel> | null = null;
+  const open: WatchRoomRun["open"] = { sessions: [], encoders: [] };
+  const start = (prefix: string, o?: { mature?: boolean }) =>
+    liveChannel(ctx, prefix, o).then((ch) => {
+      open.encoders.push(ch.encoder);
+      return ch;
+    });
   const run: WatchRoomRun = {
     ctx,
     via: opts.via,
-    syncChannel: () => (syncCh ??= liveChannel(ctx, "wrsync")),
-    plainChannel: () => (plainCh ??= liveChannel(ctx, "wrplain")),
-    newChannel: (prefix, o) => liveChannel(ctx, prefix, o),
+    syncChannel: () => (syncCh ??= start("wrsync")),
+    plainChannel: () => (plainCh ??= start("wrplain")),
+    newChannel: (prefix, o) => start(prefix, o),
     sync: null,
+    open,
+    release: async () => {
+      const sessions = open.sessions.splice(0);
+      const encoders = open.encoders.splice(0);
+      await Promise.all([...sessions.map((s) => s.close()), ...encoders.map((e) => e.stop().catch(() => undefined))]);
+      // The shared channels are gone: a later caller starts its own.
+      syncCh = null;
+      plainCh = null;
+      run.sync = null;
+      return sessions.length + encoders.length;
+    },
   };
   return run;
 }
@@ -154,6 +181,7 @@ export async function openMember(
     log: ctx.log,
   });
   ctx.defer(() => session.close());
+  run.open.sessions.push(session);
   const page = await session.goto(ROUTES.signin);
   await signInViaUi(page, user, UI_TIMEOUT_MS, ctx.signal);
   if (record) {
