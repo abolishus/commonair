@@ -1,7 +1,7 @@
 {
   "channelPage.title": "{name}",
   "channelPage.loading": "Cargando el canal",
-  "channelPage.panels.title": "Información",
+  "channelPage.panels.title": "Información del canal",
   "channelPage.panels.link": "Visitar {host}",
   "channelPage.panels.linkLabel": "Visitar {host} (abre una pestaña nueva en otro sitio)"
 }
