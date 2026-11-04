@@ -37,19 +37,10 @@ export function useFollow(
   return { state, toggle };
 }
 
-/**
- * Follower count for `ChannelHeader`'s `followers` slot (which sets its type and color). The header's
- * copy is `follower-count`; a second copy on the page (the About card) takes its own id.
- */
-export function FollowerCount({
-  count,
-  testId = "follower-count",
-}: {
-  count: number;
-  testId?: string;
-}): React.JSX.Element {
+/** Follower count for `ChannelHeader`'s `followers` slot (which sets its type and color). */
+export function FollowerCount({ count }: { count: number }): React.JSX.Element {
   return (
-    <span data-testid={testId} data-count={count}>
+    <span data-testid="follower-count" data-count={count}>
       {t("follow.count", { count })}
     </span>
   );

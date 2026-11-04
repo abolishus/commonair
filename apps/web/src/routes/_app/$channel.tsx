@@ -268,7 +268,12 @@ function ChannelView({
     <ChannelAboutSection
       name={channel.displayName}
       about={about}
-      followers={<FollowerCount count={follow.state.count} testId="channel-about-followers" />}
+      followers={
+        // Its own id: the header's `follower-count` is the one other units read.
+        <span data-testid="channel-about-followers" data-count={follow.state.count}>
+          {t("follow.count", { count: follow.state.count })}
+        </span>
+      }
       panels={panels}
       banner={withBanner ? banner : null}
     />
