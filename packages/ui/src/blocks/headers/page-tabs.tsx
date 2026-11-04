@@ -42,9 +42,10 @@ export function PageTabs({
   ...props
 }: PageTabsProps): React.JSX.Element {
   const panelMode = onValueChange !== undefined || value !== undefined;
-  const current = value ?? items.find((item) => item.current)?.id ?? items[0]?.id;
+  // Link mode is controlled too: left uncontrolled, Tabs selects the first link on every page (F30).
+  const current = value ?? items.find((item) => item.current)?.id ?? (panelMode ? items[0]?.id : null);
   return (
-    <Tabs value={panelMode ? current : undefined} onValueChange={onValueChange} className={cn("min-w-0", className)}>
+    <Tabs value={current ?? null} onValueChange={onValueChange} className={cn("min-w-0", className)}>
       {/*
         Only the list scrolls sideways at 320 px; the panels keep the page width. A scroller clips
         vertically too, so the line variant's underline (below the list) gets bottom padding,

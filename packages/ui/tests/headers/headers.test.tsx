@@ -53,6 +53,29 @@ test("PageTabs route links expose current state", () => {
   expect(screen.getByRole("tab", { name: "Overview" }).getAttribute("aria-current")).toBe("page");
   expect(screen.getByRole("tab", { name: "Activity 4" })).toBeTruthy();
 });
+test("PageTabs route links select the current tab, not the first (F30)", () => {
+  render(
+    <PageTabs
+      items={[
+        { id: "overview", label: "Overview", href: "/overview" },
+        { id: "jury", label: "Jury", href: "/jury", current: true },
+      ]}
+    />,
+  );
+  expect(screen.getByRole("tab", { name: "Jury" }).hasAttribute("data-active")).toBe(true);
+  expect(screen.getByRole("tab", { name: "Overview" }).hasAttribute("data-active")).toBe(false);
+});
+test("PageTabs route links with no current tab select none", () => {
+  render(
+    <PageTabs
+      items={[
+        { id: "overview", label: "Overview", href: "/overview" },
+        { id: "jury", label: "Jury", href: "/jury" },
+      ]}
+    />,
+  );
+  expect(screen.getAllByRole("tab").some((tab) => tab.hasAttribute("data-active"))).toBe(false);
+});
 test("PageTabs panel mode renders panel content", () => {
   render(
     <PageTabs
