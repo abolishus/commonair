@@ -2674,12 +2674,19 @@ cmd_upgrade() {
   resolve_repository_url
   if [ -z "$REGISTRY" ] && [ -f "$SELFHOST_CONF" ]; then REGISTRY=$(env_get REGISTRY "$SELFHOST_CONF"); fi
   check_podman
-  collect_state_secrets
+  handed_bundle
 
   # 1. download and verify
   obtain_bundle
   [ "$BUNDLE_VERSION" != "$_curv" ] || die "version $_curv is already installed"
+  if [ -n "${COMMONAIR_UPGRADE_HANDOFF:-}" ] && [ "$BUNDLE_VERSION" != "$COMMONAIR_UPGRADE_HANDOFF" ]; then
+    die "handed release $COMMONAIR_UPGRADE_HANDOFF's upgrade, but the bundle is $BUNDLE_VERSION"
+  fi
   extract_bundle
+  # Nothing has changed yet: the target release's own script runs the rest (it asks for the
+  # external servers' passwords itself, so they are not collected before this).
+  hand_off_upgrade "$@"
+  collect_state_secrets
   check_captions "$RELEASE_DIR"
   apply_registry "$RELEASE_DIR" "$REGISTRY"
   # 2. pull every image by digest (nothing has changed yet if this fails)
@@ -2719,6 +2726,41 @@ cmd_upgrade() {
   prune_releases
   prune_images
   info "upgraded to $(installed_version)"
+}
+
+# The upgrade runs under the target release's own selfhost.sh, which knows what that release
+# needs (staging on rc.9 could not upgrade to rc.11 with its own script: unhealthy, rolled back;
+# it did with rc.11's). Once the bundle is verified and extracted, this script runs the bundle's
+# with the same arguments and exits with its status. COMMONAIR_UPGRADE_HANDOFF (the version)
+# stops a second hand-off, and COMMONAIR_UPGRADE_BUNDLE hands over the verified bundle beside its
+# checksum file and signature, so the target verifies it again without downloading it again
+# (`handed_bundle`). A target identical to this script needs no hand-off; one from before this
+# change ignores both variables, downloads the bundle again and upgrades with its own code. After
+# the upgrade, ~/commonair/selfhost.sh is the target's script: ~/commonair is the release.
+hand_off_upgrade() {
+  [ -z "${COMMONAIR_UPGRADE_HANDOFF:-}" ] || return 0
+  _next="$RELEASE_DIR/selfhost.sh"
+  [ -f "$_next" ] || die "release $BUNDLE_VERSION has no selfhost.sh: not a release bundle"
+  if [ "$(sha256sum <"$_next" | cut -d' ' -f1)" = "$(sha256sum <"$0" | cut -d' ' -f1)" ]; then return 0; fi
+  make_tmp
+  # A copy: the target extracts the bundle again, replacing the release directory it would run from.
+  cp "$_next" "$TMP_ROOT/selfhost-$BUNDLE_VERSION.sh"
+  info "handing the upgrade to release $BUNDLE_VERSION's selfhost.sh"
+  _rc=0
+  COMMONAIR_UPGRADE_HANDOFF="$BUNDLE_VERSION" COMMONAIR_UPGRADE_BUNDLE="$BUNDLE_PATH" \
+    sh "$TMP_ROOT/selfhost-$BUNDLE_VERSION.sh" upgrade "$@" || _rc=$?
+  exit "$_rc"
+}
+
+# In a handed-off upgrade: the bundle the previous script verified, verified again from the
+# checksum file (and signature) beside it, as a --bundle would be. --require-signature and
+# --insecure-no-checksum still apply.
+handed_bundle() {
+  [ -n "${COMMONAIR_UPGRADE_HANDOFF:-}" ] && [ -n "${COMMONAIR_UPGRADE_BUNDLE:-}" ] || return 0
+  [ -f "$COMMONAIR_UPGRADE_BUNDLE" ] || die "the handed-off bundle is gone: $COMMONAIR_UPGRADE_BUNDLE"
+  BUNDLE=$COMMONAIR_UPGRADE_BUNDLE
+  SUMS_FILE=""
+  VERSION=""
 }
 
 # --- backups ------------------------------------------------------------------------------

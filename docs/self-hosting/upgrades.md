@@ -32,8 +32,9 @@ Before 1.0, a minor release may change behaviour; the notes say how at the top.
 2. **Downloads and verifies** the new release: `SHA256SUMS`, its signature (when cosign is
    installed, and always with `--require-signature`), then the bundle, checked against
    `SHA256SUMS`. It refuses the version that is already installed.
-3. **Unpacks** it into `~/.local/share/commonair/releases/<version>/` and applies your mirror
-   (`--registry`, or the one recorded at install).
+3. **Unpacks** it into `~/.local/share/commonair/releases/<version>/` and **hands the rest of the
+   upgrade to the new release's own `selfhost.sh`** ([below](#the-new-releases-script-runs-the-upgrade)),
+   which applies your mirror (`--registry`, or the one recorded at install).
 4. **Pulls every image by digest.** If a pull fails, it stops here and nothing has changed. It
    also stops, before anything changes, when a container outside the instance holds the
    `commonair` network that the restart must re-create.
@@ -56,6 +57,31 @@ If step 8 or 9 fails, it **rolls back** on its own (below) and exits with an err
 
 `--bundle <path>` upgrades from a local bundle instead of downloading, with the same checks.
 `--registry` and `--insecure-no-checksum` work as for `install` ([install.md](install.md)).
+
+### The new release's script runs the upgrade
+
+The script you run is the installed release's, but a new release may install differently (new
+units, settings or checks), and only its own script knows how. So once step 2 has verified the
+bundle and step 3 has unpacked it, `upgrade` runs the bundle's `selfhost.sh` with the same
+arguments, and its outcome is the upgrade's: its exit status, its rollback. The log says
+`handing the upgrade to release <version>'s selfhost.sh`. The new script verifies the same
+bundle again from its `SHA256SUMS` (and signature) rather than downloading it again, and hands
+off no further. Nothing has changed on the host before the hand-off. When the new script is
+identical to the running one there is no hand-off. With an external Postgres and Valkey the
+passwords are asked for (or read from the environment) after it, once.
+
+Afterwards `~/commonair/selfhost.sh` is the new release's script, since `~/commonair` points at
+the new release.
+
+**From 0.1.0-rc.11 or older**, the installed script has no hand-off: it upgrades with its own
+code, which can fail on a newer release (staging, from rc.9 to rc.11: unhealthy, then rolled
+back). Run the new release's script instead. Download and verify the bundle as for an install
+([install.md](install.md)), unpack its `selfhost.sh`, and run that one:
+
+```sh
+tar -xzf commonair-selfhost_X.Y.Z.tar.gz commonair-selfhost_X.Y.Z/selfhost.sh
+sh commonair-selfhost_X.Y.Z/selfhost.sh upgrade --bundle commonair-selfhost_X.Y.Z.tar.gz
+```
 
 `upgrade` backs up the database, not the objects. If you copy objects off the server
 ([backups.md](backups.md#objects)), the daily copy keeps running as before; for a fresh copy

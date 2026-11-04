@@ -123,6 +123,8 @@ export interface BundleOptions {
   root?: string;
   manifestJson: string;
   registry?: string;
+  /** The selfhost.sh to ship in place of the tree's (tests: a target release's own script). */
+  script?: string;
 }
 
 /** Every entry of the bundle, paths relative to the archive root. */
@@ -135,7 +137,7 @@ export async function bundleEntries(opts: BundleOptions): Promise<{ version: str
   const add = (path: string, data: Uint8Array | string, mode = FILE) =>
     entries.push({ path: `${top}/${path}`, data: typeof data === "string" ? enc.encode(data) : data, mode });
 
-  add("selfhost.sh", readFileSync(join(root, "scripts/selfhost.sh")), EXEC);
+  add("selfhost.sh", opts.script ?? readFileSync(join(root, "scripts/selfhost.sh")), EXEC);
   add("release-manifest.json", opts.manifestJson);
   add("release.env", releaseEnv(manifest, registry));
 
