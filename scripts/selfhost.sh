@@ -3005,7 +3005,16 @@ db_backup_lock() {
     fi
     if [ "$_hpid" != "$$" ]; then
       info "taking over the lock of a database ${_holder#*:} that is no longer running (pid ${_hpid:-unknown})"
-      rm -f "$DB_BACKUP_LOCK"
+      # Not rm then ln: two runs taking over at once could each remove the other's fresh lock.
+      # A rename has one winner; one that moved someone else's new lock puts it back and stops.
+      if mv -f "$DB_BACKUP_LOCK" "$DB_BACKUP_LOCK.$$" 2>/dev/null; then
+        if [ "$(readlink "$DB_BACKUP_LOCK.$$" 2>/dev/null || true)" = "$_holder" ]; then
+          rm -f "$DB_BACKUP_LOCK.$$"
+        else
+          mv -f "$DB_BACKUP_LOCK.$$" "$DB_BACKUP_LOCK" 2>/dev/null || rm -f "$DB_BACKUP_LOCK.$$"
+          die "another dump, drill or upgrade just started" "re-run once it is done"
+        fi
+      fi
       ln -s "$$:$1" "$DB_BACKUP_LOCK" 2>/dev/null || die "another dump, drill or upgrade just started" "re-run once it is done"
     fi
   fi
@@ -3197,13 +3206,12 @@ human_bytes() {
 rclone_anonymous() {
   make_tmp
   : >"$TMP_ROOT/rclone-anon.conf"
-  (
-    export RCLONE_CONFIG="$TMP_ROOT/rclone-anon.conf"
-    export RCLONE_CONFIG_CAANON_TYPE=s3 RCLONE_CONFIG_CAANON_PROVIDER=Other RCLONE_CONFIG_CAANON_ENV_AUTH=false
-    export RCLONE_CONFIG_CAANON_NO_CHECK_BUCKET=true RCLONE_CONFIG_CAANON_ENDPOINT="$OBJ_DST_ENDPOINT"
-    export RCLONE_CONFIG_CAANON_REGION="$OBJ_DST_REGION" RCLONE_CONFIG_CAANON_FORCE_PATH_STYLE="$OBJ_DST_PATH_STYLE"
-    exec rclone --retries 1 --low-level-retries 1 "$@"
-  )
+  # No key here, so the remote goes in rclone's environment alone, with no subshell needed.
+  env RCLONE_CONFIG="$TMP_ROOT/rclone-anon.conf" \
+    RCLONE_CONFIG_CAANON_TYPE=s3 RCLONE_CONFIG_CAANON_PROVIDER=Other RCLONE_CONFIG_CAANON_ENV_AUTH=false \
+    RCLONE_CONFIG_CAANON_NO_CHECK_BUCKET=true RCLONE_CONFIG_CAANON_ENDPOINT="$OBJ_DST_ENDPOINT" \
+    RCLONE_CONFIG_CAANON_REGION="$OBJ_DST_REGION" RCLONE_CONFIG_CAANON_FORCE_PATH_STYLE="$OBJ_DST_PATH_STYLE" \
+    rclone --retries 1 --low-level-retries 1 "$@"
 }
 
 # A dump holds personal data, so its bucket must be private. Two checks the provider lets anyone
@@ -3398,7 +3406,7 @@ drill_teardown() {
 
 drill_passed() {
   _secs=$(($(date +%s) - DRILL_T0))
-  DRILL_RUNNING=done
+  DRILL_RUNNING='done'
   record_drill "$DRILL_KIND" success "$_secs" "$DRILL_SOURCE"
   drill_metrics "$DRILL_KIND" 1 "$_secs"
   say "restore drill passed ($DRILL_KIND, $DRILL_SOURCE) in ${_secs}s"

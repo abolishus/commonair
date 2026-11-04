@@ -1278,6 +1278,10 @@ describe("one dump, drill or upgrade at a time", () => {
     expectOk(r);
     expect(r.err).toContain("taking over the lock of a database dump that is no longer running (pid 999999)");
     expect(existsSync(dbLock(h))).toBe(false);
+    // The takeover renames the stale link aside, never leaving the renamed copy behind.
+    expect(readdirSync(join(h.home, ".local/state/commonair")).filter((f) => f.startsWith("db-backup.lock"))).toEqual(
+      [],
+    );
     expect(h.run(["backup", "--dump"], { STUB_DUMP_FAIL: "1" }).code).toBe(1);
     expect(existsSync(dbLock(h))).toBe(false);
   });
@@ -1439,6 +1443,6 @@ describe("the dump and drill units", () => {
   test("the dump runs nightly, the drills weekly", () => {
     expect(keys(unit("commonair-dump.timer"), "OnCalendar")).toEqual(["*-*-* 02:00:00 UTC"]);
     expect(keys(unit("commonair-drill.timer"), "OnCalendar")).toEqual(["Sun *-*-* 05:00:00 UTC"]);
-    expect(keys(unit("commonair-drill-walg.timer"), "OnCalendar")).toEqual(["Sun *-*-* 05:00:00 UTC"]);
+    expect(keys(unit("commonair-drill-walg.timer"), "OnCalendar")).toEqual(["Sat *-*-* 05:00:00 UTC"]);
   });
 });

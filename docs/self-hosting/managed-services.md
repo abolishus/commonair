@@ -77,16 +77,17 @@ Our production instance runs this way. OpenTofu creates the clusters
 (`infra/tofu/digitalocean/modules/instance/managed_state.tf`, on with `enable_managed_state`,
 which production sets by default); `selfhost.sh install` points the instance at them.
 
-**What the tofu module creates, and why:**
+**What the tofu module creates, and why** (`managed_state.tf`, and `backups.tf` for the dump store):
 
-| Resource                                | Setting                                           | Why                                                                                                       |
-| --------------------------------------- | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `digitalocean_database_cluster.pg`      | `engine = "pg"`, `version = 17`, `node_count = 2` | a primary and one standby: DigitalOcean's 99.95% SLA, failover in 5–10 s                                  |
-| `digitalocean_database_cluster.valkey`  | `node_count = 2`                                  | the same for Valkey                                                                                       |
-| `digitalocean_database_valkey_config`   | `noeviction`, `persistence = "rdb"`, `ssl`        | BullMQ requires `noeviction`; RDB keeps queued jobs across a restart                                      |
-| `digitalocean_database_firewall` (both) | one rule, `type = "tag"`, the env's app tag       | trusted sources: only droplets tagged `commonair-<env>-app` connect; no VPC rule type exists              |
-| both clusters                           | `private_network_uuid` = the app VPC              | the instance connects over the private network (`managed_state_secrets.pg_owner_uri` is private)          |
-| `digitalocean_spaces_bucket.instance`   | media, exports, evidence in the app region        | the objects ([object-storage.md](object-storage.md)); `object_backups` in `backup_region` takes the dumps |
+| Resource                                                   | Setting                                           | Why                                                                                              |
+| ---------------------------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `digitalocean_database_cluster.pg`                         | `engine = "pg"`, `version = 17`, `node_count = 2` | a primary and one standby: DigitalOcean's 99.95% SLA, failover in 5–10 s                         |
+| `digitalocean_database_cluster.valkey`                     | `node_count = 2`                                  | the same for Valkey                                                                              |
+| `digitalocean_database_valkey_config`                      | `noeviction`, `persistence = "rdb"`, `ssl`        | BullMQ requires `noeviction`; RDB keeps queued jobs across a restart                             |
+| `digitalocean_database_firewall` (both)                    | one rule, `type = "tag"`, the env's app tag       | trusted sources: only droplets tagged `commonair-<env>-app` connect; no VPC rule type exists     |
+| both clusters                                              | `private_network_uuid` = the app VPC              | the instance connects over the private network (`managed_state_secrets.pg_owner_uri` is private) |
+| `digitalocean_spaces_bucket.instance`                      | media, exports, evidence in the app region        | the objects ([object-storage.md](object-storage.md))                                             |
+| `digitalocean_spaces_bucket.object_backups` (`backups.tf`) | private, versioned, in `backup_region`            | the offsite copy of the objects, and the dumps under `<prefix>/dumps`                            |
 
 **The procedure:**
 

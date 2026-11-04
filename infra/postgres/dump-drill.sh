@@ -90,10 +90,11 @@ SQL
 
 # Compares "name value" lines ($1: expected from counts.json, or empty) with the actual ones
 # ($2). Every expected check must match; a table the dump did not count is a mismatch; the
-# invariants hold whatever the source said.
+# invariants hold whatever the source said. The files are told apart by name, not FNR == NR:
+# with an empty expected file (check-walg) that test holds for every actual line.
 compare() {
   awk -v have_expected="$3" '
-    FNR == NR { if (NF == 2) want[$1] = $2; next }
+    FILENAME == ARGV[1] { if (NF == 2) want[$1] = $2; next }
     NF == 2 { act[$1] = $2 }
     END {
       bad = 0

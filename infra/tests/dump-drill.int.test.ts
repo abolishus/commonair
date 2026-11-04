@@ -19,6 +19,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vite-plus/test";
 import { POSTGRES_IMAGE, podman, podmanAvailable, podmanOk } from "../../packages/db/tests/external-owner-tls.ts";
 import { testOwnerArgs } from "../../scripts/test-owner.ts";
+import { shellcheck } from "../../scripts/tests/support/shellcheck.ts";
 
 vi.setConfig({ testTimeout: 120_000, hookTimeout: 600_000 });
 
@@ -398,5 +399,50 @@ describe.runIf(HAVE_PODMAN)("the drill's target guard", () => {
   test("the drill's server listens on no TCP port", () => {
     expect(psql(DRILL, "postgres", "postgres", "SHOW listen_addresses")).toBe("");
     expect(podman(["exec", DRILL, "pg_isready", "-h", "127.0.0.1"]).code).not.toBe(0);
+  });
+});
+
+// check-walg reads no counts.json: only the invariants, as the cluster's superuser, in a server
+// that proves it is the drill's. A restored dump stands in for the WAL-G copy here: the mode
+// cannot tell them apart, and what is under test is the compare with an empty expected file.
+describe.runIf(HAVE_PODMAN)("dump-drill.sh check-walg", () => {
+  const checkWalg = () => drill(["check-walg"], { env: ["-e", "POSTGRES_DB=commonair"] });
+
+  test("a consistent CommonAir database passes with no expected counts", () => {
+    resetDrill();
+    expect(restore().code).toBe(0);
+    const c = checkWalg();
+    expect(c.code, c.out).toBe(0);
+    expect(c.out).toMatch(/all \d+ checks match/);
+    expect(c.out).not.toContain("missing after the restore");
+  });
+
+  test("a doubled follower_count fails it", () => {
+    psql(DRILL, "postgres", "commonair", "UPDATE channels SET follower_count = follower_count * 2");
+    try {
+      const c = checkWalg();
+      expect(c.code).toBe(1);
+      expect(c.out).toMatch(/follows\.count_mismatch: \d+, must be 0/);
+    } finally {
+      psql(DRILL, "postgres", "commonair", "UPDATE channels SET follower_count = follower_count / 2");
+    }
+  });
+
+  test("a database with no migrations is not a CommonAir one", () => {
+    psql(DRILL, "postgres", "commonair", "ALTER TABLE drizzle.__drizzle_migrations RENAME TO m_aside");
+    try {
+      const c = checkWalg();
+      expect(c.code).not.toBe(0);
+      expect(c.out).toContain("not a CommonAir database");
+    } finally {
+      psql(DRILL, "postgres", "commonair", "ALTER TABLE drizzle.m_aside RENAME TO __drizzle_migrations");
+    }
+  });
+});
+
+describe.runIf(HAVE_PODMAN)("shellcheck", () => {
+  test.each(["dump.sh", "dump-restore.sh", "dump-drill.sh"])("infra/postgres/%s is clean (POSIX sh)", (f) => {
+    const r = shellcheck(join(ROOT, "infra/postgres", f));
+    expect(r.code, r.out).toBe(0);
   });
 });

@@ -262,21 +262,22 @@ An example for an instance on a droplet in `NYC3`, with the copy in Amsterdam:
 
 Every setting:
 
-| Key                                       | Meaning                                                                                 |
-| ----------------------------------------- | --------------------------------------------------------------------------------------- |
-| `BACKUP_OBJECTS_REMOTE_ENDPOINT`          | The offsite store's S3 endpoint, `https://host[:port]`. Required                        |
-| `BACKUP_OBJECTS_REMOTE_REGION`            | The region it signs requests for (`ams3`, or `garage` for a Garage). Required           |
-| `BACKUP_OBJECTS_REMOTE_BUCKET`            | Its bucket. Required                                                                    |
-| `BACKUP_OBJECTS_REMOTE_ACCESS_KEY_ID`     | A key for that bucket with read, write and delete. Required                             |
-| `BACKUP_OBJECTS_REMOTE_SECRET_ACCESS_KEY` | Its secret. Required                                                                    |
-| `BACKUP_OBJECTS_REMOTE_PREFIX`            | A path inside the bucket. Default: none (`<bucket>/media`, `<bucket>/evidence`)         |
-| `BACKUP_OBJECTS_REMOTE_PATH_STYLE`        | `true` (default) or `false`: path-style or virtual-hosted URLs. Spaces accepts both     |
-| `BACKUP_OBJECTS_REMOTE_ALLOW_HTTP`        | `true` accepts an `http://` endpoint, for a store on a trusted network. Default refused |
-| `BACKUP_OBJECTS_BWLIMIT`                  | rclone's bandwidth limit for every run, as for `--bwlimit`. Default: none               |
-| `BACKUP_OBJECTS_MAX_DELETE`               | Most objects a run may delete from each bucket's copy, or `off`. Default: 1000          |
-| `BACKUP_OBJECTS_SOURCE_ACCESS_KEY_ID`     | The key that reads the instance's buckets (Garage: created by the first run)            |
-| `BACKUP_OBJECTS_SOURCE_SECRET_ACCESS_KEY` | Its secret                                                                              |
-| `BACKUP_OBJECTS_SOURCE_ENDPOINT`          | External store only: where the server reaches it, if not at `S3_ENDPOINT`               |
+| Key                                       | Meaning                                                                                  |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `BACKUP_OBJECTS_REMOTE_ENDPOINT`          | The offsite store's S3 endpoint, `https://host[:port]`. Required                         |
+| `BACKUP_OBJECTS_REMOTE_REGION`            | The region it signs requests for (`ams3`, or `garage` for a Garage). Required            |
+| `BACKUP_OBJECTS_REMOTE_BUCKET`            | Its bucket. Required                                                                     |
+| `BACKUP_OBJECTS_REMOTE_ACCESS_KEY_ID`     | A key for that bucket with read, write and delete. Required                              |
+| `BACKUP_OBJECTS_REMOTE_SECRET_ACCESS_KEY` | Its secret. Required                                                                     |
+| `BACKUP_OBJECTS_REMOTE_PREFIX`            | A path inside the bucket. Default: none (`<bucket>/media`, `<bucket>/evidence`)          |
+| `BACKUP_OBJECTS_REMOTE_PATH_STYLE`        | `true` (default) or `false`: path-style or virtual-hosted URLs. Spaces accepts both      |
+| `BACKUP_OBJECTS_REMOTE_ALLOW_HTTP`        | `true` accepts an `http://` endpoint, for a store on a trusted network. Default refused  |
+| `BACKUP_OBJECTS_BWLIMIT`                  | rclone's bandwidth limit for every run, as for `--bwlimit`. Default: none                |
+| `BACKUP_OBJECTS_MAX_DELETE`               | Most objects a run may delete from each bucket's copy, or `off`. Default: 1000           |
+| `BACKUP_OBJECTS_SOURCE_ACCESS_KEY_ID`     | The key that reads the instance's buckets (Garage: created by the first run)             |
+| `BACKUP_OBJECTS_SOURCE_SECRET_ACCESS_KEY` | Its secret                                                                               |
+| `BACKUP_OBJECTS_SOURCE_ENDPOINT`          | External store only: where the server reaches it, if not at `S3_ENDPOINT`                |
+| `BACKUP_DUMP_KEEP`                        | Complete logical dumps kept ([Logical dumps](#logical-dumps)). Default 30; fewer refused |
 
 No container receives these keys: only `selfhost.sh` reads them. A
 second Garage node works as the offsite store as well, with its own endpoint, region `garage` and
@@ -539,10 +540,10 @@ throwaway server listens on no TCP port (only on a Unix socket inside its contai
 host logins), and every check runs inside that container, after it has proved that the server it
 reaches is the one whose data directory holds the drill's marker.
 
-| Drill                        | Timer                                                  | What it restores, and how                                                                                                                  |
-| ---------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `selfhost.sh backup --drill` | `commonair-drill.timer`, weekly (Sunday 05:00 UTC +1h) | the newest complete dump: its SHA-256 first, then the owner-only order as an owner with no superuser, in a container with no network       |
-| `backup --drill --walg`      | `commonair-drill-walg.timer`, weekly (bundled only)    | the newest WAL-G base backup and its archive, replayed with archiving off; on the `commonair` network only to fetch from the backup bucket |
+| Drill                        | Timer                                                                       | What it restores, and how                                                                                                                  |
+| ---------------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `selfhost.sh backup --drill` | `commonair-drill.timer`, weekly (Sunday 05:00 UTC +1h)                      | the newest complete dump: its SHA-256 first, then the owner-only order as an owner with no superuser, in a container with no network       |
+| `backup --drill --walg`      | `commonair-drill-walg.timer`, weekly (Saturday 05:00 UTC +1h, bundled only) | the newest WAL-G base backup and its archive, replayed with archiving off; on the `commonair` network only to fetch from the backup bucket |
 
 Then the checks, as `infra/postgres/dump-drill.sh` runs them, printing check names and numbers,
 never a row:
@@ -566,7 +567,11 @@ Each drill records its result in `~/.local/state/commonair/restore-drill-dump` o
 ([monitoring.md](../operators/monitoring.md#metrics-pushed-by-jobs)).
 
 `commonair-drill-walg.timer` is on with the bundled Postgres. `commonair-drill.timer` is on with
-an external one; with the bundled one, the first successful `backup --drill` turns it on.
+an external one; with the bundled one, the first successful `backup --drill` turns it on. The
+two run on different days (Saturday and Sunday), since one drill at a time holds the database
+lock. Like `commonair-backup.timer`, the drill timer for your mode is turned on again by every
+`install --reinstall` and `upgrade`: `systemctl --user disable --now commonair-drill-walg.timer`
+lasts until then.
 
 ### The full drill onto a scratch server
 
