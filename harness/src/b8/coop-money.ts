@@ -399,9 +399,19 @@ export async function stepPatronagePayout(ext: CoopB8Extension): Promise<void> {
     await page.locator(`[data-testid="${PATRONAGE_PAY}"]`).waitFor({ timeout: UI_TIMEOUT_MS });
     const list = page.locator(`[data-testid="${PATRONAGE_PAYOUTS}"]`);
     await list.waitFor({ timeout: UI_TIMEOUT_MS });
-    const statuses = await list
-      .locator("tr[data-payout-id]")
-      .evaluateAll((trs) => trs.map((tr) => [tr.getAttribute("data-user-id"), tr.getAttribute("data-status")]));
+    // The list shows skeleton rows (no data-payout-id) until the payouts load.
+    const read = () =>
+      list
+        .locator("tr[data-payout-id]")
+        .evaluateAll((trs) => trs.map((tr) => [tr.getAttribute("data-user-id"), tr.getAttribute("data-status")]));
+    const statuses = await waitFor(
+      "the payout rows",
+      async () => {
+        const rows = await read();
+        return rows.length === 2 ? rows : null;
+      },
+      { timeoutMs: UI_TIMEOUT_MS, intervalMs: 250, signal: ctx.signal },
+    ).catch(read);
     ctx.check(
       "patronage-payouts shows both paid",
       statuses.length === 2 && statuses.every(([, s]) => s === "paid"),
