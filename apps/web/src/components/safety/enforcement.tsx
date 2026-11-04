@@ -9,7 +9,7 @@
  * one write a suspended account may make).
  */
 import type * as D from "@commonair/contracts/dto";
-import { EmptyState, RelativeTime, SkeletonGroup, SkeletonText, StatusBadge } from "@commonair/ui";
+import { EmptyState, RelativeTime, SkeletonGroup, SkeletonText, StatusBadge, useRequestNow } from "@commonair/ui";
 import { Section } from "@commonair/ui/blocks/headers";
 import { Button } from "@commonair/ui/components/button";
 import { Dialog, DialogContent } from "@commonair/ui/components/dialog";
@@ -19,6 +19,7 @@ import { LegalDocument01Icon } from "@hugeicons/core-free-icons";
 import * as React from "react";
 import { FormError } from "../form-error.tsx";
 import { t } from "../../i18n/index.ts";
+import { fillNode } from "../../lib/fill.tsx";
 import { api } from "../../lib/api.ts";
 import { APPEAL_BODY_MAX, APPEAL_BODY_MIN, AppealBodyForm } from "./appeals.tsx";
 import type { AppealDto } from "./client.ts";
@@ -138,9 +139,7 @@ export function EnforcementStatementItem({
           {s.restriction.kind !== "warning" && (
             <Fact label={t("safety.enforcement.duration")}>
               {s.restriction.endsAt ? (
-                <>
-                  {t("safety.enforcement.until")} <RelativeTime date={s.restriction.endsAt} />
-                </>
+                <RestrictionEnd endsAt={s.restriction.endsAt} />
               ) : (
                 t("safety.enforcement.indefinite")
               )}
@@ -192,6 +191,34 @@ export function EnforcementAppealForm({ onSubmit }: { onSubmit: (body: string) =
         failed: t("safety.enforcement.appealFailed"),
       }}
     />
+  );
+}
+
+/** Whether a restriction with this end has ended at `nowMs`. */
+export function restrictionEnded(endsAt: string, nowMs: number): boolean {
+  const end = Date.parse(endsAt);
+  return Number.isFinite(end) && end <= nowMs;
+}
+
+/**
+ * F39: "Until in 3 days" while it runs, "Ended 17 hours ago" once it is over (it used to read
+ * "Until 17 hours ago").
+ */
+export function RestrictionEnd({ endsAt, now }: { endsAt: string; now?: number }): React.JSX.Element {
+  // The request's clock (SSR and hydration agree); the mount time where there is none.
+  const requestNow = useRequestNow();
+  const [mountedAt] = React.useState(() => Date.now());
+  const ended = restrictionEnded(endsAt, now ?? requestNow ?? mountedAt);
+  return (
+    <span data-testid="enforcement-ends" data-ended={ended ? "true" : "false"}>
+      {ended ? (
+        fillNode(t("settings.enforcement.ended"), "time", <RelativeTime date={endsAt} />)
+      ) : (
+        <>
+          {t("safety.enforcement.until")} <RelativeTime date={endsAt} />
+        </>
+      )}
+    </span>
   );
 }
 

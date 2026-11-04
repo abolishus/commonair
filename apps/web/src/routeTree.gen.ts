@@ -18,6 +18,7 @@ import { Route as AppChannelRouteImport } from './routes/_app/$channel'
 import { Route as AppActivateRouteImport } from './routes/_app/activate'
 import { Route as AppDmcaRouteImport } from './routes/_app/dmca'
 import { Route as AppSearchRouteImport } from './routes/_app/search'
+import { Route as AppSettingsRouteImport } from './routes/_app/settings'
 import { Route as AppSigninRouteImport } from './routes/_app/signin'
 import { Route as AppSignupRouteImport } from './routes/_app/signup'
 import { Route as AppTakedownRouteImport } from './routes/_app/takedown'
@@ -121,6 +122,11 @@ const AppDmcaRoute = AppDmcaRouteImport.update({
 const AppSearchRoute = AppSearchRouteImport.update({
   id: '/search',
   path: '/search',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSettingsRoute = AppSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
   getParentRoute: () => AppRoute,
 } as any)
 const AppSigninRoute = AppSigninRouteImport.update({
@@ -329,35 +335,35 @@ const AppOauth2AuthorizeRoute = AppOauth2AuthorizeRouteImport.update({
   getParentRoute: () => AppRoute,
 } as any)
 const AppSettingsAppealsRoute = AppSettingsAppealsRouteImport.update({
-  id: '/settings/appeals',
-  path: '/settings/appeals',
-  getParentRoute: () => AppRoute,
+  id: '/appeals',
+  path: '/appeals',
+  getParentRoute: () => AppSettingsRoute,
 } as any)
 const AppSettingsConnectionsRoute = AppSettingsConnectionsRouteImport.update({
-  id: '/settings/connections',
-  path: '/settings/connections',
-  getParentRoute: () => AppRoute,
+  id: '/connections',
+  path: '/connections',
+  getParentRoute: () => AppSettingsRoute,
 } as any)
 const AppSettingsCopyrightRoute = AppSettingsCopyrightRouteImport.update({
-  id: '/settings/copyright',
-  path: '/settings/copyright',
-  getParentRoute: () => AppRoute,
+  id: '/copyright',
+  path: '/copyright',
+  getParentRoute: () => AppSettingsRoute,
 } as any)
 const AppSettingsPreferencesRoute = AppSettingsPreferencesRouteImport.update({
-  id: '/settings/preferences',
-  path: '/settings/preferences',
-  getParentRoute: () => AppRoute,
+  id: '/preferences',
+  path: '/preferences',
+  getParentRoute: () => AppSettingsRoute,
 } as any)
 const AppSettingsPrivacyRoute = AppSettingsPrivacyRouteImport.update({
-  id: '/settings/privacy',
-  path: '/settings/privacy',
-  getParentRoute: () => AppRoute,
+  id: '/privacy',
+  path: '/privacy',
+  getParentRoute: () => AppSettingsRoute,
 } as any)
 const AppSettingsSubscriptionsRoute =
   AppSettingsSubscriptionsRouteImport.update({
-    id: '/settings/subscriptions',
-    path: '/settings/subscriptions',
-    getParentRoute: () => AppRoute,
+    id: '/subscriptions',
+    path: '/subscriptions',
+    getParentRoute: () => AppSettingsRoute,
   } as any)
 const StudioDeveloperIndexRoute = StudioDeveloperIndexRouteImport.update({
   id: '/developer/',
@@ -413,15 +419,15 @@ const AppMChannelNonceRoute = AppMChannelNonceRouteImport.update({
 } as any)
 const AppSettingsNotificationsIndexRoute =
   AppSettingsNotificationsIndexRouteImport.update({
-    id: '/settings/notifications/',
-    path: '/settings/notifications/',
-    getParentRoute: () => AppRoute,
+    id: '/notifications/',
+    path: '/notifications/',
+    getParentRoute: () => AppSettingsRoute,
   } as any)
 const AppSettingsNotificationsUnsubscribeRoute =
   AppSettingsNotificationsUnsubscribeRouteImport.update({
-    id: '/settings/notifications/unsubscribe',
-    path: '/settings/notifications/unsubscribe',
-    getParentRoute: () => AppRoute,
+    id: '/notifications/unsubscribe',
+    path: '/notifications/unsubscribe',
+    getParentRoute: () => AppSettingsRoute,
   } as any)
 const StudioDeveloperAppsAppIdRoute =
   StudioDeveloperAppsAppIdRouteImport.update({
@@ -447,6 +453,7 @@ export interface FileRoutesByFullPath {
   '/activate': typeof AppActivateRoute
   '/dmca': typeof AppDmcaRoute
   '/search': typeof AppSearchRoute
+  '/settings': typeof AppSettingsRouteWithChildren
   '/signin': typeof AppSigninRoute
   '/signup': typeof AppSignupRoute
   '/takedown': typeof AppTakedownRoute
@@ -517,6 +524,7 @@ export interface FileRoutesByTo {
   '/activate': typeof AppActivateRoute
   '/dmca': typeof AppDmcaRoute
   '/search': typeof AppSearchRoute
+  '/settings': typeof AppSettingsRouteWithChildren
   '/signin': typeof AppSigninRoute
   '/signup': typeof AppSignupRoute
   '/takedown': typeof AppTakedownRoute
@@ -590,6 +598,7 @@ export interface FileRoutesById {
   '/_app/activate': typeof AppActivateRoute
   '/_app/dmca': typeof AppDmcaRoute
   '/_app/search': typeof AppSearchRoute
+  '/_app/settings': typeof AppSettingsRouteWithChildren
   '/_app/signin': typeof AppSigninRoute
   '/_app/signup': typeof AppSignupRoute
   '/_app/takedown': typeof AppTakedownRoute
@@ -663,6 +672,7 @@ export interface FileRouteTypes {
     | '/activate'
     | '/dmca'
     | '/search'
+    | '/settings'
     | '/signin'
     | '/signup'
     | '/takedown'
@@ -733,6 +743,7 @@ export interface FileRouteTypes {
     | '/activate'
     | '/dmca'
     | '/search'
+    | '/settings'
     | '/signin'
     | '/signup'
     | '/takedown'
@@ -805,6 +816,7 @@ export interface FileRouteTypes {
     | '/_app/activate'
     | '/_app/dmca'
     | '/_app/search'
+    | '/_app/settings'
     | '/_app/signin'
     | '/_app/signup'
     | '/_app/takedown'
@@ -943,6 +955,13 @@ declare module '@tanstack/react-router' {
       path: '/search'
       fullPath: '/search'
       preLoaderRoute: typeof AppSearchRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/settings': {
+      id: '/_app/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof AppSettingsRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/signin': {
@@ -1234,45 +1253,45 @@ declare module '@tanstack/react-router' {
     }
     '/_app/settings/appeals': {
       id: '/_app/settings/appeals'
-      path: '/settings/appeals'
+      path: '/appeals'
       fullPath: '/settings/appeals'
       preLoaderRoute: typeof AppSettingsAppealsRouteImport
-      parentRoute: typeof AppRoute
+      parentRoute: typeof AppSettingsRoute
     }
     '/_app/settings/connections': {
       id: '/_app/settings/connections'
-      path: '/settings/connections'
+      path: '/connections'
       fullPath: '/settings/connections'
       preLoaderRoute: typeof AppSettingsConnectionsRouteImport
-      parentRoute: typeof AppRoute
+      parentRoute: typeof AppSettingsRoute
     }
     '/_app/settings/copyright': {
       id: '/_app/settings/copyright'
-      path: '/settings/copyright'
+      path: '/copyright'
       fullPath: '/settings/copyright'
       preLoaderRoute: typeof AppSettingsCopyrightRouteImport
-      parentRoute: typeof AppRoute
+      parentRoute: typeof AppSettingsRoute
     }
     '/_app/settings/preferences': {
       id: '/_app/settings/preferences'
-      path: '/settings/preferences'
+      path: '/preferences'
       fullPath: '/settings/preferences'
       preLoaderRoute: typeof AppSettingsPreferencesRouteImport
-      parentRoute: typeof AppRoute
+      parentRoute: typeof AppSettingsRoute
     }
     '/_app/settings/privacy': {
       id: '/_app/settings/privacy'
-      path: '/settings/privacy'
+      path: '/privacy'
       fullPath: '/settings/privacy'
       preLoaderRoute: typeof AppSettingsPrivacyRouteImport
-      parentRoute: typeof AppRoute
+      parentRoute: typeof AppSettingsRoute
     }
     '/_app/settings/subscriptions': {
       id: '/_app/settings/subscriptions'
-      path: '/settings/subscriptions'
+      path: '/subscriptions'
       fullPath: '/settings/subscriptions'
       preLoaderRoute: typeof AppSettingsSubscriptionsRouteImport
-      parentRoute: typeof AppRoute
+      parentRoute: typeof AppSettingsRoute
     }
     '/_studio/developer/': {
       id: '/_studio/developer/'
@@ -1346,17 +1365,17 @@ declare module '@tanstack/react-router' {
     }
     '/_app/settings/notifications/': {
       id: '/_app/settings/notifications/'
-      path: '/settings/notifications'
+      path: '/notifications'
       fullPath: '/settings/notifications/'
       preLoaderRoute: typeof AppSettingsNotificationsIndexRouteImport
-      parentRoute: typeof AppRoute
+      parentRoute: typeof AppSettingsRoute
     }
     '/_app/settings/notifications/unsubscribe': {
       id: '/_app/settings/notifications/unsubscribe'
-      path: '/settings/notifications/unsubscribe'
+      path: '/notifications/unsubscribe'
       fullPath: '/settings/notifications/unsubscribe'
       preLoaderRoute: typeof AppSettingsNotificationsUnsubscribeRouteImport
-      parentRoute: typeof AppRoute
+      parentRoute: typeof AppSettingsRoute
     }
     '/_studio/developer/apps/$appId': {
       id: '/_studio/developer/apps/$appId'
@@ -1412,11 +1431,39 @@ const AdminRouteChildren: AdminRouteChildren = {
 
 const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
 
+interface AppSettingsRouteChildren {
+  AppSettingsAppealsRoute: typeof AppSettingsAppealsRoute
+  AppSettingsConnectionsRoute: typeof AppSettingsConnectionsRoute
+  AppSettingsCopyrightRoute: typeof AppSettingsCopyrightRoute
+  AppSettingsPreferencesRoute: typeof AppSettingsPreferencesRoute
+  AppSettingsPrivacyRoute: typeof AppSettingsPrivacyRoute
+  AppSettingsSubscriptionsRoute: typeof AppSettingsSubscriptionsRoute
+  AppSettingsNotificationsUnsubscribeRoute: typeof AppSettingsNotificationsUnsubscribeRoute
+  AppSettingsNotificationsIndexRoute: typeof AppSettingsNotificationsIndexRoute
+}
+
+const AppSettingsRouteChildren: AppSettingsRouteChildren = {
+  AppSettingsAppealsRoute: AppSettingsAppealsRoute,
+  AppSettingsConnectionsRoute: AppSettingsConnectionsRoute,
+  AppSettingsCopyrightRoute: AppSettingsCopyrightRoute,
+  AppSettingsPreferencesRoute: AppSettingsPreferencesRoute,
+  AppSettingsPrivacyRoute: AppSettingsPrivacyRoute,
+  AppSettingsSubscriptionsRoute: AppSettingsSubscriptionsRoute,
+  AppSettingsNotificationsUnsubscribeRoute:
+    AppSettingsNotificationsUnsubscribeRoute,
+  AppSettingsNotificationsIndexRoute: AppSettingsNotificationsIndexRoute,
+}
+
+const AppSettingsRouteWithChildren = AppSettingsRoute._addFileChildren(
+  AppSettingsRouteChildren,
+)
+
 interface AppRouteChildren {
   AppChannelRoute: typeof AppChannelRoute
   AppActivateRoute: typeof AppActivateRoute
   AppDmcaRoute: typeof AppDmcaRoute
   AppSearchRoute: typeof AppSearchRoute
+  AppSettingsRoute: typeof AppSettingsRouteWithChildren
   AppSigninRoute: typeof AppSigninRoute
   AppSignupRoute: typeof AppSignupRoute
   AppTakedownRoute: typeof AppTakedownRoute
@@ -1429,12 +1476,6 @@ interface AppRouteChildren {
   AppCoopSettingsRoute: typeof AppCoopSettingsRoute
   AppDirectoryCategoryRoute: typeof AppDirectoryCategoryRoute
   AppOauth2AuthorizeRoute: typeof AppOauth2AuthorizeRoute
-  AppSettingsAppealsRoute: typeof AppSettingsAppealsRoute
-  AppSettingsConnectionsRoute: typeof AppSettingsConnectionsRoute
-  AppSettingsCopyrightRoute: typeof AppSettingsCopyrightRoute
-  AppSettingsPreferencesRoute: typeof AppSettingsPreferencesRoute
-  AppSettingsPrivacyRoute: typeof AppSettingsPrivacyRoute
-  AppSettingsSubscriptionsRoute: typeof AppSettingsSubscriptionsRoute
   AppCoopIndexRoute: typeof AppCoopIndexRoute
   AppDirectoryIndexRoute: typeof AppDirectoryIndexRoute
   AppChannelClipsClipIdRoute: typeof AppChannelClipsClipIdRoute
@@ -1443,10 +1484,8 @@ interface AppRouteChildren {
   AppCoopPatronagePeriodIdRoute: typeof AppCoopPatronagePeriodIdRoute
   AppCoopProposalsNewRoute: typeof AppCoopProposalsNewRoute
   AppMChannelNonceRoute: typeof AppMChannelNonceRoute
-  AppSettingsNotificationsUnsubscribeRoute: typeof AppSettingsNotificationsUnsubscribeRoute
   AppCoopPatronageIndexRoute: typeof AppCoopPatronageIndexRoute
   AppCoopProposalsIndexRoute: typeof AppCoopProposalsIndexRoute
-  AppSettingsNotificationsIndexRoute: typeof AppSettingsNotificationsIndexRoute
   AppCoopProposalsIdEditRoute: typeof AppCoopProposalsIdEditRoute
   AppCoopProposalsIdIndexRoute: typeof AppCoopProposalsIdIndexRoute
 }
@@ -1456,6 +1495,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppActivateRoute: AppActivateRoute,
   AppDmcaRoute: AppDmcaRoute,
   AppSearchRoute: AppSearchRoute,
+  AppSettingsRoute: AppSettingsRouteWithChildren,
   AppSigninRoute: AppSigninRoute,
   AppSignupRoute: AppSignupRoute,
   AppTakedownRoute: AppTakedownRoute,
@@ -1468,12 +1508,6 @@ const AppRouteChildren: AppRouteChildren = {
   AppCoopSettingsRoute: AppCoopSettingsRoute,
   AppDirectoryCategoryRoute: AppDirectoryCategoryRoute,
   AppOauth2AuthorizeRoute: AppOauth2AuthorizeRoute,
-  AppSettingsAppealsRoute: AppSettingsAppealsRoute,
-  AppSettingsConnectionsRoute: AppSettingsConnectionsRoute,
-  AppSettingsCopyrightRoute: AppSettingsCopyrightRoute,
-  AppSettingsPreferencesRoute: AppSettingsPreferencesRoute,
-  AppSettingsPrivacyRoute: AppSettingsPrivacyRoute,
-  AppSettingsSubscriptionsRoute: AppSettingsSubscriptionsRoute,
   AppCoopIndexRoute: AppCoopIndexRoute,
   AppDirectoryIndexRoute: AppDirectoryIndexRoute,
   AppChannelClipsClipIdRoute: AppChannelClipsClipIdRoute,
@@ -1482,11 +1516,8 @@ const AppRouteChildren: AppRouteChildren = {
   AppCoopPatronagePeriodIdRoute: AppCoopPatronagePeriodIdRoute,
   AppCoopProposalsNewRoute: AppCoopProposalsNewRoute,
   AppMChannelNonceRoute: AppMChannelNonceRoute,
-  AppSettingsNotificationsUnsubscribeRoute:
-    AppSettingsNotificationsUnsubscribeRoute,
   AppCoopPatronageIndexRoute: AppCoopPatronageIndexRoute,
   AppCoopProposalsIndexRoute: AppCoopProposalsIndexRoute,
-  AppSettingsNotificationsIndexRoute: AppSettingsNotificationsIndexRoute,
   AppCoopProposalsIdEditRoute: AppCoopProposalsIdEditRoute,
   AppCoopProposalsIdIndexRoute: AppCoopProposalsIdIndexRoute,
 }

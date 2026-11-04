@@ -2,11 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { DELIVERY_SOURCES } from "@commonair/contracts/enums";
-import { EmptyState, SkeletonGroup, SkeletonText, formatBytes, useLocale } from "@commonair/ui";
+import { EmptyState, SkeletonGroup, SkeletonText, useLocale } from "@commonair/ui";
 import { DataTable, type DataTableColumn, StatCard, StatGrid } from "@commonair/ui/blocks/data";
 import { Button } from "@commonair/ui/components/button";
-import { Field, FieldDescription, FieldError, FieldLabel } from "@commonair/ui/components/field";
-import { Input } from "@commonair/ui/components/input";
+import { FieldDescription, FieldError } from "@commonair/ui/components/field";
 import { Chart01Icon } from "@hugeicons/core-free-icons";
 import * as React from "react";
 import { FormError } from "../form-error.tsx";
@@ -14,7 +13,8 @@ import { useLoad } from "../money/use-load.ts";
 import { t } from "../../i18n/index.ts";
 import { egressClient, type EgressClient, type EgressReportDto } from "./client.ts";
 import { checkEgressRange, defaultEgressInputs } from "./forms.ts";
-import { sourceLabel } from "./labels.ts";
+import { DateTimeField } from "./date-time-field.tsx";
+import { formatSize, sourceLabel } from "./labels.ts";
 
 /** Mirrors the API cap on listed broadcasts (`EGRESS_BROADCAST_CAP`). */
 export const EGRESS_BROADCAST_CAP = 200;
@@ -34,13 +34,13 @@ function columns(locale: string): DataTableColumn<BroadcastRow>[] {
       id: s,
       header: sourceLabel(s),
       align: "numeric",
-      cell: ({ row: { original: b } }) => formatBytes(b.bytes[s], locale),
+      cell: ({ row: { original: b } }) => formatSize(b.bytes[s], locale),
     })),
     {
       id: "total",
       header: t("admin.egress.total"),
       align: "numeric",
-      cell: ({ row: { original: b } }) => formatBytes(total(b.bytes), locale),
+      cell: ({ row: { original: b } }) => formatSize(total(b.bytes), locale),
     },
   ];
 }
@@ -61,8 +61,6 @@ export function EgressPage({
     initial.ok ? { from: initial.from, to: initial.to } : null,
   );
   const [rangeError, setRangeError] = React.useState<string | null>(null);
-  const fromId = React.useId();
-  const toId = React.useId();
   const report = useLoad(range ? `${range.from}|${range.to}` : "none", () =>
     range ? client.report(range) : Promise.reject(new Error("no range")),
   );
@@ -88,44 +86,36 @@ export function EgressPage({
   return (
     <div data-testid="egress" className="flex flex-col gap-6">
       <form className="flex flex-col gap-3" onSubmit={submit} noValidate>
-        <div className="grid gap-3 sm:grid-cols-3 sm:items-end">
-          <Field>
-            <FieldLabel htmlFor={fromId}>{t("admin.egress.from")}</FieldLabel>
-            <Input
-              id={fromId}
-              data-testid="egress-from"
-              type="datetime-local"
-              value={inputs.from}
-              aria-invalid={rangeError !== null || undefined}
-              onChange={(e) => {
-                const from = e.currentTarget.value;
-                setInputs((p) => ({ ...p, from }));
-              }}
-            />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor={toId}>{t("admin.egress.to")}</FieldLabel>
-            <Input
-              id={toId}
-              data-testid="egress-to"
-              type="datetime-local"
-              value={inputs.to}
-              aria-invalid={rangeError !== null || undefined}
-              onChange={(e) => {
-                const to = e.currentTarget.value;
-                setInputs((p) => ({ ...p, to }));
-              }}
-            />
-          </Field>
-          <Button data-testid="egress-load" type="submit">
-            {t("admin.egress.load")}
-          </Button>
+        {/* F33: design-system date and time fields; the values stay UTC (the hint below says so). */}
+        <div className="grid min-w-0 gap-4 lg:grid-cols-2">
+          <DateTimeField
+            data-testid="egress-from"
+            label={t("admin.egress.from")}
+            value={inputs.from}
+            invalid={rangeError !== null}
+            now={now}
+            onValueChange={(from) => setInputs((p) => ({ ...p, from }))}
+          />
+          <DateTimeField
+            data-testid="egress-to"
+            label={t("admin.egress.to")}
+            value={inputs.to}
+            invalid={rangeError !== null}
+            now={now}
+            onValueChange={(to) => setInputs((p) => ({ ...p, to }))}
+          />
         </div>
         {rangeError ? (
           <FieldError>{rangeError}</FieldError>
         ) : (
           <FieldDescription>{t("admin.egress.rangeHint")}</FieldDescription>
         )}
+        {/* F39: the button at its own width, not a whole grid column. */}
+        <div>
+          <Button data-testid="egress-load" type="submit">
+            {t("admin.egress.load")}
+          </Button>
+        </div>
       </form>
       <EgressResult report={report.data} failed={report.failed} onRetry={report.reload} />
     </div>
@@ -173,7 +163,7 @@ export function EgressResult({
               data-source={s}
               data-bytes={report.totals[s]}
               label={sourceLabel(s)}
-              value={formatBytes(report.totals[s], locale)}
+              value={formatSize(report.totals[s], locale)}
             />
           ))}
         </StatGrid>

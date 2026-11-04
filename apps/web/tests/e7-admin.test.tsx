@@ -32,6 +32,20 @@ import { locale, uiMessages } from "../src/i18n/index.ts";
 
 afterEach(cleanup);
 
+/** Chooses parts of a `DateTimeField` through its selects (a Base UI item counts a pressed click). */
+async function setDateTime(
+  field: string,
+  parts: Partial<Record<"day" | "month" | "year" | "hour" | "minute", string>>,
+) {
+  for (const [part, name] of Object.entries(parts)) {
+    fireEvent.click(tid(`${field}-${part}`));
+    const item = await screen.findByRole("option", { name });
+    fireEvent.pointerDown(item, { pointerType: "mouse" });
+    fireEvent.click(item);
+    await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull());
+  }
+}
+
 function wrap(node: React.ReactNode) {
   return render(
     <LocaleProvider locale={locale} messages={uiMessages}>
@@ -106,7 +120,9 @@ describe("egress page", () => {
     await screen.findByTestId("egress-row");
     expect(reportFn).toHaveBeenCalledWith({ from: "2026-10-26T12:01:00.000Z", to: "2026-10-27T12:01:00.000Z" });
     expect(tid("egress")).toBeTruthy();
-    expect((tid("egress-from") as HTMLInputElement).type).toBe("datetime-local");
+    // D5-settings (F33): design-system date and time selects, the value still UTC text.
+    expect(tid("egress-from").dataset.value).toBe("2026-10-26T12:01");
+    expect(tid("egress-to").dataset.value).toBe("2026-10-27T12:01");
     const totals = screen.getAllByTestId("egress-total");
     expect(totals.map((e) => [e.dataset.source, e.dataset.bytes])).toEqual([
       ["origin", "1500000"],
@@ -130,8 +146,9 @@ describe("egress page", () => {
     const reportFn = vi.fn<EgressClient["report"]>(async () => ({ ...report, byBroadcast: [] }));
     wrap(<EgressPage client={{ report: reportFn }} now={NOW} />);
     await screen.findByTestId("egress-empty");
-    fireEvent.change(tid("egress-from"), { target: { value: "2026-10-01T00:00" } });
-    fireEvent.change(tid("egress-to"), { target: { value: "2026-10-02T06:30" } });
+    await setDateTime("egress-from", { day: "1", hour: "00", minute: "00" });
+    await setDateTime("egress-to", { day: "2", hour: "06", minute: "30" });
+    // Both fields started on the default range (26 and 27 October 2026).
     fireEvent.click(tid("egress-load"));
     await waitFor(() =>
       expect(reportFn).toHaveBeenLastCalledWith({
@@ -140,7 +157,7 @@ describe("egress page", () => {
       }),
     );
     const calls = reportFn.mock.calls.length;
-    fireEvent.change(tid("egress-to"), { target: { value: "2026-12-01T00:00" } });
+    await setDateTime("egress-to", { month: "December", day: "1" });
     fireEvent.click(tid("egress-load"));
     await screen.findByText("A report covers at most 31 days.");
     expect(reportFn.mock.calls.length).toBe(calls);

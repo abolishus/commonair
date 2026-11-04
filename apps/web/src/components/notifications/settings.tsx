@@ -3,7 +3,6 @@
 
 import { ChannelAvatar, EmptyState, SkeletonGroup, SkeletonText } from "@commonair/ui";
 import { Alert, AlertDescription } from "@commonair/ui/components/alert";
-import { Button } from "@commonair/ui/components/button";
 import { Label } from "@commonair/ui/components/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@commonair/ui/components/select";
 import { Switch } from "@commonair/ui/components/switch";
@@ -28,6 +27,7 @@ import {
   settingsClient,
 } from "../../lib/notifications.ts";
 import { PushToggle } from "../pwa/push-toggle.tsx";
+import { ListLoadMore, ListSearch, NoMatch, useListWindow } from "../settings/list-window.tsx";
 
 /** The failure toast carries `notify-save-error` so the harness and tests can see it. */
 function saveFailed(err: unknown): void {
@@ -318,47 +318,45 @@ function ChannelRow({
   const c = follow.channel;
   const bellId = React.useId();
   return (
-    <li
-      data-testid="notify-channel"
-      data-slug={c.slug}
-      className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between"
-    >
-      <div className="flex min-w-0 items-center gap-3">
-        <ChannelAvatar name={c.displayName} src={c.avatarUrl} accent={c.accent} size="sm" decorative />
-        <span className="min-w-0 truncate font-medium">{c.displayName}</span>
-      </div>
-      <div className="flex flex-wrap items-end gap-4">
-        <div className="flex flex-col gap-1">
-          <Label htmlFor={bellId} className="sr-only">
-            {t("notifySettings.channels.bell", { channel: c.displayName })}
+    <li data-testid="notify-channel" data-slug={c.slug} className="flex flex-col gap-3 py-4">
+      {/* F39: the bell sits on the name line, with a visible label. */}
+      <div className="flex min-w-0 items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <ChannelAvatar name={c.displayName} src={c.avatarUrl} accent={c.accent} size="sm" decorative />
+          <span className="min-w-0 truncate font-medium">{c.displayName}</span>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <Label htmlFor={bellId} className="text-sm font-normal">
+            {t("settings.notifications.bell")}
           </Label>
           <Switch
             id={bellId}
             data-testid="notify-channel-bell"
             data-state={follow.notify ? "on" : "off"}
+            aria-label={t("notifySettings.channels.bell", { channel: c.displayName })}
             checked={follow.notify}
             onCheckedChange={onBell}
           />
         </div>
-        {prefs && (
-          <>
-            <OverrideSelect
-              medium="email"
-              channel={c.displayName}
-              value={overrideChoice(prefs, c.slug, "email")}
-              defaultOn={prefs.defaults.email}
-              onChange={(choice) => onChange("email", choice)}
-            />
-            <OverrideSelect
-              medium="push"
-              channel={c.displayName}
-              value={overrideChoice(prefs, c.slug, "push")}
-              defaultOn={prefs.defaults.push}
-              onChange={(choice) => onChange("push", choice)}
-            />
-          </>
-        )}
       </div>
+      {prefs && (
+        <div className="flex flex-wrap items-end gap-4 sm:ps-11">
+          <OverrideSelect
+            medium="email"
+            channel={c.displayName}
+            value={overrideChoice(prefs, c.slug, "email")}
+            defaultOn={prefs.defaults.email}
+            onChange={(choice) => onChange("email", choice)}
+          />
+          <OverrideSelect
+            medium="push"
+            channel={c.displayName}
+            value={overrideChoice(prefs, c.slug, "push")}
+            defaultOn={prefs.defaults.push}
+            onChange={(choice) => onChange("push", choice)}
+          />
+        </div>
+      )}
     </li>
   );
 }
@@ -412,6 +410,11 @@ function ChannelsSection({
     }
   };
 
+  const list = useListWindow(follows, (f) => [f.channel.displayName, f.channel.slug], {
+    serverHasMore: cursor !== null,
+    onServerMore: () => void loadMore(),
+  });
+
   const setNotify = (slug: string, notify: boolean) =>
     setFollows((list) => list.map((f) => (f.channel.slug === slug ? { ...f, notify } : f)));
 
@@ -454,27 +457,44 @@ function ChannelsSection({
           headingLevel={3}
         />
       ) : (
-        <ul className="flex flex-col divide-y divide-border">
-          {follows.map((f) => (
-            <ChannelRow
-              key={f.channel.id}
-              follow={f}
-              prefs={prefs}
-              onBell={(notify) => void bell(f, notify)}
-              onChange={(medium, choice) =>
-                onChange(
-                  { medium, channel: f.channel.slug, enabled: choiceEnabled(choice) },
-                  { id: f.channel.id, slug: f.channel.slug, displayName: f.channel.displayName },
-                )
-              }
+        <>
+          <ListSearch
+            data-testid="notify-channels-search"
+            label={t("settings.notifications.search")}
+            value={list.query}
+            onValueChange={list.setQuery}
+            loadedCount={follows.length}
+            partial={cursor !== null}
+          />
+          {list.matched.length === 0 ? (
+            <NoMatch query={list.query} />
+          ) : (
+            <ul className="flex flex-col divide-y divide-border">
+              {list.shown.map((f) => (
+                <ChannelRow
+                  key={f.channel.id}
+                  follow={f}
+                  prefs={prefs}
+                  onBell={(notify) => void bell(f, notify)}
+                  onChange={(medium, choice) =>
+                    onChange(
+                      { medium, channel: f.channel.slug, enabled: choiceEnabled(choice) },
+                      { id: f.channel.id, slug: f.channel.slug, displayName: f.channel.displayName },
+                    )
+                  }
+                />
+              ))}
+            </ul>
+          )}
+          {list.hasMore && (
+            <ListLoadMore
+              data-testid="notify-channels-more"
+              label={t("notifySettings.channels.loadMore")}
+              loading={more}
+              onClick={list.loadMore}
             />
-          ))}
-        </ul>
-      )}
-      {cursor !== null && load === "loaded" && (
-        <Button variant="outline" size="sm" className="self-start" disabled={more} onClick={() => void loadMore()}>
-          {t("notifySettings.channels.loadMore")}
-        </Button>
+          )}
+        </>
       )}
     </section>
   );

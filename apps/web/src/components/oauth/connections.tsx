@@ -12,7 +12,6 @@ import { PageHeader } from "@commonair/ui/blocks/headers";
 import { Button } from "@commonair/ui/components/button";
 import { Card, CardContent, CardHeader } from "@commonair/ui/components/card";
 import { Skeleton } from "@commonair/ui";
-import { PageContainer } from "@commonair/ui/layouts";
 import { toast } from "@commonair/ui/toast";
 import { PlugSocketIcon, Unlink02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -52,7 +51,7 @@ export function Connections({ client }: { client: OAuthClient }): React.JSX.Elem
   };
 
   return (
-    <PageContainer data-testid="connections" className="flex flex-col gap-6 py-8">
+    <div data-testid="connections" className="flex flex-col gap-6">
       <PageHeader
         title={t("oauth.connections.pageTitle")}
         description={
@@ -100,7 +99,7 @@ export function Connections({ client }: { client: OAuthClient }): React.JSX.Elem
             ))}
           </ul>
         ))}
-    </PageContainer>
+    </div>
   );
 }
 

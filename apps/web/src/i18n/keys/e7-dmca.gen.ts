@@ -92,7 +92,6 @@ export type Key =
   | "copyright.counter.error.jurisdiction"
   | "copyright.counter.error.signature"
   | "copyright.receipt.title"
-  | "copyright.receipt.restoreAfter"
   | "copyright.receipt.restored"
   | "copyright.receipt.suit"
   | "dmcaq.title"

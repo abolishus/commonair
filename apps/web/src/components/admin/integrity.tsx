@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { INTEGRITY_DECISIONS, INTEGRITY_SUBJECTS } from "@commonair/contracts/enums";
-import { EmptyState, RelativeTime, SkeletonGroup, SkeletonText, StatusBadge } from "@commonair/ui";
+import { EmptyState, RelativeTime, SkeletonGroup, SkeletonText, StatusBadge, useLocale } from "@commonair/ui";
 import { KeyValueList } from "@commonair/ui/blocks/data";
 import { ChoiceToggle } from "@commonair/ui/blocks/forms";
 import { Button } from "@commonair/ui/components/button";
-import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@commonair/ui/components/card";
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@commonair/ui/components/card";
 import { Field, FieldDescription, FieldError, FieldLabel } from "@commonair/ui/components/field";
 import { Input } from "@commonair/ui/components/input";
 import { Textarea } from "@commonair/ui/components/textarea";
@@ -27,7 +27,15 @@ import {
   type IntegritySubject,
 } from "./client.ts";
 import { DECIDE_REASON_MAX, channelFilter, detailText } from "./forms.ts";
-import { decisionLabel, decisionTone, subjectLabel } from "./labels.ts";
+import {
+  BYTE_DETAILS,
+  decisionLabel,
+  decisionTone,
+  detailLabel,
+  formatSize,
+  signalLabel,
+  subjectLabel,
+} from "./labels.ts";
 
 const ALL = "all";
 const CHANNEL_DEBOUNCE_MS = 400;
@@ -202,6 +210,8 @@ function FlagCard({
   const reasonId = React.useId();
   const ready = to !== "" && to !== flag.decision && reason.trim() !== "";
   const details = Object.entries(flag.details);
+  const signal = signalLabel(flag.signal);
+  const { locale } = useLocale();
 
   const submit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -234,10 +244,21 @@ function FlagCard({
       <CardHeader>
         <CardTitle>
           <h2 className="flex flex-wrap items-center gap-2">
-            <span className="font-mono break-all">{flag.signal}</span>
+            <span data-testid="integrityq-signal-label" className="break-words">
+              {signal?.label ?? flag.signal}
+            </span>
             <StatusBadge tone={decisionTone(flag.decision)}>{decisionLabel(flag.decision)}</StatusBadge>
           </h2>
         </CardTitle>
+        {/* F34: the catalogued name first; the raw code stays, small, so a search for it still finds the flag. */}
+        <CardDescription className="flex flex-col gap-1">
+          {signal && <span>{signal.description}</span>}
+          {signal && (
+            <code data-testid="integrityq-signal-code" className="font-mono text-xs break-all">
+              {flag.signal}
+            </code>
+          )}
+        </CardDescription>
         <CardAction>
           <RelativeTime date={flag.createdAt} className="text-xs text-muted-foreground" />
         </CardAction>
@@ -251,10 +272,26 @@ function FlagCard({
               value: <span className="font-mono break-all">{flag.subjectId}</span>,
             },
             { term: t("admin.integrity.score"), value: detailText(flag.score) },
-            ...details.map(([k, v]) => ({
-              term: <span className="font-mono">{k}</span>,
-              value: <span className="break-all whitespace-normal">{detailText(v)}</span>,
-            })),
+            ...details.map(([k, v]) => {
+              const label = detailLabel(k);
+              return {
+                term: label ? (
+                  <span data-testid="integrityq-detail-label" data-key={k} className="flex flex-col">
+                    <span>{label}</span>
+                    <code className="font-mono text-xs text-muted-foreground">{k}</code>
+                  </span>
+                ) : (
+                  <code data-testid="integrityq-detail-label" data-key={k} className="font-mono">
+                    {k}
+                  </code>
+                ),
+                value: (
+                  <span className="break-all whitespace-normal">
+                    {BYTE_DETAILS.has(k) && typeof v === "number" ? formatSize(v, locale) : detailText(v)}
+                  </span>
+                ),
+              };
+            }),
           ]}
         />
         {details.length === 0 && <p className="text-xs text-muted-foreground">{t("admin.integrity.noDetails")}</p>}
