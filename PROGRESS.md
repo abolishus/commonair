@@ -22,6 +22,26 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
 
 ## In flight
 
+**Batch 8 wave 1 merged (2026-11-03); `v0.1.0-rc.10` released from it.** Six units, each
+implemented, independently reviewed and fixed, then integrated by sha: S1-b external (`010eca2f`),
+L1-observability (`5927aa62`), M1-gifts-refunds (`b58b8bc2`), M1-connect (`e4e36070`), B8-server
+(`5014f234`), B8-web (`eaa96047`); integration `d8e6414e` (contract requests applied, pending lists
+lifted, ADR 0007 decisions 1–3 and item 6 marked built). CI then found real failures, fixed on
+`main` through `c389b4e7`: the external-state e2e's CA secrets (podman `secret create -` needs a
+pipe), B8-server harness rows without ids and a suspension check on a channel the peer no longer
+followed, the prediction card never learning `lockMediaTs` from the lock frame, a webhook
+verification race (two writes, now one transaction), the giveaway-verify username check reading
+the site header, and integration-test port races (children bind their own port; podman runs retry
+a lost race). Two harness timing flakes (WebKit heartbeats) and the media T0 reconnect race were
+made robust. CI run `41736761538` on `c389b4e7` green (attempt 2; attempt 1's only failure was a
+Docker Hub 502). The external Postgres/Valkey e2e now runs in CI. **`v0.1.0-rc.10`** tagged on
+`c389b4e7` at the user's request (annotated, unsigned like rc.3–rc.9; no full `workflow_dispatch`
+run first); `release.yml` run `41748469451` green, 88 assets. Deferred: late-gift booking (ADR 0007
+decision 2's gap), a durable "booked after end" mark, the ban-expiry sweep backstop move, the
+account-deletion actor `Delete`, the surge `raidUntil` pin, an upgrade-downtime metric, media
+service metrics, and the legal wording with its seed version bumps (milestone). Wave 2 runs in its
+own session.
+
 **D wave 1 done (2026-11-03): D0, D4, D1-seed, D1-api and D5-capture on `main`** (briefs in
 `.claude/briefs/d/`). CI is green on `4200b863` (41683521066), which contains all the code.
 
