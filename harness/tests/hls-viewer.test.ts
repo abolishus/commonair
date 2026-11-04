@@ -60,6 +60,25 @@ describe("playlist parsing", () => {
     expect(lowestVariant(p)?.uri).toBe("low/index.m3u8");
   });
 
+  test("the lowest variant skips a ladder's audio-only rung, unless nothing has video", () => {
+    const ladder = parsePlaylist(
+      [
+        "#EXTM3U",
+        '#EXT-X-STREAM-INF:BANDWIDTH=6000000,RESOLUTION=1920x1080,CODECS="avc1.640028,mp4a.40.2"',
+        "source.m3u8",
+        '#EXT-X-STREAM-INF:BANDWIDTH=900000,RESOLUTION=640x360,CODECS="avc1.4d401e,mp4a.40.2"',
+        "360p.m3u8",
+        '#EXT-X-STREAM-INF:BANDWIDTH=96000,CODECS="mp4a.40.2"',
+        "audio.m3u8",
+        "",
+      ].join("\n"),
+    );
+    if (ladder.kind !== "multivariant") throw new Error("expected multivariant");
+    expect(lowestVariant(ladder)?.uri).toBe("360p.m3u8");
+    const audioOnly = { ...ladder, variants: ladder.variants.filter((v) => v.uri === "audio.m3u8") };
+    expect(lowestVariant(audioOnly)?.uri).toBe("audio.m3u8");
+  });
+
   test("LL-HLS media playlist with PDT carried forward", () => {
     const p = parsePlaylist(MEDIA);
     if (p.kind !== "media") throw new Error("expected media");

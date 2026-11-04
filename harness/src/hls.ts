@@ -162,7 +162,13 @@ export function withToken(url: string, token: string, tokenParam = "t"): string 
   return u.toString();
 }
 
-/** Lowest-bandwidth variant (load tests keep viewer cost down). */
+/**
+ * Lowest-bandwidth variant with video (load tests keep viewer cost down). A ladder's audio-only
+ * rung is the cheapest of all, and viewers on it would understate egress and overstate capacity,
+ * so it is chosen only when no variant has video.
+ */
 export function lowestVariant(p: MultivariantPlaylist): Variant | null {
-  return [...p.variants].sort((a, b) => a.bandwidth - b.bandwidth)[0] ?? null;
+  const video = p.variants.filter((v) => v.resolution !== null || /avc1|hvc1|hev1|av01|vp09/.test(v.codecs ?? ""));
+  const pool = video.length > 0 ? video : p.variants;
+  return [...pool].sort((a, b) => a.bandwidth - b.bandwidth)[0] ?? null;
 }
