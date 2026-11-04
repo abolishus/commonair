@@ -204,11 +204,23 @@ describe("the verify commands", () => {
       expect(re.test(wrong), wrong).toBe(false);
   });
 
-  test("the identity is release.yml's: that file, run for a v* tag push, signing keylessly", () => {
+  test("the identity is release.yml's: that file, run on a v* tag ref, signing keylessly", () => {
     const wf = read(".github/workflows/release.yml");
     expect(RELEASE_SIGNERS.at(-1)?.workflow).toBe(".github/workflows/release.yml");
     expect(wf).toMatch(/^on:\n {2}push:\n {4}tags: \["v\*"\]/m);
     expect(wf).toContain("id-token: write");
+  });
+
+  test("verifying.md names exactly release.yml's triggers, and its check prints them all", () => {
+    const wf = read(".github/workflows/release.yml");
+    const on = /^on:\n([\s\S]*?)^[a-z]/m.exec(wf)?.[1] ?? "";
+    const triggers = [...on.matchAll(/^ {2}([a-z_]+):/gm)].map((m) => m[1]);
+    expect(triggers).toEqual(["push", "workflow_dispatch", "workflow_call"]);
+    const doc = read("docs/self-hosting/verifying.md");
+    expect(doc).toContain("the workflow has three triggers");
+    for (const t of triggers) expect(doc).toContain(`\`${t === "push" ? 'push: tags: ["v*"]' : t}\``);
+    expect(doc).toContain("git show v0.1.0:.github/workflows/release.yml | sed -n '/^on:/,/^[a-z]/p'");
+    expect(doc).not.toContain("runs only for a pushed");
   });
 
   test("selfhost.sh derives the same regexp and issuer from its repository URL", () => {

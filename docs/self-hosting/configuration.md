@@ -306,8 +306,9 @@ The three flags each have a `--no-` form that turns the feature off again, and t
 kept across upgrades and reinstalls until you pass the other one. `upgrade` takes them only with
 a release to upgrade to (`--version` or `--bundle`); on the installed release use
 `install --reinstall`. The keys you set yourself take effect when the units that read them
-restart: `systemctl --user restart commonair-api commonair-worker`, or
-`sh ~/commonair/selfhost.sh install --reinstall` ([Changing a value](#changing-a-value)).
+restart: `systemctl --user restart commonair-api commonair-worker` (add `commonair-chat` for
+giveaways, which chat reads too), or `sh ~/commonair/selfhost.sh install --reinstall`
+([Changing a value](#changing-a-value)).
 
 ### Federation (ActivityPub)
 

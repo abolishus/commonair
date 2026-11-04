@@ -116,6 +116,7 @@ the same checks. Other options:
 | ---------------------- | --------------------------------------------------------------------------------------- |
 | `--tls internal`       | Caddy's own CA instead of ACME, for LAN and test hosts ([tls.md](tls.md))               |
 | `--public-ip <a,b>`    | Addresses WHIP clients reach the server on, if not its interface addresses (behind NAT) |
+| `--sha256sums <path>`  | The release's SHA256SUMS for `--bundle`, when it is not next to the bundle              |
 | `--registry <host/ns>` | Pull our images from your mirror ([mirroring.md](mirroring.md))                         |
 | `--model <path>`       | A local copy of the moderation model, checked against its pinned sha256                 |
 | `--unsupported-distro` | Continue on a distribution other than Debian 13 or Fedora 42+                           |

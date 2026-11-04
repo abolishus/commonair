@@ -19,8 +19,9 @@
  * is none.
  *
  * `--check` reads `CHANGELOG.md` (or `--changelog`) and exits 1 unless it has a section for
- * `--version` (`## [<version>]`, dated or not), so a release cannot go out without its curated
- * notes. It needs no git.
+ * `--version` (`## [<version>]`), so a release cannot go out without its curated notes. For a
+ * release that is not a prerelease the heading must also carry its date (`## [0.1.0] - 2026-11-16`),
+ * so a section still marked "unreleased" cannot ship. It needs no git.
  *
  * Breaking changes (`type!:` or a `BREAKING CHANGE:` footer) come first, then the types in
  * TYPE_ORDER, then everything that is not a Conventional Commit under "Other". Trailers
@@ -229,6 +230,21 @@ export function hasChangelogSection(markdown: string, version: string): boolean 
   });
 }
 
+/**
+ * Why `--check` refuses `version` (null: it passes). A prerelease needs only its section; a
+ * release needs the section dated `YYYY-MM-DD`, not "unreleased" or missing.
+ */
+export function changelogSectionProblem(markdown: string, version: string): string | null {
+  const v = version.replace(/^v/, "");
+  if (!hasChangelogSection(markdown, v))
+    return `has no section for ${v}; add "## [${v}] - <YYYY-MM-DD>" before releasing`;
+  if (isPrerelease(`v${v}`)) return null;
+  const dated = new RegExp(`^## \\[${v.replace(/\./g, "\\.")}\\] - \\d{4}-\\d{2}-\\d{2}\\s*$`, "m");
+  return dated.test(markdown)
+    ? null
+    : `section ${v} is not dated; change its heading to "## [${v}] - <YYYY-MM-DD>" before releasing`;
+}
+
 /** `--since-tag`'s default for a release of `version` at `to` (newestReleaseTag over git's tags). */
 export function defaultSinceTag(to: string, version: string): string | null {
   const merged = git(["tag", "--list", "v[0-9]*", "--merged", to]);
@@ -269,8 +285,9 @@ if (import.meta.main) {
   if (args.includes("--check")) {
     const file = opt("changelog") ?? join(import.meta.dir, "../../CHANGELOG.md");
     const v = version.replace(/^v/, "");
-    if (!hasChangelogSection(readFileSync(file, "utf8"), v)) {
-      console.error(`changelog: ${file} has no section for ${v}; add "## [${v}] - <YYYY-MM-DD>" before releasing`);
+    const problem = changelogSectionProblem(readFileSync(file, "utf8"), v);
+    if (problem) {
+      console.error(`changelog: ${file} ${problem}`);
       process.exit(1);
     }
     process.stdout.write(`changelog: ${file} has a section for ${v}\n`);

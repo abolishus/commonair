@@ -8,7 +8,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vite-plus/test";
-import { compareVersions, hasChangelogSection, isPrerelease, newestReleaseTag, parseVersion } from "./changelog.ts";
+import {
+  changelogSectionProblem,
+  compareVersions,
+  hasChangelogSection,
+  isPrerelease,
+  newestReleaseTag,
+  parseVersion,
+} from "./changelog.ts";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 
@@ -115,10 +122,33 @@ describe("--check", () => {
   const run = (args: string[]) =>
     Bun.spawnSync([process.execPath, "scripts/release/changelog.ts", ...args], { cwd: ROOT });
 
-  test("the CLI passes on the repository's own CHANGELOG.md for 0.1.0", () => {
-    const r = run(["--version", "0.1.0", "--check"]);
-    expect(r.stderr.toString()).toBe("");
-    expect(r.exitCode).toBe(0);
+  test("a release needs its section dated; a prerelease needs only the section", () => {
+    expect(changelogSectionProblem(md, "0.1.0")).toContain("section 0.1.0 is not dated");
+    expect(changelogSectionProblem("## [0.1.0]\n", "v0.1.0")).toContain("is not dated");
+    expect(changelogSectionProblem("## [0.1.0] - 2026-11-16\n", "v0.1.0")).toBeNull();
+    expect(changelogSectionProblem("## [0.1.0] - 2026-11\n", "0.1.0")).toContain("is not dated");
+    expect(changelogSectionProblem("## [0.1.0] - unreleased\n## [0.1.0] - 2026-11-16\n", "0.1.0")).toBeNull();
+    expect(changelogSectionProblem("## [0.10.0] - 2026-11-16\n## [0.1.0]\n", "0.1.0")).toContain("is not dated");
+    expect(changelogSectionProblem(md, "0.1.0-rc.2")).toBeNull();
+    expect(changelogSectionProblem("## [0.2.0-rc.1] - unreleased\n", "v0.2.0-rc.1")).toBeNull();
+    expect(changelogSectionProblem(md, "0.3.0")).toContain("has no section for 0.3.0");
+  });
+
+  test("the repository's own CHANGELOG.md has the 0.1.0 section (dated when 0.1.0 is tagged)", () => {
+    expect(hasChangelogSection(readFileSync(join(ROOT, "CHANGELOG.md"), "utf8"), "0.1.0")).toBe(true);
+  });
+
+  test("the CLI passes a dated release and refuses one still marked unreleased", () => {
+    const dir = mkdtempSync(join(tmpdir(), "changelog-check-"));
+    const file = join(dir, "CHANGELOG.md");
+    writeFileSync(file, md);
+    const undated = run(["--version", "0.1.0", "--check", "--changelog", file]);
+    expect(undated.exitCode).toBe(1);
+    expect(undated.stderr.toString()).toContain('change its heading to "## [0.1.0] - <YYYY-MM-DD>"');
+    writeFileSync(file, md.replace("## [0.1.0] - unreleased", "## [0.1.0] - 2026-11-16"));
+    const dated = run(["--version", "v0.1.0", "--check", "--changelog", file]);
+    expect(dated.stderr.toString()).toBe("");
+    expect(dated.exitCode).toBe(0);
   });
 
   test("the CLI fails, naming the heading to add, when the section is missing", () => {

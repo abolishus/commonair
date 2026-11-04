@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Every `selfhost.sh` command in docs/self-hosting/ is one the script accepts (R0-release-prep):
-// its subcommand is in main(), and each flag is in that subcommand's parser and in --help.
+// its subcommand is in main(), each flag is in that subcommand's parser and in --help, and it
+// passes what the subcommand checks after parsing (install and upgrade share parse_flags, so
+// cmd_upgrade's own refusals are listed here). Every flag the parser takes is documented.
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -58,6 +60,32 @@ export function docCommands(file: string, markdown: string): DocCommand[] {
   return out;
 }
 
+/**
+ * What cmd_upgrade refuses after parse_flags, with the script text that refuses it (a test keeps
+ * each anchored). `--allow-insecure-*` needs `--database-url`/`--valkey-url` (check_state_flags),
+ * which upgrade refuses; `--database-ca` and `--valkey-ca` may replace a CA on upgrade.
+ */
+export const UPGRADE_REFUSES: { flag: RegExp; why: string; anchor: [fn: string, text: string] }[] = [
+  {
+    flag: /^--s3-/,
+    why: "the object store is chosen at install",
+    anchor: ["cmd_upgrade", '[ "$S3_FLAGS" = no ] || die'],
+  },
+  {
+    flag: /^--(database|valkey)-url$/,
+    why: "Postgres and Valkey are chosen at install",
+    anchor: ["cmd_upgrade", 'if [ -n "$DB_OPT_URL$VK_OPT_URL" ]; then'],
+  },
+  {
+    flag: /^--allow-insecure-(database|valkey)$/,
+    why: "it goes with --database-url or --valkey-url, which upgrade refuses",
+    anchor: ["check_state_flags", '"--allow-insecure-database goes with --database-url"'],
+  },
+];
+
+/** cmd_upgrade (through obtain_bundle) needs a release: one of these flags. */
+export const UPGRADE_NEEDS_ONE_OF = ["--version", "--bundle"];
+
 const hasToken = (text: string, flag: string) =>
   new RegExp(`(^|[\\s|("'])${flag.replace(/-/g, "\\-")}([\\s|)="',]|$)`, "m").test(text);
 
@@ -70,6 +98,14 @@ export function commandProblems(c: DocCommand, script: string): string[] {
     return [`${c.file}: \`${c.line}\`: selfhost.sh has no command ${c.subcommand}`];
   const parser = PARSERS[c.subcommand];
   const problems: string[] = [];
+  const where = `${c.file}: \`${c.line}\``;
+  if (c.subcommand === "upgrade" && !c.flags.includes("--help")) {
+    if (!UPGRADE_NEEDS_ONE_OF.some((f) => c.flags.includes(f)))
+      problems.push(`${where}: upgrade needs ${UPGRADE_NEEDS_ONE_OF.join(" or ")} ("say which release")`);
+    for (const flag of c.flags)
+      for (const r of UPGRADE_REFUSES)
+        if (r.flag.test(flag)) problems.push(`${where}: upgrade refuses ${flag}: ${r.why}`);
+  }
   for (const flag of c.flags) {
     if (flag === "--help") continue;
     const parsed = parser ? hasToken(shellFunction(script, parser), flag) : false;
@@ -101,6 +137,58 @@ describe("selfhost.sh commands in docs/self-hosting", () => {
     const problems = commands.filter((c) => c.file.endsWith(`/${page}`)).flatMap((c) => commandProblems(c, SH));
     expect(problems).toEqual([]);
   });
+});
+
+/** Every flag parse_flags reads, apart from the refusal arms (`--database-pass*` and the like). */
+export function parsedFlags(script: string, parser = "parse_flags"): string[] {
+  const body = shellFunction(script, parser);
+  const flags = new Set<string>();
+  for (const arm of body.matchAll(/^\s*(-{1,2}[^\s|)]+(?:\s*\|\s*-{1,2}[^\s|)]+)*)\)/gm))
+    for (const f of (arm[1] ?? "").split("|").map((x) => x.trim()))
+      if (f.startsWith("--") && !f.includes("*")) flags.add(f);
+  return [...flags].sort();
+}
+
+describe("selfhost.sh's flags in docs/self-hosting", () => {
+  const all = pages.map((f) => readFileSync(join(DOCS, f), "utf8")).join("\n");
+
+  test("parse_flags has the flags to check", () => {
+    const flags = parsedFlags(SH);
+    expect(flags.length).toBeGreaterThan(20);
+    expect(flags).toContain("--sha256sums");
+    expect(flags).not.toContain("--database-pass*");
+  });
+
+  test.each(parsedFlags(SH))("%s is documented on a self-hosting page", (flag) => {
+    expect(hasToken(all.replace(/`/g, " "), flag), flag).toBe(true);
+  });
+
+  test("each cmd_upgrade refusal the checker knows is still in the script", () => {
+    for (const r of UPGRADE_REFUSES) expect(shellFunction(SH, r.anchor[0]), r.why).toContain(r.anchor[1]);
+    expect(shellFunction(SH, "obtain_bundle")).toContain(
+      'die "say which release: --version vX.Y.Z or --bundle <path>"',
+    );
+    expect(shellFunction(SH, "cmd_upgrade")).toContain("obtain_bundle");
+  });
+});
+
+describe("configuration.md's restart advice for the keys you set yourself", () => {
+  const ENV_DIR = join(ROOT, "infra/selfhost/env");
+  const doc = readFileSync(join(DOCS, "configuration.md"), "utf8");
+  const off = doc.slice(doc.indexOf("## Features that are off by default"));
+  const advice = off.slice(0, off.indexOf("### "));
+
+  test.each(["FEDERATION_ENABLED", "TWITCH_IMPORT_ENABLED", "GIVEAWAYS_ENABLED"])(
+    "every unit that reads %s is named",
+    (key) => {
+      const units = readdirSync(ENV_DIR)
+        .filter((f) => f.endsWith(".keys"))
+        .filter((f) => readFileSync(join(ENV_DIR, f), "utf8").split("\n").includes(key))
+        .map((f) => f.replace(/\.keys$/, ""));
+      expect(units.length, key).toBeGreaterThan(0);
+      for (const u of units) expect(advice, `${key}: ${u}`).toContain(u);
+    },
+  );
 });
 
 describe("the checker itself", () => {
@@ -153,6 +241,30 @@ describe("the checker itself", () => {
     expect(d && commandProblems(d, `\n${script}`)).toEqual([
       "x.md: `sh selfhost.sh uninstall`: selfhost.sh has no command uninstall",
     ]);
+  });
+
+  test("upgrade without a release, and upgrade with an install-only flag, are caught", () => {
+    const [c] = one("```sh\nsh selfhost.sh upgrade --captions\n```\n");
+    expect(c && commandProblems(c, `\n${script}`)).toEqual([
+      'x.md: `sh selfhost.sh upgrade --captions`: upgrade needs --version or --bundle ("say which release")',
+    ]);
+    const [d] = one(
+      "```sh\nsh selfhost.sh upgrade --version v1 --s3-endpoint e --database-url u --allow-insecure-valkey\n```\n",
+    );
+    const problems = (d && commandProblems(d, `\n${script}`)) ?? [];
+    expect(problems.filter((p) => p.includes("upgrade refuses"))).toEqual([
+      expect.stringContaining("upgrade refuses --s3-endpoint: the object store is chosen at install"),
+      expect.stringContaining("upgrade refuses --database-url: Postgres and Valkey are chosen at install"),
+      expect.stringContaining("upgrade refuses --allow-insecure-valkey"),
+    ]);
+    const [e] = one("```sh\nsh selfhost.sh install --reinstall --captions\n```\n");
+    expect(e && commandProblems(e, `\n${script}`).filter((p) => p.includes("needs"))).toEqual([]);
+  });
+
+  test("parsedFlags reads every arm and skips the refusal globs", () => {
+    const sh =
+      "\nparse_flags() {\n  case $1 in\n    --a | --b) x ;;\n    --yes | -y) y ;;\n    --pass* | --db-pass*) z ;;\n  esac\n}\n";
+    expect(parsedFlags(sh)).toEqual(["--a", "--b", "--yes"]);
   });
 
   test("a flag is matched whole, not as a prefix of a longer one", () => {
