@@ -54,14 +54,27 @@ describe("homeLayout: one hero, each channel once", () => {
     });
     const layout = homeLayout(h, true);
     expect(layout.hero?.channel.slug).toBe("a");
+    // Following claims first (c, d), so New is left empty and dropped.
     expect(layout.sections.map((s) => [s.id, slugs(s.cards)])).toEqual([
       ["spotlight", ["b"]],
-      ["new", ["c"]],
-      ["following", ["d"]],
+      ["following", ["c", "d"]],
       ["live", ["e"]],
     ]);
     const all = layoutChannels(layout).map((c) => c.id);
     expect(new Set(all).size).toBe(all.length);
+  });
+
+  it("keeps a followed channel under Following: the hero is the top spotlight channel not followed", () => {
+    const h = home({ spotlight: [live("a"), live("b")], following: [live("a")] });
+    const layout = homeLayout(h, true);
+    expect(layout.hero?.channel.slug).toBe("b");
+    expect(layout.sections.map((s) => [s.id, slugs(s.cards)])).toEqual([["following", ["a"]]]);
+    // Signed out there is no Following shelf, so the hero is the first spotlight slot.
+    expect(homeLayout(h, false).hero?.channel.slug).toBe("a");
+    // Every spotlight channel followed: no hero, all of them under Following.
+    const only = homeLayout(home({ spotlight: [live("a")], following: [live("a")] }), true);
+    expect(only.hero).toBeNull();
+    expect(only.sections.map((s) => [s.id, slugs(s.cards)])).toEqual([["following", ["a"]]]);
   });
 
   it("orders spotlight, new, following, live and drops empty shelves", () => {

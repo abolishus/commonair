@@ -47,7 +47,7 @@ function claim<T extends { channel: { id: string } }>(cards: readonly T[], seen:
 }
 
 export interface HomeLayout {
-  /** The one Spotlight hero (the first spotlight slot), or null when there is none. */
+  /** The one Spotlight hero (the top spotlight channel the viewer does not follow), or null. */
   hero: StreamCard | null;
   /** The live shelves, in order, each channel once across all of them and the hero. */
   sections: DirectorySection[];
@@ -58,7 +58,7 @@ export interface HomeLayout {
 
 /**
  * The front page: one hero, then spotlight, new, following and live, deduped across every shelf
- * (a channel stays on the first shelf it reaches). Categories with more than
+ * (followed channels stay under Following; any other stays on the first shelf it reaches). Categories with more than
  * {@link CATEGORY_SHELF_MIN} channels left for "Live now" get their own shelf instead.
  * `following` is only shown to signed-in viewers. Empty shelves are dropped.
  */
@@ -70,11 +70,13 @@ export function homeLayout(
   const shelfMin = options.shelfMin ?? CATEGORY_SHELF_MIN;
   const shelfSize = options.shelfSize ?? CATEGORY_SHELF_SIZE;
   const seen = new Set<string>();
-  const hero = home.spotlight[0] ?? null;
-  if (hero) seen.add(hero.channel.id);
-  const spotlight = claim(home.spotlight.slice(1), seen);
-  const fresh = claim(home.newAndLive, seen);
+  // A followed live channel is always under Following (where a member looks for it), so it claims
+  // first; the hero is then the top spotlight channel the viewer does not follow.
   const following = signedIn ? claim(home.following, seen) : [];
+  const hero = home.spotlight.find((card) => !seen.has(card.channel.id)) ?? null;
+  if (hero) seen.add(hero.channel.id);
+  const spotlight = claim(home.spotlight, seen);
+  const fresh = claim(home.newAndLive, seen);
   const rest = claim(home.live, seen);
 
   // Group what is left for "Live now" by category, in the order the ranking put them.
@@ -108,10 +110,12 @@ export function homeLayout(
  */
 export function directorySections(home: DirectoryHome, signedIn: boolean): DirectorySection[] {
   const seen = new Set<string>();
+  // Following claims first, as in `homeLayout`; the display order stays spotlight, new, following, live.
+  const following = signedIn ? claim(home.following, seen) : [];
   const all: DirectorySection[] = [
     { id: "spotlight", cards: claim(home.spotlight, seen) },
     { id: "new", cards: claim(home.newAndLive, seen) },
-    { id: "following", cards: signedIn ? claim(home.following, seen) : [] },
+    { id: "following", cards: following },
     { id: "live", cards: claim(home.live, seen) },
   ];
   return all.filter((s) => s.cards.length > 0);
