@@ -115,16 +115,6 @@ export function edgeSyncTrajectory(
 export async function stepEdgeSync(run: WatchRoomB8Extension): Promise<void> {
   const { ctx } = run;
   const t = (what: string) => b8ExtensionTitle("edge-sync", what);
-  // QUARANTINED 2026-11-04 (PROGRESS "Batch 8 wave 2 merged", flakes): the members' convergence
-  // checks are load-sensitive on CI (both engines failed on main with the seek driver). They are
-  // report-only (`edgeSyncQuarantined` in the report) until fixed and must be hard again before
-  // v0.1.0. Chat's target and the edgeWallclock frames stay hard assertions.
-  const quarantinedResults: { check: string; ok: boolean; details: unknown }[] = [];
-  const quarantined = (check: string, ok: boolean, details: unknown) => {
-    quarantinedResults.push({ check, ok, details });
-    ctx.data("edgeSyncQuarantined", quarantinedResults);
-    if (!ok) ctx.log.warn("quarantined check failed", { check, details });
-  };
   const ch = await ctx.step(t("a live channel"), () => run.newChannel("wredge"));
   const [hostUser, guestUser, webkitUser] = await ctx.step(t("sign up two Chromium members and a WebKit one"), () =>
     Promise.all(["wreh", "wreg", "wrew"].map((prefix) => ctx.platform.signUp({ prefix }))),
@@ -165,7 +155,7 @@ export async function stepEdgeSync(run: WatchRoomB8Extension): Promise<void> {
     ctx.assert(t(`${label}'s room.sync frames carry edgeWallclock`), edgeReportsOk(s), s);
   const behind = behindRoomEdgeAt(samples, Date.now());
   ctx.data("edgeSyncBehindEdge", behind);
-  quarantined(
+  ctx.assert(
     t(`both members sit within ${ROOM_LIMITS.edgeCapSeconds} s of max(edgeWallclock) (the far one was pulled up)`),
     withinEdgeCap(behind, ["near", "far"]),
     { behind },
@@ -182,7 +172,7 @@ export async function stepEdgeSync(run: WatchRoomB8Extension): Promise<void> {
   const chromium = summarizeDelta(samples, ["near", "far"], Date.now());
   ctx.data("edgeSyncChromiumDelta", chromium);
   ctx.metric("edge_sync_chromium_delta_ms", chromium.p90Ms, "ms");
-  quarantined(
+  ctx.assert(
     t(`the Chromium members are within ${CHROMIUM_DELTA_MS} ms (p90 over the last 8 s)`),
     chromium.p90Ms !== null && chromium.p90Ms < CHROMIUM_DELTA_MS,
     chromium,
@@ -207,7 +197,7 @@ export async function stepEdgeSync(run: WatchRoomB8Extension): Promise<void> {
   ctx.data("edgeSyncWebkitDelta", pairs);
   const max = p90s.every((p) => p !== null) ? Math.max(...(p90s as number[])) : null;
   ctx.metric("edge_sync_webkit_delta_ms", max, "ms");
-  quarantined(
+  ctx.assert(
     t(`WebKit is within ${WEBKIT_DELTA_MS} ms of both members (p90 over the last 8 s)`),
     max !== null && max < WEBKIT_DELTA_MS,
     { p90s, limitMs: WEBKIT_DELTA_MS },
@@ -344,8 +334,13 @@ const UI_TIMEOUT_MS = 30_000;
 const SWITCH_TIMEOUT_MS = 45_000;
 /** How long DVR must keep playing from the origin after the switch. */
 const AFTER_SWITCH_MS = 20_000;
-/** The readout may move a little (a segment boundary, the load time); a jump to live would be > 40 s. */
-const POSITION_TOLERANCE_SECONDS = 20;
+/**
+ * The readout may move by a segment (4 s) and the load time; the jump this caught was 45 s toward
+ * live (hls.js starting the DVR source at its live sync position, fixed in `loadDvrHls`).
+ */
+const POSITION_TOLERANCE_SECONDS = 5;
+/** How long after the rewind the position is read: hls.js's first fragments land within ~0.3 s. */
+const LANDING_SETTLE_MS = 3_000;
 
 const player = (page: Page) => page.locator('[data-testid="player"]');
 
@@ -409,6 +404,9 @@ export async function stepRelayDvrSwitch(ext: RelayDvrB8Extension): Promise<void
       { timeoutMs: UI_TIMEOUT_MS, intervalMs: 250, signal: ctx.signal },
     );
   });
+  // Read once the first fragments are in: the readout right after the rewind shows the position
+  // asked for, not the one playing (CI run 41834516797: 60 then, while the media sat 14 s behind).
+  await sleep(LANDING_SETTLE_MS, ctx.signal);
   const before = await behindReadout(page);
   ctx.data("relayDvrSwitchBehindBefore", before);
   // Diagnostics (the position check failed twice in CI with 60 -> 15): the page at each stage.
@@ -458,6 +456,19 @@ export async function stepRelayDvrSwitch(ext: RelayDvrB8Extension): Promise<void
     t(`the position is kept (within ${POSITION_TOLERANCE_SECONDS} s of the readout before)`),
     before !== null && after !== null && Math.abs(after - before) <= POSITION_TOLERANCE_SECONDS,
     { before, after },
+  );
+  // The player's landing guard is a safety net: the rewind and the swap must land where asked on
+  // their own, so a correction here is the start-position bug back, hidden from the viewer.
+  const landings = (["rewound", "after"] as const).map((k) => {
+    const snap = snapshots[k] as PlayerSnapshot | { error: string } | undefined;
+    const trace =
+      snap && "video" in snap ? (snap.video?.dvrSwap as { via?: string; corrections?: number } | null) : null;
+    return { at: k, via: trace?.via ?? null, corrections: trace?.corrections ?? null };
+  });
+  check(
+    t("the rewind and the swap land without the landing guard"),
+    landings.every((l) => l.corrections === 0),
+    { landings },
   );
 
   // Leave the relay serving for whatever the scenario runs next.
