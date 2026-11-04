@@ -6,6 +6,7 @@ import { Navigate, createFileRoute } from "@tanstack/react-router";
 import * as React from "react";
 import { CoopLoadGate } from "../../components/coop/load-error.tsx";
 import { MembershipPanel, type ShareInstructionsDto } from "../../components/coop/membership.tsx";
+import { SharePayByCard, cardSharesAllowed } from "../../components/coop/shares-card.tsx";
 import { coopLoads, toastCoopError, useCoopLoad, useMyMembership } from "../../components/coop/use-coop.ts";
 import { t } from "../../i18n/index.ts";
 import { isSessionExpired } from "../../lib/action-error.ts";
@@ -34,6 +35,10 @@ function MembershipPage(): React.JSX.Element {
   const { me, config } = useBootstrap();
   const membership = useMyMembership(me);
   const settings = useCoopLoad("settings", () => api().coop.settings());
+  // Batch 8 (M1-coop-money): card payment for shares needs Stripe on the instance and the setting
+  // on. A failed read only hides "Pay by card"; the bank-transfer path stays.
+  const instance = useCoopLoad("instance", () => Promise.resolve().then(() => api().instance.info()));
+  const card = cardSharesAllowed(instance.data?.features.payments ?? null, settings.data);
   const [instructions, setInstructions] = React.useState<ShareInstructionsDto | null>(null);
   const [buying, setBuying] = React.useState(false);
 
@@ -51,6 +56,7 @@ function MembershipPage(): React.JSX.Element {
     } catch (err) {
       if (errorCode(err) === "CONFLICT") toast.error(t("coop.share.conflict"));
       else if (errorRequirement(err) === "manual_shares") toast.error(t("coop.share.manualOnly"));
+      else if (card && errorRequirement(err) === "payment_provider") toast.error(t("coopMoney.card.failed"));
       else toastCoopError(err);
     } finally {
       setBuying(false);
@@ -88,6 +94,7 @@ function MembershipPage(): React.JSX.Element {
         onRejoin={rejoin}
         onRejoinError={toastRejoinError}
       />
+      {card && <SharePayByCard view={membership.data} paying={buying} onPay={buy} />}
     </CoopLoadGate>
   );
 }

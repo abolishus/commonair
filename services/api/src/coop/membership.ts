@@ -3,13 +3,16 @@
 
 /**
  * Memberships and member shares (docs/testing/e5-selectors.md "Membership flows", ADR 0020). A
- * share is bought through the manual adapter, confirmed by a treasurer (`confirmShareTx`, called
- * from `treasurer.confirm`), returned to `refund_pending` on exit and refunded by a treasurer.
+ * share is bought by bank transfer (the manual adapter) and confirmed by a treasurer
+ * (`confirmShareTx`, called from `treasurer.confirm`), or, when the instance runs Stripe and the
+ * co-op voted `shares.cardPayments` on, by Stripe Checkout and confirmed by its webhook (batch 8,
+ * `coop/shares.ts`). It returns to `refund_pending` on exit and is refunded by a treasurer: by hand
+ * for a bank transfer, through Stripe for a card share (never automatically on leaving).
  * Every state change posts to the ledger (when money moves), writes its audit row and outbox
  * event in one transaction; the share trigger (0021) refuses any transition without its payment
  * and posting. Lock order: payment → share → membership.
  */
-import { and, desc, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, desc, eq, lt, sql } from "drizzle-orm";
 import { type Executor, schema, uuidv7 } from "@commonair/db";
 import {
   contributionWeightsOf,
@@ -18,17 +21,28 @@ import {
   membershipClassesOf,
   subscriptionQualifies,
 } from "@commonair/governance";
-import { loadMoneySettings, post, shareRefund, sharePurchase } from "@commonair/ledger";
-import { createAdapter, manualInstructions } from "@commonair/payments";
+import { loadMoneySettings, post, shareRefund } from "@commonair/ledger";
+import { type PaymentAdapter, createAdapter, manualInstructions } from "@commonair/payments";
 import type { Deps } from "../deps.ts";
 import { audit } from "../events/audit.ts";
-import { emit } from "../events/outbox.ts";
 import { decodeCursor, encodeCursor, isKeyCursor, pageOf } from "../lib/cursor.ts";
 import { iso, isoOrNull } from "../lib/dto.ts";
 import { badRequest, conflict, forbidden, notFound, precondition } from "../lib/errors.ts";
 import { os, requireCaller } from "../lib/orpc.ts";
 import { withCoopErrors, withCoopErrorsRetrying } from "./errors.ts";
 import { MEMBER, STAFF, money, unknownUser, userPicks } from "./shared.ts";
+import {
+  activateMembership as activate,
+  bookShareTx,
+  membershipEvent,
+  openShareOf,
+  releaseShareTx,
+  requestShareProviderRefund,
+  shareAdapter,
+  shareCheckoutMode,
+  shareEvent,
+  startShareCheckout,
+} from "./shares.ts";
 import { eligibility, type MembershipViewDto } from "./views.ts";
 
 const { memberships, membershipShares, payments, users } = schema;
@@ -37,48 +51,6 @@ type ShareRow = typeof membershipShares.$inferSelect;
 type MembershipRow = typeof memberships.$inferSelect;
 
 const DAY_MS = 86_400_000;
-const OPEN_SHARE = ["pending", "held", "refund_pending"] as const;
-
-async function shareEvent(tx: Executor, s: Pick<ShareRow, "id" | "userId" | "status" | "amountCents">, now: Date) {
-  await emit(
-    tx,
-    "coop.share.update",
-    null,
-    { share_id: s.id, user_id: s.userId, status: s.status, amount_cents: s.amountCents },
-    now,
-  );
-}
-
-async function membershipEvent(
-  tx: Executor,
-  m: Pick<MembershipRow, "id" | "userId" | "class" | "status" | "basis">,
-  now: Date,
-) {
-  await emit(
-    tx,
-    "coop.membership.update",
-    null,
-    { membership_id: m.id, user_id: m.userId, class: m.class, status: m.status, basis: m.basis },
-    now,
-  );
-}
-
-/** Insert an active membership unless one exists in that class (a concurrent sync may win). */
-async function activate(
-  tx: Executor,
-  userId: string,
-  cls: MembershipRow["class"],
-  basis: MembershipRow["basis"],
-  now: Date,
-): Promise<MembershipRow | null> {
-  const [row] = await tx
-    .insert(memberships)
-    .values({ id: uuidv7(), userId, class: cls, basis, joinedAt: now, lastEligibilityCheckAt: now })
-    .onConflictDoNothing({ target: [memberships.userId, memberships.class], where: sql`status = 'active'` })
-    .returning();
-  return row ?? null;
-}
-
 /** Whether one of the user's active subscriptions qualifies for viewer membership under `rules` now. */
 async function hasQualifyingSubscription(
   db: Executor,
@@ -182,48 +154,12 @@ export async function confirmShareTx(
   p: PaymentRow,
   o: { receivedAt: Date; now: Date; actorId: string },
 ): Promise<void> {
-  const { receivedAt, now } = o;
-  const [share] = await tx.select().from(membershipShares).where(eq(membershipShares.paymentId, p.id)).for("update");
-  if (!share) throw conflict("This payment has no member share");
-  if (share.status !== "pending") throw conflict(`This share is ${share.status}, not pending`);
-  const [paid] = await tx
-    .update(payments)
-    .set({ status: "succeeded", succeededAt: receivedAt, updatedAt: now })
-    .where(and(eq(payments.id, p.id), eq(payments.status, "pending")))
-    .returning({ id: payments.id });
-  if (!paid) throw conflict("This payment is no longer pending");
-  await post(
-    tx,
-    sharePurchase({
-      shareId: share.id,
-      userId: share.userId,
-      provider: p.provider,
-      settlement: "cash",
-      amountCents: share.amountCents,
-      currency: share.currency,
-      occurredAt: receivedAt,
-    }),
-  );
-  const [held] = await tx
-    .update(membershipShares)
-    .set({ status: "held", purchasedAt: receivedAt })
-    .where(and(eq(membershipShares.id, share.id), eq(membershipShares.status, "pending")))
-    .returning();
-  if (!held) throw conflict("This share changed; reload and try again");
-  await shareEvent(tx, held, now);
-  const m = await activate(tx, share.userId, "viewer", "share", now);
-  if (m) {
-    await audit(tx, {
-      actorType: STAFF,
-      actorId: o.actorId,
-      action: "membership.activate",
-      subjectType: "membership",
-      subjectId: m.id,
-      details: { class: "viewer", basis: "share", userId: share.userId, shareId: share.id },
-    });
-    await membershipEvent(tx, m, now);
-  }
+  await bookShareTx(tx, p, { receivedAt: o.receivedAt, now: o.now, actor: { type: STAFF, id: o.actorId } });
 }
+
+/** The manual adapter's checkout, as before (its errors are ours, not a provider's). */
+const manualStart = (adapter: PaymentAdapter, r: Parameters<PaymentAdapter["startCheckout"]>[0]) =>
+  adapter.startCheckout(r);
 
 export const membershipHandlers = {
   membership: os.coop.membership.handler(async ({ context }) => {
@@ -234,28 +170,50 @@ export const membershipHandlers = {
   buyShare: os.coop.buyShare.handler(async ({ context }) => {
     const { deps } = context;
     const caller = requireCaller(context);
-    // COOP_TEST_HOOKS (harness only): a share is still a manual bank transfer when the instance runs
-    // Stripe, so a seeded stripe-mock stack has shares too. Never on a public instance.
-    const manual = deps.env.PAYMENTS_PROVIDER === "manual" || deps.env.COOP_TEST_HOOKS;
-    if (!manual) throw precondition("manual_shares", "Member shares are paid by bank transfer on this instance");
     const settings = await loadSettings(deps.db);
+    // By card only when the instance runs Stripe and the co-op voted `shares.cardPayments` on;
+    // otherwise by bank transfer (COOP_TEST_HOOKS keeps a seeded stripe-mock stack on transfers).
+    const mode = shareCheckoutMode(deps.env, settings);
+    if (mode === "refused")
+      throw precondition("manual_shares", "Member shares are paid by bank transfer on this instance");
     const shareCents = membershipClassesOf(settings).viewer.shareCents;
     if (shareCents <= 0) throw precondition("share_price", "This co-op has no member share to buy");
     const { payoutRules } = await loadMoneySettings(deps.db);
     const currency = payoutRules.currency;
-    const adapter = createAdapter({ ...deps.env, PAYMENTS_PROVIDER: "manual" });
+    const adapter = mode === "card" ? shareAdapter(deps) : createAdapter({ ...deps.env, PAYMENTS_PROVIDER: "manual" });
+    const base = deps.env.PUBLIC_URL.replace(/\/+$/, "");
+    const urls = { successUrl: `${base}/coop/membership`, cancelUrl: `${base}/coop/membership` };
     // A manual reference collision (`payments_provider_ref_uq`) mints a new one.
     return withCoopErrorsRetrying("payments_provider_ref_uq", () =>
       deps.db.transaction(async (tx) => {
         const now = deps.now();
         // Serializes this user's share purchases with the share trigger's own lock.
         await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`commonair:share:${caller.user.id}`}))`);
-        const [open] = await tx
-          .select({ id: membershipShares.id })
-          .from(membershipShares)
-          .where(and(eq(membershipShares.userId, caller.user.id), inArray(membershipShares.status, [...OPEN_SHARE])))
-          .limit(1);
-        if (open) throw conflict("You already have a member share");
+        const open = await openShareOf(tx, caller.user.id);
+        if (open?.share.status === "pending" && open.payment) {
+          const p = open.payment;
+          if (p.status === "failed") {
+            // The checkout failed or expired before anything released the share: release it now.
+            await releaseShareTx(tx, p.id, now, "share payment failed");
+          } else if (p.status === "pending" && p.provider !== "manual" && mode === "card") {
+            // The same open checkout again: the provider's idempotent create returns the same session.
+            if (p.provider !== adapter.provider) throw conflict("Your checkout is still open with another provider");
+            const again = await startShareCheckout(adapter, {
+              paymentId: p.id,
+              kind: "membership_share",
+              amountCents: p.amountCents,
+              currency: p.currency,
+              quantity: 1,
+              recurring: false,
+              payerUserId: caller.user.id,
+              creatorUserId: null,
+              reference: p.providerRef,
+              ...urls,
+            });
+            if (again.kind === "redirect") return { kind: "redirect" as const, url: again.url, paymentId: p.id };
+            throw conflict("You already have a member share");
+          } else throw conflict("You already have a member share");
+        } else if (open) throw conflict("You already have a member share");
         const [viewer] = await tx
           .select({ id: memberships.id })
           .from(memberships)
@@ -270,8 +228,7 @@ export const membershipHandlers = {
         if (viewer) throw conflict("You are already a viewer member");
         const paymentId = uuidv7();
         const shareId = uuidv7();
-        const base = deps.env.PUBLIC_URL.replace(/\/+$/, "");
-        const start = await adapter.startCheckout({
+        const start = await (mode === "card" ? startShareCheckout : manualStart)(adapter, {
           paymentId,
           kind: "membership_share",
           amountCents: shareCents,
@@ -280,8 +237,7 @@ export const membershipHandlers = {
           recurring: false,
           payerUserId: caller.user.id,
           creatorUserId: null,
-          successUrl: `${base}/coop/membership`,
-          cancelUrl: `${base}/coop/membership`,
+          ...urls,
         });
         await tx.insert(payments).values({
           id: paymentId,
@@ -298,7 +254,8 @@ export const membershipHandlers = {
         });
         const [share] = await tx
           .insert(membershipShares)
-          .values({ id: shareId, userId: caller.user.id, amountCents: shareCents, currency, paymentId })
+          // On the API's clock, as an exit's `exited_at`: "left during the checkout" compares the two.
+          .values({ id: shareId, userId: caller.user.id, amountCents: shareCents, currency, paymentId, createdAt: now })
           .returning();
         if (!share) throw new Error("share insert returned nothing");
         await audit(tx, {
@@ -307,17 +264,15 @@ export const membershipHandlers = {
           action: "coop.share.request",
           subjectType: "membership_share",
           subjectId: shareId,
-          details: { shareId, paymentId, amountCents: shareCents, currency },
+          details: { shareId, paymentId, amountCents: shareCents, currency, provider: adapter.provider },
         });
         await shareEvent(tx, share, now);
+        if (start.kind === "redirect") return { kind: "redirect" as const, url: start.url, paymentId };
         return {
           kind: "instructions" as const,
           paymentId,
           reference: start.providerRef,
-          instructions:
-            start.kind === "instructions"
-              ? start.instructions
-              : manualInstructions(deps.env.MANUAL_PAYMENT_INSTRUCTIONS, start.providerRef, shareCents, currency),
+          instructions: start.instructions,
           amount: money(shareCents, currency),
         };
       }),
@@ -494,6 +449,28 @@ export const membershipHandlers = {
       const now = deps.now();
       if (sentAt.getTime() > now.getTime()) throw badRequest("The refund cannot be sent in the future");
       const note = (input.note ?? "").trim();
+      const [card] = await deps.db
+        .select({ share: membershipShares, payment: { id: payments.id, provider: payments.provider } })
+        .from(membershipShares)
+        .innerJoin(payments, eq(payments.id, membershipShares.paymentId))
+        .where(eq(membershipShares.id, input.shareId));
+      if (card && card.payment.provider !== "manual") {
+        // A card share is refunded by the provider, never recorded by hand: the treasurer's action
+        // asks Stripe (one outstanding request per payment), and `charge.refunded` posts it.
+        if (card.share.status !== "refund_pending")
+          throw conflict(`This share is ${card.share.status}, not waiting for a refund`);
+        await requestShareProviderRefund(deps, card.share, card.payment, { actorId: caller.user.id, note });
+        await audit(deps.db, {
+          actorType: STAFF,
+          actorId: caller.user.id,
+          action: "coop.share.refund_requested",
+          subjectType: "membership_share",
+          subjectId: card.share.id,
+          reason: note,
+          details: { shareId: card.share.id, paymentId: card.payment.id, amountCents: card.share.amountCents },
+        });
+        return shareView(card.share, await userPicks(deps.db, [card.share.userId]));
+      }
       const row = await withCoopErrors(() =>
         deps.db.transaction(async (tx) => {
           const [share] = await tx
