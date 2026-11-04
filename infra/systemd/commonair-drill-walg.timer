@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# Weekly, with the bundled Postgres only (enabled at install).
+[Unit]
+Description=Weekly CommonAir restore drill (WAL-G)
+
+[Timer]
+# Sunday, after the night's base backup (03:00) and object copy (04:00).
+OnCalendar=Sun *-*-* 05:00:00 UTC
+RandomizedDelaySec=1h
+Persistent=true
+Unit=commonair-drill-walg.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,17 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# The WAL-G drill (selfhost.sh backup --drill --walg), bundled Postgres only: the newest base
+# backup and its archived WAL restored into a throwaway volume and replayed by a throwaway
+# Postgres with archiving off and no TCP listener, then checked. It never connects to the live
+# database. Pushes commonair_restore_drill_seconds and commonair_restore_drill_success
+# (kind=walg).
+[Unit]
+Description=CommonAir restore drill (newest WAL-G base backup)
+After=commonair-backup.service
+
+[Service]
+Type=oneshot
+Nice=10
+IOSchedulingClass=idle
+ExecStart=/bin/sh %h/commonair/selfhost.sh backup --drill --walg

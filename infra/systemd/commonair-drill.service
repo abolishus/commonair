@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# The dump drill (selfhost.sh backup --drill): the newest dump, checksum first, restored into a
+# throwaway Postgres container with no network, as an owner with no superuser, then its counts
+# checked against the dump's. It never connects to the live database. Pushes
+# commonair_restore_drill_seconds and commonair_restore_drill_success (kind=dump).
+[Unit]
+Description=CommonAir restore drill (newest logical dump)
+After=commonair-dump.service
+
+[Service]
+Type=oneshot
+Nice=10
+IOSchedulingClass=idle
+ExecStart=/bin/sh %h/commonair/selfhost.sh backup --drill
