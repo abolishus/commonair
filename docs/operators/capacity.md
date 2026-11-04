@@ -28,25 +28,21 @@ Read this first; it decides how many generator machines a run needs.
 heartbeats every 10 s (`playback.heartbeat`) and fetches HLS from the origin. No account, no
 `auth` bucket hit.
 
-**But playback calls share the per-address `default` bucket.** The playback procedures declare no
-rate-limit bucket in the contract (`packages/contracts/src/api/router.ts`, `playback.start`,
-`heartbeat`, `end`), so `services/api/src/lib/orpc.ts` charges them to `default`: 120 calls a
-minute per client address for anonymous callers (`DEFAULT_RATE_LIMITS`,
-`services/api/src/lib/ratelimit.ts`). Caddy trusts no forwarded header (`infra/caddy/Caddyfile`),
-so every simulated viewer on one generator is one address. At 6 heartbeats a minute that is
-**about 20 steady viewers per generator address**; past it, starts fail with 429 and heartbeats
-fail, playback tokens (120 s, `PLAYBACK_TOKEN_TTL_SECONDS`) stop being refreshed, and segment
-fetches start failing about two minutes in. IPv6 does not help: limits apply per /64
-(`rateLimitSubjectIp`), and a droplet's addresses share one.
+**Playback calls have their own per-address bucket.** `playback.start`, `heartbeat` and `end`
+declare `rateLimit: "playback"` (`packages/contracts/src/api/router.ts`): 3000 calls a minute
+per client address (`DEFAULT_RATE_LIMITS`, `services/api/src/lib/ratelimit.ts`). Caddy trusts no
+forwarded header (`infra/caddy/Caddyfile`), so every simulated viewer on one generator is one
+address. At about 7 calls a minute per viewer that is **about 430 steady viewers per generator
+address**. Past that, starts fail with 429 and heartbeats fail. Playback tokens (120 s,
+`PLAYBACK_TOKEN_TTL_SECONDS`) then stop being refreshed, and segment fetches start failing about
+two minutes in. IPv6 does not help: limits apply per /64 (`rateLimitSubjectIp`), and a droplet's
+addresses share one.
 
-Real audiences behind one address (carrier-grade NAT, a campus, a household) meet the same wall,
-so this is reported to the maintainers as a contract request (per-session limits for heartbeat
-and end, a playback bucket for start). Until it lands, a sweep from one generator measures the
-rate limiter past about 20 viewers, not the host. The harness reports failed heartbeats per step
-(`heartbeatErrors` in each sweep row, metric `heartbeat.errors`); a step with more than
-`maxHeartbeatErrors` failed heartbeats (default 0) is judged inconclusive, in `load-sweep` and in
-`load-plan` against a remote target, because it is not a capacity number. The test instance must not raise the limits: there is no env override,
-and the instance under test is an unmodified release.
+The harness reports failed heartbeats per step (`heartbeatErrors` in each sweep row, metric
+`heartbeat.errors`). In `load-sweep`, and in `load-plan` against a remote target, a step with
+more than `maxHeartbeatErrors` failed heartbeats (default 0) is judged inconclusive: it measured
+the rate limiter, not the host. The test instance must not raise the limits: there is no env
+override, and the instance under test is an unmodified release.
 
 ## The test instance
 
@@ -144,7 +140,7 @@ apt-get install -y iperf3
 **Generators.** On each one, as root:
 
 ```sh
-apt-get update && apt-get install -y git ffmpeg podman iperf3
+apt-get update && apt-get install -y git podman iperf3 curl xz-utils
 
 # The repository at the release under test, at the same path on every generator.
 git clone https://github.com/abolishus/commonair.git /srv/commonair
@@ -163,7 +159,16 @@ podman rm "$BUN_CTR"
 bun --version      # must match the image tag (and CI's BUN_VERSION in .github/workflows/ci.yml)
 
 bun install --frozen-lockfile
-bunx playwright install --with-deps chromium webkit
+bun x playwright install --with-deps chromium webkit   # only bun is copied, so no bunx
+
+# FFmpeg 8.1, the harness image's build and checksum (infra/containers/harness.Containerfile):
+# Debian 13's FFmpeg 7.1 lacks -readrate_catchup, which every harness streamer passes.
+FFMPEG_BUILD=$(sed -n 's/^ARG FFMPEG_BUILD=//p' infra/containers/harness.Containerfile)
+FFMPEG_SUM=$(sed -n 's/.*amd64) arch=linux64; sum=\([0-9a-f]\{64\}\).*/\1/p' infra/containers/harness.Containerfile)
+curl -fsSL -o /tmp/ffmpeg.tar.xz "$FFMPEG_BUILD-linux64-gpl-8.1.tar.xz"
+echo "$FFMPEG_SUM  /tmp/ffmpeg.tar.xz" | sha256sum -c -
+tar -xJf /tmp/ffmpeg.tar.xz -C /usr/local/bin --strip-components=2 --wildcards '*/bin/ffmpeg' '*/bin/ffprobe'
+ffmpeg -hide_banner -h full | grep -q readrate_catchup
 
 echo "$TARGET_VPC load.stream.example.org" >> /etc/hosts
 ```
@@ -272,11 +277,29 @@ One row per size. Fill it from `data.sweepSummary` (and the streams-axis sweep f
 column). Egress is per viewer at the last passing step; CPU and NIC are p95 there. The source
 column is each sweep's `source` (from `data.params` or any row): viewers axis / streams axis.
 
-| Size (slug)               | vCPU / RAM   | Source (viewers / streams axis)             | Max viewers within targets | Max live streams (with ladders) | Broke first          | Origin egress per viewer | Target CPU p95 | Target NIC tx p95 | Postgres CPU | Valkey CPU | Release  | Date         |
-| ------------------------- | ------------ | ------------------------------------------- | -------------------------- | ------------------------------- | -------------------- | ------------------------ | -------------- | ----------------- | ------------ | ---------- | -------- | ------------ |
-| _example: `g-4vcpu-16gb`_ | _4 / 16 GiB_ | _640x360@1200k rtmp / 1920x1080@6000k rtmp_ | _2000 (20 streams)_        | _8 (8)_                         | _target_cpu at 4000_ | _150 kB/s_               | _71 %_         | _310 Mbit/s_      | _9 %_        | _2 %_      | _v0.1.0_ | _2026-11-02_ |
+| Size (slug)               | vCPU / RAM   | Source (viewers / streams axis)             | Max viewers within targets        | Max live streams (with ladders)                                     | Broke first                                                           | Origin egress per viewer | Target CPU p95 | Target NIC tx p95 | Postgres CPU | Valkey CPU | Release      | Date         |
+| ------------------------- | ------------ | ------------------------------------------- | --------------------------------- | ------------------------------------------------------------------- | --------------------------------------------------------------------- | ------------------------ | -------------- | ----------------- | ------------ | ---------- | ------------ | ------------ |
+| `c-4` (sfo2)              | 4 / 8 GiB    | 640x360@1200k rtmp / 1920x1080@6000k rtmp   | 100 (1 stream); 60 over 3 streams | 0 (0): one 1080p ladder with 60 viewers broke `target_cpu` (93.8 %) | `target_cpu`: at 500 viewers on 1 stream, 120 on 3, 100 on 4, 50 on 6 | 196 kB/s                 | 57 %           | 162 Mbit/s        | 2.5 %        | 1.2 %      | v0.1.0-rc.10 | 2026-11-04   |
+| _example: `g-4vcpu-16gb`_ | _4 / 16 GiB_ | _640x360@1200k rtmp / 1920x1080@6000k rtmp_ | _2000 (20 streams)_               | _8 (8)_                                                             | _target_cpu at 4000_                                                  | _150 kB/s_               | _71 %_         | _310 Mbit/s_      | _9 %_        | _2 %_      | _v0.1.0_     | _2026-11-02_ |
 
 The example row is invented to show the format; it is not a measurement.
+
+**`c-4`, 2026-11-04 (agent track U5):** one target and four `c-4` generators in sfo2, the VPC
+NIC ceiling 1870 Mbit/s each way. The 1-stream sweep also "passed" 150 and 250 viewers, but those
+viewers were on the ladder's audio-only rung (fixed in `edc349e4`), so they do not count. A
+`load-plan` of 1 stream × 100 viewers was judged and passed: CPU p95 53.6 %, glass-to-glass p95
+3.9 s. Where the CPU went (per-container cgroup samples):
+
+- one 1080p ladder: about 2.1 cores (`commonair-media`);
+- the live moderation classifier (`moderation.scan`): about 0.2–0.25 core per live stream, even
+  with no ladder. A software limit worth profiling before a size is chosen;
+- Caddy and origin: about 0.5 core per 100 viewers.
+
+CPU is spiky (mean 55 % against p95 94 %), so the p95 rule breaks first. Every streamer and
+browser viewer runs on the first generator; only HTTP viewers go to the others. Keep
+`browserViewers` at 2 and the stream count low on small generators, or the first generator
+becomes the limit and the run is inconclusive. The account offered no 4-vCPU General Purpose
+size (ADR 0032 §1).
 
 ## How the numbers are used
 

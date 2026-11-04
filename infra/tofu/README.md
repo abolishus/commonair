@@ -278,13 +278,9 @@ The hand-made host has no reserved IP; if one is added by hand first, import it 
   3. **A bucket policy denying `s3:DeleteObjectVersion`** to the backup keys. Spaces accepts
      bucket policies through the API only, but its documentation does not say which actions or
      principals it honours, or how to name a Spaces key as a principal; it needs the same probe.
-- **Lifecycle rule with only an abort action is unconfirmed.** Every bucket has an
-  `abort-incomplete-multipart` rule with no expiration of its own. The S3 compatibility page says
-  lifecycle covers "time-based expiration and removing incomplete multipart uploads" but not
-  whether a rule may hold only the abort. If the first apply rejects it, merge
-  `abort_incomplete_multipart_upload_days` into the `expire-noncurrent` rule in `backups.tf` and
-  drop the separate rule. The stage 1 instance buckets have no other rule to merge into; there,
-  drop the rule and record the gap (stale multipart parts are then billed until removed).
+- **Lifecycle rule with only an abort action: accepted** (first real apply, 2026-11-04, sfo2 and
+  sfo3). Spaces stored the `abort-incomplete-multipart` rule on its own, and later plans showed no
+  drift.
 - **Network load balancer: expressible.** `type = "REGIONAL_NETWORK"` exists, with `tcp` and
   `udp` forwarding rules and `network_stack = "DUALSTACK"`. Health checks are only `http`,
   `https` or `tcp`, so 443/udp has no health check of its own. Whether the droplets see client
@@ -300,6 +296,16 @@ The hand-made host has no reserved IP; if one is added by hand first, import it 
   create buckets.
 - **S3 locking on Spaces.** `use_lockfile` relies on conditional writes; if Spaces rejects them,
   `plan` fails at the lock and the operator removes `use_lockfile` (one operator at a time).
-- **The provider's `h1:` hashes in the lock files were computed from the release zips, not by
-  `tofu providers lock`** (OpenTofu was not run while writing this). `tofu init -lockfile=readonly`
-  fails on a mismatch, so the first `check.sh` run confirms them.
+- **The lock files' `h1:` hashes are confirmed.** `check.sh` (`tofu init -lockfile=readonly`,
+  `validate`, `test`) ran for the first time on 2026-11-04 and passed, and a real apply used the
+  same lock.
+- **A VPC can become undeletable.** The first VPC created in a region where the account has none
+  becomes that region's default VPC, and DigitalOcean refuses to delete a default VPC. `tofu
+  destroy` then fails on `digitalocean_vpc.app`. The agent track left one, empty and unbilled, in
+  sfo2 and tor1. Create droplets in the region once by hand first, or accept a leftover VPC.
+- **Destroying with `project_id` moves resources to the default project.** Destroying
+  `digitalocean_project_resources` unassigns what it lists, and DigitalOcean puts unassigned
+  resources in the account's default project. Anything kept out of a destroy (`tofu state rm`)
+  must be assigned back by hand.
+- **The backup buckets have `prevent_destroy`.** A `tofu destroy` of an environment stops at them
+  on purpose. Empty and delete them by hand, or `tofu state rm` them first.

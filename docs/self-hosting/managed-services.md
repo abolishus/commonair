@@ -105,15 +105,25 @@ which production sets by default); `selfhost.sh install` points the instance at 
    instance starts on Standard.
 4. **The connection limit at the chosen size.** DigitalOcean sets `max_connections` by node size
    and reserves three: the 1 GB node allows 22, enough only for `DATABASE_POOL_MAX=3`. The tofu
-   default is `db-s-1vcpu-2gb` (a standby needs at least that); read its limit with
-   `SHOW max_connections;` and let the preflight size the pool. A larger node may be needed for
-   connections alone, before the data needs it.
-5. **Valkey has no ACL users**: the `acl` command is restricted, so the instance uses the
+   default, `db-s-1vcpu-2gb` (a standby needs at least that), allows 50, so 47 for us (measured
+   2026-11-04): the default pool of 10 needs 54 and the preflight refuses it. Install with
+   `DATABASE_POOL_MAX=8` in the environment (44 needed). An idle instance used 22. A larger node
+   may be needed for connections alone, before the data needs it.
+5. **Valkey's certificate is publicly trusted** (Let's Encrypt, `*.i.db.ondigitalocean.com`;
+   measured 2026-11-04). The CA from the control panel or `get-ca` is the project CA, which signs
+   only the Postgres certificates: given to `--valkey-ca`, verification fails. Leave
+   `--valkey-ca` out (the system's CAs are used).
+6. **Valkey has no ACL users**: the `acl` command is restricted, so the instance uses the
    `default` user with the cluster's password: `--valkey-url rediss://default@<private host>:<port>`
    (or without `default@`). `VALKEY_MONITOR_USER` stays empty.
-6. Install as in step 5 above, with `--database-url 'postgres://doadmin@<private host>:25060/commonair?sslmode=verify-full'`
+7. Install as in step 5 above, with `--database-url 'postgres://doadmin@<private host>:25060/commonair?sslmode=verify-full'`
    and `--database-ca` the downloaded certificate.
-7. **The dump store** is the `object_backups` bucket tofu creates in `backup_region` (another
+   **Objects in Spaces: not tried end to end yet** (the 2026-11-04 run used bundled Garage).
+   Give `S3_EVIDENCE_*` the evidence key from `managed_state_secrets.evidence_*`, not the
+   instance key: storage-init refuses two equal keys. storage-init also checks a fourth,
+   `backups` bucket at the S3 endpoint unless `AWS_ENDPOINT` or `WALG_S3_PREFIX` is set, and
+   stage 1 creates no such bucket; that gap is open.
+8. **The dump store** is the `object_backups` bucket tofu creates in `backup_region` (another
    region than the droplet's, private, versioned, with `object_backups_key` limited to it):
    `BACKUP_OBJECTS_REMOTE_ENDPOINT` and `_REGION` from `tofu output backups`, `_BUCKET` its
    `object_backups_bucket`, and the key from `tofu output -json object_backups_key`. The same
@@ -152,8 +162,10 @@ This is the real disaster restore (the provider's point-in-time recovery cannot 
 account, the region or the backups are gone), and the managed-cluster drill: the same procedure,
 run once on the staging project and timed.
 
-**Our instance's restore time:** not measured yet. The agent track runs this procedure on the
-staging project (decision U5) and records the time here and in ADR 0032 §1.
+**Our instance's restore time** (agent track U5, 2026-11-04, ADR 0032 §1): a fresh two-node
+cluster was online in 9 min 40 s, and steps 3 and 4 took 2 min 26 s for a small (735 KB) dump,
+with every count equal. So about 13 minutes to restored data, plus step 5. The restore step grows
+with the dump: time it again at the instance's real size.
 
 Write down the time at each step marked **(time)**.
 
@@ -232,12 +244,16 @@ Write down the time at each step marked **(time)**.
 
 ## What a failover loses
 
-From ADR 0032 §3, until the agent track's `failover` test on the staging project measures it:
+Measured by the agent track (2026-11-04, ADR 0032 §1). The switch was a node resize, a planned
+switch to new nodes; DigitalOcean offers no way to force a failover:
 
-- **Postgres:** DigitalOcean promotes the standby in 5–10 s. Connections drop and the services
-  reconnect; requests during those seconds fail and are retried by clients. DigitalOcean does
-  not document the standby as synchronous, so assume that writes acknowledged in the last
-  moments before a failover can be lost, and treat the `failover` test's result as the number.
+- **Postgres:** writes failed for 7.9 s, and none of 13,453 acknowledged writes was lost.
+  Connections drop and the services reconnect; requests during those seconds fail and are retried
+  by clients. A crash of the primary is not something we could trigger, and DigitalOcean does not
+  document the standby as synchronous, so still assume that writes acknowledged in the last
+  moments before an unplanned failover can be lost.
+- **Valkey, measured:** `INCR`s failed for 5.9 s, and none of 13,438 acknowledged increments was
+  lost.
 - **Valkey:** rate-limit windows, a few seconds of chat fan-out, and queued jobs since the last
   persistence point. Jobs are at-least-once with idempotent handlers, so nothing durable is lost:
   the outbox, the ledger and every job's effects are in Postgres.

@@ -93,6 +93,33 @@ rolling.
 Stage 1 is within DigitalOcean's own commitments: 99.95% for a database with a standby node
 under our 99.9%. A target above the provider's SLA would be a wish, not a target.
 
+**Measured on DigitalOcean (agent track U5, 2026-11-04, `v0.1.0-rc.10`, region sfo2).** Every
+resource was in the project `commonair-agent-checks`, tagged `commonair-agent-check`, and destroyed
+after its check (ADR 0025, amendment of 2026-11-04).
+
+| What                                                               | Measured                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Database failover (Postgres 17.11, 2 × `db-s-1vcpu-2gb`)           | **7.9 s** of failed writes, **0 of 13,453** acknowledged writes lost. A write every 100 ms over verified TLS from outside the VPC. DigitalOcean has no forced-failover API, so a node resize (to `db-s-2vcpu-4gb`, replacing both nodes) was the trigger. It ran 9 min 20 s with one outage at the cutover. A primary crash, as opposed to a planned switch, is not something we can trigger, so its loss bound stays DigitalOcean's.                                          |
+| Valkey failover (Valkey 8.1.11, 2 × `db-s-1vcpu-2gb`)              | **5.9 s** of failed `INCR`s, **0 of 13,438** acknowledged increments lost (resize 8 min 32 s, one outage).                                                                                                                                                                                                                                                                                                                                                                     |
+| Restore into a fresh managed cluster (S1-h, `dump-restore.sh`)     | Cluster created and online: **9 min 40 s** (two nodes). Owner-only restore of a 735 KB demo-seeded dump: **2 min 26 s** (run from outside the VPC, so it is dominated by round trips), then `restore-check.sql` equal to the source: 165 checks, ledger balanced, `follows.count_mismatch` 0. About **13 min to restored data**; pointing the instance at it (`install --reinstall`) adds about 1.5 min. The restore step grows with the dump: re-time it at launch data size. |
+| App-droplet rebuild from `infra/tofu` against the managed clusters | Droplet replaced (destroy, create, reserved IP): about **2 min**. Host prep and the signed bundle: 27 s, because cloud-init's package upgrade had already run (on a cold droplet it adds a few minutes). `selfhost.sh install` of rc.10 with `--database-url` and `--valkey-url`, image pulls included: **4 min 10 s**. Then HTTPS 200 and every unit healthy. About **7 min, plus the cloud-init upgrade**: well inside the 43-minute budget.                                 |
+| S1-d's managed-cluster check (contract §1.5)                       | `external-owner.int.test.ts`, run with the real cluster as the provider's side and `doadmin` as the owner over `sslmode=verify-full` with the downloaded CA: **33 of 33 pass**. The two superuser-only cases cannot run on a managed cluster. `doadmin`: not superuser; CREATEROLE, CREATEDB, REPLICATION and BYPASSRLS. TLS 1.3. `pg_monitor` cannot be granted, as §3 predicted.                                                                                             |
+| Connection budget on `db-s-1vcpu-2gb`                              | `max_connections` 50, 47 for us. The default pool (10 × 5 services + migrate + 3) needs 54, so the preflight refuses. **`DATABASE_POOL_MAX=8` fits (44)**. The instance used 21–22 connections when idle.                                                                                                                                                                                                                                                                      |
+| Managed Valkey TLS                                                 | DigitalOcean's Valkey serves a **publicly trusted** Let's Encrypt certificate (`*.i.db.ondigitalocean.com`), not the project CA that `get-ca` returns (that CA signs only Postgres). With the downloaded CA, verification fails. Use the system's CAs (no `--valkey-ca`). `CONFIG` and `ACL` are refused, `noeviction` and RDB persistence are on, and pub/sub works.                                                                                                          |
+
+**The account limits the production droplet.** This account is offered no droplet size in NYC3
+(the region chosen at acceptance), and no size above about $0.17/h. The largest dedicated-vCPU
+sizes are `c-4` (4 vCPU, 8 GB; blr1, lon1, sfo2) and `g5-2vcpu-16gb` (atl1, mem1, mkc1, ric1).
+`g-4vcpu-16gb` is not available. S1-a's sweep on a `c-4` (`docs/operators/capacity.md`) found the
+CPU limit early:
+
+- about **100 viewers** on one stream;
+- no 1080p ladder with 60 viewers inside the 85% CPU target;
+- the live moderation classifier costs about 0.2 core per live stream.
+
+The region and size need a droplet-limit increase from DigitalOcean before they can be chosen
+(L1 checklist).
+
 ### 2. Stages and their triggers
 
 Each stage is built and rehearsed in the harness before its trigger fires. Triggers are
@@ -136,7 +163,7 @@ of the self-hosting docs (`docs/self-hosting/managed-services.md`, S1-h):
     `SUPERUSER`, `REPLICATION` or `BYPASSRLS` in `ALTER ROLE` even to switch them off, so
     `app-role.sql` and `monitor-role.sql` switch off only the attributes that are on. Nothing
     else needs a superuser. The run against a real DigitalOcean cluster (contract step §1.5)
-    follows on the staging project.
+    passed on 2026-11-04 ([§1, Measured on DigitalOcean](#1-targets)).
   - **Client TLS:** postgres.js reads `sslmode` but not `sslrootcert`, and iovalkey takes no CA
     from the URL. `DATABASE_CA_FILE` and `VALKEY_CA_FILE` name the provider's CA; with them set,
     the clients verify against it and refuse a URL weaker than `sslmode=verify-full` or
@@ -347,4 +374,4 @@ stage for our own instance:
   node than the data needs (S1-b's preflight reports it). In exchange: a database failover in
   seconds instead of a restore measured in hours, and no WAL-G to run.
 - **Launch-readiness of stage 1** waits for one run of S1-d's checks against a real managed
-  cluster on the staging project (contract step §1.5), recorded here.
+  cluster on the staging project (contract step §1.5), recorded here. Done 2026-11-04: see §1.

@@ -257,9 +257,36 @@ Follow-ups:
 - the units' undone items (card-share chargebacks, the automatic `distributed` flip, the
   outcome-unknown settle UI, status history persistence).
 
+**Batch 8 agent track (U5) ran 2026-11-04** with the operator's `doctl` context under the
+guardrails of ADR 0025's amendment (project `commonair-agent-checks`, tag `commonair-agent-check`).
+Numbers in ADR 0032 §1:
+
+- S1-d's test passed against real DigitalOcean Postgres 17.11 as `doadmin` (33/33);
+- failover: 7.9 s for Postgres and 5.9 s for Valkey, no acknowledged write lost;
+- restore into a fresh cluster: about 13 min;
+- app-droplet rebuild from tofu with rc.10: about 7 min;
+- the status stack probes staging; its page served over IPv4 and IPv6.
+
+Found and fixed:
+
+- the module destroyed shared tags (`b67b0fc2`);
+- one Spaces key for evidence and media (`1f7fa525`);
+- harness viewers on the audio-only rung (`edc349e4`).
+
+Found, open:
+
+- DigitalOcean Valkey is publicly trusted (no `--valkey-ca`; docs fixed);
+- `db-s-1vcpu-2gb` needs `DATABASE_POOL_MAX=8`;
+- storage-init wants a `backups` bucket that stage 1 never creates;
+- the account offers nothing in NYC3 and no size above about $0.17/h, so production's size and
+  region need a limit increase;
+- a `c-4` holds about 100 viewers, CPU-bound, with the live classifier at about 0.2 core per
+  stream (`docs/operators/capacity.md`).
+
 Waiting on the user:
 
-- the staging DigitalOcean token (U5: S1-h's timed managed restore, the status stack bring-up);
+- a DigitalOcean droplet-limit increase (dedicated 4+ vCPU, a region with every product) before
+  the production size and region are chosen;
 - the wave 2 live checks: the `relay-dvr`, `watch-room` and `e5-coop` card/Connect harness runs, the self-host e2e in both modes and from rc.10, and `/coop/membership` and `/coop/patronage/<id>` at 320 px in en, es and en-XA;
 - the milestone (handoff step 6).
 
