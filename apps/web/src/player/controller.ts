@@ -409,6 +409,18 @@ export class PlayerController {
   }
 
   /**
+   * Watch rooms: the element's playback rate (1 = normal), how hls.js members close small drifts
+   * without a seek's stall. False, and nothing changes, for any rate but 1 on native HLS (a
+   * GStreamer rate change may itself flush), in DVR or once stopped.
+   */
+  setLivePlaybackRate(rate: number): boolean {
+    if (this.stopped || !Number.isFinite(rate) || rate <= 0) return false;
+    if (rate !== 1 && (this.native || this.mode !== "live")) return false;
+    this.opts.video.playbackRate = rate;
+    return true;
+  }
+
+  /**
    * Hold the playhead `seconds` behind the live edge (clamped to `TARGET_LATENCY_RANGE`): hls.js
    * `liveSyncDuration` for this session, replacing `liveSyncDurationCount`, and a step to the new
    * sync position once one is known (not with `seek: false`: watch rooms land the playhead
@@ -494,6 +506,8 @@ export class PlayerController {
   private notifyMode(mode: PlaybackMode): void {
     if (this.stopped || this.mode === mode) return;
     this.mode = mode;
+    // A watch room's catch-up rate is for live playback only.
+    if (mode === "dvr" && this.opts.video.playbackRate !== 1) this.opts.video.playbackRate = 1;
     // Deleting from a Set while iterating it is safe, so a listener may unsubscribe itself.
     for (const l of this.modeListeners) l(mode);
   }

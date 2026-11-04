@@ -24,6 +24,8 @@ export interface RoomPlayerSource {
   latencySeconds?(): number | null;
   /** Optional: move the playhead by `ms` of media time from where it is (`RoomPlayer.seekBy`). */
   seekBy?(ms: number): boolean;
+  /** Optional: the element's playback rate for live playback (`RoomPlayer.setPlaybackRate`). */
+  setPlaybackRate?(rate: number): boolean;
 }
 
 const registry = new Map<string, { source: RoomPlayerSource; native: boolean }[]>();
@@ -94,6 +96,15 @@ function domPlayer(channel: string, doc: Document): RoomPlayer | null {
       video.currentTime = next;
       return true;
     },
+    ...(nativePlayback(video)
+      ? {}
+      : {
+          setPlaybackRate: (r: number) => {
+            if (!Number.isFinite(r) || r <= 0 || (r !== 1 && playbackMode(channel) !== "live")) return false;
+            video.playbackRate = r;
+            return true;
+          },
+        }),
     native: nativePlayback(video),
   };
 }
@@ -111,6 +122,7 @@ export function roomPlayer(channel: string, doc: Document | null = globalThis.do
       ...(top.native ? {} : { setTargetLatency: (sec: number, o?: { seek?: boolean }) => s.setTargetLatency(sec, o) }),
       ...(s.latencySeconds ? { latencySeconds: () => s.latencySeconds?.() ?? null } : {}),
       ...(s.seekBy ? { seekBy: (ms: number) => s.seekBy?.(ms) ?? false } : {}),
+      ...(s.setPlaybackRate && !top.native ? { setPlaybackRate: (r: number) => s.setPlaybackRate?.(r) ?? false } : {}),
       // hls.js knows its latency; native HLS (no latency) falls back to the element's `seekable`.
       edgeWallclock: () =>
         edgeOf(

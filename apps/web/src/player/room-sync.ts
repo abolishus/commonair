@@ -10,7 +10,20 @@
  * so a target received at `t0` is `target + (now - t0)` later. Drift is `playhead - target`
  * (positive: this member is ahead).
  *
- * - **hls.js** steers with `setTargetLatency`: the new hold-back is the player's own latency plus
+ * - **hls.js with a playback-rate seam** (every registered hls.js player, and the page fallback)
+ *   closes drifts by playing faster or slower (`RATE`), never by seeking, up to `RATE.seekOverMs`;
+ *   a larger drift (a member joining far off) is one seek, at most one per `RATE.seekCooldownMs`.
+ *   Seeking every tick was the failure on a busy CI runner (exp/sync-diag run 41905217763): each
+ *   seek left the element waiting (`readyState` 1, nothing buffered at the new position) for about
+ *   1.6 s of the 2 s between targets, so the member was behind again at the next target, which
+ *   seeked again. Members spent ~80 % of the time waiting and sat 1-3 s behind the target, 6-7 s
+ *   behind the room's edge. A rate change does not flush the decoder. The hold-back follows the
+ *   playhead (no seek), so hls.js keeps the distance the rate reached.
+ * - **The target** of a rate player is the median of the last few `room.sync` targets (each as an offset from when
+ *   it arrived): chat's target moves with the room's edge estimate, which jumps by up to a second
+ *   from one frame to the next; every member gets the same frames, so the same filter keeps them
+ *   on the same target without chasing that noise.
+ * - **hls.js without a rate seam** steers with `setTargetLatency`: the new hold-back is the player's own latency plus
  *   the drift, so hls.js keeps the new distance from then on. The playhead itself lands on the target
  *   from the playhead (`seekBy` the drift, PDT being linear in media time; `seekToWallclock` when
  *   the player cannot, and hls.js's sync position only when neither can), not at hls.js's sync
@@ -52,6 +65,24 @@ export const DRIFT = {
   maxSeekLeadMs: 2500,
 } as const;
 
+/** Rate steering (players with `setPlaybackRate`, not native WebKit). */
+export const RATE = {
+  /** `rate = 1 - drift / horizon`: about half of the drift closed per 2 s target. */
+  horizonMs: 4000,
+  /** Bounds that keep speech intelligible and the decoder's extra work small. */
+  min: 0.8,
+  max: 1.25,
+  /** Drift under this plays at normal speed. */
+  deadbandMs: 80,
+  reducedDeadbandMs: 300,
+  /** A drift over this is a seek (a member joining far off), at most once per cooldown. */
+  seekOverMs: 3000,
+  seekCooldownMs: 10_000,
+} as const;
+
+/** How many of the latest targets the median takes. */
+export const TARGET_MEDIAN_OF = 5;
+
 export interface DriftInput {
   /** PDT under this member's playhead now (epoch ms), null before the first frame. */
   playheadMs: number | null;
@@ -72,11 +103,16 @@ export interface DriftInput {
   measuredLatency: number | null;
   /** Milliseconds since the last correction, null if none yet. */
   sinceLastMs: number | null;
+  /** The player can change its playback rate (`setPlaybackRate`): small drifts need no seek. */
+  rate?: boolean;
+  /** Rate players: milliseconds since the last seek, null if none yet. */
+  sinceSeekMs?: number | null;
 }
 
 export type Correction =
   | { kind: "none"; driftMs: number | null }
   | { kind: "latency"; seconds: number; driftMs: number }
+  | { kind: "rate"; rate: number; driftMs: number }
   | { kind: "seek"; toMs: number; driftMs: number };
 
 const clampLatency = (s: number) => Math.min(TARGET_LATENCY_RANGE.max, Math.max(TARGET_LATENCY_RANGE.min, s));
@@ -85,8 +121,18 @@ const clampLatency = (s: number) => Math.min(TARGET_LATENCY_RANGE.max, Math.max(
 export function nextCorrection(i: DriftInput): Correction {
   if (i.mode !== "live" || i.playheadMs === null || i.targetMs === null) return { kind: "none", driftMs: null };
   const driftMs = i.playheadMs - i.targetMs;
-  if (i.sinceLastMs !== null && i.sinceLastMs < DRIFT.settleMs) return { kind: "none", driftMs };
   const abs = Math.abs(driftMs);
+  if (i.rate && !i.native) {
+    // No settle: a rate is set afresh with every target, and only a seek needs time to land.
+    const sinceSeek = i.sinceSeekMs ?? null;
+    if (abs > RATE.seekOverMs && (sinceSeek === null || sinceSeek >= RATE.seekCooldownMs))
+      return { kind: "seek", toMs: i.targetMs, driftMs };
+    const deadband = i.reducedMotion ? RATE.reducedDeadbandMs : RATE.deadbandMs;
+    if (abs <= deadband) return { kind: "rate", rate: 1, driftMs };
+    const rate = Math.min(RATE.max, Math.max(RATE.min, 1 - driftMs / RATE.horizonMs));
+    return { kind: "rate", rate: Math.round(rate * 100) / 100, driftMs };
+  }
+  if (i.sinceLastMs !== null && i.sinceLastMs < DRIFT.settleMs) return { kind: "none", driftMs };
   if (i.native) {
     const tolerance = i.reducedMotion ? DRIFT.reducedNativeToleranceMs : DRIFT.nativeToleranceMs;
     return abs > tolerance ? { kind: "seek", toMs: i.targetMs, driftMs } : { kind: "none", driftMs };
@@ -131,6 +177,8 @@ export interface RoomPlayer {
    * is then missing from it (false) or mapped against stale fragment starts.
    */
   seekBy?(ms: number): boolean;
+  /** Set the element's playback rate (1 = normal) for live playback; false when it cannot. */
+  setPlaybackRate?(rate: number): boolean;
   native: boolean;
   /**
    * Batch 8: the live edge as a wall-clock instant (the PDT at the end of the live playlist), null
@@ -210,7 +258,12 @@ export interface RoomSyncDriverDeps {
 
 /** Applies `nextCorrection` each time a target arrives; keeps the hold-back it applied. */
 export class RoomSyncDriver {
-  private target: { ms: number; at: number } | null = null;
+  /** The latest targets, each as `arrival - target` (ms), newest last; the median is the target. */
+  private offsets: number[] = [];
+  /** The playback rate this driver last set (1 until it steers by rate). */
+  private rate = 1;
+  /** When the last seek of a rate player went out. */
+  private seekAt: number | null = null;
   private applied: number | null = null;
   private lastAt: number | null = null;
   /** Seek-only players: how far ahead of the target a seek aims (ms), learnt from where seeks landed. */
@@ -226,17 +279,26 @@ export class RoomSyncDriver {
     return this.deps.now?.() ?? Date.now();
   }
 
-  /** The room's target as of now (ISO), or null. */
-  targetNow(): number | null {
-    if (!this.target) return null;
-    return this.target.ms + (this.now() - this.target.at);
+  /**
+   * The room's target as of now (epoch ms), or null: the latest one, or with `median` (rate
+   * players, which re-steer on every target) the median of the latest ones.
+   */
+  targetNow(median = false): number | null {
+    if (this.offsets.length === 0) return null;
+    if (!median) return this.now() - this.offsets[this.offsets.length - 1]!;
+    const sorted = [...this.offsets].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    const offset = sorted.length % 2 === 1 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
+    return this.now() - offset;
   }
 
   /** A `room.sync {target}` arrived: remember it and correct. */
   onTarget(targetIso: string): Correction {
     const ms = Date.parse(targetIso);
     if (!Number.isFinite(ms)) return { kind: "none", driftMs: null };
-    this.target = { ms, at: this.now() };
+    const at = this.now();
+    this.offsets.push(at - ms);
+    if (this.offsets.length > TARGET_MEDIAN_OF) this.offsets.shift();
     return this.step();
   }
 
@@ -245,7 +307,8 @@ export class RoomSyncDriver {
     if (!p) return { kind: "none", driftMs: null };
     const now = this.now();
     const head = p.playheadWallclock()?.getTime() ?? null;
-    const targetMs = this.targetNow();
+    const rate = p.setPlaybackRate !== undefined && !p.native;
+    const targetMs = this.targetNow(rate);
     const measured = measuredLatency(p, head, now, this.applied);
     const c = nextCorrection({
       playheadMs: head,
@@ -257,10 +320,29 @@ export class RoomSyncDriver {
       appliedLatency: this.applied,
       measuredLatency: measured,
       sinceLastMs: this.lastAt === null ? null : now - this.lastAt,
+      rate,
+      sinceSeekMs: this.seekAt === null ? null : now - this.seekAt,
     });
     this.lastDriftMs = c.driftMs;
+    // Normal speed whenever the room does not steer this player now (DVR, no playhead or target).
+    if (c.driftMs === null) this.setRate(p, 1);
     // `nextCorrection` only corrects with a playhead and a target.
     if (head === null || targetMs === null) return c;
+    if (c.kind === "rate") {
+      if (!this.setRate(p, c.rate)) return c;
+      // The hold-back follows the playhead without moving it, so hls.js keeps the distance the
+      // rate is reaching (a reload or a stall then resumes there, not at the old one).
+      const base = measured ?? this.applied;
+      if (p.setTargetLatency && base !== null) {
+        const seconds = clampLatency(base + c.driftMs / 1000);
+        if (this.applied === null || Math.abs(seconds - this.applied) >= 0.25) this.hold(p, seconds);
+      }
+      return c;
+    }
+    if (c.kind === "seek" && p.setPlaybackRate && !p.native) {
+      this.setRate(p, 1);
+      this.seekAt = now;
+    }
     const seekOnly = !p.setTargetLatency;
     // The first look after a seek-only seek has settled: where it ended up, against the target, is
     // how far the lead was off (the seek aimed at target + lead).
@@ -291,6 +373,14 @@ export class RoomSyncDriver {
     return c;
   }
 
+  /** Set the playback rate if it changes; true when the player now plays at `rate`. */
+  private setRate(p: RoomPlayer, rate: number): boolean {
+    if (this.rate === rate) return true;
+    if (!p.setPlaybackRate?.(rate)) return false;
+    this.rate = rate;
+    return true;
+  }
+
   /** Move the playhead to `toMs`: relative to the playhead when the player can, else by its fragments. */
   private land(p: RoomPlayer, headMs: number, toMs: number): boolean {
     if (p.seekBy?.(toMs - headMs)) return true;
@@ -308,7 +398,11 @@ export class RoomSyncDriver {
 
   /** Leaving the room: forget the target (the player keeps its last hold-back until it reloads). */
   reset(): void {
-    this.target = null;
+    this.offsets = [];
+    this.seekAt = null;
+    // Out of the room, the player plays at normal speed.
+    const p = this.deps.player();
+    if (p) this.setRate(p, 1);
     this.lastAt = null;
     this.lastDriftMs = null;
     // The lead is the player's, not the room's: kept. A landing not yet read is dropped.

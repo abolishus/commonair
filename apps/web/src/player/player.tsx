@@ -243,6 +243,7 @@ export function Player({
         playbackMode: () => controller.playbackMode(),
         latencySeconds: () => controller.hlsLatencySeconds(),
         seekBy: (ms) => controller.seekBy(ms),
+        setPlaybackRate: (rate) => controller.setLivePlaybackRate(rate),
       },
       env?.native ?? false,
     );
