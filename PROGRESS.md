@@ -22,6 +22,164 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
 
 ## In flight
 
+**D wave 2 merged (2026-11-04): D1-web, D2-channel, D2-player and D2-chat on `main`** (briefs in
+`.claude/briefs/d/`). The orchestrator made every call below without the user (they asked for
+that overnight). Each unit was implemented in its own worktree, independently reviewed against
+AGENTS.md and the brief, fixed, then integrated by sha onto `4b3b804f`, the wave 2 contract step:
+
+| Unit       | Merge      | Unit sha   |
+| ---------- | ---------- | ---------- |
+| D1-web     | `92c314bd` | `aa94f421` |
+| D2-channel | `66483155` | `aacb75b2` |
+| D2-player  | `c7c0c1d7` | `5f29b020` |
+| D2-chat    | `f712d39f` | `b2bbf2ec` |
+
+- **Contract step `4b3b804f`:** the briefs were re-checked against `main` after batch 8 wave 2
+  (stale line numbers; `$channel.tsx` already had a `head()`; D4's `redirect` and
+  `ChannelNotFoundState` requests named in D1-web and D2-channel). Three seams were added so the
+  units could build against each other in parallel: `player/theatre.ts` (`useTheatre`),
+  `chat/layout.ts` (`chatColumnClass`) and `lib/category-route.ts` (`categoryHref`, `tagHref`).
+- **Integration `edbec219`** applied the contract requests:
+  - the rail is mounted in `_app.tsx` (`sidebarPlacement="below"`);
+  - `CategoryArt` is exported and used in the category header (the F10 fallback);
+  - `TheatreProvider` wraps the channel page, and chat is hidden but stays mounted when collapsed
+    in theatre;
+  - `ChatPanel` gets `channelName` and `ageGated`;
+  - category and tag links are typed `Link`s;
+  - `$channel.tsx` left `PENDING_ACTION`, and the d4 harness skip is gone;
+  - `expandPinnedStrip` runs before every chat-card wait (e8 viewer, w3 giveaways and
+    predictions, b8 grace);
+  - `chatOffline` and `chatGated` joined `D_TEST_IDS`;
+  - seed-coverage routes for `/directory`, `/directory/$category` and `/search` (a new
+    `{ fixed }` `SeedValue`);
+  - titles for `coop.jury` and the giveaway verify page.
+
+  **`PENDING_HEAD` now lists only D3-watch's two routes and D5-studio's `import.tsx`.** None of the
+  entries were D2's.
+
+- **CI found real regressions, fixed on `main`** through `d51d432e`:
+  - `e2e-social`: the home page's Spotlight hero and per-category shelves weren't discovery
+    sections (`33e2bcba`). The cross-shelf dedupe also let the hero or New take a followed
+    channel, so Following now claims first and the hero is the top spotlight channel the viewer
+    doesn't follow (`c63b00f0`).
+  - `e4b-money`: the About card repeated the header's `follower-count`. It is now
+    `channel-about-followers` (`33e2bcba`, `129c6c1c`).
+  - W1 data-mode's harness steps didn't open the new settings menu first (`33e2bcba`).
+  - `watch-room`: the 18+-gated chat dropped the watch-room drawer, so a minor's refused invite
+    never showed (`33e2bcba`).
+  - `seed-coverage` got 429s, because every page now has the rail and so asked `directory.home`.
+    The feed is now cached per tab in `sessionStorage` for one refresh period, keyed by viewer.
+    `/search` searches streamer1's own slug, since run-prefixed slugs and prefix matching made
+    `q=streamer` empty (`1b090613`, `7ee641a3`).
+  - n4's follower removal read the list before it loaded (`d51d432e`).
+  - The channel page tests got a 5 s async wait for busy runners (`42a5a55f`).
+- **CI:** run `41801398808` on `d51d432e` passed every job except `watch-room`'s b8 edge-sync,
+  across attempts 2–4 (Chromium p90, WebKit p90 1390 ms, members 5.5–7 s behind the edge). That
+  is batch 8's sync driver, not wave 2: D2-player never touched `room-sync*`. It also failed
+  before wave 2, on `dc668494`, `1ffec9c9` and `c42fe1a2` attempt 1. batch8-wave2 quarantined the
+  WebKit cross-engine check at `6fb4150d` and owns the rest.
+
+Calls made without the user (each the option closest to the briefs, AGENTS.md and the house
+primitives):
+
+- **Followed live channels always sit under Following on `/`**, never in the hero or New (what a
+  member looks for; e2e-social relies on it).
+- **The rail's `directory.home` is cached per tab for 60 s**, keyed by viewer id or `anonymous`,
+  so another viewer's follows never show.
+- **Per-tab state in `sessionStorage`**, not `localStorage`, for the rail's collapsed state,
+  theatre and chat-collapsed, the welcome strip and recent searches. "Per tab" is the brief's
+  rule, and it stays outside the Preferences consent, as theme and language do. Every access is
+  wrapped.
+- **The pinned strip starts collapsed** (F6's "collapse into one line"). One click expands every
+  card. Scenarios that click cards expand it first.
+- **The settings menu is an in-player disclosure panel, not a portalled Popover.** Base UI's
+  `Popover` and `DropdownMenu` portal to `<body>`, which is invisible in fullscreen. The captions
+  style menu and the tooltips still portal, so the `?` dialog leaves fullscreen first.
+- **At the live edge only the LIVE badge marks the position.** "Back to live" appears once the
+  viewer is behind. D2-player declined to add a pressed, inert "Live" control, and I accept that.
+- **DVR's `L` key stays in `DvrControls`' own listener**, so B8's DVR behaviour and tests stay
+  byte-for-byte. It is listed in the shortcut map and the `?` dialog.
+- **Theatre exists only from `md` up.** Below it there's no button, and `t` does nothing.
+- **A nested `TheatreProvider` defers to an outer one**, so tests and host pages can drive
+  theatre.
+- **Category viewer totals and tags show only when `directory.live` gives them exactly.** No
+  partial numbers.
+- **The category page has only a Live tab.** No API lists VODs or clips by category.
+- **The offline hero is a poster-style link to the VOD page.** `VodPlayer` has no poster state.
+- **Clips have no 7d/30d/all filter.** `clips.list` takes no range, so clips are newest first.
+- **The About tab has no social links.** No API field holds them, and panels carry links today.
+- **Uptime uses its own one-second clock in `channel-meta.tsx`.** `RelativeTime` has no elapsed
+  mode.
+
+Left open: contract requests, now follow-ups.
+
+- **API/contracts:**
+  - `Channel.lastLiveAt` on `channels.get`; the page derives it from the newest VOD meanwhile;
+  - `ChannelCard.latestVod`, for the Recently live thumbnails and durations;
+  - `vods.listByCategory` and `clips.listByCategory`;
+  - `Category.viewerCount`, `tags` and `followerCount`;
+  - `Channel.socials`;
+  - a range filter on `clips.list`.
+- **`packages/ui`:**
+  - link slots on `StreamCard`; D1 renders a `CardLinks` row under the card meanwhile;
+  - in `site-header.tsx`: search centred on `lg`, the mobile Sheet order (search first), and
+    closing the Sheet on navigation;
+  - an elapsed mode on `RelativeTime`;
+  - a portal `container` on `PopoverContent`, `DropdownMenuContent` and `DialogContent`, so menus
+    show in fullscreen.
+- **Web:**
+  - `ChannelSummary` gains `category` and `tags`, so the 5 s poll refreshes the header's
+    metadata;
+  - goals in the pinned strip: chat state has no goal data;
+  - the offline chat's "last message" time: no API gives it;
+  - an AppShell story for `sidebarPlacement="below"`.
+
+Flakes seen, for `docs/operators/flakes.md`:
+
+- `watch-room` b8 edge-sync, every attempt from `41789541395` on (handed to batch8-wave2);
+- `surge-guard` RTMP publish "authentication failed" (`41793894751`, passed on rerun);
+- `status.int` "the renderer's targets are probed…" with `web: unknown` (`41801398808` attempt 1,
+  passed on rerun).
+
+**D wave 3 can start.** Its gates are on `main`: D3-watch needs D2-channel and D2-player, and
+D5-studio needs D5-capture's evidence and D4. D3-watch reuses `components/channel/video-grid.tsx`
+for "More from", and removes the last two D3 `PENDING_HEAD` entries. D5-studio takes
+`import.tsx`.
+
+Waiting on the user (visual checks on staging or a `seed full` stack, dark and light, at 320,
+375, 768 and 1440 px, in `en` and `es`):
+
+- **D1-web:**
+  - `/`: one Spotlight hero, no channel twice, the Categories shelf, the dismissible welcome
+    strip;
+  - `/directory` with fallback tiles and the tag filter, `/directory/art` and
+    `/search?q=streamer`;
+  - the rail expanded, collapsed and in the mobile Sheet;
+  - ⌘K;
+  - the account-menu theme switcher;
+  - Sign in and Sign up carrying `?redirect=`;
+  - a keyboard walk from `/` through search to a channel.
+- **D2-channel:**
+  - `/demo_streamer1` on every tab;
+  - an offline channel with VODs, and one without;
+  - the header at 320 and 375 px, with Report in the More menu;
+  - category, tag, uptime, Share and "Just started";
+  - an unknown channel;
+  - theatre, with chat docked and collapsed: the stream and chat must not restart.
+- **D2-player:**
+  - the bar's show and hide timing;
+  - the settings menu, the data saver chip and the one-time hint;
+  - fullscreen and PiP in Chromium, Firefox and Safari, and iOS Safari;
+  - every shortcut, with none firing in chat;
+  - DVR and VOD bars.
+- **D2-chat:**
+  - chat reaching the bottom of the viewport at 1440×900;
+  - the strip with two items, plus dismissal and focus;
+  - offline and 18+ gated chat;
+  - the points chip;
+  - the strip at 320 px.
+- **Harness:** `d-surfaces` on a `seed full` stack.
+
 **D wave 2 can start (2026-11-04).** Both units it depends on are on `main` with CI green: B8-web
 (merge `eaa96047`) and B8-player (merge `da122e26`, plus its CI fixes listed below).
 
