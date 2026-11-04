@@ -3,7 +3,8 @@
 #
 # Backstop CI: runs the same `bun run verify` used locally, one job per group of its steps. If it
 # goes red on main, fix main immediately. A push of docs alone runs only the static group (format,
-# REUSE, stray domains): nothing else reads them. Pull requests run the gate; main, the nightly schedule
+# REUSE, stray domains): nothing else reads them. A push of web UI alone (components, routes,
+# styles, catalogs) skips the integration and relay groups and runs only the UI scenarios. Pull requests run the gate; main, the nightly schedule
 # and a manual dispatch also run the full harness scenario, a release dry run (release.yml) and
 # the self-host end-to-end test. On a push to main, `changes` (scripts/ci-changes.ts) runs only the
 # harness scenarios (and shards) the push can affect, none for docs and tests alone, and skips the
@@ -49,6 +50,7 @@ jobs:
       shards: ${{ steps.classify.outputs.shards }}
       deploy: ${{ steps.classify.outputs.deploy }}
       docs: ${{ steps.classify.outputs.docs }}
+      ui: ${{ steps.classify.outputs.ui }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -161,16 +163,17 @@ jobs:
             }
     env:
       GROUP: ${{ matrix.group }}
-      # A docs-only push (scripts/ci-changes.ts) needs the static group alone; the others pass
-      # without setting up (a job `if` cannot read the matrix).
-      SKIP: ${{ needs.changes.outputs.docs == 'true' && matrix.group != 'static' }}
+      # A docs-only push (scripts/ci-changes.ts) needs the static group alone, and a UI-only one no
+      # integration or relay group; the others pass without setting up (a job `if` cannot read the
+      # matrix).
+      SKIP: ${{ (needs.changes.outputs.docs == 'true' && matrix.group != 'static') || (needs.changes.outputs.ui == 'true' && (matrix.group == 'integration' || matrix.group == 'relay')) }}
       # `podman compose` prefers the docker-compose plugin the runner image ships, which talks to
       # a Podman socket nobody started; the gate is written for podman-compose.
       PODMAN_COMPOSE_PROVIDER: podman-compose
     steps:
-      - name: Docs only
+      - name: Skipped
         if: env.SKIP == 'true'
-        run: echo "::notice::docs-only push, the $GROUP group is skipped"
+        run: echo "::notice::docs- or UI-only push, the $GROUP group is skipped"
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         if: env.SKIP != 'true'
         with:

@@ -9,12 +9,14 @@
  * every scenario for anything else. A path-filtered shard (`PATH_FILTERED_SHARDS`, the captions
  * shard) runs only when the push reaches its paths or narrows the harness to one of its
  * scenarios. The release dry run and the self-host end-to-end run only when
- * something they build or install changed. The nightly run and a manual dispatch run everything,
- * as does any push whose diff cannot be read.
+ * something they build or install changed. A push of web UI alone (`isUi`: components, routes,
+ * styles, message catalogs) skips the gate's integration and relay groups and runs only the UI
+ * scenarios (`UI_SCENARIOS`); the other browser scenarios wait for the nightly run. The nightly run
+ * and a manual dispatch run everything, as does any push whose diff cannot be read.
  *
  * Usage (CI): `bun scripts/ci-changes.ts` with EVENT_NAME, BASE (the last green run's commit on
  * main) and SHA set; writes `code`, `scenarios` (`all`, a comma list or empty), `shards` (a JSON
- * list for the harness matrix) and `deploy` to $GITHUB_OUTPUT. It runs before `bun install`, so it
+ * list for the harness matrix), `deploy`, `docs` and `ui` to $GITHUB_OUTPUT. It runs before `bun install`, so it
  * imports nothing outside the standard library and `harness/src/shards.ts` (which has no imports).
  */
 import { execFileSync } from "node:child_process";
@@ -35,6 +37,8 @@ export interface Changes {
   filteredShards: readonly string[];
   /** Only prose and pictures no test or build reads: the gate runs its static group alone. */
   docsOnly?: true;
+  /** Web UI (and docs) alone: the gate skips its integration and relay groups. */
+  uiOnly?: true;
 }
 
 export const EVERYTHING: Changes = { scenarios: ALL, deploy: true, filteredShards: Object.keys(PATH_FILTERED_SHARDS) };
@@ -53,6 +57,25 @@ export function isDocsOnly(path: string): boolean {
 /** Tests and stories: the gate runs them; no scenario does. */
 export const isTestOnly = (path: string): boolean =>
   /\.(test|int\.test)\.tsx?$/.test(path) || /(^|\/)tests\//.test(path) || /\.stories\.tsx?$/.test(path);
+
+/**
+ * Web UI no service, worker or relay runs: the web app's components, routes, styles and message
+ * catalogs, and the shared UI kit. Not the web server, the player, the chat client or the service
+ * worker, which the stream and chat scenarios drive. Integration tests never count.
+ */
+const UI: readonly RegExp[] = [
+  /^apps\/web\/src\/(components|routes|i18n)\//,
+  /^apps\/web\/src\/styles\.css$/,
+  /^packages\/ui\/(src|stories)\//,
+];
+
+export const isUi = (path: string): boolean => !/\.int\.test\.tsx?$/.test(path) && UI.some((re) => re.test(path));
+
+/**
+ * What a UI-only push runs of the harness: sign-up through watching and chatting in two browsers,
+ * and every web route as each seeded role. The nightly run still runs every browser scenario.
+ */
+export const UI_SCENARIOS: readonly string[] = ["e2e-basic", "seed-coverage"];
 
 const DEPLOY: readonly RegExp[] = [
   /^infra\//,
@@ -170,11 +193,14 @@ export function shardsFor(selection: Selection): string[] {
 }
 
 export function classify(files: readonly string[], graph: ImportGraph): Changes {
+  const docsOnly = files.every(isDocsOnly);
+  const uiOnly = !docsOnly && files.every((f) => isDocsOnly(f) || isUi(f));
   return {
-    scenarios: selectScenarios(files, graph),
+    scenarios: uiOnly ? UI_SCENARIOS : selectScenarios(files, graph),
     deploy: files.some(isDeploy),
     filteredShards: filteredShardsReached(files),
-    ...(files.every(isDocsOnly) ? { docsOnly: true as const } : {}),
+    ...(docsOnly ? { docsOnly: true as const } : {}),
+    ...(uiOnly ? { uiOnly: true as const } : {}),
   };
 }
 
@@ -209,7 +235,7 @@ export function changesFor(
 export function outputs(c: Changes): string {
   const scenarios = c.scenarios === ALL ? ALL : c.scenarios.join(",");
   const shards = c.scenarios === ALL || c.scenarios.length > 0 ? matrixShards(c) : Object.keys(FULL_SHARDS);
-  return `code=${scenarios !== ""}\nscenarios=${scenarios}\nshards=${JSON.stringify(shards)}\ndeploy=${c.deploy}\ndocs=${c.docsOnly === true}\n`;
+  return `code=${scenarios !== ""}\nscenarios=${scenarios}\nshards=${JSON.stringify(shards)}\ndeploy=${c.deploy}\ndocs=${c.docsOnly === true}\nui=${c.uiOnly === true}\n`;
 }
 
 if (import.meta.main) {

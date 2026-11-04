@@ -219,6 +219,14 @@ describe("CI verify jobs", () => {
     expect(ci.jobs.harness.needs).toBe("changes");
   });
 
+  test("a docs-only push runs the static group alone; a UI-only one skips integration and relay", () => {
+    expect(ci.jobs.changes.outputs.ui).toBe("${{ steps.classify.outputs.ui }}");
+    expect(ci.jobs.verify.env.SKIP).toBe(
+      "${{ (needs.changes.outputs.docs == 'true' && matrix.group != 'static') || " +
+        "(needs.changes.outputs.ui == 'true' && (matrix.group == 'integration' || matrix.group == 'relay')) }}",
+    );
+  });
+
   test("the release dry run and the self-host test run only when something they build or install changed", () => {
     for (const job of [ci.jobs["release-dry-run"], ci.jobs["selfhost-e2e"]]) {
       expect(job.needs).toBe("changes");

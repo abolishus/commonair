@@ -9,6 +9,7 @@ import {
   ALL,
   EVERYTHING,
   type ImportGraph,
+  UI_SCENARIOS,
   changesFor,
   classify,
   filteredShardsReached,
@@ -16,6 +17,7 @@ import {
   isDeploy,
   isDocsOnly,
   isTestOnly,
+  isUi,
   matrixShards,
   outputs,
   scenariosReaching,
@@ -172,10 +174,10 @@ describe("shardsFor and outputs", () => {
   });
   test("nothing selected: code false, and a non-empty shard list for the skipped matrix", () => {
     expect(outputs({ scenarios: [], deploy: false, filteredShards: [] })).toBe(
-      `code=false\nscenarios=\nshards=${JSON.stringify(Object.keys(FULL_SHARDS))}\ndeploy=false\ndocs=false\n`,
+      `code=false\nscenarios=\nshards=${JSON.stringify(Object.keys(FULL_SHARDS))}\ndeploy=false\ndocs=false\nui=false\n`,
     );
     expect(outputs({ scenarios: ["interact"], deploy: true, filteredShards: [] })).toBe(
-      'code=true\nscenarios=interact\nshards=["interact"]\ndeploy=true\ndocs=false\n',
+      'code=true\nscenarios=interact\nshards=["interact"]\ndeploy=true\ndocs=false\nui=false\n',
     );
     expect(outputs(EVERYTHING)).toContain("scenarios=all\n");
     expect(outputs(EVERYTHING)).toContain("docs=false\n");
@@ -189,6 +191,54 @@ describe("shardsFor and outputs", () => {
     // A test, or anything else, alongside the docs runs the whole gate.
     expect(classify(["PLAN.md", "scripts/tests/ci-changes.test.ts"], GRAPH).docsOnly).toBeUndefined();
     expect(classify(["PLAN.md", "apps/web/src/main.tsx"], GRAPH).docsOnly).toBeUndefined();
+  });
+});
+
+describe("UI-only pushes", () => {
+  test.each([
+    "apps/web/src/components/channel/channel-header.tsx",
+    "apps/web/src/components/money/tip-button.test.tsx",
+    "apps/web/src/routes/_app/index.tsx",
+    "apps/web/src/i18n/locales/en.json",
+    "apps/web/src/styles.css",
+    "packages/ui/src/blocks/stream-card.tsx",
+    "packages/ui/stories/stream-card.stories.tsx",
+  ])("%s is UI", (path) => expect(isUi(path)).toBe(true));
+
+  test.each([
+    "apps/web/server.ts",
+    "apps/web/src/server/session.ts",
+    "apps/web/src/player/hls.ts",
+    "apps/web/src/chat/client.ts",
+    "apps/web/src/sw/index.ts",
+    "apps/web/src/lib/api.ts",
+    "apps/web/package.json",
+    "apps/web/tests/server.int.test.ts",
+    "apps/web/src/components/x.int.test.tsx",
+    "packages/ui/package.json",
+  ])("%s is not UI", (path) => expect(isUi(path)).toBe(false));
+
+  test("the UI scenarios are real scenarios", () => {
+    const scenarios = [...harnessGraph(ROOT).keys()].filter((p) => /^harness\/scenarios\/[^/_][^/]*\.ts$/.test(p));
+    for (const s of UI_SCENARIOS) expect(scenarios).toContain(`harness/scenarios/${s}.ts`);
+  });
+
+  test("UI (with docs) alone: ui true, the UI scenarios on their shards", () => {
+    const c = classify(["apps/web/src/components/directory.tsx", "apps/web/src/routes/_app.tsx", "PLAN.md"], GRAPH);
+    expect(c).toEqual({ scenarios: UI_SCENARIOS, deploy: false, filteredShards: ["seed"], uiOnly: true });
+    expect(matrixShards(c)).toEqual(["seed", "rest"]);
+    expect(outputs(c)).toContain("ui=true\n");
+    expect(outputs(c)).toContain("scenarios=e2e-basic,seed-coverage\n");
+  });
+
+  test("anything else alongside the UI runs the whole gate and its usual selection", () => {
+    expect(classify(["apps/web/src/components/directory.tsx", "apps/web/src/player/hls.ts"], GRAPH)).toEqual({
+      scenarios: ALL,
+      deploy: false,
+      filteredShards: [],
+    });
+    expect(classify(["apps/web/src/styles.css", "packages/db/tests/x.int.test.ts"], GRAPH).uiOnly).toBeUndefined();
+    expect(classify(["PLAN.md"], GRAPH).uiOnly).toBeUndefined();
   });
 });
 
