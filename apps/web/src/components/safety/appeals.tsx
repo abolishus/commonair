@@ -462,7 +462,14 @@ export function MyAppeals({
           onAppeal={async (action, body) => data.add(await accountClient.appeal(action.id, body))}
         />
       )}
-      <AppealList appeals={data.appeals} />
+      {/* F39: the third list gets its heading, like the two above it. */}
+      <Section
+        data-testid="appeals-list"
+        heading={t("settings.appeals.listTitle")}
+        description={t("settings.appeals.listIntro")}
+      >
+        <AppealList appeals={data.appeals} />
+      </Section>
     </>
   );
 }

@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { PageHeader } from "@commonair/ui/blocks/headers";
-import { PageContainer } from "@commonair/ui/layouts";
 import { Navigate, createFileRoute } from "@tanstack/react-router";
 import type * as React from "react";
 import { MyAppeals } from "../../components/safety/appeals.tsx";
@@ -23,11 +22,11 @@ function AppealsPage(): React.JSX.Element {
   const { me } = useBootstrap();
   if (!me) return <Navigate to="/signin" replace />;
   return (
-    <PageContainer data-testid="appeals" className="flex flex-col gap-6 py-8">
+    <div data-testid="appeals" className="flex flex-col gap-6">
       <PageHeader title={t("safety.appeals.title")} description={t("safety.appeals.intro")} />
       {/* Statements of reasons (ADR 0019) above the appeals they lead to. */}
       <EnforcementSection />
       <MyAppeals />
-    </PageContainer>
+    </div>
   );
 }

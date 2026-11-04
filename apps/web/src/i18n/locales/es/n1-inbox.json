@@ -46,7 +46,6 @@
   "notifySettings.channels.empty": "Todavía no sigues ningún canal",
   "notifySettings.channels.emptyBody": "Sigue un canal para elegir cómo te avisa cuando empieza a transmitir en vivo.",
   "notifySettings.channels.loadMore": "Mostrar más canales",
-  "notifySettings.channels.bell": "Notificaciones de transmisiones en vivo de {channel}",
   "notifySettings.channels.email": "Correos de {channel}",
   "notifySettings.channels.push": "Notificaciones push de {channel}",
   "notifySettings.channels.emailLabel": "Correo",

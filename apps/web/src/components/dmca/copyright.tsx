@@ -38,6 +38,7 @@ import { useLoad } from "../money/use-load.ts";
 import { t } from "../../i18n/index.ts";
 import { toastActionError } from "../../lib/action-error.ts";
 import { errorCode } from "../../lib/api.ts";
+import { fillNode } from "../../lib/fill.tsx";
 import {
   copyrightClient,
   type CopyrightClient,
@@ -247,7 +248,10 @@ function NoticeCard({
             </li>
           ))}
         </ul>
-        <p className="text-sm text-muted-foreground">{t("copyright.notice.repeat")}</p>
+        {/* F35: the card's one note style (its description's), not body text. */}
+        <p data-testid="copyright-strike-note" className="text-xs/relaxed text-muted-foreground">
+          {t("copyright.notice.repeat")}
+        </p>
         {notice.counter ? (
           <CounterReceipt counter={notice.counter} />
         ) : canCounter(notice) ? (
@@ -298,9 +302,8 @@ export function CounterReceipt({
       ) : counter.suitFiledAt ? (
         <p>{t("copyright.receipt.suit")}</p>
       ) : (
-        <p>
-          {t("copyright.receipt.restoreAfter")} <RelativeTime date={counter.restoreAfter} />
-        </p>
+        // F39: one sentence with the time inside it ("restored in 2 weeks", not "restored after in 2 weeks").
+        <p>{fillNode(t("settings.copyright.restoreAfter"), "time", <RelativeTime date={counter.restoreAfter} />)}</p>
       )}
     </output>
   );

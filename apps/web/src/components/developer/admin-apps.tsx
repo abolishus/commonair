@@ -92,12 +92,15 @@ export function AdminAppsPage({ client }: { client: AdminAppsClient }): React.JS
             onChange={(e) => setTyped(e.currentTarget.value)}
           />
         </Field>
-        <SwitchField
-          label={t("developer.admin.suspendedOnly")}
-          checked={suspendedOnly}
-          onCheckedChange={setSuspendedOnly}
-          switchProps={{ "data-testid": "adminapps-filter-suspended" }}
-        />
+        {/* F39: shrink-wrapped, so the label sits next to its switch instead of a row's width away. */}
+        <div data-testid="adminapps-filter" className="w-fit sm:pb-1.5">
+          <SwitchField
+            label={t("developer.admin.suspendedOnly")}
+            checked={suspendedOnly}
+            onCheckedChange={setSuspendedOnly}
+            switchProps={{ "data-testid": "adminapps-filter-suspended" }}
+          />
+        </div>
       </div>
       {failure ? (
         <p role="alert" className="text-sm break-words text-destructive">

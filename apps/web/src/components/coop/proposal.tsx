@@ -1,7 +1,17 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { ChannelAvatar, ConfirmDialog, RelativeTime, StatusBadge, formatNumber, useLocale } from "@commonair/ui";
+import {
+  ChannelAvatar,
+  ConfirmDialog,
+  EmptyState,
+  RelativeTime,
+  SkeletonGroup,
+  SkeletonText,
+  StatusBadge,
+  formatNumber,
+  useLocale,
+} from "@commonair/ui";
 import {
   CouncilRespondForm,
   CouncilResponseCard,
@@ -20,6 +30,7 @@ import { CommentItem, CommentList } from "@commonair/ui/blocks/media";
 import { Button } from "@commonair/ui/components/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@commonair/ui/components/card";
 import { PageContainer, SplitLayout } from "@commonair/ui/layouts";
+import { Comment01Icon } from "@hugeicons/core-free-icons";
 import { Link } from "@tanstack/react-router";
 import * as React from "react";
 import { t } from "../../i18n/index.ts";
@@ -131,6 +142,8 @@ export function ProposalPage({
 
   const actions = authorActions(p, meId);
   const commentsOpen = isOpenProposal(p.status);
+  // The empty discussion's action focuses the composer below it.
+  const composerRef = React.useRef<HTMLDivElement>(null);
   const ballotOpen = votingOpen(p, now) && !votingClosed;
   const participation = p.participation;
   const participationView = participation ? (
@@ -324,8 +337,41 @@ export function ProposalPage({
             {p.status !== "draft" && (
               <Section heading={t("coop.discussion.title")}>
                 {commentsError}
-                {comments === null ? null : comments.length === 0 ? (
-                  <p>{t("coop.discussion.empty")}</p>
+                {comments === null ? (
+                  // F28: a skeleton while the discussion loads, not a blank.
+                  <SkeletonGroup data-testid="proposal-comments-loading" label={t("coop.loading")}>
+                    <SkeletonText lines={3} />
+                  </SkeletonGroup>
+                ) : comments.length === 0 ? (
+                  // F25: an empty state; a member who may comment gets the composer as its action.
+                  <EmptyState
+                    data-testid="proposal-discussion-empty"
+                    icon={Comment01Icon}
+                    headingLevel={3}
+                    title={t("coop.discussion.empty")}
+                    description={
+                      !commentsOpen
+                        ? t("coop.discussion.closed")
+                        : memberError
+                          ? // The membership check failed: its error shows below; "members only" would mislead.
+                            undefined
+                          : member
+                            ? t("settings.coop.discussionEmptyHint")
+                            : t("coop.discussion.membersOnly")
+                    }
+                    action={
+                      commentsOpen && member && !memberError ? (
+                        <Button
+                          data-testid="empty-state-action"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => composerRef.current?.querySelector("textarea")?.focus()}
+                        >
+                          {t("settings.coop.discussionStart")}
+                        </Button>
+                      ) : undefined
+                    }
+                  />
                 ) : (
                   <CommentList label={t("coop.discussion.title")}>
                     {comments.map((c) => (
@@ -352,26 +398,28 @@ export function ProposalPage({
                 {commentsOpen && memberError ? (
                   memberError
                 ) : commentsOpen && member ? (
-                  <CommentComposer
-                    label={t("coop.discussion.add")}
-                    placeholder={t("coop.discussion.placeholder")}
-                    submitLabel={t("coop.discussion.post")}
-                    value={comment}
-                    onValueChange={setComment}
-                    disabled={commenting}
-                    textareaProps={{ maxLength: COMMENT_MAX }}
-                    onSubmit={(body) => {
-                      const text = body.trim();
-                      if (!text || commenting) return;
-                      void busy(setCommenting, async () => {
-                        await onComment(text);
-                        setComment("");
-                      }).catch(onActionError);
-                    }}
-                    data-textarea-testid="proposal-comment-body"
-                    data-submit-testid="proposal-comment-submit"
-                  />
-                ) : (
+                  <div ref={composerRef}>
+                    <CommentComposer
+                      label={t("coop.discussion.add")}
+                      placeholder={t("coop.discussion.placeholder")}
+                      submitLabel={t("coop.discussion.post")}
+                      value={comment}
+                      onValueChange={setComment}
+                      disabled={commenting}
+                      textareaProps={{ maxLength: COMMENT_MAX }}
+                      onSubmit={(body) => {
+                        const text = body.trim();
+                        if (!text || commenting) return;
+                        void busy(setCommenting, async () => {
+                          await onComment(text);
+                          setComment("");
+                        }).catch(onActionError);
+                      }}
+                      data-textarea-testid="proposal-comment-body"
+                      data-submit-testid="proposal-comment-submit"
+                    />
+                  </div>
+                ) : comments !== null && comments.length === 0 ? null : (
                   <p>{commentsOpen ? t("coop.discussion.membersOnly") : t("coop.discussion.closed")}</p>
                 )}
               </Section>

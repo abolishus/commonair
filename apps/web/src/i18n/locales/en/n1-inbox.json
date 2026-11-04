@@ -46,7 +46,6 @@
   "notifySettings.channels.empty": "You do not follow any channels yet",
   "notifySettings.channels.emptyBody": "Follow a channel to choose how it tells you it went live.",
   "notifySettings.channels.loadMore": "Show more channels",
-  "notifySettings.channels.bell": "Go-live notifications from {channel}",
   "notifySettings.channels.email": "Email from {channel}",
   "notifySettings.channels.push": "Push from {channel}",
   "notifySettings.channels.emailLabel": "Email",

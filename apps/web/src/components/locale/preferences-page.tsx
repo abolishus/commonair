@@ -4,7 +4,6 @@
 import { PageHeader } from "@commonair/ui/blocks/headers";
 import { Label } from "@commonair/ui/components/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@commonair/ui/components/select";
-import { PageContainer } from "@commonair/ui/layouts";
 import { toast } from "@commonair/ui/toast";
 import { useRouter } from "@tanstack/react-router";
 import * as React from "react";
@@ -151,8 +150,8 @@ export function PreferencesPage({ initial }: { initial: string | null }): React.
 
   const autoLabel = t("preferences.language.auto");
   return (
-    <PageContainer width="narrow" data-testid="preferences-page" className="flex flex-col gap-6 py-8">
-      <PageHeader title={t("preferences.pageTitle")} />
+    <div data-testid="preferences-page" className="flex flex-col gap-6">
+      <PageHeader title={t("preferences.pageTitle")} description={t("settings.preferences.intro")} />
       <section aria-labelledby={`${selectId}-title`} className="flex flex-col gap-3">
         <h2 id={`${selectId}-title`} className="text-base font-medium">
           {t("preferences.language.title")}
@@ -206,6 +205,6 @@ export function PreferencesPage({ initial }: { initial: string | null }): React.
               : null}
         </p>
       </section>
-    </PageContainer>
+    </div>
   );
 }

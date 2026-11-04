@@ -51,7 +51,6 @@ export type Key =
   | "notifySettings.channels.empty"
   | "notifySettings.channels.emptyBody"
   | "notifySettings.channels.loadMore"
-  | "notifySettings.channels.bell"
   | "notifySettings.channels.email"
   | "notifySettings.channels.push"
   | "notifySettings.channels.emailLabel"

@@ -6,6 +6,8 @@ import {
   EmptyState,
   MoneyAmount,
   RelativeTime,
+  SkeletonGroup,
+  SkeletonText,
   StatusBadge,
   formatMoney,
   useLocale,
@@ -52,6 +54,7 @@ import {
   type TreasurerPayoutDto,
 } from "../../lib/money.ts";
 import type { TreasuryCoopTab, TreasuryPanels } from "../coop/treasury.tsx";
+import { useNarrow } from "../admin/use-narrow.ts";
 import { fraudHoldLabel } from "./fraud-review.tsx";
 
 /**
@@ -229,6 +232,18 @@ export function PaymentsPanel({
   loadingMore = false,
   onLoadMore,
 }: PaymentsPanelProps): React.JSX.Element {
+  // F31: at 375 px the table cut off Amount, Status and Confirm; there it is stacked rows.
+  const narrow = useNarrow();
+  const caption = search ? t("treasury.payments.searchCaption") : t("treasury.payments.pendingCaption");
+  const empty = (
+    <EmptyState
+      icon={MoneyReceive01Icon}
+      title={search ? t("treasury.payments.noMatch") : t("treasury.payments.empty")}
+      description={search ? t("treasury.payments.noMatchHint") : t("treasury.payments.emptyHint")}
+      headingLevel={3}
+    />
+  );
+  const footer = hasMore && onLoadMore ? <LoadMore onClick={onLoadMore} loading={loadingMore} /> : undefined;
   const columns: DataTableColumn<TreasurerPaymentDto>[] = [
     {
       id: "reference",
@@ -280,33 +295,112 @@ export function PaymentsPanel({
         onSearchChange={onSearchChange}
         searchInputProps={searchInput}
       />
-      <DataTable
-        caption={search ? t("treasury.payments.searchCaption") : t("treasury.payments.pendingCaption")}
-        columns={columns}
-        rows={payments ?? []}
-        loading={payments === null}
-        loadingRows={3}
-        getRowId={(p) => p.paymentId}
-        rowProps={(p) => ({
-          "data-testid": "treasury-payment-row",
-          "data-payment-id": p.paymentId,
-          "data-reference": p.reference,
-          "data-status": p.status,
-          "data-kind": p.kind,
-          "data-cents": p.amount.cents,
-          "data-refunded": p.refunded.cents,
-        })}
-        empty={
-          <EmptyState
-            icon={MoneyReceive01Icon}
-            title={search ? t("treasury.payments.noMatch") : t("treasury.payments.empty")}
-            description={search ? t("treasury.payments.noMatchHint") : t("treasury.payments.emptyHint")}
-            headingLevel={3}
-          />
-        }
-        footer={hasMore && onLoadMore ? <LoadMore onClick={onLoadMore} loading={loadingMore} /> : undefined}
-      />
+      {narrow ? (
+        <PaymentCards
+          payments={payments}
+          caption={caption}
+          onConfirm={onConfirm}
+          onDispute={onDispute}
+          empty={empty}
+          footer={footer}
+        />
+      ) : (
+        <DataTable
+          caption={caption}
+          columns={columns}
+          rows={payments ?? []}
+          loading={payments === null}
+          loadingRows={3}
+          getRowId={(p) => p.paymentId}
+          rowProps={(p) => ({
+            "data-testid": "treasury-payment-row",
+            "data-payment-id": p.paymentId,
+            "data-reference": p.reference,
+            "data-status": p.status,
+            "data-kind": p.kind,
+            "data-cents": p.amount.cents,
+            "data-refunded": p.refunded.cents,
+          })}
+          empty={empty}
+          footer={footer}
+        />
+      )}
     </>
+  );
+}
+
+function paymentWho(p: TreasurerPaymentDto): string {
+  return [
+    p.user?.username ?? t("treasury.payments.noUser"),
+    p.channelSlug ? t("treasury.payments.to", { channel: p.channelSlug }) : "",
+  ]
+    .filter((s) => s !== "")
+    .join(t("money.detailSeparator"));
+}
+
+/** The payments as stacked rows (F31): reference and what, then amount, status and the actions on each row. */
+export function PaymentCards({
+  payments,
+  caption,
+  onConfirm,
+  onDispute,
+  empty,
+  footer,
+}: {
+  payments: TreasurerPaymentDto[] | null;
+  caption: string;
+  onConfirm: PaymentsPanelProps["onConfirm"];
+  onDispute: PaymentsPanelProps["onDispute"];
+  empty: React.ReactNode;
+  footer?: React.ReactNode;
+}): React.JSX.Element {
+  if (payments === null)
+    return (
+      <SkeletonGroup label={caption}>
+        <SkeletonText lines={4} />
+      </SkeletonGroup>
+    );
+  if (payments.length === 0) return <>{empty}</>;
+  return (
+    <div className="flex min-w-0 flex-col gap-3">
+      <ul data-testid="treasury-payment-cards" aria-label={caption} className="flex min-w-0 flex-col divide-y border-y">
+        {payments.map((p) => {
+          const badge = paymentStatusBadge(p.status);
+          return (
+            <li
+              key={p.paymentId}
+              data-testid="treasury-payment-row"
+              data-payment-id={p.paymentId}
+              data-reference={p.reference}
+              data-status={p.status}
+              data-kind={p.kind}
+              data-cents={p.amount.cents}
+              data-refunded={p.refunded.cents}
+              className="flex min-w-0 flex-col gap-2 py-3"
+            >
+              <div className="flex min-w-0 items-start justify-between gap-3">
+                <div className="flex min-w-0 flex-col gap-0.5">
+                  <span className="font-medium tabular-nums break-all">{p.reference}</span>
+                  <span className="text-xs text-muted-foreground">{paymentDescription(p)}</span>
+                  <span className="text-xs break-words text-muted-foreground">{paymentWho(p)}</span>
+                </div>
+                <span className="shrink-0 font-medium tabular-nums">
+                  <MoneyAmount value={p.amount} />
+                </span>
+              </div>
+              <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+                <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <StatusBadge tone={badge.tone}>{badge.label}</StatusBadge>
+                  <RelativeTime date={p.createdAt} />
+                </span>
+                <PaymentActions payment={p} onConfirm={onConfirm} onDispute={onDispute} />
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+      {footer}
+    </div>
   );
 }
 

@@ -30,6 +30,7 @@ import { CheckmarkCircle02Icon } from "@hugeicons/core-free-icons";
 import * as React from "react";
 import { FormError } from "../form-error.tsx";
 import { usePaged } from "../money/use-load.ts";
+import { DateTimeField } from "../admin/date-time-field.tsx";
 import { t } from "../../i18n/index.ts";
 import { toastActionError } from "../../lib/action-error.ts";
 import {
@@ -471,7 +472,7 @@ function SnapshotView({ detail }: { detail: NcmecReportDetailDto }): React.JSX.E
   );
 }
 
-/** `datetime-local` text (the reviewer's local time) to an ISO timestamp, or null when empty or invalid. */
+/** `YYYY-MM-DDTHH:MM` text (the reviewer's local time; the `DateTimeField` value) to an ISO timestamp, or null when empty or invalid. */
 export function localDateTimeToIso(value: string): string | null {
   if (value.trim() === "") return null;
   const ms = new Date(value).getTime();
@@ -487,7 +488,6 @@ function NcmecFilingForm({
   const [filedAt, setFiledAt] = React.useState("");
   const [pending, setPending] = React.useState(false);
   const idId = React.useId();
-  const atId = React.useId();
   const iso = localDateTimeToIso(filedAt);
   const ready = reportId.trim() !== "" && iso !== null;
   const submit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -505,7 +505,7 @@ function NcmecFilingForm({
   };
   return (
     <form className="flex flex-col gap-3" onSubmit={(e) => void submit(e)} noValidate>
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-3 lg:grid-cols-2 lg:items-start">
         <Field>
           <FieldLabel htmlFor={idId}>{t("safety.legal.externalId")}</FieldLabel>
           <Input
@@ -517,16 +517,14 @@ function NcmecFilingForm({
             onChange={(e) => setReportId(e.currentTarget.value)}
           />
         </Field>
-        <Field>
-          <FieldLabel htmlFor={atId}>{t("safety.legal.filedAt")}</FieldLabel>
-          <Input
-            id={atId}
-            data-testid="legal-ncmec-filed-at"
-            type="datetime-local"
-            value={filedAt}
-            onChange={(e) => setFiledAt(e.currentTarget.value)}
-          />
-        </Field>
+        {/* F33: the design-system date and time field; the reviewer's local time, as before. */}
+        <DateTimeField
+          data-testid="legal-ncmec-filed-at"
+          label={t("safety.legal.filedAt")}
+          description={t("settings.dateTime.localHint")}
+          value={filedAt}
+          onValueChange={setFiledAt}
+        />
       </div>
       <div>
         <Button

@@ -8,7 +8,7 @@ import { AlertCallout } from "@commonair/ui/blocks/feedback";
 import { PageHeader, Section } from "@commonair/ui/blocks/headers";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@commonair/ui/components/card";
 import { PageContainer, ResponsiveGrid, SplitLayout } from "@commonair/ui/layouts";
-import { UserGroupIcon } from "@hugeicons/core-free-icons";
+import { Calendar03Icon, UserGroupIcon } from "@hugeicons/core-free-icons";
 import { Link } from "@tanstack/react-router";
 import type * as React from "react";
 import { t } from "../../i18n/index.ts";
@@ -127,7 +127,14 @@ export function CouncilPage({
               {elections === null ? (
                 <Loading />
               ) : elections.length === 0 ? (
-                <p>{t("coop.elections.empty")}</p>
+                // F25: nobody on this page can schedule one (the board does), so no action.
+                <EmptyState
+                  data-testid="council-elections-empty"
+                  icon={Calendar03Icon}
+                  headingLevel={3}
+                  title={t("coop.elections.empty")}
+                  description={t("settings.coop.electionsEmptyHint")}
+                />
               ) : (
                 <ResponsiveGrid cols={2}>
                   {elections.map((e) => (
@@ -174,7 +181,15 @@ export function CouncilPage({
                       memberClass: seat.class,
                       description: t("coop.board.seat", { class: classLabel(seat.class) }),
                     }))}
-                    empty={<p>{t("coop.board.empty")}</p>}
+                    empty={
+                      <EmptyState
+                        data-testid="council-board-empty"
+                        icon={UserGroupIcon}
+                        headingLevel={3}
+                        title={t("coop.board.empty")}
+                        description={t("settings.coop.boardEmptyHint")}
+                      />
+                    }
                   />
                 )}
               </CardContent>

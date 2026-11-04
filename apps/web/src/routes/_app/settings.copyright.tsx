@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { PageHeader } from "@commonair/ui/blocks/headers";
-import { PageContainer } from "@commonair/ui/layouts";
 import { Navigate, createFileRoute } from "@tanstack/react-router";
 import type * as React from "react";
 import { MyCopyright } from "../../components/dmca/copyright.tsx";
@@ -26,9 +25,9 @@ function CopyrightPage(): React.JSX.Element {
   const { notice } = Route.useSearch();
   if (!me) return <Navigate to="/signin" replace />;
   return (
-    <PageContainer className="flex flex-col gap-6 py-8">
+    <div data-testid="copyright-page" className="flex flex-col gap-6">
       <PageHeader title={t("copyright.title")} description={t("copyright.intro")} />
       <MyCopyright focusNoticeId={notice} />
-    </PageContainer>
+    </div>
   );
 }
