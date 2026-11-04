@@ -160,7 +160,8 @@ describe.runIf(HAVE_PODMAN)("probes to page", () => {
       } catch {
         // Prometheus still starting.
       }
-      if ((states.local === "up" && states.closed === "down") || Date.now() > deadline) break;
+      // Wait for every state asserted below: `web` (an unresolvable origin) can report after the TCP probes.
+      if ((states.local === "up" && states.closed === "down" && states.web === "down") || Date.now() > deadline) break;
       await sleep(3_000);
     }
     expect(states).toMatchObject({ local: "up", closed: "down", web: "down" });
