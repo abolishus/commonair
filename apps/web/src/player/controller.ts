@@ -157,6 +157,16 @@ export interface PlayerControllerOptions {
   onFeatures?: (features: SessionFeatures) => void;
 }
 
+/** One rendition in the settings menu's quality list. */
+export interface QualityLevel {
+  /** hls.js's level index (`setQuality`). */
+  index: number;
+  height: number | null;
+  frameRate: number | null;
+  bitrate: number;
+  audioOnly: boolean;
+}
+
 /** hls.js levels as the budget controller sees them (audio-only: no video codec, no picture size). */
 function levelInfos(hls: Pick<Hls, "levels">): LevelInfo[] {
   return hls.levels.map((l) => ({
@@ -285,6 +295,8 @@ export class PlayerController {
   /** The playlist being played (its token is replaced on reload). */
   private playlistUrl: string | null = null;
   private renditions: readonly string[] = [];
+  /** The viewer's rendition pick (`setQuality`), -1 for Auto. */
+  private qualityPick = -1;
   private readonly meter = new DataUsageMeter();
   /** The DVR grant from `playback.start` (its URL as granted), null without one. */
   private dvr: { windowSeconds: number; playlistUrl: string } | null = null;
@@ -534,6 +546,7 @@ export class PlayerController {
       const onLevel = () => finish(true);
       const timer = setTimeout(() => finish(false), DVR_LOAD_TIMEOUT_MS);
       if (ctor) hls.on(ctor.Events.LEVEL_LOADED, onLevel);
+      this.resetQuality();
       hls.loadSource(url);
       if (autoplay) void this.opts.video.play().catch(() => undefined);
     });
@@ -601,6 +614,40 @@ export class PlayerController {
   playableLevels(): LevelInfo[] {
     const levels = this.hls ? levelInfos(this.hls) : [];
     return levels.length > 0 ? levels : nominalLevels(this.renditions);
+  }
+
+  /**
+   * The renditions the viewer may pick in the settings menu (D2-player), in hls.js's order. None on
+   * native HLS, where the browser picks and exposes no levels.
+   */
+  qualityLevels(): QualityLevel[] {
+    const hls = this.hls;
+    if (!hls) return [];
+    return hls.levels.map((l, index) => ({
+      index,
+      height: l.height > 0 ? l.height : null,
+      frameRate: Number.isFinite(l.frameRate) && l.frameRate > 0 ? l.frameRate : null,
+      bitrate: Number.isFinite(l.bitrate) ? l.bitrate : 0,
+      audioOnly: !l.videoCodec && !((l.width ?? 0) > 0),
+    }));
+  }
+
+  /** The picked rendition's index, or -1 for Auto (hls.js's ABR, capped in data mode). */
+  quality(): number {
+    return this.qualityPick;
+  }
+
+  /** Pick a rendition (from the next fragment on), or -1 for Auto. */
+  setQuality(index: number): void {
+    const hls = this.hls;
+    const valid = hls !== null && Number.isInteger(index) && index >= 0 && index < hls.levels.length;
+    this.qualityPick = valid ? index : -1;
+    if (hls) hls.nextLevel = this.qualityPick;
+  }
+
+  /** Back to Auto: hls.js drops a manual level on `loadSource`, and the new renditions may differ. */
+  private resetQuality(): void {
+    this.qualityPick = -1;
   }
 
   /** hls.js: cap ABR at the wanted ceiling (the origin's filter does it for native HLS). */
@@ -761,6 +808,8 @@ export class PlayerController {
   };
 
   private attachHls(HlsCtor: typeof Hls, url: string, plan: P2PPlan | null): void {
+    // A new hls.js starts on Auto, and its levels may differ: a remembered pick would mislabel the menu.
+    this.resetQuality();
     const xhrSetup: HlsConfig["xhrSetup"] = (xhr, requestUrl) => {
       // Heartbeats refresh the playback token and the DVR token; every request uses the current one.
       const token = this.tokenFor(requestUrl);
@@ -1088,6 +1137,8 @@ export class PlayerController {
     const { video } = this.opts;
     this.playlistUrl = url;
     if (this.dvrUrl !== null) return;
+    // The new playlist's level list may differ, so the pick goes back to Auto.
+    this.resetQuality();
     if (this.hls) this.hls.loadSource(url);
     else video.src = url;
     void video.play().catch(() => undefined);

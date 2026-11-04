@@ -19,7 +19,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@commonair/ui/components/dropdown-menu";
-import { ClosedCaptionIcon, Settings02Icon } from "@hugeicons/core-free-icons";
+import { ClosedCaptionIcon, TextFontIcon } from "@hugeicons/core-free-icons";
 import * as React from "react";
 import { t } from "../i18n/index.ts";
 import type { MessageKey } from "../i18n/keys/index.gen.ts";
@@ -131,7 +131,7 @@ export function CaptionsToggle({ controller, captions }: CaptionsToggleProps): R
           render={
             <IconButton
               data-testid="player-captions-style"
-              icon={Settings02Icon}
+              icon={TextFontIcon}
               label={t("captions.player.style")}
               className="text-overlay-foreground"
             />

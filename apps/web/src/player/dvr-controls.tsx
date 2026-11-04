@@ -7,7 +7,9 @@
  * in the control row. Both render nothing without a DVR grant (window 0) or in data mode, which is
  * source-only DVR's opposite (decision 7). Keyboard: arrows ±10 s, Page Up / Page Down ±60 s,
  * Home the oldest second of the window, End live (the slider's own keys), and `L` anywhere on the
- * page but a text field. Nothing animates, so reduced motion needs no special case.
+ * page but a text field. Nothing animates, so reduced motion needs no special case. The player's
+ * shortcut map (`shortcuts.ts`, the `?` dialog) lists `L` and leaves it to this listener; the
+ * player's ±5 s arrows apply only while the scrubber is not focused.
  */
 import { formatDuration } from "@commonair/ui";
 import { PlayerScrubber } from "@commonair/ui/blocks/media";

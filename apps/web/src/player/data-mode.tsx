@@ -141,9 +141,11 @@ export interface DataModePanelProps {
   usage: DataUsage | null | undefined;
   /** Watching behind live (DVR, W2): data mode does not apply there. */
   dvr: boolean;
+  /** Inside the player settings menu (D2-player): no card border of its own. */
+  compact?: boolean;
 }
 
-/** The data-saver section under the player. */
+/** The data-saver section (in the player settings menu since D2-player, F5). */
 export function DataModePanel({
   choice,
   onChoice,
@@ -154,6 +156,7 @@ export function DataModePanel({
   levels,
   usage,
   dvr,
+  compact = false,
 }: DataModePanelProps): React.JSX.Element {
   const id = React.useId();
   const { locale } = useLocale();
@@ -163,7 +166,12 @@ export function DataModePanel({
   const selected = customOpen || custom ? "custom" : String(choice.mbPerHour);
   const estimate = plan.estimateMbPerHour === null ? null : Math.round(plan.estimateMbPerHour);
   return (
-    <section aria-labelledby={`${id}-title`} className="flex min-w-0 flex-col gap-3 rounded-md border p-3 text-sm">
+    <section
+      aria-labelledby={`${id}-title`}
+      className={
+        compact ? "flex min-w-0 flex-col gap-3 text-sm" : "flex min-w-0 flex-col gap-3 rounded-md border p-3 text-sm"
+      }
+    >
       <div className="flex items-start justify-between gap-4">
         <div className="flex min-w-0 flex-col gap-1">
           <h2 id={`${id}-title`} className="font-medium">
