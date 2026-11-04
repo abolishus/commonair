@@ -17,7 +17,7 @@ import {
   whipFfmpeg,
 } from "./ffmpeg.ts";
 import { type Supervised, spawnSupervised } from "./process.ts";
-import { withTimeout } from "./wait.ts";
+import { sleep, withTimeout } from "./wait.ts";
 
 export interface StreamerOptions {
   protocol: IngestProtocol;
@@ -39,6 +39,8 @@ export interface StreamerOptions {
   log?: Logger;
   /** How long `start()` waits for the first encoded frames. */
   startTimeoutMs?: number;
+  /** Publishes `start()` makes when ingest refuses one at connect (see `ingestRefusal`); default 3. */
+  startAttempts?: number;
 }
 
 export const STREAMER_DEFAULTS = {
@@ -62,9 +64,56 @@ export class StreamerError extends Error {
   constructor(
     message: string,
     public readonly stderr: string[],
+    /** ffmpeg's exit code when it exited before publishing; null when it timed out instead. */
+    public readonly exitCode: number | null = null,
   ) {
     super(`${message}${stderr.length ? `\n  ffmpeg: ${stderr.slice(-8).join("\n  ffmpeg: ")}` : ""}`);
     this.name = "StreamerError";
+  }
+}
+
+/**
+ * Why ingest refused or dropped a publish at connect, from ffmpeg's stderr; null for any other
+ * failure (encoder, filters, fonts). MediaMTX answers a failed auth hook the same way as a wrong
+ * key: when its call to the API fails (CI runs saw Podman's DNS stall on `api`), ffmpeg reads
+ * "authentication failed", or an I/O error once the hook times out.
+ */
+export function ingestRefusal(stderr: readonly string[]): string | null {
+  for (const line of stderr) if (/Server error: authentication failed/.test(line)) return "authentication failed";
+  for (const line of stderr) {
+    // Only a network output: a filter or font failure ends in "Error opening output files: …" too.
+    const m =
+      /Error opening output [a-z]+:\/\/\S+: (Input\/output error|Connection refused|Connection reset by peer|Broken pipe|Operation not permitted)\s*$/.exec(
+        line,
+      );
+    if (m?.[1]) return m[1];
+  }
+  return null;
+}
+
+export interface RetryPublishOptions {
+  attempts: number;
+  /** Wait before attempt n + 1 is `backoffMs * n`. */
+  backoffMs: number;
+  onRetry?: (attempt: number, reason: string, err: StreamerError) => void;
+  sleep?: (ms: number) => Promise<void>;
+}
+
+/**
+ * Run `launch` again while ingest refuses it at connect. A wrong key or a suspended channel is
+ * refused every time, so it still fails, after `attempts` tries; anything else fails at once.
+ */
+export async function retryRefusedPublish(launch: () => Promise<void>, opts: RetryPublishOptions): Promise<void> {
+  const wait = opts.sleep ?? sleep;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await launch();
+    } catch (err) {
+      const reason = err instanceof StreamerError && err.exitCode !== null ? ingestRefusal(err.stderr) : null;
+      if (!reason || attempt >= opts.attempts) throw err;
+      opts.onRetry?.(attempt, reason, err as StreamerError);
+      await wait(opts.backoffMs * attempt);
+    }
   }
 }
 
@@ -113,13 +162,29 @@ export class Streamer {
     const wantTimecode = this.opts.timecode ?? "auto";
     const timecode = wantTimecode === "auto" ? caps.filters.has("drawtext") : wantTimecode;
     try {
-      await this.launch(timecode);
+      await this.launchRetrying(timecode);
     } catch (err) {
       // drawtext can exist without a usable default font; the strip is what matters, so retry bare.
       if (!timecode || wantTimecode === true) throw err;
+      if (err instanceof StreamerError && err.exitCode !== null && ingestRefusal(err.stderr)) throw err;
       this.opts.log?.warn("streamer timecode unavailable, continuing with the strip only", { streamer: this.name });
-      await this.launch(false);
+      await this.launchRetrying(false);
     }
+  }
+
+  private launchRetrying(timecode: boolean): Promise<void> {
+    return retryRefusedPublish(() => this.launch(timecode), {
+      attempts: this.opts.startAttempts ?? 3,
+      backoffMs: 1_500,
+      onRetry: (attempt, reason, err) =>
+        this.opts.log?.warn("streamer publish refused at connect, retrying", {
+          streamer: this.name,
+          attempt,
+          reason,
+          code: err.exitCode,
+          stderr: err.stderr.slice(-8).map((line) => line.replace(/([?&]key=)[^&\s]*/g, "$1REDACTED")),
+        }),
+    });
   }
 
   private async launch(timecode: boolean): Promise<void> {
@@ -173,7 +238,7 @@ export class Streamer {
       timecode,
     });
     const exitedEarly = proc.exited.then((code) => {
-      throw new StreamerError(`${this.name}: ffmpeg exited with code ${code} before publishing`, proc.stderr());
+      throw new StreamerError(`${this.name}: ffmpeg exited with code ${code} before publishing`, proc.stderr(), code);
     });
     try {
       await withTimeout(
