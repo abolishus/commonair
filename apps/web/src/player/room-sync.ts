@@ -21,6 +21,9 @@
  *   hold-back follows it. A correction then settles before the next one, so a seek still in
  *   flight is never corrected twice (no overshoot).
  * - **WebKit native** (`prefersNativeHls`) exposes no hold-back: seek only, with about 1 s tolerance.
+ *   Its seeks land short by about the same amount each time (a keyframe snap, a flushing seek that
+ *   resumes late; CI run 41768120276: ~1.3 s, so it re-seeked to the same miss every tick), so the
+ *   driver learns that miss from where each seek ended up and aims the next one ahead by it.
  * - **Reduced motion** widens both bands so the picture jumps less often.
  * - **DVR** members are left alone (the server leaves them out of the target too).
  */
@@ -41,6 +44,12 @@ export const DRIFT = {
   reducedSeekOnlyToleranceMs: 600,
   /** No new correction this soon after the last one (a seek or a hold-back step is still settling). */
   settleMs: 1500,
+  /**
+   * Seek-only players (WebKit native): how far ahead of the target a seek may aim to make up for
+   * landing short (a keyframe snap, a flush that resumes late). Bounds a lead learnt from a player
+   * that never gets there.
+   */
+  maxSeekLeadMs: 2500,
 } as const;
 
 export interface DriftInput {
@@ -204,6 +213,10 @@ export class RoomSyncDriver {
   private target: { ms: number; at: number } | null = null;
   private applied: number | null = null;
   private lastAt: number | null = null;
+  /** Seek-only players: how far ahead of the target a seek aims (ms), learnt from where seeks landed. */
+  private seekLeadMs = 0;
+  /** When the last seek-only seek went out, until its landing is read. */
+  private seekedAt: number | null = null;
   /** The last drift seen (ms), for `data-*` and diagnostics. */
   lastDriftMs: number | null = null;
 
@@ -248,6 +261,13 @@ export class RoomSyncDriver {
     this.lastDriftMs = c.driftMs;
     // `nextCorrection` only corrects with a playhead and a target.
     if (head === null || targetMs === null) return c;
+    const seekOnly = !p.setTargetLatency;
+    // The first look after a seek-only seek has settled: where it ended up, against the target, is
+    // how far the lead was off (the seek aimed at target + lead).
+    if (seekOnly && this.seekedAt !== null && c.driftMs !== null && now - this.seekedAt >= DRIFT.settleMs) {
+      this.seekLeadMs = Math.min(DRIFT.maxSeekLeadMs, Math.max(-DRIFT.maxSeekLeadMs, this.seekLeadMs - c.driftMs));
+      this.seekedAt = null;
+    }
     if (c.kind === "latency" && p.setTargetLatency) {
       this.hold(p, c.seconds);
       // Land from the playhead; hls.js's sync position hangs off its own (moving) edge estimate.
@@ -258,8 +278,9 @@ export class RoomSyncDriver {
       // The hold-back follows the seek, so hls.js keeps the new distance rather than its old one.
       const base = measured ?? this.applied;
       const held = p.setTargetLatency && base !== null ? clampLatency(base + c.driftMs / 1000) : null;
-      if (this.land(p, head, c.toMs)) {
+      if (this.land(p, head, seekOnly ? c.toMs + this.seekLeadMs : c.toMs)) {
         if (held !== null) this.hold(p, held);
+        if (seekOnly) this.seekedAt = now;
         this.lastAt = now;
       } else if (held !== null && p.setTargetLatency) {
         // Neither seek could: a member left this far off would stay there, so step to hls.js's sync position.
@@ -290,5 +311,7 @@ export class RoomSyncDriver {
     this.target = null;
     this.lastAt = null;
     this.lastDriftMs = null;
+    // The lead is the player's, not the room's: kept. A landing not yet read is dropped.
+    this.seekedAt = null;
   }
 }
