@@ -5,7 +5,8 @@ import { ConfirmDialog, EmptyState, StatusBadge } from "@commonair/ui";
 import { ChatComposer, ChatMessage, ChatPanel as ChatPanelShell } from "@commonair/ui/blocks/media";
 import { Button } from "@commonair/ui/components/button";
 import { toast } from "@commonair/ui/toast";
-import { Message01Icon, UnavailableIcon, UserBlock01Icon } from "@hugeicons/core-free-icons";
+import { cn } from "@commonair/ui/lib/utils";
+import { Alert02Icon, Message01Icon, UnavailableIcon, UserBlock01Icon } from "@hugeicons/core-free-icons";
 import { Link, useNavigate } from "@tanstack/react-router";
 import * as React from "react";
 import { LegalDocumentLink, type LegalDoc } from "../components/legal-document-link.tsx";
@@ -39,6 +40,9 @@ import { RaidBanner } from "./interact/raid-banner.tsx";
 import { useChatInteract } from "./interact/use-chat-interact.ts";
 import { errorMessage, noticeMessage } from "./messages.ts";
 import { MessageMenu, TIMEOUT_SECONDS } from "./mod-menu.tsx";
+import { useDismissed, type DismissStore } from "./pinned/dismissed.ts";
+import { pinnedItems, undismissed, type PinnedItem } from "./pinned/model.ts";
+import { PinnedStrip, usePinnedAnnouncement } from "./pinned/strip.tsx";
 import { presentationQueue } from "./presentation.ts";
 import { chatReducer, EMPTY_GATE, gateReducer, Tombstones, type ChatRow } from "./state.ts";
 import { SurgeBanner } from "./surge-banner.tsx";
@@ -48,6 +52,13 @@ export interface ChatPanelProps {
   channel: string;
   /** The channel's id and live state, passed to the prediction card (batch 8 contract step §3.8). */
   stream?: PredictionChannel;
+  /** The channel's display name, for the offline state ("Chat is quiet until … goes live"); the slug otherwise. */
+  channelName?: string;
+  /**
+   * The page holds the stream behind the 18+ check (or a locked restricted stream): chat shows
+   * why instead of the log until the viewer confirms.
+   */
+  ageGated?: boolean;
   signedIn: boolean;
   /** The signed-in viewer's username, so moderation controls skip their own messages. */
   selfUsername?: string | null;
@@ -58,6 +69,8 @@ export interface ChatPanelProps {
   blocksClient?: BlocksClient;
   /** `safety.report` for "Report wave"; tests pass a fake. */
   reportClient?: ReportClient;
+  /** Where the pinned strip remembers dismissals (this tab's `sessionStorage`); tests pass a fake. */
+  dismissStore?: DismissStore;
 }
 
 interface ModTarget {
@@ -157,12 +170,15 @@ function onListKey(list: HTMLElement, e: KeyboardEvent, setActive: (id: string |
 export function ChatPanel({
   channel,
   stream,
+  channelName,
+  ageGated = false,
   signedIn,
   selfUsername = null,
   className,
   interactClient,
   blocksClient,
   reportClient,
+  dismissStore,
 }: ChatPanelProps): React.JSX.Element {
   const [status, setStatus] = React.useState<ChatStatus>("connecting");
   const [rows, dispatch] = React.useReducer(chatReducer, EMPTY_ROWS);
@@ -187,7 +203,8 @@ export function ChatPanel({
     const onKey = (e: KeyboardEvent) => onListKey(list, e, setActiveRow);
     list.addEventListener("keydown", onKey);
     return () => list.removeEventListener("keydown", onKey);
-  }, []);
+    // The log is not rendered while age-gated; attach once it mounts after the 18+ confirmation.
+  }, [ageGated]);
   const [draft, setDraft] = React.useState("");
   // Fed to <SurgeBanner/> (W1-watch-gate): the latest settings and surge frames, and a refused send.
   const [{ settings, surge, gateDenied }, gateDispatch] = React.useReducer(gateReducer, EMPTY_GATE);
@@ -344,9 +361,74 @@ export function ChatPanel({
   const surgeActive = surge !== null && surge.state !== "off";
   // The viewer's gate hint (ADR 0015); the banner checks features.watchGate and renders nothing otherwise.
   const gated = !canModerate && (settings?.minVerifiedWatchSeconds ?? 0) > 0;
+  // Predictions, polls and giveaways fold into one line at the top of the log (design review F6).
+  const allPinned = React.useMemo(() => pinnedItems({ poll, prediction, giveaway }), [poll, prediction, giveaway]);
+  const { dismissed, dismiss } = useDismissed(dismissStore);
+  const shownPinned = React.useMemo(() => undismissed(allPinned, dismissed), [allPinned, dismissed]);
+  const pinnedNews = usePinnedAnnouncement(allPinned, interact.loaded);
+  // Dismissing the last item unmounts the strip and its focused button: move focus somewhere stable.
+  const refocusAfterDismiss = React.useRef(false);
+  React.useEffect(() => {
+    if (!refocusAfterDismiss.current || shownPinned.length > 0) return;
+    refocusAfterDismiss.current = false;
+    const list = listRef.current;
+    const panel = list?.closest<HTMLElement>('[data-testid="chat"]');
+    const input = panel?.querySelector<HTMLInputElement>('[data-testid="chat-input"]:not(:disabled)');
+    const rows = list ? [...list.querySelectorAll<HTMLElement>("[data-calm-row]")] : [];
+    const row = rows.find((r) => r.dataset.id === activeRow) ?? rows.at(-1);
+    const log = panel?.querySelector<HTMLElement>('[data-slot="chat-log"]');
+    const target = input ?? row ?? log;
+    if (!target) return;
+    if (target === log && !log.hasAttribute("tabindex")) log.tabIndex = -1;
+    target.focus();
+  }, [shownPinned.length, activeRow]);
+  const dismissPinned = (item: PinnedItem) => {
+    if (shownPinned.length === 1) refocusAfterDismiss.current = true;
+    dismiss(item.key);
+  };
+  const renderCard = (item: PinnedItem): React.ReactNode => {
+    if (item.kind === "poll" && poll)
+      return (
+        <ChatPollCard
+          key={poll.id}
+          poll={poll}
+          signedIn={signedIn}
+          points={points}
+          client={client}
+          onVoted={interact.setPoll}
+          onPointsSpent={interact.refreshPoints}
+        />
+      );
+    if (item.kind === "prediction" && prediction)
+      return (
+        <ChatPredictionCard
+          key={prediction.id}
+          prediction={prediction}
+          channel={stream ?? null}
+          signedIn={signedIn}
+          staff={canModerate || isBroadcaster}
+          points={points}
+          client={client}
+          onBet={interact.setPrediction}
+          onPointsSpent={interact.refreshPoints}
+        />
+      );
+    if (item.kind === "giveaway" && giveaway)
+      return (
+        <GiveawayCard
+          key={giveaway.id}
+          channel={channel}
+          giveaway={giveaway}
+          signedIn={signedIn}
+          client={client}
+          onEntered={interact.setGiveaway}
+        />
+      );
+    return null;
+  };
   const pinned =
-    raid || poll || prediction || giveaway || surgeActive || gateDenied || gated ? (
-      <div className="grid gap-3">
+    raid || shownPinned.length > 0 || surgeActive || gateDenied || gated ? (
+      <div className="grid gap-2">
         <SurgeBanner
           channel={channel}
           canModerate={canModerate}
@@ -356,39 +438,8 @@ export function ChatPanel({
           gateDenied={gateDenied}
         />
         {raid && <RaidBanner raid={raid} isBroadcaster={isBroadcaster} />}
-        {poll && (
-          <ChatPollCard
-            key={poll.id}
-            poll={poll}
-            signedIn={signedIn}
-            points={points}
-            client={client}
-            onVoted={interact.setPoll}
-            onPointsSpent={interact.refreshPoints}
-          />
-        )}
-        {prediction && (
-          <ChatPredictionCard
-            key={prediction.id}
-            prediction={prediction}
-            channel={stream ?? null}
-            signedIn={signedIn}
-            staff={canModerate || isBroadcaster}
-            points={points}
-            client={client}
-            onBet={interact.setPrediction}
-            onPointsSpent={interact.refreshPoints}
-          />
-        )}
-        {giveaway && (
-          <GiveawayCard
-            key={giveaway.id}
-            channel={channel}
-            giveaway={giveaway}
-            signedIn={signedIn}
-            client={client}
-            onEntered={interact.setGiveaway}
-          />
+        {shownPinned.length > 0 && (
+          <PinnedStrip items={shownPinned} renderCard={renderCard} onDismiss={dismissPinned} />
         )}
       </div>
     ) : undefined;
@@ -494,6 +545,43 @@ export function ChatPanel({
       )
     : visible.map((r) => renderRow(r, true));
 
+  const name = channelName ?? channel;
+  if (ageGated)
+    // Nothing of the channel's chat shows before the 18+ check: no log frame, no composer.
+    return (
+      <section
+        data-testid="chat"
+        data-state="gated"
+        aria-label={t("chat.title")}
+        className={cn("flex min-h-0 min-w-0 flex-col border border-border bg-card", className)}
+      >
+        <header className="border-b border-border px-3 py-2">
+          <h2 className="truncate text-sm font-semibold">{t("chat.title")}</h2>
+        </header>
+        <EmptyState
+          data-testid="chat-gated"
+          className="flex-1"
+          icon={Alert02Icon}
+          title={t("chat.column.gatedTitle")}
+          description={t("chat.column.gatedBody")}
+          headingLevel={3}
+        />
+      </section>
+    );
+  // Offline with nothing said yet: why it is quiet, not "No messages yet".
+  const offline = stream !== undefined && !stream.live;
+  const empty = offline ? (
+    <EmptyState
+      data-testid="chat-offline"
+      className="flex-1"
+      icon={Message01Icon}
+      title={t("chat.column.offlineTitle", { name })}
+      headingLevel={3}
+    />
+  ) : (
+    <EmptyState icon={Message01Icon} title={t("chat.empty")} headingLevel={3} />
+  );
+
   return (
     <ChatPanelShell
       data-testid="chat"
@@ -506,7 +594,6 @@ export function ChatPanel({
       pinned={pinned}
       viewersAction={
         <>
-          {points && <PointsChip balance={points} />}
           {canModerate && <HeldQueue channel={channel} state={held} dispatch={heldDispatch} />}
           {!canModerate && <CalmControls settings={calmSettings} />}
           {/* W3-watch-rooms: the room trigger and its drawer (ADR 0017); renders nothing until that unit lands. */}
@@ -519,6 +606,10 @@ export function ChatPanel({
       className={className}
       footer={
         <>
+          {/* One polite line when a pinned item appears or changes state; never the countdown. */}
+          <p data-part="pinned-announce" aria-live="polite" aria-atomic="true" className="sr-only">
+            {pinnedNews}
+          </p>
           {calmOn && (
             <output
               data-testid="calm-digest"
@@ -539,6 +630,8 @@ export function ChatPanel({
               placeholder={t("chat.placeholder")}
               sendLabel={t("chat.send")}
               disabled={inputDisabled}
+              // The viewer's points sit in the input row, as on Twitch (design review F6).
+              pointsAction={points ? <PointsChip balance={points} /> : undefined}
               inputProps={{ "data-testid": "chat-input" }}
               sendProps={{ "data-testid": "chat-send" }}
             />
@@ -565,7 +658,7 @@ export function ChatPanel({
       }
     >
       <div ref={listRef} className="contents">
-        {list.length === 0 ? <EmptyState icon={Message01Icon} title={t("chat.empty")} headingLevel={3} /> : list}
+        {list.length === 0 ? empty : list}
       </div>
       <ConfirmDialog
         open={banDialog.open}

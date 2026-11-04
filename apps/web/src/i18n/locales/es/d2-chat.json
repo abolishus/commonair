@@ -1,1 +1,22 @@
-{}
+{
+  "chat.strip.kind.prediction": "Predicción",
+  "chat.strip.kind.poll": "Encuesta",
+  "chat.strip.kind.giveaway": "Sorteo",
+  "chat.strip.state.open": "En curso",
+  "chat.strip.state.openLeft": "En curso · quedan {time}",
+  "chat.strip.state.locked": "Apuestas cerradas",
+  "chat.strip.state.won": "Ganó {name}",
+  "chat.strip.state.ended": "Terminó",
+  "chat.strip.state.canceled": "Se canceló",
+  "chat.strip.state.closed": "Inscripción cerrada",
+  "chat.strip.state.drawn": "Ganadores sorteados",
+  "chat.strip.more": "+{count}",
+  "chat.strip.moreLabel": "{count, plural, one {y # elemento fijado más} other {y # elementos fijados más}}",
+  "chat.strip.dismiss.prediction": "Ocultar esta predicción",
+  "chat.strip.dismiss.poll": "Ocultar esta encuesta",
+  "chat.strip.dismiss.giveaway": "Ocultar este sorteo",
+  "chat.strip.announce": "{kind} · {state}: {title}",
+  "chat.column.offlineTitle": "El chat está tranquilo hasta que {name} esté en vivo",
+  "chat.column.gatedTitle": "El chat está detrás de la comprobación de mayoría de edad",
+  "chat.column.gatedBody": "Confirma en el reproductor que tienes 18 años o más para ver el chat."
+}

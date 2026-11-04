@@ -1,1 +1,22 @@
-{}
+{
+  "chat.strip.kind.prediction": "Prediction",
+  "chat.strip.kind.poll": "Poll",
+  "chat.strip.kind.giveaway": "Giveaway",
+  "chat.strip.state.open": "Open",
+  "chat.strip.state.openLeft": "Open · {time} left",
+  "chat.strip.state.locked": "Locked",
+  "chat.strip.state.won": "Won by {name}",
+  "chat.strip.state.ended": "Ended",
+  "chat.strip.state.canceled": "Canceled",
+  "chat.strip.state.closed": "Closed",
+  "chat.strip.state.drawn": "Winners drawn",
+  "chat.strip.more": "+{count}",
+  "chat.strip.moreLabel": "{count, plural, one {and # more pinned item} other {and # more pinned items}}",
+  "chat.strip.dismiss.prediction": "Hide this prediction",
+  "chat.strip.dismiss.poll": "Hide this poll",
+  "chat.strip.dismiss.giveaway": "Hide this giveaway",
+  "chat.strip.announce": "{kind} · {state}: {title}",
+  "chat.column.offlineTitle": "Chat is quiet until {name} goes live",
+  "chat.column.gatedTitle": "Chat is behind the 18+ check",
+  "chat.column.gatedBody": "Confirm on the player that you are 18 or older to see chat."
+}
