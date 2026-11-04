@@ -14,6 +14,18 @@ sh ~/commonair/selfhost.sh upgrade --version v0.1.0 --require-signature
 
 Read the release notes first. They list breaking changes at the top.
 
+## Release cadence
+
+- **A minor release about every two weeks** (`v0.2.0`, `v0.3.0`, …), cut from the newest commit
+  whose full test run passed. Its notes cover everything since the previous minor or patch
+  release, and `CHANGELOG.md` in the repository has the same in plain words.
+- **Patch releases as needed** (`v0.2.1`), for a fix that cannot wait: a security issue, data
+  loss, an upgrade or rollback that fails. Take them as they come.
+- **Release candidates** (`v0.3.0-rc.1`) come before some minors for testing. They are marked
+  as prereleases; a production instance does not need them.
+
+Before 1.0, a minor release may change behaviour; the notes say how at the top.
+
 ## What `upgrade` does, in order
 
 1. **Checks** Podman 5 and the systemd user manager.
@@ -98,12 +110,33 @@ For you as an operator, this means:
   cover. Upgrade one release at a time if you want the automatic rollback to be safe, or be
   ready to restore the pre-upgrade backup.
 
+## Upgrading across several releases
+
+If you skipped a few minors (say you run `v0.2.0` and the latest is `v0.5.0`), you can upgrade in
+one step: the bundle carries every migration, and `upgrade` runs the ones your database has not
+had, in order. Read the notes of each release in between, not only the last one: a breaking
+change or a new required setting from `v0.3.0` still applies to you.
+
+What one step gives up is the automatic rollback's safety. A rollback lands on your old release,
+which then runs against a schema several releases newer, and the additive-migration rule only
+covers one release (below). So for several minors:
+
+- **The safe path: one minor at a time.** `upgrade --version v0.3.0`, check `status`, then
+  `v0.4.0`, then `v0.5.0`. Each step can roll back safely, and each takes a fresh pre-upgrade
+  backup. Patch releases in between can be skipped: take the newest patch of each minor.
+- **The quick path: straight to the latest**, with a known-good backup you have restored once
+  ([backups.md](backups.md)). If the upgrade fails and its automatic rollback does not come up
+  healthy, restore the backup taken in step 5.
+
+Either way, the images of every release you pass through are pulled, so a mirror
+([mirroring.md](mirroring.md)) needs each of them.
+
 ## Going back after a successful upgrade
 
-`upgrade` also installs an older version:
+`upgrade` also installs an older version, for example back to `v0.1.0` after `v0.2.0`:
 
 ```sh
-sh ~/commonair/selfhost.sh upgrade --version v0.1.0-rc.2
+sh ~/commonair/selfhost.sh upgrade --version v0.1.0
 ```
 
 This runs the older release against the newer schema. It is safe for one release back under the

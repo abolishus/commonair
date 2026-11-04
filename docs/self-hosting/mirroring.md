@@ -68,14 +68,14 @@ sh "commonair-selfhost_$VERSION/selfhost.sh" install --yes \
   --registry registry.example.org/commonair
 ```
 
-`--registry` rewrites our 14 images in the units to the mirror, with the same digests. It is
+`--registry` rewrites the project's own images in the units (every image of the manifest but the relay's) to the mirror, with the same digests. It is
 recorded in `~/.config/commonair/selfhost.conf`, so every later `upgrade` and
 `install --reinstall` pulls from the mirror too. Copy each new release into the mirror before
 you upgrade.
 
-`--registry` covers only the project's own images. The six third-party images (Caddy, Garage,
-MediaMTX, Valkey, Prometheus, Grafana) still come from `docker.io`, `ghcr.io` and `quay.io`,
-pinned by digest. To mirror them as well, copy them the same way and configure a registry mirror
+`--registry` covers only the project's own images. The seven third-party images an instance runs
+(Caddy, coturn, Garage, MediaMTX, Valkey, Prometheus, Grafana; Mailpit and stripe-mock as well in
+staging seed mode) still come from `docker.io`, `ghcr.io` and `quay.io`, pinned by digest. To mirror them as well, copy them the same way and configure a registry mirror
 for those hosts in `/etc/containers/registries.conf`:
 
 ```toml

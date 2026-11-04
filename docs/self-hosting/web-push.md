@@ -51,11 +51,12 @@ another VAPID key). Each member can have at most ten browsers; an eleventh repla
 With the installer, as the `commonair` user:
 
 ```sh
-sh ~/commonair/selfhost.sh upgrade --web-push                 # on
-sh ~/commonair/selfhost.sh install --reinstall --web-push     # or with a reinstall
+sh ~/commonair/selfhost.sh upgrade --version vX.Y.Z --web-push # on, with an upgrade
+sh ~/commonair/selfhost.sh install --reinstall --web-push      # or on the installed release
 ```
 
-`--web-push` works on `install`, `upgrade` and `install --reinstall`. It sets `WEB_PUSH_ENABLED=true` in
+`--web-push` works on `install`, `upgrade` (with `--version` or `--bundle`, as always) and
+`install --reinstall`. It sets `WEB_PUSH_ENABLED=true` in
 `commonair.env`, and the setting is kept on later upgrades until you pass `--no-web-push`.
 Without either flag nothing changes (push stays off on a first install).
 
@@ -93,7 +94,8 @@ Back up the pair with the rest of `commonair.env` ([Backups](backups.md)).
 
 ## Turning it off
 
-`sh ~/commonair/selfhost.sh upgrade --no-web-push`, or `WEB_PUSH_ENABLED=false` and a restart. The settings
+`sh ~/commonair/selfhost.sh install --reinstall --no-web-push` (or `--no-web-push` on the next
+`upgrade`), or `WEB_PUSH_ENABLED=false` and a restart. The settings
 page then hides the push toggle and no push is sent, including go-lives already queued. Stored
 subscriptions stay until their owners sign out or turn push off, so turning it back on later
 reaches the same browsers.

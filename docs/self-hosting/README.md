@@ -15,11 +15,21 @@ One command, `selfhost.sh install`, sets up the whole platform on one host:
 
 - the web app, API, chat, the Twitch-compatible IRC gateway, the HLS origin, the media pipeline,
   the background worker and the P2P tracker;
-- Postgres with continuous WAL-G archiving and a daily base backup;
-- Valkey, MediaMTX (RTMP and WHIP ingest) and object storage: Garage on the same host, or an
+- Postgres with continuous WAL-G archiving and a daily base backup, and Valkey, both in
+  containers on the same host. That is the default, and what most instances should run.
+  Optional: use managed Postgres and Valkey instead
+  ([managed-services.md](managed-services.md));
+- MediaMTX (RTMP and WHIP ingest) and object storage: Garage on the same host, or an
   S3-compatible store of yours ([object-storage.md](object-storage.md));
+- coturn, your own STUN server for P2P playback, with a TURN relay you can turn on
+  ([p2p.md](p2p.md));
 - Caddy for HTTPS, with Let's Encrypt certificates or its own internal CA;
 - Prometheus, Loki, Tempo and Grafana for metrics, logs and traces.
+
+Off until you turn them on: live captions (`--captions`, [captions.md](captions.md)), the TURN
+relay (`--turn-relay`), browser push (`--web-push`, [web-push.md](web-push.md)), and in
+`commonair.env` federation, the Twitch import and giveaways
+([configuration.md](configuration.md#features-that-are-off-by-default)).
 
 Everything runs as rootless Podman containers under systemd user units (Quadlet). Every image
 is pinned by digest and signed. Upgrades are ordered (backup, migrations, then services) and
@@ -52,8 +62,11 @@ Read the pages in this order. Each step says what "done" looks like before you g
 7. [troubleshooting.md](troubleshooting.md), when something is not right: `status`, the logs and
    the common failures.
 
-[captions.md](captions.md), [tls.md](tls.md), [scaling.md](scaling.md), [relays.md](relays.md),
-[verifying.md](verifying.md) and [mirroring.md](mirroring.md) are for when you need them.
+[captions.md](captions.md), [p2p.md](p2p.md), [web-push.md](web-push.md), [tls.md](tls.md),
+[scaling.md](scaling.md), [relays.md](relays.md), [verifying.md](verifying.md) and
+[mirroring.md](mirroring.md) are for when you need them. Optional: use managed Postgres and
+Valkey instead of the bundled ones ([managed-services.md](managed-services.md)); decide before
+step 2, like the object store.
 
 ## The 10-minute path
 
@@ -63,34 +76,38 @@ Read the pages in this order. Each step says what "done" looks like before you g
 3. Run one command as root:
 
    ```sh
-   sh commonair-selfhost_0.1.0-rc.1/selfhost.sh install --yes \
-     --bundle "$PWD/commonair-selfhost_0.1.0-rc.1.tar.gz" \
-     --domain stream.example.org --email ops@example.org
+   sh commonair-selfhost_0.1.0/selfhost.sh install --yes \
+     --bundle "$PWD/commonair-selfhost_0.1.0.tar.gz" \
+     --domain stream.example.org --email ops@example.org --require-signature
    ```
 
 4. Set the SMTP values, sign up, and make yourself an admin
    ([install.md](install.md#5-the-first-admin-account)).
 5. Stream to it from OBS ([install.md](install.md#6-first-stream)).
 
-Replace `0.1.0-rc.1` with the latest version on the project's releases page.
+Replace `0.1.0` with the latest version on the project's releases page. A new minor release
+comes out about every two weeks ([upgrades.md](upgrades.md#release-cadence)).
 
 ## Pages
 
-| Page                                     | What it covers                                                        |
-| ---------------------------------------- | --------------------------------------------------------------------- |
-| [requirements.md](requirements.md)       | Distributions, Podman, hardware, DNS, ports, mail, off-host storage   |
-| [install.md](install.md)                 | Download, verify, install, first admin, first stream                  |
-| [configuration.md](configuration.md)     | Every environment variable, and how to change one                     |
-| [object-storage.md](object-storage.md)   | An external S3 store instead of Garage: what it needs, Spaces         |
-| [captions.md](captions.md)               | Live captions (optional): turning them on, CPU cost, AVX2 on amd64    |
-| [tls.md](tls.md)                         | ACME certificates, the internal CA, the IRC certificate               |
-| [upgrades.md](upgrades.md)               | `selfhost.sh upgrade`, rollback, pinning a version, a fork's releases |
-| [backups.md](backups.md)                 | WAL-G, off-host storage, object backups, restore, the restore drill   |
-| [scaling.md](scaling.md)                 | What to watch and what to split off first                             |
-| [relays.md](relays.md)                   | Running a member relay                                                |
-| [verifying.md](verifying.md)             | Checking signatures, SBOMs and provenance yourself                    |
-| [mirroring.md](mirroring.md)             | Copying a release into your own registry                              |
-| [troubleshooting.md](troubleshooting.md) | Status, logs, common failures                                         |
+| Page                                       | What it covers                                                        |
+| ------------------------------------------ | --------------------------------------------------------------------- |
+| [requirements.md](requirements.md)         | Distributions, Podman, hardware, DNS, ports, mail, off-host storage   |
+| [install.md](install.md)                   | Download, verify, install, first admin, first stream                  |
+| [configuration.md](configuration.md)       | Every environment variable, and how to change one                     |
+| [object-storage.md](object-storage.md)     | An external S3 store instead of Garage: what it needs, Spaces         |
+| [managed-services.md](managed-services.md) | Optional: managed Postgres and Valkey instead of the bundled ones     |
+| [captions.md](captions.md)                 | Live captions (optional): turning them on, CPU cost, AVX2 on amd64    |
+| [p2p.md](p2p.md)                           | P2P playback, your STUN server, the optional TURN relay               |
+| [web-push.md](web-push.md)                 | Browser push notifications (optional)                                 |
+| [tls.md](tls.md)                           | ACME certificates, the internal CA, the IRC certificate               |
+| [upgrades.md](upgrades.md)                 | `selfhost.sh upgrade`, rollback, pinning a version, a fork's releases |
+| [backups.md](backups.md)                   | WAL-G, off-host storage, object backups, restore, the restore drill   |
+| [scaling.md](scaling.md)                   | What to watch and what to split off first                             |
+| [relays.md](relays.md)                     | Running a member relay                                                |
+| [verifying.md](verifying.md)               | Checking signatures, SBOMs and provenance yourself                    |
+| [mirroring.md](mirroring.md)               | Copying a release into your own registry                              |
+| [troubleshooting.md](troubleshooting.md)   | Status, logs, common failures                                         |
 
 How far one host goes, measured, is in [the capacity runbook](../operators/capacity.md).
 
@@ -122,9 +139,10 @@ stays behind, unused.
 
 These are true of the current release. Each one is tracked for a later release.
 
-- **One host only.** `selfhost.sh` installs everything on one server. Splitting Postgres or
-  media onto other servers is not scripted yet ([scaling.md](scaling.md)). Only the object store
-  can live elsewhere ([object-storage.md](object-storage.md)).
+- **One application host.** `selfhost.sh` installs every service on one server. The state can
+  live elsewhere: the object store ([object-storage.md](object-storage.md)), and Postgres and
+  Valkey as managed services ([managed-services.md](managed-services.md)). Splitting media or
+  the services onto more servers is not scripted yet ([scaling.md](scaling.md)).
 - **A service holds its own secrets.** Each unit gets only its keys of `commonair.env`
   ([configuration.md](configuration.md#which-unit-sees-which-key)): Caddy gets none, but a
   compromised api or worker still holds the database password and S3 keys it needs.

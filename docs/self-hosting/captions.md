@@ -27,12 +27,12 @@ default on (`captions.defaultEnabled`, ADR 0011 decision 2).
 As the `commonair` user:
 
 ```sh
-sh ~/commonair/selfhost.sh upgrade --captions             # with an upgrade
-sh ~/commonair/selfhost.sh install --reinstall --captions # or on the installed release
+sh ~/commonair/selfhost.sh upgrade --version vX.Y.Z --captions # with an upgrade
+sh ~/commonair/selfhost.sh install --reinstall --captions      # or on the installed release
 ```
 
 `--captions` works on `install`, `upgrade` and `install --reinstall`, and as root on a first
-install. In that order, it:
+install. `upgrade` needs a release to go to (`--version` or `--bundle`), as always. In that order, it:
 
 1. checks the CPU (amd64 only) and stops with the missing features named if it falls short.
    Nothing has changed at that point;
@@ -118,8 +118,8 @@ It should print all three. Each release states the requirement too: in its notes
 ## Turning it off
 
 ```sh
-sh ~/commonair/selfhost.sh upgrade --no-captions             # with an upgrade
-sh ~/commonair/selfhost.sh install --reinstall --no-captions # or on the installed release
+sh ~/commonair/selfhost.sh upgrade --version vX.Y.Z --no-captions # with an upgrade
+sh ~/commonair/selfhost.sh install --reinstall --no-captions      # or on the installed release
 ```
 
 This stops and removes `commonair-whisper` and empties `WHISPER_URL`. Captions already saved with

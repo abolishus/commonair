@@ -4,18 +4,31 @@
 /**
  * Release notes from Conventional Commits (ADR 0023 §5).
  *
- *   bun scripts/release/changelog.ts --to <ref> --version <x.y.z> [--from <ref>] [--repo <url>]
- *       [--platforms linux/amd64,linux/arm64] [--out <file>]
+ *   bun scripts/release/changelog.ts --to <ref> --version <x.y.z> [--from <ref> | --since-tag <tag>]
+ *       [--repo <url>] [--platforms linux/amd64,linux/arm64] [--out <file>]
+ *   bun scripts/release/changelog.ts --version <x.y.z> --check [--changelog <file>]
  *
  * With `--platforms`, the notes end with the CPU features an image needs on those platforms
  * beyond the baseline (CPU_REQUIREMENTS: whisper's AVX2 on amd64).
  *
- * `--from` defaults to the nearest `v*` tag before `--to` (all history when there is none).
+ * The range starts at `--from`, else at `--since-tag`, whose default is the newest `v*` tag that is
+ * not a prerelease and is already in `--to`'s history, leaving out the tag being released and any
+ * tag on `--to` itself. U3 cuts a minor every two weeks: its notes run from the last minor or
+ * patch, not from its own release candidates. Before the first such release (only `-rc` tags, as
+ * for `v0.1.0`) it falls back to the nearest `v*` tag before `--to`, and to all history when there
+ * is none.
+ *
+ * `--check` reads `CHANGELOG.md` (or `--changelog`) and exits 1 unless it has a section for
+ * `--version` (`## [<version>]`), so a release cannot go out without its curated notes. For a
+ * release that is not a prerelease the heading must also carry its date (`## [0.1.0] - 2026-11-16`),
+ * so a section still marked "unreleased" cannot ship. It needs no git.
+ *
  * Breaking changes (`type!:` or a `BREAKING CHANGE:` footer) come first, then the types in
  * TYPE_ORDER, then everything that is not a Conventional Commit under "Other". Trailers
  * (Signed-off-by, Co-Authored-By, …) never reach the notes.
  */
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { parsePlatforms } from "./images.ts";
 import { cpuRequirementLines, cpuRequirements } from "./manifest.ts";
 
@@ -150,6 +163,97 @@ function git(args: string[]): { ok: boolean; out: string } {
   return { ok: r.exitCode === 0, out: r.stdout.toString().trim() };
 }
 
+// Semver 2.0 core plus an optional prerelease, no build metadata: what release tags are (manifest.ts).
+const SEMVER = /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
+
+export interface Version {
+  major: number;
+  minor: number;
+  patch: number;
+  /** Prerelease identifiers (`rc.2` is ["rc", "2"]); empty for a release. */
+  pre: string[];
+}
+
+/** A version or a `v` tag, or null when it is not semver. */
+export function parseVersion(v: string): Version | null {
+  const m = SEMVER.exec(v);
+  if (!m) return null;
+  return { major: Number(m[1]), minor: Number(m[2]), patch: Number(m[3]), pre: m[4] ? m[4].split(".") : [] };
+}
+
+/** Semver precedence (§11): negative when a ranks below b. Throws on a value that is not semver. */
+export function compareVersions(a: string, b: string): number {
+  const x = parseVersion(a);
+  const y = parseVersion(b);
+  if (!x) throw new Error(`not a version: ${a}`);
+  if (!y) throw new Error(`not a version: ${b}`);
+  for (const k of ["major", "minor", "patch"] as const) if (x[k] !== y[k]) return x[k] - y[k];
+  // A release ranks above its own prereleases.
+  if (x.pre.length === 0 || y.pre.length === 0) return y.pre.length - x.pre.length;
+  for (let i = 0; i < Math.max(x.pre.length, y.pre.length); i++) {
+    const p = x.pre[i];
+    const q = y.pre[i];
+    if (p === undefined) return -1;
+    if (q === undefined) return 1;
+    if (p === q) continue;
+    const pn = /^\d+$/.test(p);
+    const qn = /^\d+$/.test(q);
+    if (pn && qn) return Number(p) - Number(q);
+    if (pn !== qn) return pn ? -1 : 1;
+    return p < q ? -1 : 1;
+  }
+  return 0;
+}
+
+export const isPrerelease = (tag: string): boolean => (parseVersion(tag)?.pre.length ?? 0) > 0;
+
+/**
+ * `--since-tag`'s default from the tags already in `--to`'s history: the newest `v*` tag that is
+ * not a prerelease, leaving out `exclude` (the tag being released, any tag on `--to`). Tags that
+ * are not semver are ignored. Null when there is none.
+ */
+export function newestReleaseTag(tags: readonly string[], exclude: readonly string[] = []): string | null {
+  let best: string | null = null;
+  for (const t of tags) {
+    if (!t.startsWith("v") || parseVersion(t) === null || isPrerelease(t) || exclude.includes(t)) continue;
+    if (best === null || compareVersions(t, best) > 0) best = t;
+  }
+  return best;
+}
+
+/** Whether a Keep a Changelog file has a section for `version`: `## [0.1.0]`, dated or not. */
+export function hasChangelogSection(markdown: string, version: string): boolean {
+  const v = version.replace(/^v/, "");
+  return markdown.split("\n").some((l) => {
+    const m = /^## \[([^\]]+)\](?:\s+-\s+\S.*)?\s*$/.exec(l);
+    return m?.[1] === v;
+  });
+}
+
+/**
+ * Why `--check` refuses `version` (null: it passes). A prerelease needs only its section; a
+ * release needs the section dated `YYYY-MM-DD`, not "unreleased" or missing.
+ */
+export function changelogSectionProblem(markdown: string, version: string): string | null {
+  const v = version.replace(/^v/, "");
+  if (!hasChangelogSection(markdown, v))
+    return `has no section for ${v}; add "## [${v}] - <YYYY-MM-DD>" before releasing`;
+  if (isPrerelease(`v${v}`)) return null;
+  const dated = new RegExp(`^## \\[${v.replace(/\./g, "\\.")}\\] - \\d{4}-\\d{2}-\\d{2}\\s*$`, "m");
+  return dated.test(markdown)
+    ? null
+    : `section ${v} is not dated; change its heading to "## [${v}] - <YYYY-MM-DD>" before releasing`;
+}
+
+/** `--since-tag`'s default for a release of `version` at `to` (newestReleaseTag over git's tags). */
+export function defaultSinceTag(to: string, version: string): string | null {
+  const merged = git(["tag", "--list", "v[0-9]*", "--merged", to]);
+  if (!merged.ok) return null;
+  const atTo = git(["tag", "--list", "v[0-9]*", "--points-at", to]);
+  const exclude = [`v${version.replace(/^v/, "")}`, ...(atTo.ok ? atTo.out.split("\n").filter(Boolean) : [])];
+  return newestReleaseTag(merged.out.split("\n").filter(Boolean), exclude);
+}
+
 /** The nearest `v*` tag strictly before `to`, or null when there is none. */
 export function previousTag(to: string): string | null {
   const r = git(["describe", "--tags", "--abbrev=0", "--match", "v[0-9]*", `${to}^`]);
@@ -173,11 +277,23 @@ if (import.meta.main) {
   const version = opt("version");
   if (!version) {
     console.error(
-      "usage: changelog.ts --version <x.y.z> [--to <ref>] [--from <ref>] [--repo <url>] [--platforms <list>] [--out <file>]",
+      "usage: changelog.ts --version <x.y.z> [--to <ref>] [--from <ref> | --since-tag <tag>] [--repo <url>] " +
+        "[--platforms <list>] [--out <file>]\n       changelog.ts --version <x.y.z> --check [--changelog <file>]",
     );
     process.exit(2);
   }
-  const from = opt("from") ?? previousTag(to);
+  if (args.includes("--check")) {
+    const file = opt("changelog") ?? join(import.meta.dir, "../../CHANGELOG.md");
+    const v = version.replace(/^v/, "");
+    const problem = changelogSectionProblem(readFileSync(file, "utf8"), v);
+    if (problem) {
+      console.error(`changelog: ${file} ${problem}`);
+      process.exit(1);
+    }
+    process.stdout.write(`changelog: ${file} has a section for ${v}\n`);
+    process.exit(0);
+  }
+  const from = opt("from") ?? opt("since-tag") ?? defaultSinceTag(to, version) ?? previousTag(to);
   const platforms = opt("platforms");
   const notes = releaseNotes(commitsBetween(from, to), {
     version,

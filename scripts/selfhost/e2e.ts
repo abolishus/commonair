@@ -5,7 +5,7 @@
  * Self-host end to end (ADR 0023 §7 and §9): what we test is what we ship.
  *
  *   bun scripts/selfhost/e2e.ts [--distro debian|fedora] [--storage garage|external]
- *     [--state bundled|external] [--no-mirror] [--keep]
+ *     [--state bundled|external] [--from-release <tag>] [--no-mirror] [--keep]
  *
  * 1. Builds the 14 release images from this checkout (an image already built for this commit,
  *    by its label, is reused), pushes them to a throwaway Zot registry and writes a release
@@ -47,6 +47,15 @@
  * password-only default user (DigitalOcean's model) and the rollback, and checks after each that
  * no bundled Postgres or Valkey unit exists and that Valkey refused no command. The bundled
  * default (no --state) runs exactly as before.
+ *
+ * --from-release <tag> (R0-release-prep, e2e-from-release.ts) replaces steps 1's first release
+ * and 2: it downloads that published release from GitHub, verifies it in the host as
+ * verifying.md does (cosign, then sha256sum), installs it with its own `selfhost.sh install
+ * --version <tag> --require-signature` from ghcr, and seeds two members, a channel, a follow and
+ * a ledger posting. Step 4 then upgrades it to the candidate built from this tree with the
+ * published release's own installed selfhost.sh, as a stranger's upgrade runs, and checks that
+ * the data survived; step 5's rollback follows as usual. It needs the network (it refuses at once
+ * without), runs with the bundled default only, and on CI only for workflow_dispatch.
  *
  * Locally, third-party images come through a pull-through Zot mirror kept in
  * .cache/selfhost-e2e-mirror/ (e2e-mirror.ts), against Docker Hub's rate limit; --no-mirror
@@ -95,6 +104,19 @@ import {
   externalStateSetup,
   migrateRestarts,
 } from "./e2e-external.ts";
+import {
+  type Seeded,
+  assertOnline,
+  checkSeeded,
+  downloadRelease,
+  fromReleaseRefusal,
+  installPublished,
+  releaseTag,
+  seedInApi,
+  seedNames,
+  upgradeBlocker,
+  upgradeOutcome,
+} from "./e2e-from-release.ts";
 
 // Test-only images (ADR 0022: digest-pinned, licensed in infra/image-licenses.json).
 export const ZOT_IMAGE =
@@ -231,6 +253,8 @@ export interface E2eOptions {
   keep: boolean;
   /** undefined: the default (mirrorWanted). */
   mirror: boolean | undefined;
+  /** A published release tag to install first and upgrade from (e2e-from-release.ts). */
+  fromRelease?: string;
 }
 
 /**
@@ -257,10 +281,14 @@ export function e2eOptions(argv: readonly string[]): E2eOptions {
         opts.storage = v as Storage;
         storageGiven = true;
       } else opts.state = v as State;
-    } else if (name === "keep") opts.keep = true;
+    } else if (name === "from-release") opts.fromRelease = releaseTag(argv[++i] ?? "").tag;
+    else if (name === "keep") opts.keep = true;
     else if (name === "mirror" || name === "no-mirror") opts.mirror = name === "mirror";
     else throw new Error(`unknown option ${a}`);
   }
+  // The releases it starts from may predate the external store and state; their own e2e runs cover those.
+  if (opts.fromRelease && (opts.storage !== "garage" || opts.state !== "bundled"))
+    throw new Error(`--from-release runs with the bundled default only (no --storage external or --state external)`);
   // External Postgres and Valkey run beside an external object store, as a managed stage 1 does.
   if (opts.state === "external" && storageGiven && opts.storage !== "external")
     throw new Error("--state external runs with --storage external (an instance on managed services)");
@@ -1186,7 +1214,13 @@ const PODMAN_FIRST = {
 } as const;
 
 async function main(): Promise<void> {
-  const { distro, storage, state, keep, mirror: mirrorFlag } = e2eOptions(process.argv.slice(2));
+  const { distro, storage, state, keep, mirror: mirrorFlag, fromRelease } = e2eOptions(process.argv.slice(2));
+  if (fromRelease) {
+    // Before anything is built: on the wrong CI event, or offline, it refuses at once.
+    const refusal = fromReleaseRefusal(process.env);
+    if (refusal) throw new Error(refusal);
+    await assertOnline();
+  }
   const mirror = mirrorWanted(mirrorFlag, process.env);
   const external = storage === "external";
   const externalState = state === "external";
@@ -1224,13 +1258,20 @@ async function main(): Promise<void> {
     const v1 = "0.0.0-e2e.1";
     const v2 = "0.0.0-e2e.2";
     const v3 = "0.0.0-e2e.3";
-    await step(`release ${v1}: push and bundle`, () =>
-      release(
-        v1,
-        commit,
-        push(v1, (n) => `${LOCAL}/${n}:${commit.slice(0, 12)}`, port),
-      ),
-    );
+    // The published release's assets, where the host container mounts them (/e2e/releases).
+    const published = fromRelease ? `published-${fromRelease}` : "";
+    if (fromRelease)
+      await step(`download the published ${fromRelease}`, () =>
+        downloadRelease(fromRelease, join(LOG_DIR, "releases", published)),
+      );
+    else
+      await step(`release ${v1}: push and bundle`, () =>
+        release(
+          v1,
+          commit,
+          push(v1, (n) => `${LOCAL}/${n}:${commit.slice(0, 12)}`, port),
+        ),
+      );
     await step(`start a ${distro} host`, async () => {
       await startHost(distro, model, zotAddress);
       // Before anything in the host pulls: root's podman and the instance user's read it alike.
@@ -1253,38 +1294,59 @@ async function main(): Promise<void> {
         fixturePorts.add(E2E_STATE.valkeyPort);
       });
 
+    // --from-release: the published release, installed and seeded as a stranger's instance would be.
+    const seeded: Seeded | null = fromRelease
+      ? await step(`published ${fromRelease}: verify, install and seed`, async () => {
+          await installPublished(inHost, expectThat, {
+            tag: fromRelease,
+            downloads: `/e2e/releases/${published}`,
+            extra:
+              `--tls internal --domain ${DOMAIN} --email ops@${DOMAIN} --public-ip 127.0.0.1` +
+              (model ? ` --model /e2e/${MODEL_FILE}` : ""),
+            log,
+          });
+          const version = releaseTag(fromRelease).version;
+          expectThat(installedVersion() === version, `status reports ${version}`);
+          checkHttps();
+          const s = seedInApi(inHost, seedNames(commit));
+          checkSeeded(inHost, expectThat, s, `${fromRelease} installed`, `--cacert ${ROOT_CA}`);
+          return s;
+        })
+      : null;
+
     const installLabel = externalState ? " (external Postgres, Valkey and S3)" : external ? " (external S3 store)" : "";
-    await step(`install ${v1}${installLabel}`, async () => {
-      const bundle = `/e2e/releases/${v1}/${bundleAssetName(v1)}`;
-      inHost(
-        `${sh} install --bundle ${bundle} --tls internal --domain ${DOMAIN} --email ops@${DOMAIN} ` +
-          `--registry ${MIRROR} --public-ip 127.0.0.1 ${model ? `--model /e2e/${MODEL_FILE} ` : ""}` +
-          `${external ? `${externalInstallFlags()} ` : ""}` +
-          `${externalState ? `${externalStateFlags("acl")} ` : ""}--yes`,
-        // The store's keys and the servers' passwords go in the environment, never on the command line.
-        { env: { ...(external ? externalInstallEnv() : {}), ...(externalState ? externalStateEnv("acl") : {}) } },
-      );
-      expectThat(installedVersion() === v1, `status reports ${v1}`);
-      checkHttps();
-      if (external) {
-        checkExternalStore(inHost, expectThat);
-      } else {
-        checkBrowserStorage("install");
-      }
-      checkUnitEnv();
-      // The bundled Valkey's own checks; an external one has its own (e2e-external.ts).
-      if (!externalState) {
-        checkValkeyAuth();
-      }
-      if (externalState) await checkExternalState(inHost, expectThat, "install");
-      checkClientAddresses();
-      checkIrcClientAddresses(inHost, expectThat);
-      checkIpv6();
-      checkListeners();
-      checkStopPostOrder();
-      // The collector's host, Postgres and Valkey series and the rule groups (L1-observability).
-      await checkMetrics(inHost, expectThat, externalState ? "external" : "bundled");
-    });
+    if (!fromRelease)
+      await step(`install ${v1}${installLabel}`, async () => {
+        const bundle = `/e2e/releases/${v1}/${bundleAssetName(v1)}`;
+        inHost(
+          `${sh} install --bundle ${bundle} --tls internal --domain ${DOMAIN} --email ops@${DOMAIN} ` +
+            `--registry ${MIRROR} --public-ip 127.0.0.1 ${model ? `--model /e2e/${MODEL_FILE} ` : ""}` +
+            `${external ? `${externalInstallFlags()} ` : ""}` +
+            `${externalState ? `${externalStateFlags("acl")} ` : ""}--yes`,
+          // The store's keys and the servers' passwords go in the environment, never on the command line.
+          { env: { ...(external ? externalInstallEnv() : {}), ...(externalState ? externalStateEnv("acl") : {}) } },
+        );
+        expectThat(installedVersion() === v1, `status reports ${v1}`);
+        checkHttps();
+        if (external) {
+          checkExternalStore(inHost, expectThat);
+        } else {
+          checkBrowserStorage("install");
+        }
+        checkUnitEnv();
+        // The bundled Valkey's own checks; an external one has its own (e2e-external.ts).
+        if (!externalState) {
+          checkValkeyAuth();
+        }
+        if (externalState) await checkExternalState(inHost, expectThat, "install");
+        checkClientAddresses();
+        checkIrcClientAddresses(inHost, expectThat);
+        checkIpv6();
+        checkListeners();
+        checkStopPostOrder();
+        // The collector's host, Postgres and Valkey series and the rule groups (L1-observability).
+        await checkMetrics(inHost, expectThat, externalState ? "external" : "bundled");
+      });
 
     await step(`release ${v2} (new digests) and upgrade`, async () => {
       relabel(commit, v2);
@@ -1294,13 +1356,25 @@ async function main(): Promise<void> {
         push(v2, (n) => `${LOCAL}/${n}:${v2}`, port),
       );
       const before = migrateRun();
-      inHost(`sh ~/commonair/selfhost.sh upgrade --bundle /e2e/releases/${v2}/${bundleAssetName(v2)}`, { user: true });
+      const upgrade = `sh ~/commonair/selfhost.sh upgrade --bundle /e2e/releases/${v2}/${bundleAssetName(v2)}`;
+      if (fromRelease) {
+        // The installed selfhost.sh is the published release's: it does the upgrade, as a
+        // stranger's does. That release came from ghcr, so the candidate's registry is named here.
+        const out = inHost(`${upgrade} --registry ${MIRROR} 2>&1; echo "exit=$?"`, {
+          user: true,
+          env: { COMMONAIR_HEALTH_TIMEOUT: "600" },
+        });
+        const outcome = upgradeOutcome(out);
+        if (!outcome.ok) throw new StepError(upgradeBlocker(fromRelease, v2, outcome, out));
+      } else inHost(upgrade, { user: true });
       expectThat(installedVersion() === v2, `status reports ${v2}`);
       checkMigrateFirst(before);
-      if (externalState) {
+      if (externalState || fromRelease) {
         const restarts = migrateRestarts(inHost);
-        expectThat(restarts === 0, `the upgrade ran migrate once, as the owner (${restarts} restarts)`);
+        const as = externalState ? ", as the owner" : "";
+        expectThat(restarts === 0, `the upgrade ran migrate once${as} (${restarts} restarts)`);
       }
+      if (seeded) checkSeeded(inHost, expectThat, seeded, `upgraded from ${fromRelease}`, `--cacert ${ROOT_CA}`);
       checkHttps();
       if (external) {
         // The upgrade keeps the store the install chose.
@@ -1363,6 +1437,7 @@ async function main(): Promise<void> {
       expectThat(installedVersion() === v2, `status reports ${v2} again`);
       checkHttps();
       if (externalState) await checkExternalState(inHost, expectThat, "rollback");
+      if (seeded) checkSeeded(inHost, expectThat, seeded, "after the rollback", `--cacert ${ROOT_CA}`);
     });
   } catch (e) {
     collectLogs();

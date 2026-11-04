@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # Install
 
 The examples use `stream.example.org` for the instance and `ops@example.org` for the operator.
-Replace both, and replace `0.1.0-rc.1` with the latest release.
+Replace both, and replace `0.1.0` with the latest release.
 
 ## 1. Prepare the server
 
@@ -60,7 +60,7 @@ Never pipe a download into a shell. Download the bundle, its checksums and their
 check them, and only then run anything:
 
 ```sh
-VERSION=0.1.0-rc.1
+VERSION=0.1.0
 BASE=https://github.com/abolishus/commonair/releases/download/v$VERSION
 mkdir -p ~/commonair-release && cd ~/commonair-release
 curl -fsSLO "$BASE/SHA256SUMS"
@@ -109,20 +109,24 @@ sh "commonair-selfhost_$VERSION/selfhost.sh" install --yes \
 - `--email` is the ACME account address and the default for every instance contact (security,
   abuse, DMCA, privacy). Change the contacts later in the env file.
 
-Instead of `--bundle`, `--version v0.1.0-rc.1` downloads the release itself over HTTPS and runs
+Instead of `--bundle`, `--version v0.1.0` downloads the release itself over HTTPS and runs
 the same checks. Other options:
 
 | Option                 | What it does                                                                            |
 | ---------------------- | --------------------------------------------------------------------------------------- |
 | `--tls internal`       | Caddy's own CA instead of ACME, for LAN and test hosts ([tls.md](tls.md))               |
 | `--public-ip <a,b>`    | Addresses WHIP clients reach the server on, if not its interface addresses (behind NAT) |
+| `--sha256sums <path>`  | The release's SHA256SUMS for `--bundle`, when it is not next to the bundle              |
 | `--registry <host/ns>` | Pull our images from your mirror ([mirroring.md](mirroring.md))                         |
 | `--model <path>`       | A local copy of the moderation model, checked against its pinned sha256                 |
 | `--unsupported-distro` | Continue on a distribution other than Debian 13 or Fedora 42+                           |
 | `--reinstall`          | Install over an existing instance (secrets and env-file edits are kept)                 |
 | `--web-push`           | Offer browser push notifications; `--no-web-push` turns them off                        |
+| `--captions`           | Live captions with whisper.cpp ([captions.md](captions.md)); checks the CPU first       |
+| `--turn-relay`         | coturn's TURN relay for P2P viewers behind strict NATs ([p2p.md](p2p.md))               |
 
-Run `sh selfhost.sh --help` for the full list.
+Run `sh selfhost.sh --help` for the full list. The optional features stay off unless you pass
+their flag ([configuration.md](configuration.md#features-that-are-off-by-default)).
 
 **Object storage.** By default the objects (media, data exports, WAL-G backups, sealed evidence)
 live in Garage on this server, and `install` needs nothing for it. To keep them in an
@@ -147,6 +151,15 @@ sh "commonair-selfhost_$VERSION/selfhost.sh" install --yes \
 `read -rs` is bash syntax. Run as root with `--yes`, the keys reach the `commonair` user's run
 through the environment. [object-storage.md](object-storage.md) says what the store must support
 and walks through Spaces.
+
+**Optional: use managed Postgres and Valkey.** By default `install` runs Postgres (with WAL-G
+backups) and Valkey in containers on this server, which is what most instances should do. To use
+external servers instead, such as a provider's managed PostgreSQL and Valkey, add
+`--database-url` and `--valkey-url` (and `--database-ca`, `--valkey-ca` for the provider's CA)
+to this command, with the passwords in `DATABASE_PASSWORD` and `VALKEY_PASSWORD`, never on the
+command line. **Choose now**, as for the store: an instance never switches between bundled and
+external. [managed-services.md](managed-services.md) walks through it, and
+[requirements.md](requirements.md#external-postgres-and-valkey) says what the servers need.
 
 **A fork's releases.** To install a fork's release, set `COMMONAIR_REPOSITORY_URL` to the fork's
 repository URL for this command. It decides where releases are downloaded from and which
@@ -175,8 +188,8 @@ Checks, each failing with the fix to apply:
 
 - the distribution, Podman 5 and catatonit, systemd 254+ and a running user manager;
 - subuid and subgid entries, linger, and the unprivileged-port sysctl;
-- on a first install, that nothing listens on 80, 443, 1935, 6667, 6697 (TCP) or 443, 8189
-  (UDP). It prints the firewall command when firewalld is running, and whether the host has a
+- on a first install, that nothing listens on 80, 443, 1935, 6667, 6697 (TCP) or 443, 8189,
+  3478 (UDP). It prints the firewall command when firewalld is running, and whether the host has a
   global IPv6 address (the public ports listen on it too, so an AAAA record can point here).
 
 Then it:
@@ -189,7 +202,9 @@ Then it:
    `--email`, and `MTX_WEBRTCADDITIONALHOSTS` from `--public-ip` or the server's global
    addresses;
 5. creates the Podman secrets `commonair-database-url`, `commonair-owner-database-url`,
-   `commonair-valkey-url` and `commonair-grafana-admin-password` from the env file;
+   `commonair-valkey-url`, `commonair-grafana-admin-password` and the metrics collector's
+   `commonair-pg-monitor-password` and `commonair-valkey-monitor-password` from the env file
+   ([configuration.md](configuration.md#secrets-and-the-metrics-collectors-keys));
 6. points the symlink `~/commonair` at the release, and records a `--registry` mirror in
    `~/.config/commonair/selfhost.conf`;
 7. creates the moderation hash lists `~/.local/share/commonair/moderation/csam.pdq` and
