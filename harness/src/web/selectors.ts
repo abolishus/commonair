@@ -345,6 +345,8 @@ export const D_TEST_IDS = {
   playerShortcutsDialog: "player-shortcuts-dialog",
   playerDataSaverChip: "player-data-saver-chip",
   chatPinnedStrip: "chat-pinned-strip",
+  chatOffline: "chat-offline",
+  chatGated: "chat-gated",
   // D3: the VOD and clip watch pages.
   watchMeta: "watch-meta",
   watchChannelCard: "watch-channel-card",

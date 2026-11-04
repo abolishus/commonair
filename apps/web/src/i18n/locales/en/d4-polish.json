@@ -76,5 +76,7 @@
   "polish.birthDate.required": "Enter your date of birth.",
   "polish.birthDate.invalid": "That date does not exist.",
   "polish.birthDate.future": "Your date of birth cannot be in the future.",
-  "polish.coop.allDecisions": "See all decisions"
+  "polish.coop.allDecisions": "See all decisions",
+  "pageTitle.coopJury": "Jury duty",
+  "pageTitle.giveawayVerify": "Verify a giveaway · {name}"
 }

@@ -21,7 +21,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { Link } from "@tanstack/react-router";
 import * as React from "react";
 import { t } from "../../i18n/index.ts";
-import { categoryHref, tagHref } from "../../lib/category-route.ts";
+import { categoryLink, tagLink as tagRoute } from "../../lib/category-route.ts";
 import { reportClient, type ReportClient, type ReportSubject } from "../safety/client.ts";
 import { ReportForm } from "../safety/report-dialog.tsx";
 import { formatUptime, isoDuration, uptimeSeconds } from "./channel-data.ts";
@@ -29,20 +29,20 @@ import { formatUptime, isoDuration, uptimeSeconds } from "./channel-data.ts";
 /** The category, linking to its directory page. */
 export function CategoryLink({ category }: { category: { slug: string; name: string } }): React.JSX.Element {
   return (
-    <a
+    <Link
       data-testid="channel-meta-category"
       data-slug={category.slug}
-      href={categoryHref(category.slug)}
+      {...categoryLink(category.slug)}
       className="min-w-0 truncate font-medium text-foreground underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
     >
       {category.name}
-    </a>
+    </Link>
   );
 }
 
 /** The element a tag `Badge` renders as (`ChannelHeader`'s `tagLink`): a link to the directory filtered by it. */
 export function tagLink(tag: string): React.ReactElement {
-  return <a data-testid="channel-meta-tag" data-tag={tag} href={tagHref(tag)} aria-label={tag} />;
+  return <Link data-testid="channel-meta-tag" data-tag={tag} {...tagRoute(tag)} aria-label={tag} />;
 }
 
 const subscribeSeconds = (tick: () => void) => {

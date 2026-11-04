@@ -471,8 +471,6 @@ describe("detectors", () => {
 export const PENDING_HEAD: Readonly<Record<string, string>> = {
   "src/routes/_app/$channel_.vods.$vodId.tsx": "D3-watch",
   "src/routes/_app/$channel_.clips.$clipId.tsx": "D3-watch",
-  "src/routes/_app/coop.jury.tsx": "B8-web (owns components/jury), then D4's successor",
-  "src/routes/_app/$channel_.giveaways.$giveawayId.tsx": "B8-web (owns components/giveaways)",
   "src/routes/_studio/import.tsx": "B8-server (owns components/twitch-import), then D5-studio",
 };
 

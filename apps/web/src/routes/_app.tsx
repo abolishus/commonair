@@ -6,7 +6,7 @@ import { Outlet, createFileRoute, type ErrorComponentProps } from "@tanstack/rea
 import type * as React from "react";
 import { LegalPending } from "../components/legal-pending.tsx";
 import { ErrorState, NotFoundState, ShellFallback } from "../components/not-found.tsx";
-import { AppFooter, AppHeader } from "../components/site-chrome.tsx";
+import { AppFooter, AppHeader, AppRail } from "../components/site-chrome.tsx";
 import { t } from "../i18n/index.ts";
 
 /** Site chrome (header + footer) for every public page; creator tools use `_studio`, embeds none. */
@@ -37,7 +37,13 @@ function AppNotFound(): React.JSX.Element {
 
 function AppLayout(): React.JSX.Element {
   return (
-    <AppShell header={<AppHeader />} footer={<AppFooter />} skipLabel={t("nav.skipToContent")}>
+    <AppShell
+      header={<AppHeader />}
+      sidebar={<AppRail />}
+      sidebarPlacement="below"
+      footer={<AppFooter />}
+      skipLabel={t("nav.skipToContent")}
+    >
       <LegalPending />
       <Outlet />
     </AppShell>

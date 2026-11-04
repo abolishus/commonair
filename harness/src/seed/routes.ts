@@ -9,8 +9,11 @@
  */
 import type { SeedUnitName } from "./types.ts";
 
-/** A value seed-social knows (a fixed login's channel slug) or one a unit publishes in `store.extra`. */
-export type SeedValue = { channelOf: string } | { extra: readonly [SeedUnitName, string] };
+/**
+ * A value seed-social knows (a fixed login's channel slug), one a unit publishes in `store.extra`, or
+ * a fixed value every seed has (a category slug from `social/content.ts`).
+ */
+export type SeedValue = { channelOf: string } | { extra: readonly [SeedUnitName, string] } | { fixed: string };
 
 export interface SeedRoute {
   /** A fixed login handle, or `anonymous`. */
@@ -46,6 +49,10 @@ export const SEED_ROUTES: Readonly<Record<string, SeedRoute>> = {
   },
   // W3-portability: the landing of one of streamer1's move links, published by seed-social.
   "/m/$channel/$nonce": { ...viewer, params: { channel: ch("streamer1"), nonce: ex("social", "moveLinkNonce") } },
+  // D1-web: the directory, one seeded category (streamer1 is live in Art) and a search.
+  "/directory/": viewer,
+  "/directory/$category": { ...viewer, params: { category: { fixed: "art" } } },
+  "/search": { ...viewer, query: { fixed: "q=streamer" } },
   "/embed/$channel": { as: "anonymous", params: { channel: ch("streamer1") }, expectData: true },
   "/signin": form,
   "/signup": form,

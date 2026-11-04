@@ -131,6 +131,8 @@ const serverOff = () => false;
 
 /** The page-level provider (the channel page mounts it): theatre on or off, kept for this tab. */
 export function TheatreProvider({ children }: { children: React.ReactNode }): React.JSX.Element {
+  // Nested under another provider (a host page, or a test driving theatre), the outer one wins.
+  const outer = React.useContext(TheatreContext) !== OFF;
   const theatre = React.useSyncExternalStore(theatreFlag.subscribe, theatreFlag.read, serverOff);
   const hidden = React.useSyncExternalStore(chatFlag.subscribe, chatFlag.read, serverOff);
   const value = React.useMemo<Theatre>(() => ({ theatre, setTheatre: theatreFlag.write }), [theatre]);
@@ -138,6 +140,7 @@ export function TheatreProvider({ children }: { children: React.ReactNode }): Re
     () => ({ chatHidden: theatre && hidden, setChatHidden: chatFlag.write }),
     [theatre, hidden],
   );
+  if (outer) return React.createElement(React.Fragment, null, children);
   return React.createElement(
     TheatreContext.Provider,
     { value },

@@ -4,7 +4,9 @@
 import { createFileRoute } from "@tanstack/react-router";
 import type * as React from "react";
 import { GiveawayVerifyPage } from "../../components/giveaways/verify-page.tsx";
+import { t } from "../../i18n/index.ts";
 import { useBootstrap } from "../../lib/bootstrap.ts";
+import { titleHead } from "../../lib/page-title.ts";
 
 /**
  * `/$channel/giveaways/$giveawayId`: a giveaway's public verify page (ADR 0039): the commitment,
@@ -13,6 +15,7 @@ import { useBootstrap } from "../../lib/bootstrap.ts";
  * (which renders no outlet) while the URL stays `/$channel/giveaways/$giveawayId`.
  */
 export const Route = createFileRoute("/_app/$channel_/giveaways/$giveawayId")({
+  head: ({ params }) => titleHead(t("pageTitle.giveawayVerify", { name: params.channel })),
   component: GiveawayRoute,
 });
 

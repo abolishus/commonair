@@ -16,6 +16,7 @@ import { playerBundles } from "../player-server.ts";
 import { sleep, waitFor } from "../wait.ts";
 import { signInViaUi } from "../web/flows.ts";
 import { ROUTES, TEST_IDS as T } from "../web/selectors.ts";
+import { expandPinnedStrip } from "../d/d2-chat.ts";
 import { WebSession, byTestId } from "../web/session.ts";
 import { type E8Run, type E8Streamer, newE8Streamer, waitLive } from "./kit.ts";
 import { E8_ID_PATTERNS, E8_ROUTES, E8_TEST_IDS as E, byE8Id } from "./selectors.ts";
@@ -143,6 +144,7 @@ export async function stepViewer(run: E8Run): Promise<void> {
     });
     const choice = poll.choices[0];
     if (!choice) throw new Error("the poll has no choices");
+    await expandPinnedStrip(page);
     await byE8Id(page, E.chatPoll, { "poll-id": poll.id, status: "active" }).waitFor(ui);
     await byE8Id(page, E.chatPollChoice, { "choice-id": choice.id }).click(ui);
     await byE8Id(page, E.chatPollVoted, { "choice-id": choice.id, votes: "1" }).waitFor(ui);
@@ -159,6 +161,7 @@ export async function stepViewer(run: E8Run): Promise<void> {
     });
     const outcome = p.outcomes[0];
     if (!outcome) throw new Error("the prediction has no outcomes");
+    await expandPinnedStrip(page);
     await byE8Id(page, E.chatPrediction, { "prediction-id": p.id, status: "active" }).waitFor(ui);
     await byE8Id(page, E.chatPredictionAmount).fill(String(VIEWER_BET), ui);
     await byE8Id(page, E8_ID_PATTERNS.chatPredictionBet.id(outcome.id)).click(ui);

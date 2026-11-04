@@ -81,4 +81,6 @@ export type Key =
   | "polish.birthDate.required"
   | "polish.birthDate.invalid"
   | "polish.birthDate.future"
-  | "polish.coop.allDecisions";
+  | "polish.coop.allDecisions"
+  | "pageTitle.coopJury"
+  | "pageTitle.giveawayVerify";

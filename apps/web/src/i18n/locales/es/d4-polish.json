@@ -76,5 +76,7 @@
   "polish.birthDate.required": "Indica tu fecha de nacimiento.",
   "polish.birthDate.invalid": "Esa fecha no existe.",
   "polish.birthDate.future": "Tu fecha de nacimiento no puede estar en el futuro.",
-  "polish.coop.allDecisions": "Ver todas las decisiones"
+  "polish.coop.allDecisions": "Ver todas las decisiones",
+  "pageTitle.coopJury": "Jurado",
+  "pageTitle.giveawayVerify": "Verificar un sorteo · {name}"
 }

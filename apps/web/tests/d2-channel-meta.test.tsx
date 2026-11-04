@@ -210,9 +210,14 @@ describe("category and tags (F9)", () => {
     expect(screen.getByTestId("channel-meta-uptime").textContent).toMatch(/^Live for 1:(29|3\d)$/);
   });
 
-  it("CategoryLink encodes the slug", () => {
-    render(<CategoryLink category={{ slug: "music & dj", name: "Music" }} />);
-    expect(screen.getByTestId("channel-meta-category").getAttribute("href")).toBe("/directory/music%20%26%20dj");
+  it("CategoryLink encodes the slug", async () => {
+    const root = createRootRoute({
+      component: () => <CategoryLink category={{ slug: "music & dj", name: "Music" }} />,
+    });
+    const router = createRouter({ routeTree: root, history: createMemoryHistory({ initialEntries: ["/"] }) });
+    render(providers(<RouterProvider router={router} />));
+    const link = await screen.findByTestId("channel-meta-category");
+    expect(link.getAttribute("href")).toBe("/directory/music%20%26%20dj");
   });
 
   it("channelAbout prefers the live broadcast's category and dedupes tags", () => {

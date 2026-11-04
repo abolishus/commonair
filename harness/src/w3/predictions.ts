@@ -32,6 +32,7 @@ import { FORCED_LATENCIES } from "../w1/timeline-web.ts";
 import { toDate } from "../w2/sql-time.ts";
 import { signInViaUi } from "../web/flows.ts";
 import { ROUTES, TEST_IDS as T } from "../web/selectors.ts";
+import { expandPinnedStrip } from "../d/d2-chat.ts";
 import { WebSession, byTestId } from "../web/session.ts";
 import type { InteractW3Extension } from "./kit.ts";
 
@@ -270,6 +271,7 @@ export async function stepFairPrediction(run: InteractW3Extension): Promise<void
   if (page === null) return;
   await ctx.step(t("the far viewer's channel page shows chat-prediction-result"), async () => {
     await page.session.goto(E8_ROUTES.channel(s.channel));
+    await expandPinnedStrip(page.page);
     await byE8Id(page.page, FAIR_PREDICTION_IDS.result, {
       pool: String(pool),
       winners: "1",

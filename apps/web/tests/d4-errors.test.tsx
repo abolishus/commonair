@@ -51,6 +51,7 @@ function emptyStateTags(code: string): { attrs: string; index: number }[] {
 vi.mock("../src/components/site-chrome.tsx", () => ({
   AppHeader: () => <header data-testid="app-header" />,
   AppFooter: () => <footer />,
+  AppRail: () => null,
 }));
 
 const { ChannelNotFoundState, ErrorState, NotFoundState } = await import("../src/components/not-found.tsx");
@@ -239,7 +240,6 @@ describe("the shared states", () => {
  * an entry whose states all have an action fails until it is removed.
  */
 const PENDING_ACTION: Readonly<Record<string, string>> = {
-  "src/routes/_app/$channel.tsx": "D2-channel adopts ChannelNotFoundState (components/not-found.tsx)",
   "src/routes/embed.$channel.tsx": "contract request: the embed's not-found links out of the frame",
 };
 

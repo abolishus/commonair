@@ -49,7 +49,7 @@ import { useBootstrap } from "../../lib/bootstrap.ts";
 import { titleHead } from "../../lib/page-title.ts";
 import { useChannel } from "../../lib/use-channel.ts";
 import { Player } from "../../player/player.tsx";
-import { useTheatre } from "../../player/theatre.ts";
+import { TheatreProvider, useTheatre, useTheatreChat } from "../../player/theatre.ts";
 
 export const Route = createFileRoute("/_app/$channel")({
   // `?tab=videos|clips|about` (F2): each tab is a link and Back steps through them.
@@ -81,7 +81,12 @@ function ChannelPage(): React.JSX.Element {
   const navigate = Route.useNavigate();
   const onTabChange = React.useCallback((next: ChannelTab) => void navigate({ search: tabSearch(next) }), [navigate]);
   // Keyed by channel so per-channel state (follow, chat, lists) never leaks across navigations.
-  return <ChannelView key={page.summary.slug} page={page} tab={tab} onTabChange={onTabChange} />;
+  // D2-player's theatre state (per tab): the player's toggle and this layout read the same provider.
+  return (
+    <TheatreProvider>
+      <ChannelView key={page.summary.slug} page={page} tab={tab} onTabChange={onTabChange} />
+    </TheatreProvider>
+  );
 }
 
 function ChannelView({
@@ -104,6 +109,7 @@ function ChannelView({
   const restricted = channel.live?.restricted === "under_review";
   const [client] = React.useState(maturityClient);
   const { theatre } = useTheatre();
+  const { chatHidden } = useTheatreChat();
   const vods = useChannelVods(channel.slug, page.vods);
   // Live -> offline: the loaded list predates the broadcast that just ended (it was still recording,
   // so it was left out); ask again so the hero and "Last live" are that broadcast.
@@ -335,6 +341,8 @@ function ChannelView({
       stream={{ id: channel.id, live: channel.live !== null, slug: channel.slug }}
       signedIn={signedIn}
       selfUsername={me?.username ?? null}
+      channelName={channel.displayName}
+      ageGated={stage === "mature-gate" || stage === "restricted-locked"}
       // D2-chat sizes the column (bounded so the log scrolls inside it; full height in theatre).
       className={chatColumnClass({ theatre: theatre && live })}
     />
@@ -370,7 +378,8 @@ function ChannelView({
           {stageNode}
           {theatreLayout ? null : details}
         </div>
-        <aside className="min-w-0 lg:w-80 lg:shrink-0">{chat}</aside>
+        {/* Collapsed in theatre, chat stays mounted (connection, scroll and draft kept) but hidden. */}
+        <aside className={cn("min-w-0 lg:w-80 lg:shrink-0", theatreLayout && chatHidden && "hidden")}>{chat}</aside>
       </div>
       {theatreLayout ? (
         <div className="mx-auto flex w-full max-w-7xl min-w-0 flex-col gap-4 px-4">{details}</div>

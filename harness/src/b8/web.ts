@@ -37,6 +37,7 @@ import { PANEL_EXPECTED } from "../n3/index.ts";
 import { blockingViolations } from "../n4/web.ts";
 import { signInViaUi } from "../web/flows.ts";
 import { ROUTES } from "../web/selectors.ts";
+import { expandPinnedStrip } from "../d/d2-chat.ts";
 import { WebSession } from "../web/session.ts";
 import type { InteractB8Extension, TwitchImportB8Extension } from "./kit.ts";
 
@@ -206,6 +207,7 @@ export async function stepGraceBetWeb(run: InteractB8Extension): Promise<void> {
     ctx.defer(async () => {
       await owner.interact.predictions.cancel({ id: c.id }).catch(() => undefined);
     });
+    await expandPinnedStrip(page);
     await within(page, "chat-prediction", { "prediction-id": c.id, status: "active" }).waitFor({
       timeout: UI_TIMEOUT_MS,
     });
@@ -225,6 +227,7 @@ export async function stepGraceBetWeb(run: InteractB8Extension): Promise<void> {
   });
 
   await ctx.step(title("the card offers prediction-grace; the viewer bets from it"), async () => {
+    await expandPinnedStrip(page);
     const grace = within(page, B8_WEB_IDS.grace, { "prediction-id": created.id });
     await grace.waitFor({ timeout: GRACE_SHOWN_MS });
     const endsAt = await grace.getAttribute("data-grace-ends-at");

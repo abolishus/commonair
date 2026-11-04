@@ -14,6 +14,7 @@ import { t } from "../../i18n/index.ts";
 import { api } from "../../lib/api.ts";
 import { getSessionUser, useBootstrap } from "../../lib/bootstrap.ts";
 import { requireSession } from "../../lib/guard.ts";
+import { titleHead } from "../../lib/page-title.ts";
 
 /**
  * `/coop/jury`: the advisory jury (ADR 0038): opt in or out, and a seated juror's cases and votes.
@@ -21,6 +22,7 @@ import { requireSession } from "../../lib/guard.ts";
  */
 export const Route = createFileRoute("/_app/coop/jury")({
   beforeLoad: () => requireSession(() => getSessionUser()),
+  head: () => titleHead(t("pageTitle.coopJury")),
   component: JuryRoute,
 });
 

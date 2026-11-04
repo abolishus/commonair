@@ -66,16 +66,7 @@ export async function steps(ctx: DContext): Promise<void> {
   await s.step("d4: an unknown channel offers Browse live channels", async () => {
     await open(ctx, page, ROUTES.channel(UNKNOWN_CHANNEL));
     const action = page.locator(tid(T.emptyStateAction));
-    const found = await action
-      .first()
-      .waitFor({ timeout: 5_000 })
-      .then(() => true)
-      .catch(() => false);
-    if (!found) {
-      // `$channel.tsx` is D2-channel's: it adopts `ChannelNotFoundState` (components/not-found.tsx).
-      s.skipStep("d4: unknown channel action", "waiting on D2-channel adopting ChannelNotFoundState");
-      return;
-    }
+    await action.first().waitFor({ timeout: UI_TIMEOUT_MS });
     s.assert("the unknown channel's state has an action", (await action.count()) >= 1);
   });
 

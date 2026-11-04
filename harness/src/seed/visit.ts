@@ -12,13 +12,15 @@ import type { SeedStore } from "./types.ts";
 export type ResolvedRoute = { ok: true; url: string } | { ok: false; missing: string };
 
 function valueOf(v: SeedValue, store: SeedStore): string | null {
+  if ("fixed" in v) return v.fixed;
   if ("channelOf" in v) return store.channels.find((c) => c.ownerHandle === v.channelOf)?.slug ?? null;
   const [unit, key] = v.extra;
   const got = store.extra[unit]?.[key];
   return typeof got === "string" && got.length > 0 ? got : null;
 }
 
-const describe = (v: SeedValue) => ("channelOf" in v ? `${v.channelOf}'s channel` : `store.extra.${v.extra.join(".")}`);
+const describe = (v: SeedValue) =>
+  "fixed" in v ? v.fixed : "channelOf" in v ? `${v.channelOf}'s channel` : `store.extra.${v.extra.join(".")}`;
 
 /** Fill a route path's `$param` segments and query from the store. Pure. */
 export function resolveSeedRoute(path: string, route: SeedRoute, store: SeedStore): ResolvedRoute {

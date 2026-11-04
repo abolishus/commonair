@@ -24,9 +24,7 @@ const CARD: Record<string, string> = {
   poll: E8.chatPoll,
   giveaway: "chat-giveaway",
 };
-/** D2-chat's offline state; not in `D_TEST_IDS` yet (contract request). */
-const CHAT_OFFLINE = "chat-offline";
-/** Ids outside the web registry (other units' cards, D2-chat's unregistered state). */
+/** Ids outside the web registry (other units' cards). */
 const byTestId = (id: string) => `[data-testid="${id}"]`;
 
 /**
@@ -131,7 +129,7 @@ export async function steps(ctx: DContext): Promise<void> {
     const page = ctx.anonymous;
     await open(ctx, page, ROUTES.channel(offline));
     await page.locator(tid("chat")).waitFor({ timeout: UI_TIMEOUT_MS });
-    const quiet = page.locator(byTestId(CHAT_OFFLINE));
+    const quiet = page.locator(tid(T.chatOffline));
     const spoken = page.locator(tid("chat-message"));
     await quiet
       .or(spoken.first())

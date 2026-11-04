@@ -32,6 +32,7 @@ import type { SignedInUser } from "../users.ts";
 import { waitFor } from "../wait.ts";
 import { signInViaUi } from "../web/flows.ts";
 import { ROUTES } from "../web/selectors.ts";
+import { expandPinnedStrip } from "../d/d2-chat.ts";
 import { WebSession } from "../web/session.ts";
 import type { InteractW3Extension } from "./kit.ts";
 import { w3ExtensionTitle } from "./steps.ts";
@@ -223,6 +224,7 @@ export async function stepGiveaway(run: InteractW3Extension): Promise<void> {
       await signInViaUi(page, s.button, UI_TIMEOUT_MS, signal);
       await session.goto(ROUTES.channel(channel));
       const ui = { timeout: UI_TIMEOUT_MS };
+      await expandPinnedStrip(page);
       await byId(page, "chat-giveaway", { "giveaway-id": g.id, status: "open" }).waitFor(ui);
       await byId(page, "chat-giveaway-no-purchase").waitFor(ui);
       await byId(page, "chat-giveaway-enter").click(ui);
