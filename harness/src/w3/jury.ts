@@ -33,6 +33,11 @@ export const JURY_MEMBERS = 12;
 /** Username prefix of the step's own members, and the LIKE pattern that matches only them. */
 export const JURY_PREFIX = "e5_jury";
 export const JURY_USERNAME_LIKE = "e5\\_jury\\_%";
+/**
+ * The harness's case marker: the resolution note of every moderation case and the details of
+ * every report the step seeds. No real case or report carries it.
+ */
+export const JURY_CASE_MARKER = "harness:e5-coop:jury";
 const K = 10;
 const HOOK_TIMEOUT_MS = 75_000;
 const WINDOW_SLACK_MS = 90_000;
@@ -102,6 +107,32 @@ export function tallies(
     out.set(key, t);
   }
   return out;
+}
+
+/** A jury panel as the rerun cleanup reads it. */
+export interface PanelRow {
+  id: string;
+  /** Usernames of its seats. */
+  seats: readonly string[];
+  /** Its sampled cases, and how many of them carry `JURY_CASE_MARKER`. */
+  cases: number;
+  markedCases: number;
+}
+
+/** Whether a username is one of the step's own members (`e5_jury_…`, as `JURY_USERNAME_LIKE`). */
+export const isHarnessJuror = (username: string): boolean => username.startsWith(`${JURY_PREFIX}_`);
+
+/**
+ * The panels a same-stack rerun removes: the harness's own, by its marker. A panel is the harness's
+ * when it sampled a case the harness seeded (`JURY_CASE_MARKER`) and seated one of the harness's
+ * members. Only a draw during a harness run does both: the step's members opt in just before its
+ * draw and opt out when it ends, and its cases exist only on a stack the harness seeded. A panel
+ * with no marked case, or with no harness seat, is someone else's and stays (a panel that is not
+ * there to clean then fails the draw assertion, which reports it). An empty panel (committed,
+ * nothing selected yet) is reused by the next draw and needs no cleanup.
+ */
+export function harnessPanelIds(panels: readonly PanelRow[]): string[] {
+  return panels.filter((p) => p.markedCases > 0 && p.seats.some(isHarnessJuror)).map((p) => p.id);
 }
 
 /** The case every seated juror sees (conflicts can hide one from someone), or null. */
@@ -185,9 +216,10 @@ export async function seedJuryCases(sql: InstanceType<typeof Bun.SQL>, p: SeedPa
       values (${id}::uuid, ${v.tier}::moderation_tier, ${v.origin}::moderation_case_origin, ${v.category}::moderation_category,
               ${v.listCategory}::hash_list_category, 'broadcast', ${uuidv7()}::uuid, ${v.channelId}::uuid, ${v.userId}::uuid, ${v.ruleRef})`;
     // Cases start undecided (0016); deciding them is a separate update, as in production.
+    // The note is the harness's case marker: it is how a rerun recognises the harness's panel.
     await sql`
       update moderation_cases set status = ${v.status}::moderation_case_status, resolved_at = now() - interval '1 day',
-             resolved_by_id = ${v.resolvedBy}::uuid
+             resolved_by_id = ${v.resolvedBy}::uuid, resolution_note = ${JURY_CASE_MARKER}
        where id = ${id}::uuid`;
     return id;
   };
@@ -234,9 +266,9 @@ export async function seedJuryCases(sql: InstanceType<typeof Bun.SQL>, p: SeedPa
   for (let i = 0; i < 8; i++) {
     const id = uuidv7();
     await sql`
-      insert into reports (id, reporter_id, subject_type, subject_id, reason, status, resolved_at)
+      insert into reports (id, reporter_id, subject_type, subject_id, reason, details, status, resolved_at)
       values (${id}::uuid, ${p.reporter}::uuid, 'user', ${p.reported}::uuid, ${i < 5 ? "harassment" : "spam"}::report_reason,
-              ${i % 3 === 0 ? "dismissed" : "actioned"}::report_status, now() - interval '1 day')`;
+              ${JURY_CASE_MARKER}, ${i % 3 === 0 ? "dismissed" : "actioned"}::report_status, now() - interval '1 day')`;
     reports.push(id);
   }
   return { ok, t0, ncii, reports };
@@ -258,6 +290,46 @@ async function seedCases(ext: CoopW3Extension, legal: SignedInUser): Promise<See
       legal: legal.id,
     });
   });
+}
+
+/** A period's panels with their seats' usernames and their marked cases. */
+export async function readPanels(sql: InstanceType<typeof Bun.SQL>, period: string): Promise<PanelRow[]> {
+  const rows = (await sql`
+    select p.id::text as id,
+           coalesce((select json_agg(u.username order by u.username) from jury_seats s join users u on u.id = s.user_id
+                      where s.panel_id = p.id), '[]'::json) as seats,
+           (select count(*)::int from jury_cases jc where jc.panel_id = p.id) as cases,
+           (select count(*)::int from jury_cases jc
+              left join moderation_cases mc on jc.subject_kind = 'moderation_case' and mc.id = jc.subject_id
+              left join reports r on jc.subject_kind = 'report' and r.id = jc.subject_id
+             where jc.panel_id = p.id
+               and (mc.resolution_note = ${JURY_CASE_MARKER} or r.details = ${JURY_CASE_MARKER})) as marked
+      from jury_panels p
+     where p.period = ${period}
+     order by p.id`) as { id: string; seats: unknown; cases: number; marked: number }[];
+  return rows.map((r) => {
+    const seats: unknown = typeof r.seats === "string" ? JSON.parse(r.seats) : r.seats;
+    return {
+      id: r.id,
+      seats: Array.isArray(seats) ? seats.filter((s): s is string => typeof s === "string") : [],
+      cases: Number(r.cases),
+      markedCases: Number(r.marked),
+    };
+  });
+}
+
+/**
+ * Removes the period's harness panels (`harnessPanelIds`) and returns their ids. Seats, sampled
+ * cases, votes and flags go with each panel by `ON DELETE CASCADE`: `jury_votes` is append-only,
+ * but its 0046 trigger lets a cascade through, so no test hook is needed. The seeded moderation
+ * cases and reports stay (their tables refuse deletes); a rerun seeds new ones.
+ */
+export async function dropHarnessPanels(sql: InstanceType<typeof Bun.SQL>, period: string): Promise<string[]> {
+  const ids = harnessPanelIds(await readPanels(sql, period));
+  if (ids.length === 0) return [];
+  const gone = (await sql`
+    delete from jury_panels where id = any(${sql.array(ids, "uuid")}) returning id::text as id`) as { id: string }[];
+  return gone.map((g) => g.id);
 }
 
 export interface Outcome {
@@ -362,18 +434,9 @@ export async function stepJury(ext: CoopW3Extension): Promise<void> {
 
   // ------------------------------------------------------------ 3. cases
   await withSql(ext.databaseUrl, async (sql) => {
-    // A rerun in the same month: drop this month's panel so the draw runs, but only when every
-    // seat on it is a harness jury member (`e5_jury_…`). Anyone else's panel stays, and the draw
-    // assertion below then reports it.
-    const gone = await sql`
-      delete from jury_panels p
-      where p.period = ${period}
-        and exists (select 1 from jury_seats s where s.panel_id = p.id)
-        and not exists (
-          select 1 from jury_seats s join users u on u.id = s.user_id
-          where s.panel_id = p.id and u.username not like ${JURY_USERNAME_LIKE}
-        )
-      returning p.id`;
+    // A rerun in the same month: drop this month's harness panel (by its marker) so the draw runs.
+    // Anyone else's panel stays, and the draw assertion below then reports it.
+    const gone = await dropHarnessPanels(sql, period);
     if (gone.length) ctx.log.info("jury: dropped this month's earlier harness panel", { panels: gone.length });
   });
   const seeded = await ctx.step("jury: 3. seed closed T1/T2 cases and reports, one T0 and one NCII case", () =>

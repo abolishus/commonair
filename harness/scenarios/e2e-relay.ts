@@ -14,9 +14,10 @@
  * drain=true via=web|api` (see src/relay-plan.ts). `via=api` creates and retires relays through
  * the API and uses HTTP viewers only.
  *
- * W3 extensions (`--set w3=`, `src/w3/steps.ts`; ADR 0016 amendment 1, `src/w3/dvr-relay/`):
- * `dvr-relay`, `dvr-purge` (adds `dvr-relay`) and `relay-vtt` run once the honest viewers are
- * verified on the Go relay, before the liar relay and the drain.
+ * The relay's DVR, purge feed and captions (the W3 extensions `dvr-relay`, `dvr-purge` and
+ * `relay-vtt`) and B8-player's `relay-dvr-switch` run in `relay-dvr` (batch 8 decision (o): the
+ * two together were over the ~12 min shard cap). Both scenarios stand the relay up through
+ * `setUpRelay` below, so either runs alone on a fresh stack.
  */
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -30,11 +31,9 @@ import { GoRelay, buildRelay, freePort, relayHost } from "../src/relay.ts";
 import { type RelayPlan, buildRelayPlan, verifiedCountOk } from "../src/relay-plan.ts";
 import { DEFAULT_REPORT_DIR } from "../src/report.ts";
 import { type ScenarioContext, defineScenario } from "../src/scenario.ts";
+import type { Streamer } from "../src/streamer.ts";
 import type { SignedInUser } from "../src/users.ts";
 import { ViewbotSwarm } from "../src/viewbot.ts";
-import { stepDvrPurge, stepDvrRelay, stepRelayVtt } from "../src/w3/dvr-relay/index.ts";
-import type { RelayW3Extension } from "../src/w3/kit.ts";
-import { type W3Extension, w3ExtensionTitle, w3Extensions } from "../src/w3/steps.ts";
 import { waitFor } from "../src/wait.ts";
 import { signInViaUi, signUpViaUi } from "../src/web/flows.ts";
 import { ROUTES, TEST_IDS as T, tid } from "../src/web/selectors.ts";
@@ -61,11 +60,18 @@ const REDACT = [tid(T.relayToken), tid(T.relayRunCommand), tid(T.streamKey)];
 
 type RelayNode = Awaited<ReturnType<ApiClient["relays"]["mine"]>>[number];
 
-const W3_STEPS: Readonly<Record<W3Extension<"e2e-relay">, (ext: RelayW3Extension) => Promise<void>>> = {
-  "dvr-relay": stepDvrRelay,
-  "dvr-purge": stepDvrPurge,
-  "relay-vtt": stepRelayVtt,
-};
+/**
+ * What each relay scenario covers, in order (the step-union test in `tests/b8-harness.test.ts`
+ * checks the split lost nothing): `e2e-relay` keeps the relay base.
+ */
+export const E2E_RELAY_PHASES = [
+  "setup",
+  "viewers on the relay",
+  "viewbot swarm",
+  "verification",
+  "over-reporting relay",
+  "drain",
+] as const;
 
 /** What the harness reads about a relay, from the `/relays` row (web) or `relays.mine` (api). */
 export interface RelayRead {
@@ -84,7 +90,7 @@ export function readFromNode(n: RelayNode): RelayRead {
   };
 }
 
-interface RelayView {
+export interface RelayView {
   read(id: string): Promise<RelayRead | null>;
 }
 
@@ -137,34 +143,59 @@ export default defineScenario({
     "member creates a relay on /relays → Go relay on the LAN serves honest viewers → viewbots excluded → receipts verified, count = honest → 5× liar relay suspended, its viewers back on origin → SIGTERM drain offline → restart active → retire",
   needs: ["api", "web", "mail", "media", "origin", "worker", "relay", "ffmpeg", "browser"],
   // Needs Go and OUTBOUND_ALLOW_PRIVATE_NETWORKS=true (the harness stack sets it) and runs
-  // ~15 minutes: `full` runs it last (ADR 0021).
+  // ~9 minutes since `relay-dvr` took the DVR steps; `full` still runs it last (ADR 0021).
   inFull: true,
   timeoutMs: 30 * 60_000,
   async run(ctx) {
+    // An old `--set w3=dvr-relay` would otherwise run no DVR step and still pass.
+    if (ctx.param("w3", "") !== "")
+      throw new Error("e2e-relay has no W3 extensions since batch 8: run relay-dvr with --set w3=");
     const plan = buildRelayPlan(ctx.params);
     ctx.data("plan", plan);
-    const sessions: WebSession[] = [];
-    const state = { finished: false, softFailed: false };
-    const logs: { relay: GoRelay | null; liar: LiarRelay | null } = { relay: null, liar: null };
-    // Registered first so they run last: relay logs (complete on failure) and screenshots.
-    ctx.defer(async () => {
-      const failed = !state.finished || state.softFailed;
-      if (logs.relay) ctx.data("relay.logs", logs.relay.logs.lines(failed ? undefined : 50));
-      if (logs.liar) {
-        ctx.data("liar.logs", logs.liar.logs.lines(failed ? undefined : 50));
-        ctx.data("liar.receipts", logs.liar.receipts);
-      }
-      if (failed) await screenshotSessions(ctx, sessions);
-      await Promise.allSettled(sessions.map((s) => s.close()));
-    });
-    const check: ScenarioContext["check"] = (name, condition, details) => {
-      if (!condition) state.softFailed = true;
-      return ctx.check(name, condition, details);
-    };
-    await e2eRelay(ctx, plan, sessions, logs, check);
-    state.finished = true;
+    await runRelayScenario(ctx, (run) => e2eRelay(ctx, plan, run));
   },
 });
+
+/** The relay processes a relay scenario reports the logs of. */
+export interface RelayLogs {
+  relay: GoRelay | null;
+  liar: LiarRelay | null;
+}
+
+/** What a relay scenario's body gets: its browser sessions, its relays' logs and a soft check. */
+export interface RelayRun {
+  sessions: WebSession[];
+  logs: RelayLogs;
+  /** `ctx.check` that also marks the run failed, so the logs and screenshots are kept in full. */
+  check: ScenarioContext["check"];
+}
+
+/**
+ * Runs a relay scenario's body with its reporting: the relays' logs (complete on a failure, the
+ * last 50 lines otherwise), screenshots of every session on a failure, and the sessions closed.
+ */
+export async function runRelayScenario(ctx: ScenarioContext, body: (run: RelayRun) => Promise<void>): Promise<void> {
+  const sessions: WebSession[] = [];
+  const state = { finished: false, softFailed: false };
+  const logs: RelayLogs = { relay: null, liar: null };
+  // Registered first so they run last: relay logs (complete on failure) and screenshots.
+  ctx.defer(async () => {
+    const failed = !state.finished || state.softFailed;
+    if (logs.relay) ctx.data("relay.logs", logs.relay.logs.lines(failed ? undefined : 50));
+    if (logs.liar) {
+      ctx.data("liar.logs", logs.liar.logs.lines(failed ? undefined : 50));
+      ctx.data("liar.receipts", logs.liar.receipts);
+    }
+    if (failed) await screenshotSessions(ctx, sessions);
+    await Promise.allSettled(sessions.map((s) => s.close()));
+  });
+  const check: ScenarioContext["check"] = (name, condition, details) => {
+    if (!condition) state.softFailed = true;
+    return ctx.check(name, condition, details);
+  };
+  await body({ sessions, logs, check });
+  state.finished = true;
+}
 
 async function screenshotSessions(ctx: ScenarioContext, sessions: readonly WebSession[]): Promise<void> {
   const dir = join(ctx.env.HARNESS_REPORT_DIR ?? DEFAULT_REPORT_DIR, `${ctx.runId}-${ctx.name}`);
@@ -172,20 +203,49 @@ async function screenshotSessions(ctx: ScenarioContext, sessions: readonly WebSe
   if (files.length > 0) ctx.data("screenshots", files);
 }
 
-async function e2eRelay(
-  ctx: ScenarioContext,
-  plan: RelayPlan,
-  sessions: WebSession[],
-  logs: { relay: GoRelay | null; liar: LiarRelay | null },
-  check: ScenarioContext["check"],
-): Promise<void> {
+/** A live channel, a member's registered Go relay that is active, and the helpers to use them. */
+export interface RelayBase {
+  streamer: SignedInUser;
+  channel: string;
+  encoder: Streamer;
+  member: SignedInUser;
+  /** The member's `/relays` page (via=web), else null. */
+  relayPage: Page | null;
+  relayId: string;
+  goRelay: GoRelay;
+  /** The relays' public host (the liar listens there too). */
+  host: string;
+  /** When the relay first reported active (epoch ms). */
+  activeAt: number;
+  view: RelayView;
+  waitRelay: (id: string, what: string, ok: (r: RelayRead) => boolean, timeoutMs: number) => Promise<RelayRead>;
+  /** A new Chromium session (closed when the scenario ends). */
+  openSession: (label: string) => Promise<WebSession>;
+  poll: <R>(
+    what: string,
+    fn: () => Promise<R | null | undefined | false>,
+    timeoutMs: number,
+    intervalMs?: number,
+  ) => Promise<R>;
+  /** Honest HTTP viewers opened so far (stopped when the scenario ends). */
+  http: HttpViewer[];
+  openHttp: (id: string) => Promise<HttpViewer>;
+  /** Whether a viewer's current assignment is relay `id`. */
+  onRelay: (v: HttpViewer, id: string) => boolean;
+}
+
+/**
+ * Section 1 of `e2e-relay`, which `relay-dvr` shares: the streamer S goes live over RTMP, the
+ * member M signs up (through the web form with via=web, else the API), creates relay
+ * `harness-relay` on `/relays` (or `relays.create`) and reads its token, and the Go relay built
+ * from `relay/` starts on the LAN address with that token until the relay row is active.
+ */
+export async function setUpRelay(ctx: ScenarioContext, plan: RelayPlan, run: RelayRun): Promise<RelayBase> {
+  const { sessions, logs, check } = run;
   const p = ctx.platform;
   const signal = ctx.signal;
   const ui = { timeout: UI_TIMEOUT_MS };
   const web = plan.via === "web";
-  // `--set w3=` names a pending extension; by default only merged ones run (src/w3/steps.ts).
-  const w3 = w3Extensions("e2e-relay", ctx.param("w3", ""));
-  ctx.data("w3.extensions", w3);
   const { probe } = web ? await playerBundles() : { probe: "" };
   const openSession = async (label: string) => {
     const s = await WebSession.open({
@@ -314,9 +374,7 @@ async function e2eRelay(
   const activeAt = Date.now();
   ctx.metric("relay.active_latency", activeAt - relayStarted, "ms");
 
-  // ── 2. Honest viewers on the relay ────────────────────────────────────────────────────────
   const http: HttpViewer[] = [];
-  const browsers: BrowserWatcher[] = [];
   ctx.defer(() => Promise.allSettled(http.map((v) => v.stop())));
   const openHttp = async (id: string) => {
     const v = new HttpViewer({ id, target: { channel }, api: p.api().client, log: ctx.log });
@@ -325,6 +383,37 @@ async function e2eRelay(
     return v;
   };
   const onRelay = (v: HttpViewer, id: string) => v.assignment?.source === "relay" && v.assignment.relayId === id;
+  return {
+    streamer,
+    channel,
+    encoder,
+    member,
+    relayPage,
+    relayId,
+    goRelay,
+    host,
+    activeAt,
+    view,
+    waitRelay,
+    openSession,
+    poll,
+    http,
+    openHttp,
+    onRelay,
+  };
+}
+
+async function e2eRelay(ctx: ScenarioContext, plan: RelayPlan, run: RelayRun): Promise<void> {
+  const p = ctx.platform;
+  const signal = ctx.signal;
+  const ui = { timeout: UI_TIMEOUT_MS };
+  const { logs, check } = run;
+  const base = await setUpRelay(ctx, plan, run);
+  const { streamer, channel, encoder, member, relayPage, relayId, goRelay, host, activeAt } = base;
+  const { waitRelay, openSession, poll, http, openHttp, onRelay } = base;
+
+  // ── 2. Honest viewers on the relay ────────────────────────────────────────────────────────
+  const browsers: BrowserWatcher[] = [];
   const honestCount = () => http.length + browsers.length;
   const relayAssigned = () =>
     http.filter((v) => onRelay(v, relayId)).length + browsers.filter((b) => b.source === "relay").length;
@@ -338,7 +427,7 @@ async function e2eRelay(
         if (signedIn) {
           const fan = await p.signUp({ prefix: "e3_fan" });
           const page = await s.goto(ROUTES.signin);
-          await signInViaUi(page, fan, UI_TIMEOUT_MS, signal);
+          await signInViaUi(page, fan, UI_TIMEOUT_MS, signal, ctx.log);
         }
         const page = await s.goto(ROUTES.channel(channel));
         const w: BrowserWatcher = { label, session: s, page, source: null, attempts: 0 };
@@ -470,23 +559,6 @@ async function e2eRelay(
     check,
     assignedHttp.flatMap((v) => (v.sessionId ? [v.sessionId] : [])),
   );
-
-  // ── W3: DVR from the relay, purges, relay captions ──────────────────────────────────────────
-  if (w3.run.length > 0) {
-    const ext: RelayW3Extension = {
-      ctx,
-      platform: p,
-      check,
-      channel,
-      streamer,
-      member,
-      relay: goRelay,
-      relayId,
-      openHttpViewer: openHttp,
-      onRelay: (v) => onRelay(v, relayId),
-    };
-    for (const name of w3.run) await ctx.step(w3ExtensionTitle(name, "run"), () => W3_STEPS[name](ext));
-  }
 
   // ── 5. Over-reporting relay ──────────────────────────────────────────────────────────────
   let liarAssigned = 0;

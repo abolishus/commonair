@@ -15,14 +15,25 @@
  *    the ladder restarts; every rendition must be present for ≥ 2 min, including the minute after;
  * 4. after the broadcast ends, every VOD segment is decoded the same way.
  *
+ * Every measurement window ends on what it stands for, not on a clock (batch 8 decision (o): the
+ * scenario was 12m49s, over the shard cap): the recorder restarts once every rendition has
+ * `beforeRestartSeconds` of samples; WHIP stops measuring once every rendition is covered for the
+ * 2 min the coverage check asks; RTMP needs no second half, since its ladder keeps running (and
+ * is sampled) through the 120 s stop hysteresis that follows; and after the ladder restart it
+ * measures until every rendition covers the minute the check judges. Each wait has a ceiling
+ * (`measureSeconds`, `afterRestartSeconds`, plus slack), and a window that never fills fails the
+ * coverage check that judges it, as before.
+ *
  * `--set assert=false` records the metrics (and data `baseline`) without asserting: the baseline
  * run against `main`. Other knobs: `ladderViewers` (above TRANSCODE_VIEWER_THRESHOLD; default 60),
- * `measureSeconds`, `afterRestartSeconds`, `protocols` (`rtmp,whip`), `mediaContainer`.
+ * `beforeRestartSeconds` (30), `measureSeconds` (130), `afterRestartSeconds` (70), `protocols`
+ * (`rtmp,whip`), `mediaContainer`.
  */
 import type { SignedInUser } from "../src/users.ts";
 import {
   type ClockProtocol,
   type ClockSample,
+  type CoverageRule,
   type ProtocolSkew,
   judgeCoverage,
   protocolSkew,
@@ -39,6 +50,30 @@ const LIVE_TO_VOD_P95_MS = 250;
 const LIVE_GAP_MS = 2_000;
 const VOD_GAP_MS = 4_000;
 const VOD_READY_TIMEOUT_MS = 5 * 60_000;
+/** What the coverage check judges (`restartAt` per run): ≥ 2 min each, 80 % of the minute after. */
+export const COVERAGE_RULE: Omit<CoverageRule, "restartAt"> = {
+  minTotalMs: 120_000,
+  afterRestartMs: 60_000,
+  afterRestartFraction: 0.8,
+  gapMs: 5_000,
+};
+/** On top of a measurement window's old fixed length, before its wait gives up. */
+const WINDOW_SLACK_MS = 60_000;
+const COVERAGE_POLL_MS = 2_000;
+
+/**
+ * Whether the samples cover every advertised rendition as `rule` asks: what a measurement window
+ * waits for. Fewer than two renditions (no rung yet, or a poll between playlists) is never ready.
+ */
+export function coverageReady(
+  samples: readonly ClockSample[],
+  renditions: readonly string[],
+  rule: CoverageRule,
+): boolean {
+  if (renditions.length < 2) return false;
+  const judged = new Map(judgeCoverage(samples, rule).map((c) => [c.rendition, c.ok]));
+  return renditions.every((r) => judged.get(r) === true);
+}
 
 interface Run {
   protocol: ClockProtocol;
@@ -69,13 +104,7 @@ export default defineScenario({
     ctx.data("skew", results);
     const coverage = runs.map((r) => ({
       protocol: r.protocol,
-      renditions: judgeCoverage(r.live, {
-        minTotalMs: 120_000,
-        restartAt: r.restartAt,
-        afterRestartMs: 60_000,
-        afterRestartFraction: 0.8,
-        gapMs: 5_000,
-      }),
+      renditions: judgeCoverage(r.live, { ...COVERAGE_RULE, restartAt: r.restartAt }),
     }));
     ctx.data("coverage", coverage);
     if (!enforce) {
@@ -111,6 +140,7 @@ export default defineScenario({
 async function broadcast(ctx: ScenarioContext, protocol: ClockProtocol): Promise<Run> {
   const p = ctx.platform;
   const n = ctx.intParam("ladderViewers", 60);
+  const beforeRestartMs = ctx.intParam("beforeRestartSeconds", 30) * 1000;
   const measureMs = ctx.intParam("measureSeconds", 130) * 1000;
   const afterRestartMs = ctx.intParam("afterRestartSeconds", 70) * 1000;
   const ladderRestart = protocol === "rtmp";
@@ -156,13 +186,58 @@ async function broadcast(ctx: ScenarioContext, protocol: ClockProtocol): Promise
   await ctx.step(`${tag}: ${n} HTTP viewers cross the transcode threshold`, openViewers);
   await ctx.step(`${tag}: the ladder starts`, () => ladderUp(opened));
 
-  await ctx.step(`${tag}: measure ${measureMs / 1000} s with one recorder restart`, async () => {
-    await Bun.sleep(measureMs / 2);
+  /**
+   * Waits until the samples cover every rendition seen as `rule` asks, or gives up at `ceilingMs`
+   * (logged): the coverage check then judges what was sampled and fails a window that never filled.
+   */
+  const covered = async (what: string, since: number, rule: CoverageRule, ceilingMs: number): Promise<number> => {
+    const started = Date.now();
+    const renditions = () => [...new Set([...sampler.current, ...sampler.renditionsSince(since)])].sort();
+    const samples = () => sampler.samples.filter((x) => x.seenAt >= since);
+    await waitFor(`${channel} ${what}`, async () => coverageReady(samples(), renditions(), rule), {
+      timeoutMs: ceilingMs,
+      intervalMs: COVERAGE_POLL_MS,
+      signal: ctx.signal,
+    }).catch((err: unknown) => {
+      if (ctx.signal.aborted) throw err;
+      ctx.log.warn("clock-skew: a measurement window did not fill; the coverage check judges it", {
+        protocol,
+        what,
+        sampler: sampler.status(),
+      });
+    });
+    return Date.now() - started;
+  };
+
+  const measured = Date.now();
+  await ctx.step(`${tag}: measure until every rendition is covered, with one recorder restart`, async () => {
+    const before = await covered(
+      `${beforeRestartMs / 1000} s of every rendition before the recorder restart`,
+      measured,
+      { ...COVERAGE_RULE, minTotalMs: beforeRestartMs, restartAt: null },
+      measureMs / 2 + WINDOW_SLACK_MS,
+    );
+    ctx.metric(`${protocol}.beforeRecorderRestart`, before, "ms");
     const r = await restartRecorder(broadcastId ?? "", { container: ctx.params.mediaContainer });
     ctx.data(`${protocol}.recorderRestart`, { ...r, at: new Date().toISOString() });
     ctx.check(`${tag}: the recorder's ffmpeg was ended once`, r.signalled === 1, r);
-    await Bun.sleep(measureMs / 2);
+    // RTMP's ladder runs on through the stop hysteresis below (sampled all along), which covers
+    // the 2 min; WHIP has no ladder restart, so it measures here until the 2 min are covered.
+    // RTMP's 2 min therefore rest on media's 120 s stop hysteresis (`transcodeStopAfterMs`,
+    // services/media/src/settings.ts) and are mostly sampled with no viewers: ~30 s under load
+    // here, then the hysteresis. Nothing waits for that total; the coverage check still asserts
+    // it. Raise `beforeRestartSeconds` for more samples under load.
+    if (!ladderRestart) {
+      const total = await covered(
+        "every rendition covered for 2 min",
+        0,
+        { ...COVERAGE_RULE, restartAt: null },
+        measureMs + WINDOW_SLACK_MS - before,
+      );
+      ctx.metric(`${protocol}.afterRecorderRestart`, total, "ms");
+    }
   });
+  ctx.metric(`${protocol}.measure`, Date.now() - measured, "ms");
 
   let restartAt: number | null = null;
   if (ladderRestart) {
@@ -181,9 +256,17 @@ async function broadcast(ctx: ScenarioContext, protocol: ClockProtocol): Promise
     });
     const firstAfter = sampler.samples.filter((x) => x.seenAt >= back && x.rendition !== "source");
     restartAt = firstAfter.length ? Math.min(...firstAfter.map((x) => x.stripMs)) : null;
-    await ctx.step(`${tag}: measure ${afterRestartMs / 1000} s after the ladder restart`, () =>
-      Bun.sleep(afterRestartMs),
+    const after = await ctx.step(
+      `${tag}: measure until every rendition covers the minute after the ladder restart`,
+      () =>
+        covered(
+          "every rendition covers the minute after the ladder restart",
+          back,
+          { ...COVERAGE_RULE, minTotalMs: 0, restartAt },
+          afterRestartMs + WINDOW_SLACK_MS,
+        ),
     );
+    ctx.metric(`${protocol}.afterLadderRestart`, after, "ms");
   }
 
   await ctx.step(`${tag}: stop sampling and viewing`, async () => {
