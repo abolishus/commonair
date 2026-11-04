@@ -105,7 +105,11 @@ export const SEED_ROUTES: Readonly<Record<string, SeedRoute>> = {
     okEmpty: ["No held messages", "No mod actions yet"],
   },
   "/content": studio,
-  "/revenue": studio,
+  // The seed sets up no payout account; D5-studio draws that note as an empty state (revenue.payout.none).
+  "/revenue": {
+    ...studio,
+    okEmpty: ["The co-op's treasurer sets up your payout account. Payouts wait until it is ready."],
+  },
   "/chat": studio,
   "/relays": studio,
   "/interact": studio,
