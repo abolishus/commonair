@@ -203,7 +203,8 @@ export function ChatPanel({
     const onKey = (e: KeyboardEvent) => onListKey(list, e, setActiveRow);
     list.addEventListener("keydown", onKey);
     return () => list.removeEventListener("keydown", onKey);
-  }, []);
+    // The log is not rendered while age-gated; attach once it mounts after the 18+ confirmation.
+  }, [ageGated]);
   const [draft, setDraft] = React.useState("");
   // Fed to <SurgeBanner/> (W1-watch-gate): the latest settings and surge frames, and a refused send.
   const [{ settings, surge, gateDenied }, gateDispatch] = React.useReducer(gateReducer, EMPTY_GATE);
@@ -365,6 +366,26 @@ export function ChatPanel({
   const { dismissed, dismiss } = useDismissed(dismissStore);
   const shownPinned = React.useMemo(() => undismissed(allPinned, dismissed), [allPinned, dismissed]);
   const pinnedNews = usePinnedAnnouncement(allPinned, interact.loaded);
+  // Dismissing the last item unmounts the strip and its focused button: move focus somewhere stable.
+  const refocusAfterDismiss = React.useRef(false);
+  React.useEffect(() => {
+    if (!refocusAfterDismiss.current || shownPinned.length > 0) return;
+    refocusAfterDismiss.current = false;
+    const list = listRef.current;
+    const panel = list?.closest<HTMLElement>('[data-testid="chat"]');
+    const input = panel?.querySelector<HTMLInputElement>('[data-testid="chat-input"]:not(:disabled)');
+    const rows = list ? [...list.querySelectorAll<HTMLElement>("[data-calm-row]")] : [];
+    const row = rows.find((r) => r.dataset.id === activeRow) ?? rows.at(-1);
+    const log = panel?.querySelector<HTMLElement>('[data-slot="chat-log"]');
+    const target = input ?? row ?? log;
+    if (!target) return;
+    if (target === log && !log.hasAttribute("tabindex")) log.tabIndex = -1;
+    target.focus();
+  }, [shownPinned.length, activeRow]);
+  const dismissPinned = (item: PinnedItem) => {
+    if (shownPinned.length === 1) refocusAfterDismiss.current = true;
+    dismiss(item.key);
+  };
   const renderCard = (item: PinnedItem): React.ReactNode => {
     if (item.kind === "poll" && poll)
       return (
@@ -418,7 +439,7 @@ export function ChatPanel({
         />
         {raid && <RaidBanner raid={raid} isBroadcaster={isBroadcaster} />}
         {shownPinned.length > 0 && (
-          <PinnedStrip items={shownPinned} renderCard={renderCard} onDismiss={(item) => dismiss(item.key)} />
+          <PinnedStrip items={shownPinned} renderCard={renderCard} onDismiss={dismissPinned} />
         )}
       </div>
     ) : undefined;

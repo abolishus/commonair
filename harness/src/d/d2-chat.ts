@@ -29,6 +29,18 @@ const CHAT_OFFLINE = "chat-offline";
 /** Ids outside the web registry (other units' cards, D2-chat's unregistered state). */
 const byTestId = (id: string) => `[data-testid="${id}"]`;
 
+/**
+ * Unfold the chat's pinned strip so its cards are visible (they stay mounted but hidden while it
+ * is folded). One click expands every pinned card. For scenarios that wait on or click a chat
+ * poll, prediction or giveaway card; a no-op when there is no strip or it is already expanded.
+ */
+export async function expandPinnedStrip(page: Page, timeout = UI_TIMEOUT_MS): Promise<void> {
+  const toggle = page.locator(`${tid(T.chatPinnedStrip)} [data-part="toggle"]`);
+  await toggle.waitFor({ timeout }).catch(() => undefined);
+  if ((await toggle.count()) === 0) return;
+  if ((await toggle.getAttribute("aria-expanded")) === "false") await toggle.click({ timeout });
+}
+
 async function open(ctx: DContext, page: Page, path: string): Promise<void> {
   const url = new URL(path, ctx.scenario.env.HARNESS_WEB_URL).toString();
   await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
@@ -60,12 +72,20 @@ export async function steps(ctx: DContext): Promise<void> {
     s.assert("the strip expands", (await toggle.getAttribute("aria-expanded")) === "true");
     const top = CARD[kind];
     if (top) await page.locator(byTestId(top)).first().waitFor({ state: "visible", timeout: UI_TIMEOUT_MS });
+    // The seed gives streamer1 a prediction; skip only when the API agrees there is none now
+    // (a step earlier in the run may have resolved it), so a strip that drops it fails.
+    const current = await api.interact.predictions.current({ channel: streamer1 }).catch(() => null);
     const prediction = page.locator(byTestId(E8.chatPrediction));
-    if ((await prediction.count()) === 0) {
-      s.skipStep("d2-chat: the expanded prediction card", "streamer1 has no prediction pinned right now");
+    if (!current) {
+      s.skipStep("d2-chat: the expanded prediction card", "streamer1 has no current prediction");
     } else {
-      await prediction.first().waitFor({ state: "visible", timeout: UI_TIMEOUT_MS });
-      s.check("expanding shows the prediction card", await prediction.first().isVisible());
+      await prediction
+        .first()
+        .waitFor({ state: "visible", timeout: UI_TIMEOUT_MS })
+        .catch(() => undefined);
+      s.assert("expanding shows the prediction card", await prediction.first().isVisible(), {
+        prediction: current.id,
+      });
     }
     await page.keyboard.press("Escape");
     s.check("Escape folds it again", (await toggle.getAttribute("aria-expanded")) === "false");
@@ -79,6 +99,13 @@ export async function steps(ctx: DContext): Promise<void> {
       await open(ctx, page, ROUTES.channel(streamer1));
       const chat = page.locator(tid("chat"));
       await chat.waitFor({ timeout: UI_TIMEOUT_MS });
+      // The full-height column needs D2-channel to apply `chatColumnClass` (contract request);
+      // until the channel page does, the panel keeps its fixed height and there is nothing to check.
+      const applied = await chat.evaluate((el) => el.classList.contains("chat-column"));
+      if (!applied) {
+        s.skipStep("d2-chat: the full-height column", "the channel page does not apply chatColumnClass yet");
+        return;
+      }
       const box = await chat.boundingBox();
       const bottom = box ? box.y + box.height : 0;
       // The page's 1rem bottom padding is the only gap (a little slack for borders and rounding).

@@ -17,7 +17,8 @@ import {
   createRoute,
   createRouter,
 } from "@tanstack/react-router";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import * as React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { ChatPanel, type ChatPanelProps } from "../src/chat/chat-panel.tsx";
 import type { ChatMessageFrame, SocketLike } from "../src/chat/connection.ts";
@@ -109,13 +110,17 @@ const memoryStore = (): DismissStore => {
 };
 
 function panel(props: Partial<ChatPanelProps> = {}) {
+  mount(() => (
+    <ChatPanel channel={CHANNEL} signedIn={false} interactClient={client()} dismissStore={memoryStore()} {...props} />
+  ));
+}
+
+function mount(Page: () => React.JSX.Element) {
   const root = createRootRoute({ component: () => <Outlet /> });
   const route = createRoute({
     getParentRoute: () => root,
     path: "/",
-    component: () => (
-      <ChatPanel channel={CHANNEL} signedIn={false} interactClient={client()} dismissStore={memoryStore()} {...props} />
-    ),
+    component: Page,
   });
   const router = createRouter({ routeTree: root.addChildren([route]), history: createMemoryHistory() });
   render(
@@ -197,6 +202,40 @@ describe("the 18+ gate", () => {
     expect(chat.querySelector("h2")?.textContent).toBe(t("chat.title"));
   });
 
+  it("gives j and k to the log once the viewer confirms 18+ (the same panel instance)", async () => {
+    let confirm: () => void = () => {};
+    const store = memoryStore();
+    const interactClient = client();
+    mount(function Gate() {
+      const [gated, setGated] = React.useState(true);
+      confirm = () => setGated(false);
+      return (
+        <ChatPanel
+          channel={CHANNEL}
+          stream={LIVE}
+          signedIn={false}
+          ageGated={gated}
+          interactClient={interactClient}
+          dismissStore={store}
+        />
+      );
+    });
+    expect((await screen.findByTestId("chat")).dataset.state).toBe("gated");
+    act(() => confirm());
+    const ws = await socket();
+    act(() => {
+      ws.push({ op: "message", channel: CHANNEL, message: message(1, "one") });
+      ws.push({ op: "message", channel: CHANNEL, message: message(2, "two") });
+    });
+    await waitFor(() => expect(screen.getAllByTestId("chat-message")).toHaveLength(2));
+    const rows = screen.getAllByTestId("chat-message");
+    rows[1]?.focus();
+    fireEvent.keyDown(rows[1] as HTMLElement, { key: "k" });
+    expect(document.activeElement).toBe(rows[0]);
+    fireEvent.keyDown(rows[0] as HTMLElement, { key: "j" });
+    expect(document.activeElement).toBe(rows[1]);
+  });
+
   it("keeps the column class it is given", async () => {
     panel({ ageGated: true, className: "h-112 lg:sticky" });
     expect((await screen.findByTestId("chat")).className).toContain("lg:sticky");
@@ -214,6 +253,18 @@ describe("the panel's strip and input row", () => {
     const announce = document.querySelector('[data-part="pinned-announce"]');
     expect(announce?.getAttribute("aria-live")).toBe("polite");
     expect(announce?.textContent).toBe("");
+  });
+
+  it("keeps keyboard focus in the panel when the last pinned item is dismissed", async () => {
+    panel({ stream: LIVE, interactClient: client({ predictionCurrent: async () => prediction }) });
+    await screen.findByTestId("chat-pinned-strip");
+    const dismiss = document.querySelector<HTMLElement>('[data-testid="chat-pinned-strip"] [data-part="dismiss"]');
+    dismiss?.focus();
+    expect(document.activeElement).toBe(dismiss);
+    act(() => dismiss?.click());
+    await waitFor(() => expect(screen.queryByTestId("chat-pinned-strip")).toBeNull());
+    expect(document.activeElement).not.toBe(document.body);
+    expect(screen.getByTestId("chat").contains(document.activeElement)).toBe(true);
   });
 
   it("shows the viewer's points in the input row, not the header", async () => {

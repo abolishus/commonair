@@ -159,8 +159,14 @@ export function PinnedStrip({ items, renderCard, onDismiss, now = systemNow }: P
           />
         </div>
       )}
-      {/* Bounded so several open cards never squeeze the log out of a full-height column. */}
-      <div id={regionId} data-part="cards" hidden={!expanded} className="grid max-h-96 min-w-0 gap-3 overflow-y-auto">
+      {/* Bounded so open cards never squeeze the log out of the column; tighter below lg, where the
+          column is h-112 and also holds the header and the composer. */}
+      <div
+        id={regionId}
+        data-part="cards"
+        hidden={!expanded}
+        className="grid max-h-48 min-w-0 lg:max-h-96 gap-3 overflow-y-auto"
+      >
         {items.map((item) => (
           <React.Fragment key={item.slot}>{renderCard(item)}</React.Fragment>
         ))}
