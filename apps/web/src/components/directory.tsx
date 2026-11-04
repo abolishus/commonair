@@ -1,21 +1,27 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import type { ChannelCard } from "@commonair/contracts/dto";
+import type { Category, ChannelCard, StreamCard } from "@commonair/contracts/dto";
 import { ChannelAvatar, EmptyState, RelativeTime } from "@commonair/ui";
 import { Section } from "@commonair/ui/blocks/headers";
-import { StreamGrid } from "@commonair/ui/blocks/media";
-import { Card } from "@commonair/ui/components/card";
-import { AlertCircleIcon, LiveStreaming02Icon } from "@hugeicons/core-free-icons";
+import { Button } from "@commonair/ui/components/button";
+import { AlertCircleIcon, ArrowRight01Icon, LiveStreaming02Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { Link } from "@tanstack/react-router";
 import type * as React from "react";
 import { t } from "../i18n/index.ts";
-import type {
-  DirectorySection,
-  DirectorySectionId,
-  OfflineSection,
-  OfflineSectionId,
+import { categoryLink } from "../lib/category-route.ts";
+import {
+  collidingNames,
+  displayLabel,
+  type CategoryShelf,
+  type DirectorySection,
+  type DirectorySectionId,
+  type OfflineSection,
+  type OfflineSectionId,
 } from "../lib/directory-sections.ts";
+import { DiscoveryCategoryGrid } from "./discovery/category-tiles.tsx";
+import { CardLinks, DiscoveryStreamCard, DiscoveryStreamGrid } from "./discovery/stream-cards.tsx";
 
 function sectionTitle(id: DirectorySectionId): string {
   switch (id) {
@@ -39,49 +45,118 @@ function offlineTitle(id: OfflineSectionId): string {
   }
 }
 
+export interface DirectoryProps {
+  /** The live shelves; null when loading failed. */
+  sections: DirectorySection[] | null;
+  offline?: OfflineSection[];
+  /** The one Spotlight hero (F8). */
+  hero?: StreamCard | null;
+  /** The busiest categories, for the Categories shelf. */
+  categories?: Category[];
+  /** Categories with enough live channels for a shelf of their own. */
+  categoryShelves?: CategoryShelf[];
+  /** The way forward when nothing is live (start streaming, sign up). */
+  emptyAction?: React.ReactNode;
+}
+
+/** Tiles on the home page's Categories shelf (F8: 6–8). */
+const HOME_CATEGORIES = 8;
+
 /**
- * The directory on `/`: one `StreamGrid` per non-empty live section, then the offline sections.
- * `sections` is null when loading failed.
+ * The front page's directory (F8): the Spotlight hero, the live shelves (each channel once), the
+ * Categories shelf, per-category shelves with "Show all", then the offline shelves. Names that two
+ * channels on the page share show their `@handle`.
  */
 export function Directory({
   sections,
   offline = [],
-}: {
-  sections: DirectorySection[] | null;
-  offline?: OfflineSection[];
-}): React.JSX.Element {
+  hero = null,
+  categories = [],
+  categoryShelves = [],
+  emptyAction,
+}: DirectoryProps): React.JSX.Element {
+  const collisions = collidingNames(
+    [
+      ...(hero ? [hero] : []),
+      ...(sections ?? []).flatMap((s) => s.cards),
+      ...categoryShelves.flatMap((s) => s.cards),
+      ...offline.flatMap((s) => s.cards),
+    ].map((c) => c.channel),
+  );
+  const liveCategories = categories.filter((c) => c.liveChannels > 0).slice(0, HOME_CATEGORIES);
+  const nothingLive = hero === null && (sections ?? []).length === 0 && categoryShelves.length === 0;
   return (
-    <div data-testid="directory" className="flex flex-col gap-8">
+    <div data-testid="directory" className="flex flex-col gap-10">
       {sections === null ? (
         <EmptyState icon={AlertCircleIcon} title={t("directory.loadFailed")} />
-      ) : sections.length === 0 ? (
+      ) : nothingLive ? (
         <EmptyState
           data-testid="directory-empty"
           icon={LiveStreaming02Icon}
           title={t("directory.empty")}
           description={t("directory.emptyHint")}
+          action={emptyAction}
         />
-      ) : (
-        sections.map((section) => (
-          <Section
-            key={section.id}
-            data-testid="directory-section"
-            data-section={section.id}
-            heading={sectionTitle(section.id)}
-          >
-            <StreamGrid
-              streams={section.cards}
-              hrefFor={(card) => `/${card.channel.slug}`}
-              renderLink={(card) => <Link to="/$channel" params={{ channel: card.channel.slug }} />}
-              cardProps={(card) => ({
-                "data-testid": "stream-card",
-                "data-channel": card.channel.slug,
-                showReason: section.id !== "following",
-              })}
-            />
-          </Section>
-        ))
+      ) : null}
+      {sections !== null && hero && (
+        <Section
+          data-testid="home-hero"
+          data-section="spotlight-hero"
+          heading={t("directory.section.spotlight")}
+          description={t("discovery.home.spotlightHint")}
+        >
+          <DiscoveryStreamCard
+            card={hero}
+            collisions={collisions}
+            lazy={false}
+            headingLevel={3}
+            className="max-w-4xl"
+          />
+        </Section>
       )}
+      {sections?.map((section) => (
+        <Section
+          key={section.id}
+          data-testid="directory-section"
+          data-section={section.id}
+          heading={sectionTitle(section.id)}
+        >
+          <DiscoveryStreamGrid cards={section.cards} collisions={collisions} showReason={section.id !== "following"} />
+        </Section>
+      ))}
+      {sections !== null && liveCategories.length > 0 && (
+        <Section
+          data-testid="home-categories-shelf"
+          heading={t("discovery.home.categories")}
+          action={<ShowAll to="/directory" label={t("discovery.home.allCategories")} />}
+        >
+          <DiscoveryCategoryGrid categories={liveCategories} columns={6} />
+        </Section>
+      )}
+      {sections !== null &&
+        categoryShelves.map((shelf) => (
+          <Section
+            key={shelf.category.id}
+            data-testid="directory-section"
+            data-section="category"
+            data-category={shelf.category.slug}
+            heading={shelf.category.name}
+            action={
+              <Button
+                variant="ghost"
+                size="sm"
+                nativeButton={false}
+                render={<Link {...categoryLink(shelf.category.slug)} />}
+                aria-label={t("discovery.home.showAllIn", { category: shelf.category.name })}
+              >
+                {t("discovery.home.showAll")}
+                <HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={2} aria-hidden className="rtl:-scale-x-100" />
+              </Button>
+            }
+          >
+            <DiscoveryStreamGrid cards={shelf.cards} collisions={collisions} />
+          </Section>
+        ))}
       {sections !== null &&
         offline.map((section) => (
           <Section
@@ -90,37 +165,72 @@ export function Directory({
             data-section={section.id}
             heading={offlineTitle(section.id)}
           >
-            <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <ul className="grid min-w-0 grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
               {section.cards.map((card) => (
-                <OfflineChannelCard key={card.channel.id} card={card} />
+                <li key={card.channel.id} className="min-w-0">
+                  <RecentTile card={card} collisions={collisions} recent={section.id === "recent"} />
+                </li>
               ))}
-            </div>
+            </ul>
           </Section>
         ))}
     </div>
   );
 }
 
-/** An offline channel: avatar, name, last title and when it was last live. */
-function OfflineChannelCard({ card }: { card: ChannelCard }): React.JSX.Element {
+function ShowAll({ to, label }: { to: "/directory"; label: string }): React.JSX.Element {
   return (
-    <Link
-      to="/$channel"
-      params={{ channel: card.channel.slug }}
-      data-testid="channel-card"
-      data-channel={card.channel.slug}
-      className="group block min-w-0 rounded-none outline-none focus-visible:ring-2 focus-visible:ring-ring"
-    >
-      <Card className="flex min-w-0 flex-row items-center gap-3 p-3 transition-colors group-hover:bg-muted">
-        <ChannelAvatar
-          name={card.channel.displayName}
-          src={card.channel.avatarUrl}
-          accent={card.channel.accent}
-          decorative
-        />
-        <span className="flex min-w-0 flex-1 flex-col">
-          <span className="truncate text-sm font-medium">{card.channel.displayName}</span>
-          {card.title && <span className="truncate text-xs text-muted-foreground">{card.title}</span>}
+    <Button variant="ghost" size="sm" nativeButton={false} render={<Link to={to} />}>
+      {label}
+      <HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={2} aria-hidden className="rtl:-scale-x-100" />
+    </Button>
+  );
+}
+
+/**
+ * An offline channel: a 16:9 tile (the initial avatar on the channel's accent; the latest VOD's
+ * thumbnail once the directory returns one), its name, last title and when it was last live, then
+ * its category as a link.
+ */
+function RecentTile({
+  card,
+  collisions,
+  recent,
+}: {
+  card: ChannelCard;
+  collisions: ReadonlySet<string>;
+  recent: boolean;
+}): React.JSX.Element {
+  return (
+    <div data-testid={recent ? "home-recent-tile" : undefined} className="flex min-w-0 flex-col gap-1">
+      <Link
+        to="/$channel"
+        params={{ channel: card.channel.slug }}
+        data-testid="channel-card"
+        data-channel={card.channel.slug}
+        className="group flex min-w-0 flex-col gap-2 rounded-none outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <span
+          data-accent={card.channel.accent}
+          className="grid aspect-video w-full place-items-center overflow-hidden bg-channel-accent/15 ring-channel-accent transition-shadow group-hover:ring-2"
+        >
+          <ChannelAvatar
+            name={card.channel.displayName}
+            src={card.channel.avatarUrl}
+            accent={card.channel.accent}
+            size="lg"
+            decorative
+          />
+        </span>
+        <span className="flex min-w-0 flex-col">
+          <span dir="auto" className="truncate text-sm font-medium">
+            {displayLabel(collisions, card.channel)}
+          </span>
+          {card.title && (
+            <span dir="auto" className="truncate text-xs text-muted-foreground">
+              {card.title}
+            </span>
+          )}
           <span className="truncate text-xs text-muted-foreground">
             {card.lastLiveAt ? (
               <>
@@ -129,10 +239,10 @@ function OfflineChannelCard({ card }: { card: ChannelCard }): React.JSX.Element 
             ) : (
               t("directory.neverLive")
             )}
-            {card.category && ` · ${card.category.name}`}
           </span>
         </span>
-      </Card>
-    </Link>
+      </Link>
+      <CardLinks category={card.category} />
+    </div>
   );
 }

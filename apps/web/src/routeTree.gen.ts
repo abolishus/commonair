@@ -17,6 +17,7 @@ import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppChannelRouteImport } from './routes/_app/$channel'
 import { Route as AppActivateRouteImport } from './routes/_app/activate'
 import { Route as AppDmcaRouteImport } from './routes/_app/dmca'
+import { Route as AppSearchRouteImport } from './routes/_app/search'
 import { Route as AppSigninRouteImport } from './routes/_app/signin'
 import { Route as AppSignupRouteImport } from './routes/_app/signup'
 import { Route as AppTakedownRouteImport } from './routes/_app/takedown'
@@ -55,6 +56,8 @@ import { Route as AppCoopCouncilRouteImport } from './routes/_app/coop.council'
 import { Route as AppCoopJuryRouteImport } from './routes/_app/coop.jury'
 import { Route as AppCoopMembershipRouteImport } from './routes/_app/coop.membership'
 import { Route as AppCoopSettingsRouteImport } from './routes/_app/coop.settings'
+import { Route as AppDirectoryIndexRouteImport } from './routes/_app/directory.index'
+import { Route as AppDirectoryCategoryRouteImport } from './routes/_app/directory.$category'
 import { Route as AppOauth2AuthorizeRouteImport } from './routes/_app/oauth2.authorize'
 import { Route as AppSettingsAppealsRouteImport } from './routes/_app/settings.appeals'
 import { Route as AppSettingsConnectionsRouteImport } from './routes/_app/settings.connections'
@@ -113,6 +116,11 @@ const AppActivateRoute = AppActivateRouteImport.update({
 const AppDmcaRoute = AppDmcaRouteImport.update({
   id: '/dmca',
   path: '/dmca',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSearchRoute = AppSearchRouteImport.update({
+  id: '/search',
+  path: '/search',
   getParentRoute: () => AppRoute,
 } as any)
 const AppSigninRoute = AppSigninRouteImport.update({
@@ -305,6 +313,16 @@ const AppCoopSettingsRoute = AppCoopSettingsRouteImport.update({
   path: '/coop/settings',
   getParentRoute: () => AppRoute,
 } as any)
+const AppDirectoryIndexRoute = AppDirectoryIndexRouteImport.update({
+  id: '/directory/',
+  path: '/directory/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppDirectoryCategoryRoute = AppDirectoryCategoryRouteImport.update({
+  id: '/directory/$category',
+  path: '/directory/$category',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppOauth2AuthorizeRoute = AppOauth2AuthorizeRouteImport.update({
   id: '/oauth2/authorize',
   path: '/oauth2/authorize',
@@ -428,6 +446,7 @@ export interface FileRoutesByFullPath {
   '/$channel': typeof AppChannelRoute
   '/activate': typeof AppActivateRoute
   '/dmca': typeof AppDmcaRoute
+  '/search': typeof AppSearchRoute
   '/signin': typeof AppSigninRoute
   '/signup': typeof AppSignupRoute
   '/takedown': typeof AppTakedownRoute
@@ -465,6 +484,7 @@ export interface FileRoutesByFullPath {
   '/coop/jury': typeof AppCoopJuryRoute
   '/coop/membership': typeof AppCoopMembershipRoute
   '/coop/settings': typeof AppCoopSettingsRoute
+  '/directory/$category': typeof AppDirectoryCategoryRoute
   '/oauth2/authorize': typeof AppOauth2AuthorizeRoute
   '/settings/appeals': typeof AppSettingsAppealsRoute
   '/settings/connections': typeof AppSettingsConnectionsRoute
@@ -474,6 +494,7 @@ export interface FileRoutesByFullPath {
   '/settings/subscriptions': typeof AppSettingsSubscriptionsRoute
   '/developer/bots': typeof StudioDeveloperBotsRoute
   '/coop/': typeof AppCoopIndexRoute
+  '/directory/': typeof AppDirectoryIndexRoute
   '/developer/': typeof StudioDeveloperIndexRoute
   '/$channel/clips/$clipId': typeof AppChannelClipsClipIdRoute
   '/$channel/giveaways/$giveawayId': typeof AppChannelGiveawaysGiveawayIdRoute
@@ -495,6 +516,7 @@ export interface FileRoutesByTo {
   '/$channel': typeof AppChannelRoute
   '/activate': typeof AppActivateRoute
   '/dmca': typeof AppDmcaRoute
+  '/search': typeof AppSearchRoute
   '/signin': typeof AppSigninRoute
   '/signup': typeof AppSignupRoute
   '/takedown': typeof AppTakedownRoute
@@ -532,6 +554,7 @@ export interface FileRoutesByTo {
   '/coop/jury': typeof AppCoopJuryRoute
   '/coop/membership': typeof AppCoopMembershipRoute
   '/coop/settings': typeof AppCoopSettingsRoute
+  '/directory/$category': typeof AppDirectoryCategoryRoute
   '/oauth2/authorize': typeof AppOauth2AuthorizeRoute
   '/settings/appeals': typeof AppSettingsAppealsRoute
   '/settings/connections': typeof AppSettingsConnectionsRoute
@@ -541,6 +564,7 @@ export interface FileRoutesByTo {
   '/settings/subscriptions': typeof AppSettingsSubscriptionsRoute
   '/developer/bots': typeof StudioDeveloperBotsRoute
   '/coop': typeof AppCoopIndexRoute
+  '/directory': typeof AppDirectoryIndexRoute
   '/developer': typeof StudioDeveloperIndexRoute
   '/$channel/clips/$clipId': typeof AppChannelClipsClipIdRoute
   '/$channel/giveaways/$giveawayId': typeof AppChannelGiveawaysGiveawayIdRoute
@@ -565,6 +589,7 @@ export interface FileRoutesById {
   '/_app/$channel': typeof AppChannelRoute
   '/_app/activate': typeof AppActivateRoute
   '/_app/dmca': typeof AppDmcaRoute
+  '/_app/search': typeof AppSearchRoute
   '/_app/signin': typeof AppSigninRoute
   '/_app/signup': typeof AppSignupRoute
   '/_app/takedown': typeof AppTakedownRoute
@@ -603,6 +628,7 @@ export interface FileRoutesById {
   '/_app/coop/jury': typeof AppCoopJuryRoute
   '/_app/coop/membership': typeof AppCoopMembershipRoute
   '/_app/coop/settings': typeof AppCoopSettingsRoute
+  '/_app/directory/$category': typeof AppDirectoryCategoryRoute
   '/_app/oauth2/authorize': typeof AppOauth2AuthorizeRoute
   '/_app/settings/appeals': typeof AppSettingsAppealsRoute
   '/_app/settings/connections': typeof AppSettingsConnectionsRoute
@@ -612,6 +638,7 @@ export interface FileRoutesById {
   '/_app/settings/subscriptions': typeof AppSettingsSubscriptionsRoute
   '/_studio/developer/bots': typeof StudioDeveloperBotsRoute
   '/_app/coop/': typeof AppCoopIndexRoute
+  '/_app/directory/': typeof AppDirectoryIndexRoute
   '/_studio/developer/': typeof StudioDeveloperIndexRoute
   '/_app/$channel_/clips/$clipId': typeof AppChannelClipsClipIdRoute
   '/_app/$channel_/giveaways/$giveawayId': typeof AppChannelGiveawaysGiveawayIdRoute
@@ -635,6 +662,7 @@ export interface FileRouteTypes {
     | '/$channel'
     | '/activate'
     | '/dmca'
+    | '/search'
     | '/signin'
     | '/signup'
     | '/takedown'
@@ -672,6 +700,7 @@ export interface FileRouteTypes {
     | '/coop/jury'
     | '/coop/membership'
     | '/coop/settings'
+    | '/directory/$category'
     | '/oauth2/authorize'
     | '/settings/appeals'
     | '/settings/connections'
@@ -681,6 +710,7 @@ export interface FileRouteTypes {
     | '/settings/subscriptions'
     | '/developer/bots'
     | '/coop/'
+    | '/directory/'
     | '/developer/'
     | '/$channel/clips/$clipId'
     | '/$channel/giveaways/$giveawayId'
@@ -702,6 +732,7 @@ export interface FileRouteTypes {
     | '/$channel'
     | '/activate'
     | '/dmca'
+    | '/search'
     | '/signin'
     | '/signup'
     | '/takedown'
@@ -739,6 +770,7 @@ export interface FileRouteTypes {
     | '/coop/jury'
     | '/coop/membership'
     | '/coop/settings'
+    | '/directory/$category'
     | '/oauth2/authorize'
     | '/settings/appeals'
     | '/settings/connections'
@@ -748,6 +780,7 @@ export interface FileRouteTypes {
     | '/settings/subscriptions'
     | '/developer/bots'
     | '/coop'
+    | '/directory'
     | '/developer'
     | '/$channel/clips/$clipId'
     | '/$channel/giveaways/$giveawayId'
@@ -771,6 +804,7 @@ export interface FileRouteTypes {
     | '/_app/$channel'
     | '/_app/activate'
     | '/_app/dmca'
+    | '/_app/search'
     | '/_app/signin'
     | '/_app/signup'
     | '/_app/takedown'
@@ -809,6 +843,7 @@ export interface FileRouteTypes {
     | '/_app/coop/jury'
     | '/_app/coop/membership'
     | '/_app/coop/settings'
+    | '/_app/directory/$category'
     | '/_app/oauth2/authorize'
     | '/_app/settings/appeals'
     | '/_app/settings/connections'
@@ -818,6 +853,7 @@ export interface FileRouteTypes {
     | '/_app/settings/subscriptions'
     | '/_studio/developer/bots'
     | '/_app/coop/'
+    | '/_app/directory/'
     | '/_studio/developer/'
     | '/_app/$channel_/clips/$clipId'
     | '/_app/$channel_/giveaways/$giveawayId'
@@ -900,6 +936,13 @@ declare module '@tanstack/react-router' {
       path: '/dmca'
       fullPath: '/dmca'
       preLoaderRoute: typeof AppDmcaRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/search': {
+      id: '/_app/search'
+      path: '/search'
+      fullPath: '/search'
+      preLoaderRoute: typeof AppSearchRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/signin': {
@@ -1168,6 +1211,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppCoopSettingsRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/directory/': {
+      id: '/_app/directory/'
+      path: '/directory'
+      fullPath: '/directory/'
+      preLoaderRoute: typeof AppDirectoryIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/directory/$category': {
+      id: '/_app/directory/$category'
+      path: '/directory/$category'
+      fullPath: '/directory/$category'
+      preLoaderRoute: typeof AppDirectoryCategoryRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/oauth2/authorize': {
       id: '/_app/oauth2/authorize'
       path: '/oauth2/authorize'
@@ -1359,6 +1416,7 @@ interface AppRouteChildren {
   AppChannelRoute: typeof AppChannelRoute
   AppActivateRoute: typeof AppActivateRoute
   AppDmcaRoute: typeof AppDmcaRoute
+  AppSearchRoute: typeof AppSearchRoute
   AppSigninRoute: typeof AppSigninRoute
   AppSignupRoute: typeof AppSignupRoute
   AppTakedownRoute: typeof AppTakedownRoute
@@ -1369,6 +1427,7 @@ interface AppRouteChildren {
   AppCoopJuryRoute: typeof AppCoopJuryRoute
   AppCoopMembershipRoute: typeof AppCoopMembershipRoute
   AppCoopSettingsRoute: typeof AppCoopSettingsRoute
+  AppDirectoryCategoryRoute: typeof AppDirectoryCategoryRoute
   AppOauth2AuthorizeRoute: typeof AppOauth2AuthorizeRoute
   AppSettingsAppealsRoute: typeof AppSettingsAppealsRoute
   AppSettingsConnectionsRoute: typeof AppSettingsConnectionsRoute
@@ -1377,6 +1436,7 @@ interface AppRouteChildren {
   AppSettingsPrivacyRoute: typeof AppSettingsPrivacyRoute
   AppSettingsSubscriptionsRoute: typeof AppSettingsSubscriptionsRoute
   AppCoopIndexRoute: typeof AppCoopIndexRoute
+  AppDirectoryIndexRoute: typeof AppDirectoryIndexRoute
   AppChannelClipsClipIdRoute: typeof AppChannelClipsClipIdRoute
   AppChannelGiveawaysGiveawayIdRoute: typeof AppChannelGiveawaysGiveawayIdRoute
   AppChannelVodsVodIdRoute: typeof AppChannelVodsVodIdRoute
@@ -1395,6 +1455,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppChannelRoute: AppChannelRoute,
   AppActivateRoute: AppActivateRoute,
   AppDmcaRoute: AppDmcaRoute,
+  AppSearchRoute: AppSearchRoute,
   AppSigninRoute: AppSigninRoute,
   AppSignupRoute: AppSignupRoute,
   AppTakedownRoute: AppTakedownRoute,
@@ -1405,6 +1466,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppCoopJuryRoute: AppCoopJuryRoute,
   AppCoopMembershipRoute: AppCoopMembershipRoute,
   AppCoopSettingsRoute: AppCoopSettingsRoute,
+  AppDirectoryCategoryRoute: AppDirectoryCategoryRoute,
   AppOauth2AuthorizeRoute: AppOauth2AuthorizeRoute,
   AppSettingsAppealsRoute: AppSettingsAppealsRoute,
   AppSettingsConnectionsRoute: AppSettingsConnectionsRoute,
@@ -1413,6 +1475,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppSettingsPrivacyRoute: AppSettingsPrivacyRoute,
   AppSettingsSubscriptionsRoute: AppSettingsSubscriptionsRoute,
   AppCoopIndexRoute: AppCoopIndexRoute,
+  AppDirectoryIndexRoute: AppDirectoryIndexRoute,
   AppChannelClipsClipIdRoute: AppChannelClipsClipIdRoute,
   AppChannelGiveawaysGiveawayIdRoute: AppChannelGiveawaysGiveawayIdRoute,
   AppChannelVodsVodIdRoute: AppChannelVodsVodIdRoute,

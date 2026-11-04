@@ -9,7 +9,7 @@
 
 export interface SiteNavEntry {
   id: "directory" | "coop";
-  to: "/" | "/coop";
+  to: "/directory" | "/coop";
   current: boolean;
 }
 
@@ -177,7 +177,12 @@ function normalize(pathname: string): string {
 export function siteNav(pathname: string): SiteNavEntry[] {
   const path = normalize(pathname);
   return [
-    { id: "directory", to: "/", current: path === "/" },
+    // Browse is the directory (decision (a)): current there, on a category page and on search.
+    {
+      id: "directory",
+      to: "/directory",
+      current: path === "/directory" || path.startsWith("/directory/") || path === "/search",
+    },
     { id: "coop", to: "/coop", current: path === "/coop" || path.startsWith("/coop/") },
   ];
 }

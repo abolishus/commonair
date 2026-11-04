@@ -13,3 +13,13 @@ export function categoryHref(slug: string): string {
 export function tagHref(tag: string): string {
   return `/directory?tag=${encodeURIComponent(tag)}`;
 }
+
+/** {@link categoryHref} as typed router-link props: `<Link {...categoryLink(slug)} />`. */
+export function categoryLink(slug: string): { to: "/directory/$category"; params: { category: string } } {
+  return { to: "/directory/$category", params: { category: slug } };
+}
+
+/** {@link tagHref} as typed router-link props: `<Link {...tagLink(tag)} />`. */
+export function tagLink(tag: string): { to: "/directory"; search: { tag: string } } {
+  return { to: "/directory", search: { tag } };
+}

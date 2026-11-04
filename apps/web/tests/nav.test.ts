@@ -19,11 +19,14 @@ import {
 import { adminPageFor, mayOpenAdminPage } from "../src/components/safety/access.ts";
 
 describe("site nav", () => {
-  it("links the directory and marks it current only on /", () => {
-    expect(siteNav("/")).toEqual([
-      { id: "directory", to: "/", current: true },
+  it("links the directory (D1: /directory) and marks it current there, on categories and on search", () => {
+    expect(siteNav("/directory")).toEqual([
+      { id: "directory", to: "/directory", current: true },
       { id: "coop", to: "/coop", current: false },
     ]);
+    expect(siteNav("/directory/art")[0]?.current).toBe(true);
+    expect(siteNav("/search")[0]?.current).toBe(true);
+    expect(siteNav("/")[0]?.current).toBe(false);
     expect(siteNav("/rivertide")[0]?.current).toBe(false);
     expect(siteNav("/dashboard")[0]?.current).toBe(false);
   });
@@ -39,7 +42,7 @@ describe("site nav", () => {
   });
 
   it("ignores trailing slashes", () => {
-    expect(siteNav("//")[0]?.current).toBe(true);
+    expect(siteNav("/directory//")[0]?.current).toBe(true);
   });
 });
 
