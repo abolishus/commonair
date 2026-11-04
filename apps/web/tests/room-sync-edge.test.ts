@@ -129,6 +129,31 @@ describe("the registry's edge", () => {
     });
   });
 
+  it("hls.js players get a playback-rate seam on the page's element; native ones do not", () => {
+    offs.push(registerRoomPlayer("rate-hls", source("live", 4), false));
+    const el = { playbackRate: 1 };
+    const doc = { querySelector: () => el } as unknown as Document;
+    const p = roomPlayer("rate-hls", doc);
+    expect(p?.setPlaybackRate?.(1.25)).toBe(true);
+    expect(el.playbackRate).toBe(1.25);
+    expect(p?.setPlaybackRate?.(Number.NaN)).toBe(false);
+    expect(p?.setPlaybackRate?.(0)).toBe(false);
+    expect(roomPlayer("rate-hls", null)?.setPlaybackRate?.(1)).toBe(false);
+    // An element that refuses the value (it throws, or keeps its own).
+    const refusing = {
+      get playbackRate() {
+        return 1;
+      },
+      set playbackRate(_: number) {
+        throw new Error("NotSupportedError");
+      },
+    };
+    const doc2 = { querySelector: () => refusing } as unknown as Document;
+    expect(roomPlayer("rate-hls", doc2)?.setPlaybackRate?.(1.1)).toBe(false);
+    offs.push(registerRoomPlayer("rate-native", source("live", null), true));
+    expect(roomPlayer("rate-native", doc)).not.toHaveProperty("setPlaybackRate");
+  });
+
   it("dvr: null", () => {
     offs.push(registerRoomPlayer("edge-dvr", source("dvr", 4), false));
     expect(roomSyncReport("edge-dvr", fakeDoc({ currentTime: 50, end: 53 }))).toMatchObject({
