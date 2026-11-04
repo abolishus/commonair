@@ -22,6 +22,87 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
 
 ## In flight
 
+**D wave 2 can start (2026-11-04).** Both units it depends on are on `main` with CI green: B8-web
+(merge `eaa96047`) and B8-player (merge `da122e26`, plus its CI fixes listed below).
+
+**Batch 8 wave 2 merged (2026-11-04).** Six units, each implemented, independently reviewed and
+fixed, then integrated by sha onto `ea233078`:
+
+| Unit             | Merge      |
+| ---------------- | ---------- |
+| B8-harness       | `e03a4b72` |
+| B8-player        | `da122e26` |
+| S1-h backups-ext | `e0331d27` |
+| R0-release-prep  | `b89b178f` |
+| L1-status        | `010af302` |
+| M1-coop-money    | `9f7dc131` |
+
+Integration `80c59e4a` applied the contract requests and lifted every `PENDING_B8_*` entry
+(`UNWIRED_B8_SCENARIOS`, `PENDING_B8_EXTENSIONS` and `PENDING_B8_IDS` are now empty):
+
+- `e2e-dump.ts` wired into the self-host e2e, with S1-h's per-mode timers in `install_units`;
+- the harness `shards.ts`, `registry.ts` and `w3/steps.ts` diffs, with the new `relay-dvr`
+  shard and `relay-dvr-switch` wired into it;
+- `@commonair/ledger` gained `owedCents` and `patronageReversedCents`;
+- each unit's no-counsel calls added to the README's post-launch review.
+
+CI then found real failures, fixed on `main` through `c42fe1a2`:
+
+- **promtool test timeout:** vitest's 5 s default (`f8553573`).
+- **`relay-dvr` never verified the DVR session:** the split lost `e2e-relay`'s live audience, and
+  the origin issues the relay only for live media. The scenario now keeps a live viewer
+  (`5b133a98`).
+- **DVR swap position:** after a relay drain the player landed about 45 s toward live. There is
+  now a 15 s landing guard with diagnostics (`ea5eb662`, `34be8bc2`). The root cause is not
+  found: it never reproduced in a local Chromium.
+- **Watch-room edge sync:** three driver fixes (`d0ce8327`, `32d5d4a3`, `a2a2aba8`, `c42fe1a2`)
+  and per-member trajectories in the harness report.
+- **M1's patronage page check** read skeleton rows (`220e6cc8`).
+- **The seed art test timeout** (`9de6bc08`).
+
+CI run `41771305439` on `c42fe1a2` is green: attempt 2 reran `w3` and `seed`. Edge sync is
+load-sensitive. Seek-based corrections stall the decoder on a busy runner, so it passed on the
+same code it failed on in attempt 1.
+
+Differs from the briefs:
+
+- R0's from-release e2e starts from `v0.1.0-rc.10`, not rc.2: older rcs can't upgrade to this
+  tree with their own script.
+- S1-h's timers live in `infra/systemd/`, because Quadlet doesn't process timers.
+- Declined, now follow-ups:
+  - a restore-drill alert (L1-observability's rules);
+  - a `status.json` freshness probe;
+  - a rate limit on the public `/readyz` routes;
+  - the `outcomeUnknown` statement field;
+  - the terms and privacy wording (milestone).
+
+Flakes seen, once each, all passing on rerun or the next run (for `docs/operators/flakes.md`):
+
+- `chat.int` "regex filters run in the filter worker" (`msg_held`, the watch-list chat-filter
+  test);
+- `rtsp-publish-proxy.int` (first segment's PDT null, not the port-race signature);
+- chat `upgrade-deadline.int` (websocket failed);
+- `postgres-health.int` (5850 ms against a 3000 ms bound);
+- an Alpine CDN TLS error in the `captions` platform build;
+- `seed-coverage` "/$channel as viewer1" (empty chat).
+
+Follow-ups:
+
+- edge-sync rate-based correction (in flight);
+- the DVR-swap root cause;
+- a product gap: issuance gives a relay nothing for DVR pulls, so a DVR session on a channel with
+  no live viewer can never verify through a relay (ADR 0016 Amendment 1);
+- `shards.ts` timings from the first push run's PASS lines;
+- dating `## [0.1.0]` in CHANGELOG.md before the tag;
+- the units' undone items (card-share chargebacks, the automatic `distributed` flip, the
+  outcome-unknown settle UI, status history persistence).
+
+Waiting on the user:
+
+- the staging DigitalOcean token (U5: S1-h's timed managed restore, the status stack bring-up);
+- the wave 2 live checks: the `relay-dvr`, `watch-room` and `e5-coop` card/Connect harness runs, the self-host e2e in both modes and from rc.10, and `/coop/membership` and `/coop/patronage/<id>` at 320 px in en, es and en-XA;
+- the milestone (handoff step 6).
+
 **Batch 8 wave 1 merged (2026-11-03); `v0.1.0-rc.10` released from it.** Six units, each
 implemented, independently reviewed and fixed, then integrated by sha: S1-b external (`010eca2f`),
 L1-observability (`5927aa62`), M1-gifts-refunds (`b58b8bc2`), M1-connect (`e4e36070`), B8-server
