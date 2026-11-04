@@ -98,17 +98,6 @@ function domPlayer(channel: string, doc: Document): RoomPlayer | null {
   };
 }
 
-/** Set the element's playback rate; false without an element or when it refuses the value. */
-function setRate(video: HTMLVideoElement | null, rate: number): boolean {
-  if (!video || !Number.isFinite(rate) || rate <= 0) return false;
-  try {
-    video.playbackRate = rate;
-  } catch {
-    return false;
-  }
-  return video.playbackRate === rate;
-}
-
 /** The room's view of this channel's player, or null when none is mounted. */
 export function roomPlayer(channel: string, doc: Document | null = globalThis.document ?? null): RoomPlayer | null {
   const stack = registry.get(channel);
@@ -119,14 +108,7 @@ export function roomPlayer(channel: string, doc: Document | null = globalThis.do
       playheadWallclock: () => s.playheadWallclock(),
       playbackMode: () => s.playbackMode(),
       seekToWallclock: (t) => s.seekToWallclock(t),
-      ...(top.native
-        ? {}
-        : {
-            setTargetLatency: (sec: number, o?: { seek?: boolean }) => s.setTargetLatency(sec, o),
-            // hls.js on MSE: a rate change does not flush, unlike a seek. Not native: untested there.
-            setPlaybackRate: (rate: number) =>
-              setRate(doc?.querySelector<HTMLVideoElement>(PLAYER_VIDEO) ?? null, rate),
-          }),
+      ...(top.native ? {} : { setTargetLatency: (sec: number, o?: { seek?: boolean }) => s.setTargetLatency(sec, o) }),
       ...(s.latencySeconds ? { latencySeconds: () => s.latencySeconds?.() ?? null } : {}),
       ...(s.seekBy ? { seekBy: (ms: number) => s.seekBy?.(ms) ?? false } : {}),
       // hls.js knows its latency; native HLS (no latency) falls back to the element's `seekable`.
