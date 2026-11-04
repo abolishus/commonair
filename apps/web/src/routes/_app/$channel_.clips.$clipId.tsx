@@ -3,7 +3,7 @@
 
 import { createFileRoute } from "@tanstack/react-router";
 import type * as React from "react";
-import { getWatchHead, watchPageTitle } from "../../components/vod-watch/watch-head.ts";
+import { getWatchHead, TITLE_STALE_MS, watchPageTitle } from "../../components/vod-watch/watch-head.ts";
 import { ClipWatchPage } from "../../components/vod-watch/watch-page.tsx";
 import { useBootstrap } from "../../lib/bootstrap.ts";
 import { titleHead } from "../../lib/page-title.ts";
@@ -17,6 +17,9 @@ import { titleHead } from "../../lib/page-title.ts";
  */
 export const Route = createFileRoute("/_app/$channel_/clips/$clipId")({
   loader: ({ params }) => getWatchHead({ data: { kind: "clip", id: params.clipId, channel: params.channel } }),
+  // Only a title: reuse it for a minute, so hovering tiles (preload "intent") and going back do not refetch.
+  staleTime: TITLE_STALE_MS,
+  preloadStaleTime: TITLE_STALE_MS,
   head: ({ loaderData, params }) => titleHead(watchPageTitle(loaderData, "clip", params.channel)),
   component: ClipRoute,
 });

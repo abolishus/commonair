@@ -66,3 +66,25 @@ export function playheadSeconds(playheadMicros: number | null, originMicros: num
 export function moreFrom(tiles: readonly VideoTile[], currentId: string, size = MORE_FROM_SIZE): VideoTile[] {
   return tiles.filter((tile) => tile.id !== currentId).slice(0, Math.max(0, size));
 }
+
+/** The two player calls the `?t=` start needs (`WatchPlayerHandle` satisfies it). */
+export interface StartSeekPlayer {
+  originWallclock(): Date | null;
+  seekToWallclock(t: Date): boolean;
+}
+
+/**
+ * One attempt at the `?t=` start: "done" once the player moved there, "pending" while it does not
+ * know media time 0 yet (or refused), "dropped" when `t` is past the recording, so the page stops
+ * retrying and plays from the start. A `durationSeconds` of 0 or less means unknown.
+ */
+export function seekToStart(
+  player: StartSeekPlayer | null,
+  startSeconds: number,
+  durationSeconds: number,
+): "done" | "pending" | "dropped" {
+  if (durationSeconds > 0 && startSeconds >= durationSeconds) return "dropped";
+  const origin = player?.originWallclock() ?? null;
+  if (!player || !origin) return "pending";
+  return player.seekToWallclock(new Date(origin.getTime() + startSeconds * 1000)) ? "done" : "pending";
+}

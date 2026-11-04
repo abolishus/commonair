@@ -5,6 +5,7 @@
 
 export type Key =
   | "watch.pageTitle.notAvailable"
+  | "watch.pageTitle.clipNotAvailable"
   | "watch.pageTitle.video"
   | "watch.pageTitle.clip"
   | "watch.meta.recorded"

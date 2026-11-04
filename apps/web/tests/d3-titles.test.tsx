@@ -82,7 +82,7 @@ describe("watch route titles", () => {
 
   it("missing or private: not available, and never the title", () => {
     expect(titleOf(VodRoute, { kind: "missing" })).toBe(T("Video not available"));
-    expect(titleOf(ClipRoute, { kind: "missing" })).toBe(T("Video not available"));
+    expect(titleOf(ClipRoute, { kind: "missing" })).toBe(T("Clip not available"));
   });
 
   it("a failed lookup or no loader data yet: the kind and the slug", () => {
@@ -92,7 +92,8 @@ describe("watch route titles", () => {
 
   it("follows the language", async () => {
     setClientTranslator(await loadLocale("es"));
-    expect(titleOf(VodRoute, { kind: "missing" })).toBe(T("Vídeo no disponible"));
+    expect(titleOf(VodRoute, { kind: "missing" })).toBe(T("Video no disponible"));
+    expect(titleOf(ClipRoute, { kind: "missing" })).toBe(T("Clip no disponible"));
     expect(titleOf(ClipRoute, { kind: "error" })).toBe(T("Clip", "rivertide"));
   });
 

@@ -106,6 +106,14 @@ export async function steps(ctx: DContext): Promise<void> {
     const back = page.locator(tid(T.emptyStateAction));
     await back.waitFor({ timeout: UI_TIMEOUT_MS });
     s.check("Back goes to the channel", (await back.getAttribute("href")) === ROUTES.channel(streamer));
-    s.check("the text names the channel", ((await back.textContent()) ?? "").includes(channel.displayName));
+    // The label starts as the slug and becomes the display name once the channel card loads.
+    const named = await back
+      .filter({ hasText: channel.displayName })
+      .waitFor({ timeout: UI_TIMEOUT_MS })
+      .then(
+        () => true,
+        () => false,
+      );
+    s.check("the text names the channel", named, { text: await back.textContent() });
   });
 }

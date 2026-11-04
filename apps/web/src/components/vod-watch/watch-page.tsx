@@ -22,7 +22,7 @@ import { summarize } from "../../lib/channel-summary.ts";
 import { CHANNEL_MEDIA_PAGE, type ClipItem, type MediaPage, type VodItem } from "../channel/channel-data.ts";
 import { maturityClient, type MaturityClient } from "../safety/client.ts";
 import { MatureGate } from "../safety/mature-gate.tsx";
-import { playheadSeconds, type WatchKind } from "../watch/share.ts";
+import { playheadSeconds, seekToStart, type WatchKind } from "../watch/share.ts";
 import {
   useWatchChannel,
   WatchChannelCard,
@@ -289,15 +289,18 @@ function WatchLayout(p: LayoutProps): React.JSX.Element {
     clockRef.current = clock;
   }, [clock]);
   const [gateClient] = React.useState(() => p.maturity ?? maturityClient());
-  // `?t=`: seek once, as soon as the player knows where media time 0 is.
+  // `?t=`: seek once, as soon as the player knows where media time 0 is; a `t` past the end is dropped.
   const pendingStart = React.useRef(p.startAt ?? null);
-  const onPlayhead = React.useCallback((at: Date | null) => {
-    const origin = handle.current?.originWallclock() ?? null;
-    const start = pendingStart.current;
-    if (start !== null && origin && handle.current?.seekToWallclock(new Date(origin.getTime() + start * 1000)))
-      pendingStart.current = null;
-    setClock({ playhead: at ? dateToMicros(at) : null, origin: origin ? dateToMicros(origin) : null });
-  }, []);
+  const duration = p.durationSeconds;
+  const onPlayhead = React.useCallback(
+    (at: Date | null) => {
+      const start = pendingStart.current;
+      if (start !== null && seekToStart(handle.current, start, duration) !== "pending") pendingStart.current = null;
+      const origin = handle.current?.originWallclock() ?? null;
+      setClock({ playhead: at ? dateToMicros(at) : null, origin: origin ? dateToMicros(origin) : null });
+    },
+    [duration],
+  );
   const onSeek = React.useCallback((at: Date) => {
     handle.current?.seekToWallclock(at);
   }, []);

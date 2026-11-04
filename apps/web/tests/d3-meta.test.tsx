@@ -11,7 +11,13 @@ import { LocaleProvider, TooltipProvider } from "@commonair/ui";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import type * as React from "react";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
-import { parseStartTime, parseWatchSearch, playheadSeconds, watchUrl } from "../src/components/watch/share.ts";
+import {
+  parseStartTime,
+  parseWatchSearch,
+  playheadSeconds,
+  seekToStart,
+  watchUrl,
+} from "../src/components/watch/share.ts";
 import { WatchMeta, WatchShare, type WatchMetaProps } from "../src/components/watch/watch-meta.tsx";
 import { locale, t, uiMessages } from "../src/i18n/index.ts";
 
@@ -132,6 +138,49 @@ describe("playheadSeconds", () => {
     expect(playheadSeconds(null, 0)).toBeNull();
     expect(playheadSeconds(0, null)).toBeNull();
     expect(playheadSeconds(0, 1_000_000)).toBeNull();
+  });
+});
+
+describe("seekToStart (?t=)", () => {
+  const origin = new Date("2026-11-01T10:00:00Z");
+  const player = (known: Date | null, accepts = true) => {
+    const seeks: Date[] = [];
+    return {
+      seeks,
+      originWallclock: () => known,
+      seekToWallclock: (at: Date) => {
+        seeks.push(at);
+        return accepts;
+      },
+    };
+  };
+
+  it("seeks to origin + t once the origin is known", () => {
+    const p = player(origin);
+    expect(seekToStart(p, 90, 3600)).toBe("done");
+    expect(p.seeks).toEqual([new Date(origin.getTime() + 90_000)]);
+  });
+
+  it("waits while there is no player or no origin, without seeking", () => {
+    expect(seekToStart(null, 90, 3600)).toBe("pending");
+    const p = player(null);
+    expect(seekToStart(p, 90, 3600)).toBe("pending");
+    expect(p.seeks).toEqual([]);
+  });
+
+  it("stays pending when the player refuses the time", () => {
+    expect(seekToStart(player(origin, false), 90, 3600)).toBe("pending");
+  });
+
+  it("drops a start at or past the end without seeking", () => {
+    const p = player(origin);
+    expect(seekToStart(p, 3600, 3600)).toBe("dropped");
+    expect(seekToStart(p, 4000, 3600)).toBe("dropped");
+    expect(p.seeks).toEqual([]);
+  });
+
+  it("an unknown duration (0) does not drop", () => {
+    expect(seekToStart(player(origin), 90, 0)).toBe("done");
   });
 });
 

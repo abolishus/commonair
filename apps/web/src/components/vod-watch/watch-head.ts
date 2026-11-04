@@ -23,6 +23,9 @@ export type WatchHead =
   /** The API failed; the page asks again in the browser. */
   | { kind: "error" };
 
+/** How long a route keeps a loaded title before asking again. */
+export const TITLE_STALE_MS = 60_000;
+
 const SLUG = /^[a-z0-9_]{3,25}$/;
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -52,7 +55,8 @@ export const getWatchHead = createServerFn({ method: "GET" })
 
 /** The page part of the title; the routes pass it to `titleHead` (" · <site>" is added there). */
 export function watchPageTitle(head: WatchHead | undefined, kind: WatchKind, channel: string): string {
-  if (head?.kind === "missing") return t("watch.pageTitle.notAvailable");
+  if (head?.kind === "missing")
+    return kind === "vod" ? t("watch.pageTitle.notAvailable") : t("watch.pageTitle.clipNotAvailable");
   if (head?.kind !== "ok") {
     const label = kind === "vod" ? t("watch.pageTitle.video") : t("watch.pageTitle.clip");
     return `${label}${TITLE_SEPARATOR}${channel}`;
