@@ -25,9 +25,18 @@ import { runSeedLiveCommand } from "../src/seed/media/live-io.ts";
 import { SEED_ROUTES, type SeedRoute } from "../src/seed/routes.ts";
 import { SEED_STORE_FILE, type SeedStoreFile, runSeedFull } from "../src/seed/run.ts";
 import type { SeedStore } from "../src/seed/types.ts";
-import { type VisitObservation, loginsOf, reportUrl, resolveSeedRoute, visitProblems } from "../src/seed/visit.ts";
+import {
+  CRAWL_PACE,
+  type VisitObservation,
+  crawlWaitMs,
+  loginsOf,
+  reportUrl,
+  resolveSeedRoute,
+  visitProblems,
+} from "../src/seed/visit.ts";
 import { signInViaUi } from "../src/web/flows.ts";
 import { ROUTES, TEST_IDS as T } from "../src/web/selectors.ts";
+import { sleep } from "../src/wait.ts";
 import { WebSession, byTestId, waitForHydration } from "../src/web/session.ts";
 
 const UI_TIMEOUT_MS = 30_000;
@@ -213,6 +222,12 @@ export default defineScenario({
         log: ctx.log,
       });
       ctx.defer(() => session.close());
+      const page = await session.page();
+      // This login's API calls (one user's rate-limit bucket), so the crawl can keep under it.
+      const calls: number[] = [];
+      page.on("request", (r) => {
+        if (new URL(r.url()).pathname.startsWith("/rpc/")) calls.push(Date.now());
+      });
       if (as !== "anonymous") {
         const user = store.users.find((u) => u.handle === as);
         ctx.assert(`the seed made ${as}`, user !== undefined);
@@ -223,7 +238,6 @@ export default defineScenario({
           await byTestId(page, T.navUser).first().waitFor({ timeout: UI_TIMEOUT_MS });
         });
       }
-      const page = await session.page();
       for (const [path, route] of routes) {
         const resolved = resolveSeedRoute(path, route, store);
         if (!resolved.ok) {
@@ -232,6 +246,13 @@ export default defineScenario({
           else ctx.skipStep(`${path} as ${as}`, `no ${resolved.missing}`);
           continue;
         }
+        const wait = crawlWaitMs(calls, Date.now());
+        if (wait > 0) {
+          ctx.log.info("seed-coverage: pacing under the API rate limit", { as, path, waitMs: wait });
+          await sleep(wait, ctx.signal);
+        }
+        const now = Date.now();
+        for (let i = 0; i < CRAWL_PACE.serverCallsPerPage; i++) calls.push(now);
         const seen = await visit(
           page,
           resolved.url,

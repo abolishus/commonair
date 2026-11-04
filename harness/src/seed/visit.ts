@@ -88,3 +88,29 @@ export function reportUrl(url: string): string {
     return url.split("?")[0] ?? url;
   }
 }
+
+/**
+ * The crawl's pace. The API's `default` bucket allows 120 calls a minute per signed-in user
+ * (`services/api/src/lib/ratelimit.ts`), and every call a page makes counts, its server render's
+ * included. A person never walks twenty pages a minute; the crawl does, so it waits for room
+ * instead of the limit being raised.
+ */
+export const CRAWL_PACE = {
+  /** The API's default bucket, plus a second of margin for clock skew. */
+  max: 120,
+  windowMs: 61_000,
+  /** Room left for the next page's calls: a heavy page (the channel page, a studio page) makes about this many. */
+  pageCalls: 30,
+  /** Calls a server render makes for the user (bootstrap and the route's loaders), which the browser never sees. */
+  serverCallsPerPage: 6,
+} as const;
+
+/** How long to wait before the next page so its calls fit in the window, given the calls already made. Pure. */
+export function crawlWaitMs(calls: readonly number[], nowMs: number, pace = CRAWL_PACE): number {
+  const live = calls.filter((t) => t > nowMs - pace.windowMs).sort((a, b) => a - b);
+  const allowed = pace.max - pace.pageCalls;
+  if (live.length < allowed) return 0;
+  // The call whose expiry brings the count under `allowed`.
+  const blocking = live[live.length - allowed] as number;
+  return Math.max(0, blocking + pace.windowMs - nowMs);
+}

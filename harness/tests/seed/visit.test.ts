@@ -4,7 +4,15 @@
 import { describe, expect, test } from "vite-plus/test";
 import { SEED_ROUTES, type SeedRoute } from "../../src/seed/routes.ts";
 import type { SeedStore } from "../../src/seed/types.ts";
-import { type VisitObservation, loginsOf, reportUrl, resolveSeedRoute, visitProblems } from "../../src/seed/visit.ts";
+import {
+  CRAWL_PACE,
+  type VisitObservation,
+  crawlWaitMs,
+  loginsOf,
+  reportUrl,
+  resolveSeedRoute,
+  visitProblems,
+} from "../../src/seed/visit.ts";
 
 const store: SeedStore = {
   users: [],
@@ -148,5 +156,28 @@ describe("milestone wiring", () => {
     expect(SEED_ROUTES["/coop/jury"]).toEqual({ as: "member1", expectData: true });
     expect(SEED_ROUTES["/admin/federation"]).toEqual({ as: "admin", expectData: true });
     expect(SEED_ROUTES["/import"]).toEqual({ as: "streamer3", expectData: true });
+  });
+});
+
+describe("crawlWaitMs", () => {
+  const allowed = CRAWL_PACE.max - CRAWL_PACE.pageCalls;
+  const at = (n: number, t: number) => Array.from({ length: n }, () => t);
+
+  test("no wait while a page's calls still fit", () => {
+    expect(crawlWaitMs([], 0)).toBe(0);
+    expect(crawlWaitMs(at(allowed - 1, 1_000), 2_000)).toBe(0);
+  });
+
+  test("full: waits until enough of the oldest calls leave the window", () => {
+    const calls = [...at(10, 1_000), ...at(allowed - 10, 5_000)];
+    // The 10 calls at 1 s must leave (61 s window): one of them is the blocking call.
+    expect(crawlWaitMs(calls, 6_000)).toBe(1_000 + CRAWL_PACE.windowMs - 6_000);
+  });
+
+  test("calls older than the window do not count, and unsorted input is fine", () => {
+    const old = at(allowed + 5, 0);
+    expect(crawlWaitMs(old, CRAWL_PACE.windowMs + 1)).toBe(0);
+    const mixed = [...at(allowed - 1, 9_000), 3_000].reverse();
+    expect(crawlWaitMs(mixed, 10_000)).toBe(3_000 + CRAWL_PACE.windowMs - 10_000);
   });
 });
