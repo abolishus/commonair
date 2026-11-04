@@ -333,6 +333,23 @@ export class PlayerController {
   }
 
   /**
+   * Move the playhead `ms` of media time from where it is (watch rooms). PDT is linear in media
+   * time, so this lands where `playheadWallclock` says the drift is, without the playing level's
+   * fragment list (`seekToWallclock`), which hls.js stops refreshing once ABR loads another level.
+   * False, and nothing moves, outside the seekable or buffered range, or while a fresh hls.js
+   * source has nothing buffered (`seekToWallclock` handles that start).
+   */
+  seekBy(ms: number): boolean {
+    if (this.stopped || !Number.isFinite(ms)) return false;
+    const { video } = this.opts;
+    if (video.readyState < 1 || (this.hls && !this.hls.hasEnoughToStart)) return false;
+    const next = video.currentTime + ms / 1000;
+    if (!inRanges(video.seekable, next) && !inRanges(video.buffered, next)) return false;
+    video.currentTime = next;
+    return true;
+  }
+
+  /**
    * Hold the playhead `seconds` behind the live edge (clamped to `TARGET_LATENCY_RANGE`): hls.js
    * `liveSyncDuration` for this session, replacing `liveSyncDurationCount`, and a step to the new
    * sync position once one is known (not with `seek: false`: watch rooms land the playhead

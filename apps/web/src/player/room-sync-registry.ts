@@ -22,6 +22,8 @@ export interface RoomPlayerSource {
   playbackMode(): "live" | "dvr";
   /** Optional: the player's live latency in seconds (hls.js `latency`), null when unknown. */
   latencySeconds?(): number | null;
+  /** Optional: move the playhead by `ms` of media time from where it is (`RoomPlayer.seekBy`). */
+  seekBy?(ms: number): boolean;
 }
 
 const registry = new Map<string, { source: RoomPlayerSource; native: boolean }[]>();
@@ -108,6 +110,7 @@ export function roomPlayer(channel: string, doc: Document | null = globalThis.do
       seekToWallclock: (t) => s.seekToWallclock(t),
       ...(top.native ? {} : { setTargetLatency: (sec: number, o?: { seek?: boolean }) => s.setTargetLatency(sec, o) }),
       ...(s.latencySeconds ? { latencySeconds: () => s.latencySeconds?.() ?? null } : {}),
+      ...(s.seekBy ? { seekBy: (ms: number) => s.seekBy?.(ms) ?? false } : {}),
       // hls.js knows its latency; native HLS (no latency) falls back to the element's `seekable`.
       edgeWallclock: () =>
         edgeOf(

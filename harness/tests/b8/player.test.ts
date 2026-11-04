@@ -4,7 +4,14 @@
 /** B8-player's harness checks: the edge reports in `room.sync` frames, and the DVR fetch summary. */
 import { describe, expect, it } from "vite-plus/test";
 import { ROOM_LIMITS } from "@commonair/contracts/enums";
-import { dvrFetchSummary, EDGE_CAP_SLACK_MS, edgeReportsOk, targetLeadOk, withinEdgeCap } from "../../src/b8/player.ts";
+import {
+  dvrFetchSummary,
+  EDGE_CAP_SLACK_MS,
+  edgeReportsOk,
+  edgeSyncTrajectory,
+  targetLeadOk,
+  withinEdgeCap,
+} from "../../src/b8/player.ts";
 import {
   behindRoomEdgeAt,
   edgeSummary,
@@ -174,5 +181,33 @@ describe("targetLeadSummary and targetLeadOk", () => {
       minMs: null,
       maxMs: null,
     });
+  });
+});
+
+describe("edgeSyncTrajectory", () => {
+  it("every frame and target relative to the first, behind and edge lead in ms, DVR flagged", () => {
+    const samples: Record<string, PlayheadSample[]> = {
+      near: [
+        { sentAt: T0 + 1000, pdt: T0 - 2000, mode: "live", edge: T0 + 500 },
+        { sentAt: T0 + 3000, pdt: T0 - 2000, mode: "dvr", edge: null },
+      ],
+      far: [{ sentAt: T0 + 2000, pdt: T0 - 7000, mode: "live" }],
+    };
+    const targets = { near: [{ receivedAt: T0, target: T0 - 5000 }] };
+    expect(edgeSyncTrajectory(samples, targets)).toEqual({
+      t0: T0,
+      frames: {
+        near: [
+          [1000, 3000, 2500, 0],
+          [3000, 5000, null, 1],
+        ],
+        far: [[2000, 9000, null, 0]],
+      },
+      targets: { near: [[0, 5000]] },
+    });
+  });
+
+  it("nothing recorded: no t0, empty lists", () => {
+    expect(edgeSyncTrajectory({ near: [] }, {})).toEqual({ t0: null, frames: { near: [] }, targets: {} });
   });
 });
