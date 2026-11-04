@@ -350,11 +350,14 @@ export function ProposalPage({
                     headingLevel={3}
                     title={t("coop.discussion.empty")}
                     description={
-                      commentsOpen && member && !memberError
-                        ? t("settings.coop.discussionEmptyHint")
-                        : commentsOpen
-                          ? t("coop.discussion.membersOnly")
-                          : t("coop.discussion.closed")
+                      !commentsOpen
+                        ? t("coop.discussion.closed")
+                        : memberError
+                          ? // The membership check failed: its error shows below; "members only" would mislead.
+                            undefined
+                          : member
+                            ? t("settings.coop.discussionEmptyHint")
+                            : t("coop.discussion.membersOnly")
                     }
                     action={
                       commentsOpen && member && !memberError ? (

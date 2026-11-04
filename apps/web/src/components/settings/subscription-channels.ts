@@ -5,19 +5,23 @@
  * F38: `/settings/subscriptions` lists channels by display name. A subscription carries only the
  * channel's slug, so the page reads each channel once (`channels.get`) and falls back to the slug
  * for one that does not answer. A `channel` object on the subscription DTO would make this one
- * request (filed as a contract request).
+ * request (filed as a contract request); until then the lookups run a few at a time.
  */
 import * as React from "react";
 import { api } from "../../lib/api.ts";
 import type { SubscriptionDto } from "../../lib/support.ts";
+import { runLimited } from "../portability/grants.tsx";
 import type { SubscriptionChannel } from "../support/subscription-list.tsx";
 
 export type ChannelLookup = (slug: string) => Promise<SubscriptionChannel>;
 
 const lookupChannel: ChannelLookup = async (slug) => {
   const c = await api().channels.get({ channel: slug });
-  return { displayName: c.displayName, avatarUrl: c.avatarUrl };
+  return { displayName: c.displayName, avatarUrl: c.avatarUrl, accent: c.theme.accent ?? null };
 };
+
+/** Lookups in flight at once, so a long subscription list does not fan out N requests. */
+export const LOOKUP_CONCURRENCY = 4;
 
 /** One lookup per distinct slug; failed ones are left out (the row shows the slug). */
 export async function loadSubscriptionChannels(
@@ -25,12 +29,16 @@ export async function loadSubscriptionChannels(
   lookup: ChannelLookup = lookupChannel,
 ): Promise<Map<string, SubscriptionChannel>> {
   const unique = [...new Set(slugs)];
-  const answers = await Promise.allSettled(unique.map((slug) => lookup(slug)));
-  const out = new Map<string, SubscriptionChannel>();
-  answers.forEach((a, i) => {
-    const slug = unique[i];
-    if (a.status === "fulfilled" && slug !== undefined) out.set(slug, a.value);
+  const found = new Map<string, SubscriptionChannel>();
+  await runLimited(unique, LOOKUP_CONCURRENCY, async (slug) => {
+    found.set(slug, await lookup(slug));
   });
+  // In the order asked, not the order answered.
+  const out = new Map<string, SubscriptionChannel>();
+  for (const slug of unique) {
+    const channel = found.get(slug);
+    if (channel) out.set(slug, channel);
+  }
   return out;
 }
 

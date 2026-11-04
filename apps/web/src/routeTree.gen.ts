@@ -60,6 +60,7 @@ import { Route as AppCoopSettingsRouteImport } from './routes/_app/coop.settings
 import { Route as AppDirectoryIndexRouteImport } from './routes/_app/directory.index'
 import { Route as AppDirectoryCategoryRouteImport } from './routes/_app/directory.$category'
 import { Route as AppOauth2AuthorizeRouteImport } from './routes/_app/oauth2.authorize'
+import { Route as AppSettingsIndexRouteImport } from './routes/_app/settings.index'
 import { Route as AppSettingsAppealsRouteImport } from './routes/_app/settings.appeals'
 import { Route as AppSettingsConnectionsRouteImport } from './routes/_app/settings.connections'
 import { Route as AppSettingsCopyrightRouteImport } from './routes/_app/settings.copyright'
@@ -334,6 +335,11 @@ const AppOauth2AuthorizeRoute = AppOauth2AuthorizeRouteImport.update({
   path: '/oauth2/authorize',
   getParentRoute: () => AppRoute,
 } as any)
+const AppSettingsIndexRoute = AppSettingsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppSettingsRoute,
+} as any)
 const AppSettingsAppealsRoute = AppSettingsAppealsRouteImport.update({
   id: '/appeals',
   path: '/appeals',
@@ -502,6 +508,7 @@ export interface FileRoutesByFullPath {
   '/developer/bots': typeof StudioDeveloperBotsRoute
   '/coop/': typeof AppCoopIndexRoute
   '/directory/': typeof AppDirectoryIndexRoute
+  '/settings/': typeof AppSettingsIndexRoute
   '/developer/': typeof StudioDeveloperIndexRoute
   '/$channel/clips/$clipId': typeof AppChannelClipsClipIdRoute
   '/$channel/giveaways/$giveawayId': typeof AppChannelGiveawaysGiveawayIdRoute
@@ -524,7 +531,6 @@ export interface FileRoutesByTo {
   '/activate': typeof AppActivateRoute
   '/dmca': typeof AppDmcaRoute
   '/search': typeof AppSearchRoute
-  '/settings': typeof AppSettingsRouteWithChildren
   '/signin': typeof AppSigninRoute
   '/signup': typeof AppSignupRoute
   '/takedown': typeof AppTakedownRoute
@@ -573,6 +579,7 @@ export interface FileRoutesByTo {
   '/developer/bots': typeof StudioDeveloperBotsRoute
   '/coop': typeof AppCoopIndexRoute
   '/directory': typeof AppDirectoryIndexRoute
+  '/settings': typeof AppSettingsIndexRoute
   '/developer': typeof StudioDeveloperIndexRoute
   '/$channel/clips/$clipId': typeof AppChannelClipsClipIdRoute
   '/$channel/giveaways/$giveawayId': typeof AppChannelGiveawaysGiveawayIdRoute
@@ -648,6 +655,7 @@ export interface FileRoutesById {
   '/_studio/developer/bots': typeof StudioDeveloperBotsRoute
   '/_app/coop/': typeof AppCoopIndexRoute
   '/_app/directory/': typeof AppDirectoryIndexRoute
+  '/_app/settings/': typeof AppSettingsIndexRoute
   '/_studio/developer/': typeof StudioDeveloperIndexRoute
   '/_app/$channel_/clips/$clipId': typeof AppChannelClipsClipIdRoute
   '/_app/$channel_/giveaways/$giveawayId': typeof AppChannelGiveawaysGiveawayIdRoute
@@ -721,6 +729,7 @@ export interface FileRouteTypes {
     | '/developer/bots'
     | '/coop/'
     | '/directory/'
+    | '/settings/'
     | '/developer/'
     | '/$channel/clips/$clipId'
     | '/$channel/giveaways/$giveawayId'
@@ -743,7 +752,6 @@ export interface FileRouteTypes {
     | '/activate'
     | '/dmca'
     | '/search'
-    | '/settings'
     | '/signin'
     | '/signup'
     | '/takedown'
@@ -792,6 +800,7 @@ export interface FileRouteTypes {
     | '/developer/bots'
     | '/coop'
     | '/directory'
+    | '/settings'
     | '/developer'
     | '/$channel/clips/$clipId'
     | '/$channel/giveaways/$giveawayId'
@@ -866,6 +875,7 @@ export interface FileRouteTypes {
     | '/_studio/developer/bots'
     | '/_app/coop/'
     | '/_app/directory/'
+    | '/_app/settings/'
     | '/_studio/developer/'
     | '/_app/$channel_/clips/$clipId'
     | '/_app/$channel_/giveaways/$giveawayId'
@@ -1251,6 +1261,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppOauth2AuthorizeRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/settings/': {
+      id: '/_app/settings/'
+      path: '/'
+      fullPath: '/settings/'
+      preLoaderRoute: typeof AppSettingsIndexRouteImport
+      parentRoute: typeof AppSettingsRoute
+    }
     '/_app/settings/appeals': {
       id: '/_app/settings/appeals'
       path: '/appeals'
@@ -1438,6 +1455,7 @@ interface AppSettingsRouteChildren {
   AppSettingsPreferencesRoute: typeof AppSettingsPreferencesRoute
   AppSettingsPrivacyRoute: typeof AppSettingsPrivacyRoute
   AppSettingsSubscriptionsRoute: typeof AppSettingsSubscriptionsRoute
+  AppSettingsIndexRoute: typeof AppSettingsIndexRoute
   AppSettingsNotificationsUnsubscribeRoute: typeof AppSettingsNotificationsUnsubscribeRoute
   AppSettingsNotificationsIndexRoute: typeof AppSettingsNotificationsIndexRoute
 }
@@ -1449,6 +1467,7 @@ const AppSettingsRouteChildren: AppSettingsRouteChildren = {
   AppSettingsPreferencesRoute: AppSettingsPreferencesRoute,
   AppSettingsPrivacyRoute: AppSettingsPrivacyRoute,
   AppSettingsSubscriptionsRoute: AppSettingsSubscriptionsRoute,
+  AppSettingsIndexRoute: AppSettingsIndexRoute,
   AppSettingsNotificationsUnsubscribeRoute:
     AppSettingsNotificationsUnsubscribeRoute,
   AppSettingsNotificationsIndexRoute: AppSettingsNotificationsIndexRoute,

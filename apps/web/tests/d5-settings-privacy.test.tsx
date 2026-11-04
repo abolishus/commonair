@@ -376,7 +376,7 @@ describe("Channels you follow (F36, F39)", () => {
     expect(rows().map((r) => r.dataset.slug)).toEqual(["ch025"]);
   });
 
-  it("the bell switch has a visible label on the name line, and keeps its full accessible name", async () => {
+  it("the bell switch has a visible label on the name line, and its accessible name starts with it", async () => {
     wrap(<NotificationSettings client={client([{ items: [follow(1, "Ada")], nextCursor: null }])} />);
     const row = await screen.findByTestId("notify-channel");
     const bell = within(row).getByTestId("notify-channel-bell");
@@ -385,6 +385,13 @@ describe("Channels you follow (F36, F39)", () => {
     expect(nameLine?.textContent).toContain(t("settings.notifications.bell"));
     const label = within(row).getByText(t("settings.notifications.bell"));
     expect(label.className).not.toContain("sr-only");
-    expect(bell.getAttribute("aria-label")).toBe(t("notifySettings.channels.bell", { channel: "Ada" }));
+    expect(bell.getAttribute("aria-label")).toBeNull();
+    // WCAG 2.5.3 Label in Name: voice control can say the visible text; the channel follows it.
+    const name = (bell.getAttribute("aria-labelledby") ?? "")
+      .split(" ")
+      .map((id) => document.getElementById(id)?.textContent ?? "")
+      .join(" ");
+    expect(name).toBe(`${t("settings.notifications.bell")} Ada`);
+    expect(screen.getByRole("switch", { name: `${t("settings.notifications.bell")} Ada` })).toBe(bell);
   });
 });

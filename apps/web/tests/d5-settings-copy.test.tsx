@@ -25,7 +25,7 @@ import type * as React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { CounterReceipt } from "../src/components/dmca/copyright.tsx";
 import { RestrictionEnd, restrictionEnded } from "../src/components/safety/enforcement.tsx";
-import { loadSubscriptionChannels } from "../src/components/settings/subscription-channels.ts";
+import { LOOKUP_CONCURRENCY, loadSubscriptionChannels } from "../src/components/settings/subscription-channels.ts";
 import { SubscriptionList, subscriptionChannelName } from "../src/components/support/subscription-list.tsx";
 import { locale, t, uiMessages } from "../src/i18n/index.ts";
 import { subscription } from "./support-fixtures.ts";
@@ -183,6 +183,35 @@ describe("subscription names (F38)", () => {
       ["a", { displayName: "A", avatarUrl: null }],
       ["b", { displayName: "B", avatarUrl: null }],
     ]);
+  });
+
+  it("keeps at most four lookups in flight", async () => {
+    let inFlight = 0;
+    let peak = 0;
+    const lookup = async (slug: string) => {
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      await new Promise((r) => setTimeout(r, 1));
+      inFlight -= 1;
+      return { displayName: slug, avatarUrl: null };
+    };
+    const slugs = Array.from({ length: 20 }, (_, i) => `ch${i}`);
+    const map = await loadSubscriptionChannels(slugs, lookup);
+    expect(peak).toBe(LOOKUP_CONCURRENCY);
+    expect([...map.keys()]).toEqual(slugs);
+  });
+
+  it("the avatar takes the channel's accent", async () => {
+    wrap(
+      <SubscriptionList
+        subscriptions={[subscription({ channelSlug: "demo_streamer1" })]}
+        channels={new Map([["demo_streamer1", { displayName: "Aurora Pixel", avatarUrl: null, accent: "violet" }]])}
+        onCancel={async () => {}}
+        onCancelError={() => {}}
+      />,
+    );
+    const row = await screen.findByTestId("subscription-row");
+    expect(row.querySelector("[data-accent]")?.getAttribute("data-accent")).toBe("violet");
   });
 
   it("the page asks for the names", () => {

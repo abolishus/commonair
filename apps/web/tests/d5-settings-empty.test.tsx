@@ -103,6 +103,14 @@ describe("the empty discussion (F25)", () => {
     expect(screen.getAllByText(t("coop.discussion.membersOnly"))).toHaveLength(1);
   });
 
+  it("a failed membership check does not claim the viewer is not a member", () => {
+    proposalPage(votingProposal(), { member: false, memberError: <p data-testid="member-error">failed</p> });
+    const empty = screen.getByTestId("proposal-discussion-empty");
+    expect(within(empty).queryByTestId("empty-state-action")).toBeNull();
+    expect(screen.queryByText(t("coop.discussion.membersOnly"))).toBeNull();
+    expect(screen.getByTestId("member-error")).toBeTruthy();
+  });
+
   it("a closed discussion says it is closed", () => {
     proposalPage(proposal({ status: "rejected" }));
     const empty = screen.getByTestId("proposal-discussion-empty");

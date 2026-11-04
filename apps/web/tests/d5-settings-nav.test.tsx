@@ -16,6 +16,7 @@ import {
   createRootRoute,
   createRoute,
   createRouter,
+  isRedirect,
 } from "@tanstack/react-router";
 import { act, cleanup, configure, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { readFileSync, readdirSync } from "node:fs";
@@ -148,6 +149,53 @@ describe("the settings layout", () => {
   });
 });
 
+describe("bare /settings", () => {
+  it("redirects to the first tab instead of an empty layout", async () => {
+    const { Route: IndexRoute } = await import("../src/routes/_app/settings.index.tsx");
+    const beforeLoad = IndexRoute.options.beforeLoad as () => unknown;
+    let thrown: unknown;
+    try {
+      beforeLoad();
+    } catch (err) {
+      thrown = err;
+    }
+    expect(isRedirect(thrown)).toBe(true);
+    const options = (thrown as { options: { to: string; replace?: boolean } }).options;
+    expect(options.to).toBe(SETTINGS_TABS[0].to);
+    expect(options.replace).toBe(true);
+  });
+
+  it("lands on the first tab in the router", async () => {
+    const root = createRootRoute({ component: () => <Outlet /> });
+    const settings = createRoute({ getParentRoute: () => root, path: "/settings", component: Layout });
+    const { Route: IndexRoute } = await import("../src/routes/_app/settings.index.tsx");
+    const index = createRoute({
+      getParentRoute: () => settings,
+      path: "/",
+      beforeLoad: IndexRoute.options.beforeLoad as () => void,
+    });
+    const first = createRoute({
+      getParentRoute: () => settings,
+      path: "subscriptions",
+      component: () => <p data-testid="page">subscriptions</p>,
+    });
+    const router = createRouter({
+      routeTree: root.addChildren([settings.addChildren([index, first])]),
+      history: createMemoryHistory({ initialEntries: ["/settings"] }),
+    });
+    render(
+      <LocaleProvider locale={locale} messages={uiMessages}>
+        <TooltipProvider>
+          <RouterProvider router={router} />
+        </TooltipProvider>
+      </LocaleProvider>,
+    );
+    await waitFor(() => expect(router.state.location.pathname).toBe("/settings/subscriptions"));
+    expect((await screen.findByTestId("page")).textContent).toBe("subscriptions");
+    expect(screen.getByTestId("settings-nav").dataset.current).toBe("subscriptions");
+  });
+});
+
 describe("one width", () => {
   it("the layout is the one container, at the default width", async () => {
     await mount("/settings/subscriptions");
@@ -158,7 +206,12 @@ describe("one width", () => {
 
   it("no settings page or its component brings a container of its own", () => {
     const routes = readdirSync(join(WEB, "src/routes/_app"))
-      .filter((f) => f.startsWith("settings.") && f !== "settings.tsx" && !f.includes("unsubscribe"))
+      .filter(
+        (f) =>
+          f.startsWith("settings.") &&
+          !["settings.tsx", "settings.index.tsx"].includes(f) &&
+          !f.includes("unsubscribe"),
+      )
       .map((f) => `src/routes/_app/${f}`);
     expect(routes).toHaveLength(7);
     const files = [...routes, "src/components/oauth/connections.tsx", "src/components/locale/preferences-page.tsx"];

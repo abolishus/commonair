@@ -127,7 +127,7 @@ export function GrantsView({
                       size="sm"
                       data-testid="portability-grants-all-on"
                       aria-describedby={bulkHintId}
-                      disabled={bulkBusy || scope.slugs.length === 0}
+                      disabled={bulkBusy || loadingMore || scope.slugs.length === 0}
                       aria-busy={bulkBusy || undefined}
                       onClick={() => onSetAll(true, scope)}
                     >
@@ -139,7 +139,7 @@ export function GrantsView({
                       size="sm"
                       data-testid="portability-grants-all-off"
                       aria-describedby={bulkHintId}
-                      disabled={bulkBusy || scope.slugs.length === 0}
+                      disabled={bulkBusy || loadingMore || scope.slugs.length === 0}
                       aria-busy={bulkBusy || undefined}
                       onClick={() => onSetAll(false, scope)}
                     >
@@ -269,7 +269,8 @@ export function PortabilityGrants(): React.JSX.Element {
   const appendFollows = (page: FollowChannel[]) => setRows((rs) => withMoreFollows(rs ?? [], page, granted));
 
   const loadMore = () => {
-    if (cursor === null || loadingMore) return;
+    // Not during a bulk run: it may page to the end itself, and a late page would revive the cursor.
+    if (cursor === null || loadingMore || bulkBusy) return;
     setLoadingMore(true);
     api()
       .me.follows({ cursor, limit: 100 })
@@ -300,7 +301,7 @@ export function PortabilityGrants(): React.JSX.Element {
   };
 
   const onSetAll = (on: boolean, scope: { slugs: readonly string[]; everything: boolean }) => {
-    if (bulkBusy || rows === null) return;
+    if (bulkBusy || loadingMore || rows === null) return;
     setBulkBusy(true);
     void (async () => {
       let all = [...rows];

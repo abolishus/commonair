@@ -317,23 +317,28 @@ function ChannelRow({
 }): React.JSX.Element {
   const c = follow.channel;
   const bellId = React.useId();
+  const bellLabelId = `${bellId}-label`;
+  const nameId = `${bellId}-name`;
   return (
     <li data-testid="notify-channel" data-slug={c.slug} className="flex flex-col gap-3 py-4">
       {/* F39: the bell sits on the name line, with a visible label. */}
       <div className="flex min-w-0 items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
           <ChannelAvatar name={c.displayName} src={c.avatarUrl} accent={c.accent} size="sm" decorative />
-          <span className="min-w-0 truncate font-medium">{c.displayName}</span>
+          <span id={nameId} className="min-w-0 truncate font-medium">
+            {c.displayName}
+          </span>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <Label htmlFor={bellId} className="text-sm font-normal">
+          <Label id={bellLabelId} htmlFor={bellId} className="text-sm font-normal">
             {t("settings.notifications.bell")}
           </Label>
           <Switch
             id={bellId}
             data-testid="notify-channel-bell"
             data-state={follow.notify ? "on" : "off"}
-            aria-label={t("notifySettings.channels.bell", { channel: c.displayName })}
+            // WCAG 2.5.3: the name starts with the visible label, then says which channel.
+            aria-labelledby={`${bellLabelId} ${nameId}`}
             checked={follow.notify}
             onCheckedChange={onBell}
           />

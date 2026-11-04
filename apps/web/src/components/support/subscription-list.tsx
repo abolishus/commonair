@@ -9,6 +9,7 @@ import {
   SkeletonGroup,
   SkeletonText,
   StatusBadge,
+  type Accent,
 } from "@commonair/ui";
 import { Button } from "@commonair/ui/components/button";
 import {
@@ -37,6 +38,8 @@ import {
 export interface SubscriptionChannel {
   displayName: string;
   avatarUrl: string | null;
+  /** The channel's accent, so the avatar matches the one on its other rows. */
+  accent?: Accent | null;
 }
 
 /**
@@ -104,6 +107,7 @@ export function SubscriptionList({
               <ChannelAvatar
                 name={channel.name}
                 src={channels?.get(s.channelSlug)?.avatarUrl ?? null}
+                accent={channels?.get(s.channelSlug)?.accent ?? null}
                 size="md"
                 decorative
               />

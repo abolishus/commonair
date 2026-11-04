@@ -47,6 +47,15 @@ export function dateTimeYears(now: Date, before = 2, after = 0): number[] {
   return Array.from({ length: before + after + 1 }, (_, i) => current + after - i);
 }
 
+/**
+ * The year list with `year` in it: a value from outside the range (an old egress window from the
+ * URL, a clock past New Year) must still show its year rather than the placeholder.
+ */
+export function withYear(years: readonly number[], year: number | null): readonly number[] {
+  if (year === null || years.includes(year)) return years;
+  return [...years, year].sort((a, b) => b - a);
+}
+
 const pad2 = (n: number) => String(n).padStart(2, "0");
 
 export interface DateTimeFieldProps {
@@ -89,7 +98,7 @@ export function DateTimeField({
     setState({ value, parts: draft });
   }
   const [mountedAt] = React.useState(() => now ?? new Date());
-  const yearList = years ?? dateTimeYears(mountedAt);
+  const yearList = withYear(years ?? dateTimeYears(mountedAt), draft.year);
   const days = daysInMonth(draft.year ?? 0, draft.month ?? 0);
   const options: Record<DateTimePart, { value: string; label: string }[]> = {
     day: Array.from({ length: days }, (_, i) => ({ value: String(i + 1), label: String(i + 1) })),

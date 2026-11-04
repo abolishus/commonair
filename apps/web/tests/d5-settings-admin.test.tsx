@@ -21,6 +21,7 @@ import {
   dateTimeParts,
   dateTimeValue,
   dateTimeYears,
+  withYear,
 } from "../src/components/admin/date-time-field.tsx";
 import { EgressResult } from "../src/components/admin/egress.tsx";
 import { FlagList } from "../src/components/admin/integrity.tsx";
@@ -209,6 +210,13 @@ describe("date-time parts", () => {
     expect(dateTimeYears(now)).toEqual([2026, 2025, 2024]);
     expect(dateTimeYears(now, 1, 1)).toEqual([2027, 2026, 2025]);
   });
+
+  it("adds a value's year when it is outside the list, keeping newest first", () => {
+    expect(withYear([2026, 2025, 2024], 2020)).toEqual([2026, 2025, 2024, 2020]);
+    expect(withYear([2026, 2025, 2024], 2027)).toEqual([2027, 2026, 2025, 2024]);
+    expect(withYear([2026, 2025, 2024], 2025)).toEqual([2026, 2025, 2024]);
+    expect(withYear([2026, 2025, 2024], null)).toEqual([2026, 2025, 2024]);
+  });
 });
 
 describe("DateTimeField (F33)", () => {
@@ -251,6 +259,12 @@ describe("DateTimeField (F33)", () => {
     await pick("when-minute", "05");
     expect(onValue).toHaveBeenLastCalledWith("2026-02-28T09:05");
     expect(screen.getByTestId("when").dataset.value).toBe("2026-02-28T09:05");
+  });
+
+  it("shows the year of a value outside the offered years", () => {
+    wrap(<Harness initial="2019-06-15T08:30" onValue={() => {}} />);
+    expect(screen.getByTestId("when-year").textContent).toContain("2019");
+    expect(screen.getByTestId("when").dataset.value).toBe("2019-06-15T08:30");
   });
 
   it("shows a value from outside and pulls the day back when the month gets shorter", async () => {
