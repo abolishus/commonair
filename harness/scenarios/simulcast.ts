@@ -3,7 +3,7 @@
 
 /**
  * Milestone E6, simulcast (docs/testing/e6-selectors.md, "Scenario `simulcast`"): S adds the mock
- * RTMP target on `/dashboard` (key `harness-<runId>`), goes live, the target reports `live` and
+ * RTMP target on `/dashboard/settings` (key `harness-<runId>`), goes live, the target reports `live` and
  * ffprobe counts frames arriving at the mock target at the source resolution; disabling stops
  * the push and re-enabling restarts it; going offline ends the `simulcast_sessions` row with
  * bytes sent. The key is never in an API response (the harness's own, and on the web path every
@@ -58,7 +58,7 @@ const SLACK_MS = 10_000;
 export default defineScenario({
   name: "simulcast",
   description:
-    "S adds the mock RTMP target on /dashboard → goes live → target live, ≥ 60 frames at the source resolution arrive → disable stops / enable restarts the push → offline: session ended with bytes sent; the key is in no API response or service log",
+    "S adds the mock RTMP target on /dashboard/settings → goes live → target live, ≥ 60 frames at the source resolution arrive → disable stops / enable restarts the push → offline: session ended with bytes sent; the key is in no API response or service log",
   needs: ["api", "web", "media", "ffmpeg", "browser", "podman"],
   timeoutMs: 10 * 60_000,
   async run(ctx) {
@@ -101,8 +101,8 @@ async function simulcast(ctx: ScenarioContext, kit: Kit): Promise<void> {
     session = await kit.webSession("S", s);
     browserRpc.attach(await session.page());
     const sess = session;
-    targetId = await ctx.step("1 S adds the mock target on /dashboard", async () => {
-      const page = await sess.goto(E6_ROUTES.dashboard);
+    targetId = await ctx.step("1 S adds the mock target on /dashboard/settings", async () => {
+      const page = await sess.goto(E6_ROUTES.dashboardSettings);
       const section = byE6Id(page, E.simulcast);
       await section.waitFor({ timeout: UI_TIMEOUT_MS });
       await byE6Id(section, E.simulcastName).fill(name, { timeout: UI_TIMEOUT_MS });
@@ -115,7 +115,7 @@ async function simulcast(ctx: ScenarioContext, kit: Kit): Promise<void> {
       if (!data.targetId) throw new Error("simulcast-target has no data-target-id");
       // The list never shows the key: not as text, not in an attribute.
       const html = await byE6Id(section, E.simulcastTarget).evaluateAll((els) => els.map((e) => e.outerHTML).join(""));
-      ctx.assert("1 the target list on /dashboard does not show the key", !html.includes(key));
+      ctx.assert("1 the target list on /dashboard/settings does not show the key", !html.includes(key));
       const keyInputType = await byE6Id(section, E.simulcastKey).getAttribute("type");
       ctx.check("1 the key field is a password input", keyInputType === "password", { type: keyInputType });
       return data.targetId;
@@ -154,7 +154,7 @@ async function simulcast(ctx: ScenarioContext, kit: Kit): Promise<void> {
     if (session) {
       // The section polls the list every 5 s itself; reloading the page instead would trip the
       // session check's rate limit and render the dashboard signed out.
-      const page = await session.goto(E6_ROUTES.dashboard);
+      const page = await session.goto(E6_ROUTES.dashboardSettings);
       await waitFor(
         `simulcast-target data-status="${want}"`,
         async () => {
@@ -206,7 +206,7 @@ async function simulcast(ctx: ScenarioContext, kit: Kit): Promise<void> {
   // ------------------------------------------------------------ 4. disable, re-enable
   const setEnabled = async (enabled: boolean) => {
     if (session) {
-      const page = await session.goto(E6_ROUTES.dashboard);
+      const page = await session.goto(E6_ROUTES.dashboardSettings);
       const row = byE6Id(page, E.simulcastTarget, { "target-id": targetId });
       await setSwitch(byE6Id(row, E.simulcastEnabled), enabled, UI_TIMEOUT_MS);
       await byE6Id(page, E.simulcastTarget, { "target-id": targetId, enabled: String(enabled) }).waitFor({
@@ -303,9 +303,9 @@ async function removeTarget(
       // Twice on slow CI runners this step hung until the scenario timeout with the target already
       // gone from the page. Each action is logged and the web path is capped, so a stuck browser
       // call names itself and the list below still decides.
-      let at = "open /dashboard";
+      let at = "open /dashboard/settings";
       const web = (async () => {
-        const page = await session.goto(E6_ROUTES.dashboard);
+        const page = await session.goto(E6_ROUTES.dashboardSettings);
         const row = byE6Id(page, E.simulcastTarget, { "target-id": targetId });
         at = "click remove";
         await byE6Id(row, E.simulcastRemove).click({ timeout: UI_TIMEOUT_MS });

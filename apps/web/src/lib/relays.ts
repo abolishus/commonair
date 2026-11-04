@@ -4,7 +4,7 @@
 /** Pure helpers for the `/relays` page: status badges, byte sizes, the run command, links. */
 import type { RelayNode } from "@commonair/contracts/dto";
 import { RELAY_STATUSES } from "@commonair/contracts/enums";
-import { type StatusTone, formatUnit } from "@commonair/ui";
+import { type StatusTone, formatNumber, formatUnit } from "@commonair/ui";
 import type { z } from "zod";
 import { t, type MessageKey } from "../i18n/index.ts";
 
@@ -62,10 +62,11 @@ export function formatBytes(bytes: number, locale: string): string {
     value /= 1000;
     unit++;
   }
-  const digits = unit === 0 ? 0 : 1;
+  // Intl's short "byte" reads "0 byte"; below a kilobyte use the symbol, as the shared formatter does.
+  if (unit === 0) return `${formatNumber(Math.round(value), locale)} B`;
   return formatUnit(value, BYTE_UNITS[unit] ?? "byte", locale, {
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
   });
 }
 

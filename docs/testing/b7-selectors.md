@@ -38,7 +38,7 @@ its unit merges (a pending id that is already rendered fails, so the list only s
 | `/$channel/giveaways/$giveawayId` | public verify page: commitment, seed, entries, winners, the draw re-run               | W3-giveaways                 |
 | `/coop/jury`                      | jury opt-in, and a seated juror's cases and votes                                     | W3-jury                      |
 | `/admin/federation`               | admins: the domain block list and key rotation                                        | N4-web                       |
-| `/dashboard`                      | gains the federation section (`FederationSettings` mount)                             | N4-web                       |
+| `/dashboard/settings`             | gains the federation section (`FederationSettings` mount)                             | N4-web                       |
 | `/settings/privacy`               | gains the portability grants (`PortabilityGrants` mount)                              | W3-portability               |
 | `/transparency`                   | gains the jury results (`JuryResults` slot)                                           | W3-jury                      |
 | `/admin/moderation`               | a `watch_room` report's detail gains its evidence (`WatchRoomEvidence`)               | W3-watch-rooms               |
@@ -258,7 +258,7 @@ Units build on these and never edit `chat/interact/{state,client,use-chat-intera
 
 | Test id                      | Element and attributes                                                                                  |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `federation-settings`        | The `/dashboard` section; absent while `features.federation` is false                                   |
+| `federation-settings`        | The `/dashboard/settings` section; absent while `features.federation` is false                          |
 | `federation-enabled`         | The on/off switch; `data-state` `on`/`off` (off asks through a `ConfirmDialog`)                         |
 | `federation-handle`          | The `@slug@domain` handle, with its copy `IconButton`; `data-handle`                                    |
 | `federation-handle-copy`     | The handle's copy `IconButton`                                                                          |

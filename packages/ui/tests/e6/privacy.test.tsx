@@ -24,12 +24,12 @@ const attr = (el: Element, name: string) => el.getAttribute(name);
 
 describe("formatters", () => {
   test.each([
-    [0, "0 byte"],
-    [999, "999 byte"],
+    [0, "0 B"],
+    [999, "999 B"],
     [1000, "1 kB"],
     [1_536_000, "1.5 MB"],
     [2_000_000_000, "2 GB"],
-    [-5, "0 byte"],
+    [-5, "0 B"],
   ])("formatBytes(%i)", (bytes, text) => {
     expect(formatBytes(bytes, "en")).toBe(text);
   });

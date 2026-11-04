@@ -159,6 +159,30 @@ export interface UiBudget {
   signal: AbortSignal;
 }
 
+const MONTH = new Intl.DateTimeFormat("en", { month: "long", timeZone: "UTC" });
+
+/**
+ * D5-settings' date-time field: one Select per part (`<id>-year|month|day|hour|minute`), chosen by
+ * option label. Year and month first, so the day list has the right length. `value` is
+ * `YYYY-MM-DDTHH:MM`, as the old `datetime-local` input took it.
+ */
+async function setDateTimeField(page: Page, id: string, value: string, ui: { timeout: number }): Promise<void> {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value);
+  if (!m) throw new Error(`not a YYYY-MM-DDTHH:MM value: ${value}`);
+  const [, year = "", month = "", day = "", hour = "", minute = ""] = m;
+  const parts: [string, string][] = [
+    ["year", year],
+    ["month", MONTH.format(new Date(Date.UTC(2020, Number(month) - 1, 1)))],
+    ["day", String(Number(day))],
+    ["hour", hour],
+    ["minute", minute],
+  ];
+  for (const [part, name] of parts) {
+    await byE7Id(page, `${id}-${part}`).click(ui);
+    await page.getByRole("option", { name, exact: true }).click(ui);
+  }
+}
+
 /** `/admin/egress`: set the range, load, and read the broadcast's row (null while it has none). */
 export async function egressRowOnPage(
   page: Page,
@@ -168,8 +192,8 @@ export async function egressRowOnPage(
 ): Promise<{ origin: number; relay: number; p2p: number; cdn: number } | null> {
   const ui = { timeout: b.timeoutMs };
   await byE7Id(page, E.egress).waitFor(ui);
-  await byE7Id(page, E.egressFrom).fill(range.fromInput, ui);
-  await byE7Id(page, E.egressTo).fill(range.toInput, ui);
+  await setDateTimeField(page, E.egressFrom, range.fromInput, ui);
+  await setDateTimeField(page, E.egressTo, range.toInput, ui);
   await byE7Id(page, E.egressLoad).click(ui);
   const row = byE7Id(page, E.egressRow, { "broadcast-id": broadcastId });
   const settled = await waitFor(

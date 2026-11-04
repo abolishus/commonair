@@ -30,7 +30,6 @@
   "settings.dateTime.hour": "Hora",
   "settings.dateTime.minute": "Minuto",
   "settings.dateTime.localHint": "En tu propia zona horaria.",
-  "settings.bytes": "{value} B",
   "settings.integrity.signal.datacenterIp": "Red de centro de datos",
   "settings.integrity.signal.datacenterIp.hint": "La sesión vino de una red de alojamiento o centro de datos, donde casi no hay espectadores reales.",
   "settings.integrity.signal.privacyRelay": "Relé de privacidad",

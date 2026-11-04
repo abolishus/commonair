@@ -196,7 +196,7 @@ async function e2eBasic(ctx: ScenarioContext, sessions: WebSession[], check: Sce
 
   // 2. Dashboard: server URL + a freshly rotated key → RTMP publish, as OBS would.
   const { server, key } = await ctx.step("streamer: read server URL and rotate the stream key", async () => {
-    const page = await streamer.goto(ROUTES.dashboard);
+    const page = await streamer.goto(ROUTES.dashboardSettings);
     // The URL arrives with `stream.ingest`; the element may render empty while it loads.
     const serverUrl = await waitFor(
       "stream server URL",
@@ -218,7 +218,7 @@ async function e2eBasic(ctx: ScenarioContext, sessions: WebSession[], check: Sce
 
   // The dashboard's avatar upload: presigned PUT, the scanning commit, then theme.avatarKey.
   const avatarUrl = await ctx.step("streamer: upload an avatar from the dashboard", async () => {
-    const page = await streamer.goto(ROUTES.dashboard);
+    const page = await streamer.goto(ROUTES.dashboardSettings);
     const slot = byTestId(page, T.appearanceSlot, { purpose: "avatar" });
     await slot
       .locator(tid(T.appearanceFile))

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /** Labels and badge tones for the E7 admin pages (every key spelled out, so the catalog check sees it). */
-import { formatBytes, formatNumber, type StatusTone } from "@commonair/ui";
+import { formatBytes, type StatusTone } from "@commonair/ui";
 import { t, type MessageKey } from "../../i18n/index.ts";
 import type { DeliverySource, IncidentStatus, IntegrityDecision, IntegritySubject } from "./client.ts";
 
@@ -195,5 +195,5 @@ export const BYTE_DETAILS: ReadonlySet<string> = new Set(["bytesIssued", "bytesR
  */
 export function formatSize(bytes: number, locale: string): string {
   const n = Number.isFinite(bytes) ? Math.max(0, Math.round(bytes)) : 0;
-  return n < 1000 ? t("settings.bytes", { value: formatNumber(n, locale) }) : formatBytes(n, locale);
+  return formatBytes(n, locale);
 }

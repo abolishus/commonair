@@ -437,6 +437,8 @@ export const ROUTES = {
   signup: "/signup",
   signin: "/signin",
   dashboard: "/dashboard",
+  /** D5-studio: the stream setup cards (key, avatar, DVR, simulcast, Discord, federation). */
+  dashboardSettings: "/dashboard/settings",
   /** E3: your relays. */
   relays: "/relays",
   /** E4b: your subscriptions. */

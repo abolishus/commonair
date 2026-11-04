@@ -100,11 +100,11 @@ leaves the queue and is never shown to viewers.
 
 ### Egress (`/admin/egress`)
 
-| Test id        | Element / meaning                                                                                                              |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `egress`       | Page wrapper; `egress-from`, `egress-to` (`<input type="datetime-local">`, UTC), `egress-load`; `egress-empty`; `egress-error` |
-| `egress-total` | One per delivery source: `data-source` (`DELIVERY_SOURCES`), `data-bytes`                                                      |
-| `egress-row`   | One broadcast: `data-broadcast-id`, `data-channel`, `data-origin`, `data-relay`, `data-p2p`, `data-cdn` (bytes)                |
+| Test id        | Element / meaning                                                                                                                                                                                                    |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `egress`       | Page wrapper; `egress-from`, `egress-to` (date-time fieldsets, UTC: one Select per `-year`, `-month`, `-day`, `-hour`, `-minute`; `data-value` is `YYYY-MM-DDTHH:MM`), `egress-load`; `egress-empty`; `egress-error` |
+| `egress-total` | One per delivery source: `data-source` (`DELIVERY_SOURCES`), `data-bytes`                                                                                                                                            |
+| `egress-row`   | One broadcast: `data-broadcast-id`, `data-channel`, `data-origin`, `data-relay`, `data-p2p`, `data-cdn` (bytes)                                                                                                      |
 
 ### Incidents (`/admin/incidents`)
 

@@ -46,9 +46,9 @@ describe("formatBytes", () => {
   const f = (n: number) => formatBytes(n, "en");
 
   it("prints whole bytes below 1 kB", () => {
-    expect(f(0)).toBe("0 byte");
-    expect(f(1)).toBe("1 byte");
-    expect(f(999)).toBe("999 byte");
+    expect(f(0)).toBe("0 B");
+    expect(f(1)).toBe("1 B");
+    expect(f(999)).toBe("999 B");
   });
 
   it("uses SI units with one fraction digit", () => {
@@ -69,9 +69,9 @@ describe("formatBytes", () => {
   });
 
   it("treats negative and non-finite input as zero", () => {
-    expect(f(-5)).toBe("0 byte");
-    expect(f(Number.NaN)).toBe("0 byte");
-    expect(f(Number.POSITIVE_INFINITY)).toBe("0 byte");
+    expect(f(-5)).toBe("0 B");
+    expect(f(Number.NaN)).toBe("0 B");
+    expect(f(Number.POSITIVE_INFINITY)).toBe("0 B");
   });
 
   it("follows the locale", () => {

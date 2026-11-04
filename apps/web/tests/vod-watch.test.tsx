@@ -22,7 +22,8 @@ import { ClipWatchPage, VodWatchPage, type WatchClient } from "../src/components
 import type { MaturityClient } from "../src/components/safety/client.ts";
 import { locale, t, uiMessages } from "../src/i18n/index.ts";
 
-vi.mock("@tanstack/react-router", () => ({
+vi.mock("@tanstack/react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@tanstack/react-router")>()),
   Link: ({ children, className, ...rest }: { children: React.ReactNode; className?: string }) => (
     <a href="/rivertide" className={className} data-testid={(rest as { "data-testid"?: string })["data-testid"]}>
       {children}

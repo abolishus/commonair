@@ -35,7 +35,6 @@ export type Key =
   | "settings.dateTime.hour"
   | "settings.dateTime.minute"
   | "settings.dateTime.localHint"
-  | "settings.bytes"
   | "settings.integrity.signal.datacenterIp"
   | "settings.integrity.signal.datacenterIp.hint"
   | "settings.integrity.signal.privacyRelay"

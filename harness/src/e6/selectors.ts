@@ -83,6 +83,8 @@ export function optionId(fieldId: string, value: string): string {
 
 export const E6_ROUTES = {
   dashboard: "/dashboard",
+  /** The simulcast panel moved here with the other setup cards (D5-studio). */
+  dashboardSettings: "/dashboard/settings",
   overlays: "/overlays",
   content: "/content",
   privacy: "/settings/privacy",

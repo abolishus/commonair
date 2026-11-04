@@ -24,7 +24,7 @@ const UI_TIMEOUT_MS = 30_000;
 const FOLLOWER_TIMEOUT_MS = 120_000;
 const FOLLOWER_POLL_MS = 3_000;
 
-export const FEDERATION_ROUTES = { studio: "/dashboard", admin: "/admin/federation" } as const;
+export const FEDERATION_ROUTES = { studio: "/dashboard/settings", admin: "/admin/federation" } as const;
 
 /** The ids these steps select by (docs/testing/b7-selectors.md "Federation"). */
 export const FEDERATION_IDS = {

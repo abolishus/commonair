@@ -74,12 +74,18 @@ describe("message catalogs", () => {
     expect([...used].filter((k) => !(k in en))).toEqual([]);
   });
 
+  const KEY_SHAPE = /^[\w-]+(?:\.[\w-]+)+$/;
+
   it("uses every key of every namespace outside src/i18n/", () => {
     const used = appFiles.map(([, text]) => text).join("\n");
-    const unused = Object.keys(en).filter((k) => !used.includes(`"${k}"`) && !UNUSED_ALLOWED.includes(k));
+    // One pass collects every quoted key-shaped literal (the closing quote is a lookahead, so
+    // `"a.b""c.d"` yields both); scanning the whole source once per key timed out under load.
+    const quoted = new Set(Array.from(used.matchAll(/"([\w-]+(?:\.[\w-]+)+)(?=")/g), (m) => m[1]));
+    const isUsed = (k: string) => (KEY_SHAPE.test(k) ? quoted.has(k) : used.includes(`"${k}"`));
+    const unused = Object.keys(en).filter((k) => !isUsed(k) && !UNUSED_ALLOWED.includes(k));
     expect(unused).toEqual([]);
     // The allowlist only shrinks: a key it names that is now used (or gone) must leave it.
-    expect(UNUSED_ALLOWED.filter((k) => !(k in en) || used.includes(`"${k}"`))).toEqual([]);
+    expect(UNUSED_ALLOWED.filter((k) => !(k in en) || isUsed(k))).toEqual([]);
   });
 
   it("never builds keys at runtime (the checks above would miss them)", () => {

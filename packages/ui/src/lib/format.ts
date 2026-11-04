@@ -238,6 +238,8 @@ export function formatBytes(bytes: number, locale: string): string {
     value /= 1000;
     index++;
   }
+  // Intl's short "byte" reads "0 byte"; below a kilobyte use the symbol, as every larger unit does.
+  if (index === 0) return `${formatNumber(Math.round(value), locale)} B`;
   const unit = BYTE_UNITS[index] ?? "byte";
   return cached(
     `bytes|${locale}|${unit}`,

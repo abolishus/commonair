@@ -67,6 +67,9 @@ export const SEED_ROUTES: Readonly<Record<string, SeedRoute>> = {
   "/activate": { as: "viewer1", query: ex("platform", "activateQuery"), expectData: false },
   "/oauth2/authorize": { as: "viewer1", query: ex("platform", "authorizeQuery"), expectData: true },
 
+  // The settings layout (D5-settings); `/settings/` redirects to subscriptions.
+  "/settings": viewer,
+  "/settings/": viewer,
   "/settings/privacy": viewer,
   "/settings/connections": viewer,
   "/settings/preferences": viewer,
@@ -94,7 +97,13 @@ export const SEED_ROUTES: Readonly<Record<string, SeedRoute>> = {
   "/coop/jury": { as: "member1", expectData: true },
 
   // Live and healthy, the stream-health panel says so with the empty state (dashboard.health.healthy).
-  "/dashboard": { ...studio, okEmpty: ["No problems detected"] },
+  "/dashboard": { ...studio, okEmpty: ["No problems detected", "Nothing yet"] },
+  "/dashboard/settings": studio,
+  "/mod/$channel": {
+    ...studio,
+    params: { channel: ch("streamer1") },
+    okEmpty: ["No held messages", "No mod actions yet"],
+  },
   "/content": studio,
   "/revenue": studio,
   "/chat": studio,
