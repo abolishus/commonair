@@ -13,15 +13,15 @@
  * - `checkout.failed` (`shareCheckoutFailed`): the pending share is cancelled with the payment.
  * - `charge.refunded` (`shareChargeRefundedAction`): the `shareRefund` posting (`coop/shares.ts`).
  *
- * The processor fee is not posted: `sharePurchase` has no fee leg yet (a contract request), so a
- * missing balance transaction never holds a share back either.
+ * The processor fee is posted with the purchase (`sharePurchase`'s fee leg, `feeFor`): a missing
+ * balance transaction answers 500, and Stripe's retry finds it attached, as for every other charge.
  */
 import { and, eq } from "drizzle-orm";
 import { type Executor, schema } from "@commonair/db";
 import type { StripeAction } from "@commonair/payments";
 import { bookShareTx, releaseShareTx, shareChargeRefunded } from "../../coop/shares.ts";
 import { audit } from "../../events/audit.ts";
-import { type AppliedAction, type PreparedAction, StripeProcessingError } from "../stripe-events.ts";
+import { type AppliedAction, type PreparedAction, StripeProcessingError, feeFor } from "../stripe-events.ts";
 
 type PaymentRow = typeof schema.payments.$inferSelect;
 type CheckoutCompleted = Extract<StripeAction, { type: "checkout.completed" }>;
@@ -41,7 +41,7 @@ export async function shareCheckoutCompleted(
   tx: Executor,
   payment: PaymentRow,
   a: CheckoutCompleted,
-  _prepared: PreparedAction,
+  prepared: PreparedAction,
   now: Date,
   _generic: () => Promise<AppliedAction>,
 ): Promise<AppliedAction> {
@@ -59,7 +59,9 @@ export async function shareCheckoutCompleted(
     throw new StripeProcessingError(`Stripe charged ${a.currency}, the share is in ${payment.currency}`);
   if (a.amountTotal !== null && a.amountTotal !== payment.amountCents)
     throw new StripeProcessingError(`Stripe charged ${a.amountTotal} cents, the share is ${payment.amountCents}`);
+  const feeCents = feeFor(prepared, payment.currency);
   const outcome = await bookShareTx(tx, payment, {
+    feeCents,
     receivedAt: shareArrival(a.at, payment.createdAt, now),
     now,
     actor: { type: "system", id: null },

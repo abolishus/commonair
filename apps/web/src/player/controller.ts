@@ -24,15 +24,18 @@ import type { CaptionTrack } from "@commonair/contracts/dto";
 import { RENDITIONS, type CAPTIONS_STATES } from "@commonair/contracts/enums";
 import type { Api } from "../lib/api.ts";
 import { capIndex, nominalLevels, type LevelInfo } from "./budget.ts";
+import { swapDvrSource } from "./dvr.ts";
 import {
   HeartbeatAccountant,
   MAX_P2P_PEERS,
   RENDITION_SOURCE,
   dataModeField,
+  heartbeatDvrSwitch,
   nextHeartbeatDelay,
   playbackFields,
   withToken,
   type CumulativeStats,
+  type DvrSwitch,
 } from "./heartbeat.ts";
 import type { PlaybackMode } from "./media-clock.ts";
 import { P2P_TUNING, P2P_WATCHING_WINDOW_MS, p2pHlsConfig, renditionOf } from "./p2p/config.ts";
@@ -463,7 +466,7 @@ export class PlayerController {
   }
 
   /** hls.js: load the DVR playlist and wait for its level, so `seekToWallclock` has fragments. */
-  private loadDvrHls(hls: Hls, url: string): Promise<boolean> {
+  private loadDvrHls(hls: Hls, url: string, autoplay = true): Promise<boolean> {
     const ctor = this.hlsCtor;
     return new Promise<boolean>((resolve) => {
       let done = false;
@@ -478,12 +481,12 @@ export class PlayerController {
       const timer = setTimeout(() => finish(false), DVR_LOAD_TIMEOUT_MS);
       if (ctor) hls.on(ctor.Events.LEVEL_LOADED, onLevel);
       hls.loadSource(url);
-      void this.opts.video.play().catch(() => undefined);
+      if (autoplay) void this.opts.video.play().catch(() => undefined);
     });
   }
 
   /** Native HLS: point the element at the DVR playlist and wait for its metadata. */
-  private loadDvrNative(url: string): Promise<boolean> {
+  private loadDvrNative(url: string, autoplay = true): Promise<boolean> {
     const { video } = this.opts;
     return new Promise<boolean>((resolve) => {
       const finish = (ok: boolean) => {
@@ -498,7 +501,7 @@ export class PlayerController {
       video.addEventListener("loadedmetadata", onMeta);
       video.addEventListener("error", onError);
       video.src = url;
-      void video.play().catch(() => undefined);
+      if (autoplay) void video.play().catch(() => undefined);
     });
   }
 
@@ -896,6 +899,9 @@ export class PlayerController {
       if (res.dvrToken && this.dvr) this.dvrToken = res.dvrToken;
       const move = heartbeatSwitch(res);
       if (move && !this.stopped) this.switchTo(move.url, move.source);
+      // The mode, not `dvrUrl`: a rewind still loading on the relay only gets the grant move.
+      const dvrMove = heartbeatDvrSwitch(res, { hasGrant: this.dvr !== null, playingDvr: this.mode === "dvr" });
+      if (dvrMove && !this.stopped) this.switchDvrTo(dvrMove);
       // Only a token says what the origin applies: a beat answered without one (a concurrent beat
       // lost the race) leaves the change pending, and it is sent again.
       if (res.token && !this.stopped) this.applyDataModeToken(res.token, move !== null);
@@ -917,6 +923,45 @@ export class PlayerController {
   private switchTo(url: string, source: PlayerSource): void {
     this.reload(url);
     this.opts.onSource?.(source);
+  }
+
+  /**
+   * Batch 8 (`dvrSwitchTo`): the session's relay left, so its DVR grant moves to the origin
+   * playlist for the rest of the session. Unless DVR is playing (mode `dvr`), only the grant
+   * changes: the next `enterDvr` rewinds on the origin, and a rewind still loading on the relay
+   * fails there and returns to live as any failed `enterDvr` does. While DVR plays, the source
+   * swaps at the current position (`swapDvrSource`: no seek to live; a paused viewer is not told to
+   * play and stays paused). A failed swap returns to live; a later `enterDvr`/`exitDvr` supersedes it.
+   */
+  private switchDvrTo(move: DvrSwitch): void {
+    if (!this.dvr) return;
+    this.dvr = { windowSeconds: this.dvr.windowSeconds, playlistUrl: move.url };
+    if (move.token !== null) this.dvrToken = move.token;
+    if (!move.swap || this.mode !== "dvr" || this.dvrUrl === null) return;
+    const generation = ++this.dvrGeneration;
+    const { video } = this.opts;
+    void swapDvrSource(
+      {
+        playheadWallclock: () => this.playheadWallclock(),
+        seekToWallclock: (t) => this.seekToWallclock(t),
+        paused: () => video.paused,
+        pause: () => video.pause(),
+        loadDvr: async (url, { autoplay }) => {
+          // Set first, so `tokenFor` hands the new directory its DVR token.
+          this.dvrUrl = url;
+          const ok = await (this.hls ? this.loadDvrHls(this.hls, url, autoplay) : this.loadDvrNative(url, autoplay));
+          if (generation !== this.dvrGeneration || this.stopped) return false;
+          if (!ok) {
+            this.exitDvr();
+            return false;
+          }
+          // Still DVR (it was when the swap began); a guard should anything have reset the mode.
+          this.notifyMode("dvr");
+          return true;
+        },
+      },
+      this.dvrToken === null ? move.url : withToken(move.url, this.dvrToken),
+    );
   }
 
   /**

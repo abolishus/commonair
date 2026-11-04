@@ -91,10 +91,10 @@ PostgreSQL and Valkey such as DigitalOcean's, or your own on a private network. 
 `commonair-postgres` nor `commonair-valkey` is installed, no unit depends on them, and `migrate`
 runs as your owner role and creates the app and monitor roles itself.
 [requirements.md](requirements.md#external-postgres-and-valkey) says what the servers need, and
-`managed-services.md` walks through DigitalOcean's. Both servers are
+[managed-services.md](managed-services.md) walks through DigitalOcean's. Both servers are
 external or neither is, and the choice is made at the first install: an instance never switches
 between bundled and external, because that moves the data (a dump and restore, described in
-managed-services.md).
+[managed-services.md](managed-services.md#moving-between-bundled-and-managed-services)).
 
 | `install` flag              | Env key                   | Default and meaning                                                                          |
 | --------------------------- | ------------------------- | -------------------------------------------------------------------------------------------- |
@@ -140,7 +140,7 @@ On an external instance:
   queues, sessions and caches, and those on the old server are not carried over.
 - `upgrade` takes no URL flag. It runs the preflight again, runs `migrate` once as the owner (the
   role scripts are idempotent), and takes no WAL-G backup: the provider's point-in-time recovery
-  covers the database (`managed-services.md`). `--database-ca` and
+  covers the database ([managed-services.md](managed-services.md)). `--database-ca` and
   `--valkey-ca` replace a CA, on `upgrade` and `install --reinstall` alike. If a CA's secret was
   removed, both refuse to go on (or ask for the file at a terminal) rather than drop TLS. If an
   upgrade fails and rolls back, the database is restored, if it must be, with the provider's
@@ -274,9 +274,10 @@ services, so the reference below does not list them.
 
 The object backups' settings, `BACKUP_OBJECTS_REMOTE_*` (`ENDPOINT`, `REGION`, `BUCKET`,
 `PREFIX`, `PATH_STYLE`, `ALLOW_HTTP`, `ACCESS_KEY_ID`, `SECRET_ACCESS_KEY`),
-`BACKUP_OBJECTS_BWLIMIT`, `BACKUP_OBJECTS_MAX_DELETE` (default 1000, or `off`) and
-`BACKUP_OBJECTS_SOURCE_*` (`ACCESS_KEY_ID`, `SECRET_ACCESS_KEY`, `ENDPOINT`), are read by
-`selfhost.sh backup` alone and given to no unit. [backups.md](backups.md#set-it-up-digitalocean-spaces)
+`BACKUP_OBJECTS_BWLIMIT`, `BACKUP_OBJECTS_MAX_DELETE` (default 1000, or `off`),
+`BACKUP_OBJECTS_SOURCE_*` (`ACCESS_KEY_ID`, `SECRET_ACCESS_KEY`, `ENDPOINT`) and
+`BACKUP_DUMP_KEEP` (complete [logical dumps](backups.md#logical-dumps) kept: default 30, fewer
+refused), are read by `selfhost.sh backup` alone and given to no unit. [backups.md](backups.md#set-it-up-digitalocean-spaces)
 lists every one.
 
 ## Chat retention and the verified-watch gate
@@ -678,6 +679,8 @@ the tables by hand. Columns:
 | `GARAGE_RPC_SECRET`         | no       | —       | generated                 | Garage requires exactly 64 hex characters.                                                                                                                                                                                                           |
 | `GARAGE_ADMIN_TOKEN`        | no       | —       | generated                 | Bearer token for Garage's admin API, used by commonair-storage-init (compose: garage-init) to create buckets and keys.                                                                                                                               |
 | `GRAFANA_ADMIN_PASSWORD`    | no       | —       | generated                 | Password of Grafana's `admin` user; Grafana refuses to start without it.                                                                                                                                                                             |
+| `ALERT_EMAIL_TO`            | no       | —       | —                         | Grafana's alert route (infra/grafana/provisioning/alerting/route-env.sh): the on-call address(es), comma-separated. Unset: Grafana starts with no route and says so loudly.                                                                          |
+| `ALERT_WEBHOOK_URL`         | no       | —       | —                         | An optional webhook the same alerts are posted to, beside the mail.                                                                                                                                                                                  |
 | `VALKEY_PASSWORD`           | no       | —       | generated                 | Password Valkey requires (`requirepass`). Empty runs Valkey without one (development only; the self-hosted unit refuses to start without it). It goes into VALKEY_URL unescaped, so only URL-safe characters (init-env generates 64 hex characters). |
 | `BIND_ADDRESS`              | no       | —       | —                         | Host interface for published ports (default 127.0.0.1).                                                                                                                                                                                              |
 | `PUBLIC_HOSTNAME`           | no       | —       | set by install            | Public hostname Caddy serves with TLS (profile `tls`).                                                                                                                                                                                               |

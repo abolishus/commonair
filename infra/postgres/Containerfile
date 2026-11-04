@@ -38,6 +38,10 @@ COPY --chmod=0755 infra/postgres/entrypoint.sh /usr/local/bin/commonair-entrypoi
 COPY --chmod=0755 infra/postgres/health.sh /usr/local/bin/commonair-pg-health
 COPY --chmod=0755 infra/postgres/wal-fetch.sh /usr/local/bin/commonair-wal-fetch
 COPY --chmod=0644 infra/postgres/walg-env.sh /usr/local/lib/commonair/walg-env.sh
+COPY --chmod=0755 infra/postgres/dump.sh /usr/local/bin/commonair-dump
+COPY --chmod=0755 infra/postgres/dump-restore.sh /usr/local/bin/commonair-dump-restore
+COPY --chmod=0755 infra/postgres/dump-drill.sh /usr/local/bin/commonair-dump-drill
+COPY --chmod=0644 infra/postgres/restore-owner.sql infra/postgres/restore-check.sql /usr/local/share/commonair/
 # Fail the build if the binary cannot load its shared libraries on this base.
 RUN wal-g --version
 

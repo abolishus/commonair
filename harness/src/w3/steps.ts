@@ -4,7 +4,7 @@
 /**
  * The batch 7 scenarios' step selection (docs/testing/b7-selectors.md, "Scenarios"): the
  * `watch-room`, `portability`, `twitch-import` and `federation` scenarios (the `w3` shard), and the
- * extension steps W3 and B7-followups add to `interact`, `e5-coop`, `e2e-relay`, `trust-safety`,
+ * extension steps W3 and B7-followups add to `interact`, `e5-coop`, `relay-dvr`, `trust-safety`,
  * `integrity-basic` and `rehearsal`. Pure. Owned by the orchestrator: **only the orchestrator
  * removes a step from a pending list, when it merges the unit that implements it.** Units fill
  * their step modules (`W3_EXTENSION_UNITS`, and the scenario modules named on each table).
@@ -162,14 +162,14 @@ export function federationTitle(n: FederationStep, what: string): string {
 /**
  * The extension steps each existing scenario runs, in order (the unit that writes each is in
  * `W3_EXTENSION_UNITS`). `interact` runs its extensions after its own steps; `e5-coop` after its last step;
- * `e2e-relay` while the Go relay is active and its viewers verified (before the liar and the
- * drain); `trust-safety` around its steps (before step 1 and after the last), as W2's
+ * `relay-dvr` once its Go relay is active (before B8's `relay-dvr-switch`; batch 8 split them out of
+ * `e2e-relay`); `trust-safety` around its steps (before step 1 and after the last), as W2's
  * `enforcement`; `integrity-basic` after W2's extensions; `rehearsal` after its steps.
  */
 export const W3_EXTENSIONS = {
   interact: ["giveaway", "surge-raid", "fair-prediction"],
   "e5-coop": ["jury"],
-  "e2e-relay": ["dvr-relay", "dvr-purge", "relay-vtt"],
+  "relay-dvr": ["dvr-relay", "dvr-purge", "relay-vtt"],
   "trust-safety": ["sor-resolve"],
   "integrity-basic": ["group-appeal-threshold"],
   rehearsal: ["moderation-samples"],
@@ -216,7 +216,7 @@ export const W3_EXTENSION_PREREQUISITES: Readonly<Record<W3Extension, readonly W
 
 /**
  * The scenario's own steps an extension needs: `moderation-samples` reads the report of the
- * rehearsal step 1 arms and publishes. `e2e-relay` and `integrity-basic` have no step selection.
+ * rehearsal step 1 arms and publishes. `relay-dvr` and `integrity-basic` have no step selection.
  */
 export const W3_SCENARIO_STEP_PREREQUISITES: Readonly<Record<W3Extension, readonly number[]>> = {
   giveaway: [],

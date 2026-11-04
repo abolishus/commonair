@@ -652,6 +652,21 @@ describe("other rules", () => {
     expect(buy.idempotencyKey).not.toBe(back.idempotencyKey);
   });
 
+  test("a card share's processor fee is the co-op's expense; the member is owed the full price", () => {
+    const i = { shareId: PAYMENT, userId: USER, provider: "stripe", amountCents: 500, currency: "usd", occurredAt: AT };
+    const buy = sharePurchase({ ...i, feeCents: 45 });
+    expectWellFormed(buy);
+    expect(on(buy, accounts.memberShare(USER))).toBe(-500);
+    expect(on(buy, accounts.paymentFees())).toBe(45);
+    expect(on(buy, accounts.cash("stripe"))).toBe(455);
+    // No fee (manual, or 0): no fee lines at all.
+    expect(sharePurchase({ ...i, feeCents: 0 }).entries).toHaveLength(2);
+    expect(sharePurchase(i).entries).toHaveLength(2);
+    expect(() => sharePurchase({ ...i, feeCents: -1 })).toThrow(/fee must be/);
+    expect(() => sharePurchase({ ...i, feeCents: 501 })).toThrow(/exceed/);
+    expect(() => sharePurchase({ ...i, feeCents: 1.5 })).toThrow(/fee must be/);
+  });
+
   test("infrastructure cost", () => {
     const p = infrastructureCost({
       infraCostId: PAYMENT,

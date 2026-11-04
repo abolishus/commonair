@@ -123,6 +123,8 @@ describe("bundle contents", () => {
       "infra/grafana/dashboards/postgres.json",
       "infra/grafana/dashboards/stage-triggers.json",
       "infra/grafana/dashboards/valkey.json",
+      "infra/grafana/provisioning/alerting/commonair.yaml.tmpl",
+      "infra/grafana/provisioning/alerting/route-env.sh",
       "infra/grafana/provisioning/dashboards/dashboards.yaml",
       "infra/grafana/provisioning/datasources/datasources.yaml",
       "infra/loki/loki.yaml",

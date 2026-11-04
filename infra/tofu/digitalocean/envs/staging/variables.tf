@@ -34,3 +34,35 @@ variable "instance_origin" {
   type        = string
   default     = null
 }
+
+variable "enable_monitoring_droplet" {
+  description = "The monitoring droplet (status page and outside probes, docs/operators/status-page.md). Off for staging; the U5 agent track turns it on to bring the status stack up."
+  type        = bool
+  default     = false
+  nullable    = false
+}
+
+variable "monitoring_region" {
+  description = "Region of the monitoring droplet; required with enable_monitoring_droplet, and not staging's region."
+  type        = string
+  default     = null
+}
+
+variable "turn_relay" {
+  description = "Open coturn's TURN relay range (selfhost.sh --turn-relay)."
+  type        = bool
+  default     = false
+}
+
+variable "status_site_name" {
+  description = "The instance's INSTANCE_NAME, shown on the status page and in its alert mails. Null shows the origin's host."
+  type        = string
+  default     = null
+}
+
+variable "status_locale" {
+  description = "Language of the status page: en or es."
+  type        = string
+  default     = "en"
+  nullable    = false
+}

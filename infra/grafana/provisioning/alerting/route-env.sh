@@ -1,5 +1,6 @@
 # SPDX-FileCopyrightText: 2026 CommonAir contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
+# shellcheck shell=sh
 #
 # Sourced by Grafana's entrypoint before /run.sh (`. /etc/grafana/provisioning/alerting/route-env.sh`)
 # to install the alert route (docs/operators/on-call.md#the-alert-route):

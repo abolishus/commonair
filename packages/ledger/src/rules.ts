@@ -1024,9 +1024,22 @@ export interface ShareInput {
   occurredAt: Date;
 }
 
-/** A viewer buys a refundable member share: cash in, a liability to the member. */
-export function sharePurchase(i: ShareInput): Posting {
+export interface SharePurchaseInput extends ShareInput {
+  /** The processor's fee on a card share (Stripe's balance transaction), 0 or absent otherwise. */
+  feeCents?: number;
+}
+
+/**
+ * A viewer buys a refundable member share: cash in, a liability to the member for the full price.
+ * A card share's processor fee is the co-op's expense, so the settlement account ends at what the
+ * processor actually holds (batch 8, M1-coop-money).
+ */
+export function sharePurchase(i: SharePurchaseInput): Posting {
   assertCents("amount", i.amountCents, { allowZero: false });
+  const fee = i.feeCents ?? 0;
+  assertCents("fee", fee);
+  if (fee > i.amountCents) throw new RangeError("the fee cannot exceed the share's price");
+  const settle = settlementAccount(i.provider, i.settlement ?? "cash");
   return finish({
     kind: "share_purchase",
     description: "Member share purchased",
@@ -1037,8 +1050,14 @@ export function sharePurchase(i: ShareInput): Posting {
     occurredAt: i.occurredAt,
     metadata: { userId: i.userId },
     entries: [
-      { code: settlementAccount(i.provider, i.settlement ?? "cash"), amountCents: i.amountCents },
+      { code: settle, amountCents: i.amountCents },
       { code: accounts.memberShare(i.userId), amountCents: -i.amountCents },
+      ...(fee > 0
+        ? [
+            { code: accounts.paymentFees(), amountCents: fee, memo: "processor fee" },
+            { code: settle, amountCents: -fee, memo: "processor fee" },
+          ]
+        : []),
     ],
   });
 }

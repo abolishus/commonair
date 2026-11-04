@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * `e2e-relay` W3 extensions (docs/testing/b7-selectors.md, "Scenarios"; ADR 0016 Amendment 1):
+ * `relay-dvr` W3 extensions (split out of `e2e-relay` in batch 8; docs/testing/b7-selectors.md, "Scenarios"; ADR 0016 Amendment 1):
  *
  * - `dvr-relay`: a relay-assigned viewer rewinds on its own channel (VODs on, so it records). Its
  *   DVR playlist is on the relay, the segments come from the relay (the relay's receipts credit

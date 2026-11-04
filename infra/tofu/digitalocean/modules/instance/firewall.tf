@@ -19,6 +19,7 @@ locals {
       { protocol = "tcp", port_range = "6697" }, # IRC over TLS
     ],
     var.irc_plaintext ? [{ protocol = "tcp", port_range = "6667" }] : [],
+    var.turn_relay ? [{ protocol = "udp", port_range = "49160-49199" }] : [],
   )
 
   # Cloud firewalls are stateful, but with no outbound rule nothing leaves the droplet at all:

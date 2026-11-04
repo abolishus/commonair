@@ -1139,6 +1139,8 @@ export const PatronageStatement = z.object({
     viewerHoursVerified: z.number(),
     viewerHoursExcluded: z.number(),
   }),
+  /** Batch 8 (M1-coop-money): the member's own latest payout for the period, or null. */
+  payout: PatronagePayoutView.pick({ status: true, amount: true, paidAt: true }).nullable(),
 });
 /** A patronage period as treasurers and admins see it (`coop.patronage.periods`). */
 export const PatronagePeriodView = z.object({

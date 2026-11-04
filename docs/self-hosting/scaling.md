@@ -55,8 +55,8 @@ has.
    [requirements.md](requirements.md#external-postgres-and-valkey)). A managed Postgres needs
    only an owner with `CREATEROLE`, no superuser (ADR 0032 §3). Decide before the first
    install: an instance never switches between the bundled servers and external ones, since
-   that moves the data (`managed-services.md` describes the dump and
-   restore).
+   that moves the data ([managed-services.md](managed-services.md#moving-between-bundled-and-managed-services)
+   describes the dump and restore).
 2. **Add app servers** (API, chat, web, worker, origin, tracker) behind a load balancer.
 3. **Add media servers** for more transcoding and ingest.
 4. **Rely on member relays and P2P before any CDN.** Members who run a relay

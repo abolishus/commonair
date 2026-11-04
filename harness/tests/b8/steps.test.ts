@@ -123,8 +123,8 @@ describe("extensions", () => {
     for (const e of merged) expect(UNWIRED_B8_SCENARIOS, e).not.toContain(scenarioOf(e));
   });
 
-  test("an unwired scenario's extensions stay pending (relay-dvr waits for B8-harness)", () => {
-    expect(UNWIRED_B8_SCENARIOS).toEqual(["relay-dvr"]);
+  test("an unwired scenario's extensions stay pending (none since relay-dvr was wired)", () => {
+    expect(UNWIRED_B8_SCENARIOS).toEqual([]);
     for (const s of UNWIRED_B8_SCENARIOS)
       for (const e of B8_EXTENSIONS[s] as readonly B8Extension[]) expect(PENDING_B8_EXTENSIONS, e).toContain(e);
   });

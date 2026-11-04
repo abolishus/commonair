@@ -1210,3 +1210,43 @@ export async function findPayoutTransfer(
   const [byId] = await db.select().from(transfers).where(eq(transfers.id, ref.transferId));
   return byId ?? null;
 }
+
+// Co-op patronage payouts (M1-coop-money): one copy for the API and the worker. ------------------
+
+type PatronagePayoutStatus = (typeof schema.patronagePayouts.$inferSelect)["status"];
+
+/**
+ * What a member is still owed for a period, for a new payout row: the allocation, less every paid
+ * row, less what a reversed row kept (its amount less what came back). Pending rows are open, so a
+ * new row is never made beside them. Never below zero; integer cents, never split.
+ */
+export function owedCents(
+  allocationCents: number,
+  rows: readonly { status: PatronagePayoutStatus; amountCents: number; reversedCents: number }[],
+): number {
+  let out = allocationCents;
+  for (const r of rows) {
+    if (r.status === "paid") out -= r.amountCents;
+    if (r.status === "reversed") out -= Math.max(0, r.amountCents - r.reversedCents);
+  }
+  return Math.max(0, out);
+}
+
+/**
+ * Every reversal booked per patronage payout row so far: the cumulative total its
+ * `patronage_payout_reversal` postings carry (the largest, as each posting records the running
+ * total). Rows with none are absent from the map.
+ */
+export async function patronageReversedCents(tx: Executor, payoutIds: readonly string[]): Promise<Map<string, number>> {
+  if (payoutIds.length === 0) return new Map();
+  const payoutId = sql<string>`${schema.ledgerTransactions.metadata}->>'payoutId'`;
+  const rows = await tx
+    .select({
+      payoutId,
+      cents: sql<string>`max((${schema.ledgerTransactions.metadata}->>'cumulativeCents')::bigint)::text`,
+    })
+    .from(schema.ledgerTransactions)
+    .where(and(eq(schema.ledgerTransactions.kind, "patronage_payout_reversal"), inArray(payoutId, [...payoutIds])))
+    .groupBy(payoutId);
+  return new Map(rows.map((r) => [r.payoutId, Number(r.cents)]));
+}

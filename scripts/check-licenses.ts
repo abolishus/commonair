@@ -117,10 +117,27 @@ export function checkNpm(roots: string[]): { checked: number; findings: Finding[
   };
 }
 
-/** Container images must be listed in infra/image-licenses.json with an allowed license. */
-export function checkImages(composePath: string, registryPath: string): { checked: number; findings: Finding[] } {
+/**
+ * Container images must be listed in infra/image-licenses.json with an allowed license: compose's,
+ * and the `Image=` lines of the Quadlet units in `unitDirs` that compose never runs (the
+ * monitoring droplet's, infra/status/units).
+ */
+export function checkImages(
+  composePath: string,
+  registryPath: string,
+  unitDirs: readonly string[] = [],
+): { checked: number; findings: Finding[] } {
   if (!existsSync(composePath)) return { checked: 0, findings: [] };
-  const images = [...readFileSync(composePath, "utf8").matchAll(/^\s*image:\s*["']?([^"'\s#]+)/gm)].map((m) => m[1]!);
+  const images = [
+    ...[...readFileSync(composePath, "utf8").matchAll(/^\s*image:\s*["']?([^"'\s#]+)/gm)].map((m) => m[1]!),
+    ...unitDirs
+      .filter((d) => existsSync(d))
+      .flatMap((d) =>
+        readdirSync(d)
+          .filter((f) => f.endsWith(".container"))
+          .flatMap((f) => [...readFileSync(join(d, f), "utf8").matchAll(/^Image=(\S+)$/gm)].map((m) => m[1]!)),
+      ),
+  ];
   const registry: Record<string, { license: string; source: string }> = existsSync(registryPath)
     ? JSON.parse(readFileSync(registryPath, "utf8"))
     : {};
@@ -275,7 +292,7 @@ export function checkTofu(tofuDir: string, registryPath: string): { checked: num
 
 if (import.meta.main) {
   const npm = checkNpm(["."]);
-  const images = checkImages("compose.yaml", "infra/image-licenses.json");
+  const images = checkImages("compose.yaml", "infra/image-licenses.json", ["infra/status/units"]);
   const go = checkGo("relay");
   const tofu = checkTofu("infra/tofu", "infra/tofu/provider-licenses.json");
   const findings = [...npm.findings, ...images.findings, ...go.findings, ...tofu.findings];

@@ -136,7 +136,8 @@ describe("the real harness graph", () => {
   test("a batch 7 scenario module selects its scenario and the w3 shard, which is never filtered", () => {
     // interact too: its B8-web steps (b8/web.ts) read the Twitch fixture's panels from n3.
     expect(scenariosReaching("harness/src/n3/index.ts", graph)).toEqual(["interact", "twitch-import"]);
-    expect(scenariosReaching("harness/src/w3/watch-rooms/index.ts", graph)).toEqual(["watch-room"]);
+    // relay-dvr too: B8-player's steps (b8/player.ts, both scenarios') share the watch-room helpers.
+    expect(scenariosReaching("harness/src/w3/watch-rooms/index.ts", graph)).toEqual(["relay-dvr", "watch-room"]);
     // seed-coverage runs seed full, whose seed-interact drives giveaways through this module;
     // d-surfaces reads that run's store (seed/run.ts).
     expect(scenariosReaching("harness/src/w3/giveaways.ts", graph)).toEqual([

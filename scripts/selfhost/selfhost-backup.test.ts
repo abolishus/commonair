@@ -42,7 +42,7 @@ const REMOTE_KEYS = {
   BACKUP_OBJECTS_REMOTE_SECRET_ACCESS_KEY: "offsite/Secret+Value=0123456789abcdefOFF",
 };
 /** The release's Postgres image, which the dumps and drills run. */
-const PG_IMAGE = `ghcr.io/example/commonair/postgres@sha256:${"ab".repeat(32)}`;
+const PG_IMAGE = `ghcr.io/abolishus/commonair/postgres@sha256:${"ab".repeat(32)}`;
 /** What the podman stub's `garage key create` prints (Garage v2's layout). */
 const GARAGE_KEY = { id: "GK00aa11bb22cc33dd44ee55ff", secret: "5e".repeat(32) };
 const REMOTE = {

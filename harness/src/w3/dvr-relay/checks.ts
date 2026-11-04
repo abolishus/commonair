@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * Pure parts of the `e2e-relay` W3 steps (`index.ts`): receipt sums per session, the caption
+ * Pure parts of the `relay-dvr` W3 steps (`index.ts`): receipt sums per session, the caption
  * cache rule, the caption fixture the relay-vtt step plants, and where a URL points.
  */
 import { CAPTIONS_KEYS, encodeCue, type LiveTrack } from "@commonair/captions";

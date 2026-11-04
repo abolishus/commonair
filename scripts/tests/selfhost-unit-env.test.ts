@@ -256,8 +256,11 @@ describe("third-party images and tools-image jobs get what they read", () => {
   });
 
   test("postgres: every variable of the image's scripts is listed, set by the unit or the image's own", () => {
+    // The dump and drill scripts (S1-h) run in one-off containers `selfhost.sh backup --dump` and
+    // `--drill` start with their own environment, never in the Postgres unit.
+    const oneOff = new Set(["dump.sh", "dump-restore.sh", "dump-drill.sh"]);
     const shell = readdirSync(join(ROOT, "infra/postgres"))
-      .filter((f) => f.endsWith(".sh"))
+      .filter((f) => f.endsWith(".sh") && !oneOff.has(f))
       .map((f) => code(read(`infra/postgres/${f}`)))
       .join("\n");
     const vars = new Set([...shell.matchAll(/\$\{?([A-Z][A-Z0-9_]*)/g)].map((m) => m[1]!));
@@ -271,7 +274,18 @@ describe("third-party images and tools-image jobs get what they read", () => {
   test("garage and grafana", () => {
     expect(listed("garage")).toEqual(["GARAGE_ADMIN_TOKEN", "GARAGE_RPC_SECRET"]);
     expect(read("infra/garage/garage.toml")).not.toMatch(/rpc_secret|admin_token/);
-    expect(listed("grafana")).toEqual(["GF_*"]);
+    // GF_*, and the alert route and relay route-env.sh maps to GF_SMTP_* (L1-status).
+    expect(listed("grafana")).toEqual([
+      "ALERT_EMAIL_TO",
+      "ALERT_WEBHOOK_URL",
+      "GF_*",
+      "MAIL_FROM",
+      "SMTP_HOST",
+      "SMTP_PASSWORD",
+      "SMTP_PORT",
+      "SMTP_SECURE",
+      "SMTP_USER",
+    ]);
     expect(unitValues(unitText("grafana"), "Secret")).toEqual([
       "commonair-grafana-admin-password,type=env,target=GF_SECURITY_ADMIN_PASSWORD",
     ]);
@@ -509,7 +523,8 @@ describe("render-env.sh", () => {
       "S3_EVIDENCE_SECRET_ACCESS_KEY",
       "S3_SECRET_ACCESS_KEY",
     ],
-    grafana: [],
+    // The relay's password, which route-env.sh maps to GF_SMTP_PASSWORD for the alert mail.
+    grafana: ["SMTP_PASSWORD"],
     "irc-cert": [],
     // The monitor passwords reach the collector as Podman secrets, never through its env file.
     "otel-collector": [],

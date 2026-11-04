@@ -19,6 +19,7 @@ import {
   PAYOUT_TRANSFER_KEY_WINDOW_MS,
   accounts,
   insertFraudFlag,
+  owedCents,
   patronageAllocation,
   payoutTransferKey,
   post,
@@ -31,7 +32,7 @@ import {
   type TransferRequest,
   type TransferResult,
 } from "@commonair/payments";
-import { owedCents, runPatronagePayout } from "../src/coop/patronage-payout.ts";
+import { runPatronagePayout } from "../src/coop/patronage-payout.ts";
 import { job } from "../src/jobs/patronage-payout.ts";
 import { transferAdapterFromEnv } from "../src/money/transfers.ts";
 import { makeUser, setup, type TestEnv } from "./fixtures.ts";

@@ -211,13 +211,26 @@ describe("checkout session params", () => {
     expect(() => checkoutSessionParams(request({ amountCents: 0 }), "r")).toThrow(/positive/);
   });
 
-  test("member shares are not sold through Stripe (ADR 0020)", () => {
+  test("a member share is one one-off payment to the co-op (ADR 0020, batch 8)", () => {
+    const p = checkoutSessionParams(
+      request({ kind: "membership_share", recurring: false, creatorUserId: null, amountCents: 500 }),
+      "r",
+    );
+    expect(p.mode).toBe("payment");
+    expect((p.metadata as Record<string, string>).kind).toBe("membership_share");
+    expect(JSON.stringify(p.line_items)).toContain("Co-op member share");
     expect(() =>
       checkoutSessionParams(
-        request({ kind: "membership_share", recurring: false, creatorUserId: null, amountCents: 500 }),
+        request({ kind: "membership_share", recurring: true, creatorUserId: null, amountCents: 500 }),
         "r",
       ),
-    ).toThrow(/member shares/);
+    ).toThrow(/one-off/);
+    expect(() =>
+      checkoutSessionParams(
+        request({ kind: "membership_share", recurring: false, creatorUserId: "u", amountCents: 500 }),
+        "r",
+      ),
+    ).toThrow(/one-off/);
   });
 });
 

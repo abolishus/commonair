@@ -72,9 +72,13 @@ module "instance" {
 
   backup_region = "nyc3"
 
-  # Staging is watched from production's monitoring droplet, so it has no uptime monitoring
-  # until production is applied (README, "Running it").
-  enable_monitoring_droplet = false
+  # Staging is watched from production's monitoring droplet, so it has none of its own unless a
+  # run asks for it (U5: bringing the status stack up, docs/operators/status-page.md).
+  enable_monitoring_droplet = var.enable_monitoring_droplet
+  monitoring_region         = var.monitoring_region
+  status_site_name          = var.status_site_name
+  status_locale             = var.status_locale
+  turn_relay                = var.turn_relay
 
   # Off unless a run sets it (U5): managed clusters are billed from creation.
   enable_managed_state = var.enable_managed_state

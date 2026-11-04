@@ -56,6 +56,8 @@ export interface MembershipPanelProps {
   /** `coop.join({ class: "viewer" })`, then a refreshed view; omitted: no rejoin offered. */
   onRejoin?: () => Promise<void>;
   onRejoinError?: (err: unknown) => void;
+  /** Batch 8: the page offers "Pay by card" (`share-buy-stripe`) instead of the bank-transfer buy. */
+  hideBuy?: boolean;
 }
 
 function progressText(e: EligibilityDto, currency: string, locale: string): string {
@@ -83,6 +85,7 @@ export function MembershipPanel({
   onExitError,
   onRejoin,
   onRejoinError,
+  hideBuy = false,
 }: MembershipPanelProps): React.JSX.Element {
   const { locale } = useLocale();
   const share = view?.share ?? null;
@@ -228,7 +231,7 @@ export function MembershipPanel({
               amountLabel={t("coop.share.amount")}
               note={shareNote}
               buy={
-                canBuyShare(view) && !instructions
+                canBuyShare(view) && !instructions && !hideBuy
                   ? {
                       label: t("coop.share.buy"),
                       onBuy,

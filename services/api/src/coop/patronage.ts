@@ -25,6 +25,7 @@ import { iso, isoOrNull } from "../lib/dto.ts";
 import { apiError, badRequest, conflict, notFound, precondition } from "../lib/errors.ts";
 import { os, requireCaller } from "../lib/orpc.ts";
 import { withCoopErrors } from "./errors.ts";
+import { memberPatronagePayout } from "./patronage-payouts.ts";
 import { STAFF, money } from "./shared.ts";
 
 const { patronagePeriods, patronageAllocations, patronageInputs, users } = schema;
@@ -80,6 +81,8 @@ async function statementOf(db: Executor, period: PeriodRow, userId: string) {
       .where(and(eq(patronageInputs.periodId, period.id), eq(patronageInputs.userId, userId))),
   ]);
   if (!alloc && !inputs) return null;
+  // Only ever the member's own payout (status, amount, when paid), never another's.
+  const payout = await memberPatronagePayout(db, period.id, userId);
   return {
     periodId: period.id,
     periodStart: iso(period.periodStart),
@@ -97,6 +100,7 @@ async function statementOf(db: Executor, period: PeriodRow, userId: string) {
       viewerHoursVerified: inputs?.viewerHoursVerified ?? 0,
       viewerHoursExcluded: inputs?.viewerHoursExcluded ?? 0,
     },
+    payout: payout ? { status: payout.status, amount: payout.amount, paidAt: payout.paidAt } : null,
   };
 }
 

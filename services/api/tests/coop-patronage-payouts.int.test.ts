@@ -19,7 +19,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { schema, uuidv7, type Database } from "@commonair/db";
-import { accounts, patronageAllocation, post, rawBalance } from "@commonair/ledger";
+import { accounts, owedCents, patronageAllocation, post, rawBalance } from "@commonair/ledger";
 import type { StripeAction } from "@commonair/payments";
 import {
   MANUAL_REFERENCE,
@@ -27,7 +27,6 @@ import {
   markPatronagePayoutPaid,
   markPatronagePayoutUnsent,
   memberPatronagePayout,
-  owedCents,
   patronageTransferEvent,
   payStep,
 } from "../src/coop/patronage-payouts.ts";

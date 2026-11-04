@@ -35,14 +35,16 @@ export interface StripeAdapterOptions {
 
 const productName = (r: CheckoutRequest): string => {
   if (r.kind === "tip") return "Tip";
+  if (r.kind === "membership_share") return "Co-op member share";
   if (r.recurring) return `Tier ${r.tier ?? 1} subscription`;
   return `Tier ${r.tier ?? 1} gift subscription`;
 };
 
 /** The Checkout Session parameters for a request (exported for tests). */
 export function checkoutSessionParams(r: CheckoutRequest, reference: string): FormObject {
-  // Member shares are manual-only in E5 (ADR 0020): a Stripe share needs refunds and webhooks first.
-  if (r.kind === "membership_share") throw new RangeError("member shares are not sold through Stripe");
+  // Member shares (batch 8, M1-coop-money): one one-off payment to the co-op, never a creator's.
+  if (r.kind === "membership_share" && (r.recurring || r.creatorUserId !== null || r.quantity !== 1))
+    throw new RangeError("a member share is one one-off payment to the co-op");
   if (!Number.isSafeInteger(r.amountCents) || r.amountCents <= 0) throw new RangeError("amount must be positive cents");
   if (!Number.isSafeInteger(r.quantity) || r.quantity < 1) throw new RangeError("quantity must be at least 1");
   // Integer cents only: a gift total is quantity × the tier price.

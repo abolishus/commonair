@@ -582,7 +582,7 @@ services:
     entrypoint:
       - /bin/sh
       - -c
-      - 'test -n "$$GF_SECURITY_ADMIN_PASSWORD" || { echo "GRAFANA_ADMIN_PASSWORD is required" >&2; exit 1; }; exec /run.sh'
+      - 'test -n "$$GF_SECURITY_ADMIN_PASSWORD" || { echo "GRAFANA_ADMIN_PASSWORD is required" >&2; exit 1; }; . /etc/grafana/provisioning/alerting/route-env.sh; exec /run.sh'
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-}
@@ -594,6 +594,15 @@ services:
       GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
       GF_NEWS_NEWS_FEED_ENABLED: "false"
       GF_PLUGINS_PLUGIN_ADMIN_ENABLED: "false"
+      # The alert route and the relay route-env.sh maps to GF_SMTP_* (docs/operators/on-call.md).
+      ALERT_EMAIL_TO: ${ALERT_EMAIL_TO:-}
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+      SMTP_HOST: ${SMTP_HOST:-mailpit}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      MAIL_FROM: ${MAIL_FROM:-}
     ports: ["${BIND_ADDRESS:-127.0.0.1}:${GRAFANA_PORT:-3030}:3000"]
     volumes:
       - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro,Z

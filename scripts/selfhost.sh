@@ -77,8 +77,9 @@ Commands:
   install    Install a CommonAir release on this host and start it.
   upgrade    Upgrade to another release: verify, pull by digest, back up, migrate first,
              restart, wait for health; roll back to the previous release if health fails.
-  backup     Take a WAL-G base backup now and list the backups; with --objects, copy the media
-             and evidence buckets to the offsite store (docs/self-hosting/backups.md).
+  backup     Take a WAL-G base backup now and list the backups (a logical dump with an external
+             Postgres); with --objects, copy the media and evidence buckets to the offsite store;
+             with --drill, test-restore the newest dump (docs/self-hosting/backups.md).
   status     Show the installed version, every unit's state and health, TLS, backups, disk use;
              with external Postgres and Valkey, their reachability, TLS, version and load.
   reset-staging
@@ -180,7 +181,7 @@ upgrade options: --version | --bundle, --sha256sums, --registry, --require-signa
   --captions | --no-captions, --captions-model, --database-ca, --valkey-ca (a new CA for
   external servers). The object store, Postgres and Valkey stay as installed.
 
-backup options (no option: --database):
+backup options (no option: --database, or --dump with an external Postgres):
   --database            A WAL-G base backup of Postgres now, then the list of base backups.
   --objects             Copy the media and evidence buckets to the offsite S3 store set by the
                         BACKUP_OBJECTS_REMOTE_* keys of commonair.env (rclone sync). Together
@@ -188,7 +189,15 @@ backup options (no option: --database):
                         commonair-object-backup.timer (daily).
   --restore-objects     Copy the offsite copy back into this instance's buckets (rclone copy:
                         nothing on the instance is deleted). On its own only.
-  --bwlimit <rate>      rclone's bandwidth limit for --objects and --restore-objects, e.g. 20M
+  --dump                A logical dump (pg_dump) to the BACKUP_OBJECTS_REMOTE_* store, 30 kept
+                        (BACKUP_DUMP_KEEP may raise it). The default with an external Postgres.
+                        The first success enables commonair-dump.timer (nightly).
+  --drill               Restore the newest dump into a throwaway container with no network and
+                        check it. The first pass enables commonair-drill.timer (weekly).
+  --walg                With --drill: the same for the newest WAL-G base backup (bundled
+                        Postgres only).
+  --bwlimit <rate>      rclone's bandwidth limit for --objects, --restore-objects, --dump and
+                        --drill, e.g. 20M
                         (bytes/s) or "08:00,4M 23:00,off". Default: BACKUP_OBJECTS_BWLIMIT.
   --max-delete <n|off>  With --objects: stop and fail once a bucket's copy would lose more than
                         n objects in one run. Default: BACKUP_OBJECTS_MAX_DELETE, else 1000.
@@ -1942,11 +1951,12 @@ install_unit_file() {
   mv "$QUADLET_DIR/$_iu.tmp" "$QUADLET_DIR/$_iu"
 }
 
-# The release's systemd units this instance runs: WAL-G's backup service and timer need the
-# bundled Postgres (commonair-backup.service is Requisite= on it).
+# The release's systemd units this instance runs: WAL-G's backup and drill services and timers
+# need the bundled Postgres (commonair-backup.service is Requisite= on it).
 systemd_unit_in_mode() {
   case "$1" in
     commonair-backup.service | commonair-backup.timer) [ "$STATE_MODE" != external ] ;;
+    commonair-drill-walg.service | commonair-drill-walg.timer) [ "$STATE_MODE" != external ] ;;
     *) return 0 ;;
   esac
 }
@@ -2238,9 +2248,15 @@ restart_stack() {
   # shellcheck disable=SC2046
   systemctl --user start --no-block $(sockets) $(services)
   # Enabled, a socket also listens at boot, before Caddy is up (connections wait in its queue).
-  # WAL-G's daily base backup runs only against the bundled Postgres.
+  # WAL-G's daily base backup and its weekly drill run only against the bundled Postgres; an
+  # external one gets the nightly dump and the weekly dump drill (S1-h). With the bundled one the
+  # dump timers stay as set: the first successful backup --dump / --drill turns each on.
   _timers="commonair-irc-cert.timer"
-  if [ "${STATE_MODE:-bundled}" != external ]; then _timers="commonair-backup.timer $_timers"; fi
+  if [ "${STATE_MODE:-bundled}" != external ]; then
+    _timers="commonair-backup.timer commonair-drill-walg.timer $_timers"
+  else
+    _timers="commonair-dump.timer commonair-drill.timer $_timers"
+  fi
   # shellcheck disable=SC2046,SC2086
   systemctl --user enable --now $(sockets) $_timers >/dev/null 2>&1 || true
 }
@@ -2649,9 +2665,17 @@ cmd_upgrade() {
     info "taking a base backup before the upgrade"
     systemctl --user start commonair-backup.service ||
       die "the pre-upgrade backup failed; nothing was changed" "see: journalctl --user -u commonair-backup"
+  elif [ -n "$(env_get BACKUP_OBJECTS_REMOTE_BUCKET "$ENV_FILE")" ] &&
+    systemctl --user cat commonair-dump.service >/dev/null 2>&1; then
+    # A release from before S1-h has no dump unit: it upgrades as before.
+    info "taking a logical dump before the upgrade"
+    systemctl --user start commonair-dump.service ||
+      die "the pre-upgrade dump failed; nothing was changed" "see: journalctl --user -u commonair-dump"
   else
     info "external Postgres: no WAL-G backup here; the provider's point-in-time recovery covers the upgrade"
   fi
+  # No dump or drill while migrations change the schema (S1-h).
+  db_backup_lock upgrade
   # The new release's tools (init-env) may add variables; existing values are kept.
   write_env "$RELEASE_DIR"
   backfill_env
@@ -3710,6 +3734,8 @@ cmd_status() {
     say "last backup: the provider's (external Postgres; docs/self-hosting/managed-services.md)"
   fi
   say "last object backup: $(object_backup_summary)"
+  say "last dump: $(dump_backup_summary)"
+  say "last restore drill: $(drill_summary)"
   say ""
   say "volumes:"
   for _v in $(podman volume ls --quiet --filter name=commonair- 2>/dev/null); do

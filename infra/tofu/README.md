@@ -76,7 +76,8 @@ bash infra/tofu/check.sh
 The tests in `modules/instance/tests/` plan against a mocked provider and check that:
 
 - the app firewall opens exactly 22, 80, 443/tcp, 443/udp, 1935, 8189/udp, 3478/udp and 6697 over IPv4
-  and IPv6, 6667 only with `irc_plaintext`, and outbound stays open;
+  and IPv6, 6667 only with `irc_plaintext`, 49160-49199/udp only with `turn_relay`, and outbound
+  stays open;
 - SSH comes only from `operator_cidrs`, and `0.0.0.0/0` or `::/0` is rejected;
 - stage 1 and stage 2 resources are absent by default;
 - the database firewalls admit only the environment's app tag;
@@ -107,7 +108,9 @@ the account; tofu never creates one, and a missing fingerprint fails the plan.
   versioned, with incomplete multipart uploads aborted after 2 days and old versions expired after
   `backup_noncurrent_days`, and one Spaces key per bucket;
 - the monitoring droplet in `monitoring_region`, with a firewall for SSH and the status page.
-  `monitoring_region` is required while `enable_monitoring_droplet` is true (the default).
+  `monitoring_region` is required while `enable_monitoring_droplet` is true (the default). When
+  `instance_origin` is set, its cloud-init installs the status stack (outside probes, the static
+  status page and the down alerts; [status-page.md](../../docs/operators/status-page.md)).
 
 App droplets are named `commonair-<env>` at every stage; stage 2 adds `commonair-<env>-app-2`,
 `-app-3` and so on, so raising `app_count` never renames the host that runs the stack.

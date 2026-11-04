@@ -22,3 +22,6 @@ instance_origin = "https://stream.example.org"
 
 # Stage 2: app droplets behind a network load balancer (needs stage 1).
 # app_count = 2
+
+# The status page's name (the instance's INSTANCE_NAME); unset shows the origin's host.
+# status_site_name = "<INSTANCE_NAME>"

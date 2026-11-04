@@ -27,13 +27,15 @@
  * API's transfer webhook can find it (`coop/patronage-payouts.ts` `patronageTransferEvent`). Ids and
  * cents only reach Stripe, the logs and the audit rows.
  */
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { type Executor, schema, uuidv7 } from "@commonair/db";
 import { emitEvent, systemAudit } from "@commonair/governance";
 import {
   PAYOUT_TRANSFER_KEY_WINDOW_MS,
-  payeeHasHoldingFlag,
+  owedCents,
   patronagePayout,
+  patronageReversedCents,
+  payeeHasHoldingFlag,
   payoutTransferKey,
   post,
 } from "@commonair/ledger";
@@ -67,19 +69,6 @@ export type ManualReason = "account_deleted" | "account_not_ready" | "held";
 export function refusalCode(err: StripeRequestError): string {
   const code = err.code;
   return code && /^[a-z0-9_]{1,56}$/.test(code) ? code : `stripe_${err.status}`;
-}
-
-/** What the member is still owed for a new row (pure; the API's `owedCents`, unit-tested in both). */
-export function owedCents(
-  allocationCents: number,
-  rows: readonly { status: PayoutRow["status"]; amountCents: number; reversedCents: number }[],
-): number {
-  let out = allocationCents;
-  for (const r of rows) {
-    if (r.status === "paid") out -= r.amountCents;
-    if (r.status === "reversed") out -= Math.max(0, r.amountCents - r.reversedCents);
-  }
-  return Math.max(0, out);
 }
 
 /** When the marker was first written, or null. The sending marker's time is the key's first use. */
@@ -337,24 +326,10 @@ async function openFollowUp(tx: Executor, row: PayoutRow, now: Date): Promise<st
     .from(patronagePayouts)
     .where(and(eq(patronagePayouts.periodId, row.periodId), eq(patronagePayouts.userId, row.userId)));
   if (rows.some((r) => r.status === "pending" || r.status === "paid")) return null;
-  const reversedIds = rows.filter((r) => r.status === "reversed").map((r) => r.id);
-  const reversed = new Map<string, number>();
-  if (reversedIds.length > 0) {
-    const sums = await tx
-      .select({
-        payoutId: sql<string>`${schema.ledgerTransactions.metadata}->>'payoutId'`,
-        cents: sql<string>`max((${schema.ledgerTransactions.metadata}->>'cumulativeCents')::bigint)::text`,
-      })
-      .from(schema.ledgerTransactions)
-      .where(
-        and(
-          eq(schema.ledgerTransactions.kind, "patronage_payout_reversal"),
-          inArray(sql<string>`${schema.ledgerTransactions.metadata}->>'payoutId'`, reversedIds),
-        ),
-      )
-      .groupBy(sql`${schema.ledgerTransactions.metadata}->>'payoutId'`);
-    for (const s of sums) reversed.set(s.payoutId, Number(s.cents));
-  }
+  const reversed = await patronageReversedCents(
+    tx,
+    rows.filter((r) => r.status === "reversed").map((r) => r.id),
+  );
   const owed = owedCents(
     alloc.amountCents,
     rows.map((r) => ({ status: r.status, amountCents: r.amountCents, reversedCents: reversed.get(r.id) ?? 0 })),

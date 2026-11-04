@@ -659,6 +659,13 @@ export const infraEnv = z.object({
   /** Password of Grafana's `admin` user; Grafana refuses to start without it. */
   GRAFANA_ADMIN_PASSWORD: z.string().min(16).optional(),
   /**
+   * Grafana's alert route (infra/grafana/provisioning/alerting/route-env.sh): the on-call
+   * address(es), comma-separated. Unset: Grafana starts with no route and says so loudly.
+   */
+  ALERT_EMAIL_TO: z.string().optional(),
+  /** An optional webhook the same alerts are posted to, beside the mail. */
+  ALERT_WEBHOOK_URL: z.url().optional(),
+  /**
    * Password Valkey requires (`requirepass`). Empty runs Valkey without one (development only; the
    * self-hosted unit refuses to start without it). It goes into VALKEY_URL unescaped, so only
    * URL-safe characters (init-env generates 64 hex characters).

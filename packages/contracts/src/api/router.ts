@@ -3039,6 +3039,36 @@ export const contract = {
         .input(z.object({ periodId: Id }))
         .output(z.array(D.PatronagePayoutView)),
       /**
+       * Batch 8 (M1-coop-money): mark a payout paid. A manual row takes the treasurer's short code;
+       * a Connect row whose outcome is unknown takes its `tr_` id once checked at Stripe. Never the
+       * treasurer's own payout. Audited.
+       */
+      markPaid: treasurer
+        .route({
+          method: "POST",
+          path: "/coop/patronage/payouts/{payoutId}/paid",
+          summary: "Mark a patronage payout paid",
+          ...tag("Patronage"),
+        })
+        .errors(SECOND_APPROVER)
+        .input(z.object({ payoutId: Id, reference: z.string().min(1).max(64), paidAt: Timestamp }))
+        .output(D.PatronagePayoutView),
+      /**
+       * Batch 8 (M1-coop-money): settle a Connect payout whose outcome is unknown as never sent,
+       * once Stripe shows no transfer for it: the row fails and a manual row opens for what is
+       * still owed. Never the treasurer's own payout. Audited.
+       */
+      markUnsent: treasurer
+        .route({
+          method: "POST",
+          path: "/coop/patronage/payouts/{payoutId}/unsent",
+          summary: "Settle a patronage payout as not sent",
+          ...tag("Patronage"),
+        })
+        .errors(SECOND_APPROVER)
+        .input(z.object({ payoutId: Id }))
+        .output(z.object({ failed: D.PatronagePayoutView, followUp: D.PatronagePayoutView.nullable() })),
+      /**
        * Batch 8 (M1-coop-money): pay an approved period out, one row per member with a positive
        * allocation. Two approvers, as for write-offs: the first call records the request, a second
        * treasurer (or an admin) approves it. Audited; a repeat changes nothing.

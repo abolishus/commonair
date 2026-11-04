@@ -27,7 +27,7 @@ import { endSubscriptions } from "./checkout-shared.ts";
 import { confirmPaymentTx, reversePaymentTx } from "./checkout-treasurer.ts";
 import { postPaymentWithSplit } from "./splits.ts";
 import { refundUpdated } from "./stripe-events/refunds.ts";
-import { shareCheckoutCompleted } from "./stripe-events/shares.ts";
+import { shareChargeRefundedAction, shareCheckoutCompleted, shareCheckoutFailed } from "./stripe-events/shares.ts";
 import { transferReversed, transferUpdated } from "./stripe-events/transfers.ts";
 import { recordProviderRefundFailed } from "./stripe-refunds.ts";
 
@@ -85,7 +85,7 @@ export async function prepareStripeAction(adapter: PaymentAdapter, a: StripeActi
   return { feeRef: ref, fee: await adapter.paymentFee(ref) };
 }
 
-function feeFor(prepared: PreparedAction, currency: string): number {
+export function feeFor(prepared: PreparedAction, currency: string): number {
   if (prepared.feeRef === null) return 0;
   // Stripe attaches the balance transaction shortly after the charge; never book a fee of 0 for
   // a charge that has one. Failing here answers 500, and Stripe's retry finds it attached.
@@ -243,6 +243,7 @@ async function checkoutCompletedGeneric(
 async function checkoutFailed(tx: Executor, paymentId: string, now: Date): Promise<AppliedAction> {
   const p = await lockPaymentById(tx, paymentId);
   if (!p || p.provider !== "stripe" || p.status !== "pending") return noop("not_pending");
+  if (p.kind === "membership_share") return shareCheckoutFailed(tx, p, now);
   await tx
     .update(payments)
     .set({ status: "failed", updatedAt: now })
@@ -439,6 +440,8 @@ async function chargeRefunded(
 ): Promise<AppliedAction> {
   let p = (await lockPaymentByRef(tx, a.paymentIntent)) ?? (await lockPaymentById(tx, a.paymentId));
   if (!p || p.provider !== "stripe") return noop("unknown_payment");
+  // A card share's refund books `shareRefund` (it has no channel for reversePaymentTx).
+  if (p.kind === "membership_share") return shareChargeRefundedAction(tx, p, a, now);
   if (a.currency !== p.currency) throw new StripeProcessingError("refund currency differs from the payment");
   const prior = await tx
     .select({ ref: disputes.providerRef, amount: disputes.amountCents })

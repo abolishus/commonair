@@ -328,6 +328,6 @@ Steps are pending until the unit that implements them merges (`harness/src/w3/st
   jurors vote (`jury-vote-<vote>`, `jury-vote-submit`); close; the results are published with
   suppression (`jury-results-suppressed`), a majority-disagree case is flagged, no T0 or NCII case
   was sampled, and the seed matches the commitment (`jury-results-seed`).
-- **`e2e-relay` extensions (W3-dvr-relay):** `dvr-relay`, `dvr-purge`, `relay-vtt` (no web ids).
+- **`relay-dvr` extensions (W3-dvr-relay; in `e2e-relay` until batch 8 split them out):** `dvr-relay`, `dvr-purge`, `relay-vtt` (no web ids).
 - **B7-followups:** `trust-safety` `sor-resolve`, `integrity-basic` `group-appeal-threshold` and
   `rehearsal` `moderation-samples` (no new web ids).

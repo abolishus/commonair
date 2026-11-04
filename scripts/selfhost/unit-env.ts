@@ -258,8 +258,18 @@ export const STATIC_UNITS: Record<string, StaticList> = {
     ],
   },
   grafana: {
-    why: "Grafana's GF_* settings (the admin password is a Podman secret)",
-    keys: ["GF_*"],
+    why: "Grafana's GF_* settings, and the alert route and relay route-env.sh maps to them (the admin password is a Podman secret)",
+    keys: [
+      "GF_*",
+      "ALERT_EMAIL_TO",
+      "ALERT_WEBHOOK_URL",
+      "MAIL_FROM",
+      "SMTP_HOST",
+      "SMTP_PASSWORD",
+      "SMTP_PORT",
+      "SMTP_SECURE",
+      "SMTP_USER",
+    ],
   },
   "otel-collector": {
     why: "the ${env:...} references of infra/otel-collector/config.yaml and tls/*.yaml (the monitor passwords are Podman secrets)",

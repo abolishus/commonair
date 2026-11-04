@@ -93,6 +93,7 @@ function MembershipPage(): React.JSX.Element {
         onExitError={toastCoopError}
         onRejoin={rejoin}
         onRejoinError={toastRejoinError}
+        hideBuy={card}
       />
       {card && <SharePayByCard view={membership.data} paying={buying} onPay={buy} />}
     </CoopLoadGate>

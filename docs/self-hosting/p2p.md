@@ -99,20 +99,11 @@ firewall, including the relay range when the relay is on. In a provider firewall
 yourself, and the relay range when the relay is on.
 
 **DigitalOcean.** The cloud firewall that the OpenTofu module (`infra/tofu/digitalocean`) creates
-opens 3478/udp but not the relay range: the module has no setting for it yet. Cloud firewalls take
-port ranges, so with the relay on add one rule, in the control panel (Networking → Firewalls →
-your firewall → Inbound Rules → Custom, UDP, `49160-49199`, all IPv4 and all IPv6) or with
-`doctl`:
-
-```sh
-doctl compute firewall list --format ID,Name
-doctl compute firewall add-rules <firewall id> \
-  --inbound-rules "protocol:udp,ports:49160-49199,address:0.0.0.0/0,address:::/0"
-```
-
-If the firewall is managed by `tofu apply`, the next apply removes a rule added by hand, since
-the module owns the firewall's whole rule set. Add it again after each apply until the module
-can open the range itself. With a wider `TURN_RELAY_PORT_MIN`/`MAX`, open that range instead.
+opens 3478/udp, and the relay range only when you ask for it: set `turn_relay = true` in your
+`terraform.tfvars` and run `tofu apply`. The module owns the firewall's whole rule set, so a rule
+added by hand in the control panel or with `doctl` is removed by the next apply. With a wider
+`TURN_RELAY_PORT_MIN`/`MAX`, the module's range is too narrow: open the extra ports in a firewall
+the module does not manage.
 
 coturn writes no logs, so no viewer address reaches your journal or Grafana.
 

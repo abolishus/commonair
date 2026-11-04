@@ -557,12 +557,7 @@ describe("b7-selectors.md (batch 7)", () => {
  * looks only at `data-testid` because some ids are also file, tab or job names (`refund-requests`,
  * `payout-transfers`, `patronage-payouts`).
  */
-const PENDING_B8_IDS: readonly string[] = [
-  // M1-coop-money
-  "share-buy-stripe",
-  "patronage-payouts",
-  "patronage-pay",
-];
+const PENDING_B8_IDS: readonly string[] = [];
 
 describe("b8-selectors.md (batch 8)", () => {
   const ids = testIds("b8-selectors.md");
@@ -589,6 +584,8 @@ describe("b8-selectors.md (batch 8)", () => {
         "share-buy-stripe",
         "patronage-payouts",
         "patronage-pay",
+        "patronage-payout-mark-paid",
+        "patronage-payout-mine",
         "twitch-import-field",
       ].sort(),
     );

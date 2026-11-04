@@ -300,3 +300,21 @@ run "media_volume_when_asked" {
     error_message = "The media volume is attached to the first app droplet."
   }
 }
+
+run "turn_relay_range_is_behind_a_flag" {
+  command = plan
+
+  variables {
+    turn_relay = true
+  }
+
+  assert {
+    condition     = contains([for r in digitalocean_firewall.app.inbound_rule : "${r.protocol}/${r.port_range}"], "udp/49160-49199")
+    error_message = "turn_relay opens 49160-49199/udp."
+  }
+
+  assert {
+    condition     = length(digitalocean_firewall.app.inbound_rule) == 9
+    error_message = "turn_relay adds only the relay range."
+  }
+}

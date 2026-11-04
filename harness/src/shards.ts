@@ -4,18 +4,27 @@
 // No imports: scripts/ (the gate, CI's tests) read the shard list without the harness's types.
 
 /**
- * Parts of `full` for parallel runners, each under the batch 7 README's ~12 min cap where one
- * scenario allows it. `rest` is everything the named shards leave, so a new scenario is always in
- * some shard. Each shard runs in `full`'s order.
+ * Parts of `full` for parallel runners, each under the ~12 min cap (batch 8 decision (o): a single
+ * scenario over it is split or trimmed, never left as an exception). `rest` is everything the named
+ * shards leave, so a new scenario is always in some shard. Each shard runs in `full`'s order.
  *
- * Scenario time per shard on the push run of fc1fc4ff (2026-11-01, run 41357496846, batch 7 wave
- * 2), before this split: interact 16m07s (interact 8m50, channel-bot 7m17), rest 15m46s,
- * features 14m49s (surge-guard 9m58, timeline-sync 4m51), relay 13m60s, clock 12m49s, long
- * 12m44s (trust-safety 8m17, e5-coop 4m27), notify 8m04s, captions 3m46s. `relay` (e2e-relay) and
- * `clock` (clock-skew holds a broadcast through a ladder restart) are single scenarios.
+ * Scenario time per shard on the push run of c389b4e7 (2026-11-03, run 41736761538, batch 8
+ * wave 1 merged; harness PASS lines): relay 15m01s (e2e-relay; its W3 DVR steps 5m51s), clock
+ * 13m11s, interact 11m27s (B8's three steps 2m15s), surge 9m46s, features 9m18s (e5-coop 4m60,
+ * timeline-sync 4m18), w3 8m59s (watch-room 6m01, federation 2m11, portability 27s,
+ * twitch-import 20s), rest 8m27s, long 8m24s, core 8m16s, notify 7m58s, bot 7m30s, captions
+ * 3m48s. B8-harness then split e2e-relay (relay ~9m10s; relay-dvr ~6m35s plus B8-player's
+ * relay-dvr-switch, ~8m15s estimated) and trimmed clock-skew's fixed measurement sleeps to
+ * coverage waits (~11m10s estimated: RTMP −1m54s, WHIP −7s). Wave 2 adds M1-coop-money's two
+ * e5-coop steps to `features` (~11 min estimated) and B8-player's edge-sync to `w3` (~10 min).
+ * The estimates (relay, relay-dvr, clock, features, w3) are replaced by the PASS lines of the
+ * first push run after merge; `seed` (seed-coverage) is not timed here (GitHub's API was down).
  */
 export const FULL_SHARDS = {
   relay: ["e2e-relay"],
+  // B8-harness (batch 8 decision (o)): the relay's DVR, purge feed, `.vtt` and the mid-DVR switch,
+  // split out of e2e-relay, which was 15m01s with them.
+  "relay-dvr": ["relay-dvr"],
   long: ["trust-safety"],
   clock: ["clock-skew"],
   // E8, with W3's giveaway, surge-raid and fair-prediction steps (batch 7 decision (d)).

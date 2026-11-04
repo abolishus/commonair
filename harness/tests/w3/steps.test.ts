@@ -164,7 +164,7 @@ describe("extensions", () => {
     expect(W3_EXTENSIONS).toEqual({
       interact: ["giveaway", "surge-raid", "fair-prediction"],
       "e5-coop": ["jury"],
-      "e2e-relay": ["dvr-relay", "dvr-purge", "relay-vtt"],
+      "relay-dvr": ["dvr-relay", "dvr-purge", "relay-vtt"],
       "trust-safety": ["sor-resolve"],
       "integrity-basic": ["group-appeal-threshold"],
       rehearsal: ["moderation-samples"],
@@ -197,9 +197,9 @@ describe("extensions", () => {
   test("scenario steps an extension needs are real steps of its scenario", () => {
     const steps: Record<W3ExtendedScenario, readonly number[]> = {
       interact: INTERACT_STEP_NUMBERS,
-      // e5-coop, e2e-relay and integrity-basic: no step an extension may add.
+      // e5-coop, relay-dvr and integrity-basic: no step an extension may add.
       "e5-coop": [],
-      "e2e-relay": [],
+      "relay-dvr": [],
       "trust-safety": SAFETY_STEP_NUMBERS,
       "integrity-basic": [],
       rehearsal: REHEARSAL_STEP_NUMBERS,
@@ -235,8 +235,8 @@ describe("w3Extensions", () => {
   });
 
   test("a named extension runs (pending or not) with its prerequisites, in the scenario's order", () => {
-    expect(w3Extensions("e2e-relay", "dvr-purge")).toEqual({ run: ["dvr-relay", "dvr-purge"], added: ["dvr-relay"] });
-    expect(w3Extensions("e2e-relay", "relay-vtt,dvr-relay")).toEqual({ run: ["dvr-relay", "relay-vtt"], added: [] });
+    expect(w3Extensions("relay-dvr", "dvr-purge")).toEqual({ run: ["dvr-relay", "dvr-purge"], added: ["dvr-relay"] });
+    expect(w3Extensions("relay-dvr", "relay-vtt,dvr-relay")).toEqual({ run: ["dvr-relay", "relay-vtt"], added: [] });
     expect(w3Extensions("interact", " fair-prediction , giveaway ")).toEqual({
       run: ["giveaway", "fair-prediction"],
       added: [],

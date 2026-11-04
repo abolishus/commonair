@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { describe, expect, test } from "vite-plus/test";
-import { computePayoutBatch, reservableAt } from "../src/payouts.ts";
+import { computePayoutBatch, owedCents, reservableAt } from "../src/payouts.ts";
 
 describe("computePayoutBatch", () => {
   test("pays at or above the minimum, carries over the rest, in user-id order", () => {
@@ -109,5 +109,28 @@ describe("reservableAt", () => {
       expect(r.amountCents + r.nettedCents).toBeLessThanOrEqual(now.liabilityCents);
       expect(r.nettedCents).toBeLessThanOrEqual(now.receivableCents);
     }
+  });
+});
+
+describe("owedCents (patronage payouts)", () => {
+  test("allocation less paid rows and what reversed rows kept; pending and failed rows owe on", () => {
+    expect(owedCents(1000, [])).toBe(1000);
+    expect(owedCents(1000, [{ status: "paid", amountCents: 1000, reversedCents: 0 }])).toBe(0);
+    expect(owedCents(1000, [{ status: "pending", amountCents: 1000, reversedCents: 0 }])).toBe(1000);
+    expect(owedCents(1000, [{ status: "failed", amountCents: 1000, reversedCents: 0 }])).toBe(1000);
+    expect(owedCents(1000, [{ status: "reversed", amountCents: 1000, reversedCents: 1000 }])).toBe(1000);
+    expect(owedCents(1000, [{ status: "reversed", amountCents: 1000, reversedCents: 400 }])).toBe(400);
+    expect(
+      owedCents(1000, [
+        { status: "reversed", amountCents: 1000, reversedCents: 1000 },
+        { status: "paid", amountCents: 600, reversedCents: 0 },
+      ]),
+    ).toBe(400);
+  });
+
+  test("never below zero, and a reversal larger than the row keeps nothing", () => {
+    expect(owedCents(10, [{ status: "paid", amountCents: 20, reversedCents: 0 }])).toBe(0);
+    expect(owedCents(100, [{ status: "reversed", amountCents: 50, reversedCents: 80 }])).toBe(100);
+    expect(owedCents(0, [])).toBe(0);
   });
 });

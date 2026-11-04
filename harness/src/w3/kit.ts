@@ -5,7 +5,7 @@
  * The contexts the six extended scenarios hand their batch 7 extension steps (`src/w3/steps.ts`).
  * `interact` hands the E8 run (`src/e8/kit.ts`), `integrity-basic` and `trust-safety` the W2
  * shapes (`src/w2/kit.ts`), `rehearsal` its run (`src/w2/rehearsal/index.ts`); `e5-coop` and
- * `e2e-relay` hand the shapes below. Owned by the orchestrator: units send a contract request
+ * `relay-dvr` hand the shapes below. Owned by the orchestrator: units send a contract request
  * instead of editing it.
  */
 import type { CoopHooks } from "../coop-io.ts";
@@ -46,7 +46,7 @@ export interface CoopW3Extension {
 }
 
 /**
- * What `e2e-relay` hands `dvr-relay`, `dvr-purge` and `relay-vtt`: the channel is live, the Go
+ * What `relay-dvr` hands `dvr-relay`, `dvr-purge` and `relay-vtt`: the channel is live, the Go
  * relay active, honest viewers verified on it and the viewbots excluded. They run before the liar
  * relay and the drain, so the relay must be left serving.
  */

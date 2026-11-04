@@ -12,7 +12,7 @@
 import { ServerFrame } from "@commonair/contracts/chat";
 import { backoffDelay } from "../../chat/backoff.ts";
 import type { SocketLike } from "../../chat/connection.ts";
-import { playbackMode, playheadWallclock } from "../../player/media-clock.ts";
+import { roomSyncReport } from "../../player/room-sync-registry.ts";
 
 export type RoomFrame = Extract<ServerFrame, { op: "room.state" | "room.message" | "room.sync" | "room.closed" }>;
 export type RoomMessageFrame = Extract<ServerFrame, { op: "room.message" }>["message"];
@@ -23,8 +23,11 @@ export interface RoomConnectionDeps {
   /** A fresh room token (the API re-checks the member at every call). */
   getRoomToken: () => Promise<string>;
   createSocket: (url: string) => SocketLike;
-  /** This member's playhead and mode; defaults to the channel's media clock. */
-  playhead?: () => { at: Date | null; mode: "live" | "dvr" };
+  /**
+   * This member's playhead, mode and (batch 8) live edge; defaults to the channel's player
+   * (`roomSyncReport`). Without `edge` the frame carries no `edgeWallclock`.
+   */
+  playhead?: () => { at: Date | null; mode: "live" | "dvr"; edge?: Date | null };
   setTimer?: (fn: () => void, ms: number) => unknown;
   clearTimer?: (handle: unknown) => void;
   setRepeat?: (fn: () => void, ms: number) => unknown;
@@ -178,8 +181,15 @@ export class RoomConnection {
   }
 
   private reportPlayhead(): void {
-    const p = this.deps.playhead?.() ?? { at: playheadWallclock(this.channel), mode: playbackMode(this.channel) };
+    const p = this.deps.playhead?.() ?? roomSyncReport(this.channel);
     if (!p.at) return;
-    this.write({ op: "room.sync", roomId: this.roomId, playheadWallclock: p.at.toISOString(), mode: p.mode });
+    this.write({
+      op: "room.sync",
+      roomId: this.roomId,
+      playheadWallclock: p.at.toISOString(),
+      mode: p.mode,
+      // The live edge chat caps the room from (null in DVR or while unknown).
+      ...(p.edge === undefined ? {} : { edgeWallclock: p.mode === "live" && p.edge ? p.edge.toISOString() : null }),
+    });
   }
 }

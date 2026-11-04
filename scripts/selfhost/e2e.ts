@@ -94,6 +94,7 @@ import {
   externalStoreSetup,
 } from "./e2e-s3.ts";
 import { checkObjectBackup, objectBackupSetup, objectBackupTeardown } from "./e2e-backup.ts";
+import { checkDumps, checkWalgDrill, dumpTeardown } from "./e2e-dump.ts";
 import { checkMetrics } from "./e2e-metrics.ts";
 import {
   E2E_STATE,
@@ -1414,12 +1415,25 @@ async function main(): Promise<void> {
         await checkExternalState(inHost, expectThat, "default user");
       });
 
-    await step("backups: objects offsite and an object restore", () => {
+    await step("backups: objects offsite and an object restore", async () => {
       objectBackupSetup(inHost, expectThat);
       const t = checkObjectBackup(inHost, expectThat);
       console.log(`e2e: object backup ${t.backupSeconds}s, object restore ${t.restoreSeconds}s`);
+      // S1-h: with an external Postgres the dump to the same offsite store is the backup.
+      if (externalState) {
+        const d = await checkDumps(inHost, expectThat);
+        console.log(`e2e: dump ${d.dumpSeconds}s, dump drill ${d.drillSeconds}s`);
+        dumpTeardown(inHost);
+      }
       objectBackupTeardown(inHost);
     });
+
+    // Not after a from-release upgrade: the published release's selfhost.sh did that upgrade, and
+    // one from before S1-h does not enable the drill's timer.
+    if (!externalState && !fromRelease)
+      await step("backups: the weekly WAL-G drill", async () => {
+        console.log(`e2e: WAL-G drill ${await checkWalgDrill(inHost, expectThat)}s`);
+      });
 
     await step(`broken release ${v3} rolls back to ${v2}`, async () => {
       relabel(commit, v3, ["api"]);

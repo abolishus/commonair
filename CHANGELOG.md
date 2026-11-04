@@ -53,7 +53,9 @@ by what you use, not by change type. The design decisions behind each part are t
   operator turns it on and the streamer enables it.
 - **Simulcast** to other platforms, **overlays** for alerts and goals, **rehearsal mode** to test
   a stream with invited viewers before going live, and **watch rooms** (ADR 0017) where a group
-  watches in sync.
+  watches in sync, held near the live edge even when members watch from different sources.
+- **Rewinding through a relay** keeps playing from the origin when that relay leaves, at the same
+  position, with no error.
 - **Verified viewer counts** (ADR 0015): integrity signals (datacenter networks, concurrency,
   headless browsers, chat ratio, follow and raid bursts) exclude viewbots from the count, with
   reasons and group appeals. **Signed audience attestations** let a streamer prove their numbers
@@ -99,13 +101,14 @@ by what you use, not by change type. The design decisions behind each part are t
 ### Co-op
 
 - **Memberships** in classes, with eligibility from verified watching and streaming, and
-  **shares**.
+  **shares**, paid by bank transfer, or by card where the members have voted card payments on.
 - **Governance** (ADR 0004, ADR 0020): proposals, discussion, council review, votes and tallies.
   Protected decisions need a majority in every member class, which the database enforces, not
   only the application.
 - **The creator council**, recomputed from the members, and **elections**.
 - **Patronage**: a versioned formula with caps turns a period's surplus into allocations, each
-  member gets a statement explaining theirs, and payouts follow.
+  member gets a statement explaining theirs, and payouts follow: approved by two treasurers, paid
+  by hand or through Stripe Connect, with each member's payout status on their statement.
 - **Transparency**: the ledger's aggregates, infrastructure costs and the enforcement report
   are public on `/transparency`.
 - **An advisory jury** (ADR 0038): randomly drawn members review moderation cases and advise; off
@@ -159,8 +162,10 @@ by what you use, not by change type. The design decisions behind each part are t
   your own registry.
 - **Upgrades** that take a backup, run the migrations before any service starts, and roll back on
   their own when the new release does not come up healthy.
-- **Backups**: WAL-G continuous archiving of the bundled Postgres with a restore drill, and
-  `backup --objects` to copy media and evidence to another S3 store.
+- **Backups**: WAL-G continuous archiving of the bundled Postgres, nightly logical dumps
+  (`backup --dump`, 30 kept; the backup for a managed Postgres), weekly automatic restore drills
+  of both into a throwaway container, and `backup --objects` to copy media and evidence to another
+  S3 store.
 - **State where you want it**: Garage on the same host by default, or any S3-compatible store
   (`--s3-*`); the bundled Postgres and Valkey by default, or managed ones (`--database-url`,
   `--valkey-url`) over verified TLS, with a preflight that checks rights, version and the
@@ -168,7 +173,10 @@ by what you use, not by change type. The design decisions behind each part are t
 - **Optional features by flag**: `--captions` (checks the CPU for AVX2 first), `--turn-relay` and
   `--web-push`.
 - **Observability**: Prometheus, Loki, Tempo and Grafana, with host, Postgres and Valkey metrics,
-  dashboards and burn-rate alerts for an availability target.
+  dashboards and burn-rate alerts for an availability target, mailed to the on-call address.
+- **A public status page** from a second region: outside probes of the site, API, chat, video,
+  ingest and certificate, a static page with 90 days of history, and down alerts that do not
+  depend on the server they watch.
 - A staging seed mode that fills a staging instance with realistic demo data (ADR 0040).
 
 ### Developer platform
@@ -179,6 +187,12 @@ by what you use, not by change type. The design decisions behind each part are t
   WebSocket, with delivery logs and test events.
 - **`@commonair/sdk`** (Apache-2.0, ADR 0035), a developer console, and an OpenAPI description of
   the whole API.
+- An end-to-end test harness whose scenarios each run on their own against a full stack, in
+  parallel shards, in every supported language.
+
+## [0.1.0-rc.10] - 2026-11-03
+
+Release candidate for staging. Notes: [v0.1.0-rc.10][0.1.0-rc.10].
 
 ## [0.1.0-rc.9] - 2026-11-02
 
@@ -222,6 +236,7 @@ Debian 13 host. Notes: [v0.1.0-rc.1][0.1.0-rc.1].
 
 [Unreleased]: https://github.com/abolishus/commonair/compare/v0.1.0-rc.9...main
 [0.1.0]: https://github.com/abolishus/commonair/commits/main
+[0.1.0-rc.10]: https://github.com/abolishus/commonair/releases/tag/v0.1.0-rc.10
 [0.1.0-rc.9]: https://github.com/abolishus/commonair/releases/tag/v0.1.0-rc.9
 [0.1.0-rc.8]: https://github.com/abolishus/commonair/releases/tag/v0.1.0-rc.8
 [0.1.0-rc.7]: https://github.com/abolishus/commonair/releases/tag/v0.1.0-rc.7

@@ -119,6 +119,12 @@ jobs:
           REPOSITORY_OWNER: ${{ github.repository_owner }}
           RUN_NUMBER: ${{ github.run_number }}
         run: bun scripts/release/prepare.ts
+      # A release (not an rc or a dry run) needs its dated CHANGELOG.md section (R0-release-prep).
+      - name: Curated changelog section
+        env:
+          VERSION: ${{ steps.plan.outputs.version }}
+          PRERELEASE: ${{ steps.plan.outputs.prerelease }}
+        run: if [ "$PRERELEASE" != true ]; then bun scripts/release/changelog.ts --version "$VERSION" --check; fi
       - name: Release notes
         env:
           VERSION: ${{ steps.plan.outputs.version }}

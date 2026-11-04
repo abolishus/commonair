@@ -51,6 +51,8 @@ export const FULL_REQUIRED = [
   // E6 (this unit).
   "backup-restore",
   "e2e-relay",
+  // B8-harness (batch 8 decision (o)): the relay's DVR, purge feed and captions, split out of e2e-relay.
+  "relay-dvr",
   // S1-c: two of each app service (needs `stack --harness --multi`).
   "multi-instance",
   // E7: egress, status incidents and integrity review.

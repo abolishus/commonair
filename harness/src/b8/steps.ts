@@ -40,11 +40,10 @@ export type B8ExtendedScenario = keyof typeof B8_EXTENSIONS;
 export type B8Extension<S extends B8ExtendedScenario = B8ExtendedScenario> = (typeof B8_EXTENSIONS)[S][number];
 
 /**
- * Scenarios not wired yet: `relay-dvr` is the scenario B8-harness splits out of `e2e-relay` in
- * wave 2. The orchestrator wires `relay-dvr-switch` into it when B8-harness merges, and removes
- * the scenario from this list.
+ * Scenarios not wired yet (none since B8-harness split `relay-dvr` out of `e2e-relay` in wave 2 and
+ * wired `relay-dvr-switch` into it). An extension of an unwired scenario stays pending.
  */
-export const UNWIRED_B8_SCENARIOS: readonly B8ExtendedScenario[] = ["relay-dvr"];
+export const UNWIRED_B8_SCENARIOS: readonly B8ExtendedScenario[] = [];
 
 /** Which unit implements each extension, and the module it lives in (relative to `src/b8/`). */
 export const B8_EXTENSION_UNITS: Readonly<Record<B8Extension, { unit: string; file: string }>> = {
@@ -74,14 +73,9 @@ export const B8_EXTENSION_UNITS: Readonly<Record<B8Extension, { unit: string; fi
 /**
  * Extensions whose implementing unit has not merged yet: selectable explicitly
  * (`--set b8=gift-window`) but left out of `all`, so the full harness on main stays green while
- * they are stubs. Wave 1's were lifted at its merge; wave 2's remain.
+ * they are stubs. Wave 1's and wave 2's were lifted at their merges.
  */
-export const PENDING_B8_EXTENSIONS: readonly B8Extension[] = [
-  "share-stripe",
-  "patronage-payout",
-  "edge-sync",
-  "relay-dvr-switch",
-];
+export const PENDING_B8_EXTENSIONS: readonly B8Extension[] = [];
 
 /** The reversal reverses the transfer `connect-transfer` made. */
 export const B8_EXTENSION_PREREQUISITES: Readonly<Record<B8Extension, readonly B8Extension[]>> = {

@@ -66,6 +66,9 @@ module "instance" {
 
   media_volume_size_gb = var.media_volume_size_gb
   irc_plaintext        = var.irc_plaintext
+  turn_relay           = var.turn_relay
+  status_site_name     = var.status_site_name
+  status_locale        = var.status_locale
 
   enable_managed_state = var.enable_managed_state
   pg_size              = var.pg_size

@@ -31,6 +31,10 @@ Environment=GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES=false
 Environment=GF_NEWS_NEWS_FEED_ENABLED=false
 Environment=GF_PLUGINS_PLUGIN_ADMIN_ENABLED=false
 Secret=commonair-grafana-admin-password,type=env,target=GF_SECURITY_ADMIN_PASSWORD
+# route-env.sh installs the alert route (ALERT_EMAIL_TO, ALERT_WEBHOOK_URL, the SMTP relay) before
+# Grafana starts (docs/operators/on-call.md#the-alert-route); with no route it logs so, loudly.
+Entrypoint=/bin/sh
+Exec=-c ". /etc/grafana/provisioning/alerting/route-env.sh; exec /run.sh"
 # Loopback only, for an SSH tunnel (docs/self-hosting/requirements.md); it needs the admin login.
 PublishPort=127.0.0.1:3030:3000
 Volume=%h/commonair/infra/grafana/provisioning:/etc/grafana/provisioning:ro,Z

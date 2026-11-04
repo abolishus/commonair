@@ -36,7 +36,14 @@ import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { Valkey } from "iovalkey";
 import { B8_JOBS, PatronagePayoutJob, QUEUES, patronagePayoutJobId } from "@commonair/contracts/internal";
 import { type Executor, schema, uuidv7 } from "@commonair/db";
-import { payeeHasHoldingFlag, patronagePayout, patronagePayoutReversed, post } from "@commonair/ledger";
+import {
+  owedCents,
+  patronagePayout,
+  patronagePayoutReversed,
+  patronageReversedCents,
+  payeeHasHoldingFlag,
+  post,
+} from "@commonair/ledger";
 import { type StripeAction, createAdapter } from "@commonair/payments";
 import { valkeyTls } from "@commonair/service";
 import type { Deps } from "../deps.ts";
@@ -87,23 +94,6 @@ export function payStep(markers: readonly { action: string; actorId: string | nu
   if (!request || request.actorId === null) return { kind: "request" };
   if (request.actorId === callerId) return { kind: "same_person" };
   return { kind: "approve", requesterId: request.actorId };
-}
-
-/**
- * What a member is still owed for a period, for a new row: the allocation, less every paid row,
- * less what a reversed row kept (its amount less what came back). Pending rows are open, so a new
- * row is never made beside them. Never below zero; integer cents, never split.
- */
-export function owedCents(
-  allocationCents: number,
-  rows: readonly { status: PayoutRow["status"]; amountCents: number; reversedCents: number }[],
-): number {
-  let out = allocationCents;
-  for (const r of rows) {
-    if (r.status === "paid") out -= r.amountCents;
-    if (r.status === "reversed") out -= Math.max(0, r.amountCents - r.reversedCents);
-  }
-  return Math.max(0, out);
 }
 
 const isOpen = (s: PayoutRow["status"]) => s === "pending" || s === "paid";
@@ -175,25 +165,6 @@ export async function closePatronagePayoutQueue(deps: Deps): Promise<void> {
 
 // ── Rows ────────────────────────────────────────────────────────────────────────────────────
 
-/** Every reversal booked per payout row so far (the cumulative total of its reversal postings). */
-async function reversedCentsOf(tx: Executor, payoutIds: readonly string[]): Promise<Map<string, number>> {
-  if (payoutIds.length === 0) return new Map();
-  const rows = await tx
-    .select({
-      payoutId: sql<string>`${schema.ledgerTransactions.metadata}->>'payoutId'`,
-      cents: sql<string>`max((${schema.ledgerTransactions.metadata}->>'cumulativeCents')::bigint)::text`,
-    })
-    .from(schema.ledgerTransactions)
-    .where(
-      and(
-        eq(schema.ledgerTransactions.kind, "patronage_payout_reversal"),
-        inArray(sql<string>`${schema.ledgerTransactions.metadata}->>'payoutId'`, [...payoutIds]),
-      ),
-    )
-    .groupBy(sql`${schema.ledgerTransactions.metadata}->>'payoutId'`);
-  return new Map(rows.map((r) => [r.payoutId, Number(r.cents)]));
-}
-
 interface Member {
   userId: string;
   deleted: boolean;
@@ -255,7 +226,7 @@ export async function openMissingPayouts(
     .orderBy(asc(patronageAllocations.userId));
   if (allocations.length === 0) return { created: 0, stripe: [] };
   const rows = await tx.select().from(patronagePayouts).where(eq(patronagePayouts.periodId, period.id));
-  const reversed = await reversedCentsOf(
+  const reversed = await patronageReversedCents(
     tx,
     rows.filter((r) => r.status === "reversed").map((r) => r.id),
   );
@@ -616,7 +587,7 @@ export async function patronageTransferEvent(
       settled = true;
     }
   }
-  const booked = (await reversedCentsOf(tx, [row.id])).get(row.id) ?? 0;
+  const booked = (await patronageReversedCents(tx, [row.id])).get(row.id) ?? 0;
   const cumulative = Math.min(a.amountReversed, row.amountCents);
   if (cumulative > booked) {
     await recordReversal(tx, row, { cumulativeCents: cumulative, bookedCents: booked, now });
@@ -706,6 +677,12 @@ async function startPatronageTransfers(deps: Deps, periodId: string, userIds: re
 }
 
 export const patronagePayoutHandlers = {
+  markPaid: os.coop.patronage.markPaid.handler(async ({ context, input }) =>
+    markPatronagePayoutPaid(context.deps, { ...input, actorId: requireCaller(context).user.id }),
+  ),
+  markUnsent: os.coop.patronage.markUnsent.handler(async ({ context, input }) =>
+    markPatronagePayoutUnsent(context.deps, { ...input, actorId: requireCaller(context).user.id }),
+  ),
   payouts: os.coop.patronage.payouts.handler(async ({ context, input }) => {
     const { db } = context.deps;
     const [period] = await db

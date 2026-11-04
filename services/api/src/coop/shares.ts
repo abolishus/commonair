@@ -163,6 +163,8 @@ export interface BookShareOptions {
    * manual confirm keeps today's behaviour (a treasurer confirms a transfer they can see).
    */
   refundIfLeft?: boolean;
+  /** A card share's processor fee (the webhook's balance transaction), posted as an expense. */
+  feeCents?: number;
 }
 
 export type BookShareOutcome = "activated" | "already_member" | "refund_pending";
@@ -226,6 +228,7 @@ export async function bookShareTx(tx: Executor, p: PaymentRow, o: BookShareOptio
       amountCents: share.amountCents,
       currency: share.currency,
       occurredAt: receivedAt,
+      ...(o.feeCents ? { feeCents: o.feeCents } : {}),
     }),
   );
   const [held] = await tx

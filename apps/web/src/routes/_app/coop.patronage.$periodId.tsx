@@ -63,6 +63,11 @@ function PayoutSection({ periodId }: { periodId: string }): React.JSX.Element {
       onRetry={payouts.reload}
       onPay={pay}
       onPayError={toastPayError}
+      onMarkPaid={async (payoutId, reference) => {
+        await api().coop.patronage.markPaid({ payoutId, reference, paidAt: new Date().toISOString() });
+        payouts.reload();
+      }}
+      onMarkPaidError={toastCoopError}
     />
   );
 }

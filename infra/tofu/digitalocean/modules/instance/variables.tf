@@ -121,6 +121,13 @@ variable "irc_plaintext" {
   nullable    = false
 }
 
+variable "turn_relay" {
+  description = "Open coturn's relay range 49160-49199/udp. Off unless the instance runs --turn-relay."
+  type        = bool
+  default     = false
+  nullable    = false
+}
+
 variable "backup_region" {
   description = "Spaces region for the WAL-G and object backup buckets. Must differ from region."
   type        = string

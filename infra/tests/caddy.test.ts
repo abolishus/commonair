@@ -30,6 +30,9 @@ describe("routing", () => {
   test("each public path reaches the service that owns it", () => {
     expect(Object.fromEntries(handles())).toEqual({
       "@internal": "respond 404",
+      // The status page's outside probes (L1-status): pass or fail only, rewritten to /readyz.
+      "/readyz/api": "api:3001",
+      "/readyz/origin": "origin:3003",
       "/api/*": "api:3001",
       "/rpc/*": "api:3001",
       "/overlay/events": "api:3001",

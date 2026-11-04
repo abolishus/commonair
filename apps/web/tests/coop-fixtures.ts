@@ -301,6 +301,7 @@ export const statement: StatementDto = {
     viewerHoursVerified: 7.5,
     viewerHoursExcluded: 0.5,
   },
+  payout: null,
 };
 
 export function month(key: string, over: Partial<CoopMonthDto> = {}): CoopMonthDto {

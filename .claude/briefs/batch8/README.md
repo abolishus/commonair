@@ -592,3 +592,54 @@ Reported by the wave 1 units (merged 2026-11-03; conservative defaults, each rev
 - **B8-web:** a mature channel's banner stays hidden until the viewer confirms 18+, even offline;
   a report flag opens the reports tab with nothing selected; the prediction grace offer uses the
   client's clock (the server judges every bet).
+
+Reported by the wave 2 units (merged 2026-11-03; conservative defaults, each revisitable):
+
+- **S1-h backups-ext:** 30 dumps kept, never fewer (`BACKUP_DUMP_KEEP` may only raise it); dumps
+  share the object backup bucket under `<prefix>/dumps`; a bucket listable or readable without a
+  key is refused, and objects get no explicit private ACL (Garage's ACL handling is uncertain);
+  the WAL-G drill timer is on for every bundled install (Saturdays, twice the data volume's disk);
+  every reinstall and upgrade turns the drill timers back on, as `commonair-backup.timer`; on
+  external state the dump timers are on from install, before a dump store exists (failures show
+  in the journal and `status`); on bundled state the dump drill's timer turns on after its first
+  pass; the moving procedure gets past S1-b's refusal by adding `STATE_MODE=external` by hand;
+  its six units live in `infra/systemd/`, not `infra/quadlet/` (Quadlet does not process timers;
+  accepted at merge).
+- **M1-coop-money:** a card share refunds only in full and only once `refund_pending` (a partial or
+  dashboard refund books nothing and is audited); chargebacks on card shares are not handled
+  yet; the manual confirm is unchanged and "left during checkout" applies to card shares only;
+  the two patronage approvals are audit markers with no expiry; any reversal ends the row, and a
+  second partial reversal after the follow-up is paid stays in the payable; a Connect row whose
+  outcome is unknown is never re-sent automatically, its follow-up is always manual, and one
+  marked paid by hand is recorded even if the account was deleted since; manual references have
+  no spaces (no names); no automatic `distributed` flip and no tax forms (decision (f)); a failed
+  `instance.info` read hides "Pay by card"; the card share's processor fee is the co-op's expense
+  (posted at merge).
+- **R0-release-prep:** the from-release e2e seeds through the release's own db and ledger code,
+  not the HTTP API (ALTCHA, no inbox, no treasurer session; the follower count is read back
+  through the API); it runs only on `workflow_dispatch`, bundled only, from v0.1.0-rc.10 (rc.2 to
+  rc.9 cannot upgrade to this tree with their own `selfhost.sh`: the collector's monitor secrets,
+  and nothing runs them); a 600 s upgrade health timeout; `--check` refuses an undated release
+  section, so the date is set by hand at tag time; verifying.md says a manual run on a tag ref
+  would also match the signing identity.
+- **L1-status:** the canaries are Quad9 and Cloudflare anycast DNS over TCP (connect only); video
+  is probed through the origin's readiness, not a synthetic channel; the inside alert route is
+  rendered from a template; maintenance mutes every outside alert, recoveries included; degraded
+  to down waits for the same 10-minute window; "probes not reporting" after 5 minutes, also when
+  the monitoring droplet's Prometheus fails (those runs use the droplet's clock); 10 s connect,
+  20 s idle and 60 s total delivery budget (a mail accepted after it may be sent again); a failed
+  note file is skipped, links in notes keep only their text; the site name defaults to the
+  origin's host; the page is `en` or `es`, alert mails English only; the AAAA record only after a
+  `curl -6` check; an expired certificate shows as website and certificate down; re-provisioning
+  loses the 90-day history; a dead monitoring droplet is noticed only by a daily look at the page;
+  `/readyz/api` and `/readyz/origin` are public and unauthenticated (pass or fail only, no rate
+  limit yet).
+- **B8-player:** `EDGE_SKEW_MS` = 1 s (a reported edge at most 1 s ahead of chat's clock; beyond
+  that rooms fall back to the batch 7 estimate); a paused DVR viewer is swapped without playing
+  and stays paused; a rewind still loading when `dvrSwitchTo` arrives falls back to live; the
+  switch owed after data mode is cleared on the first beat with a plain origin token, and dropped
+  if the DVR grant is no longer allowed; `edge-sync` models two sources by 3 s and 9 s hold-backs.
+- **B8-harness:** the jury marker is a constant written only into harness-seeded rows'
+  `resolution_note` and `details`; a panel is deleted only when it sampled a marked case and
+  seated an `e5_jury_` member; a locale with no catalog entry matches the English rate-limit
+  message, with a warning in the run's log.

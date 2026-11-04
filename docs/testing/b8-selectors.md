@@ -89,11 +89,13 @@ unit fills it).
 
 ### Co-op money (M1-coop-money)
 
-| Test id             | Element and attributes                                                                                                             |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `share-buy-stripe`  | "Pay by card" for a share on `/coop/membership`; shown only when the instance and the setting allow it                             |
-| `patronage-payouts` | The period page's treasurer payout list; each row `data-user-id`, `data-status` (`PATRONAGE_PAYOUT_STATUSES`), `data-amount-cents` |
-| `patronage-pay`     | Pays the period out (second approver as for write-offs); opens a `ConfirmDialog`; `data-period-id`                                 |
+| Test id                      | Element and attributes                                                                                                             |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `share-buy-stripe`           | "Pay by card" for a share on `/coop/membership`; shown only when the instance and the setting allow it                             |
+| `patronage-payouts`          | The period page's treasurer payout list; each row `data-user-id`, `data-status` (`PATRONAGE_PAYOUT_STATUSES`), `data-amount-cents` |
+| `patronage-pay`              | Pays the period out (second approver as for write-offs); opens a `ConfirmDialog`; `data-period-id`                                 |
+| `patronage-payout-mark-paid` | A treasurer marks a manual payout row paid with a reference; `data-payout-id`                                                      |
+| `patronage-payout-mine`      | The member's own payout status on their statement; `data-status` (`PATRONAGE_PAYOUT_STATUSES`, or `none`)                          |
 
 ### Twitch import (B8-server)
 
@@ -147,9 +149,8 @@ The contexts each scenario hands its extensions are in `harness/src/b8/kit.ts`.
   its email cites no case) and `lapsed-ban-signin` (a lapsed ban cleared at sign-in writes one
   `channel.suspension {suspended:false}`, never two with the `ban-expiry` sweep).
 - **`relay-dvr`** (B8-player, `relay-dvr-switch`): the relay stops mid-DVR session and the player
-  keeps DVR from the origin with no 403. `relay-dvr` is the scenario B8-harness splits out of
-  `e2e-relay` in wave 2 (`UNWIRED_B8_SCENARIOS`); the orchestrator wires the step when B8-harness
-  merges.
+  keeps DVR from the origin with no 403. `relay-dvr` is the scenario B8-harness split out of
+  `e2e-relay` in wave 2; the step is wired into it (wave 2 merge).
 
 The jury rerun cleanup and the localized rate-limit message are B8-harness's, in existing files:
 they are not extensions and add no id. The jury flag link (`jury-flag-case-link`) is covered by

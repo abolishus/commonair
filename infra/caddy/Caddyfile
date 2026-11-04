@@ -150,6 +150,17 @@ import http-{$CADDY_LISTEN:ports}
 
 	import s3-{$S3_MODE:garage}
 
+	# Readiness for the status page's outside probes (docs/operators/status-page.md#what-is-probed):
+	# pass or fail per check only (packages/service/src/server.ts never exposes error text).
+	handle /readyz/api {
+		rewrite * /readyz
+		reverse_proxy api:3001
+	}
+	handle /readyz/origin {
+		rewrite * /readyz
+		reverse_proxy origin:3003
+	}
+
 	# The embeddable player must be frameable by any site; everything else must not be.
 	@embed path /embed /embed/*
 	@framed not path /embed /embed/*

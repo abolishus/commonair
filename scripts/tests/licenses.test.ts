@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vite-plus/test";
-import { checkNpm } from "../check-licenses.ts";
+import { checkImages, checkNpm } from "../check-licenses.ts";
 import { evaluate, licenseOf } from "../licenses.ts";
 
 describe("license policy", () => {
@@ -98,5 +98,31 @@ describe("our own packages (ADR 0035)", () => {
     expect(reasons([["@commonair/db", "Apache-2.0"]])).toEqual([
       ["@commonair/db", "own package must be AGPL-3.0-or-later"],
     ]);
+  });
+});
+
+describe("checkImages", () => {
+  test("also checks the Image= lines of Quadlet units compose never runs (infra/status/units)", () => {
+    const root = mkdtempSync(join(tmpdir(), "images-"));
+    try {
+      writeFileSync(join(root, "compose.yaml"), "services:\n  a:\n    image: quay.io/x/listed:v1@sha256:00\n");
+      writeFileSync(
+        join(root, "licenses.json"),
+        JSON.stringify({ "quay.io/x/listed": { license: "Apache-2.0", source: "https://example.org/LICENSE" } }),
+      );
+      mkdirSync(join(root, "units"));
+      writeFileSync(join(root, "units", "a.container"), "[Container]\nImage=quay.io/x/listed:v1@sha256:00\n");
+      writeFileSync(join(root, "units", "b.container"), "[Container]\nImage=quay.io/x/unlisted:v2@sha256:11\n");
+      writeFileSync(join(root, "units", "c.network"), "Image=quay.io/x/ignored:v3\n");
+      const compose = join(root, "compose.yaml");
+      const reg = join(root, "licenses.json");
+      expect(checkImages(compose, reg).findings).toEqual([]);
+      const r = checkImages(compose, reg, [join(root, "units"), join(root, "missing")]);
+      expect(r.findings.map((f) => [f.name, f.reason])).toEqual([
+        ["quay.io/x/unlisted", "not listed in infra/image-licenses.json"],
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

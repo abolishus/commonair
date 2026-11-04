@@ -23,6 +23,7 @@ import { closeInteractTickRunner } from "./interact/hooks.ts";
 import { closeGiveawayCloseQueue } from "./interact/giveaways/queue.ts";
 import { closeOverlayHub } from "./overlay/stream.ts";
 import { closePayoutTransferQueue } from "./money/transfers.ts";
+import { closePatronagePayoutQueue } from "./coop/patronage-payouts.ts";
 import { closeExportQueue } from "./privacy/export-queue.ts";
 import { closeFederationQueue } from "./federation/queue.ts";
 import { closePortabilityQueue } from "./portability/queue.ts";
@@ -133,6 +134,7 @@ export async function buildDeps(
         ["overlay hub", closeOverlayHub],
         ["export queue", closeExportQueue],
         ["payout transfer queue", closePayoutTransferQueue],
+        ["patronage payout queue", closePatronagePayoutQueue],
         ["portability queue", closePortabilityQueue],
         ["federation queue", closeFederationQueue],
         ["relay purge feed", closeRelayPurgeFeed],

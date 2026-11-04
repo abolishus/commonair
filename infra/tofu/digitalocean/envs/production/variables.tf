@@ -86,3 +86,22 @@ variable "app_count" {
   type        = number
   default     = 1
 }
+
+variable "turn_relay" {
+  description = "Open coturn's TURN relay range (selfhost.sh --turn-relay)."
+  type        = bool
+  default     = false
+}
+
+variable "status_site_name" {
+  description = "The instance's INSTANCE_NAME, shown on the status page and in its alert mails. Null shows the origin's host."
+  type        = string
+  default     = null
+}
+
+variable "status_locale" {
+  description = "Language of the status page: en or es."
+  type        = string
+  default     = "en"
+  nullable    = false
+}

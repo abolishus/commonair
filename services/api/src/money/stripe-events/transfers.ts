@@ -27,6 +27,7 @@ import {
   recordPayoutTransferReversal,
 } from "@commonair/ledger";
 import type { StripeAction } from "@commonair/payments";
+import { patronageTransferEvent } from "../../coop/patronage-payouts.ts";
 import { type AppliedAction, StripeProcessingError } from "../stripe-events.ts";
 
 type TransferAction = Extract<StripeAction, { type: "transfer.reversed" | "transfer.updated" }>;
@@ -46,7 +47,8 @@ export function matchesTransfer(
 
 async function applyTransfer(tx: Executor, a: TransferAction, now: Date): Promise<AppliedAction> {
   const row = await findPayoutTransfer(tx, { providerRef: a.transferRef, transferId: a.transferId });
-  if (!row) return noop("ignored");
+  // Not a creator payout: a co-op patronage payout sent through Connect (M1-coop-money), or nothing.
+  if (!row) return (await patronageTransferEvent(tx, a, now)) ?? noop("ignored");
   if (!matchesTransfer(row, a)) return noop("transfer_mismatch");
   if (row.status === "failed") {
     await recordOrphanedPayoutTransfer(tx, { transferId: row.id, providerRef: a.transferRef, at: now });

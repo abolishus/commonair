@@ -86,7 +86,8 @@ Open these inbound, in the host firewall and in any provider firewall in front o
 
 Only if you turn the TURN relay on (`--turn-relay`, off by default): UDP 49160-49199
 (`TURN_RELAY_PORT_MIN`-`MAX`), the relay's range. The DigitalOcean cloud firewall that the
-OpenTofu module creates does not open it; [p2p.md](p2p.md#ports-and-firewalls) says how.
+OpenTofu module creates opens it only with `turn_relay = true`; [p2p.md](p2p.md#ports-and-firewalls)
+says how.
 
 Each public port listens on IPv6 and IPv4 (IPv4 alone on a host without IPv6). Ports 80 and
 443 are held by systemd (`commonair-caddy.socket`) and handed to Caddy, and 6667 and 6697 the

@@ -2,54 +2,25 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * Batch 8 money seams (contract step §2.5-§2.7): the new treasurer and patronage procedures are
- * routed, access-checked and answer 501 until their units fill them; the new Stripe webhook
- * actions reach their stub handlers and answer `ignored`; a gift checkout marks its payment.
+ * Batch 8 money seams (contract step §2.5-§2.7): the new Stripe webhook actions reach their
+ * handlers and answer `ignored`; a gift checkout marks its payment. (The patronage procedures'
+ * stubs are filled since M1-coop-money; coop-patronage-payouts.int covers their access.)
  */
-import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
-import { schema } from "@commonair/db";
 import { loadStripeSignature } from "@commonair/payments";
-import { signUpAndSignIn, startApi, type TestApi } from "./harness.ts";
-
-type Account = Awaited<ReturnType<typeof signUpAndSignIn>>;
+import { startApi, type TestApi } from "./harness.ts";
 
 const SECRET = "whsec_b8_seams";
 let api: TestApi;
-let treasurer: Account;
-let viewer: Account;
 
 beforeAll(async () => {
   api = await startApi();
-  [treasurer, viewer] = await Promise.all([signUpAndSignIn(api), signUpAndSignIn(api)]);
-  await api.db.db.update(schema.users).set({ role: "treasurer" }).where(eq(schema.users.id, treasurer.userId));
 }, 180_000);
 afterAll(async () => {
   await api?.stop();
 });
 
 const ID = "01890000-0000-7000-8000-0000000000b8";
-
-describe("the new procedures are stubs behind their access levels", () => {
-  const routes: [method: string, path: string, body?: unknown][] = [
-    ["GET", `/api/coop/patronage/${ID}/payouts`],
-    ["POST", `/api/coop/patronage/${ID}/pay`, {}],
-  ];
-
-  test("a treasurer gets 501", async () => {
-    for (const [method, path, body] of routes) {
-      const r = await treasurer.client.call(method, path, body);
-      expect([path, r.status]).toEqual([path, 501]);
-    }
-  });
-
-  test("anyone else is refused before the stub", async () => {
-    for (const [method, path, body] of routes) {
-      const r = await viewer.client.call(method, path, body);
-      expect([path, r.status]).toEqual([path, 403]);
-    }
-  });
-});
 
 describe("the new webhook actions reach their handlers", () => {
   beforeAll(() => {

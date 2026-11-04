@@ -649,6 +649,9 @@ describe("systemd timers (infra/systemd)", () => {
     const timers = readdirSync(dir).filter((f) => f.endsWith(".timer"));
     expect(timers.sort()).toEqual([
       "commonair-backup.timer",
+      "commonair-drill-walg.timer",
+      "commonair-drill.timer",
+      "commonair-dump.timer",
       "commonair-irc-cert.timer",
       "commonair-object-backup.timer",
     ]);

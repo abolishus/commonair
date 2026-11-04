@@ -73,3 +73,17 @@ Decided by the head agent within these answers (recorded so reviewers can check 
   approved; two-person approval). The app role loses UPDATE/DELETE on the append-only ones.
 - Follow-ups: Stripe shares; an explicit viewer join; paying out patronage payables; council election as an alternative
   seating method (would be a governance setting); board-election UI beyond read-only.
+
+## Amendment 1 (batch 8, M1-coop-money, 2026-11-03)
+
+- **Shares by card** (`shares.cardPayments`, off by default; `manual_shares` stays the default)
+  are one one-off Stripe Checkout payment to the co-op. The purchase books the full price to the
+  member's share and the processor's fee as the co-op's expense (`sharePurchase`'s fee leg). A
+  card share is refunded only in full, by a treasurer, and only once it is `refund_pending`.
+- **Patronage payouts** need two approvers (the request and a different treasurer's or an
+  admin's approval). A member with a ready Stripe Express account is paid by a Connect transfer;
+  everyone else by hand, with a short reference code that holds no names. A Connect patronage
+  transfer reuses M1-connect's idempotency key format, `payout-transfer:<patronage payout row
+  id>` (UUIDv7 row ids cannot collide with creator payouts' ids), and its 20-hour key window: a
+  row whose outcome is unknown, or whose first send is older than the window, is never sent
+  again automatically; a treasurer settles it as paid (`tr_…`) or not sent.

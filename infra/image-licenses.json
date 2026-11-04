@@ -41,6 +41,12 @@
     "tag": "v3.15.0",
     "notes": "Also published as -distroless and -busybox variants."
   },
+  "quay.io/prometheus/blackbox-exporter": {
+    "license": "Apache-2.0",
+    "source": "https://github.com/prometheus/blackbox_exporter/blob/v0.29.1/LICENSE",
+    "tag": "v0.29.1",
+    "notes": "Outside probes for the status page on the monitoring droplet (infra/status, batch 8 decision (k)). Also published as -distroless and -busybox variants."
+  },
   "docker.io/grafana/loki": {
     "license": "AGPL-3.0-only",
     "source": "https://github.com/grafana/loki/blob/v3.7.8/LICENSE",
