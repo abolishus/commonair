@@ -8,17 +8,16 @@
  * scenario over it is split or trimmed, never left as an exception). `rest` is everything the named
  * shards leave, so a new scenario is always in some shard. Each shard runs in `full`'s order.
  *
- * Scenario time per shard on the push run of c389b4e7 (2026-11-03, run 41736761538, batch 8
- * wave 1 merged; harness PASS lines): relay 15m01s (e2e-relay; its W3 DVR steps 5m51s), clock
- * 13m11s, interact 11m27s (B8's three steps 2m15s), surge 9m46s, features 9m18s (e5-coop 4m60,
- * timeline-sync 4m18), w3 8m59s (watch-room 6m01, federation 2m11, portability 27s,
- * twitch-import 20s), rest 8m27s, long 8m24s, core 8m16s, notify 7m58s, bot 7m30s, captions
- * 3m48s. B8-harness then split e2e-relay (relay ~9m10s; relay-dvr ~6m35s plus B8-player's
- * relay-dvr-switch, ~8m15s estimated) and trimmed clock-skew's fixed measurement sleeps to
- * coverage waits (~11m10s estimated: RTMP −1m54s, WHIP −7s). Wave 2 adds M1-coop-money's two
- * e5-coop steps to `features` (~11 min estimated) and B8-player's edge-sync to `w3` (~10 min).
- * The estimates (relay, relay-dvr, clock, features, w3) are replaced by the PASS lines of the
- * first push run after merge; `seed` (seed-coverage) is not timed here (GitHub's API was down).
+ * Scenario time per shard (harness PASS lines, scenarios summed) on the push run of b8ff94df
+ * (2026-11-04, run 41894534066, every shard but the path-filtered two), with the run of c30aa706
+ * (41883112744) in brackets where it differs by more than a minute: clock 10m36s (clock-skew),
+ * surge 9m25s, w3 9m23s (watch-room 6m33, federation 2m08, portability 26s, twitch-import 16s),
+ * relay 9m19s [8m07s], features 9m19s (timeline-sync 4m41, e5-coop 4m38), interact 8m54s
+ * [10m40s], rest 8m45s, core 8m15s (integrity-basic 3m02, viewers 1m55, e4b-money 1m46,
+ * multi-instance 1m32), notify 8m04s (live-dvr 4m11, notifications 2m55, rehearsal 58s),
+ * relay-dvr 7m45s [6m27s], long 7m31s, bot 7m16s. The path-filtered shards on the push run of
+ * b5f2bebf (41827726573): captions 3m45s, and seed 15m33s (12m19s on 656f658a, run
+ * 41816121331), the one shard over the cap (PROGRESS, "Release follow-ups").
  */
 export const FULL_SHARDS = {
   relay: ["e2e-relay"],
