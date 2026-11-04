@@ -330,11 +330,12 @@ export class PlayerController {
   /**
    * Hold the playhead `seconds` behind the live edge (clamped to `TARGET_LATENCY_RANGE`): hls.js
    * `liveSyncDuration` for this session, replacing `liveSyncDurationCount`, and a step to the new
-   * sync position once one is known. Returns the value applied. Native HLS exposes no target, so
+   * sync position once one is known (not with `seek: false`: watch rooms land the playhead
+   * themselves, from the PDT). Returns the value applied. Native HLS exposes no target, so
    * it changes nothing and returns the current latency (NaN while unknown). Before `start()` the
    * path is not decided yet: the value is stored and returned, and applies only if hls.js attaches.
    */
-  setTargetLatency(seconds: number): number {
+  setTargetLatency(seconds: number, opts: { seek?: boolean } = {}): number {
     if (this.native) return this.latencySeconds() ?? Number.NaN;
     if (!Number.isFinite(seconds)) return this.targetLatencyS ?? Number.NaN;
     const applied = clampLatency(seconds);
@@ -345,6 +346,7 @@ export class PlayerController {
       const max = hls.config.liveMaxLatencyDuration;
       if (max !== undefined && max <= applied) hls.config.liveMaxLatencyDuration = applied + P2P_TUNING.maxLatencySlack;
       hls.targetLatency = applied;
+      if (opts.seek === false) return applied;
       const sync = hls.liveSyncPosition;
       const media = this.opts.video;
       if (sync !== null && Number.isFinite(sync) && hls.media && !media.seeking) media.currentTime = sync;

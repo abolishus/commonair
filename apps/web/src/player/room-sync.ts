@@ -11,9 +11,14 @@
  * (positive: this member is ahead).
  *
  * - **hls.js** steers with `setTargetLatency`: the new hold-back is the last one applied plus the
- *   drift, so one step converges whatever the encoder's offset between PDT and hls.js's edge. A
- *   drift over 2 s is a seek (`seekToWallclock`). A correction then settles before the next one,
- *   so a seek still in flight is never corrected twice (no overshoot).
+ *   drift, so hls.js keeps the new distance from then on. The playhead itself lands on the target
+ *   from the playhead (`seekToWallclock`; PDT is linear in media time), not at hls.js's sync
+ *   position: that one is measured from this member's own edge estimate (`edge + age`), which
+ *   moves by hundreds of ms between steps (a rendition switch, a late playlist reload,
+ *   `edgeStalled`), so a step that seeks there lands off by however far it moved (CI run
+ *   41757992200: two members stayed 0.5-1.1 s apart). A drift over 2 s is a plain seek, and the
+ *   hold-back follows it. A correction then settles before the next one, so a seek still in
+ *   flight is never corrected twice (no overshoot).
  * - **WebKit native** (`prefersNativeHls`) exposes no hold-back: seek only, with about 1 s tolerance.
  * - **Reduced motion** widens both bands so the picture jumps less often.
  * - **DVR** members are left alone (the server leaves them out of the target too).
@@ -92,8 +97,11 @@ export function nextCorrection(i: DriftInput): Correction {
 export interface RoomPlayer {
   playheadWallclock(): Date | null;
   playbackMode(): PlaybackMode;
-  /** hls.js hold-back; absent on players that cannot steer (the fallback, native). */
-  setTargetLatency?(seconds: number): number;
+  /**
+   * hls.js hold-back; absent on players that cannot steer (the fallback, native). `seek: false`
+   * holds the new distance without stepping to hls.js's sync position now.
+   */
+  setTargetLatency?(seconds: number, opts?: { seek?: boolean }): number;
   /**
    * The player's own live latency in seconds (hls.js `latency`), when it knows it. The first
    * hold-back step uses it as its base; without it the base is `now - PDT`, which mixes the
@@ -207,30 +215,40 @@ export class RoomSyncDriver {
     if (!p) return { kind: "none", driftMs: null };
     const now = this.now();
     const head = p.playheadWallclock()?.getTime() ?? null;
+    const targetMs = this.targetNow();
+    const measured = measuredLatency(p, head, now);
     const c = nextCorrection({
       playheadMs: head,
-      targetMs: this.targetNow(),
+      targetMs,
       mode: p.playbackMode(),
       native: p.native,
       steer: p.setTargetLatency !== undefined,
       reducedMotion: this.deps.reducedMotion(),
       appliedLatency: this.applied,
-      measuredLatency: measuredLatency(p, head, now),
+      measuredLatency: measured,
       sinceLastMs: this.lastAt === null ? null : now - this.lastAt,
     });
     this.lastDriftMs = c.driftMs;
-    if (c.kind === "latency" && p.setTargetLatency) {
-      const applied = p.setTargetLatency(c.seconds);
-      this.applied = Number.isFinite(applied) ? applied : c.seconds;
+    if (c.kind === "latency" && p.setTargetLatency && targetMs !== null) {
+      this.hold(p, c.seconds);
+      // Land from the playhead; hls.js's sync position hangs off its own (moving) edge estimate.
+      if (!p.seekToWallclock(new Date(targetMs))) p.setTargetLatency(c.seconds);
       this.lastAt = now;
     } else if (c.kind === "seek") {
       if (p.seekToWallclock(new Date(c.toMs))) {
-        // The hold-back follows the seek, so hls.js does not pull the playhead back afterwards.
-        if (this.applied !== null && p.setTargetLatency) this.applied = clampLatency(this.applied + c.driftMs / 1000);
+        // The hold-back follows the seek, so hls.js keeps the new distance rather than its old one.
+        const base = this.applied ?? measured;
+        if (p.setTargetLatency && base !== null) this.hold(p, clampLatency(base + c.driftMs / 1000));
         this.lastAt = now;
       }
     }
     return c;
+  }
+
+  /** Set the hold-back without moving the playhead, and remember it. */
+  private hold(p: RoomPlayer, seconds: number): void {
+    const applied = p.setTargetLatency?.(seconds, { seek: false }) ?? Number.NaN;
+    this.applied = Number.isFinite(applied) ? applied : seconds;
   }
 
   /** Leaving the room: forget the target (the player keeps its last hold-back until it reloads). */

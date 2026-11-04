@@ -191,6 +191,17 @@ describe("setTargetLatency", () => {
     await c.stop();
   });
 
+  it("hls.js: seek false holds the new distance without moving the playhead", async () => {
+    const { c, hls, video } = await hlsSession();
+    hls.media = video;
+    hls.liveSyncPosition = 88;
+    video.currentTime = 80;
+    expect(c.setTargetLatency(7, { seek: false })).toBe(7);
+    expect(hls.targetLatency).toBe(7);
+    expect(video.currentTime).toBe(80);
+    await c.stop();
+  });
+
   it("hls.js: clamps to the allowed range and keeps the max latency above the target", async () => {
     const { c, hls } = await hlsSession();
     hls.config.liveMaxLatencyDuration = 6;
