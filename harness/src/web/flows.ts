@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /** Small web flows several scenarios share (sign up, sign in, wait for one of several elements). */
+import { existsSync, readFileSync } from "node:fs";
 import type { Locator, Page } from "playwright";
+import { createLogger } from "@commonair/observability";
+import { PSEUDO_LOCALE, pseudoLocalize } from "../../../packages/i18n/src/pseudo.ts";
 import { type Mailpit, findTokenLink } from "../mailpit.ts";
 import type { UserCredentials } from "../users.ts";
 import { sleep, waitFor } from "../wait.ts";
@@ -32,8 +35,96 @@ export async function waitForOneOf<Id extends TestId>(
   return seen.id;
 }
 
-/** The `error.rateLimited` form error (core.json, en): the `auth` bucket is full for this address. */
-const RATE_LIMITED_FORM_ERROR = /too many attempts/i;
+// ------------------------------------------------------------ the rate-limited form error
+
+/**
+ * The `auth` bucket is full for this address: the form shows `error.rateLimited` from the web
+ * catalog (`apps/web/src/i18n/locales/<lang>/core.json`) in the page's language. `form-error`
+ * carries no error code (no test id or ARIA state tells one error from another), so the harness
+ * matches the catalog text for the locale the page renders in, never an English literal.
+ */
+export const RATE_LIMITED_KEY = "error.rateLimited";
+const WEB_LOCALES = new URL("../../../apps/web/src/i18n/locales/", import.meta.url);
+const log = createLogger({ service: "harness", base: { module: "web-flows" } });
+
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * A catalog message as a pattern: its literal text escaped, every `{placeholder}` (a whole ICU
+ * argument, plural and select included, up to its matching brace) a wildcard. The web catalogs
+ * use no ICU `'{'` quoting, so a brace always opens an argument.
+ */
+export function messagePattern(message: string): RegExp {
+  let out = "";
+  let literal = "";
+  let depth = 0;
+  for (const ch of message) {
+    if (ch === "{") {
+      if (depth === 0) {
+        out += escapeRegExp(literal);
+        literal = "";
+      }
+      depth++;
+    } else if (ch === "}" && depth > 0) {
+      depth--;
+      if (depth === 0) out += ".+?";
+    } else if (depth === 0) literal += ch;
+  }
+  return new RegExp(out + escapeRegExp(literal), "i");
+}
+
+function readCatalogMessage(lang: string, key: string): string | null {
+  if (!/^[a-z]{2,3}$/.test(lang)) return null;
+  const file = new URL(`${lang}/core.json`, WEB_LOCALES);
+  if (!existsSync(file)) return null;
+  const message = (JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>)[key];
+  return typeof message === "string" ? message : null;
+}
+
+/**
+ * `error.rateLimited` as the web renders it for `locale` (the page's `<html lang>`): the
+ * language's catalog (`es-MX` reads `es`), `en-XA` through the web's pseudo-locale transform, and
+ * English with a warning for a locale whose catalog lacks the key (the web falls back the same way).
+ */
+export function rateLimitedMessage(
+  locale: string | null | undefined,
+  warn: (msg: string, fields: Record<string, unknown>) => void = (msg, fields) => log.warn(msg, fields),
+): string {
+  const tag = locale?.trim() || "en";
+  const english = readCatalogMessage("en", RATE_LIMITED_KEY);
+  if (english === null) throw new Error(`apps/web en/core.json has no "${RATE_LIMITED_KEY}"`);
+  if (tag.toLowerCase() === PSEUDO_LOCALE.toLowerCase()) return pseudoLocalize(english);
+  const lang = (tag.split("-")[0] ?? "").toLowerCase();
+  if (lang === "en") return english;
+  const own = readCatalogMessage(lang, RATE_LIMITED_KEY);
+  if (own !== null) return own;
+  warn("rate-limit message: the locale's catalog has no entry, matching English", {
+    locale: tag,
+    key: RATE_LIMITED_KEY,
+  });
+  return english;
+}
+
+const patterns = new Map<string, RegExp>();
+
+/** The rate-limited form error's pattern for a locale (cached per tag). */
+export function rateLimitedPattern(locale: string | null | undefined): RegExp {
+  const tag = locale?.trim() || "en";
+  let p = patterns.get(tag);
+  if (!p) {
+    p = messagePattern(rateLimitedMessage(tag));
+    patterns.set(tag, p);
+  }
+  return p;
+}
+
+/** The language the page renders in (`<html lang>`), or null before it has one. */
+async function pageLocale(page: Page): Promise<string | null> {
+  return page
+    .locator("html")
+    .getAttribute("lang", { timeout: 1_000 })
+    .catch(() => null);
+}
 /** The `auth` bucket's window (services/api/src/lib/ratelimit.ts) plus a margin. */
 const AUTH_WINDOW_WAIT_MS = 65_000;
 const RATE_LIMITED_RETRY_MS = 5_000;
@@ -60,7 +151,7 @@ export async function signInViaUi(
       await leftSignin(page, timeoutMs);
       return;
     } catch (err) {
-      const limited = err instanceof Error && RATE_LIMITED_FORM_ERROR.test(err.message);
+      const limited = err instanceof Error && rateLimitedPattern(await pageLocale(page)).test(err.message);
       if (!limited || Date.now() + RATE_LIMITED_RETRY_MS > deadline) throw err;
       await sleep(RATE_LIMITED_RETRY_MS, signal);
       // A stale error can outlive a submit that went through: signed in is signed in.
