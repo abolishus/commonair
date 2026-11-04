@@ -5,7 +5,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # ADR 0025: Staging and production on DigitalOcean (supersedes ADR 0010)
 
-- Status: accepted (2026-10-26)
+- Status: accepted (2026-10-26); decision 5 amended 2026-11-04 ([Amendment](#amendment-2026-11-04-decision-5-until-production-exists))
 - Date: 2026-10-26 (provider facts checked on 2026-10-24)
 
 ## Context
@@ -94,6 +94,25 @@ Hostinger is out: prepaid terms, one IP per VPS, no confirmed IPv6 or Debian 13 
   self-hosters get the same option (`.claude/briefs/next/S1-scaling.md`).
 - **Availability at launch is 99.5% a month**; 99.9% is the target once stage 1 adds database
   failover.
+
+## Amendment (2026-11-04): decision 5 until production exists
+
+DigitalOcean API tokens cannot be limited to one project, and an account has billing alerts but
+no hard spending cap, so the staging-only project with its own scoped token that batch 8 planned
+(U5) would not have contained anything. Until production exists, the maintainer lets an agent
+use the operator's account token through the `doctl` context `commonair`, with these guardrails:
+
+- every resource the agent creates is in the project `commonair-agent-checks` and tagged
+  `commonair-agent-check`, and is deleted by that tag only, as soon as its check is done;
+- nothing untagged is modified, resized, powered off or deleted: not the staging droplet
+  `commonair-rc-test`, nor anything else in `first-project`;
+- the resource inventory is taken at the start and end of every run, and the two must match
+  apart from `commonair-agent-checks`;
+- a billing alert (about $50) is set before the first billable resource;
+- the token and every database password stay out of git, logs and command lines.
+
+**Once production exists, this ends:** agent checks then run in a separate DigitalOcean team
+with its own scoped token, which cannot reach production.
 
 ## Open questions
 
