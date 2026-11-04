@@ -1442,7 +1442,7 @@ describe.runIf(CAN_RUN_PROMTOOL)("promtool", () => {
     expect(r.code, r.out).toBe(0);
     expect(r.out).toContain("SUCCESS");
     expect(r.out).not.toContain("FAILED");
-  });
+  }, 300_000);
 });
 
 // ---------------------------------------------------------------- a slow or dead route
