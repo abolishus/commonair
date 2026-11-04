@@ -265,7 +265,10 @@ Numbers in ADR 0032 §1:
 - failover: 7.9 s for Postgres and 5.9 s for Valkey, no acknowledged write lost;
 - restore into a fresh cluster: about 13 min;
 - app-droplet rebuild from tofu with rc.10: about 7 min;
-- the status stack probes staging; its page served over IPv4 and IPv6.
+- the status stack probes staging; its page served over IPv4 and IPv6. Two gaps:
+  - `api` and `video` show down until staging runs a release with the `/readyz/api` and
+    `/readyz/origin` routes (`80c59e4a`, after rc.10);
+  - the alert mail was not tested (the user skipped placing `alert.env`).
 
 Found and fixed:
 
