@@ -27,6 +27,7 @@ self.addEventListener("message", (event: MessageEvent<RunRequest>) => {
   } else if (filters) sets.delete(req.key); // re-inserted below: most recently used last
   if (!filters) return reply({ type: "missing", id: req.id });
   sets.set(req.key, filters);
+  reply({ type: "started", id: req.id });
   reply({ type: "result", id: req.id, outcome: applyFilters(req.body, filters, req.budgetMs) });
 });
 

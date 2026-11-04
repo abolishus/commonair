@@ -24,5 +24,7 @@ export interface RunRequest {
 
 export type WorkerReply =
   | { type: "ready" }
+  /** The set is compiled and the filters start now: the hard timeout runs from here. */
+  | { type: "started"; id: number }
   | { type: "result"; id: number; outcome: FilterOutcome }
   | { type: "missing"; id: number };

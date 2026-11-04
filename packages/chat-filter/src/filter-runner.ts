@@ -46,8 +46,21 @@ export interface WorkerFilterRunnerOptions {
   workers?: number;
   /** Soft budget across all filters, checked between filters (default FILTER_BUDGET_MS). */
   budgetMs?: number;
-  /** Wall time from dispatch after which the worker is terminated (default budget + 25 ms). */
+  /**
+   * Wall time from the worker's start on a message (its set compiled) after which the worker is
+   * terminated and the set quarantined (default budget + 100 ms). Measured from `started`, not
+   * from dispatch: getting the message and a new set to the worker and compiling it is not the
+   * filters running, and with 25 ms of slack from dispatch a loaded host held and quarantined sets
+   * whose patterns were fine (chat.int's regex filter test, `msg_held` for `msg_rejected`).
+   */
   hardTimeoutMs?: number;
+  /**
+   * A worker that has not started a message this long after dispatch is replaced and the message
+   * held, without quarantining the set (default 2 s).
+   */
+  startTimeoutMs?: number;
+  /** The worker script (tests). */
+  workerUrl?: string;
   /** Longest a message waits for a free worker before it is held (default 250 ms). */
   maxQueueWaitMs?: number;
   /** Messages waiting for a worker beyond this are held at once (default 10 000). */
@@ -104,14 +117,15 @@ export class WorkerFilterRunner implements FilterRunner {
   private respawnTimer: ReturnType<typeof setTimeout> | null = null;
   private nextId = 0;
   private closed = false;
-  private readonly o: Required<Omit<WorkerFilterRunnerOptions, "logger" | "hooks">>;
+  private readonly o: Required<Omit<WorkerFilterRunnerOptions, "logger" | "hooks" | "workerUrl">>;
 
   constructor(private readonly opts: WorkerFilterRunnerOptions = {}) {
     const budgetMs = opts.budgetMs ?? FILTER_BUDGET_MS;
     this.o = {
       workers: Math.max(1, opts.workers ?? 2),
       budgetMs,
-      hardTimeoutMs: opts.hardTimeoutMs ?? budgetMs + 25,
+      hardTimeoutMs: opts.hardTimeoutMs ?? budgetMs + 100,
+      startTimeoutMs: opts.startTimeoutMs ?? 2_000,
       maxQueueWaitMs: opts.maxQueueWaitMs ?? 250,
       maxQueue: opts.maxQueue ?? 10_000,
       maxQueuedPerSet: opts.maxQueuedPerSet ?? 50,
@@ -209,7 +223,7 @@ export class WorkerFilterRunner implements FilterRunner {
   }
 
   private spawn(): Slot {
-    const worker = new Worker(WORKER_URL);
+    const worker = new Worker(this.opts.workerUrl ?? WORKER_URL);
     const slot: Slot = { worker, ready: false, dead: false, job: null, timer: null, known: new Set() };
     worker.addEventListener("message", (event: MessageEvent<WorkerReply>) => this.onReply(slot, event.data));
     worker.addEventListener("error", () => this.fail(slot, "crash"));
@@ -228,6 +242,11 @@ export class WorkerFilterRunner implements FilterRunner {
     }
     const job = slot.job;
     if (!job || job.id !== msg.id) return;
+    if (msg.type === "started") {
+      if (slot.timer) clearTimeout(slot.timer);
+      slot.timer = setTimeout(() => this.fail(slot, "timeout"), this.o.hardTimeoutMs);
+      return;
+    }
     if (msg.type === "missing") {
       // The worker evicted this set from its cache: send it again, same deadline.
       slot.known.delete(job.key);
@@ -256,7 +275,8 @@ export class WorkerFilterRunner implements FilterRunner {
         continue;
       }
       slot.job = job;
-      slot.timer = setTimeout(() => this.fail(slot, "timeout"), this.o.hardTimeoutMs);
+      // Until the worker says it started: the hard timeout begins there (`onReply`).
+      slot.timer = setTimeout(() => this.fail(slot, "crash"), this.o.startTimeoutMs);
       this.post(slot, job);
     }
   }

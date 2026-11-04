@@ -63,9 +63,41 @@ function make(opts: WorkerFilterRunnerOptions = {}) {
 const HELD = { action: "hold", timedOut: true };
 /**
  * For tests about outcomes, not timing. The production hard timeout is the filter budget plus
- * 25 ms, so one scheduling stall while other suites run in parallel would hold a message.
+ * 100 ms, so one scheduling stall while other suites run in parallel could hold a message.
  */
 const UNHURRIED = { hardTimeoutMs: 2_000, maxQueueWaitMs: 2_000 };
+
+const SLOW_START_WORKER = new URL("./fixtures/slow-start-worker.ts", import.meta.url).href;
+
+describe("WorkerFilterRunner: the hard timeout runs from the worker's start", () => {
+  test("a new set that takes longer than the hard timeout to load is still run, not held", async () => {
+    // The worker needs 300 ms to load and compile the set; the filters themselves take
+    // microseconds. Timed from dispatch (as before), 50 ms held the message and quarantined a set
+    // whose patterns were fine (chat.int's regex filter test on a loaded runner).
+    const { r, reasons, quarantines } = make({
+      workers: 1,
+      hardTimeoutMs: 50,
+      maxQueueWaitMs: 2_000,
+      workerUrl: SLOW_START_WORKER,
+    });
+    expect(await r.run("join discord.gg/abc", typical)).toEqual({ action: "block", filterId: "b3" });
+    expect(await r.run("hello there", typical)).toEqual({ action: "pass", body: "hello there", filterId: null });
+    expect(reasons).toEqual([]);
+    expect(quarantines()).toBe(0);
+  });
+
+  test("a worker that never starts the message is replaced and the message held, the set not quarantined", async () => {
+    const { r, reasons, quarantines } = make({
+      workers: 1,
+      startTimeoutMs: 100,
+      maxQueueWaitMs: 2_000,
+      workerUrl: SLOW_START_WORKER,
+    });
+    expect(await r.run("join discord.gg/abc", typical)).toMatchObject(HELD);
+    expect(reasons).toEqual(["crash"]);
+    expect(quarantines()).toBe(0);
+  });
+});
 
 describe("WorkerFilterRunner", () => {
   test("runs filters in a worker with the same outcomes as inline", async () => {
