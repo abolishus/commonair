@@ -100,6 +100,29 @@ export const NO_SESSION_FEATURES: SessionFeatures = Object.freeze({
 
 /** How long `enterDvr` waits for the DVR playlist before it gives up and returns to live. */
 export const DVR_LOAD_TIMEOUT_MS = 10_000;
+/** How long after a DVR source swap the landing is held (the new source's start-up). */
+export const DVR_LANDING_GUARD_MS = 15_000;
+/** How far the playhead may drift from the landing (plus played time) before it is put back. */
+export const DVR_LANDING_TOLERANCE_MS = 5_000;
+/** Corrections per swap; past them the playhead stays wherever it went. */
+export const DVR_LANDING_MAX_CORRECTIONS = 3;
+/** A `timeupdate` step longer than this is a jump, not playback. */
+const PLAYBACK_STEP_MAX_S = 1.5;
+
+/** A DVR swap's landing while the new source settles (`DVR_LANDING_GUARD_MS`). */
+interface DvrLanding {
+  generation: number;
+  /** Where the swap sent the playhead (epoch ms). */
+  target: number;
+  until: number;
+  /** Media seconds played since, counted from `timeupdate` steps (jumps excluded). */
+  played: number;
+  lastTime: number | null;
+  corrections: number;
+  seekOk: boolean;
+  /** Last measured distance from where the playhead should be (ms; + is toward live). */
+  driftMs: number | null;
+}
 
 export interface PlayerControllerOptions {
   channel: string;
@@ -271,6 +294,7 @@ export class PlayerController {
   private dvrUrl: string | null = null;
   /** Bumped by every `enterDvr`/`exitDvr`, so a superseded DVR load does nothing when it settles. */
   private dvrGeneration = 0;
+  private landing: DvrLanding | null = null;
 
   constructor(private readonly opts: PlayerControllerOptions) {
     const t = opts.targetLatency;
@@ -306,6 +330,11 @@ export class PlayerController {
    * `getStartDate()`, within `seekable`. False, and nothing moves, when `t` is out of range.
    */
   seekToWallclock(t: Date): boolean {
+    this.landing = null;
+    return this.seekToWallclockAt(t);
+  }
+
+  private seekToWallclockAt(t: Date): boolean {
     const at = t.getTime();
     if (this.stopped || !Number.isFinite(at)) return false;
     const { video } = this.opts;
@@ -341,6 +370,7 @@ export class PlayerController {
    */
   seekBy(ms: number): boolean {
     if (this.stopped || !Number.isFinite(ms)) return false;
+    this.landing = null;
     const { video } = this.opts;
     if (video.readyState < 1 || (this.hls && !this.hls.hasEnoughToStart)) return false;
     const next = video.currentTime + ms / 1000;
@@ -687,6 +717,7 @@ export class PlayerController {
       this.stats = new VideoStats(video, () => this.setState("playing"));
       video.addEventListener("playing", this.onPlaying);
       video.addEventListener("error", this.onVideoError);
+      video.addEventListener("timeupdate", this.holdLanding);
       this.scheduleHeartbeat();
       if (this.native) {
         await this.waitForPlaylist(started.playlistUrl);
@@ -967,9 +998,23 @@ export class PlayerController {
     void swapDvrSource(
       {
         playheadWallclock: () => this.playheadWallclock(),
-        seekToWallclock: (t) => this.seekToWallclock(t),
+        seekToWallclock: (t) => this.seekToWallclockAt(t),
         paused: () => video.paused,
         pause: () => video.pause(),
+        landed: (target, seekOk) => {
+          if (generation !== this.dvrGeneration || this.stopped) return;
+          this.landing = {
+            generation,
+            target: target.getTime(),
+            until: Date.now() + DVR_LANDING_GUARD_MS,
+            played: 0,
+            lastTime: null,
+            corrections: 0,
+            seekOk,
+            driftMs: null,
+          };
+          this.traceLanding();
+        },
         loadDvr: async (url, { autoplay }) => {
           // Set first, so `tokenFor` hands the new directory its DVR token.
           this.dvrUrl = url;
@@ -986,6 +1031,53 @@ export class PlayerController {
       },
       this.dvrToken === null ? move.url : withToken(move.url, this.dvrToken),
     );
+  }
+
+  /**
+   * Hold a DVR swap's landing while the new source settles: the playhead should be where the swap
+   * sent it plus what has played since. hls.js can still move it on a new live playlist (to the
+   * live sync position once the first fragments are in, CI run 41764916744: 60 s behind became 15);
+   * a jump like that is put back, at most `DVR_LANDING_MAX_CORRECTIONS` times. A seek of the
+   * viewer's (any public seek), a new `enterDvr`/`exitDvr`/swap or the end of the window ends it.
+   */
+  private holdLanding = (): void => {
+    const l = this.landing;
+    if (!l) return;
+    const { video } = this.opts;
+    if (l.generation !== this.dvrGeneration || this.mode !== "dvr" || this.stopped || Date.now() > l.until) {
+      this.landing = null;
+      return;
+    }
+    const t = video.currentTime;
+    if (l.lastTime !== null) {
+      const step = t - l.lastTime;
+      if (step > 0 && step <= PLAYBACK_STEP_MAX_S) l.played += step;
+    }
+    l.lastTime = t;
+    // Not while a seek is under way or before the new source has media.
+    if (video.seeking || (this.hls && !this.hls.hasEnoughToStart)) return;
+    const at = this.playheadWallclock();
+    if (!at) return;
+    const expected = l.target + l.played * 1000;
+    l.driftMs = Math.round(at.getTime() - expected);
+    if (Math.abs(l.driftMs) > DVR_LANDING_TOLERANCE_MS && l.corrections < DVR_LANDING_MAX_CORRECTIONS) {
+      l.corrections += 1;
+      if (this.seekToWallclockAt(new Date(expected))) l.lastTime = video.currentTime;
+    }
+    this.traceLanding();
+  };
+
+  /** The last swap's landing on the element (`data-dvr-swap`), for the harness's relay-dvr diagnostics. */
+  private traceLanding(): void {
+    const l = this.landing;
+    if (!l) return;
+    this.opts.video.dataset.dvrSwap = JSON.stringify({
+      target: l.target,
+      seekOk: l.seekOk,
+      played: Math.round(l.played * 10) / 10,
+      driftMs: l.driftMs,
+      corrections: l.corrections,
+    });
   }
 
   /**
@@ -1019,6 +1111,7 @@ export class PlayerController {
     const { video } = this.opts;
     video.removeEventListener("playing", this.onPlaying);
     video.removeEventListener("error", this.onVideoError);
+    video.removeEventListener("timeupdate", this.holdLanding);
     this.stats?.dispose();
     // The P2P loader (peer connections, tracker socket) goes before the session ends.
     if (this.p2p) this.p2p.destroy();

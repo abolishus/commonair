@@ -5,6 +5,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import { ROOM_LIMITS } from "@commonair/contracts/enums";
 import {
+  dvrFetchLog,
   dvrFetchSummary,
   EDGE_CAP_SLACK_MS,
   edgeReportsOk,
@@ -129,6 +130,20 @@ describe("dvrFetchSummary", () => {
     const sum = dvrFetchSummary([{ origin: "http://localhost:3003", status: 404, at: T0 }], hosts, T0);
     expect(sum.firstOriginOkAt).toBeNull();
     expect(sum.origin).toBe(1);
+  });
+
+  it("dvrFetchLog: the last fetches by source, file and status, timed from `since`", () => {
+    const log = dvrFetchLog(
+      [
+        { origin: "http://192.168.1.5:7443", status: 200, at: T0 - 1000, file: "index.m3u8" },
+        { origin: "http://localhost:3003", status: 404, at: T0 + 2500, file: "seg12.m4s" },
+        { origin: "https://cdn.example.invalid", status: 200, at: T0 + 3000 },
+      ],
+      hosts,
+      T0,
+    );
+    expect(log).toEqual(["-1000ms relay index.m3u8 200", "2500ms origin seg12.m4s 404", "3000ms other ? 200"]);
+    expect(dvrFetchLog([{ origin: hosts.origin, status: 200, at: T0, file: "a" }], hosts, T0, 0)).toEqual([]);
   });
 });
 

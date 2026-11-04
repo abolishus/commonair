@@ -119,6 +119,11 @@ export interface DvrSwapSeam {
   loadDvr(url: string, opts: { autoplay: boolean }): Promise<boolean>;
   paused(): boolean;
   pause(): void;
+  /**
+   * Where the swap sent the playhead (`seekOk` false: the new playlist did not reach it yet), so
+   * the controller can hold it there while the new source settles.
+   */
+  landed?(target: Date, seekOk: boolean): void;
 }
 
 export type DvrSwapOutcome = "swapped" | "failed";
@@ -140,7 +145,11 @@ export async function swapDvrSource(
   const paused = seam.paused();
   const started = now();
   if (!(await seam.loadDvr(url, { autoplay: !paused }))) return "failed";
-  if (at) seam.seekToWallclock(new Date(paused ? at.getTime() : at.getTime() + (now() - started)));
+  if (at) {
+    const target = new Date(paused ? at.getTime() : at.getTime() + (now() - started));
+    const seekOk = seam.seekToWallclock(target);
+    seam.landed?.(target, seekOk);
+  }
   // Belt and braces: an element that autoplays on a new source is paused again here.
   if (paused && !seam.paused()) seam.pause();
   return "swapped";

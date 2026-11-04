@@ -24,8 +24,14 @@ class DvrHls extends FakeHls {
 
 vi.mock("hls.js", () => ({ default: DvrHls }));
 
-const { DVR_LOAD_TIMEOUT_MS, NO_SESSION_FEATURES, PlayerController, urlDirectory } =
-  await import("../src/player/controller.ts");
+const {
+  DVR_LANDING_GUARD_MS,
+  DVR_LANDING_MAX_CORRECTIONS,
+  DVR_LOAD_TIMEOUT_MS,
+  NO_SESSION_FEATURES,
+  PlayerController,
+  urlDirectory,
+} = await import("../src/player/controller.ts");
 type Features = import("../src/player/controller.ts").SessionFeatures;
 
 const T0 = Date.parse("2026-11-01T12:00:00.000Z");
@@ -366,13 +372,101 @@ function startupModel(hls: DvrHls, video: HTMLVideoElement, windows: Record<stri
     firstFragmentBuffered() {
       if (buffered) return;
       buffered = true;
-      const last = fragments[fragments.length - 1];
-      const liveSync = last ? last.start + last.duration - 3 * 4 : 0;
-      const start = startAt >= 0 ? startAt : liveSync;
+      const start = startAt >= 0 ? startAt : this.liveSync();
       if (video.currentTime < start) video.currentTime = start;
+    },
+    /** hls.js's live sync position: three segments from the end. */
+    liveSync() {
+      const last = fragments[fragments.length - 1];
+      return last ? last.start + last.duration - 3 * 4 : 0;
+    },
+    /** Playback advancing `seconds` (with the element's `timeupdate`). */
+    play(seconds: number) {
+      for (let s = 0; s < seconds; s += 0.25) {
+        video.currentTime += 0.25;
+        video.dispatchEvent(new Event("timeupdate"));
+      }
     },
   };
 }
+
+/** A playing relay session 60 s behind, then the heartbeat that moves it to the origin. */
+async function swappedSession() {
+  const EDGE = T0;
+  const RELAY_DVR = "https://relay.example/dvr/019a0000-0000-7000-8000-0000000000aa/index.m3u8?t=dvr-1";
+  const ORIGIN_DVR = "https://play.example/dvr/019a0000-0000-7000-8000-0000000000aa/index.m3u8?t=dvr-o";
+  const s = await hlsSession({ dvrPlaylistUrl: RELAY_DVR });
+  const { c, f, hls, video } = s;
+  Object.defineProperty(video, "paused", { get: () => false, configurable: true });
+  const model = startupModel(hls, video, {
+    "https://relay.example/dvr/": dvrWindow(EDGE, 92),
+    "https://play.example/dvr/": dvrWindow(EDGE, 120),
+  });
+  const entering = c.enterDvr(RELAY_DVR);
+  model.levelLoaded();
+  await entering;
+  model.firstFragmentBuffered();
+  c.seekToWallclock(new Date(EDGE - 60_000));
+  f.heartbeat.mockResolvedValue({
+    ok: true,
+    token: "tok-o",
+    dvrToken: "dvr-o",
+    switchTo: "https://play.example/hls/live/rivertide/index.m3u8?t=tok-o",
+    dvrSwitchTo: ORIGIN_DVR,
+  });
+  await (c as unknown as { heartbeat(): Promise<void> }).heartbeat();
+  model.levelLoaded();
+  await new Promise((r) => setTimeout(r, 0));
+  model.firstFragmentBuffered();
+  return { ...s, model, before: EDGE - 60_000 };
+}
+
+describe("dvrSwitchTo: the landing is kept while the new source settles", () => {
+  it("a jump toward live after the swap (hls.js's live sync) is undone; played time still counts", async () => {
+    const { c, video, model, before } = await swappedSession();
+    model.play(2);
+    // Whatever moves the playhead once the origin's first fragments are in (CI: to live sync).
+    video.currentTime = model.liveSync();
+    model.play(1);
+    const at = c.playheadWallclock()?.getTime() ?? Number.NaN;
+    // 3 s of playback since the swap, not the 45 s jump.
+    expect(Math.abs(at - (before + 3_000))).toBeLessThan(1_000);
+    expect(c.playbackMode()).toBe("dvr");
+    const trace = JSON.parse(video.dataset.dvrSwap ?? "{}") as Record<string, unknown>;
+    expect(trace).toMatchObject({ seekOk: true, corrections: 1 });
+    await c.stop();
+  });
+
+  it("a seek the viewer makes after the swap is theirs: not undone", async () => {
+    const { c, model } = await swappedSession();
+    model.play(1);
+    expect(c.seekToWallclock(new Date(T0 - 20_000))).toBe(true);
+    model.play(1);
+    expect(Math.abs((c.playheadWallclock()?.getTime() ?? Number.NaN) - (T0 - 19_000))).toBeLessThan(1_000);
+    await c.stop();
+  });
+
+  it("gives up after a few corrections", async () => {
+    const { c, video, model } = await swappedSession();
+    for (let i = 0; i < 6; i++) {
+      video.currentTime = model.liveSync();
+      model.play(0.5);
+    }
+    const trace = JSON.parse(video.dataset.dvrSwap ?? "{}") as Record<string, unknown>;
+    expect(trace.corrections).toBe(DVR_LANDING_MAX_CORRECTIONS);
+    await c.stop();
+  });
+
+  it("leaves the playhead alone once the guard window is over", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const { c, video, model } = await swappedSession();
+    vi.setSystemTime(Date.now() + DVR_LANDING_GUARD_MS + 1_000);
+    video.currentTime = model.liveSync();
+    model.play(0.5);
+    expect(video.currentTime).toBeCloseTo(model.liveSync() + 0.5, 1);
+    await c.stop();
+  });
+});
 
 describe("dvrSwitchTo while DVR plays (hls.js)", () => {
   const EDGE = T0;
