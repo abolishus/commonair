@@ -102,6 +102,62 @@ export interface RoomPlayer {
   latencySeconds?(): number | null;
   seekToWallclock(t: Date): boolean;
   native: boolean;
+  /**
+   * Batch 8: the live edge as a wall-clock instant (the PDT at the end of the live playlist), null
+   * in DVR or while unknown. Chat measures the room's 5 s cap from `max` of the members' edges.
+   */
+  edgeWallclock?(): Date | null;
+}
+
+/** What `liveEdgeMs` reads. Every field may be unknown (null). */
+export interface EdgeInput {
+  mode: PlaybackMode;
+  /** PDT under the playhead (epoch ms). */
+  playheadMs: number | null;
+  /** hls.js `latency`: seconds from the playhead to the live edge, from the playlist. */
+  latencySeconds: number | null;
+  /** Native HLS: the end of `video.seekable` and `currentTime` (seconds, media time). */
+  seekableEnd: number | null;
+  currentTime: number | null;
+}
+
+/**
+ * The player's live edge as a wall-clock instant (epoch ms), from the media clock it already has
+ * (ADR 0012): the PDT under the playhead plus the distance to the edge. hls.js knows that distance
+ * from the playlist (`latency`); native HLS from `seekable`'s end. Both are media time, so the
+ * viewer's own clock plays no part. Null in DVR (a DVR member is left out of the target, and its
+ * edge with it), before the first frame, or when neither distance is known.
+ */
+export function liveEdgeMs(i: EdgeInput): number | null {
+  if (i.mode !== "live" || i.playheadMs === null || !Number.isFinite(i.playheadMs)) return null;
+  if (i.latencySeconds !== null && Number.isFinite(i.latencySeconds) && i.latencySeconds > 0)
+    return i.playheadMs + i.latencySeconds * 1000;
+  if (
+    i.seekableEnd !== null &&
+    i.currentTime !== null &&
+    Number.isFinite(i.seekableEnd) &&
+    Number.isFinite(i.currentTime) &&
+    i.seekableEnd >= i.currentTime
+  )
+    return i.playheadMs + (i.seekableEnd - i.currentTime) * 1000;
+  return null;
+}
+
+/** What a member reports with every `room.sync`: its playhead, its mode and its live edge. */
+export interface RoomReport {
+  at: Date | null;
+  mode: PlaybackMode;
+  /** Null in DVR or while unknown. */
+  edge: Date | null;
+}
+
+/** This member's report, from its player. A DVR member reports no edge. */
+export function roomReport(p: RoomPlayer | null): RoomReport | null {
+  if (!p) return null;
+  const mode = p.playbackMode();
+  const at = p.playheadWallclock();
+  const edge = mode === "live" ? (p.edgeWallclock?.() ?? null) : null;
+  return { at, mode, edge: edge && Number.isFinite(edge.getTime()) ? edge : null };
 }
 
 /** The player's own latency when it reports a usable one, else the wall-clock estimate. */

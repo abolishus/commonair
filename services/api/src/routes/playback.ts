@@ -274,7 +274,7 @@ async function refreshDvr(
   s: typeof playbackSessions.$inferSelect,
   dataMode: number | null,
   a: Assignment,
-): Promise<string | undefined> {
+): Promise<{ token: string; vodId: string } | undefined> {
   if (dataMode !== null || !s.broadcastId) return undefined;
   const vodId = await deps.valkey.get(dvrKey(s.id));
   if (!vodId) return undefined;
@@ -285,7 +285,26 @@ async function refreshDvr(
     .where(eq(broadcasts.id, s.broadcastId));
   if (!row) return undefined;
   const allowed = await dvrVodFor(deps, row.c, row.b, () => audienceOfUser(deps, s.userId, row.c), dataMode);
-  return allowed === vodId ? signDvr(deps, s.id, s.channelId, vodId, a) : undefined;
+  return allowed === vodId ? { token: await signDvr(deps, s.id, s.channelId, vodId, a), vodId } : undefined;
+}
+
+/**
+ * Batch 8 (B8-player, W3-dvr-relay request 8): the heartbeat's `dvrSwitchTo`. A relay session whose
+ * relay left the active set moves its live source to the origin (`switchTo`); its DVR moves with
+ * it, to the origin DVR playlist under the fresh origin DVR token, so the player keeps rewinding
+ * instead of meeting 403s on the departed relay. Only ever relay → origin: `moved` is the live
+ * move's target, which the heartbeat sets to the origin and never to a relay, and the DVR URL is
+ * built on `PLAYBACK_PUBLIC_URL`, never `CDN_BASE_URL` (ADR 0016: no CDN serves DVR). From then on the
+ * session's tokens are origin tokens, so the grant stays on the origin and the switch is sent once.
+ */
+export function dvrSwitchFor(
+  deps: Deps,
+  from: PlaybackClaims["src"],
+  moved: Assignment | null,
+  dvr: { token: string; vodId: string } | undefined,
+): string | undefined {
+  if (from !== "relay" || moved?.source !== "origin" || !dvr) return undefined;
+  return dvrPlaylistUrl(deps, dvr.vodId, dvr.token, { source: "origin" });
 }
 
 export const playback = {
@@ -541,12 +560,14 @@ export const playback = {
       throw apiError("FORBIDDEN", "Confirm you are 18 or older to watch this stream");
     const { token } = await signFor(deps, s.id, s.channelId, claims.path, a, dataMode, claims.rb);
     // The DVR token is refreshed beside the live one (same lifetime and source); none in data mode.
-    const dvrToken = await refreshDvr(deps, s, dataMode, a);
+    const dvr = await refreshDvr(deps, s, dataMode, a);
+    const dvrSwitchTo = dvrSwitchFor(deps, claims.src, assignment, dvr);
     return {
       ok: true as const,
       token,
-      ...(dvrToken ? { dvrToken } : {}),
+      ...(dvr ? { dvrToken: dvr.token } : {}),
       ...(assignment ? { switchTo: playlistUrl(playlistBase(deps, assignment), claims.path, token) } : {}),
+      ...(dvrSwitchTo ? { dvrSwitchTo } : {}),
     };
   }),
 

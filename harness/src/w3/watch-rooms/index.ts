@@ -69,7 +69,7 @@ export interface LiveChannel {
   encoder: Streamer;
 }
 
-interface Member {
+export interface Member {
   label: string;
   user: SignedInUser;
   session: WebSession;
@@ -125,7 +125,7 @@ const sel = (id: string, data: Record<string, string> = {}) =>
     .join("");
 
 /** Open a signed-in browser session for `user`, recording its room sync frames into `samples`. */
-async function openMember(
+export async function openMember(
   run: WatchRoomRun,
   label: string,
   user: SignedInUser,
@@ -167,7 +167,7 @@ async function openDrawer(page: Page): Promise<void> {
 }
 
 /** The host opens a room on `channel`; returns its id and the invite path (`/<slug>?room=&invite=`). */
-async function createRoom(run: WatchRoomRun, host: Member | SignedInUser, channel: string) {
+export async function createRoom(run: WatchRoomRun, host: Member | SignedInUser, channel: string) {
   const user = "user" in host ? host.user : host;
   if (run.via === "web" && "page" in host) {
     await host.session.goto(`/${channel}`);
@@ -186,7 +186,7 @@ async function createRoom(run: WatchRoomRun, host: Member | SignedInUser, channe
 }
 
 /** A member joins through the invite; resolves with null, or the refusal code. */
-async function joinRoom(
+export async function joinRoom(
   run: WatchRoomRun,
   member: Member | SignedInUser,
   room: { roomId: string; invitePath: string; nonce: string },
@@ -214,7 +214,7 @@ async function joinRoom(
 }
 
 /** A browser member watching the room: the channel page, playing live, the drawer on the room. */
-async function watchInRoom(member: Member, channel: string, roomId: string): Promise<void> {
+export async function watchInRoom(member: Member, channel: string, roomId: string): Promise<void> {
   if (!member.page.url().includes(`/${channel}`)) await member.session.goto(`/${channel}`);
   await member.page.locator(`[data-testid="player"][data-state="playing"]`).waitFor({ timeout: PLAYING_TIMEOUT_MS });
   await openDrawer(member.page);

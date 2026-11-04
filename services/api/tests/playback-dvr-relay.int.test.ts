@@ -16,6 +16,7 @@ import { dvrTokenPath, vodPrefix } from "@commonair/contracts/storage";
 import { PLAYBACK_TOKEN_TTL_SECONDS, type PlaybackClaims } from "@commonair/contracts/tokens";
 import { schema, uuidv7 } from "@commonair/db";
 import { verifyPlaybackToken } from "@commonair/tokens";
+import { MIN_HEARTBEAT_WALL_SECONDS } from "../src/playback/verify.ts";
 import { client, signUpAndSignIn, startApi, type Client, type TestApi } from "./harness.ts";
 
 let api: TestApi;
@@ -30,7 +31,14 @@ type Start = {
   dvrWindowSeconds: number;
   dvrPlaylistUrl: string | null;
 };
-type Beat = { ok: boolean; token?: string; dvrToken?: string; switchTo?: string };
+type Beat = {
+  ok: boolean;
+  token?: string;
+  dvrToken?: string;
+  switchTo?: string;
+  dvrSwitchTo?: string;
+  throttled?: boolean;
+};
 type User = Awaited<ReturnType<typeof signUpAndSignIn>>;
 type MutableEnv = {
   CDN_PROVIDER: "none" | "origin-pull";
@@ -267,5 +275,146 @@ describe("heartbeat: the DVR token follows the assignment", () => {
       src: "relay",
       rid: relayId,
     });
+  });
+});
+
+// Batch 8 (B8-player, W3-dvr-relay request 8): a relay session whose relay leaves the active set
+// moves its DVR to the origin with the live move, through `dvrSwitchTo`.
+describe("heartbeat: dvrSwitchTo moves DVR off a departed relay, to the origin only", () => {
+  const SECOND_RELAY_URL = "https://relay-dvr-2.example.invalid";
+  const CDN = "https://cdn.example.invalid";
+
+  async function relaySession(live: Live, viewer: Client): Promise<Start> {
+    const s = await startOn("relay", () => viewer, live.owner.username);
+    await expectRelayDvr(s, live);
+    return s;
+  }
+
+  async function expectOriginSwitch(url: string | undefined, s: Start, live: Live, dvrToken: string | undefined) {
+    // On `PLAYBACK_PUBLIC_URL`'s DVR route, whatever the CDN settings (ADR 0016: no CDN serves DVR).
+    expect(url?.startsWith(`${ORIGIN()}/dvr/${live.vodId}/index.m3u8?t=`)).toBe(true);
+    expect(url?.startsWith(CDN)).toBe(false);
+    const claims = await claimsOf(tokenOfUrl(url ?? ""));
+    expect(claims).toMatchObject({
+      sid: s.sessionId,
+      cid: live.channelId,
+      path: dvrTokenPath(live.vodId),
+      src: "origin",
+    });
+    expect(claims.rid).toBeUndefined();
+    expect(claims.dm).toBeUndefined();
+    expect(claims.exp - claims.iat).toBe(DVR_TOKEN_TTL_SECONDS);
+    // The URL carries the same fresh origin DVR token the beat returns as `dvrToken`.
+    expect(tokenOfUrl(url ?? "")).toBe(dvrToken);
+  }
+
+  test("once, after the relay leaves, on the origin (never the CDN) with a fresh origin DVR token", async () => {
+    const live = await liveRecording();
+    const viewer = client(api);
+    const s = await relaySession(live, viewer);
+    const first = await beat(viewer, s, s.token, 10);
+    expect(first.dvrSwitchTo).toBeUndefined();
+
+    Object.assign(env(), { CDN_PROVIDER: "origin-pull", CDN_BASE_URL: CDN });
+    await api.deps.valkey.hdel(KEYS.relays, relayId);
+    const moved = await beat(viewer, s, s.token, 10);
+    expect(moved.switchTo?.startsWith(ORIGIN())).toBe(true);
+    await expectOriginSwitch(moved.dvrSwitchTo, s, live, moved.dvrToken);
+
+    // The grant is the origin's for the rest of the session: the relay coming back changes
+    // nothing, and later beats (on the origin token now) carry no further switch.
+    await publishRelay();
+    const after = await beat(viewer, s, moved.token ?? "", 10);
+    expect([after.switchTo, after.dvrSwitchTo]).toEqual([undefined, undefined]);
+    const refreshed = await beat(viewer, s, moved.token ?? "");
+    expect([refreshed.switchTo, refreshed.dvrSwitchTo]).toEqual([undefined, undefined]);
+    expect(await claimsOf(refreshed.dvrToken ?? "")).toMatchObject({ src: "origin", path: dvrTokenPath(live.vodId) });
+  });
+
+  test("a lost answer is repaired: the old relay token still gets the switch on the next beat", async () => {
+    const live = await liveRecording();
+    const viewer = client(api);
+    const s = await relaySession(live, viewer);
+    await api.deps.valkey.hdel(KEYS.relays, relayId);
+    const lost = await beat(viewer, s, s.token, 10);
+    expect(lost.dvrSwitchTo).toBeDefined();
+    const again = await beat(viewer, s, s.token, 10);
+    await expectOriginSwitch(again.dvrSwitchTo, s, live, again.dvrToken);
+  });
+
+  test("never for an origin or CDN session, even with relays leaving", async () => {
+    const live = await liveRecording();
+    const viewer = client(api);
+    const s = await startOn("origin", () => viewer, live.owner.username);
+    await api.deps.valkey.hdel(KEYS.relays, relayId);
+    for (const advance of [10, PLAYBACK_TOKEN_TTL_SECONDS - 60]) {
+      const r = await beat(viewer, s, s.token, advance);
+      expect([r.switchTo, r.dvrSwitchTo]).toEqual([undefined, undefined]);
+    }
+
+    const busy = await liveRecording("public", 100);
+    Object.assign(env(), { CDN_PROVIDER: "origin-pull", CDN_BASE_URL: CDN });
+    const cdn = await start(viewer, busy.owner.username);
+    expect(cdn.source).toBe("cdn");
+    const r = await beat(viewer, cdn, cdn.token);
+    expect(r.dvrToken).toBeDefined();
+    expect([r.switchTo, r.dvrSwitchTo]).toEqual([undefined, undefined]);
+  });
+
+  test("never relay → relay: with another relay active, DVR still moves to the origin", async () => {
+    const live = await liveRecording();
+    const viewer = client(api);
+    const s = await relaySession(live, viewer);
+    const other = uuidv7();
+    await api.deps.valkey.hset(
+      KEYS.relays,
+      other,
+      JSON.stringify({ url: SECOND_RELAY_URL, capacityMbps: 1000, status: "active", load: 0 }),
+    );
+    try {
+      await api.deps.valkey.hdel(KEYS.relays, relayId);
+      const moved = await beat(viewer, s, s.token, 10);
+      expect(moved.switchTo?.startsWith(ORIGIN())).toBe(true);
+      expect(moved.dvrSwitchTo?.startsWith(SECOND_RELAY_URL)).toBe(false);
+      await expectOriginSwitch(moved.dvrSwitchTo, s, live, moved.dvrToken);
+    } finally {
+      await api.deps.valkey.hdel(KEYS.relays, other);
+    }
+  });
+
+  test("a relay that leaves and is back before the beat is answered: no switch", async () => {
+    const live = await liveRecording();
+    const viewer = client(api);
+    const s = await relaySession(live, viewer);
+    await api.deps.valkey.hdel(KEYS.relays, relayId);
+    await publishRelay();
+    const r = await beat(viewer, s, s.token);
+    expect([r.switchTo, r.dvrSwitchTo]).toEqual([undefined, undefined]);
+    expect(await claimsOf(r.dvrToken ?? "")).toMatchObject({ src: "relay", rid: relayId });
+  });
+
+  test("none on an ignored beat (under the rate floor); the next beat carries it", async () => {
+    const live = await liveRecording();
+    const viewer = client(api);
+    const s = await relaySession(live, viewer);
+    await beat(viewer, s, s.token, 10);
+    await api.deps.valkey.hdel(KEYS.relays, relayId);
+    const ignored = await beat(viewer, s, s.token, MIN_HEARTBEAT_WALL_SECONDS - 1);
+    expect(ignored.throttled).toBe(true);
+    expect([ignored.switchTo, ignored.dvrSwitchTo, ignored.dvrToken]).toEqual([undefined, undefined, undefined]);
+    const moved = await beat(viewer, s, s.token, 10);
+    await expectOriginSwitch(moved.dvrSwitchTo, s, live, moved.dvrToken);
+  });
+
+  test("a relay session without a DVR grant gets the live move only", async () => {
+    const live = await liveRecording();
+    await db().update(schema.channels).set({ dvrEnabled: false }).where(eq(schema.channels.id, live.channelId));
+    const viewer = client(api);
+    const s = await startOn("relay", () => viewer, live.owner.username);
+    expectNone(s);
+    await api.deps.valkey.hdel(KEYS.relays, relayId);
+    const moved = await beat(viewer, s, s.token, 10);
+    expect(moved.switchTo?.startsWith(ORIGIN())).toBe(true);
+    expect([moved.dvrToken, moved.dvrSwitchTo]).toEqual([undefined, undefined]);
   });
 });

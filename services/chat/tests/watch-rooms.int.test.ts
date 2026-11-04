@@ -337,6 +337,41 @@ describe("sync", () => {
     expect(capped).toBeGreaterThan(10_000);
     for (const c of [h, g, d]) c.close();
   });
+
+  test("batch 8: the cap is measured from max(edgeWallclock); a future edge is dropped", async () => {
+    const r = await room();
+    const m = await member(r);
+    const h = await joined(a, r.host.id, r.id);
+    const g = await joined(b, m.id, r.id);
+    const report = (c: Client, headAgo: number, edgeAgo: number) =>
+      c.send({
+        op: "room.sync",
+        roomId: r.id,
+        playheadWallclock: new Date(Date.now() - headAgo).toISOString(),
+        mode: "live",
+        edgeWallclock: new Date(Date.now() - edgeAgo).toISOString(),
+      });
+    // Edges 1 s and 3 s back; the slow member 20 s back: capped 5 s behind the 1 s edge, not the leader.
+    report(h, 6000, 3000);
+    report(g, 20_000, 1000);
+    const lag = await eventually(async () => {
+      const f = await g.waitFor<"room.sync">((x) => x.op === "room.sync", 3000, { includePast: false });
+      const behind = Date.now() - Date.parse(f.target);
+      return behind > 5000 && behind < 7500 ? behind : null;
+    }, 6000);
+    expect(lag).toBeGreaterThan(5000);
+
+    // A member claiming an edge a minute in the future cannot pull the room forward.
+    report(h, 6000, -60_000);
+    report(g, 20_000, 20_000);
+    const held = await eventually(async () => {
+      const f = await h.waitFor<"room.sync">((x) => x.op === "room.sync", 3000, { includePast: false });
+      const behind = Date.now() - Date.parse(f.target);
+      return behind > 10_000 && behind < 12_500 ? behind : null;
+    }, 6000);
+    expect(held).toBeGreaterThan(10_000);
+    for (const c of [h, g]) c.close();
+  });
 });
 
 describe("empty rooms", () => {
