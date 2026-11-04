@@ -223,6 +223,7 @@ export function Player({
         playheadWallclock: () => controller.playheadWallclock(),
         playbackMode: () => controller.playbackMode(),
         latencySeconds: () => controller.hlsLatencySeconds(),
+        seekBy: (ms) => controller.seekBy(ms),
       },
       env?.native ?? false,
     );

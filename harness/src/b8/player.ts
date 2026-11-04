@@ -74,6 +74,44 @@ export function withinEdgeCap(behind: Readonly<Record<string, number>> | null, m
   });
 }
 
+/** One member's frames for the report: `[t, behind, edgeLead]` (ms), `edgeLead` null without an edge, `dvr` frames flagged. */
+export interface EdgeSyncTrajectory {
+  /** Harness clock (epoch ms) every `t` is measured from: the first frame either way. */
+  t0: number | null;
+  /** Per member: `[t, now - playhead, edge - playhead | null, dvr ? 1 : 0]` for each `room.sync` sent. */
+  frames: Record<string, [number, number, number | null, 0 | 1][]>;
+  /** Per member: `[t, now - target]` for each server `room.sync {target}` received. */
+  targets: Record<string, [number, number][]>;
+}
+
+/**
+ * The members' reported playheads, edges and the targets they received, compactly, relative to the
+ * first frame (diagnostics for `edge-sync`; no user data, only timings).
+ */
+export function edgeSyncTrajectory(
+  samples: Readonly<Record<string, readonly PlayheadSample[]>>,
+  targets: Readonly<Record<string, readonly TargetSample[]>>,
+): EdgeSyncTrajectory {
+  const times = [
+    ...Object.values(samples).flatMap((l) => l.map((s) => s.sentAt)),
+    ...Object.values(targets).flatMap((l) => l.map((s) => s.receivedAt)),
+  ];
+  const t0 = times.length === 0 ? null : Math.min(...times);
+  const base = t0 ?? 0;
+  const frames: EdgeSyncTrajectory["frames"] = {};
+  for (const [member, list] of Object.entries(samples))
+    frames[member] = list.map((s) => [
+      s.sentAt - base,
+      Math.round(s.sentAt - s.pdt),
+      s.edge === undefined || s.edge === null ? null : Math.round(s.edge - s.pdt),
+      s.mode === "dvr" ? 1 : 0,
+    ]);
+  const received: EdgeSyncTrajectory["targets"] = {};
+  for (const [member, list] of Object.entries(targets))
+    received[member] = list.map((s) => [s.receivedAt - base, Math.round(s.receivedAt - s.target)]);
+  return { t0, frames, targets: received };
+}
+
 export async function stepEdgeSync(run: WatchRoomB8Extension): Promise<void> {
   const { ctx } = run;
   const t = (what: string) => b8ExtensionTitle("edge-sync", what);
@@ -109,6 +147,8 @@ export async function stepEdgeSync(run: WatchRoomB8Extension): Promise<void> {
   await ctx.step(t(`play together for ${SYNC_SETTLE_MS / 1000} s`), () => sleep(SYNC_SETTLE_MS, ctx.signal));
   const settledAt = Date.now();
 
+  // Diagnostics: every frame, so a failing run shows how the members moved, not only where they ended.
+  ctx.data("edgeSyncTrajectory", edgeSyncTrajectory(samples, targets));
   const chromiumEdges = { near: edgeSummary(samples.near ?? []), far: edgeSummary(samples.far ?? []) };
   ctx.data("edgeSyncChromiumEdges", chromiumEdges);
   for (const [label, s] of Object.entries(chromiumEdges))

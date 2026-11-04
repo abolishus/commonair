@@ -267,6 +267,69 @@ describe("RoomSyncDriver", () => {
     expect(holdBack).toBe(5);
   });
 
+  /**
+   * hls.js once ABR loads another level: the playing level's fragment list is no longer refreshed,
+   * so `seekToWallclock` (which maps through it) misses a target past its end (false), while the
+   * playhead itself can still move by any amount within the seekable range.
+   */
+  function staleLevelPlayer(behindS: number) {
+    let clock = NOW;
+    let behindMs = behindS * 1000;
+    let holdBack = behindS;
+    const calls: string[] = [];
+    const player: RoomPlayer = {
+      playheadWallclock: () => new Date(clock - behindMs),
+      playbackMode: () => "live",
+      setTargetLatency: (s: number, o?: { seek?: boolean }) => {
+        calls.push(o?.seek === false ? `hold ${s.toFixed(2)}` : `latency ${s.toFixed(2)}`);
+        holdBack = s;
+        return s;
+      },
+      latencySeconds: () => behindMs / 1000,
+      seekToWallclock: () => {
+        calls.push("seekToWallclock");
+        return false;
+      },
+      seekBy: (ms: number) => {
+        calls.push(`seekBy ${ms}`);
+        behindMs -= ms;
+        return true;
+      },
+      native: false,
+    };
+    return { player, calls, holdBack: () => holdBack, tick: (ms: number) => (clock += ms), now: () => clock };
+  }
+
+  it("hls.js far behind with a stale level: lands by seekBy, not seekToWallclock (CI run 41761738970)", () => {
+    // edge-sync: the far member (9 s) was 4 s behind the target; seekToWallclock found nothing in
+    // the stale fragment list, so the member was never pulled up (near 9.4 s, far 7.2 s behind the edge).
+    const sim = staleLevelPlayer(9);
+    const driver = new RoomSyncDriver({ player: () => sim.player, reducedMotion: () => false, now: sim.now });
+    expect(driver.onTarget(new Date(sim.now() - 5000).toISOString()).kind).toBe("seek");
+    expect(sim.player.playheadWallclock()!.getTime()).toBe(sim.now() - 5000);
+    expect(sim.calls).toEqual(["seekBy 4000", "hold 5.00"]);
+    sim.tick(2000);
+    expect(driver.onTarget(new Date(sim.now() - 5000).toISOString()).kind).toBe("none");
+  });
+
+  it("hls.js small step with a stale level: lands by seekBy", () => {
+    const sim = staleLevelPlayer(3);
+    const driver = new RoomSyncDriver({ player: () => sim.player, reducedMotion: () => false, now: sim.now });
+    expect(driver.onTarget(new Date(sim.now() - 4000).toISOString()).kind).toBe("latency");
+    expect(sim.player.playheadWallclock()!.getTime()).toBe(sim.now() - 4000);
+    expect(sim.calls).toEqual(["hold 4.00", "seekBy -1000"]);
+  });
+
+  it("hls.js far behind when neither seek can: steps to hls.js's sync position instead of staying put", () => {
+    const sim = staleLevelPlayer(9);
+    const player: RoomPlayer = { ...sim.player };
+    delete player.seekBy;
+    const driver = new RoomSyncDriver({ player: () => player, reducedMotion: () => false, now: sim.now });
+    expect(driver.onTarget(new Date(sim.now() - 5000).toISOString()).kind).toBe("seek");
+    expect(sim.calls).toEqual(["seekToWallclock", "latency 5.00"]);
+    expect(sim.holdBack()).toBe(5);
+  });
+
   it("native: seeks once into tolerance", () => {
     const sim = simulatedPlayer({ offsetS: 1, holdBackS: 4, native: true });
     const driver = new RoomSyncDriver({ player: () => sim.player, reducedMotion: () => false, now: sim.now });
@@ -307,6 +370,15 @@ describe("room player registry", () => {
     expect(p?.native).toBe(false);
     p?.setTargetLatency?.(5);
     expect(calls).toEqual(["l5"]);
+    expect(p).not.toHaveProperty("seekBy");
+    const offBy = registerRoomPlayer(
+      "chan",
+      { ...source, seekBy: (ms: number) => (calls.push(`b${ms}`), true) },
+      false,
+    );
+    expect(roomPlayer("chan", null)?.seekBy?.(250)).toBe(true);
+    expect(calls).toEqual(["l5", "b250"]);
+    offBy();
     const offNative = registerRoomPlayer("chan", source, true);
     expect(roomPlayer("chan", null) ?? {}).not.toHaveProperty("setTargetLatency");
     offNative();

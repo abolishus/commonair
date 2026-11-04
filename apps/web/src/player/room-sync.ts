@@ -12,7 +12,8 @@
  *
  * - **hls.js** steers with `setTargetLatency`: the new hold-back is the last one applied plus the
  *   drift, so hls.js keeps the new distance from then on. The playhead itself lands on the target
- *   from the playhead (`seekToWallclock`; PDT is linear in media time), not at hls.js's sync
+ *   from the playhead (`seekBy` the drift, PDT being linear in media time; `seekToWallclock` when
+ *   the player cannot, and hls.js's sync position only when neither can), not at hls.js's sync
  *   position: that one is measured from this member's own edge estimate (`edge + age`), which
  *   moves by hundreds of ms between steps (a rendition switch, a late playlist reload,
  *   `edgeStalled`), so a step that seeks there lands off by however far it moved (CI run
@@ -109,6 +110,14 @@ export interface RoomPlayer {
    */
   latencySeconds?(): number | null;
   seekToWallclock(t: Date): boolean;
+  /**
+   * Move the playhead `ms` of media time from where it is (positive: forward); false, and nothing
+   * moves, outside the seekable range. It reads the same mapping `playheadWallclock` does, so a
+   * correction lands where the drift says. `seekToWallclock` maps through the playing level's
+   * fragment list instead, which hls.js stops refreshing once ABR loads another level: the target
+   * is then missing from it (false) or mapped against stale fragment starts.
+   */
+  seekBy?(ms: number): boolean;
   native: boolean;
   /**
    * Batch 8: the live edge as a wall-clock instant (the PDT at the end of the live playlist), null
@@ -229,26 +238,43 @@ export class RoomSyncDriver {
       sinceLastMs: this.lastAt === null ? null : now - this.lastAt,
     });
     this.lastDriftMs = c.driftMs;
-    if (c.kind === "latency" && p.setTargetLatency && targetMs !== null) {
+    // `nextCorrection` only corrects with a playhead and a target.
+    if (head === null || targetMs === null) return c;
+    if (c.kind === "latency" && p.setTargetLatency) {
       this.hold(p, c.seconds);
       // Land from the playhead; hls.js's sync position hangs off its own (moving) edge estimate.
-      if (!p.seekToWallclock(new Date(targetMs))) p.setTargetLatency(c.seconds);
+      // Only when neither seek can, step there after all.
+      if (!this.land(p, head, targetMs)) this.remember(p.setTargetLatency(c.seconds), c.seconds);
       this.lastAt = now;
     } else if (c.kind === "seek") {
-      if (p.seekToWallclock(new Date(c.toMs))) {
-        // The hold-back follows the seek, so hls.js keeps the new distance rather than its old one.
-        const base = this.applied ?? measured;
-        if (p.setTargetLatency && base !== null) this.hold(p, clampLatency(base + c.driftMs / 1000));
+      // The hold-back follows the seek, so hls.js keeps the new distance rather than its old one.
+      const base = this.applied ?? measured;
+      const held = p.setTargetLatency && base !== null ? clampLatency(base + c.driftMs / 1000) : null;
+      if (this.land(p, head, c.toMs)) {
+        if (held !== null) this.hold(p, held);
+        this.lastAt = now;
+      } else if (held !== null && p.setTargetLatency) {
+        // Neither seek could: a member left this far off would stay there, so step to hls.js's sync position.
+        this.remember(p.setTargetLatency(held), held);
         this.lastAt = now;
       }
     }
     return c;
   }
 
+  /** Move the playhead to `toMs`: relative to the playhead when the player can, else by its fragments. */
+  private land(p: RoomPlayer, headMs: number, toMs: number): boolean {
+    if (p.seekBy?.(toMs - headMs)) return true;
+    return p.seekToWallclock(new Date(toMs));
+  }
+
+  private remember(applied: number, asked: number): void {
+    this.applied = Number.isFinite(applied) ? applied : asked;
+  }
+
   /** Set the hold-back without moving the playhead, and remember it. */
   private hold(p: RoomPlayer, seconds: number): void {
-    const applied = p.setTargetLatency?.(seconds, { seek: false }) ?? Number.NaN;
-    this.applied = Number.isFinite(applied) ? applied : seconds;
+    this.remember(p.setTargetLatency?.(seconds, { seek: false }) ?? Number.NaN, seconds);
   }
 
   /** Leaving the room: forget the target (the player keeps its last hold-back until it reloads). */

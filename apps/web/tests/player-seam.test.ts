@@ -200,6 +200,55 @@ describe("seekToWallclock", () => {
   });
 });
 
+describe("seekBy", () => {
+  /** Give the element a readyState and seekable/buffered ranges the test controls. */
+  function ranges(
+    video: HTMLVideoElement,
+    state: { readyState: number; seekable: [number, number][]; buffered: [number, number][] },
+  ) {
+    const list = (r: [number, number][]) => ({
+      length: r.length,
+      start: (i: number) => r[i]?.[0] ?? 0,
+      end: (i: number) => r[i]?.[1] ?? 0,
+    });
+    Object.defineProperty(video, "readyState", { get: () => state.readyState, configurable: true });
+    Object.defineProperty(video, "seekable", { get: () => list(state.seekable), configurable: true });
+    Object.defineProperty(video, "buffered", { get: () => list(state.buffered), configurable: true });
+  }
+
+  it("hls.js: moves the playhead from where it is, without the level's fragment list", async () => {
+    const { c, hls, video } = await hlsSession();
+    Object.defineProperty(hls, "hasEnoughToStart", { get: () => true, configurable: true });
+    ranges(video, { readyState: 4, seekable: [[50, 100]], buffered: [] });
+    video.currentTime = 80;
+    // No level details at all: seekToWallclock could not map anything.
+    expect(c.seekBy(4000)).toBe(true);
+    expect(video.currentTime).toBe(84);
+    expect(c.seekBy(-1500)).toBe(true);
+    expect(video.currentTime).toBe(82.5);
+    await c.stop();
+  });
+
+  it("refuses outside the seekable and buffered ranges, before a frame, on a fresh source, and NaN", async () => {
+    const { c, hls, video } = await hlsSession();
+    let enough = true;
+    Object.defineProperty(hls, "hasEnoughToStart", { get: () => enough, configurable: true });
+    const state = { readyState: 4, seekable: [] as [number, number][], buffered: [[78, 83]] as [number, number][] };
+    ranges(video, state);
+    video.currentTime = 80;
+    expect(c.seekBy(2000)).toBe(true); // in the buffered range
+    expect(c.seekBy(5000)).toBe(false);
+    expect(c.seekBy(Number.NaN)).toBe(false);
+    enough = false;
+    expect(c.seekBy(-1000)).toBe(false);
+    enough = true;
+    state.readyState = 0;
+    expect(c.seekBy(-1000)).toBe(false);
+    expect(video.currentTime).toBe(82);
+    await c.stop();
+  });
+});
+
 describe("setTargetLatency", () => {
   it("hls.js: sets liveSyncDuration through hls.targetLatency and steps to the sync position", async () => {
     const { c, hls, video } = await hlsSession();
