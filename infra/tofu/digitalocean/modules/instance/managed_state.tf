@@ -120,15 +120,27 @@ resource "digitalocean_spaces_bucket_cors_configuration" "media" {
   }
 }
 
+# Two keys: storage-init refuses an evidence key equal to the main one (ADR 0006 Q4), so a
+# leaked media key cannot read or erase sealed evidence.
 resource "digitalocean_spaces_key" "instance" {
   count = local.managed
   name  = "${local.prefix}-instance"
 
   dynamic "grant" {
-    for_each = local.instance_buckets
+    for_each = { for k, v in local.instance_buckets : k => v if k != "evidence" }
     content {
       bucket     = digitalocean_spaces_bucket.instance[grant.key].name
       permission = "readwrite"
     }
+  }
+}
+
+resource "digitalocean_spaces_key" "evidence" {
+  count = local.managed
+  name  = "${local.prefix}-evidence"
+
+  grant {
+    bucket     = digitalocean_spaces_bucket.instance["evidence"].name
+    permission = "readwrite"
   }
 }

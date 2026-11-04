@@ -105,10 +105,18 @@ run "instance_buckets_and_cors" {
 
   assert {
     condition = (
-      length(digitalocean_spaces_key.instance[0].grant) == 3 &&
-      alltrue([for g in digitalocean_spaces_key.instance[0].grant : g.permission == "readwrite" && g.bucket != ""])
+      length(digitalocean_spaces_key.instance[0].grant) == 2 &&
+      alltrue([for g in digitalocean_spaces_key.instance[0].grant : g.permission == "readwrite" && g.bucket != "" && !endswith(g.bucket, "-evidence")])
     )
-    error_message = "The instance key is limited to the three instance buckets (an empty bucket would mean every bucket)."
+    error_message = "The instance key is limited to the media and exports buckets (an empty bucket would mean every bucket)."
+  }
+
+  assert {
+    condition = (
+      length(digitalocean_spaces_key.evidence[0].grant) == 1 &&
+      one(digitalocean_spaces_key.evidence[0].grant).bucket == digitalocean_spaces_bucket.instance["evidence"].name
+    )
+    error_message = "The evidence key reaches the evidence bucket only, and differs from the instance key (ADR 0006 Q4)."
   }
 }
 

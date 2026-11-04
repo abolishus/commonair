@@ -85,12 +85,14 @@ output "managed_state" {
 }
 
 output "managed_state_secrets" {
-  description = "Owner connection URIs (doadmin, private network) and the instance's Spaces key."
+  description = "Owner connection URIs (doadmin, private network), the instance's Spaces key (media, exports) and the evidence key (S3_EVIDENCE_*)."
   sensitive   = true
   value = var.enable_managed_state ? {
-    pg_owner_uri      = digitalocean_database_cluster.pg[0].private_uri
-    valkey_uri        = digitalocean_database_cluster.valkey[0].private_uri
-    access_key_id     = digitalocean_spaces_key.instance[0].access_key
-    secret_access_key = digitalocean_spaces_key.instance[0].secret_key
+    pg_owner_uri               = digitalocean_database_cluster.pg[0].private_uri
+    valkey_uri                 = digitalocean_database_cluster.valkey[0].private_uri
+    access_key_id              = digitalocean_spaces_key.instance[0].access_key
+    secret_access_key          = digitalocean_spaces_key.instance[0].secret_key
+    evidence_access_key_id     = digitalocean_spaces_key.evidence[0].access_key
+    evidence_secret_access_key = digitalocean_spaces_key.evidence[0].secret_key
   } : null
 }
