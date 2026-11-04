@@ -183,10 +183,18 @@ describe("reconciling unknown outcomes", () => {
   test("a request settled by its webhook meanwhile gets no failure marker", async () => {
     const x = await stripePayment();
     await unknownRequest(x.p.id, 500, 30 * MIN);
-    // The refund was posted (charge.refunded) before the reconciler looks.
+    // The refund was posted (charge.refunded) before the reconciler looks. Stamped on the test
+    // clock: a wall-clock createdAt falls outside the request's 24 h window once NOW is a day old.
     await db()
       .insert(schema.disputes)
-      .values({ paymentId: x.p.id, kind: "refund", status: "closed", amountCents: 500, providerRef: "re_posted" });
+      .values({
+        paymentId: x.p.id,
+        kind: "refund",
+        status: "closed",
+        amountCents: 500,
+        providerRef: "re_posted",
+        createdAt: ago(20 * MIN),
+      });
     const r = await reconcileUnknownRefunds(ctx(), port({ [x.p.providerRef]: [] }));
     expect(r.none).toBe(0);
     expect((await markersOf(x.p.id)).map((m) => m.action)).toEqual([REFUND_REQUESTED, REFUND_OUTCOME_UNKNOWN]);
