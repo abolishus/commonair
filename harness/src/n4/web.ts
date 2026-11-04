@@ -175,7 +175,13 @@ export async function waitForFollowerViaWeb(ctx: ScenarioContext, as: SignedInUs
 export async function removeFollowerViaWeb(ctx: ScenarioContext, as: SignedInUser, actorId: string): Promise<void> {
   await asUser(ctx, as, "n4-streamer", FEDERATION_ROUTES.studio, async (page) => {
     await studioSection(ctx, page);
-    if (!(await findFollower(page, actorId))) throw new Error(`follower ${actorId} is not listed`);
+    // The list loads after the section shows: wait for the row rather than reading it once.
+    const listed = await waitFor(`follower ${actorId} listed before removal`, () => findFollower(page, actorId), {
+      timeoutMs: UI_TIMEOUT_MS,
+      intervalMs: 250,
+      signal: ctx.signal,
+    }).catch(() => false);
+    if (!listed) throw new Error(`follower ${actorId} is not listed`);
     const row = followerRow(page, actorId);
     await row.locator(tid(F.followerRemove)).click({ timeout: UI_TIMEOUT_MS });
     await page.locator(tid(F.confirm)).click({ timeout: UI_TIMEOUT_MS });
