@@ -22,6 +22,125 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
 
 ## In flight
 
+**D wave 3 merged (2026-11-04): D3-watch, D5-studio and D5-settings on `main`. The D plan is
+complete in code; what is left is the user's visual checks and the follow-ups below** (briefs in
+`.claude/briefs/d/`). The orchestrator made every call below without the user. Each unit was
+implemented in its own worktree, independently reviewed against AGENTS.md and its brief, fixed,
+then integrated by sha onto `62b6dead`, the wave 3 contract step:
+
+| Unit        | Findings                                                 | Merge      | Unit sha   |
+| ----------- | -------------------------------------------------------- | ---------- | ---------- |
+| D3-watch    | F11                                                      | `211ff235` | `fd6024c9` |
+| D5-settings | F25 (co-op), F27, F28, F31, F33–F39 (settings and admin) | `b6cdc842` | `a4ca20b0` |
+| D5-studio   | F21–F26, F28, F29, F31–F33, F35, F38, F39 (studio)       | `c7d404df` | `b2312748` |
+
+- **Contract step `62b6dead`:** the briefs were re-checked against `main` after wave 2. **D5 was
+  split** into D5-studio and a new D5-settings (`.claude/briefs/d/D5-settings.md`), with disjoint
+  paths, a `d5-settings` namespace and a `d-surfaces` step, so each half fits one context. The
+  D5-studio brief now names the real chart files (`blocks/data/trend-chart.tsx`, `breakdown.tsx`),
+  D4's `NotFoundState` re-export, and the D5-capture addendum's findings each unit takes. D3-watch's
+  brief names `video-grid.tsx`'s exports and D4's `components/not-found.tsx`.
+- **F30 (co-op tabs always lit Overview)** was fixed at integration in `packages/ui` (`bf05f0f8`):
+  `PageTabs` in link mode left Base UI's `Tabs` uncontrolled, so it selected the first tab on
+  every page. It now selects the `current` item, or none.
+- **Integration `918efe6a`, `db893645`** applied the contract requests:
+  - the setup cards moved to `/dashboard/settings`, so e2e-basic, simulcast and n4's federation
+    steps go there (`ROUTES.dashboardSettings`, `E6_ROUTES.dashboardSettings`);
+  - seed-coverage routes for `/dashboard/settings`, `/mod/$channel`, `/settings` and `/settings/`;
+  - e7's egress steps set the range through D5-settings' date-time selects;
+  - `formatBytes` prints "0 B", not "0 byte" (F34), in `packages/ui` and `lib/relays.ts`;
+  - the vod-watch test's router mock keeps the real exports (D4's `NotFoundState` imports
+    `getRouteApi` through `site-chrome`);
+  - w3 portability finds the move notices on `/settings/notifications`, through the new search
+    box (the parent session cleared that one file in `harness/src/w3`);
+  - the catalog keys the units retired from `core`, `money`, `e7-dmca` and `n1-inbox`, and
+    D5-studio's header move in `twitch-import/import-page.tsx`, accepted;
+  - selector docs (`b7`, `e7`, `e4c`) for the moved federation section and the date-time fields.
+- **`PENDING_HEAD` is empty.**
+- **CI found:** an unformatted `source-policy.test.ts` after the `PENDING_HEAD` merge (`117e824f`),
+  and seed-coverage failing `/revenue` on D5-studio's new payout empty state (`9582dd42`, now
+  `okEmpty`). The i18n "uses every key" test timed out at 5 s under full-suite load for all three
+  units; it now collects quoted keys in one pass (6 s → under 0.3 s).
+- **CI:** run `41922495854` on `71f6f169` (wave 3 plus release-followups' fixes on top) is green on
+  the first attempt, every job including the harness. On the way: `41915284899` attempt 1 hit the
+  chat-filter flake, and `41920035390` failed infra's `status.test.ts` on `readdirSync` order
+  (CI's ext4 is not sorted; `14bf888f` sorts it).
+
+Calls made without the user (each the option closest to the briefs, AGENTS.md and the house
+primitives):
+
+- **D5 split in two units** at the re-check; `lib/nav.ts`, `site-chrome.tsx`'s sidebars and
+  `_admin.tsx` stay with D5-studio, so the admin groups are its.
+- **Share's `?t=` is opt-in** (a checkbox in the Share popover), VODs only; a `?t=` past the end
+  plays from the start. "More from" links "View all" (D2's shelf wording).
+- **The mod view lives at `/mod/$channel` inside the studio layout.** Access is the server's
+  answer: it asks `chat.held.list` first and shows the not-found page on FORBIDDEN, NOT_FOUND or
+  UNAUTHORIZED. The held queue polls every 15 s.
+- **Stream settings is `/dashboard/settings`**; the dashboard header keeps only "View channel".
+- **The control room polls `channels.get` at the health card's pace**, visible tab only. The
+  activity feed opens its own read-only chat socket, so the dashboard holds two.
+- **Previous-period deltas come from a second `analytics.range` call**, so no contract change.
+  Followers page `channels.followers` up to 20 pages; past the cap the card reads "N+" with no
+  delta. Trend metrics switch one at a time (their scales differ).
+- **Empty states with no owner action** (revenue with no viewers, payout not set up, co-op
+  elections and board seats) keep a description and no button.
+- **Bare `/settings` redirects to Subscriptions.** The settings layout is a `settings.tsx` route
+  with a `head()`; tab labels reuse the account menu's keys and order.
+- **Account deletion sits at the top of privacy, export first**; move notices moved to
+  notifications.
+- **Two date-time fields**, one per unit (`components/studio/date-time-field.tsx` 5-minute steps,
+  `components/admin/date-time-field.tsx` every minute), both Selects in the locale's order. Merging
+  them is a follow-up.
+- **Hours stay 24-hour** until `packages/ui` has a `formatHour`.
+
+Left open, now follow-ups:
+
+- **API/contracts:**
+  - `category: { slug, name } | null` on the Vod and Clip DTOs, for D3's category link (the page
+    passes `null` meanwhile);
+  - chat forwards `channel.follow` and `channel.giveaway.end` as `op:"event"` frames to the
+    broadcaster's and moderators' connections, for the activity feed;
+  - `channel: { slug, displayName, avatarUrl, accent }` on the Subscription DTO (one
+    `channels.get` per channel meanwhile, 4 at a time);
+  - optional `portability.grants.setMany`, so "All on / All off" is one call.
+- **`packages/ui`:** `formatHour(hour, locale)`; the header avatar's initial from `displayName`
+  (F38, `layouts/user-menu.tsx:37`).
+- **Web:**
+  - `PageHeader` into the routes for Rehearse and Move (`PENDING_ROUTE_HEADER` lists them);
+  - F35's note style in `dvr-settings.tsx`, rehearsal, portability, interact-studio and the
+    Discord/federation "Not set up." line;
+  - F28's loading text in `coop/overview.tsx:191` and `vod-watch/vod-player.tsx:237`;
+  - `SettingsNav` onto `PageTabs` now that F30 is fixed;
+  - one shared date-time field;
+  - F36's captions paging and the admin queues collapsed to rows.
+- **Check on a live stack:** whether the dashboard's muted preview counts the streamer as a
+  verified viewer through the player heartbeat. If it does, the count is wrong and needs a fix.
+
+Flakes seen: the chat-filter timing test, a third time and for the first time in the unit tier
+(`filter-runner.test.ts` "a regex call past the hard timeout…", `expected 'hold'` to be
+`'block'`, 41915284899 attempt 1). release-followups' `69e242ad` (the hard timeout timed from the
+message's start) landed after that run. Recorded in `docs/operators/flakes.md`.
+
+Waiting on the user (visual checks on a `seed full` stack, dark and light, at 320, 375 and
+1440 px, in `en` and `es`):
+
+- **D3-watch:** a `demo_streamer1` VOD and clip (compare 11, 12, 20): the meta row, Share with and
+  without the timestamp (a `?t=90` link starts at 1:30), the channel card live and offline,
+  "More from" with six items and View all; a missing VOD and clip (compare 19).
+- **D5-studio** as `demo_streamer1`: `/dashboard` (preview, chat, live numbers, Edit stream info,
+  and at 375 px a header that doesn't break mid-word); `/dashboard/settings`; `/mod/<slug>`; the
+  grouped studio sidebar, and the grouped admin sidebar as `admin`; `/analytics` trends, deltas
+  and dash patterns; `/revenue` trend and stacked ledger at 375 px; `/bot` stacked commands;
+  `/crew` date and time selects; `/relays`. As `newbie`: an empty-state action on `/content`,
+  `/analytics`, `/revenue` (no red tier fields on load), `/crew`, `/relays` and `/captions`. As
+  `viewer1`: `/mod/<streamer1>` is not found.
+- **D5-settings:** D5-capture's 031–043 and 044–056 retaken beside the capture: the settings tab
+  row and the phone Select on all seven pages; privacy's deletion in the first viewport; search,
+  Load more and All on/off on notifications; `/admin/integrity` labels; `/admin/egress` selects
+  and "0 B"; `/treasury` stacked rows as `demo_treasurer`; the co-op empties.
+- **F30:** each `/coop/*` tab is selected on its own page.
+- **Harness:** `d-surfaces` on a `seed full` stack.
+
 **D wave 2 merged (2026-11-04): D1-web, D2-channel, D2-player and D2-chat on `main`** (briefs in
 `.claude/briefs/d/`). The orchestrator made every call below without the user (they asked for
 that overnight). Each unit was implemented in its own worktree, independently reviewed against
