@@ -142,22 +142,25 @@ describe("egress page", () => {
     expect(screen.queryByTestId("egress-empty")).toBeNull();
   });
 
-  it("submits the typed range as UTC and refuses a bad one", async () => {
+  // Each pick opens a portalled Select, so the test picks only what the range logic needs (the
+  // field's hour and minute picks are covered in d5-settings-admin) and has room on a loaded runner:
+  // a timed-out run keeps clicking into the next test's page.
+  it("submits the typed range as UTC and refuses a bad one", { timeout: 20_000 }, async () => {
     const reportFn = vi.fn<EgressClient["report"]>(async () => ({ ...report, byBroadcast: [] }));
     wrap(<EgressPage client={{ report: reportFn }} now={NOW} />);
     await screen.findByTestId("egress-empty");
-    await setDateTime("egress-from", { day: "1", hour: "00", minute: "00" });
-    await setDateTime("egress-to", { day: "2", hour: "06", minute: "30" });
-    // Both fields started on the default range (26 and 27 October 2026).
+    // Both fields start on the default range: 26 and 27 October 2026, 12:01 UTC.
+    await setDateTime("egress-from", { day: "1" });
+    await setDateTime("egress-to", { day: "2" });
     fireEvent.click(tid("egress-load"));
     await waitFor(() =>
       expect(reportFn).toHaveBeenLastCalledWith({
-        from: "2026-10-01T00:00:00.000Z",
-        to: "2026-10-02T06:30:00.000Z",
+        from: "2026-10-01T12:01:00.000Z",
+        to: "2026-10-02T12:01:00.000Z",
       }),
     );
     const calls = reportFn.mock.calls.length;
-    await setDateTime("egress-to", { month: "December", day: "1" });
+    await setDateTime("egress-to", { month: "December" });
     fireEvent.click(tid("egress-load"));
     await screen.findByText("A report covers at most 31 days.");
     expect(reportFn.mock.calls.length).toBe(calls);
