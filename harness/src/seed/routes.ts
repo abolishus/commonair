@@ -31,6 +31,9 @@ export interface SeedRoute {
 
 const ch = (handle: string): SeedValue => ({ channelOf: handle });
 const ex = (unit: SeedUnitName, key: string): SeedValue => ({ extra: [unit, key] });
+// Live chat sends no backlog on join, so its panel is empty until `seed live`'s next message
+// (about one every 15 s): a crawl that lands between two is not missing data.
+const LIVE_CHAT_EMPTY = "No messages yet";
 const studio: SeedRoute = { as: "streamer1", expectData: true };
 const admin: SeedRoute = { as: "admin", expectData: true };
 const member: SeedRoute = { as: "member1", expectData: true };
@@ -39,7 +42,7 @@ const form: SeedRoute = { as: "anonymous", expectData: false };
 
 export const SEED_ROUTES: Readonly<Record<string, SeedRoute>> = {
   "/": viewer,
-  "/$channel": { ...viewer, params: { channel: ch("streamer1") } },
+  "/$channel": { ...viewer, params: { channel: ch("streamer1") }, okEmpty: [LIVE_CHAT_EMPTY] },
   // W2-vod-watch: streamer1's public VOD and a clip of it, published by seed-media.
   "/$channel/vods/$vodId": { ...viewer, params: { channel: ch("streamer1"), vodId: ex("media", "vodId") } },
   "/$channel/clips/$clipId": { ...viewer, params: { channel: ch("streamer1"), clipId: ex("media", "clipId") } },
@@ -97,12 +100,12 @@ export const SEED_ROUTES: Readonly<Record<string, SeedRoute>> = {
   "/coop/jury": { as: "member1", expectData: true },
 
   // Live and healthy, the stream-health panel says so with the empty state (dashboard.health.healthy).
-  "/dashboard": { ...studio, okEmpty: ["No problems detected", "Nothing yet"] },
+  "/dashboard": { ...studio, okEmpty: ["No problems detected", "Nothing yet", LIVE_CHAT_EMPTY] },
   "/dashboard/settings": studio,
   "/mod/$channel": {
     ...studio,
     params: { channel: ch("streamer1") },
-    okEmpty: ["No held messages", "No mod actions yet"],
+    okEmpty: ["No held messages", "No mod actions yet", LIVE_CHAT_EMPTY],
   },
   "/content": studio,
   // The seed sets up no payout account; D5-studio draws that note as an empty state (revenue.payout.none).
