@@ -107,8 +107,12 @@ Flakes seen:
   't.t=new Map(n.map(e=>[e.key,e.fromSerializable]))')` and no player (run 41922495854 attempt
   3; new candidate, in the web app's hydration, not room sync; step 2's WebKit page in the same
   run was fine);
-- `e7-admin.test.tsx` "egress page" timed out at 5 s (run 41918197708 attempt 2; D wave 3's
-  file, changed in `46f9ca55`; passed on the next run);
+- `e7-admin.test.tsx` "egress page" timed out at 5 s (run 41918197708 attempt 2, and 41943081762,
+  where the timed-out test kept clicking into "shows an error with retry"; D wave 3's file,
+  changed in `46f9ca55`). **Fixed by `1127e4f0`:** eight portalled Select picks took 0.75 s
+  locally and over 5 s on a loaded runner, so the test now picks only day and month (0.25 s; the
+  field's hour and minute picks are tested in `d5-settings-admin`) with a 20 s timeout. Run
+  41944257432 green;
 - `relay` Go test `TestGracefulStopSendsOneDrainingHeartbeat`, "bad payload": a duplicate
   receipt nonce, the relay re-sending a receipt under load (run 41918197708 attempt 1; new
   candidate, not related to these changes).
