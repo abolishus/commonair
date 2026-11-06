@@ -94,10 +94,10 @@ const lastSaysSuspended = sql`(select (e.payload->>'suspended')::boolean from ev
  * written once. Its `audit_log` row says `via: "recovery"`.
  */
 export async function recoverLostUnsuspensions(ctx: WorkerContext, batch = 200): Promise<{ recovered: number }> {
-  const now = ctx.now();
-  const owed = sql`(not ${suspendedAt(now)} and not exists (select 1 from users ou where ou.id = c.owner_id and ou.banned) and ${lastSaysSuspended} is true)`;
+  const owed = (now: Date) =>
+    sql`(not ${suspendedAt(now)} and not exists (select 1 from users ou where ou.id = c.owner_id and ou.banned) and ${lastSaysSuspended} is true)`;
   const candidates = (await ctx.db.execute(
-    sql`select c.id, c.owner_id as "ownerId" from channels c where ${owed} order by c.id limit ${batch}`,
+    sql`select c.id, c.owner_id as "ownerId" from channels c where ${owed(ctx.now())} order by c.id limit ${batch}`,
   )) as unknown as { id: string; ownerId: string }[];
   let recovered = 0;
   for (const cand of candidates) {
@@ -106,11 +106,16 @@ export async function recoverLostUnsuspensions(ctx: WorkerContext, batch = 200):
         sql`select c.id, c.owner_id as "ownerId" from channels c where c.id = ${cand.id}::uuid for update`,
       )) as unknown as { id: string; ownerId: string }[];
       if (locked.length === 0) return 0;
-      // Read again under the lock: whoever held it first may have written the event.
+      // Read again under the lock, as of now: whoever held it first may have written the event.
+      const asOf = ctx.now();
       const [still] = (await tx.execute(
-        sql`select ${owed} as owed from channels c where c.id = ${cand.id}::uuid`,
-      )) as unknown as { owed: boolean }[];
+        sql`select ${owed(asOf)} as owed, (select max(e.occurred_at) from events e where e.channel_id = c.id and e.type = 'channel.suspension') as "lastAt" from channels c where c.id = ${cand.id}::uuid`,
+      )) as unknown as { owed: boolean; lastAt: Date | string | null }[];
       if (still?.owed !== true) return 0;
+      // "Latest" is by `occurred_at`: the unsuspension must sort after the event it answers, even
+      // when that one was stamped by another host's clock a little ahead of ours.
+      const lastMs = still.lastAt === null ? -Infinity : new Date(still.lastAt).getTime();
+      const now = new Date(Math.max(asOf.getTime(), lastMs + 1));
       await emit(tx, "channel.suspension", cand.id, { channel_id: cand.id, suspended: false }, now);
       await audit(
         tx,

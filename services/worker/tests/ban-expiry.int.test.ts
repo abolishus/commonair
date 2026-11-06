@@ -108,6 +108,25 @@ describe("recoverLostUnsuspensions (decision (g) backstop)", () => {
     expect(await lapses(u.user.id)).toEqual(["recovery"]);
   });
 
+  test("the recovered event sorts after the one it answers, even one stamped ahead of our clock", async () => {
+    const u = await makeUser(t.db);
+    // The API's clock ran 2 s ahead of the worker's when it announced the suspension.
+    const ahead = new Date(now.getTime() + 2_000);
+    await emit(t.db, "channel.suspension", u.channel.id, { channel_id: u.channel.id, suspended: true }, ahead);
+    expect(await recoverLostUnsuspensions(ctx())).toEqual({ recovered: 1 });
+    const [last] = await t.db
+      .select({ occurredAt: schema.events.occurredAt })
+      .from(schema.events)
+      .where(and(eq(schema.events.channelId, u.channel.id), eq(schema.events.type, "channel.suspension")))
+      .orderBy(desc(schema.events.occurredAt), desc(schema.events.id))
+      .limit(1);
+    expect(last!.occurredAt.getTime()).toBeGreaterThan(ahead.getTime());
+    expect(await suspensions(t.db, u.channel.id)).toEqual([true, false]);
+    // Settled: the next run owes nothing.
+    expect(await recoverLostUnsuspensions(ctx())).toEqual({ recovered: 0 });
+    expect(await lapses(u.user.id)).toEqual(["recovery"]);
+  });
+
   test("leaves suspensions still in force, uncleared lapsed bans and settled channels alone", async () => {
     const own = await lostHook();
     await t.db.update(schema.channels).set({ suspendedAt: now }).where(eq(schema.channels.id, own.channel.id));
