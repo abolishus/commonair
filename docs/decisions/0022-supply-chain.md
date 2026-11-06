@@ -59,7 +59,17 @@ packages, and referenced actions and images by mutable tags.
    and `--write` rewrites them. To bump an image, change the tag, run `--write`, and update the
    license entry. Our own images (`localhost/commonair/*`, `ghcr.io/abolishus/*`) are pinned by
    our release process instead.
-8. **A security fix that is still inside the cooldown** may be adopted early, but only from
+8. **Malware and image contents are scanned daily** (added 2026-11-05). The vulnerabilities
+   workflow runs `scripts/check-malware.ts`: OSV-Scanner over `bun.lock`, failing on any `MAL-`
+   advisory (the OpenSSF malicious-packages feed), which `bun audit` does not report and which
+   `vet-package.ts` checks only when a dependency is added. Malware gets no exception, so a `MAL-`
+   id in `osv-scanner.toml` fails too. `scripts/check-image-vulns.ts` runs Grype over every pinned
+   third-party image and writes the Critical and High CVEs that have a fix to the run summary. It
+   reports and does not gate: on its first run 12 of 23 images had fixed Criticals, nearly all Go
+   standard library or distro packages that upstream had not rebuilt yet, which we act on by
+   re-pinning or bumping tags, not by an exception list. It fails only when an image cannot be
+   scanned. Both tools are pinned by version and hash in `scripts/release/tools.ts`.
+9. **A security fix that is still inside the cooldown** may be adopted early, but only from
    the same upstream (the same publisher and repository), only after vetting, and with the
    waiver recorded in the commit message. Waiting the week is the default; skipping it is a
    decision someone signs.
@@ -71,6 +81,7 @@ packages, and referenced actions and images by mutable tags.
 - Upgrades arrive at least a week after release. Dependabot (`.github/dependabot.yml`) proposes
   the bumps with a matching 7-day cooldown; it keeps SHA and digest pins in place.
 - Exceptions expire, so each one is reviewed again on a known date instead of being forgotten.
-- Not covered yet: CVE scanning of container image contents (for example with Trivy,
-  Apache-2.0), and verifying signatures and provenance of npm tarballs and images at install
-  time. Both are candidates for a later ADR.
+- Image CVEs are visible but not enforced (point 8); turning that into a gate needs triage of
+  the backlog first.
+- Not covered yet: verifying signatures and provenance of npm tarballs and images at install
+  time. A candidate for a later ADR.

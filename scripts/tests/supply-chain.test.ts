@@ -8,11 +8,14 @@ import {
   checkBunfig,
   checkGoVulns,
   checkImages,
+  checkMalware,
   checkManifest,
   checkTrusted,
   checkWorkflow,
   imageBearing,
   imageRefs,
+  imageVulnTable,
+  imageVulns,
   parseJsonStream,
   specProblem,
 } from "../supply-chain.ts";
@@ -283,6 +286,100 @@ describe("parseJsonStream", () => {
     expect(parseJsonStream(text)).toEqual([{ a: { b: 1 } }, { s: 'has } and { and " quote' }]);
   });
   test("empty input", () => expect(parseJsonStream("")).toEqual([]));
+});
+
+describe("checkMalware", () => {
+  const report = (vulns: { id: string; aliases?: string[]; summary?: string }[]) => ({
+    results: [
+      {
+        source: { path: "/repo/bun.lock" },
+        packages: [{ package: { name: "evil", version: "1.0.0" }, vulnerabilities: vulns }],
+      },
+    ],
+  });
+
+  test("a MAL- id is a finding with the package and version", () => {
+    const f = checkMalware(report([{ id: "MAL-2026-1234", summary: "Malicious code in evil (npm)" }]), []);
+    expect(f).toHaveLength(1);
+    expect(f[0]?.what).toBe("evil@1.0.0 MAL-2026-1234");
+    expect(f[0]?.reason).toMatch(/^Malicious code in evil \(npm\); /);
+    expect(f[0]?.where).toBe("osv-scanner (/repo/bun.lock)");
+  });
+
+  test("a GHSA whose alias is a MAL- id is malware too", () => {
+    const f = checkMalware(report([{ id: "GHSA-aaaa-bbbb-cccc", aliases: ["MAL-2026-9"] }]), []);
+    expect(f.map((x) => x.what)).toEqual(["evil@1.0.0 MAL-2026-9"]);
+  });
+
+  test("ordinary vulnerabilities are left to bun audit", () => {
+    expect(checkMalware(report([{ id: "GHSA-aaaa-bbbb-cccc", aliases: ["CVE-2026-1"] }]), [])).toEqual([]);
+  });
+
+  test("empty and missing results are clean", () => {
+    expect(checkMalware({}, [])).toEqual([]);
+    expect(checkMalware({ results: [{ packages: [] }] }, [])).toEqual([]);
+    expect(checkMalware(report([]), [])).toEqual([]);
+  });
+
+  test("a MAL- id in the ignore list is a finding, even with nothing installed", () => {
+    const f = checkMalware({}, ["GHSA-67mh-4wv8-2f99", "MAL-2026-1234"]);
+    expect(f).toEqual([expect.objectContaining({ where: "osv-scanner.toml", what: "MAL-2026-1234" })]);
+  });
+});
+
+describe("imageVulns", () => {
+  const match = (id: string, severity: string, name: string, fixed = true) => ({
+    vulnerability: { id, severity, fix: { versions: fixed ? ["9.9.9"] : [] } },
+    artifact: { name, version: "1.0.0" },
+  });
+
+  test("counts distinct fixed Critical and High ids, sorted", () => {
+    const r = imageVulns("img", {
+      matches: [
+        match("CVE-2", "Critical", "libcurl"),
+        match("CVE-2", "Critical", "curl"),
+        match("CVE-1", "Critical", "curl"),
+        match("GO-1", "High", "stdlib"),
+        match("CVE-3", "Medium", "zlib"),
+        match("CVE-4", "Critical", "zlib", false),
+      ],
+    });
+    expect(r).toEqual({ image: "img", critical: ["CVE-1", "CVE-2"], high: ["GO-1"] });
+  });
+
+  test("no matches is clean", () => {
+    expect(imageVulns("img", {})).toEqual({ image: "img", critical: [], high: [] });
+    expect(imageVulns("img", { matches: [] })).toEqual({ image: "img", critical: [], high: [] });
+  });
+});
+
+describe("imageVulnTable", () => {
+  const ref = (n: string) => `docker.io/library/${n}:1@${DIGEST}`;
+
+  test("worst first, digests dropped, clean images counted, long lists truncated", () => {
+    const md = imageVulnTable([
+      { image: ref("clean"), critical: [], high: [] },
+      { image: ref("high"), critical: [], high: ["H1"] },
+      { image: ref("worst"), critical: ["C1", "C2", "C3", "C4", "C5", "C6", "C7"], high: [] },
+    ]);
+    expect(md).toContain("3 image(s): 2 with Critical/High, 1 clean, 0 not scanned.");
+    expect(md).not.toContain("sha256:");
+    expect(md).not.toContain("library/clean");
+    expect(md.indexOf("library/worst")).toBeLessThan(md.indexOf("library/high"));
+    expect(md).toContain("| `docker.io/library/worst:1` | 7 | 0 | C1, C2, C3, C4, C5, +2 more |");
+    expect(md).toContain("| `docker.io/library/high:1` | 0 | 1 | – |");
+  });
+
+  test("failed scans are listed apart, not counted as clean", () => {
+    const md = imageVulnTable([{ image: ref("gone"), critical: [], high: [], error: "401 Unauthorized" }]);
+    expect(md).toContain("1 image(s): 0 with Critical/High, 0 clean, 1 not scanned.");
+    expect(md).toContain("- `docker.io/library/gone:1`: 401 Unauthorized");
+    expect(md).not.toContain("| Image |");
+  });
+
+  test("an empty image list still renders", () => {
+    expect(imageVulnTable([])).toContain("0 image(s): 0 with Critical/High, 0 clean, 0 not scanned.");
+  });
 });
 
 describe("osv-scanner.toml", () => {

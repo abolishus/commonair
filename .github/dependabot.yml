@@ -4,7 +4,7 @@
 # Proposes dependency bumps as pull requests (ADR 0022). The cooldown matches bunfig.toml's
 # minimumReleaseAge, so nothing younger than 7 days is proposed; CI runs the same supply-chain
 # gate on every bump. Updates are grouped weekly to keep the queue short. Security updates
-# ignore the cooldown, which is what ADR 0022 point 8 allows after vetting.
+# ignore the cooldown, which is what ADR 0022 point 9 allows after vetting.
 version: 2
 updates:
   - package-ecosystem: bun

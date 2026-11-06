@@ -130,6 +130,49 @@ export const TOOLS = {
       },
     },
   },
+  // Malicious-package scan of bun.lock (scripts/check-malware.ts). Hashes match osv-scanner_SHA256SUMS.
+  "osv-scanner": {
+    version: "2.7.0",
+    license: "Apache-2.0",
+    binary: "osv-scanner",
+    archive: false,
+    assets: {
+      "linux/amd64": {
+        url: gh("google/osv-scanner", "v2.7.0", "osv-scanner_linux_amd64"),
+        sha256: "160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b",
+      },
+      "linux/arm64": {
+        url: gh("google/osv-scanner", "v2.7.0", "osv-scanner_linux_arm64"),
+        sha256: "4061ef4c021ed3c47f203b818f337e351336cc5cd67c0274fc36bd1dfc728dd7",
+      },
+      "darwin/arm64": {
+        url: gh("google/osv-scanner", "v2.7.0", "osv-scanner_darwin_arm64"),
+        sha256: "d4926ef8da134332543be276dff157e4c170f99ad91fc48e89448a8816bdf70b",
+      },
+    },
+  },
+  // CVE scan of third-party image contents (scripts/check-image-vulns.ts). 0.121.1 (2026-11-02)
+  // was inside the cooldown when pinned. Hashes match grype_0.121.0_checksums.txt.
+  grype: {
+    version: "0.121.0",
+    license: "Apache-2.0",
+    binary: "grype",
+    archive: true,
+    assets: {
+      "linux/amd64": {
+        url: gh("anchore/grype", "v0.121.0", "grype_0.121.0_linux_amd64.tar.gz"),
+        sha256: "64e07133d3486115de647a66581461dccf5c732748a0a3119077395565f15519",
+      },
+      "linux/arm64": {
+        url: gh("anchore/grype", "v0.121.0", "grype_0.121.0_linux_arm64.tar.gz"),
+        sha256: "86f570f75ca947ea3dd6486309232bcff6d78e44ba081ae75ab14eab72be3dae",
+      },
+      "darwin/arm64": {
+        url: gh("anchore/grype", "v0.121.0", "grype_0.121.0_darwin_arm64.tar.gz"),
+        sha256: "7be39d3a0428c664ce0183e4aba31ed9accffce9eda7e7f6fa84e9c512285f27",
+      },
+    },
+  },
   // OpenTofu for infra/tofu (check.sh). 1.13.2 (2026-10-21) was inside the cooldown when pinned.
   // Hashes from tofu_1.13.1_SHA256SUMS, whose cosign signature names the v1.13 release workflow.
   tofu: {

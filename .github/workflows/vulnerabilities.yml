@@ -4,12 +4,14 @@
 # Known-vulnerability scan of main, daily: `bun audit` for npm and govulncheck for the relay, with
 # the dated exceptions in supply-chain.json (ADR 0022). The gate runs the same checks on every
 # push; this catches advisories published after the code last changed, and backs the README badge.
+# It also fails on known-malicious npm packages (OSV-Scanner), and reports, without failing, the
+# fixed Critical/High CVEs inside every pinned third-party image (Grype) in the run summary.
 name: vulnerabilities
 
 on:
   push:
     branches: [main]
-    paths: ["bun.lock", "relay/go.mod", "relay/go.sum", "supply-chain.json"]
+    paths: ["bun.lock", "relay/go.mod", "relay/go.sum", "supply-chain.json", "osv-scanner.toml"]
   schedule:
     - cron: "23 6 * * *"
   workflow_dispatch:
@@ -48,3 +50,23 @@ jobs:
       - name: Go vulnerabilities
         if: ${{ !cancelled() }}
         run: bun scripts/check-go-vulns.ts
+      - name: Malicious packages
+        if: ${{ !cancelled() }}
+        run: bun scripts/check-malware.ts
+
+  # A separate job: it takes minutes, and its report should not wait on, or hide, the gate above.
+  images:
+    name: image CVEs (report)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - name: Grype over every pinned third-party image
+        run: bun scripts/check-image-vulns.ts

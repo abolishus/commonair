@@ -13,6 +13,8 @@
  *   reasoned exceptions.
  * - GitHub Actions: pinned to a full commit SHA (tags are mutable).
  * - Third-party container images: pinned to a digest (tags are mutable).
+ * - Malware: no OSV `MAL-` advisory anywhere in bun.lock (scripts/check-malware.ts).
+ * - Image contents: fixed Critical/High CVEs reported, not gated (scripts/check-image-vulns.ts).
  */
 
 export const MIN_RELEASE_AGE_DAYS = 7;
@@ -304,4 +306,112 @@ export function parseJsonStream(text: string): unknown[] {
     else if (c === "}" && --depth === 0) out.push(JSON.parse(text.slice(start, i + 1)));
   }
   return out;
+}
+
+/** The parts of `osv-scanner scan --format json` the malware check reads. */
+export interface OsvReport {
+  results?: {
+    source?: { path?: string };
+    packages?: {
+      package: { name: string; version?: string; ecosystem?: string };
+      vulnerabilities?: { id: string; aliases?: string[]; summary?: string }[];
+    }[];
+  }[];
+}
+
+const isMalware = (id: string) => id.startsWith("MAL-");
+
+/**
+ * Known-malicious packages (OSV `MAL-` ids, from the OpenSSF malicious-packages feed) anywhere in
+ * the lockfile. `bun audit` does not report these. Malware never gets an exception, so a `MAL-` id
+ * in osv-scanner.toml, which could hide one, is a finding too.
+ */
+export function checkMalware(report: OsvReport, ignoredIds: string[]): Finding[] {
+  const findings: Finding[] = [];
+  for (const result of report.results ?? [])
+    for (const { package: pkg, vulnerabilities } of result.packages ?? [])
+      for (const v of vulnerabilities ?? []) {
+        const id = [v.id, ...(v.aliases ?? [])].find(isMalware);
+        if (!id) continue;
+        findings.push({
+          where: `osv-scanner (${result.source?.path ?? "lockfile"})`,
+          what: `${pkg.name}@${pkg.version ?? "?"} ${id}`,
+          reason: `${v.summary ?? "known malicious package"}; remove it, rotate any secrets the install could read, and check how it got in`,
+        });
+      }
+  for (const id of ignoredIds.filter(isMalware))
+    findings.push({
+      where: "osv-scanner.toml",
+      what: id,
+      reason: "malicious-package advisories cannot be ignored: remove the entry and the package",
+    });
+  return findings;
+}
+
+/** The parts of `grype -o json` the image report reads. */
+export interface GrypeReport {
+  matches?: {
+    vulnerability: { id: string; severity?: string; fix?: { versions?: string[] } };
+    artifact: { name: string; version?: string };
+  }[];
+}
+
+export interface ImageVulns {
+  image: string;
+  /** Distinct advisory ids per severity, sorted, so one CVE in five packages counts once. */
+  critical: string[];
+  high: string[];
+  /** Set when the scan itself failed; the counts are then meaningless. */
+  error?: string;
+}
+
+/** Critical and High advisories that have a fixed version, from a Grype scan of one image. */
+export function imageVulns(image: string, report: GrypeReport): ImageVulns {
+  const ids = (severity: string) =>
+    [
+      ...new Set(
+        (report.matches ?? [])
+          .filter((m) => m.vulnerability.severity === severity && (m.vulnerability.fix?.versions?.length ?? 0) > 0)
+          .map((m) => m.vulnerability.id),
+      ),
+    ].toSorted();
+  return { image, critical: ids("Critical"), high: ids("High") };
+}
+
+/**
+ * Markdown for the run summary: worst images first, clean ones collapsed into a count. Report
+ * only (ADR 0022): upstream images trail distro and Go fixes, so this informs re-pins and tag
+ * bumps rather than gating them.
+ */
+export function imageVulnTable(rows: ImageVulns[]): string {
+  const name = (ref: string) => ref.replace(/@sha256:[0-9a-f]{64}$/, "");
+  const failed = rows.filter((r) => r.error);
+  const dirty = rows
+    .filter((r) => !r.error && r.critical.length + r.high.length > 0)
+    .toSorted(
+      (a, b) =>
+        b.critical.length - a.critical.length || b.high.length - a.high.length || a.image.localeCompare(b.image),
+    );
+  const clean = rows.length - failed.length - dirty.length;
+  const sample = (ids: string[]) => ids.slice(0, 5).join(", ") + (ids.length > 5 ? `, +${ids.length - 5} more` : "");
+  const lines = [
+    "## Third-party image CVEs (fix available)",
+    "",
+    `${rows.length} image(s): ${dirty.length} with Critical/High, ${clean} clean, ${failed.length} not scanned.`,
+  ];
+  if (dirty.length > 0)
+    lines.push(
+      "",
+      "| Image | Critical | High | Critical advisories |",
+      "| --- | ---: | ---: | --- |",
+      ...dirty.map(
+        (r) => `| \`${name(r.image)}\` | ${r.critical.length} | ${r.high.length} | ${sample(r.critical) || "–"} |`,
+      ),
+    );
+  if (failed.length > 0) lines.push("", "Not scanned:", ...failed.map((r) => `- \`${name(r.image)}\`: ${r.error}`));
+  lines.push(
+    "",
+    "Upstream rebuilds of the same tag often carry the fixes: `bun scripts/pin-images.ts` shows which digests moved.",
+  );
+  return `${lines.join("\n")}\n`;
 }
