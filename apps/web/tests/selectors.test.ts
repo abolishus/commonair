@@ -590,6 +590,8 @@ describe("b8-selectors.md (batch 8)", () => {
         "patronage-payouts",
         "patronage-pay",
         "patronage-payout-mark-paid",
+        "patronage-payout-mark-unsent",
+        "patronage-payout-outcome-unknown",
         "patronage-payout-mine",
         "twitch-import-field",
       ].sort(),

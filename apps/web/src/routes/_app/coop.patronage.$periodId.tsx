@@ -68,6 +68,11 @@ function PayoutSection({ periodId }: { periodId: string }): React.JSX.Element {
         payouts.reload();
       }}
       onMarkPaidError={toastCoopError}
+      onMarkUnsent={async (payoutId) => {
+        await api().coop.patronage.markUnsent({ payoutId });
+        payouts.reload();
+      }}
+      onMarkUnsentError={toastCoopError}
     />
   );
 }

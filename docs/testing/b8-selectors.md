@@ -94,13 +94,15 @@ unit fills it).
 
 ### Co-op money (M1-coop-money)
 
-| Test id                      | Element and attributes                                                                                                             |
-| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `share-buy-stripe`           | "Pay by card" for a share on `/coop/membership`; shown only when the instance and the setting allow it                             |
-| `patronage-payouts`          | The period page's treasurer payout list; each row `data-user-id`, `data-status` (`PATRONAGE_PAYOUT_STATUSES`), `data-amount-cents` |
-| `patronage-pay`              | Pays the period out (second approver as for write-offs); opens a `ConfirmDialog`; `data-period-id`                                 |
-| `patronage-payout-mark-paid` | A treasurer marks a manual payout row paid with a reference; `data-payout-id`                                                      |
-| `patronage-payout-mine`      | The member's own payout status on their statement; `data-status` (`PATRONAGE_PAYOUT_STATUSES`, or `none`)                          |
+| Test id                            | Element and attributes                                                                                                             |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `share-buy-stripe`                 | "Pay by card" for a share on `/coop/membership`; shown only when the instance and the setting allow it                             |
+| `patronage-payouts`                | The period page's treasurer payout list; each row `data-user-id`, `data-status` (`PATRONAGE_PAYOUT_STATUSES`), `data-amount-cents` |
+| `patronage-pay`                    | Pays the period out (second approver as for write-offs); opens a `ConfirmDialog`; `data-period-id`                                 |
+| `patronage-payout-mark-paid`       | A treasurer marks a manual payout row paid with a reference; `data-payout-id`                                                      |
+| `patronage-payout-mark-unsent`     | A treasurer records that an outcome-unknown Connect payout never reached Stripe; `data-payout-id`                                  |
+| `patronage-payout-outcome-unknown` | The note on a Connect payout row whose Stripe outcome is unknown                                                                   |
+| `patronage-payout-mine`            | The member's own payout status on their statement; `data-status` (`PATRONAGE_PAYOUT_STATUSES`, or `none`)                          |
 
 ### Twitch import (B8-server)
 
