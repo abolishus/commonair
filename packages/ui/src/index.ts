@@ -8,6 +8,12 @@
  * `@commonair/ui/toast`, tokens in `@commonair/ui/globals.css`.
  */
 export { LocaleProvider, useLocale, useUiMessages, type LocaleProviderProps } from "./lib/locale.tsx";
+export {
+  PortalContainerProvider,
+  usePortalContainer,
+  type PortalContainer,
+  type PortalContainerProviderProps,
+} from "./lib/portal-container.tsx";
 export { NowProvider, useRequestNow, type NowProviderProps } from "./lib/now.tsx";
 export {
   enMessages,

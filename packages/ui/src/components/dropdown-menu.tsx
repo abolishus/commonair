@@ -7,6 +7,7 @@
 import * as React from "react";
 import { Menu as MenuPrimitive } from "@base-ui/react/menu";
 import { cn } from "@commonair/ui/lib/utils";
+import { usePortalContainer } from "../lib/portal-container.tsx";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowRight01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
 
@@ -28,10 +29,14 @@ function DropdownMenuContent({
   side = "bottom",
   sideOffset = 4,
   className,
+  container,
   ...props
-}: MenuPrimitive.Popup.Props & Pick<MenuPrimitive.Positioner.Props, "align" | "alignOffset" | "side" | "sideOffset">) {
+}: MenuPrimitive.Popup.Props &
+  Pick<MenuPrimitive.Positioner.Props, "align" | "alignOffset" | "side" | "sideOffset"> &
+  Pick<MenuPrimitive.Portal.Props, "container">) {
+  const portalContainer = usePortalContainer(container);
   return (
-    <MenuPrimitive.Portal>
+    <MenuPrimitive.Portal container={portalContainer}>
       <MenuPrimitive.Positioner
         className="isolate z-50 outline-none"
         align={align}

@@ -7,6 +7,7 @@
 import * as React from "react";
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import { cn } from "@commonair/ui/lib/utils";
+import { usePortalContainer } from "../lib/portal-container.tsx";
 import { useUiMessages } from "@commonair/ui/lib/locale";
 
 import { Button } from "@commonair/ui/components/button";
@@ -46,13 +47,16 @@ function DialogContent({
   className,
   children,
   showCloseButton = true,
+  container,
   ...props
-}: DialogPrimitive.Popup.Props & {
-  showCloseButton?: boolean;
-}) {
+}: DialogPrimitive.Popup.Props &
+  Pick<DialogPrimitive.Portal.Props, "container"> & {
+    showCloseButton?: boolean;
+  }) {
   const messages = useUiMessages();
+  const portalContainer = usePortalContainer(container);
   return (
-    <DialogPortal>
+    <DialogPortal container={portalContainer}>
       <DialogOverlay />
       <DialogPrimitive.Popup
         data-slot="dialog-content"
