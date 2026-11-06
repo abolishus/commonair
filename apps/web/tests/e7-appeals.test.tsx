@@ -206,30 +206,110 @@ describe("account actions on /settings/appeals", () => {
 });
 
 describe("appeal queue on /admin/appeals", () => {
-  it("shows the kind and what overturning will do", () => {
-    wrap(
-      <AppealQueueList
-        appeals={[
-          appealOf(strike.id),
-          appealOf("0192f000-0000-7000-8000-0000000000e1", {
-            id: "0192f000-0000-7000-8000-0000000000c2",
-            kind: "moderation",
-            subjectType: "moderation_action",
-          }),
-          appealOf("0192f000-0000-7000-8000-0000000000e2", {
-            id: "0192f000-0000-7000-8000-0000000000c3",
-            kind: "moderation",
-            subjectType: "content_label",
-          }),
-        ]}
-        onResolve={vi.fn<(a: AppealDto, s: "upheld" | "overturned", r: string) => Promise<void>>()}
-      />,
+  const second = "0192f000-0000-7000-8000-0000000000c2";
+  const queue = (): AppealDto[] => [
+    appealOf(strike.id),
+    appealOf("0192f000-0000-7000-8000-0000000000e1", {
+      id: second,
+      kind: "moderation",
+      subjectType: "moderation_action",
+      body: "The stream was not what the report said.",
+    }),
+    appealOf("0192f000-0000-7000-8000-0000000000e2", {
+      id: "0192f000-0000-7000-8000-0000000000c3",
+      kind: "moderation",
+      subjectType: "content_label",
+    }),
+  ];
+  const items = () => screen.getAllByTestId("appealq-item");
+  const toggle = (item: HTMLElement) => within(item).getByTestId("appealq-item-toggle");
+
+  it("shows each appeal as a closed row of its key facts, with no form", () => {
+    wrap(<AppealQueueList appeals={queue()} onResolve={vi.fn<AppealResolve>()} />);
+    expect(items().map((i) => [i.dataset.kind, i.dataset.status, i.dataset.open])).toEqual([
+      ["account", "open", "false"],
+      ["moderation", "open", "false"],
+      ["moderation", "open", "false"],
+    ]);
+    const row = items()[0]!;
+    expect(row.textContent).toContain(appealSubjectLabel("account_action"));
+    expect(row.textContent).toContain(en["appeals.account.kind.account"]);
+    expect(row.textContent).toContain("This strike was a mistake.");
+    expect(toggle(row).getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByTestId("appealq-detail")).toBeNull();
+    expect(screen.queryByTestId("appealq-resolution")).toBeNull();
+    expect(screen.queryByTestId("appealq-submit")).toBeNull();
+  });
+
+  it("opening a row shows the kind and what overturning will do", () => {
+    wrap(<AppealQueueList appeals={queue()} onResolve={vi.fn<AppealResolve>()} />);
+    fireEvent.click(toggle(items()[0]!));
+    expect(items()[0]!.dataset.open).toBe("true");
+    expect(toggle(items()[0]!).getAttribute("aria-expanded")).toBe("true");
+    const detail = within(items()[0]!).getByTestId("appealq-detail");
+    expect(detail.textContent).toContain(en["appeals.account.effect.accountAction"]);
+    fireEvent.click(toggle(items()[1]!));
+    expect(within(items()[1]!).getByTestId("appealq-detail").textContent).toContain(
+      en["appeals.account.effect.moderationAction"],
     );
-    const items = screen.getAllByTestId("appealq-item");
-    expect(items.map((i) => i.dataset.kind)).toEqual(["account", "moderation", "moderation"]);
-    expect(items[0]!.textContent).toContain(en["appeals.account.effect.accountAction"]);
-    expect(items[0]!.textContent).toContain(en["appeals.account.kind.account"]);
-    expect(items[1]!.textContent).toContain(en["appeals.account.effect.moderationAction"]);
-    expect(items[2]!.querySelector("[data-effect]")).toBeNull();
+    fireEvent.click(toggle(items()[2]!));
+    expect(items()[2]!.querySelector("[data-effect]")).toBeNull();
+  });
+
+  it("one row is open at a time, so the page has one form", () => {
+    wrap(<AppealQueueList appeals={queue()} onResolve={vi.fn<AppealResolve>()} />);
+    fireEvent.click(toggle(items()[0]!));
+    fireEvent.click(toggle(items()[1]!));
+    expect(items().map((i) => i.dataset.open)).toEqual(["false", "true", "false"]);
+    expect(screen.getAllByTestId("appealq-resolution")).toHaveLength(1);
+    fireEvent.click(toggle(items()[1]!));
+    expect(screen.queryByTestId("appealq-resolution")).toBeNull();
+  });
+
+  it("the toggle is a focusable native button that controls the detail", () => {
+    wrap(<AppealQueueList appeals={queue()} onResolve={vi.fn<AppealResolve>()} />);
+    const button = toggle(items()[0]!);
+    // A native button turns Enter and Space into a click, so the keyboard opens the row.
+    expect(button.tagName).toBe("BUTTON");
+    button.focus();
+    expect(document.activeElement).toBe(button);
+    fireEvent.click(button);
+    const detail = within(items()[0]!).getByTestId("appealq-detail");
+    expect(button.getAttribute("aria-controls")).toBe(detail.id);
+    expect(within(items()[0]!).getByTestId("appealq-resolution")).toBeTruthy();
+  });
+
+  it("a draft survives closing the row", () => {
+    wrap(<AppealQueueList appeals={queue()} onResolve={vi.fn<AppealResolve>()} />);
+    fireEvent.click(toggle(items()[1]!));
+    fireEvent.click(screen.getByTestId("appealq-resolve-overturned"));
+    fireEvent.change(screen.getByTestId("appealq-resolution"), { target: { value: "Reversed." } });
+    fireEvent.click(toggle(items()[0]!));
+    fireEvent.click(toggle(items()[1]!));
+    expect((screen.getByTestId("appealq-resolution") as HTMLTextAreaElement).value).toBe("Reversed.");
+    expect((screen.getByTestId("appealq-submit") as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("resolves from the open row", async () => {
+    const onResolve = vi.fn<AppealResolve>(async () => {});
+    wrap(<AppealQueueList appeals={queue()} onResolve={onResolve} />);
+    fireEvent.click(toggle(items()[1]!));
+    const submit = screen.getByTestId("appealq-submit") as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+    fireEvent.click(screen.getByTestId("appealq-resolve-upheld"));
+    fireEvent.change(screen.getByTestId("appealq-resolution"), { target: { value: "  The decision stands.  " } });
+    fireEvent.click(submit);
+    await waitFor(() => expect(onResolve).toHaveBeenCalledTimes(1));
+    const [appeal, status, resolution] = onResolve.mock.calls[0]!;
+    expect([appeal.id, status, resolution]).toEqual([second, "upheld", "The decision stands."]);
+  });
+
+  it("a resolved appeal opens to its text without a form", () => {
+    wrap(<AppealQueueList appeals={[appealOf(strike.id, { status: "upheld" })]} onResolve={vi.fn<AppealResolve>()} />);
+    fireEvent.click(toggle(items()[0]!));
+    expect(within(items()[0]!).getByTestId("appealq-detail").textContent).toContain("This strike was a mistake.");
+    expect(screen.queryByTestId("appealq-resolution")).toBeNull();
   });
 });
+
+type AppealResolve = (a: AppealDto, s: "upheld" | "overturned", r: string) => Promise<void>;
