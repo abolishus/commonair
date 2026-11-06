@@ -19,5 +19,18 @@
   "fuChannel.category.videosEmptyHint": "Past broadcasts in this category show up here once they are saved.",
   "fuChannel.category.clipsEmpty": "No clips in {category} yet",
   "fuChannel.category.clipsEmptyHint": "Clips cut from broadcasts in this category show up here.",
-  "fuChannel.recent.watchLatest": "Watch {name}'s latest video ({duration})"
+  "fuChannel.recent.watchLatest": "Watch {name}'s latest video ({duration})",
+  "fuChannel.editor.socials": "Social links",
+  "fuChannel.editor.socialsHint": "Up to {max} links, shown on your About tab in this order.",
+  "fuChannel.editor.socialsEmpty": "No links yet.",
+  "fuChannel.editor.row": "Link {n}",
+  "fuChannel.editor.platform": "Platform",
+  "fuChannel.editor.url": "Address",
+  "fuChannel.editor.add": "Add link",
+  "fuChannel.editor.full": "That is {max} links, the most a channel can show.",
+  "fuChannel.editor.moveUp": "Move link {n} up",
+  "fuChannel.editor.moveDown": "Move link {n} down",
+  "fuChannel.editor.remove": "Remove link {n}",
+  "fuChannel.editor.badUrl": "Enter an https:// address without a username or password.",
+  "fuChannel.editor.fixLinks": "Fix the highlighted links before saving."
 }

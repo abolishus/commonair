@@ -16,25 +16,13 @@
  * step with the reason instead of failing it.
  */
 import type { Page } from "playwright";
-import { ROUTES, TEST_IDS as T, tid } from "../web/selectors.ts";
+import { FU_CHANNEL_IDS, ROUTES, TEST_IDS as T, tid } from "../web/selectors.ts";
 import { waitForHydration } from "../web/session.ts";
 import type { DContext } from "./context.ts";
 
 const UI_TIMEOUT_MS = 15_000;
 /** The seeded streamer with data (`demo_streamer1`, live in Art under `seed live`). */
 const STREAMER = "streamer1";
-/**
- * The follow-up ids (data-testid), beside D_TEST_IDS / TEST_IDS until the orchestrator folds them
- * into `web/selectors.ts`.
- */
-export const FU_CHANNEL_IDS = {
-  channelSocials: "channel-socials",
-  channelSocialLink: "channel-social-link",
-  clipFilters: "clip-filters",
-  clipRange: (range: "7d" | "30d" | "all") => `clip-range-${range}`,
-  clipSort: (sort: "recent" | "top") => `clip-sort-${sort}`,
-  clipsFilteredEmpty: "clips-filtered-empty",
-} as const;
 const fid = (id: string): string => `[data-testid="${id}"]`;
 
 /** A 375 px phone (screenshots 13 and 24). */

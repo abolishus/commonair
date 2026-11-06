@@ -68,7 +68,12 @@ const liveHealth: StreamHealthDto = {
   viewers: { verified: 42, pending: 3, excluded: 7 },
 };
 
-const INFO: StreamInfo = { title: "Painting skies", category: { id: "c-art", name: "Art" }, tags: ["chill"] };
+const INFO: StreamInfo = {
+  title: "Painting skies",
+  category: { id: "c-art", name: "Art" },
+  tags: ["chill"],
+  socials: [],
+};
 
 function infoClient(update: StreamInfoClient["update"]): StreamInfoClient {
   return {

@@ -362,6 +362,50 @@ export const D_TEST_IDS = {
   signupBirthdateYear: "signup-birthdate-year",
 } as const;
 
+/**
+ * The follow-up ids (data-testid) on the channel page: About's social links and the Clips tab's
+ * sort and range filter. Kept out of `TEST_IDS` because the range and sort ids are built per value.
+ */
+export const FU_CHANNEL_IDS = {
+  channelSocials: "channel-socials",
+  channelSocialLink: "channel-social-link",
+  clipFilters: "clip-filters",
+  clipRange: (range: "7d" | "30d" | "all") => `clip-range-${range}`,
+  clipSort: (sort: "recent" | "top") => `clip-sort-${sort}`,
+  clipsFilteredEmpty: "clips-filtered-empty",
+} as const;
+
+/** The follow-up ids on a category page: the header's verified viewers and tags, and the media tabs. */
+export const FU_CATEGORY_IDS = {
+  categoryViewerCount: "category-viewer-count",
+  categoryTags: "category-tags",
+  categoryTag: "category-tag",
+  categoryMediaEmpty: "category-media-empty",
+  videoGrid: "channel-video-grid",
+  videoCard: "channel-video-card",
+} as const;
+
+/**
+ * The social links editor inside the studio's `stream-info` card. Each row is `socialRow` with
+ * `data-index` (0-based, in saved order); the row's controls are found inside it. The platform
+ * select carries its value as `data-value`, and its options are `socialPlatformOption(platform)`.
+ */
+export const FU_SOCIALS_EDITOR_IDS = {
+  socials: "stream-info-socials",
+  socialsEmpty: "stream-info-socials-empty",
+  socialsFull: "stream-info-socials-full",
+  socialRow: "stream-info-social",
+  socialPlatform: "stream-info-social-platform",
+  socialPlatformOption: (platform: string) => `stream-info-social-platform-${platform}`,
+  socialUrl: "stream-info-social-url",
+  socialError: "stream-info-social-error",
+  socialUp: "stream-info-social-up",
+  socialDown: "stream-info-social-down",
+  socialRemove: "stream-info-social-remove",
+  socialAdd: "stream-info-social-add",
+  save: "stream-info-save",
+} as const;
+
 export const TEST_IDS = {
   ...E1_TEST_IDS,
   ...E2_TEST_IDS,

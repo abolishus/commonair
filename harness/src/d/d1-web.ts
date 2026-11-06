@@ -13,21 +13,12 @@
  */
 import type { Page } from "playwright";
 import { createApi } from "../api/client.ts";
-import { D_TEST_IDS as D, ROUTES, tid } from "../web/selectors.ts";
+import { D_TEST_IDS as D, FU_CATEGORY_IDS, ROUTES, tid } from "../web/selectors.ts";
 import { waitForHydration } from "../web/session.ts";
 import type { DContext } from "./context.ts";
 
 const UI_TIMEOUT_MS = 15_000;
 
-/** The category page's follow-up ids, until the orchestrator folds them into `web/selectors.ts`. */
-export const FU_CATEGORY_IDS = {
-  categoryViewerCount: "category-viewer-count",
-  categoryTags: "category-tags",
-  categoryTag: "category-tag",
-  categoryMediaEmpty: "category-media-empty",
-  videoGrid: "channel-video-grid",
-  videoCard: "channel-video-card",
-} as const;
 const fid = (id: string): string => `[data-testid="${id}"]`;
 const STREAMERS = ["streamer1", "streamer2", "streamer3"] as const;
 

@@ -19,5 +19,18 @@
   "fuChannel.category.videosEmptyHint": "Las emisiones pasadas de esta categoría aparecen aquí cuando se guardan.",
   "fuChannel.category.clipsEmpty": "Aún no hay clips en {category}",
   "fuChannel.category.clipsEmptyHint": "Los clips de emisiones de esta categoría aparecen aquí.",
-  "fuChannel.recent.watchLatest": "Ver el último video de {name} ({duration})"
+  "fuChannel.recent.watchLatest": "Ver el último video de {name} ({duration})",
+  "fuChannel.editor.socials": "Enlaces sociales",
+  "fuChannel.editor.socialsHint": "Hasta {max} enlaces, en este orden en tu pestaña Acerca de.",
+  "fuChannel.editor.socialsEmpty": "Aún no hay enlaces.",
+  "fuChannel.editor.row": "Enlace {n}",
+  "fuChannel.editor.platform": "Plataforma",
+  "fuChannel.editor.url": "Dirección",
+  "fuChannel.editor.add": "Añadir enlace",
+  "fuChannel.editor.full": "Son {max} enlaces, el máximo que puede mostrar un canal.",
+  "fuChannel.editor.moveUp": "Subir el enlace {n}",
+  "fuChannel.editor.moveDown": "Bajar el enlace {n}",
+  "fuChannel.editor.remove": "Quitar el enlace {n}",
+  "fuChannel.editor.badUrl": "Escribe una dirección https:// sin usuario ni contraseña.",
+  "fuChannel.editor.fixLinks": "Corrige los enlaces marcados antes de guardar."
 }

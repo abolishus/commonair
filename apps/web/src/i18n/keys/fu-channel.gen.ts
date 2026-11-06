@@ -24,4 +24,17 @@ export type Key =
   | "fuChannel.category.videosEmptyHint"
   | "fuChannel.category.clipsEmpty"
   | "fuChannel.category.clipsEmptyHint"
-  | "fuChannel.recent.watchLatest";
+  | "fuChannel.recent.watchLatest"
+  | "fuChannel.editor.socials"
+  | "fuChannel.editor.socialsHint"
+  | "fuChannel.editor.socialsEmpty"
+  | "fuChannel.editor.row"
+  | "fuChannel.editor.platform"
+  | "fuChannel.editor.url"
+  | "fuChannel.editor.add"
+  | "fuChannel.editor.full"
+  | "fuChannel.editor.moveUp"
+  | "fuChannel.editor.moveDown"
+  | "fuChannel.editor.remove"
+  | "fuChannel.editor.badUrl"
+  | "fuChannel.editor.fixLinks";
