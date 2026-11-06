@@ -8,7 +8,7 @@
  * its client id and secret are set.
  */
 import { sql } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
+import { afterAll, beforeAll, describe, expect, test, vi } from "vite-plus/test";
 import { createAuth } from "../src/auth/index.ts";
 import { client, mailTo, signUpAndSignIn, startApi, waitFor, type TestApi } from "./harness.ts";
 
@@ -20,6 +20,10 @@ afterAll(async () => {
   await api?.stop();
 });
 
+/** Mail goes out after the response; CI under load can take a while to deliver it to Mailpit. */
+const MAIL_WAIT_MS = 20_000;
+// Room for two mail waits in one test.
+vi.setConfig({ testTimeout: 60_000 });
 const linkIn = (text: string) => /https?:\/\/\S+/.exec(text)?.[0] ?? "";
 
 describe("mail flows", () => {
@@ -33,7 +37,7 @@ describe("mail flows", () => {
     const mail = await waitFor(async () => {
       const m = await mailTo(me.email);
       return m && /reset/i.test(m.text) && !/verify-email/.test(m.text) ? m : null;
-    });
+    }, MAIL_WAIT_MS);
     expect(linkIn(mail.text).startsWith(api.deps.site.publicUrl)).toBe(true);
   });
 
@@ -47,14 +51,14 @@ describe("mail flows", () => {
     const mail = await waitFor(async () => {
       const m = await mailTo(me.email);
       return m && /magic-link/.test(m.text) ? m : null;
-    });
+    }, MAIL_WAIT_MS);
     const link = linkIn(mail.text);
     expect(link.startsWith(api.deps.site.publicUrl)).toBe(true);
     // An unknown address gets a link too (no account enumeration), but following it never makes
     // an account (disableSignUp).
     const stranger = `nobody-${crypto.randomUUID().slice(0, 8)}@test.invalid`;
     await client(api).call("POST", "/api/auth/sign-in/magic-link", { email: stranger });
-    const strangerMail = await waitFor(() => mailTo(stranger));
+    const strangerMail = await waitFor(() => mailTo(stranger), MAIL_WAIT_MS);
     const verify = await fetch(linkIn(strangerMail.text).replace(api.deps.site.publicUrl, api.url), {
       redirect: "manual",
     });

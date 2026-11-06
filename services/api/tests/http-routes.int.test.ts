@@ -27,8 +27,16 @@ afterAll(async () => {
   await api?.stop();
 });
 
-/** A fresh client address per call site: the limiters' keys live in the shared Valkey. */
-const addr = () => `198.51.100.${Math.floor(Math.random() * 250) + 1}`;
+/**
+ * A fresh client address per call: the limiters' keys live in the shared Valkey, so two call
+ * sites (or a rerun inside a limiter's window) must never share one. Consecutive addresses in
+ * 198.18.0.0/15 from a random start: no repeat within a run, and a rerun lands elsewhere.
+ */
+let nextAddr = Math.floor(Math.random() * 0x20000);
+const addr = () => {
+  const n = nextAddr++ % 0x20000;
+  return `198.${18 + (n >> 16)}.${(n >> 8) & 255}.${n & 255}`;
+};
 const peer = (address = "127.0.0.1") => ({ requestIP: () => ({ address, family: "IPv4" as const, port: 1 }) });
 function call(
   app: ReturnType<typeof createApp>,
