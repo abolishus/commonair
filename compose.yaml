@@ -93,8 +93,10 @@ x-app-depends: &app-depends
     condition: service_completed_successfully
   valkey:
     condition: service_healthy
+  # Started, not healthy (R0-d, as the Quadlet units' Wants= + After=): observability never holds
+  # back the apps. What they export before the collector listens is retried.
   otel-collector:
-    condition: service_healthy
+    condition: service_started
 
 x-app-healthcheck: &app-healthcheck
   test: ["CMD", "bun", "/opt/commonair/healthcheck.ts"]
@@ -509,11 +511,13 @@ services:
       - ./infra/otel-collector:/etc/otelcol-contrib:ro,Z
       # The host's /proc for the hostmetrics receiver (on macOS, the Podman machine's).
       - /proc:/hostfs/proc:ro
+    # Started, not healthy: a Loki or Tempo that never gets healthy must not keep the collector,
+    # and through it the apps' metrics, down. The collector retries its exports.
     depends_on:
       loki:
-        condition: service_healthy
+        condition: service_started
       tempo:
-        condition: service_healthy
+        condition: service_started
     healthcheck:
       <<: *healthcheck
       test: ["CMD", "/usr/local/bin/busybox", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:13133/"]
@@ -608,13 +612,14 @@ services:
       - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro,Z
       - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro,Z
       - grafana-data:/var/lib/grafana
+    # Started, not healthy, as for every observability dependency (R0-d).
     depends_on:
       prometheus:
-        condition: service_healthy
+        condition: service_started
       loki:
-        condition: service_healthy
+        condition: service_started
       tempo:
-        condition: service_healthy
+        condition: service_started
     healthcheck:
       <<: *healthcheck
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/api/health"]

@@ -45,6 +45,8 @@ const services = Object.entries(compose.services);
 const registry = JSON.parse(read("infra/image-licenses.json")) as Record<string, { license: string; tag: string }>;
 
 const ONE_SHOT = new Set(["migrate", "garage-init"]);
+/** Waited on as started, never healthy (R0-d): observability never holds back what depends on it. */
+const OBSERVABILITY = new Set(["otel-collector", "prometheus", "loki", "tempo"]);
 const OWN_IMAGE = /^\$\{IMAGE_REGISTRY:-localhost\/commonair\}\/([a-z-]+):\$\{IMAGE_TAG:-dev\}$/;
 // Tag for humans and image-licenses.json, digest because tags are mutable (ADR 0022).
 const PINNED = /^([a-z0-9.-]+\.[a-z]+(?::\d+)?\/[a-z0-9._/-]+):([A-Za-z0-9._-]+)@sha256:[0-9a-f]{64}$/;
@@ -197,7 +199,11 @@ describe("compose.yaml: lifecycle", () => {
     const problems = Object.entries(s.depends_on ?? {}).flatMap(([dep, { condition }]) => {
       const target = compose.services[dep];
       if (!target) return [`unknown ${dep}`];
-      const want = ONE_SHOT.has(dep) ? "service_completed_successfully" : "service_healthy";
+      const want = ONE_SHOT.has(dep)
+        ? "service_completed_successfully"
+        : OBSERVABILITY.has(dep)
+          ? "service_started"
+          : "service_healthy";
       // A default-profile service must not wait on an optional-profile one.
       return [
         ...(condition === want ? [] : [`${dep}: ${condition}, want ${want}`]),
@@ -205,6 +211,17 @@ describe("compose.yaml: lifecycle", () => {
       ];
     });
     expect(problems, name).toEqual([]);
+  });
+
+  test("the apps wait for the collector to start, not to be healthy (R0-d)", () => {
+    for (const app of ["api", "chat", "irc", "origin", "media", "worker", "tracker"]) {
+      const dep = compose.services[app]?.depends_on?.["otel-collector"];
+      expect(dep?.condition, app).toBe("service_started");
+    }
+    expect(compose.services["otel-collector"]?.depends_on).toEqual({
+      loki: { condition: "service_started" },
+      tempo: { condition: "service_started" },
+    });
   });
 
   test("optional profiles", () => {
