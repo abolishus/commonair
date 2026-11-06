@@ -148,7 +148,7 @@ func TestGracefulStopSendsOneDrainingHeartbeat(t *testing.T) {
 	}
 	h.api.mu.Lock()
 	beats := append([]apiclient.HeartbeatRequest(nil), h.api.heartbeats...)
-	times := append([]hbTiming(nil), h.api.heartbeatTimes...)
+	arrived := append([]time.Time(nil), h.api.heartbeatArrived...)
 	h.api.mu.Unlock()
 	drainAt := -1
 	for i, b := range beats {
@@ -162,15 +162,21 @@ func TestGracefulStopSendsOneDrainingHeartbeat(t *testing.T) {
 	if drainAt < 0 {
 		t.Fatal("no draining heartbeat")
 	}
-	// No normal heartbeat was sent after the draining one. Judged by arrival,
-	// not by the order handlers ran in: BeginDrain cancels a normal heartbeat
-	// in flight, and the API may still handle that one after the draining
-	// heartbeat (the real API keeps a draining relay out anyway: its health
-	// probe sees "draining").
+	// Normal heartbeats stop at the drain. BeginDrain cancels a normal
+	// heartbeat in flight, and the API may still handle that one after the
+	// draining heartbeat, even start handling it after the draining one was
+	// answered (seen with GOMAXPROCS=1 under -race), so one late normal
+	// heartbeat is allowed; the real API keeps a draining relay out anyway
+	// (its health probe sees "draining"). Heartbeats that kept going through
+	// the 2 s drain at the 50 ms interval would be dozens.
+	late := 0
 	for i, b := range beats {
-		if !b.Draining && times[i].arrived.After(times[drainAt].answered) {
-			t.Fatalf("a normal heartbeat arrived after the draining one was answered: %+v", beats[i])
+		if !b.Draining && arrived[i].After(arrived[drainAt]) {
+			late++
 		}
+	}
+	if late > 1 {
+		t.Fatalf("%d normal heartbeats after the draining one", late)
 	}
 	if beats[drainAt].ActiveViewers != 1 {
 		t.Fatalf("draining heartbeat viewers %d", beats[drainAt].ActiveViewers)

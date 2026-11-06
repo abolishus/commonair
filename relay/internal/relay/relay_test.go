@@ -130,13 +130,12 @@ type fakeAPI struct {
 	relayPub      string
 	registrations int
 	heartbeats    []apiclient.HeartbeatRequest
-	// heartbeatTimes[i]: when heartbeats[i]'s request reached the API and was answered.
-	// Handlers run concurrently, so a heartbeat the relay sent and then abandoned can be
-	// recorded after a later one; arrival times keep the order the relay sent them in.
-	heartbeatTimes []hbTiming
-	receipts       []tokens.SignedReceipt
-	status         string
-	receiptStatus  int // non-zero: fail receipts with this status
+	// heartbeatArrived[i]: when heartbeats[i]'s handler started (handlers run
+	// concurrently, so this is close to, not exactly, the order they were sent in).
+	heartbeatArrived []time.Time
+	receipts         []tokens.SignedReceipt
+	status           string
+	receiptStatus    int // non-zero: fail receipts with this status
 	// nonces the API accepted; duplicateReceipts counts resends answered 409.
 	nonces            map[string]bool
 	duplicateReceipts int
@@ -166,8 +165,6 @@ func newFakeAPI(t *testing.T, originURL string, originKey ed25519.PublicKey) *fa
 	t.Cleanup(a.Close)
 	return a
 }
-
-type hbTiming struct{ arrived, answered time.Time }
 
 func (a *fakeAPI) serve(w http.ResponseWriter, r *http.Request) {
 	arrived := time.Now()
@@ -222,7 +219,7 @@ func (a *fakeAPI) serve(w http.ResponseWriter, r *http.Request) {
 		var in apiclient.HeartbeatRequest
 		_ = json.NewDecoder(r.Body).Decode(&in)
 		a.heartbeats = append(a.heartbeats, in)
-		a.heartbeatTimes = append(a.heartbeatTimes, hbTiming{arrived: arrived, answered: time.Now()})
+		a.heartbeatArrived = append(a.heartbeatArrived, arrived)
 		writeJSON(w, http.StatusOK, apiclient.HeartbeatResponse{Status: a.status, OriginPublicKey: tokens.EncodeB64URL(a.originKey)})
 	case "/api/relay/receipts":
 		if a.receiptStatus != 0 {
