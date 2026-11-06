@@ -14,7 +14,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import * as React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import type { PlayerControllerOptions } from "../src/player/controller.ts";
-import { locale, uiMessages } from "../src/i18n/index.ts";
+import { locale, t, uiMessages } from "../src/i18n/index.ts";
 import { BAR_HIDE_MS, usePlayerBar } from "../src/player/bar.ts";
 import { DATA_MODE_STORAGE_KEY } from "../src/player/budget.ts";
 import { setP2PStorage } from "../src/player/p2p/preference.ts";
@@ -359,6 +359,27 @@ describe("the VOD bar", () => {
     const video = screen.getByTestId("vod-player").querySelector("video") as HTMLVideoElement;
     fireEvent.click(screen.getByTestId("player-settings-speed-1.5"));
     expect(video.playbackRate).toBe(1.5);
+  });
+
+  it("loading is a busy skeleton named for screen readers, then gone once the video has metadata (F28)", () => {
+    wrap(
+      <VodPlayer
+        source={{ kind: "mp4", url: "/media/clips/c.mp4", windowStartedAt: null }}
+        variant="clip"
+        title="The jump"
+        durationSeconds={30}
+        captions={[]}
+      />,
+    );
+    const loading = screen.getByTestId("vod-player-loading");
+    expect(loading.getAttribute("aria-busy")).toBe("true");
+    expect(loading.textContent).toBe(t("replay.player.loading"));
+    expect(loading.querySelector('[data-slot="skeleton-thumbnail"]')).not.toBeNull();
+    const video = screen.getByTestId("vod-player").querySelector("video") as HTMLVideoElement;
+    act(() => {
+      video.dispatchEvent(new Event("loadedmetadata"));
+    });
+    expect(screen.queryByTestId("vod-player-loading")).toBeNull();
   });
 
   it("says data saver does not apply to videos when it is on", () => {

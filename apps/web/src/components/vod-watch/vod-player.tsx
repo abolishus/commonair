@@ -15,7 +15,14 @@
  * The control bar is the live player's (D2-player, F3): volume, captions, settings (quality on
  * HLS, speed), PiP, theatre where the page offers it, fullscreen, and the same shortcuts.
  */
-import { formatDuration, IconButton, PortalContainerProvider, useLocale } from "@commonair/ui";
+import {
+  formatDuration,
+  IconButton,
+  PortalContainerProvider,
+  SkeletonGroup,
+  SkeletonThumbnail,
+  useLocale,
+} from "@commonair/ui";
 import { PlayerChrome, PlayerControl, PlayerScrubber } from "@commonair/ui/blocks/media";
 import type * as D from "@commonair/contracts/dto";
 import { ClosedCaptionIcon, PauseIcon, PlayIcon } from "@hugeicons/core-free-icons";
@@ -363,7 +370,10 @@ export function VodPlayer({
     state === "error" ? (
       <p className="p-4 text-center text-sm">{t("replay.player.error")}</p>
     ) : state === "loading" ? (
-      <p className="p-4 text-center text-sm">{t("replay.player.loading")}</p>
+      // The frame's shape while the video loads; the group is aria-busy and names it for screen readers (F28).
+      <SkeletonGroup data-testid="vod-player-loading" label={t("replay.player.loading")} className="size-full">
+        <SkeletonThumbnail className="size-full" />
+      </SkeletonGroup>
     ) : undefined;
 
   const menu = (
