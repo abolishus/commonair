@@ -462,6 +462,12 @@ describe("caddy live: presigned object routes", () => {
     expect(api.status).toBe(200);
     expect(api.stub).toMatch(/^api GET \/readyz\/public xff=\S+$/);
     expect(api.body).toBe('{"ok":true}');
+    // A client naming another address cannot pick its limiter bucket: Caddy trusts no proxy, so
+    // the header the service sees is the peer's address alone.
+    const spoofed = curl("GET", "/readyz/api", { headers: { "X-Forwarded-For": "203.0.113.9" } });
+    expect(spoofed.stub).toMatch(/^api GET \/readyz\/public xff=\S+$/);
+    expect(spoofed.stub).not.toContain("203.0.113.9");
+    expect(spoofed.stub).toBe(api.stub);
     // The limiter's answer passes through unchanged.
     const origin = curl("GET", "/readyz/origin");
     expect(origin).toMatchObject({ status: 429, stub: "origin GET /readyz/public" });

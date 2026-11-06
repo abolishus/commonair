@@ -2091,7 +2091,18 @@ describe("main", () => {
     const logs: Record<string, unknown>[] = [];
     const write = process.stdout.write.bind(process.stdout);
     process.stdout.write = ((chunk: string) => {
-      for (const l of String(chunk).split("\n").filter(Boolean)) logs.push(JSON.parse(l) as Record<string, unknown>);
+      // Only main's own lines (JSON with a msg) are captured; anything else the runner writes
+      // meanwhile passes through rather than failing the parse.
+      for (const l of String(chunk).split("\n").filter(Boolean)) {
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(l);
+        } catch {
+          parsed = null;
+        }
+        if (parsed && typeof parsed === "object" && "msg" in parsed) logs.push(parsed as Record<string, unknown>);
+        else write(`${l}\n`);
+      }
       return true;
     }) as typeof process.stdout.write;
     try {
@@ -2137,6 +2148,22 @@ describe("main", () => {
   test("an unreadable config exits 1 before touching anything", async () => {
     const data = setupData();
     const { code, logs } = await run({ STATUS_CONFIG: join(data, "absent.json"), STATUS_DATA: data });
+    expect(code).toBe(1);
+    expect(logs).toEqual([expect.objectContaining({ level: "error", msg: "render failed: unreadable config" })]);
+    expect(existsSync(join(data, "site", "index.html"))).toBe(false);
+  });
+
+  test("an SMTP_CA_FILE it cannot read is an unreadable config, not a relay trusted without it", async () => {
+    const etc = tmp();
+    writeFileSync(join(etc, "status.json"), JSON.stringify(RAW_CONFIG));
+    writeFileSync(join(etc, "alert.env"), `SMTP_CA_FILE=${join(etc, "absent.pem")}\n`);
+    const data = setupData();
+    const { code, logs } = await run({
+      STATUS_CONFIG: join(etc, "status.json"),
+      STATUS_ALERT_ENV: join(etc, "alert.env"),
+      STATUS_DATA: data,
+      STATUS_PROMETHEUS_URL: "http://127.0.0.1:9",
+    });
     expect(code).toBe(1);
     expect(logs).toEqual([expect.objectContaining({ level: "error", msg: "render failed: unreadable config" })]);
     expect(existsSync(join(data, "site", "index.html"))).toBe(false);

@@ -13,12 +13,13 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, test } from "vite-plus/test";
+import { afterAll, describe, expect, test } from "vite-plus/test";
 import { ALL_ENV_SCHEMAS } from "../../packages/config/src/env.ts";
 import {
   APP_UNITS,
@@ -86,6 +87,15 @@ describe("the committed key lists", () => {
       [`${KEYS_DIR}/commonair-a.keys`, "A\n"],
       [`${KEYS_DIR}/commonair-b.keys`, "B\nC\n"],
     ]);
+    const roots: string[] = [];
+    const scratch = () => {
+      const root = mkdtempSync(join(tmpdir(), "commonair-unit-env-"));
+      roots.push(root);
+      return root;
+    };
+    afterAll(() => {
+      for (const r of roots) rmSync(r, { recursive: true, force: true });
+    });
     const run = (check: boolean, root: string) => {
       const out = { log: [] as string[], error: [] as string[] };
       const bad = syncKeyLists(check, root, files, {
@@ -96,7 +106,7 @@ describe("the committed key lists", () => {
     };
 
     test("--check on a root with none: each list is out of date, nothing is written", () => {
-      const root = mkdtempSync(join(tmpdir(), "commonair-unit-env-"));
+      const root = scratch();
       const r = run(true, root);
       expect(r.bad).toBe(2);
       expect(r.error).toEqual([
@@ -107,7 +117,7 @@ describe("the committed key lists", () => {
     });
 
     test("writes what is missing or edited, then --check passes; an unchanged list is not rewritten", () => {
-      const root = mkdtempSync(join(tmpdir(), "commonair-unit-env-"));
+      const root = scratch();
       expect(run(false, root)).toEqual({
         bad: 0,
         log: [`wrote ${KEYS_DIR}/commonair-a.keys`, `wrote ${KEYS_DIR}/commonair-b.keys`],
@@ -121,7 +131,7 @@ describe("the committed key lists", () => {
     });
 
     test("a list of no unit is reported in both modes and never deleted; other files are ignored", () => {
-      const root = mkdtempSync(join(tmpdir(), "commonair-unit-env-"));
+      const root = scratch();
       run(false, root);
       writeFileSync(join(root, KEYS_DIR, "commonair-gone.keys"), "X\n");
       writeFileSync(join(root, KEYS_DIR, "README"), "notes\n");
