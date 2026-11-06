@@ -51,7 +51,14 @@ import {
 import { en } from "../src/i18n/en.ts";
 import { locale, uiMessages } from "../src/i18n/index.ts";
 
-afterEach(cleanup);
+const toasts = vi.hoisted(() => ({ success: vi.fn<(m: string) => void>(), error: vi.fn<(m: string) => void>() }));
+vi.mock("@commonair/ui/toast", () => ({ toast: toasts }));
+
+afterEach(() => {
+  cleanup();
+  toasts.success.mockReset();
+  toasts.error.mockReset();
+});
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────────────────────
 
@@ -1014,6 +1021,146 @@ describe("/admin/apps", () => {
     fireEvent.click(id("adminapps-filter-suspended"));
     await waitFor(() => expect(m.list).toHaveBeenLastCalledWith({ limit: 25, suspended: true }));
     await waitFor(() => expect((screen.getAllByTestId("adminapp")[0] as HTMLElement).dataset.suspended).toBe("true"));
+  });
+});
+
+describe("/admin/apps: states and failures", () => {
+  const rows = () => screen.getAllByTestId("adminapp") as HTMLElement[];
+
+  it("a failed first load offers a retry that loads again", async () => {
+    const { client, m } = fakeAdmin();
+    m.list.mockRejectedValueOnce(apiError("INTERNAL_SERVER_ERROR"));
+    wrap(<AdminAppsPage client={client} />);
+    expect(await screen.findByText(en["developer.admin.loadFailed"])).toBeTruthy();
+    expect(screen.queryByTestId("adminapp")).toBeNull();
+    fireEvent.click(screen.getByText(en["developer.retry"]));
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    expect(m.list).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText(en["developer.admin.loadFailed"])).toBeNull();
+  });
+
+  it("an instance with no apps says none are registered, not that nothing matches", async () => {
+    const { client, m } = fakeAdmin();
+    m.list.mockResolvedValueOnce(page([]));
+    wrap(<AdminAppsPage client={client} />);
+    const empty = await find("adminapps-empty");
+    expect(empty.textContent).toContain(en["developer.admin.empty"]);
+    expect(empty.textContent).not.toContain(en["developer.admin.noMatch"]);
+  });
+
+  it("labels public and confidential apps, and a suspension with its reason", async () => {
+    const { client, m } = fakeAdmin();
+    m.list.mockResolvedValueOnce(
+      page([
+        adminApp({ confidential: false }),
+        adminApp({ id: "a2", name: "Spammy", suspended: { at: T0, reason: "spam" } }),
+      ]),
+    );
+    wrap(<AdminAppsPage client={client} />);
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    const [pub, conf] = rows();
+    expect(pub?.textContent).toContain(en["developer.app.kind.public"]);
+    expect(conf?.textContent).toContain(en["developer.app.kind.confidential"]);
+    expect(conf?.textContent).toContain("Suspended: ");
+    expect(pub?.textContent).not.toContain("Suspended: ");
+  });
+
+  it("loads more from the cursor; a failed page toasts and keeps the rows", async () => {
+    const { client, m } = fakeAdmin();
+    m.list.mockResolvedValueOnce(page([adminApp()], "c2"));
+    wrap(<AdminAppsPage client={client} />);
+    fireEvent.click(await screen.findByText(en["developer.loadMore"]));
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    expect(m.list).toHaveBeenLastCalledWith({ limit: 25, cursor: "c2" });
+    // The second page had no cursor, so there is no more.
+    expect(screen.queryByText(en["developer.loadMore"])).toBeNull();
+    cleanup();
+
+    const other = fakeAdmin();
+    other.m.list.mockResolvedValueOnce(page([adminApp()], "c2"));
+    other.m.list.mockRejectedValueOnce(apiError("RATE_LIMITED"));
+    wrap(<AdminAppsPage client={other.client} />);
+    fireEvent.click(await screen.findByText(en["developer.loadMore"]));
+    await waitFor(() => expect(toasts.error).toHaveBeenCalledWith(en["developer.error.rateLimited"]));
+    expect(rows()).toHaveLength(1);
+  });
+
+  it("a refused unsuspension says why above the list and keeps the row suspended", async () => {
+    const { client, m } = fakeAdmin();
+    m.unsuspend.mockRejectedValueOnce(apiError("CONFLICT"));
+    wrap(<AdminAppsPage client={client} />);
+    await find("adminapp-unsuspend");
+    click("adminapp-unsuspend");
+    await confirm();
+    // The confirmation stays open over the page (so the page is hidden from roles); the message is there.
+    expect((await screen.findByText(en["developer.admin.conflict"])).getAttribute("role")).toBe("alert");
+    expect(rows()[1]?.dataset.suspended).toBe("true");
+    expect(toasts.success).not.toHaveBeenCalled();
+    // A later success clears the message.
+    fireEvent.click(await screen.findByTestId("confirm-dialog-cancel"));
+    click("adminapp-unsuspend");
+    await confirm();
+    await waitFor(() => expect(rows()[1]?.dataset.suspended).toBe("false"));
+    expect(screen.queryByText(en["developer.admin.conflict"])).toBeNull();
+    expect(toasts.success).toHaveBeenCalledWith("Spammy is no longer suspended.");
+  });
+
+  it("a refused suspension stays in the dialog with the reason it failed", async () => {
+    const { client, m } = fakeAdmin();
+    m.suspend.mockRejectedValueOnce(apiError("INTERNAL_SERVER_ERROR"));
+    wrap(<AdminAppsPage client={client} />);
+    await find("adminapp-suspend");
+    click("adminapp-suspend");
+    await find("adminapp-suspend-form");
+    fireEvent.click(id("adminapp-reason-security"));
+    click("adminapp-suspend-submit");
+    await confirm();
+    await waitFor(() => expect(m.suspend).toHaveBeenCalledWith({ id: APP_ID, reason: "security" }));
+    const form = await find("adminapp-suspend-form");
+    const failure = await within(form).findByText(en["developer.admin.suspendFailed"]);
+    expect(failure.getAttribute("role")).toBe("alert");
+    expect(rows()[0]?.dataset.suspended).toBe("false");
+  });
+
+  it("a successful suspension closes the dialog and confirms with the app's name", async () => {
+    const { client } = fakeAdmin();
+    wrap(<AdminAppsPage client={client} />);
+    await find("adminapp-suspend");
+    click("adminapp-suspend");
+    await find("adminapp-suspend-form");
+    fireEvent.click(id("adminapp-reason-spam"));
+    click("adminapp-suspend-submit");
+    await confirm();
+    await waitFor(() => expect(toasts.success).toHaveBeenCalledWith("Overlay is suspended."));
+    await waitFor(() => expect(screen.queryByTestId("adminapp-suspend-form")).toBeNull());
+  });
+
+  it("Cancel and Escape close the suspend dialog without suspending", async () => {
+    const { client, m } = fakeAdmin();
+    wrap(<AdminAppsPage client={client} />);
+    await find("adminapp-suspend");
+    click("adminapp-suspend");
+    const form = await find("adminapp-suspend-form");
+    fireEvent.click(within(form).getByText(en["developer.cancel"]));
+    await waitFor(() => expect(screen.queryByTestId("adminapp-suspend-form")).toBeNull());
+    click("adminapp-suspend");
+    await find("adminapp-suspend-form");
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByTestId("adminapp-suspend-form")).toBeNull());
+    expect(m.suspend).not.toHaveBeenCalled();
+  });
+
+  it("a change made after switching the filter applies to the new list", async () => {
+    const { client, m } = fakeAdmin();
+    wrap(<AdminAppsPage client={client} />);
+    await find("adminapp-unsuspend");
+    m.list.mockResolvedValueOnce(page([adminApp({ id: "a2", name: "Spammy", suspended: { at: T0, reason: "spam" } })]));
+    fireEvent.click(id("adminapps-filter-suspended"));
+    await waitFor(() => expect(m.list).toHaveBeenLastCalledWith({ limit: 25, suspended: true }));
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    click("adminapp-unsuspend");
+    await confirm();
+    await waitFor(() => expect(rows()[0]?.dataset.suspended).toBe("false"));
   });
 });
 

@@ -7,7 +7,7 @@ import { LocaleProvider, TooltipProvider } from "@commonair/ui";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type * as React from "react";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
-import { AppealQueueList } from "../src/components/safety/appeal-queue.tsx";
+import { AppealQueue, AppealQueueList, RESOLUTION_MAX } from "../src/components/safety/appeal-queue.tsx";
 import {
   AccountActionList,
   MyAppeals,
@@ -18,13 +18,21 @@ import type {
   AccountActionDto,
   AccountActionsClient,
   AppealDto,
+  AppealQueueClient,
   AppealsClient,
 } from "../src/components/safety/client.ts";
 import { appealSubjectLabel, overturnEffect, overturnEffectLabel } from "../src/components/safety/labels.ts";
 import { en } from "../src/i18n/en.ts";
 import { locale, uiMessages } from "../src/i18n/index.ts";
 
-afterEach(cleanup);
+const toasts = vi.hoisted(() => ({ success: vi.fn<(m: string) => void>(), error: vi.fn<(m: string) => void>() }));
+vi.mock("@commonair/ui/toast", () => ({ toast: toasts }));
+
+afterEach(() => {
+  cleanup();
+  toasts.success.mockReset();
+  toasts.error.mockReset();
+});
 
 function wrap(node: React.ReactNode) {
   return render(
@@ -309,6 +317,180 @@ describe("appeal queue on /admin/appeals", () => {
     fireEvent.click(toggle(items()[0]!));
     expect(within(items()[0]!).getByTestId("appealq-detail").textContent).toContain("This strike was a mistake.");
     expect(screen.queryByTestId("appealq-resolution")).toBeNull();
+  });
+});
+
+describe("appeal queue: decision form edges", () => {
+  const items = () => screen.getAllByTestId("appealq-item");
+  const openFirst = () => fireEvent.click(within(items()[0]!).getByTestId("appealq-item-toggle"));
+  const submit = () => screen.getByTestId("appealq-submit") as HTMLButtonElement;
+
+  it("a skeleton while loading and an empty state with no appeals", () => {
+    const { unmount } = wrap(<AppealQueueList appeals={null} onResolve={vi.fn<AppealResolve>()} />);
+    expect(screen.getByText(en["safety.appealq.loading"])).toBeTruthy();
+    expect(screen.queryByTestId("appealq-item")).toBeNull();
+    unmount();
+    wrap(<AppealQueueList appeals={[]} onResolve={vi.fn<AppealResolve>()} />);
+    expect(screen.getByText(en["safety.appealq.empty"])).toBeTruthy();
+    expect(screen.queryByRole("list")).toBeNull();
+  });
+
+  it("needs both a decision and a reply that is not just spaces, capped at the maximum", () => {
+    wrap(<AppealQueueList appeals={[appealOf(strike.id)]} onResolve={vi.fn<AppealResolve>()} />);
+    openFirst();
+    expect((screen.getByTestId("appealq-resolution") as HTMLTextAreaElement).maxLength).toBe(RESOLUTION_MAX);
+    fireEvent.change(screen.getByTestId("appealq-resolution"), { target: { value: "   " } });
+    fireEvent.click(screen.getByTestId("appealq-resolve-overturned"));
+    expect(submit().disabled).toBe(true);
+    fireEvent.change(screen.getByTestId("appealq-resolution"), { target: { value: "Reversed." } });
+    expect(submit().disabled).toBe(false);
+  });
+
+  it("submitting the form without a decision sends nothing", async () => {
+    const onResolve = vi.fn<AppealResolve>(async () => {});
+    wrap(<AppealQueueList appeals={[appealOf(strike.id)]} onResolve={onResolve} />);
+    openFirst();
+    fireEvent.change(screen.getByTestId("appealq-resolution"), { target: { value: "No decision." } });
+    // The button is disabled, but Enter in a form can still submit it.
+    fireEvent.submit(submit().closest("form")!);
+    await Promise.resolve();
+    expect(onResolve).not.toHaveBeenCalled();
+  });
+
+  it("is busy while resolving, confirms, and clears the draft", async () => {
+    let finish: () => void = () => {};
+    const onResolve = vi.fn<AppealResolve>(
+      () =>
+        new Promise<void>((r) => {
+          finish = r;
+        }),
+    );
+    wrap(<AppealQueueList appeals={[appealOf(strike.id)]} onResolve={onResolve} />);
+    openFirst();
+    fireEvent.click(screen.getByTestId("appealq-resolve-overturned"));
+    fireEvent.change(screen.getByTestId("appealq-resolution"), { target: { value: "Reversed." } });
+    fireEvent.click(submit());
+    await waitFor(() => expect(submit().getAttribute("aria-busy")).toBe("true"));
+    expect(submit().disabled).toBe(true);
+    // A second submit while one is in flight is dropped.
+    fireEvent.submit(submit().closest("form")!);
+    expect(onResolve).toHaveBeenCalledTimes(1);
+    finish();
+    await waitFor(() => expect(toasts.success).toHaveBeenCalledWith(en["safety.appealq.resolved"]));
+    expect((screen.getByTestId("appealq-resolution") as HTMLTextAreaElement).value).toBe("");
+    expect(submit().getAttribute("aria-busy")).toBeNull();
+  });
+
+  it("a failed resolve says so and keeps the draft", async () => {
+    const onResolve = vi.fn<AppealResolve>(async () => {
+      throw new Error("boom");
+    });
+    wrap(<AppealQueueList appeals={[appealOf(strike.id)]} onResolve={onResolve} />);
+    openFirst();
+    fireEvent.click(screen.getByTestId("appealq-resolve-upheld"));
+    fireEvent.change(screen.getByTestId("appealq-resolution"), { target: { value: "Stands." } });
+    fireEvent.click(submit());
+    await waitFor(() => expect(toasts.error).toHaveBeenCalledWith(en["safety.appealq.failed"]));
+    expect(toasts.success).not.toHaveBeenCalled();
+    expect((screen.getByTestId("appealq-resolution") as HTMLTextAreaElement).value).toBe("Stands.");
+    expect(submit().disabled).toBe(false);
+  });
+
+  it("an expired session asks to sign in again", async () => {
+    const onResolve = vi.fn<AppealResolve>(async () => {
+      throw Object.assign(new Error("no"), { code: "UNAUTHORIZED" });
+    });
+    wrap(<AppealQueueList appeals={[appealOf(strike.id)]} onResolve={onResolve} />);
+    openFirst();
+    fireEvent.click(screen.getByTestId("appealq-resolve-upheld"));
+    fireEvent.change(screen.getByTestId("appealq-resolution"), { target: { value: "Stands." } });
+    fireEvent.click(submit());
+    await waitFor(() => expect(toasts.error).toHaveBeenCalledWith(en["auth.sessionExpired"], expect.anything()));
+  });
+});
+
+describe("AppealQueue with its client", () => {
+  const page = (items: AppealDto[], nextCursor: string | null = null) => ({ items, nextCursor });
+  const fake = (over: Partial<AppealQueueClient> = {}): AppealQueueClient => ({
+    queue: vi.fn<AppealQueueClient["queue"]>(async () => page([appealOf(strike.id)])),
+    resolve: vi.fn<AppealQueueClient["resolve"]>(async (input) => appealOf(strike.id, { status: input.status })),
+    ...over,
+  });
+
+  it("shows a skeleton, then the first page of open appeals", async () => {
+    let answer: (p: { items: AppealDto[]; nextCursor: string | null }) => void = () => {};
+    const queue = vi.fn<AppealQueueClient["queue"]>(
+      () =>
+        new Promise((r) => {
+          answer = r;
+        }),
+    );
+    const client = fake({ queue });
+    wrap(<AppealQueue client={client} />);
+    expect(screen.getByText(en["safety.appealq.loading"])).toBeTruthy();
+    answer(page([appealOf(strike.id)]));
+    expect(await screen.findByTestId("appealq-item")).toBeTruthy();
+    expect(queue).toHaveBeenCalledWith(undefined);
+    // One page only: no "load more".
+    expect(screen.queryByText(en["safety.modq.loadMore"])).toBeNull();
+  });
+
+  it("a failed load says so and shows the empty list rather than a skeleton", async () => {
+    const client = fake({
+      queue: vi.fn<AppealQueueClient["queue"]>(async () => {
+        throw new Error("down");
+      }),
+    });
+    wrap(<AppealQueue client={client} />);
+    expect(await screen.findByText(en["safety.appealq.loadFailed"])).toBeTruthy();
+    expect(screen.getByText(en["safety.appealq.empty"])).toBeTruthy();
+    expect(screen.queryByText(en["safety.appealq.loading"])).toBeNull();
+  });
+
+  it("loads more pages from the cursor and appends them", async () => {
+    const second = appealOf(strike.id, { id: "0192f000-0000-7000-8000-0000000000d2", body: "Second page." });
+    const queue = vi.fn<AppealQueueClient["queue"]>(async (cursor) =>
+      cursor === "c2" ? page([second]) : page([appealOf(strike.id)], "c2"),
+    );
+    wrap(<AppealQueue client={fake({ queue })} />);
+    const more = await screen.findByText(en["safety.modq.loadMore"]);
+    fireEvent.click(more);
+    await waitFor(() => expect(screen.getAllByTestId("appealq-item")).toHaveLength(2));
+    expect(queue).toHaveBeenLastCalledWith("c2");
+    expect(screen.queryByText(en["safety.modq.loadMore"])).toBeNull();
+  });
+
+  it("a failed next page toasts and keeps the rows", async () => {
+    const queue = vi.fn<AppealQueueClient["queue"]>(async (cursor) => {
+      if (cursor) throw new Error("down");
+      return page([appealOf(strike.id)], "c2");
+    });
+    wrap(<AppealQueue client={fake({ queue })} />);
+    fireEvent.click(await screen.findByText(en["safety.modq.loadMore"]));
+    await waitFor(() => expect(toasts.error).toHaveBeenCalledWith(en["safety.appealq.loadMoreFailed"]));
+    expect(screen.getAllByTestId("appealq-item")).toHaveLength(1);
+  });
+
+  it("resolving sends the decision and reloads the queue", async () => {
+    let open = true;
+    const queue = vi.fn<AppealQueueClient["queue"]>(async () => page(open ? [appealOf(strike.id)] : []));
+    const resolve = vi.fn<AppealQueueClient["resolve"]>(async (input) => {
+      open = false;
+      return appealOf(strike.id, { status: input.status });
+    });
+    wrap(<AppealQueue client={fake({ queue, resolve })} />);
+    fireEvent.click(within(await screen.findByTestId("appealq-item")).getByTestId("appealq-item-toggle"));
+    fireEvent.click(screen.getByTestId("appealq-resolve-overturned"));
+    fireEvent.change(screen.getByTestId("appealq-resolution"), { target: { value: " Reversed. " } });
+    fireEvent.click(screen.getByTestId("appealq-submit"));
+    await waitFor(() => expect(screen.getByText(en["safety.appealq.empty"])).toBeTruthy());
+    expect(resolve).toHaveBeenCalledWith({
+      id: "0192f000-0000-7000-8000-0000000000c1",
+      status: "overturned",
+      resolution: "Reversed.",
+    });
+    expect(queue).toHaveBeenCalledTimes(2);
+    expect(toasts.success).toHaveBeenCalledWith(en["safety.appealq.resolved"]);
   });
 });
 
