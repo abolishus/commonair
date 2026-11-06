@@ -19,7 +19,8 @@ function fakeFleet() {
 }
 
 const open = (fleet: BrowserFleet, locale?: Parameters<typeof localeCookie>[1]) =>
-  WebSession.open({ fleet, engine: "chromium", webUrl: WEB, probeScript: "", label: "t", locale });
+  // clientIp null: the runner's own address, so the context options are only the locale's.
+  WebSession.open({ fleet, engine: "chromium", webUrl: WEB, probeScript: "", label: "t", locale, clientIp: null });
 
 describe("localeCookie", () => {
   test("is host-only on the web host (url, no domain)", () => {
