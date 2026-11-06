@@ -418,6 +418,18 @@ describe("StreamCard", () => {
     expect(container.querySelector("img")!.getAttribute("alt")).toBe("");
   });
 
+  test("an empty title still names the primary link (Untitled stream)", () => {
+    render(
+      <StreamCard
+        stream={{ ...stream, broadcast: { ...stream.broadcast, title: "  " } }}
+        href="/pixel_pioneer"
+        locale="en"
+      />,
+    );
+    const link = screen.getByRole("link", { name: "Untitled stream" });
+    expect(link.getAttribute("href")).toBe("/pixel_pioneer");
+  });
+
   test("link slots: channel, category and tags are sibling links, never nested, in reading order", async () => {
     const user = userEvent.setup();
     const { container } = render(

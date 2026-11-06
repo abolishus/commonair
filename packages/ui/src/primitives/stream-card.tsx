@@ -119,7 +119,8 @@ export function StreamCard({
       "data-slot": "stream-card-link",
       className:
         "outline-none after:absolute after:inset-0 after:z-0 focus-visible:after:ring-2 focus-visible:after:ring-ring focus-visible:after:ring-offset-2 focus-visible:after:ring-offset-background",
-      children: broadcast.title,
+      // An empty title would leave the primary link with no name and no box to click.
+      children: broadcast.title.trim() ? broadcast.title : messages.untitledStream,
     },
   });
 

@@ -30,6 +30,8 @@ export interface UiMessages {
   notifications: string;
   closeNotification: string;
   mature: string;
+  /** A stream card's title when the broadcast has none, so its link keeps a name and a box. */
+  untitledStream: string;
   live: string;
   /** Accessible label for a verified viewer count, e.g. "1,234 verified viewers". */
   viewerCount: (formatted: string, count: number) => string;
@@ -88,6 +90,7 @@ export function uiMessagesFromCatalog(
     notifications: m("ui.notifications"),
     closeNotification: m("ui.closeNotification"),
     mature: m("ui.mature"),
+    untitledStream: m("ui.untitledStream"),
     live: m("ui.live"),
     viewerCount: (formatted, count) => m("ui.viewerCount", { formatted, count }),
     // Spelled out so the contract stays a type-only import; the Record type makes the compiler

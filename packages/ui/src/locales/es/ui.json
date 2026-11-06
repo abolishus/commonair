@@ -14,6 +14,7 @@
   "ui.notifications": "Notificaciones",
   "ui.closeNotification": "Cerrar notificación",
   "ui.mature": "Para adultos",
+  "ui.untitledStream": "Transmisión sin título",
   "ui.live": "En vivo",
   "ui.viewerCount": "{formatted} {count, plural, one {espectador verificado} other {espectadores verificados}}",
   "ui.discoveryReason.popular": "Popular",
