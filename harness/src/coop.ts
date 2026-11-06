@@ -77,6 +77,28 @@ export const E5_GOVERNANCE_BOOTSTRAP = {
   "notifications.goLive": { cooldownHours: 4, emailDigestMinutes: 1 },
 } as const;
 
+/**
+ * The seed stack's `GOVERNANCE_BOOTSTRAP_JSON` (harness/compose.seed.yaml, layered after the E5
+ * override): E5's, with shorter discussion, council review and votes. seed-coop's longest wait is
+ * its two restorations back to back, each a discussion or council review plus a vote: 150 s of
+ * its 160 s on CI at E5's periods (run 42215129857), about 100 s at these. A unit test keeps the
+ * compose value equal to it.
+ */
+export const SEED_GOVERNANCE_BOOTSTRAP = {
+  ...E5_GOVERNANCE_BOOTSTRAP,
+  "governance.protections": {
+    ...E5_GOVERNANCE_BOOTSTRAP["governance.protections"],
+    councilReviewSeconds: 20,
+    minVotingSeconds: 30,
+  },
+  "governance.ordinary": {
+    ...E5_GOVERNANCE_BOOTSTRAP["governance.ordinary"],
+    discussionSeconds: 20,
+    minVotingSeconds: 30,
+    votingSeconds: 30,
+  },
+} as const;
+
 /** The seed's rule: each override key is shallow-merged into that key's default value. */
 export function shallowMergeSettings(
   defaults: Readonly<Record<string, unknown>>,

@@ -81,9 +81,10 @@ const A = accounts(small).accounts;
 const of = (p: MoneyPlan, f: (x: MoneyPlan["payments"][number]) => boolean) => p.payments.filter(f);
 
 describe("seed-money unit", () => {
-  test("claims its stub's tables, runs after social, and leaves nothing pending", () => {
+  test("claims its stub's tables, runs after social and interact, and leaves nothing pending", () => {
     expect(unit.name).toBe("money");
-    expect(unit.after).toEqual(["social"]);
+    // After interact: its goals count the payments made after them.
+    expect(unit.after).toEqual(["social", "interact"]);
     // Payouts and the write-off come from the hold-release ops tick (OPS_TEST_HOOKS).
     expect(unit.pending).toEqual([]);
     expect(unit.tables).toEqual(expect.arrayContaining(["payouts", "split_writeoff_proposals"]));

@@ -67,6 +67,14 @@ describe("summarizeStartup", () => {
     expect(d.scripts[0]).toContain("token=REDACTED");
     expect(d.console[0]).toBe("error: GET /api/x?invite=REDACTED failed");
   });
+
+  it("a script URL that does not parse still loses its query and fragment", () => {
+    const d = summarizeStartup(
+      raw({ scripts: [{ src: "http://[bad/assets/x.js?invite=n0nce#f", type: "module", async: false, inline: null }] }),
+      [],
+    );
+    expect(d.scripts).toEqual(["module http://[bad/assets/x.js"]);
+  });
 });
 
 describe("consoleBuffer", () => {

@@ -17,8 +17,13 @@ import type { SeedScale } from "../scale.ts";
 import type { SeedStore, SeededUser } from "../types.ts";
 
 export const K = ENFORCEMENT_REPORT_RULES.k;
-/** How long a cell suspension lasts: short, so later units can still sign the account in. */
-export const CELL_SUSPENSION_SECONDS = 60;
+/**
+ * How long a cell suspension lasts: short, so later units can still sign the account in. The unit
+ * waits it out after its last report (57 s of its 99 s on CI at 60 s, run 42215129857). Nothing
+ * after the reports needs one still in force: the statement builder, the `/transparency` cells
+ * and an appeal of a lapsed suspension (`lifted: false`) all work on the decision, not the ban.
+ */
+export const CELL_SUSPENSION_SECONDS = 20;
 /** The scripted classifier's scores: T2 labels at 0.85, T1 restricts at 0.99 (as `trust-safety`). */
 export const T2_SCORE = 0.85;
 export const T1_SCORE = 0.99;

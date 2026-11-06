@@ -21,6 +21,12 @@
 #   The rates are far above real ones on purpose: a seeded recording moves only a few MB, and the
 #   rollup rounds each broadcast's total to whole cents.
 #
+# - Shorter governance periods than the E5 bootstrap (GOVERNANCE_BOOTSTRAP_JSON on migrate, so the
+#   fresh volume's first migration applies them): discussion and council review 20 s, votes 30 s,
+#   which cut seed-coop's restorations from about 150 s to 100. Keep it equal to
+#   SEED_GOVERNANCE_BOOTSTRAP in harness/src/coop.ts (a unit test checks); the e5-coop scenario
+#   never runs on this stack.
+#
 # The signing keys (INTEGRITY_SIGNING_KEY, PORTABILITY_SIGNING_KEY) and the VAPID pair come from
 # .env as on every stack; `stack --seed` refuses while one is empty. Everything here talks only to
 # local peers and mocks.
@@ -39,6 +45,17 @@ x-seed-worker: &seed-worker
   DEMO_SEED_FULL: "true"
 
 services:
+  migrate:
+    environment:
+      GOVERNANCE_BOOTSTRAP_JSON: >-
+        {"governance.protections":{"councilReviewSeconds":20,"minVotingSeconds":30,"quorum":0.01,"streamerClassQuorum":0.01},
+        "governance.ordinary":{"discussionSeconds":20,"minVotingSeconds":30,"votingSeconds":30,"quorum":0.01},
+        "membership.classes":{"streamer":{"minStreamingHours":0.01,"windowDays":90,"minVerifiedViewers":2,"lapseGraceDays":14},
+        "viewer":{"shareCents":500,"shareRefundableOnExit":true,"activeSubscriptionQualifies":true,"minSubscriptionCents":300},
+        "worker":{"appointedBy":"board"}},
+        "council.config":{"size":50,"minStreamingHours":0.01},
+        "interact.points.accrual":{"pointsPerBlock":10,"blockMinutes":1,"dailyCapPerChannel":1000},
+        "notifications.goLive":{"cooldownHours":4,"emailDigestMinutes":1}}
   api:
     environment: *seed-payments
   worker:

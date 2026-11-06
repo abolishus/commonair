@@ -96,6 +96,21 @@ describe("resolveSeedRoute", () => {
     });
   });
 
+  test("a published query or query parameter that is missing names its key", () => {
+    const empty: SeedStore = { ...store, extra: {} };
+    expect(resolveSeedRoute("/overlay/chat", SEED_ROUTES["/overlay/chat"] as SeedRoute, empty)).toEqual({
+      ok: false,
+      missing: "store.extra.interact.overlayChatQuery",
+    });
+    expect(
+      resolveSeedRoute(
+        "/search",
+        { as: "viewer1", expectData: true, queryParam: ["q", { extra: ["social", "q"] }] },
+        empty,
+      ),
+    ).toEqual({ ok: false, missing: "store.extra.social.q" });
+  });
+
   test("a route without params or query is its own path", () => {
     expect(resolveSeedRoute("/coop/", SEED_ROUTES["/coop/"] as SeedRoute, store)).toEqual({ ok: true, url: "/coop/" });
   });

@@ -22,6 +22,7 @@ import type { SignedInUser } from "../../users.ts";
 import { ViewbotSwarm } from "../../viewbot.ts";
 import type { Viewer } from "../../viewer.ts";
 import { sleep, waitFor } from "../../wait.ts";
+import { settledPool } from "../pool.ts";
 import { startSpeechStream } from "../../w2/captions/publisher.ts";
 import type { SeedStore } from "../types.ts";
 import { CAPTION_CORRECTION } from "./content.ts";
@@ -620,26 +621,30 @@ async function correctCaption(d: RecordDeps, who: string, vodId: string): Promis
   );
 }
 
-/** Run the plan batch by batch (at most `plan.concurrency` at once). */
+/**
+ * Run the plan `plan.concurrency` at a time, in index order, each next recording as soon as one
+ * ends. After a failure the recordings in flight finish (no publisher is left running) and the
+ * first error is thrown. Results keep the plan's order.
+ */
 export async function recordAll(
   d: RecordDeps,
   plan: RecordingPlan,
   progress: (line: string) => void,
 ): Promise<RecordingResult[]> {
-  const batches = new Map<number, RecordingSpec[]>();
-  for (const r of plan.recordings) batches.set(r.batch, [...(batches.get(r.batch) ?? []), r]);
-  const out: RecordingResult[] = [];
-  for (const [batch, specs] of [...batches.entries()].sort((a, b) => a[0] - b[0])) {
-    if (specs.length > plan.concurrency) throw new Error(`seed-media: batch ${batch} runs ${specs.length} recordings`);
-    const started = Date.now();
-    // Settle the whole batch first, so a failure never leaves the others' publishers running.
-    const settled = await Promise.allSettled(specs.map((s) => record(d, plan, s)));
-    for (const s of settled) if (s.status === "rejected") throw s.reason;
-    const results = settled.flatMap((s) => (s.status === "fulfilled" ? [s.value] : []));
-    out.push(...results);
-    progress(
-      `recording batch ${batch + 1}: ${specs.map((s) => s.handle).join(", ")} in ${((Date.now() - started) / 1000).toFixed(0)} s`,
-    );
-  }
+  const started = Date.now();
+  const secs = (from: number) => ((Date.now() - from) / 1000).toFixed(0);
+  const sorted = [...plan.recordings].sort((a, b) => a.index - b.index);
+  const out = await settledPool(
+    sorted,
+    plan.concurrency,
+    async (s: RecordingSpec) => {
+      const t = Date.now();
+      const r = await record(d, plan, s);
+      progress(`recorded ${s.handle} in ${secs(t)} s (${s.seconds} s on air)`);
+      return r;
+    },
+    d.signal,
+  );
+  progress(`${out.length} recordings, ${plan.concurrency} at a time, in ${secs(started)} s`);
   return out;
 }

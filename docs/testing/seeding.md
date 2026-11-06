@@ -50,7 +50,12 @@ bun scripts/infra.ts stack --harness --multi --captions --w3 --seed
   - `PAYMENTS_PROVIDER=stripe` against stripe-mock;
   - `DEMO_SEED_FULL=true` on the worker;
   - a non-zero `INFRA_COST_MODEL`. Its rates are far above real ones, so the few MB a seeded
-    recording moves still cost whole cents.
+    recording moves still cost whole cents;
+  - shorter governance periods than the E5 bootstrap (`GOVERNANCE_BOOTSTRAP_JSON` on migrate,
+    `SEED_GOVERNANCE_BOOTSTRAP` in `harness/src/coop.ts`): 20 s of discussion and council review,
+    30 s votes. seed-coop waits out two restorations of the default periods back to back, so these
+    take it from about 150 s to 100. Like the E5 bootstrap, they apply at a fresh volume's first
+    migration only.
 - The other overrides it needs:
   - **the harness overrides:** every test hook (`COOP_`, `MODERATION_`, `OPS_` and
     `INTERACT_TEST_HOOKS`), the E5 governance bootstrap, the scripted classifier with the
@@ -87,9 +92,28 @@ DEMO_SEED_FULL=true DEMO_SEED_PASSWORD='<at least 12 characters>' bun harness/sr
 | `medium` | 100       | 2 k     | 200 k      | 365 days | staging                          |
 | `large`  | 1 k       | 20 k    | 2 M        | 730 days | pagination and query-plan checks |
 
-At `small` the whole run takes roughly 25–30 minutes. Several units really go live, record, encode
-and wait for the worker; the slowest are seed-media at about 10 minutes and seed-coop at about 5.
-The run order is: social, then interact, money and media, then safety, then coop, then platform.
+At `small` the whole run takes roughly 25–30 minutes locally and under 10 on CI (9m34s before
+the timings below were cut). Several units really go live, record, encode and wait for the worker;
+the slowest are seed-media, seed-coop and seed-safety.
+
+The run order is: social, interact, money, media, safety, coop, platform. Each unit names the
+units whose data it needs (`after`), including the implicit ones: media and money wait for interact
+(interact puts streamer1 and streamer2 on air, writes `playback_sessions` that media counts as its
+own, and its goals count the payments made after them), and platform waits for coop (its proposal
+notifications link coop's proposals). `seed full` runs the units one after another, so the
+checkpoint after each unit holds exactly the units before it. The `seed-coverage` scenario writes
+no checkpoints, so its own seed starts each unit as soon as the units it waits for are done: money
+runs beside media (`--set seedConcurrent=false` runs them one by one). Its report has each unit's
+time (`seed-coverage.seed.<unit>`, in ms) and the whole seed's (`seed-coverage.seed`).
+
+The waits the units cannot avoid are kept short:
+
+- **seed-media** records its 11 broadcasts five at a time, each next one as soon as one ends
+  (four batches of three took 199 s on CI; about 110 s this way).
+- **seed-safety** suspends the enforcement-cell targets and viewer2 for 20 s, and waits for those
+  suspensions to lapse before it ends (57 s of its 99 s at 60 s).
+- **seed-coop** runs on the seed stack's shorter governance periods (above), and its streamer
+  election closes within them.
 
 ### Generated art
 
@@ -276,7 +300,7 @@ Revenue charts, broadcast history, chat and song requests do spread across the h
 ## Reset
 
 - **Local:** stop the stack, delete its volumes and start it again. Migrate runs on the fresh
-  volume with the E5 bootstrap.
+  volume with the seed stack's governance bootstrap (`stack --seed`).
 
   ```bash
   bun scripts/infra.ts reset

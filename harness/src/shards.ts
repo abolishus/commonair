@@ -26,8 +26,16 @@
  * those waits). Splitting the crawl into two shards would run the 10 min seed twice, each shard
  * still about 12 min, so instead the crawl runs three logins side by side (`CRAWL_CONCURRENCY`,
  * harness/src/seed/visit.ts), every route still as its role: an estimate, until CI measures it,
- * of about 2.5 min (viewer1's), so the shard is about 12 to 12.5 min. Under ~10 min needs a
- * faster seed (a seed-unit change, outside this file).
+ * of about 2.5 min (viewer1's).
+ *
+ * The seed itself was 9m34s on the nightly of eeff9ecb (social 12 s, interact 37, money 17, media
+ * 234, safety 99, coop 160, platform 15), mostly waits. Cut since, estimates until CI measures
+ * them (the scenario records each unit's time, `seed-coverage.seed.<unit>`): media records five at
+ * a time without batch barriers (its four batches were 199 s, now about 110: media ~145 s);
+ * safety's cell suspensions last 20 s, not 60 (its lapse wait was 57 s: safety ~60 s); coop runs
+ * on the seed stack's shorter governance periods (compose.seed.yaml; its restorations were 150 s,
+ * now about 100: coop ~110 s); and money runs beside media (harness/src/seed/units.ts `runUnits`).
+ * About 6.3 min of seed, so the shard is about 9 to 9.5 min.
  */
 export const FULL_SHARDS = {
   relay: ["e2e-relay"],

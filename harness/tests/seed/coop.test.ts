@@ -9,6 +9,8 @@
 import { describe, expect, test } from "vite-plus/test";
 import {
   E5_GOVERNANCE_BOOTSTRAP,
+  SEED_GOVERNANCE_BOOTSTRAP,
+  governancePeriods,
   PROPOSAL_ORDER,
   STREAMER_MAJORITY_NOT_MET,
   expectedTally,
@@ -30,6 +32,7 @@ import {
   expectedBoardSeats,
   fillerTitles,
   forbiddenSamples,
+  gateLeadSeconds,
   inRevenuePeriod,
   isAdult,
   juryInputProblems,
@@ -280,6 +283,43 @@ describe("states at small", () => {
     expect(membership.shares.refunded).toHaveLength(1);
     expect(new Set(all).size).toBe(all.length);
     for (const h of membership.shares.pending) expect(membership.juryOptIns).not.toContain(h);
+  });
+
+  test("the gates' lead is 40% of the stack's discussion: E5's 12 s by default, 8 s on the seed stack", () => {
+    expect(gateLeadSeconds(30)).toBe(12);
+    expect(gateLeadSeconds(20)).toBe(8);
+    expect(gateLeadSeconds(0)).toBe(1);
+    const leads = (discussionSeconds?: number) => {
+      const { facts, streamers } = fixture(SMALL);
+      const rng = createRng(1).fork("coop");
+      const electorate = electorateOf(facts, streamers, planMemberships(rng.fork("memberships"), SMALL, facts));
+      const g = planGovernance(rng.fork("governance"), SMALL, {
+        electorate,
+        seats: SEATS,
+        ...(discussionSeconds === undefined ? {} : { discussionSeconds }),
+      });
+      return g.proposals.flatMap((p) => (p.gate.after === "votingEndsWithin" ? [p.gate.seconds] : []));
+    };
+    expect(leads()).toEqual([12, 12]);
+    const seed = governancePeriods(
+      Object.entries(SEED_GOVERNANCE_BOOTSTRAP).map(([key, value]) => ({ key, value: value as unknown })),
+    );
+    expect(leads(seed.discussionSeconds)).toEqual([8, 8]);
+    // Both sides of the gate outlast a tally and an apply (a tick or two) on the seed stack.
+    expect(seed.discussionSeconds - gateLeadSeconds(seed.discussionSeconds)).toBeGreaterThanOrEqual(10);
+  });
+
+  test("the streamer election closes inside the restorations on the seed stack", () => {
+    const { governance } = plansFor(1);
+    const streamer = governance.elections.find((e) => e.cls === "streamer");
+    expect(streamer).toMatchObject({ target: "closed", nominationsSeconds: 20, votingSeconds: 60 });
+    const p = governancePeriods(
+      Object.entries(SEED_GOVERNANCE_BOOTSTRAP).map(([key, value]) => ({ key, value: value as unknown })),
+    );
+    // Two restorations back to back: council review + protected vote, then discussion + vote.
+    const restorations = p.discussionSeconds + p.councilReviewSeconds + p.discussionSeconds + p.votingSeconds;
+    expect(restorations).toBe(90);
+    expect(streamer?.votingSeconds ?? Infinity).toBeLessThan(restorations);
   });
 
   test("the open states are gated behind the restorations of the default periods", () => {

@@ -230,11 +230,24 @@ export interface GovernanceInput {
   /** Board seats per class (`board.seats`). */
   seats: Readonly<Record<MemberClass, number>>;
   rules?: PlanRules;
+  /** The stack's `governance.ordinary.discussionSeconds` (E5's 30 when unset): sizes the gates. */
+  discussionSeconds?: number;
 }
 
 const DAY_S = 86_400;
-/** The discussion of a gated proposal ends this long after the proposal it waits for decides. */
-export const GATE_LEAD_SECONDS = 12;
+/** E5's discussion period, the gates' default. */
+const E5_DISCUSSION_SECONDS = 30;
+
+/**
+ * How long before the restoration it waits for decides a gated proposal is submitted (its gate
+ * `votingEndsWithin`). Its short discussion must still be running when the restoration applies,
+ * and must end after it: lead and discussion minus lead both have to outlast the tally and the
+ * apply (a tick or two). 40% of the discussion: 12 s of E5's 30 (as before), 8 s of the seed
+ * stack's 20. Pure.
+ */
+export function gateLeadSeconds(discussionSeconds: number): number {
+  return Math.max(1, Math.round(discussionSeconds * 0.4));
+}
 
 const COMMENTS = [
   "I support this; the smaller channels need the extra room.",
@@ -421,6 +434,7 @@ export function planGovernance(rng: Rng, scale: SeedScale, input: GovernanceInpu
   const problems = governanceProblems(input);
   if (problems.length > 0) throw new Error(`seed-coop: cannot plan governance: ${problems.join("; ")}`);
   const rules = input.rules ?? BOOTSTRAP_RULES;
+  const lead = gateLeadSeconds(input.discussionSeconds ?? E5_DISCUSSION_SECONDS);
   const electorate = [...input.electorate].sort((a, b) => a.handle.localeCompare(b.handle));
   const streamers = electorate.filter((m) => has(m, "streamer"));
   const nonStreamers = electorate.filter((m) => !has(m, "streamer"));
@@ -635,7 +649,7 @@ export function planGovernance(rng: Rng, scale: SeedScale, input: GovernanceInpu
     change: null,
     affectsCreators: true,
     target: "council_review",
-    gate: { after: "votingEndsWithin", ref: "protectionsDefaults", seconds: GATE_LEAD_SECONDS },
+    gate: { after: "votingEndsWithin", ref: "protectionsDefaults", seconds: lead },
     councilStance: "support",
   });
   {
@@ -650,7 +664,7 @@ export function planGovernance(rng: Rng, scale: SeedScale, input: GovernanceInpu
       body: "Publish a plain-language co-op budget on the transparency page every quarter.",
       change: null,
       target: "voting",
-      gate: { after: "votingEndsWithin", ref: "ordinaryDefaults", seconds: GATE_LEAD_SECONDS },
+      gate: { after: "votingEndsWithin", ref: "ordinaryDefaults", seconds: lead },
       votes: voters.map((m, i) => vote(m, choices[i] ?? "yes")),
     });
   }
@@ -733,8 +747,9 @@ export function planElections(
       target: "closed",
       candidates: candidates.map((handle) => ({ handle, statement: statement(r) })),
       ballots: ballots(r, pools.streamers, candidates, pools.seats.streamer),
-      nominationsSeconds: 25,
-      votingSeconds: 70,
+      // Closed within the restorations' 90 s or so (seed stack), so it never waits alone.
+      nominationsSeconds: 20,
+      votingSeconds: 60,
     });
   }
   {

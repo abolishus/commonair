@@ -182,6 +182,12 @@ describe("judging one step", () => {
     expect(one({ targetNicP95BytesPerSecond: 237_500_000 })).toEqual(["target_nic"]);
   });
 
+  test("errors with no viewer measured count as an error rate of 1; none at all as 0", () => {
+    const e = (m: Partial<StepMeasure>) => judgeStep({ ...good, ...m }, t).breaches.find((b) => b.metric === "errors");
+    expect(e({ viewers: 0, started: 0, errors: 2 })?.value).toBe(1);
+    expect(e({ viewers: 0, started: 0, errors: 0 })).toBeUndefined();
+  });
+
   test("missing measurements: no browsers = no latency rule; no target sampling = no host rules", () => {
     const one = (m: Partial<StepMeasure>) => judgeStep({ ...good, ...m }, t).breaches.map((b) => b.metric);
     expect(one({ browserViewers: 0, glassToGlassP95Ms: null })).toEqual([]);

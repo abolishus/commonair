@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vite-plus/test";
 import { InfraCostModel } from "../../../packages/config/src/env.ts";
 import { SEED_ENV_KEYS, SEED_OVERRIDE } from "../../../scripts/infra.ts";
+import { E5_GOVERNANCE_BOOTSTRAP, SEED_GOVERNANCE_BOOTSTRAP, preflightGovernance } from "../../src/coop.ts";
 import { REPLICAS } from "../../src/multi/replicas.ts";
 
 type Env = Record<string, string>;
@@ -66,5 +67,35 @@ describe("harness/compose.seed.yaml", () => {
       expect(model.centsPerGb.origin ?? 0, svc).toBeGreaterThan(0);
       expect(model.centsPerGb.cdn ?? 0, svc).toBeGreaterThan(0);
     }
+  });
+
+  test("migrate's GOVERNANCE_BOOTSTRAP_JSON is exactly SEED_GOVERNANCE_BOOTSTRAP", () => {
+    const raw = env("migrate").GOVERNANCE_BOOTSTRAP_JSON;
+    expect(typeof raw).toBe("string");
+    expect(Bun.deepEquals(JSON.parse(String(raw)), SEED_GOVERNANCE_BOOTSTRAP)).toBe(true);
+    expect(Object.keys(env("migrate"))).toEqual(["GOVERNANCE_BOOTSTRAP_JSON"]);
+  });
+
+  test("the seed bootstrap is E5's with shorter periods only, and still passes seed-coop's preflight", () => {
+    const {
+      "governance.ordinary": ordinary,
+      "governance.protections": protections,
+      ...rest
+    } = SEED_GOVERNANCE_BOOTSTRAP;
+    const {
+      "governance.ordinary": e5Ordinary,
+      "governance.protections": e5Protections,
+      ...e5Rest
+    } = E5_GOVERNANCE_BOOTSTRAP;
+    expect(rest).toEqual(e5Rest);
+    expect(ordinary).toEqual({ ...e5Ordinary, discussionSeconds: 20, minVotingSeconds: 30, votingSeconds: 30 });
+    expect(protections).toEqual({ ...e5Protections, councilReviewSeconds: 20, minVotingSeconds: 30 });
+    // The database refuses votingSeconds below minVotingSeconds (0002_protections_hardening.sql).
+    expect(ordinary.votingSeconds).toBeGreaterThanOrEqual(ordinary.minVotingSeconds);
+    const settings = Object.entries(SEED_GOVERNANCE_BOOTSTRAP).map(([key, value]) => ({
+      key,
+      value: value as unknown,
+    }));
+    expect(preflightGovernance(settings)).toEqual({ ok: true, problem: null });
   });
 });

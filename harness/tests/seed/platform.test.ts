@@ -112,9 +112,10 @@ const counts = (p: PlatformPlan) => ({
 });
 
 describe("seed-platform unit", () => {
-  test("claims its stub's tables, runs after social, media and safety, and leaves nothing pending", () => {
+  test("claims its stub's tables, runs after social, media, safety and coop, and leaves nothing pending", () => {
     expect(unit.name).toBe("platform");
-    expect(unit.after).toEqual(["social", "media", "safety"]);
+    // coop: the proposal notifications link its proposals.
+    expect(unit.after).toEqual(["social", "media", "safety", "coop"]);
     expect(unit.pending).toEqual([]);
     expect(unit.tables).toHaveLength(21);
     expect(unit.tables).toContain("federation_actor_keys");

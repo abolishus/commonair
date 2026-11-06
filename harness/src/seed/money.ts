@@ -76,7 +76,9 @@ export interface MoneyExtra {
 
 export const unit: SeedUnit = {
   name: "money",
-  after: ["social"],
+  // interact: its tip and subscription goals count the payments made after them, as on a real
+  // channel; side by side the counts would depend on which came first.
+  after: ["social", "interact"],
   tables: TABLES,
   pending: PENDING,
   run: runMoney,

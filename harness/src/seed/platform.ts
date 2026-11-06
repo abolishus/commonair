@@ -83,8 +83,9 @@ export const unit: SeedUnit = {
   name: "platform",
   // media: the go-live email digest needs a real broadcast (`notification_email_queue.broadcast_id`)
   // and the federation activity toggles one of streamer1's recorded VODs. safety: it publishes the
-  // accounts this unit must never sign in as (`restrictedUserIds`).
-  after: ["social", "media", "safety"],
+  // accounts this unit must never sign in as (`restrictedUserIds`). coop: the `proposal` and
+  // `vote_open` notifications link the proposals it made.
+  after: ["social", "media", "safety", "coop"],
   tables: TABLES,
   pending: [],
   async run(ctx) {

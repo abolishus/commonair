@@ -10,7 +10,9 @@
  * other database (an unsharded `full`, whose other scenarios made users) it reports every route as
  * skipped, with the reason: the seed needs a fresh database. During the walk streamer1 and
  * streamer2 stream with chat (`seed live`, stopped in the teardown), unless a separate `seed live`
- * already keeps streamer1 live. Logins are crawled `CRAWL_CONCURRENCY` at a time
+ * already keeps streamer1 live. Its own seed runs independent units side by side
+ * (`--set seedConcurrent=false`: one by one) and records each unit's time as a metric
+ * (`seed-coverage.seed.<unit>`). Logins are crawled `CRAWL_CONCURRENCY` at a time
  * (`--set crawlConcurrency=1` walks them one by one, as before), each paced under its own user's
  * rate limit, and their sign-ins under the shared per-address `auth` limit.
  */
@@ -81,6 +83,7 @@ async function seeded(ctx: ScenarioContext): Promise<Seeded | { skip: string }> 
       throw new Error(`--set scale=${scale}: small, medium or large`);
     let store: SeedStore | null = null;
     const lines: string[] = [];
+    const seedStarted = Date.now();
     const code = await ctx.step(`seed full --scale ${scale}`, () =>
       runSeedFull({
         scale,
@@ -92,6 +95,13 @@ async function seeded(ctx: ScenarioContext): Promise<Seeded | { skip: string }> 
         source: { ...process.env, DEMO_SEED_PASSWORD: password },
         storeFile: join(ctx.env.HARNESS_REPORT_DIR ?? DEFAULT_REPORT_DIR, SEED_STORE_FILE),
         onStore: (s) => (store = s),
+        // No checkpoints here, so independent units run side by side (harness/src/seed/units.ts).
+        concurrent: ctx.param("seedConcurrent", "true") !== "false",
+        // Per unit, so the next CI run says where the seed's time went.
+        onUnit: (unit, ms, rows) => {
+          ctx.metric(`seed-coverage.seed.${unit}`, ms, "ms");
+          ctx.metric(`seed-coverage.seed.${unit}.rows`, rows);
+        },
         out: (l) => {
           // The generated password never reaches the report.
           if (!l.startsWith("Password")) lines.push(l);
@@ -99,6 +109,7 @@ async function seeded(ctx: ScenarioContext): Promise<Seeded | { skip: string }> 
         },
       }),
     );
+    ctx.metric("seed-coverage.seed", Date.now() - seedStarted, "ms");
     ctx.data("seed.output", lines);
     ctx.assert("seed full succeeded", code === 0, { code, last: lines.slice(-5) });
     if (!store) throw new Error("seed full returned no store");
@@ -287,7 +298,8 @@ export default defineScenario({
   needs: ["api", "web", "worker", "media", "mail", "ffmpeg", "browser"],
   // Its own CI shard (`seed`, harness/src/shards.ts): `seed full` needs a database with no users.
   inFull: true,
-  // seed full at small (about 10 min on CI), then 72 page loads over 11 logins, three at a time.
+  // seed full at small (about 6.5 min on CI, 9.5 before the seed's waits were cut), then 72 page
+  // loads over 11 logins, three at a time.
   timeoutMs: 45 * 60_000,
   async run(ctx) {
     const s = await seeded(ctx);

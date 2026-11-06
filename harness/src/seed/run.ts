@@ -24,8 +24,8 @@ import { pendingTables } from "./coverage.ts";
 import { describeTarget, fullSeedRefusals } from "./guard.ts";
 import { createRng } from "./prng.ts";
 import { SEED_SCALES, type SeedScaleName } from "./scale.ts";
-import type { SeedStore, SeedUnitName, SeedUnitReport } from "./types.ts";
-import { SEED_UNITS, orderUnits } from "./units.ts";
+import type { SeedStore, SeedUnit, SeedUnitName, SeedUnitReport } from "./types.ts";
+import { SEED_UNITS, orderUnits, runUnits } from "./units.ts";
 
 export interface SeedFullOptions {
   scale: SeedScaleName;
@@ -53,6 +53,13 @@ export interface SeedFullOptions {
   from?: SeedUnitName;
   /** Stop after this unit (`selfhost.sh` runs one unit at a time and snapshots in between). */
   to?: SeedUnitName;
+  /**
+   * Run each unit as soon as the units it waits for are done, beside the others (`runUnits`).
+   * Ignored when checkpoints are written: a checkpoint after one unit must not hold half of another.
+   */
+  concurrent?: boolean;
+  /** Each unit's wall time and rows once it is done (the scenario's per-unit metrics). */
+  onUnit?: (unit: SeedUnitName, ms: number, rows: number) => void;
 }
 
 /** The store file's name in the harness report directory. */
@@ -78,7 +85,7 @@ export async function runSeedFull(o: SeedFullOptions): Promise<number> {
     return 2;
   }
   const url = o.env.DATABASE_URL;
-  const handle = url ? createDb({ url, max: 4, applicationName: "commonair-seed" }) : undefined;
+  const handle = url ? createDb({ url, max: 6, applicationName: "commonair-seed" }) : undefined;
   try {
     const selection = selectUnits(orderUnits(SEED_UNITS), o.from, o.to);
     const fingerprint = handle ? await dbFingerprint(handle) : { users: 0, usersHash: "" };
@@ -123,8 +130,9 @@ export async function runSeedFull(o: SeedFullOptions): Promise<number> {
     if (checkpoint) out(`resuming after seed-${checkpoint.unit} (checkpoint of ${checkpoint.now})`);
     else if (o.checkpointDir) clearCheckpoints(o.checkpointDir);
     const reports: { unit: string; report: SeedUnitReport }[] = [];
-    for (const unit of selection.run) {
-      if (o.signal.aborted) throw o.signal.reason;
+    const concurrent = (o.concurrent ?? false) && !o.checkpointDir;
+    if (concurrent) out("units run side by side as their dependencies allow");
+    const runOne = async (unit: SeedUnit) => {
       const started = Date.now();
       out(`seed-${unit.name}: running`);
       const report = await unit.run({
@@ -141,7 +149,9 @@ export async function runSeedFull(o: SeedFullOptions): Promise<number> {
       });
       reports.push({ unit: unit.name, report });
       const rows = Object.values(report.rows).reduce((a, b) => a + b, 0);
-      out(`seed-${unit.name}: ${rows} rows in ${((Date.now() - started) / 1000).toFixed(1)} s`);
+      const ms = Date.now() - started;
+      out(`seed-${unit.name}: ${rows} rows in ${(ms / 1000).toFixed(1)} s`);
+      o.onUnit?.(unit.name, ms, rows);
       for (const n of report.notes ?? []) out(`  note: ${n}`);
       if (o.checkpointDir) {
         const file = writeCheckpoint(o.checkpointDir, {
@@ -156,7 +166,8 @@ export async function runSeedFull(o: SeedFullOptions): Promise<number> {
         });
         out(`  checkpoint: ${file}`);
       }
-    }
+    };
+    await runUnits(selection.run, runOne, { concurrent, signal: o.signal });
     const passwordLine = given
       ? "Password: the value of DEMO_SEED_PASSWORD"
       : `Password for every account: ${password}`;

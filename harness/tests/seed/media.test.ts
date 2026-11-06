@@ -22,7 +22,6 @@ import {
   SWARM_SESSIONS,
   bulkRecordings,
   historyCounts,
-  maxConcurrency,
   planHistory,
   planRecordings,
   recentVodChannels,
@@ -71,9 +70,10 @@ const bulk = (scale: SeedScale) => ({
 const R = planRecordings(createRng(7).fork("recordings"), small, bulk(small));
 
 describe("seed-media unit", () => {
-  test("claims its stub's tables, runs after social and leaves nothing pending", () => {
+  test("claims its stub's tables, runs after social and interact and leaves nothing pending", () => {
     expect(unit.name).toBe("media");
-    expect(unit.after).toEqual(["social"]);
+    // Never beside interact: both put streamer1 on air, and interact writes playback_sessions.
+    expect(unit.after).toEqual(["social", "interact"]);
     expect(unit.pending).toEqual([]);
     expect(unit.tables).toContain("watch_room_messages");
     expect(unit.tables).toHaveLength(23);
@@ -259,11 +259,16 @@ describe("planRecordings", () => {
     );
   });
 
-  test("at most 3 recordings at once", () => {
+  test("at most 5 recordings at once, started in index order with streamer1's first", () => {
     expect(R.concurrency).toBe(RECORDING_CONCURRENCY);
-    expect(maxConcurrency(R)).toBeLessThanOrEqual(3);
+    expect(RECORDING_CONCURRENCY).toBe(5);
     const large = planRecordings(createRng(7), SEED_SCALES.large, bulk(SEED_SCALES.large));
-    expect(maxConcurrency(large)).toBeLessThanOrEqual(3);
+    for (const plan of [R, large]) {
+      expect(plan.concurrency).toBe(5);
+      expect(plan.recordings.map((r) => r.index)).toEqual(plan.recordings.map((_, i) => i));
+      // The longest recording (speech, then captions) starts first, so the pool never waits on it last.
+      expect(plan.recordings[0]?.handle).toBe("streamer1");
+    }
   });
 
   test("the fixed recorders and a few bulk streamers record; streamer3 exactly once", () => {

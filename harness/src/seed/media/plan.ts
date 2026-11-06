@@ -32,8 +32,17 @@ export const FIXED_HEALTH_BROADCASTS = 3;
 export const BULK_HEALTH_SHARE = 0.15;
 /** seed-coop seats streamer members from eligible stream hours inside this many days. */
 export const MEMBER_HOURS_DAYS = 90;
-/** Recordings run at most this many at once (brief: "run at most 3 at once"). */
-export const RECORDING_CONCURRENCY = 3;
+/**
+ * Recordings in flight at once. The brief said at most 3, run in batches of 3, and on CI four
+ * batches took 199 s (run 42215129857: 69, 43, 50 and 37 s), each waiting for its slowest
+ * recording. Now each next recording starts as soon as one ends (`settledPool`), five at a time
+ * (about 110 s for the same recordings, `poolSeconds`): two publishers more than before, each a
+ * 640x360 test pattern at 800 kb/s (veryfast), below the
+ * seed stack's adaptive-ladder threshold (TRANSCODE_VIEWER_THRESHOLD, 50 viewers), with one
+ * captioned stream (CAPTIONS_MAX_STREAMS=1), and the media service finalizes VODs and cuts clips
+ * two at a time either way.
+ */
+export const RECORDING_CONCURRENCY = 5;
 
 /** The fixed streamers' recordings, in the order they run (streamer3's is its first broadcast). */
 export const FIXED_RECORDERS = ["streamer1", "streamer2", "council1", "streamer3"] as const;
@@ -296,9 +305,8 @@ export interface ClipSpec {
 }
 
 export interface RecordingSpec {
+  /** Start order: the first `concurrency` start together, then each next one when one ends. */
   index: number;
-  /** Recordings in the same batch run together (at most `RECORDING_CONCURRENCY`). */
-  batch: number;
   handle: string;
   /** How long the publisher streams (the speech recording's length is its fixture's). */
   seconds: number;
@@ -419,7 +427,6 @@ export function planRecordings(rng: Rng, scale: SeedScale, input: RecordingInput
           ];
     return {
       index,
-      batch: Math.floor(index / RECORDING_CONCURRENCY),
       handle,
       seconds,
       title: fillTitle(r.pick(BROADCAST_TITLES), index + 1),
@@ -455,13 +462,6 @@ export function planRecordings(rng: Rng, scale: SeedScale, input: RecordingInput
     rehearsal: { recording: s2.index, owner: "streamer2", invitee: "chanmod", seconds: 15 },
     concurrency: RECORDING_CONCURRENCY,
   };
-}
-
-/** Largest number of recordings in one batch. Pure. */
-export function maxConcurrency(plan: Pick<RecordingPlan, "recordings">): number {
-  const per = new Map<number, number>();
-  for (const r of plan.recordings) per.set(r.batch, (per.get(r.batch) ?? 0) + 1);
-  return Math.max(0, ...per.values());
 }
 
 /** Row counts the history plan writes, per table. Pure. */

@@ -499,7 +499,7 @@ async function reports(run: Run): Promise<void> {
         durationSeconds: CELL_SUSPENSION_SECONDS,
       };
       run.notes.push(
-        `seed-safety: ${r.subject.authorHandle} has no chat line, so its lesser action is a 60 s suspension`,
+        `seed-safety: ${r.subject.authorHandle} has no chat line, so its lesser action is a ${CELL_SUSPENSION_SECONDS} s suspension`,
       );
     }
     if (!subject) {

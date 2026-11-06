@@ -117,7 +117,9 @@ async function ownersWithoutMemberHours(ctx: SeedContext): Promise<string[]> {
 
 export const unit: SeedUnit = {
   name: "media",
-  after: ["social"],
+  // interact: it puts streamer1 and streamer2 on air and writes playback_sessions, which this unit
+  // counts as its own rows (before and after the recordings), so they never run side by side.
+  after: ["social", "interact"],
   tables: TABLES,
   pending: [],
   async run(ctx) {
@@ -218,7 +220,7 @@ export const unit: SeedUnit = {
         "seed-media: the analytics display bypass for the fixed channels lasts 1 h (ANALYTICS_DISPLAY_BYPASS_TTL_SECONDS); after that, today's rollups wait out the 24 h display delay",
         "seed-media: streamer1's simulcast target points at a local RTMP sink that stops with the seed; it is left disabled so later lives do not retry it",
         "seed-media: the relay node is offline after the seed (its process stops with the run); its receipts and purges stay. relay_purges also has the worker's recording_ended rows (stream.offline) and council1's private VOD (vod_hidden)",
-        "seed-media: store.extra.media.liveWindow is not published: no unit asked for it, and units run one after another",
+        "seed-media: store.extra.media.liveWindow is not published: no unit asked for it (only money may run beside seed-media, and it reads no live window)",
       ],
     };
   },

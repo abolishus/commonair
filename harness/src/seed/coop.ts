@@ -132,7 +132,7 @@ export const unit: SeedUnit = {
     const pre = preflightGovernance(initial);
     if (!pre.ok)
       throw new Error(
-        `seed-coop: ${pre.problem ?? "short governance periods missing"} (the seed overlay sets GOVERNANCE_BOOTSTRAP_JSON to E5_GOVERNANCE_BOOTSTRAP)`,
+        `seed-coop: ${pre.problem ?? "short governance periods missing"} (the seed overlay sets GOVERNANCE_BOOTSTRAP_JSON to SEED_GOVERNANCE_BOOTSTRAP)`,
       );
     const periods = governancePeriods(initial);
     const before = await countRows(ctx.db, TABLES);
@@ -209,6 +209,7 @@ export const unit: SeedUnit = {
       electorate,
       seats: seatsOf(initial),
       rules: rulesOf(initial),
+      discussionSeconds: periods.discussionSeconds,
     });
     const juryCaseIds = stringList(safety.juryCaseIds);
     const juryReportIds = stringList(safety.juryReportIds);
