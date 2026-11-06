@@ -8,11 +8,16 @@
 import { ProgressRow } from "@commonair/ui/blocks/data";
 import type * as React from "react";
 import { t } from "../../i18n/index.ts";
-import type { GoalView } from "../interact/state.ts";
+import { goalPercent, type GoalView } from "../interact/state.ts";
 import { progressLabel, stateLabel, type PinnedItem } from "./model.ts";
 
 export function GoalCard({ goal, item }: { goal: GoalView; item: PinnedItem }): React.JSX.Element {
-  const progress = item.progress ?? { type: goal.type, current: goal.current, target: goal.target, percent: 0 };
+  const progress = item.progress ?? {
+    type: goal.type,
+    current: goal.current,
+    target: goal.target,
+    percent: goalPercent(goal),
+  };
   const ended = goal.endedAt !== null;
   return (
     <section
