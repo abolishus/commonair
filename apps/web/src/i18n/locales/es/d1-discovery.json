@@ -1,7 +1,6 @@
 {
   "discovery.card.nameWithHandle": "{name} (@{handle})",
   "discovery.card.tag": "Canales en directo con la etiqueta {tag}",
-  "discovery.card.tagText": "#{tag}",
   "discovery.category.browseOthers": "Explorar otras categorías",
   "discovery.category.live": "{count, plural, one {{formatted} canal en directo} other {{formatted} canales en directo}}",
   "discovery.category.noneLive": "Nadie está en directo en {category} ahora mismo",

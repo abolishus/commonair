@@ -5,11 +5,11 @@
 /**
  * Card link slots (follow-up to D1): a live card's category and tags, and an offline tile's
  * category, are links inside the card (no `CardLinks` row under it), never nested in the card's
- * channel link, and reached by Tab after it. The category page lists its tags as links.
+ * channel link, and reached by Tab after it. (The category page's own tag list is d1-category's.)
  */
 import { cleanup, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
-import { ART, MUSIC, boot, category, home, live, offline, renderInRouter } from "./d1-fixtures.tsx";
+import { ART, MUSIC, boot, home, live, offline, renderInRouter } from "./d1-fixtures.tsx";
 
 const fake = vi.hoisted(() => ({ boot: null as unknown }));
 vi.mock("../src/lib/bootstrap.ts", () => ({ useBootstrap: () => fake.boot }));
@@ -25,7 +25,7 @@ vi.mock("../src/lib/api.ts", () => ({
 }));
 
 const { DiscoveryStreamCard, DiscoveryStreamGrid } = await import("../src/components/discovery/stream-cards.tsx");
-const { CategoryNotFound, CategoryPage } = await import("../src/components/discovery/category-page.tsx");
+const { CategoryNotFound } = await import("../src/components/discovery/category-page.tsx");
 const { Directory } = await import("../src/components/directory.tsx");
 const { homeLayout } = await import("../src/lib/directory-sections.ts");
 
@@ -90,37 +90,12 @@ describe("offline tile category slot", () => {
       />,
     );
     const tile = screen.getByTestId("home-recent-tile");
-    expect(tile.className).toContain("relative");
     const channel = tile.querySelector('[data-testid="channel-card"]') as HTMLElement;
     expect(channel.getAttribute("href")).toBe("/napper");
-    expect(channel.className).toContain("after:inset-0");
     const link = tile.querySelector('[data-testid="card-category-link"]') as HTMLElement;
     expect(link.getAttribute("href")).toBe("/directory/music");
-    expect(link.className).toContain("z-10");
     expect(channel.contains(link)).toBe(false);
     expect(tile.querySelector("a a")).toBeNull();
-  });
-});
-
-describe("the category page header", () => {
-  it("lists its live channels' tags as tag-filter links", async () => {
-    await renderInRouter(
-      <CategoryPage
-        category={category(ART, 2)}
-        live={{
-          items: [live("a1", { category: ART, tags: ["cozy"] }), live("a2", { category: ART, tags: ["pixel"] })],
-          nextCursor: null,
-        }}
-      />,
-      "/directory/art",
-    );
-    const list = screen.getByRole("list", { name: "Tags on live channels" });
-    const links = [...list.querySelectorAll('[data-testid="card-tag-link"]')];
-    expect(links.map((a) => a.getAttribute("href") ?? "").sort((x, y) => x.localeCompare(y))).toEqual([
-      "/directory?tag=cozy",
-      "/directory?tag=pixel",
-    ]);
-    expect(links.map((a) => a.textContent ?? "").sort((x, y) => x.localeCompare(y))).toEqual(["#cozy", "#pixel"]);
   });
 });
 

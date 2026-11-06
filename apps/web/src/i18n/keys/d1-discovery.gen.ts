@@ -6,7 +6,6 @@
 export type Key =
   | "discovery.card.nameWithHandle"
   | "discovery.card.tag"
-  | "discovery.card.tagText"
   | "discovery.category.browseOthers"
   | "discovery.category.live"
   | "discovery.category.noneLive"

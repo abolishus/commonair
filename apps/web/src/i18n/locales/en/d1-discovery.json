@@ -1,7 +1,6 @@
 {
   "discovery.card.nameWithHandle": "{name} (@{handle})",
   "discovery.card.tag": "Live channels tagged {tag}",
-  "discovery.card.tagText": "#{tag}",
   "discovery.category.browseOthers": "Browse other categories",
   "discovery.category.live": "{count, plural, one {{formatted} channel live} other {{formatted} channels live}}",
   "discovery.category.noneLive": "Nobody is live in {category} right now",
