@@ -38,8 +38,7 @@ orchestrator made every call below without the user and lists them for post-laun
     review, 30 s votes);
   - money runs beside media.
 
-  Estimated at 9 to 9.5 min, down from 15m33s. That is only an estimate until CI records
-  `seed-coverage.seed.<unit>` and `seed-coverage.crawl`. If the runner can't take five recordings
+  Measured on CI run 42286121862: seed-coverage took 10m20s, down from 15m33s (seed 7m03s, crawl 3m14s). If the runner can't take five recordings
   at once, lower `RECORDING_CONCURRENCY` to 4. The shard was not split, because each half would
   pay the ~10 min seed.
 
@@ -320,7 +319,7 @@ Flakes seen:
 
 Still open:
 
-- ~~seed shard over the cap (item 4)~~ trimmed to an estimated 9 to 9.5 min (platform-debt);
+- ~~seed shard over the cap (item 4)~~ seed-coverage 10m20s on run 42286121862 (platform-debt);
 - ~~the relay drain test's duplicate receipt~~ fixed (platform-debt);
 - `## [0.1.0]`'s date, at the release.
 

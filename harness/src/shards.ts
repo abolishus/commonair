@@ -35,7 +35,8 @@
  * safety's cell suspensions last 20 s, not 60 (its lapse wait was 57 s: safety ~60 s); coop runs
  * on the seed stack's shorter governance periods (compose.seed.yaml; its restorations were 150 s,
  * now about 100: coop ~110 s); and money runs beside media (harness/src/seed/units.ts `runUnits`).
- * About 6.3 min of seed, so the shard is about 9 to 9.5 min.
+ * Measured on the push run of d16972e4 (42286121862): seed-coverage 10m20s, the seed 7m03s (social 14 s,
+ * interact 36, money 21, media 2m37, safety 1m04, coop 1m53, platform 38) and the crawl 3m14s.
  */
 export const FULL_SHARDS = {
   relay: ["e2e-relay"],
