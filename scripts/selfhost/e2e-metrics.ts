@@ -44,6 +44,8 @@ export const RULE_GROUPS = [
   "commonair-stage-triggers",
   "commonair-slo",
   "commonair-state",
+  "commonair-backups",
+  "commonair-status-page",
 ] as const;
 
 /**

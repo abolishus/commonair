@@ -69,7 +69,7 @@ x-multi-app-depends: &app-depends
   valkey:
     condition: service_healthy
   otel-collector:
-    condition: service_healthy
+    condition: service_started
 
 x-multi-app-healthcheck: &app-healthcheck
   test: ["CMD", "bun", "/opt/commonair/healthcheck.ts"]
