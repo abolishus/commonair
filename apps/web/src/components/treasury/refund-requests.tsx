@@ -383,8 +383,8 @@ export function RefundRequests(): React.JSX.Element {
           try {
             await api().money.treasurer.refundRequests.resolve({ requestId: r.id, outcome, note });
           } catch (err) {
-            // Settled meanwhile (a webhook, another treasurer): show the list as it is now.
-            if (errorCode(err) === "CONFLICT") list.reload();
+            // Settled meanwhile (a webhook, another treasurer): show the list and summary as they are now.
+            if (errorCode(err) === "CONFLICT") reload();
             throw err;
           }
           toast.success(t("refundRequests.resolve.done"));

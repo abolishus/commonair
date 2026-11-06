@@ -24,6 +24,7 @@ function hydrate(): void {
     bootstrap: Reflect.get(window, "$_TSR") as unknown,
     storage: sessionStore(),
     now: Date.now(),
+    search: window.location.search,
   });
   if (decision === "stale") return;
   // Only on a miss: an attribute React does not render stays off the hydrated `<html>`.

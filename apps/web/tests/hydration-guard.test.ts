@@ -1,8 +1,16 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { describe, expect, it } from "vite-plus/test";
-import { BOOT_RELOAD_KEY, BOOT_RELOAD_WINDOW_MS, bootDecision, type BootState } from "../src/hydration-guard.ts";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import {
+  BOOT_RELOAD_KEY,
+  BOOT_RELOAD_WINDOW_MS,
+  ONE_TIME_PARAMS,
+  bootDecision,
+  type BootState,
+  hasOneTimeParam,
+  sessionStore,
+} from "../src/hydration-guard.ts";
 
 function memory(initial: Record<string, string> = {}) {
   const map = new Map(Object.entries(initial));
@@ -21,6 +29,7 @@ const state = (over: Partial<BootState> = {}): BootState => ({
   bootstrap: { buffer: [] },
   storage: memory(),
   now: NOW,
+  search: "",
   ...over,
 });
 
@@ -86,5 +95,75 @@ describe("bootDecision", () => {
       setItem: () => undefined,
     };
     expect(bootDecision(state({ bootstrap: undefined, storage: unreadable }))).toBe("reload");
+  });
+});
+
+describe("one-time URL parameters", () => {
+  it("are recognised by name, case-insensitively, with or without a value", () => {
+    expect(ONE_TIME_PARAMS).toEqual(["token", "code", "state", "nonce"]);
+    for (const search of [
+      "?token=abc",
+      "?code=x&state=y",
+      "?a=1&nonce=n",
+      "?Code=x",
+      "?STATE",
+      "token=t",
+      "?x=1&token=",
+    ])
+      expect(hasOneTimeParam(search), search).toBe(true);
+  });
+
+  it("are not matched by values, prefixes or look-alike names", () => {
+    for (const search of [
+      "",
+      "?",
+      "?q=token",
+      "?tokens=1",
+      "?access_token_hint=1",
+      "?zipcode=1",
+      "?statement=2",
+      "?ref=code",
+    ])
+      expect(hasOneTimeParam(search), search).toBe(false);
+  });
+
+  it("are never reloaded for: a missing bootstrap hydrates anyway, and nothing is recorded", () => {
+    const storage = memory();
+    expect(bootDecision(state({ bootstrap: undefined, storage, search: "?code=abc&state=xyz" }))).toBe("missing");
+    expect(bootDecision(state({ bootstrap: undefined, storage, search: "?token=t" }))).toBe("missing");
+    expect(storage.map.size).toBe(0);
+  });
+
+  it("do not change a page that has its bootstrap, or one that is stale", () => {
+    expect(bootDecision(state({ search: "?token=t" }))).toBe("hydrate");
+    expect(bootDecision(state({ currentDocument: {}, bootstrap: undefined, search: "?token=t" }))).toBe("stale");
+  });
+
+  it("other parameters still reload once", () => {
+    const storage = memory();
+    expect(bootDecision(state({ bootstrap: undefined, storage, search: "?tab=refunds&page=2" }))).toBe("reload");
+    expect(storage.map.get(BOOT_RELOAD_KEY)).toBe(String(NOW));
+  });
+});
+
+describe("sessionStore", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("is the window's sessionStorage", () => {
+    const storage = memory();
+    vi.stubGlobal("window", { sessionStorage: storage });
+    expect(sessionStore()).toBe(storage);
+  });
+
+  it("is null where touching it throws (blocked storage, sandboxed frame)", () => {
+    vi.stubGlobal(
+      "window",
+      Object.defineProperty({}, "sessionStorage", {
+        get() {
+          throw new DOMException("denied", "SecurityError");
+        },
+      }),
+    );
+    expect(sessionStore()).toBeNull();
   });
 });

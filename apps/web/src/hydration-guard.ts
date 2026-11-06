@@ -12,7 +12,9 @@
  * global is only ever deleted by `$_TSR.h()` after a hydration has finished, so a missing one
  * means this document never got (or no longer has) the data hydration needs: reloading once is
  * the only way the viewer gets a working page. A reload that just happened is not repeated, so a
- * page that always lacks it cannot loop.
+ * page that always lacks it cannot loop. A URL carrying a one-time parameter (an OAuth `code` or
+ * `state`, a magic-link `token`, a `nonce`) is never reloaded: the second request would spend or
+ * replay it.
  */
 
 /** `sessionStorage` key: when this tab last reloaded for a missing bootstrap (epoch ms). */
@@ -21,6 +23,8 @@ export const BOOT_RELOAD_KEY = "commonair-boot-reload";
 export const BOOT_RELOAD_WINDOW_MS = 60_000;
 /** `<html data-boot>`: what the guard found, for the harness's start-up diagnostics. */
 export const BOOT_ATTRIBUTE = "boot";
+/** Query parameters a reload could spend twice (compared case-insensitively). */
+export const ONE_TIME_PARAMS: readonly string[] = ["token", "code", "state", "nonce"];
 
 export type BootDecision =
   /** The bootstrap is there: hydrate. */
@@ -29,7 +33,10 @@ export type BootDecision =
   | "stale"
   /** No bootstrap, and no recent reload for it: reload once. */
   | "reload"
-  /** No bootstrap again right after a reload, or nowhere to remember the reload: hydrate anyway. */
+  /**
+   * No bootstrap again right after a reload, nowhere to remember the reload, or a one-time
+   * parameter in the URL: hydrate anyway.
+   */
   | "missing";
 
 type BootStorage = Pick<Storage, "getItem" | "setItem">;
@@ -44,6 +51,14 @@ export interface BootState {
   /** `sessionStorage`, or null where reading it throws. */
   storage: BootStorage | null;
   now: number;
+  /** `location.search` now. */
+  search: string;
+}
+
+/** Whether `search` carries a parameter a reload could spend twice (pure). */
+export function hasOneTimeParam(search: string): boolean {
+  for (const key of new URLSearchParams(search).keys()) if (ONE_TIME_PARAMS.includes(key.toLowerCase())) return true;
+  return false;
 }
 
 function lastReload(storage: BootStorage): number | null {
@@ -60,7 +75,7 @@ export function bootDecision(state: BootState): BootDecision {
   if (state.currentDocument !== state.entryDocument) return "stale";
   if (typeof state.bootstrap === "object" && state.bootstrap !== null) return "hydrate";
   const { storage, now } = state;
-  if (!storage) return "missing";
+  if (!storage || hasOneTimeParam(state.search)) return "missing";
   const last = lastReload(storage);
   if (last !== null && now - last >= 0 && now - last < BOOT_RELOAD_WINDOW_MS) return "missing";
   try {
