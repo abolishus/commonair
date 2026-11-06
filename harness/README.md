@@ -220,8 +220,11 @@ Caddy (profile `tls`), so browsers reach the web server straight through its pub
 web server appends the address it accepted the connection from, for `/rpc` and `/api` and for the
 API calls its own rendering makes (`forwardingFetch`), and the API walks the chain past its
 trusted hops (the compose network, the port's host side included). So every browser has its own
-`auth` and `default` rate-limit subjects instead of one shared by a whole shard. Pass
-`clientIp: null` for a session that should arrive from the runner's own address.
+`auth` and `default` rate-limit subjects instead of one shared by a whole shard. Such sessions run
+with service workers blocked: in WebKit a worker's requests skip context routes, so the app's
+worker would send the page's API calls from the runner's address (the PWA step, `src/n1/pwa.ts`,
+has its own context). Pass `clientIp: null` for a session that should arrive from the runner's
+own address, with service workers as before.
 
 ### P2P viewers (`src/p2p.ts`, `src/proxy.ts`, `harness/compose.p2p.yaml`; P1)
 

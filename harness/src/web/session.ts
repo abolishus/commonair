@@ -124,6 +124,9 @@ export class WebSession {
     const context = await browser.newContext({
       viewport: { width: 1280, height: 800 },
       locale: browserLocale(opts.locale),
+      // In WebKit a service worker's requests (the production build's has a fetch listener) skip
+      // context routes, so they would arrive without the session's address (`simulateClientAddress`).
+      ...(clientIp ? { serviceWorkers: "block" as const } : {}),
     });
     try {
       if (clientIp) await simulateClientAddress(context, opts.webUrl, clientIp);

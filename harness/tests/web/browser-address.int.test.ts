@@ -34,6 +34,34 @@ let web: Server;
 let other: Server;
 let fleet: BrowserFleet;
 const otherForwarded: (string | null)[] = [];
+/** `x-forwarded-for` of each navigation to the service-worker page, as the web server got it. */
+const swPageForwarded: (string | null)[] = [];
+
+/**
+ * Like apps/web/src/sw/sw.ts: a fetch listener that answers nothing outside its shell, so the
+ * page's own requests fall through to the network once the worker controls the page.
+ */
+const SW_SCRIPT = `self.addEventListener("install", () => self.skipWaiting());
+self.addEventListener("activate", (e) => e.waitUntil(self.clients.claim()));
+self.addEventListener("fetch", (e) => {
+  if (new URL(e.request.url).pathname.startsWith("/assets/")) e.respondWith(fetch(e.request));
+});`;
+
+const swPage = `<!doctype html><html><body><script>
+(async () => {
+  // A blocked registration may reject or never settle: give it a moment either way.
+  const controlled = (async () => {
+    await navigator.serviceWorker.register("/sw.js");
+    await navigator.serviceWorker.ready;
+    if (!navigator.serviceWorker.controller)
+      await new Promise((r) => navigator.serviceWorker.addEventListener("controllerchange", r, { once: true }));
+  })();
+  await Promise.race([controlled.catch(() => undefined), new Promise((r) => setTimeout(r, 3000))]);
+  const subjects = [];
+  for (let i = 0; i < 2; i++) subjects.push((await (await fetch("/rpc/whoami", { method: "POST", body: "{}" })).json()).subject);
+  document.body.dataset.result = JSON.stringify({ subjects, controlled: !!navigator.serviceWorker.controller });
+})();
+</script></body></html>`;
 
 const page = (otherUrl: string) => `<!doctype html><html data-hydrated="true"><body><script>
 (async () => {
@@ -68,6 +96,12 @@ beforeAll(async () => {
     port: 0,
     fetch: async (req, srv) => {
       const url = new URL(req.url);
+      if (url.pathname === "/sw.js")
+        return new Response(SW_SCRIPT, { headers: { "content-type": "text/javascript", "cache-control": "no-store" } });
+      if (url.pathname === "/sw") {
+        swPageForwarded.push(req.headers.get("x-forwarded-for"));
+        return new Response(swPage, { headers: { "content-type": "text/html", "cache-control": "no-store" } });
+      }
       if (!url.pathname.startsWith("/rpc/"))
         return new Response(page(otherUrl), { headers: { "content-type": "text/html" } });
       const chain = [req.headers.get("x-forwarded-for"), srv.requestIP(req)?.address]
@@ -117,6 +151,37 @@ describe.each(["chromium", "webkit"] satisfies BrowserEngine[])("in %s", (engine
       expect(otherForwarded.every((h) => h === null)).toBe(true);
     } finally {
       await Promise.all([a.close(), b.close()]);
+    }
+  }, 120_000);
+
+  // The production build registers a service worker with a fetch listener. In WebKit, requests a
+  // worker sees skip Playwright's routes, so a worker in control would send the page's API calls
+  // from the runner's own address: a session with an address runs without service workers.
+  test("a service worker never takes a session's requests past its address", async () => {
+    const s = await WebSession.open({
+      fleet,
+      engine,
+      webUrl: `http://localhost:${web.port}`,
+      probeScript: "",
+      label: "sw",
+      humanize: false,
+    });
+    try {
+      swPageForwarded.length = 0;
+      for (const name of ["main", "second"]) {
+        const p = await s.goto("/sw", name);
+        const handle = await p.waitForSelector("body[data-result]", { state: "attached", timeout: 30_000 });
+        const r = JSON.parse((await handle.getAttribute("data-result")) ?? "{}") as {
+          subjects: string[];
+          controlled: boolean;
+        };
+        expect(r.controlled).toBe(false);
+        expect(r.subjects).toEqual([s.clientIp, s.clientIp]);
+      }
+      // The second navigation came after the first page tried to install the worker.
+      expect(swPageForwarded).toEqual([s.clientIp, s.clientIp]);
+    } finally {
+      await s.close();
     }
   }, 120_000);
 
