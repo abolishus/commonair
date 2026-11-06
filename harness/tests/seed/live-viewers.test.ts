@@ -105,6 +105,29 @@ describe("planWatchers", () => {
     expect(ws.map((w) => w.handle)).toEqual(["v00002"]);
   });
 
+  test("a gated channel gets only viewers who confirmed 18+, its chatters included", () => {
+    const pool = viewers(60);
+    const adults = pool.filter((_, i) => i % 3 === 0);
+    const channels = [ch("streamer1"), { ...ch("streamer3"), gated: true }];
+    const live = planLive(createRng(2).fork("live"), { streamers: channels, viewers: pool }, 2);
+    const ws = planWatchers(createRng(2).fork("watchers"), live.channels, pool, live.chatters, adults);
+    const gated = ws.filter((w) => w.channel === "demo_streamer3");
+    expect(gated.length).toBeGreaterThanOrEqual(MIN_WATCHERS);
+    for (const w of gated) expect(adults).toContain(w.handle);
+    // Its non-adult chatters still chat; they just do not watch.
+    const minors = live.chatters.filter((c) => c.channel === "demo_streamer3" && !adults.includes(c.handle));
+    for (const c of minors) expect(gated.map((w) => w.handle)).not.toContain(c.handle);
+    // An ungated channel still takes anyone.
+    expect(ws.some((w) => w.channel === "demo_streamer1" && !adults.includes(w.handle))).toBe(true);
+    expect(new Set(ws.map((w) => w.handle)).size).toBe(ws.length);
+  });
+
+  test("a gated channel with no adults has no watchers; the default treats nobody as an adult", () => {
+    const gated = [{ ...ch("streamer3"), gated: true }];
+    expect(planWatchers(createRng(1), gated, viewers(20), [])).toEqual([]);
+    expect(planWatchers(createRng(1), gated, viewers(20), [], ["v99999"])).toEqual([]);
+  });
+
   test("watchersFor stays within the bounds at every rank", () => {
     const r = createRng(3);
     for (let rank = 0; rank < 50; rank++) {

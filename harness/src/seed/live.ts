@@ -39,6 +39,11 @@ export const DEFAULT_LIVE_CHANNELS = 3;
 export interface LiveChannel {
   handle: string;
   slug: string;
+  /**
+   * The channel or its category is mature: playback needs a signed-in viewer who confirmed they
+   * are 18 or older, so only such viewers watch it (`planWatchers`).
+   */
+  gated?: boolean;
 }
 
 export interface LiveChatter {
@@ -62,6 +67,8 @@ export interface LiveAvailable {
   streamers: readonly LiveChannel[];
   /** Bulk viewer handles. */
   viewers: readonly string[];
+  /** The bulk viewers who confirmed they are 18 or older, the only ones a gated channel admits. */
+  adults?: readonly string[];
 }
 
 /** Channels: the fixed streamers in `LIVE_FIXED_ORDER`, then bulk streamers by handle. Pure. */
@@ -106,17 +113,25 @@ export interface LiveLogin {
    * fixed login: never a chatter (signing in would change its state, or its lines would not show).
    */
   restricted: boolean;
+  /** Confirmed 18 or older (`users.mature_confirmed_at`). */
+  adult?: boolean;
+  /** Its channel, if any, is mature or in a mature category. */
+  gated?: boolean;
 }
 
 const STREAMS = new Set<string>(LIVE_FIXED_ORDER);
 
 /** Who streams (restricted or not: the fixed streamers are never suspended) and who chats. Pure. */
 export function liveAvailable(logins: readonly LiveLogin[]): LiveAvailable {
+  const viewers = logins.filter((l) => !l.restricted && /^v\d+$/.test(l.handle));
   return {
     streamers: logins.flatMap((l) =>
-      l.slug && (STREAMS.has(l.handle) || /^s\d+$/.test(l.handle)) ? [{ handle: l.handle, slug: l.slug }] : [],
+      l.slug && (STREAMS.has(l.handle) || /^s\d+$/.test(l.handle))
+        ? [{ handle: l.handle, slug: l.slug, ...(l.gated ? { gated: true } : {}) }]
+        : [],
     ),
-    viewers: logins.filter((l) => !l.restricted && /^v\d+$/.test(l.handle)).map((l) => l.handle),
+    viewers: viewers.map((l) => l.handle),
+    adults: viewers.filter((l) => l.adult === true).map((l) => l.handle),
   };
 }
 

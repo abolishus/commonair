@@ -114,7 +114,22 @@ describe("liveAvailable", () => {
   });
 
   test("no logins: nothing to stream, nobody to chat", () => {
-    expect(liveAvailable([])).toEqual({ streamers: [], viewers: [] });
+    expect(liveAvailable([])).toEqual({ streamers: [], viewers: [], adults: [] });
+  });
+
+  test("a gated channel is marked; adults are the unrestricted bulk viewers who confirmed 18+", () => {
+    const a = liveAvailable([
+      { ...login("streamer1"), gated: false },
+      { ...login("streamer3"), gated: true },
+      { ...login("v00001"), adult: true },
+      { ...login("v00002"), adult: false },
+      { ...login("v00003", true), adult: true },
+      login("v00004"),
+      { ...login("viewer1"), adult: true },
+    ]);
+    expect(a.streamers).toEqual([ch("streamer1"), { ...ch("streamer3"), gated: true }]);
+    expect(a.viewers).toEqual(["v00001", "v00002", "v00004"]);
+    expect(a.adults).toEqual(["v00001"]);
   });
 });
 

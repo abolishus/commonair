@@ -64,6 +64,8 @@ interface Login {
   email: string;
   slug: string | null;
   restricted: boolean;
+  adult: boolean;
+  gated: boolean;
 }
 
 export async function runSeedLiveCommand(o: SeedLiveCommand): Promise<number> {
@@ -83,7 +85,10 @@ export async function runSeedLiveCommand(o: SeedLiveCommand): Promise<number> {
                 or exists (select 1 from account_deletions d where d.user_id = u.id and d.status = 'scheduled')
                 or exists (select 1 from chat_bans b where b.user_id = u.id)
                 or exists (select 1 from user_blocks k where k.blocked_user_id = u.id)
-               ) as restricted
+               ) as restricted,
+               u.mature_confirmed_at is not null as adult,
+               coalesce(c.mature or exists (select 1 from categories g where g.id = c.category_id and g.mature), false)
+                 as gated
           from users u left join channels c on c.owner_id = u.id
          where u.username like 'demo\\_%' and u.email like '%@demo-seed.invalid'`;
   } finally {
@@ -103,7 +108,13 @@ export async function runSeedLiveCommand(o: SeedLiveCommand): Promise<number> {
 
   const handleOf = (username: string) => username.replace(/^demo_/, "");
   const available = liveAvailable(
-    logins.map((l) => ({ handle: handleOf(l.username), slug: l.slug, restricted: l.restricted })),
+    logins.map((l) => ({
+      handle: handleOf(l.username),
+      slug: l.slug,
+      restricted: l.restricted,
+      adult: l.adult,
+      gated: l.gated,
+    })),
   );
   const rng = createRng(LIVE_SEED).fork("live");
   const plan = planLive(rng, available, o.channels > 0 ? o.channels : DEFAULT_LIVE_CHANNELS);
@@ -236,7 +247,9 @@ export async function runSeedLiveCommand(o: SeedLiveCommand): Promise<number> {
     now: () => Date.now(),
   };
   const watchers =
-    o.watchers === false ? [] : planWatchers(rng.fork("watchers"), plan.channels, available.viewers, plan.chatters);
+    o.watchers === false
+      ? []
+      : planWatchers(rng.fork("watchers"), plan.channels, available.viewers, plan.chatters, available.adults);
   const watching = runWatchers(watchers, rng.fork("watching"), watcherDeps, controller.signal);
   // Keeps /analytics showing streamer1's history while the streams run (BYPASS_RENEW_MS says why).
   const secret = internalSecret(env, source);

@@ -52,25 +52,36 @@ export function watchersFor(rank: number, r: Rng): number {
 /**
  * Who watches what. A channel's chatters watch it first (people chat in what they watch), then
  * other bulk viewers fill it up; no viewer watches two channels. Short of viewers, later channels
- * get fewer. Pure given `rng`.
+ * get fewer. A gated (18+) channel takes only viewers in `adults`: the API refuses anyone else's
+ * playback, so they would retry forever and the channel would show no audience. Pure given `rng`.
  */
 export function planWatchers(
   rng: Rng,
   channels: readonly LiveChannel[],
   viewers: readonly string[],
   chatters: readonly LiveChatter[],
+  adults: readonly string[] = [],
 ): LiveWatcher[] {
+  const adult = new Set(adults);
   const used = new Set<string>();
   const pool = rng.fork("watchers").shuffle([...viewers].sort());
   const out: LiveWatcher[] = [];
   channels.forEach((c, rank) => {
     const want = watchersFor(rank, rng.fork(`count:${c.handle}`));
-    const mine = chatters.filter((x) => x.channel === c.slug && !used.has(x.handle)).map((x) => x.handle);
+    const admitted = (h: string) => !c.gated || adult.has(h);
+    const mine = chatters
+      .filter((x) => x.channel === c.slug && !used.has(x.handle) && admitted(x.handle))
+      .map((x) => x.handle);
     const picked: string[] = [];
     for (const h of mine) if (picked.length < want && !picked.includes(h)) picked.push(h);
     for (const h of pool) {
       if (picked.length >= want) break;
-      if (!used.has(h) && !picked.includes(h) && !chatters.some((x) => x.handle === h && x.channel !== c.slug))
+      if (
+        admitted(h) &&
+        !used.has(h) &&
+        !picked.includes(h) &&
+        !chatters.some((x) => x.handle === h && x.channel !== c.slug)
+      )
         picked.push(h);
     }
     picked.forEach((handle, i) => {
