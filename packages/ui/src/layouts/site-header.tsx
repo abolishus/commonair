@@ -26,13 +26,21 @@ export interface SiteHeaderProps extends React.ComponentProps<"header"> {
   context?: HeaderContext;
   nav: NavItem[];
   navLabel: string;
+  /** From `lg` it sits in the middle column, centred on the page; first in the mobile sheet. */
   search?: React.ReactNode;
   searchLabel?: string;
   onOpenPalette?: () => void;
   actions?: React.ReactNode;
   user?: React.ReactNode;
   menuLabel: string;
+  /** The mobile sheet's open state: controlled with `onMobileMenuOpenChange`, otherwise the initial state. */
   mobileMenuOpen?: boolean;
+  onMobileMenuOpenChange?: (open: boolean) => void;
+  /**
+   * The router's current path. The mobile sheet closes when it changes, which also covers
+   * navigation that is not a link click (a search submit, a redirect).
+   */
+  pathname?: string;
   /** Shown at the bottom of the mobile sheet (theme switch, account links). */
   mobileActions?: React.ReactNode;
   /** Shown in the bar from `md` up only; pair with `mobileActions` for the same controls on phones. */
@@ -50,70 +58,118 @@ export function SiteHeader({
   user,
   menuLabel,
   mobileMenuOpen,
+  onMobileMenuOpenChange,
+  pathname,
   mobileActions,
   desktopActions,
   className,
   ...props
 }: SiteHeaderProps): React.JSX.Element {
+  const [openState, setOpenState] = React.useState(mobileMenuOpen ?? false);
+  const controlled = mobileMenuOpen !== undefined && onMobileMenuOpenChange !== undefined;
+  const open = controlled ? mobileMenuOpen : openState;
+  const setOpen = React.useCallback(
+    (next: boolean) => {
+      if (!controlled) setOpenState(next);
+      onMobileMenuOpenChange?.(next);
+    },
+    [controlled, onMobileMenuOpenChange],
+  );
+  // Close when the location changes; not on mount, where a caller may open the sheet on purpose.
+  const lastPath = React.useRef(pathname);
+  React.useEffect(() => {
+    if (lastPath.current === pathname) return;
+    lastPath.current = pathname;
+    setOpen(false);
+  }, [pathname, setOpen]);
+  // Any link activated in the sheet closes it, whatever the router. A modified click opens another
+  // tab and leaves this page, and the sheet, as they are.
+  const onSheetClick = (event: React.MouseEvent) => {
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+    if (event.target instanceof Element && event.target.closest("a[href]")) setOpen(false);
+  };
   return (
     <header
       aria-label={brand.name}
-      className={cn("flex min-h-14 w-full items-center gap-3 border-b bg-background px-4", className)}
+      className={cn(
+        "flex min-h-14 w-full items-center gap-3 border-b bg-background px-4",
+        // From lg three equal columns: the search owns the middle one, centred whatever the nav's width.
+        search && "lg:grid lg:grid-cols-3",
+        className,
+      )}
       {...props}
     >
-      <BrandLink brand={brand} />
-      {context ? (
-        <>
-          <Separator orientation="vertical" className="hidden h-4 self-center sm:block" />
-          <ContextLink context={context} className="hidden min-w-0 truncate text-sm font-medium sm:block" />
-        </>
-      ) : null}
-      {nav.length ? (
-        <nav aria-label={navLabel} className="hidden min-w-0 flex-1 items-center gap-1 md:flex">
-          {nav.map((item) => (
-            <NavLink key={item.id} item={item} className={buttonVariants({ variant: "ghost", size: "sm" })} />
-          ))}
-        </nav>
-      ) : null}
-      {search ? <div className="hidden min-w-0 md:block">{search}</div> : null}
-      {onOpenPalette ? (
-        <Button aria-label={searchLabel} variant="ghost" size="icon" className="md:hidden" onClick={onOpenPalette}>
-          <HugeiconsIcon icon={Search01Icon} />
-        </Button>
-      ) : null}
-      <div className="ms-auto flex shrink-0 items-center gap-2">
-        {desktopActions ? <div className="hidden items-center gap-2 md:flex">{desktopActions}</div> : null}
-        {actions}
-        {user}
+      <div data-slot="site-header-start" className="flex min-w-0 flex-1 items-center gap-3">
+        <BrandLink brand={brand} />
+        {context ? (
+          <>
+            <Separator orientation="vertical" className="hidden h-4 self-center sm:block" />
+            <ContextLink context={context} className="hidden min-w-0 truncate text-sm font-medium sm:block" />
+          </>
+        ) : null}
+        {nav.length ? (
+          <nav aria-label={navLabel} className="hidden min-w-0 flex-1 items-center gap-1 md:flex">
+            {nav.map((item) => (
+              <NavLink key={item.id} item={item} className={buttonVariants({ variant: "ghost", size: "sm" })} />
+            ))}
+          </nav>
+        ) : null}
       </div>
-      <Sheet open={mobileMenuOpen}>
-        <SheetTrigger
-          className={buttonVariants({ variant: "ghost", size: "icon", className: "md:hidden" })}
-          aria-label={menuLabel}
+      {search ? (
+        <div
+          data-slot="site-header-search"
+          className="hidden min-w-0 md:block lg:col-start-2 lg:w-full lg:max-w-md lg:justify-self-center"
         >
-          <HugeiconsIcon icon={Menu01Icon} />
-        </SheetTrigger>
-        <SheetContent side="left" className="md:hidden">
-          <SheetHeader>
-            <SheetTitle>{brand.name}</SheetTitle>
-          </SheetHeader>
-          {context ? (
-            <ContextLink
-              context={context}
-              className="mx-4 flex min-h-10 items-center px-2 py-2 text-sm font-medium hover:bg-muted"
-            />
-          ) : null}
-          {nav.length ? (
-            <nav aria-label={navLabel} className="flex flex-col gap-2 px-4">
-              {nav.map((item) => (
-                <NavLink key={item.id} item={item} className="min-h-10 rounded-none px-2 py-2 hover:bg-muted" />
-              ))}
-            </nav>
-          ) : null}
-          {search ? <div className="p-4">{search}</div> : null}
-          {mobileActions ? <div className="flex flex-wrap items-center gap-2 p-4">{mobileActions}</div> : null}
-        </SheetContent>
-      </Sheet>
+          {search}
+        </div>
+      ) : null}
+      <div
+        data-slot="site-header-end"
+        className="ms-auto flex shrink-0 items-center gap-3 lg:col-start-3 lg:justify-self-end"
+      >
+        {onOpenPalette ? (
+          <Button aria-label={searchLabel} variant="ghost" size="icon" className="md:hidden" onClick={onOpenPalette}>
+            <HugeiconsIcon icon={Search01Icon} />
+          </Button>
+        ) : null}
+        <div className="flex shrink-0 items-center gap-2">
+          {desktopActions ? <div className="hidden items-center gap-2 md:flex">{desktopActions}</div> : null}
+          {actions}
+          {user}
+        </div>
+        <Sheet open={open} onOpenChange={(next) => setOpen(next)}>
+          <SheetTrigger
+            className={buttonVariants({ variant: "ghost", size: "icon", className: "md:hidden" })}
+            aria-label={menuLabel}
+          >
+            <HugeiconsIcon icon={Menu01Icon} />
+          </SheetTrigger>
+          <SheetContent side="left" className="md:hidden" onClick={onSheetClick}>
+            <SheetHeader>
+              <SheetTitle>{brand.name}</SheetTitle>
+            </SheetHeader>
+            {search ? (
+              <div data-slot="site-header-sheet-search" className="px-4 pb-2">
+                {search}
+              </div>
+            ) : null}
+            {context ? (
+              <ContextLink
+                context={context}
+                className="mx-4 flex min-h-10 items-center px-2 py-2 text-sm font-medium hover:bg-muted"
+              />
+            ) : null}
+            {nav.length ? (
+              <nav aria-label={navLabel} className="flex flex-col gap-2 px-4">
+                {nav.map((item) => (
+                  <NavLink key={item.id} item={item} className="min-h-10 rounded-none px-2 py-2 hover:bg-muted" />
+                ))}
+              </nav>
+            ) : null}
+            {mobileActions ? <div className="flex flex-wrap items-center gap-2 p-4">{mobileActions}</div> : null}
+          </SheetContent>
+        </Sheet>
+      </div>
     </header>
   );
 }

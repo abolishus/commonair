@@ -247,6 +247,7 @@ export function AppHeader({ studio = false }: { studio?: boolean }): React.JSX.E
         nav={nav}
         navLabel={t("nav.main")}
         menuLabel={t("nav.menu")}
+        pathname={pathname}
         search={<HeaderSearchField />}
         searchLabel={t("discovery.search.open")}
         onOpenPalette={() => setSearchOpen(true)}
@@ -270,6 +271,7 @@ export function AppHeader({ studio = false }: { studio?: boolean }): React.JSX.E
                 data-testid="nav-user"
                 data-username={me.username}
                 username={me.username}
+                displayName={me.displayName}
                 menuLabel={t("nav.accountMenu", { name: me.displayName })}
                 theme={theme}
                 onThemeChange={setTheme}

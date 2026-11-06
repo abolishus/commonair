@@ -25,16 +25,25 @@ export interface UserMenuItem {
 }
 export interface UserMenuProps extends React.ComponentProps<"div"> {
   username: string;
+  /** The avatar's initial comes from it (F38), as on every other avatar; falls back to `username`. */
+  displayName?: string | null;
   avatar?: string | null;
   menuLabel: string;
   items: UserMenuItem[];
 }
-export function UserMenu({ username, avatar, menuLabel, items, ...props }: UserMenuProps): React.JSX.Element {
+export function UserMenu({
+  username,
+  displayName,
+  avatar,
+  menuLabel,
+  items,
+  ...props
+}: UserMenuProps): React.JSX.Element {
   return (
     <div {...props}>
       <DropdownMenu>
         <DropdownMenuTrigger render={<Button variant="ghost" size="sm" aria-label={menuLabel} />}>
-          <ChannelAvatar name={username} src={avatar} size="sm" decorative />
+          <ChannelAvatar name={displayName || username} src={avatar} size="sm" decorative />
           <span className="hidden max-w-32 truncate sm:inline">{username}</span>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">

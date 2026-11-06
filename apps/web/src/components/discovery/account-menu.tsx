@@ -27,6 +27,8 @@ const THEME_ICONS = { dark: Moon02Icon, light: Sun03Icon, system: ComputerIcon }
 
 export interface AccountMenuProps {
   username: string;
+  /** The avatar's initial comes from it (F38); falls back to `username`. */
+  displayName?: string | null;
   avatar?: string | null;
   menuLabel: string;
   items: UserMenuItem[];
@@ -38,6 +40,7 @@ export interface AccountMenuProps {
 
 export function AccountMenu({
   username,
+  displayName,
   avatar,
   menuLabel,
   items,
@@ -54,7 +57,7 @@ export function AccountMenu({
     <div {...props}>
       <DropdownMenu>
         <DropdownMenuTrigger render={<Button variant="ghost" size="sm" aria-label={menuLabel} />}>
-          <ChannelAvatar name={username} src={avatar} size="sm" decorative />
+          <ChannelAvatar name={displayName || username} src={avatar} size="sm" decorative />
           <span className="hidden max-w-32 truncate sm:inline">{username}</span>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
