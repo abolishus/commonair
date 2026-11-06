@@ -22,6 +22,38 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
 
 ## In flight
 
+**API-fields follow-up wave (2026-11-06).** The D1–D5 contract placeholders, on `main`: contracts
+and migration `0050` (`a9ac6ea3`), API (`ad9a6089`, `7132acf9`), chat (`a123e933`), web
+(`7b703e5d`, `6a7fa22f`, `949c4b19`, `09bbfc42`, `4a6ad6aa`), and coverage for every file touched
+(`ddb186fd`, `f3bf7498`, `470dcf76`).
+
+- Built: `Vod.category` and `Clip.category` (watch pages link the category); `Channel.lastLiveAt`;
+  `Channel.socials` (a `channels.socials` jsonb column, https only, at most 10; About tab links
+  and an editor in Edit stream info); `ChannelCard.latestVod` (VOD tiles on Recently live);
+  `Category.viewerCount` and `tags` (the directory tiles and order use them);
+  `vods.listByCategory` and `clips.listByCategory` (Videos and Clips tabs on the category page);
+  a `7d`/`30d`/`all` range on `clips.list` (with a sort and range filter on the clips tabs);
+  `Subscription.channel` (no more `channels.get` per row); `portability.grants.setMany`; chat
+  forwards `channel.follow` to the broadcaster and moderators only, and `channel.goal.*` and
+  `channel.giveaway.*` to everyone (giveaway events never reached chat before); `ChannelSummary`
+  carries `category` and `tags`; goals in the pinned strip; the offline chat's last-message time
+  (one `chat.history` call with `limit: 1`).
+- Calls made without the user, for review: `Category.followerCount` is not built, because
+  categories cannot be followed. `grants.setMany` skips channels the caller does not follow
+  (`grants.set` answers 412). The category listings with `includeMature` list mature items and
+  withhold their URLs from non-adults, as the channel lists do (`directory.live` hides them).
+- Bugs the coverage pass found and fixed: `channels.update` with an empty body returned 500;
+  `ChatCore` threw on a `null` bus payload.
+- Left open: `D.Goal` (or the `channel.goal.*` payloads) has no currency, so a tips goal shows as
+  a percentage in the strip; a contract change. A moderator connected with an app token that
+  lacks `moderator:manage:chat` is a viewer to chat and gets no follows.
+- Waiting on the user (visual, dark and light, 320 and 1440 px, `en` and `es`): the clips sort
+  and range toggles on the channel and category pages; the category header's viewer count and tag
+  links; the About social links and the socials editor in Edit stream info; the Recently live
+  tile with and without a VOD thumbnail; the goal line in the strip (the bar shows from 20rem)
+  and the expanded goal card; the offline chat's "Last message" line; a subscription row's
+  avatar and accent.
+
 **Release follow-ups toward `v0.1.0` (2026-11-04).** Six items, each on `main`. The calls
 below were made without the user, as asked. Experiment branches `exp/sync-diag`, `-2` and `-3`
 ran only the `w3` and `relay-dvr` shards, three of each, and uploaded every report; they are
@@ -197,14 +229,7 @@ primitives):
 
 Left open, now follow-ups:
 
-- **API/contracts:**
-  - `category: { slug, name } | null` on the Vod and Clip DTOs, for D3's category link (the page
-    passes `null` meanwhile);
-  - chat forwards `channel.follow` and `channel.giveaway.end` as `op:"event"` frames to the
-    broadcaster's and moderators' connections, for the activity feed;
-  - `channel: { slug, displayName, avatarUrl, accent }` on the Subscription DTO (one
-    `channels.get` per channel meanwhile, 4 at a time);
-  - optional `portability.grants.setMany`, so "All on / All off" is one call.
+- **API/contracts:** all built in the API-fields follow-up wave (see "In flight").
 - **`packages/ui`:** `formatHour(hour, locale)`; the header avatar's initial from `displayName`
   (F38, `layouts/user-menu.tsx:37`).
 - **Web:**
@@ -334,13 +359,8 @@ primitives):
 
 Left open: contract requests, now follow-ups.
 
-- **API/contracts:**
-  - `Channel.lastLiveAt` on `channels.get`; the page derives it from the newest VOD meanwhile;
-  - `ChannelCard.latestVod`, for the Recently live thumbnails and durations;
-  - `vods.listByCategory` and `clips.listByCategory`;
-  - `Category.viewerCount`, `tags` and `followerCount`;
-  - `Channel.socials`;
-  - a range filter on `clips.list`.
+- **API/contracts:** built in the API-fields follow-up wave (see "In flight"), except
+  `Category.followerCount`, written up there.
 - **`packages/ui`:**
   - link slots on `StreamCard`; D1 renders a `CardLinks` row under the card meanwhile;
   - in `site-header.tsx`: search centred on `lg`, the mobile Sheet order (search first), and
@@ -349,10 +369,6 @@ Left open: contract requests, now follow-ups.
   - a portal `container` on `PopoverContent`, `DropdownMenuContent` and `DialogContent`, so menus
     show in fullscreen.
 - **Web:**
-  - `ChannelSummary` gains `category` and `tags`, so the 5 s poll refreshes the header's
-    metadata;
-  - goals in the pinned strip: chat state has no goal data;
-  - the offline chat's "last message" time: no API gives it;
   - an AppShell story for `sidebarPlacement="below"`.
 
 Flakes seen, for `docs/operators/flakes.md`:
