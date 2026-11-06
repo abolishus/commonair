@@ -87,6 +87,20 @@ describe("dvrAllowance", () => {
 
   test("a file listed twice counts once, at its larger size", () => {
     expect(dvrAllowance([seg(0, 10), seg(0, 30), seg(1, 20)])).toEqual({ segments: 2, bytes: 50 });
+    // In either order.
+    expect(dvrAllowance([seg(0, 30), seg(0, 10), seg(1, 20)])).toEqual({ segments: 2, bytes: 50 });
+  });
+
+  test("the span boundary: segments exactly covering span + one segment are all issued, one more is not", () => {
+    // need = 8 s + the longest (4 s) = 12 s: three 4 s segments, not four.
+    const objects = [seg(0, 10), seg(1, 10), seg(2, 10), seg(3, 10)];
+    expect(dvrAllowance(objects, 8)).toEqual({ segments: 3, bytes: 30 });
+    expect(dvrAllowance(objects.slice(0, 3), 8)).toEqual({ segments: 3, bytes: 30 });
+  });
+
+  test("a negative or zero duration is not media: only a zero-length init counts as init", () => {
+    expect(dvrAllowance([seg(0, 10, -5), init(7)])).toEqual({ segments: 0, bytes: 0 });
+    expect(dvrAllowance([seg(0, 10, -5), seg(1, 20), init(7)])).toEqual({ segments: 2, bytes: 27 });
   });
 
   test("the span is a parameter; zero still covers the one segment a seek lands in", () => {

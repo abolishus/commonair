@@ -156,6 +156,33 @@ describe("computeIssuance", () => {
     ).toEqual([{ relayId: R1, bucketStart: at, sessions: 1, segmentTokens: 0, bytesIssued: 0 }]);
   });
 
+  test("without a DVR source, rewound sessions get the live allowance (negative counts are none)", () => {
+    const live = computeIssuance([{ relayId: R1, broadcastId: B1, path: "live/a", sessions: 2 }], production, at);
+    expect(
+      computeIssuance([{ relayId: R1, broadcastId: B1, path: "live/a", sessions: 2, dvrSessions: 2 }], production, at),
+    ).toEqual(live);
+    expect(
+      computeIssuance(
+        [{ relayId: R1, broadcastId: B1, path: "live/none", sessions: 2, dvrSessions: -1 }],
+        production,
+        at,
+        () => ({ segments: 9, bytes: 9 }),
+      ),
+    ).toEqual([{ relayId: R1, bucketStart: at, sessions: 2, segmentTokens: 0, bytesIssued: 0 }]);
+  });
+
+  test("rows come out sorted by relay id whatever the input order", () => {
+    const rows = computeIssuance(
+      [
+        { relayId: R2, broadcastId: B1, path: "live/a", sessions: 1 },
+        { relayId: R1, broadcastId: B1, path: "live/a", sessions: 1 },
+      ],
+      production,
+      at,
+    );
+    expect(rows.map((r) => r.relayId)).toEqual([R1, R2]);
+  });
+
   test("dvrSessions is clamped to sessions", () => {
     const rows = computeIssuance(
       [{ relayId: R1, broadcastId: B1, path: "live/none", sessions: 1, dvrSessions: 5 }],
@@ -182,6 +209,8 @@ test("issuanceBucket is the last complete minute", () => {
 
 test("each tick recomputes the last N closed minutes, oldest first", () => {
   expect(recomputeBuckets(10 * 60_000 + 10_000, 5)).toEqual([5, 6, 7, 8, 9].map((m) => m * 60_000));
+  expect(recomputeBuckets(10 * 60_000, 1)).toEqual([9 * 60_000]);
+  expect(recomputeBuckets(10 * 60_000, 0)).toEqual([]);
 });
 
 /** Valkey's SET NX PX and the two lock scripts, on a clock the test moves. */
@@ -235,6 +264,42 @@ describe("IssuanceRunner leader lock", () => {
     valkey.advance(50_000);
     expect(await b.tick()).toEqual([]);
     expect(await a.tick()).toBeNull();
+  });
+
+  test("release gives up only this runner's lock, so its shutdown tick is not refused by its own hold", async () => {
+    const valkey = fakeValkey();
+    const a = runner(valkey, 0);
+    const b = runner(valkey, 0);
+    expect(await a.tick()).toEqual([]);
+    // The hold that keeps later replicas out keeps this one out too...
+    expect(await a.tick()).toBeNull();
+    // ...another replica's release leaves it alone...
+    await b.release();
+    expect(valkey.holder()).not.toBeNull();
+    // ...and its own release lets its last tick run.
+    await a.release();
+    expect(valkey.holder()).toBeNull();
+    expect(await a.tick()).toEqual([]);
+  });
+
+  test("a lock script failure after the tick is logged, and the tick's rows still returned", async () => {
+    const warnings: string[] = [];
+    const valkey = fakeValkey();
+    const r = new IssuanceRunner({
+      db: {} as Executor,
+      production,
+      valkey: {
+        set: (...args: Parameters<typeof valkey.set>) => valkey.set(...args),
+        eval: async () => Promise.reject(new Error("valkey gone")),
+      } as never,
+      lookbackMinutes: 0,
+      logger: { warn: (msg: string) => void warnings.push(msg) } as never,
+    });
+    expect(await r.tick()).toEqual([]);
+    expect(warnings).toEqual(["issuance lock release failed"]);
+    // The shutdown release never throws at stop() either.
+    await r.release();
+    expect(warnings).toHaveLength(2);
   });
 
   test("a failed tick releases the lock so another replica can retry it", async () => {

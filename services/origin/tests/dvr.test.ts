@@ -18,6 +18,7 @@ import {
   DVR_PLAYLIST_TTL_MS,
   dvrTokenRefusal,
   parseRecording,
+  RELAY_PULL_FAILURES_PER_MINUTE,
   registerDvrRoutes,
   type DvrDeps,
 } from "../src/dvr.ts";
@@ -80,6 +81,32 @@ describe("parseRecording and cutToWindow", () => {
     );
     expect(rec.mediaSequence).toBe(0);
     expect(rec.segments.map((s) => [s.uri, s.pdtMs])).toEqual([["b.m4s", null]]);
+  });
+
+  test("a recording's own discontinuity sequence is carried into the window", () => {
+    const rec = parseRecording(
+      recorderPlaylist(3).replace(
+        "#EXT-X-MEDIA-SEQUENCE:0",
+        "#EXT-X-MEDIA-SEQUENCE:7\n#EXT-X-DISCONTINUITY-SEQUENCE:2",
+      ),
+    );
+    expect([rec.mediaSequence, rec.discontinuitySequence]).toEqual([7, 2]);
+    const cut = cutToWindow(rec, 4);
+    expect(cut.text).toContain("#EXT-X-MEDIA-SEQUENCE:9\n");
+    expect(cut.text).toContain("#EXT-X-DISCONTINUITY-SEQUENCE:2\n");
+    // A garbage value is 0, not NaN in the cut.
+    expect(parseRecording("#EXT-X-DISCONTINUITY-SEQUENCE:x\n").discontinuitySequence).toBe(0);
+  });
+
+  test("segments without an init segment: no EXT-X-MAP, and a MAP without URI is none", () => {
+    const rec = parseRecording(
+      '#EXTM3U\n#EXT-X-MAP:BYTERANGE="10@0"\n#EXTINF:4,\na.ts\n#EXTINF:4,\nb.ts\n#EXT-X-MAP:URI="i.mp4"\n#EXTINF:4,\nc.m4s\n',
+    );
+    expect(rec.segments.map((s) => s.map)).toEqual([null, null, "i.mp4"]);
+    const cut = cutToWindow(rec, 3600);
+    expect(cut.text.match(/#EXT-X-MAP/g)).toHaveLength(1);
+    expect([...cut.objects]).toEqual(["a.ts", "b.ts", "i.mp4", "c.m4s"]);
+    expect(cut.startMs).toBeNull();
   });
 
   test("cuts to the window by PDT from the newest segment and fixes the media sequence", () => {
@@ -507,6 +534,21 @@ describe("/dvr/ request handling", () => {
       expect((await s.get(bad)).status).toBe(404);
   });
 
+  test("a failing state lookup is a 404 (never a 5xx a player retries), logged without detail", async () => {
+    const warnings: unknown[][] = [];
+    const deps: DvrDeps = {
+      ...setupDeps(),
+      vodStates: new VodStateCache(() => Promise.reject(new Error("connection refused 10.0.0.5:5432"))),
+      logger: { warn: (...args: unknown[]) => void warnings.push(args) } as never,
+    };
+    const res = await createDvrHandler(deps)(
+      new Request(`http://origin/dvr/${VOD}/index.m3u8?t=${await token()}`),
+      `/dvr/${VOD}/index.m3u8`,
+    );
+    expect(res.status).toBe(404);
+    expect(warnings).toEqual([["DVR state check failed"]]);
+  });
+
   test("without object storage every request is 404", async () => {
     const deps = { ...setupDeps(), media: undefined };
     const res = await createDvrHandler(deps)(
@@ -624,6 +666,18 @@ describe("/relay-pull/dvr/", () => {
     const s = setup();
     const relayToken = await token({ src: "relay", rid: RELAY_ID });
     expect((await s.get(`${VOD}/index.m3u8`, { t: relayToken })).status).toBe(401);
+  });
+
+  test("pulls with no peer address share one failure budget", async () => {
+    const handler = createDvrHandler({ ...setupDeps(), relays: { authenticate: async () => null } });
+    const pull = () =>
+      handler(
+        new Request(`http://origin/relay-pull/dvr/${VOD}/index.m3u8`, { headers: { authorization: "Bearer x" } }),
+        `/relay-pull/dvr/${VOD}/index.m3u8`,
+        undefined,
+      );
+    for (let i = 0; i < RELAY_PULL_FAILURES_PER_MINUTE; i++) expect((await pull()).status).toBe(401);
+    expect((await pull()).status).toBe(429);
   });
 
   test("without relay auth wired the relay route is 404", async () => {

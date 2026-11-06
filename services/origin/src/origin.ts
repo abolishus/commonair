@@ -246,8 +246,12 @@ export async function createOrigin(opts: OriginOptions): Promise<Origin> {
       clearInterval(every);
       await issuing;
       await Promise.allSettled([segments.stop(), production.flush(), dvrPulls.flush()]);
-      // A last tick, so the minutes this replica just finished are not left to a successor.
-      if (opts.issuance?.enabled) await issuanceTick();
+      // A last tick, so the minutes this replica just finished are not left to a successor. The
+      // lock its previous tick kept would refuse it (for 50 s of every minute), so release it first.
+      if (opts.issuance?.enabled) {
+        await runner.release();
+        await issuanceTick();
+      }
     },
   };
 }

@@ -431,10 +431,14 @@ func (r *Relay) register(ctx context.Context) error {
 }
 
 func pullBase(originURL string) (*url.URL, error) {
-	u, err := url.Parse(strings.TrimSuffix(originURL, "/") + "/relay-pull/")
+	// Check the origin URL itself: appended to first, "http://" read as the
+	// host "relay-pull" and a query swallowed the path.
+	u, err := url.Parse(originURL)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return nil, fmt.Errorf("api returned an invalid originUrl")
 	}
+	u.Path = strings.TrimSuffix(u.Path, "/") + "/relay-pull/"
+	u.RawPath, u.RawQuery, u.Fragment = "", "", ""
 	return u, nil
 }
 

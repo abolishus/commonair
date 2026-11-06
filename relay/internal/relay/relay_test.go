@@ -145,6 +145,8 @@ type fakeAPI struct {
 	unknownOnce     bool
 	heartbeatFail   int // non-zero: fail heartbeats with this status
 	allFail         int // non-zero: fail every call with this status
+	// registerID, when set, is the relay id registration answers (default relayID).
+	registerID string
 
 	// purges answers GET /api/relay/purges: the next queued batch, else an
 	// empty one at the request's cursor after a short hold. purgeAfters
@@ -202,8 +204,12 @@ func (a *fakeAPI) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		a.relayPub = in.PublicKey
 		a.registrations++
+		id := relayID
+		if a.registerID != "" {
+			id = a.registerID
+		}
 		writeJSON(w, http.StatusOK, apiclient.RegisterResponse{
-			RelayID: relayID, OriginURL: a.originURL, OriginPublicKey: tokens.EncodeB64URL(a.originKey),
+			RelayID: id, OriginURL: a.originURL, OriginPublicKey: tokens.EncodeB64URL(a.originKey),
 			ReceiptIntervalSeconds: 60, HeartbeatIntervalSeconds: 15, Status: a.status,
 		})
 	case "/api/relay/heartbeat":

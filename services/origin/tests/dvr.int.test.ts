@@ -6,6 +6,7 @@
  * log) and object storage (Garage, the media bucket): ADR 0016 decisions 2–5.
  */
 import { afterAll, beforeAll, describe, expect, test, vi } from "vite-plus/test";
+import { DVR_RULES } from "@commonair/contracts/enums";
 import { dvrTokenPath, vodPrefix } from "@commonair/contracts/storage";
 import type { PlaybackClaims } from "@commonair/contracts/tokens";
 import { schema, uuidv7 } from "@commonair/db";
@@ -14,6 +15,7 @@ import { createValkey, type ValkeyClient } from "@commonair/service";
 import { createS3Storage, type ObjectStorage } from "@commonair/storage";
 import { generateSigningKey, randomSecret, sha256Hex, signPlaybackToken, type SigningKey } from "@commonair/tokens";
 import { eq } from "drizzle-orm";
+import { dbChannelWindow, DVR_WINDOW_TTL_MS } from "../src/dvr.ts";
 import { createOrigin, type Origin } from "../src/origin.ts";
 import { VOD_STATE_TTL_MS } from "../src/vod.ts";
 
@@ -432,5 +434,20 @@ describe("/relay-pull/dvr/ with real relay auth, state and storage", () => {
       .where(eq(schema.playbackSessions.broadcastId, r.broadcast));
     expect((await origin.runIssuance(bucket))[0]).toMatchObject({ sessions: 2, segmentTokens: 10, bytesIssued: 88 });
     await t.db.delete(schema.playbackSessions).where(eq(schema.playbackSessions.broadcastId, r.broadcast));
+  });
+});
+
+describe("dbChannelWindow", () => {
+  test("the channel's window, cached for DVR_WINDOW_TTL_MS; an unknown channel gets the default", async () => {
+    const r = await recording({ channel: { dvrWindowSeconds: 300 } });
+    let clock = 1_000_000;
+    const lookup = dbChannelWindow(t.db, () => clock);
+    expect(await Promise.all([lookup(r.channel), lookup(r.channel)])).toEqual([300, 300]);
+    await t.db.update(schema.channels).set({ dvrWindowSeconds: 900 }).where(eq(schema.channels.id, r.channel));
+    clock += DVR_WINDOW_TTL_MS - 1;
+    expect(await lookup(r.channel)).toBe(300);
+    clock += 1;
+    expect(await lookup(r.channel)).toBe(900);
+    expect(await lookup(uuidv7())).toBe(DVR_RULES.defaultWindowSeconds);
   });
 });

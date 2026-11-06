@@ -280,4 +280,14 @@ export class IssuanceRunner {
         .catch((err: unknown) => this.opts.logger?.warn("issuance lock release failed", { err }));
     }
   }
+
+  /**
+   * Give up the lock a successful tick kept (shutdown): without this the replica's own lock
+   * refuses its last tick. Another replica's lock is left alone.
+   */
+  async release(): Promise<void> {
+    await this.opts.valkey
+      .eval(RELEASE_SCRIPT, 1, ISSUANCE_KEYS.lock, this.id)
+      .catch((err: unknown) => this.opts.logger?.warn("issuance lock release failed", { err }));
+  }
 }

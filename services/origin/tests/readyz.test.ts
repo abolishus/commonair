@@ -65,6 +65,47 @@ describe("createPublicReadyz", () => {
       expect((await handler(req("198.51.100.77"), caddy)).status).toBe(200);
   });
 
+  test("an invalid TRUSTED_PROXY_CIDRS entry is ignored, not trusted; the valid ones still are", async () => {
+    let t = 0;
+    const handler = createPublicReadyz({
+      trustedProxyCidrs: ["not-a-cidr", "10.89.42.0/33", "10.89.42.0/24"],
+      ready: async () => new Response(okBody),
+      perMinute: 1,
+      now: () => t,
+    });
+    // Caddy's forwarded clients each get their own budget...
+    expect((await handler(req("198.51.100.1"), caddy)).status).toBe(200);
+    expect((await handler(req("198.51.100.2"), caddy)).status).toBe(200);
+    expect((await handler(req("198.51.100.1"), caddy)).status).toBe(429);
+    // ...but nothing makes an untrusted peer's header count.
+    expect((await handler(req("198.51.100.3"), "192.0.2.9")).status).toBe(200);
+    expect((await handler(req("198.51.100.4"), "192.0.2.9")).status).toBe(429);
+    t = 60_000;
+    expect((await handler(req("198.51.100.4"), "192.0.2.9")).status).toBe(200);
+  });
+
+  test("without a peer address every such request shares one budget", async () => {
+    const handler = createPublicReadyz({
+      trustedProxyCidrs: [],
+      ready: async () => new Response(okBody),
+      perMinute: 2,
+    });
+    expect((await handler(req(), undefined)).status).toBe(200);
+    expect((await handler(req("198.51.100.1"), undefined)).status).toBe(200);
+    expect((await handler(req("198.51.100.2"), undefined)).status).toBe(429);
+  });
+
+  test("a failed self-probe logs the error's name only", async () => {
+    const warnings: unknown[][] = [];
+    const handler = createPublicReadyz({
+      trustedProxyCidrs: [],
+      ready: () => Promise.reject(new DOMException("timed out", "TimeoutError")),
+      logger: { warn: (...args: unknown[]) => void warnings.push(args) },
+    });
+    expect((await handler(req(), "192.0.2.1")).status).toBe(503);
+    expect(warnings).toEqual([["readyz self-probe failed", { errorName: "TimeoutError" }]]);
+  });
+
   test("an unreachable listener is a plain 503, with no error text", async () => {
     const { handler } = make(() => Promise.reject(new Error("ECONNREFUSED 127.0.0.1:3003")));
     const res = await handler(req("198.51.100.1"), caddy);
