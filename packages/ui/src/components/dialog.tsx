@@ -7,7 +7,7 @@
 import * as React from "react";
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import { cn } from "@commonair/ui/lib/utils";
-import { usePortalContainer } from "../lib/portal-container.tsx";
+import { usePortalContainer } from "@commonair/ui/lib/portal-container";
 import { useUiMessages } from "@commonair/ui/lib/locale";
 
 import { Button } from "@commonair/ui/components/button";

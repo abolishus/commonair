@@ -17,6 +17,7 @@
     "./toast": "./src/toast.tsx",
     "./lib/utils": "./src/lib/utils.ts",
     "./lib/locale": "./src/lib/locale.tsx",
+    "./lib/portal-container": "./src/lib/portal-container.tsx",
     "./lib/messages": "./src/lib/messages.ts"
   },
   "scripts": {

@@ -6,7 +6,7 @@
 
 import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip";
 import { cn } from "@commonair/ui/lib/utils";
-import { usePortalContainer } from "../lib/portal-container.tsx";
+import { usePortalContainer } from "@commonair/ui/lib/portal-container";
 
 function TooltipProvider({ delay = 0, ...props }: TooltipPrimitive.Provider.Props) {
   return <TooltipPrimitive.Provider data-slot="tooltip-provider" delay={delay} {...props} />;

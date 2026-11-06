@@ -134,4 +134,20 @@ describe("portal container", () => {
     expect(screen.getByRole("dialog")).toBe(content);
     outer.remove();
   });
+
+  test("an explicit null container escapes the provider to <body>", async () => {
+    const target = makeHost();
+    render(
+      <PortalContainerProvider container={target}>
+        <Dialog open>
+          <DialogContent container={null}>
+            <DialogTitle>Dialog</DialogTitle>
+          </DialogContent>
+        </Dialog>
+      </PortalContainerProvider>,
+    );
+    const content = await slot("dialog-content");
+    expect(target.contains(content)).toBe(false);
+    expect(document.body.contains(content)).toBe(true);
+  });
 });

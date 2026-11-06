@@ -23,8 +23,12 @@ export function PortalContainerProvider({ container, children }: PortalContainer
   return <PortalContainerContext.Provider value={container}>{children}</PortalContainerContext.Provider>;
 }
 
-/** The container a portal uses: the explicit prop when given, else the nearest provider's (`<body>` when neither). */
+/**
+ * The container a portal uses. An explicit prop wins, and an explicit `null` means `<body>` even
+ * under a provider; `undefined` (prop omitted) takes the nearest provider's, else `<body>`.
+ * Base UI reads `undefined` as `<body>`, so null maps to it.
+ */
 export function usePortalContainer(explicit?: PortalContainer): PortalContainer | undefined {
   const inherited = React.useContext(PortalContainerContext);
-  return explicit ?? inherited ?? undefined;
+  return (explicit === undefined ? inherited : explicit) ?? undefined;
 }
