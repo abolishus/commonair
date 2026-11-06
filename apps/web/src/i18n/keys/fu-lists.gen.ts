@@ -11,4 +11,7 @@ export type Key =
   | "lists.captions.previous"
   | "lists.captions.next"
   | "lists.captions.page"
-  | "lists.captions.unsaved";
+  | "lists.captions.unsaved"
+  | "lists.captions.pagerBottom"
+  | "lists.captions.emptyTrack"
+  | "lists.captions.emptyTrackHint";

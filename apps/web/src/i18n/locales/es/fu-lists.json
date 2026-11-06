@@ -6,5 +6,8 @@
   "lists.captions.previous": "Antes",
   "lists.captions.next": "Después",
   "lists.captions.page": "{start} a {end} · parte {page} de {count}",
-  "lists.captions.unsaved": "{count, plural, one {# corrección sin guardar} other {# correcciones sin guardar}}"
+  "lists.captions.unsaved": "{count, plural, one {# corrección sin guardar} other {# correcciones sin guardar}}",
+  "lists.captions.pagerBottom": "Páginas de subtítulos, final de la lista",
+  "lists.captions.emptyTrack": "Esta pista no tiene subtítulos",
+  "lists.captions.emptyTrackHint": "Los subtítulos no recogieron nada dicho en este VOD, así que no hay nada que corregir."
 }

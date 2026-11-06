@@ -6,5 +6,8 @@
   "lists.captions.previous": "Earlier",
   "lists.captions.next": "Later",
   "lists.captions.page": "{start} to {end} · part {page} of {count}",
-  "lists.captions.unsaved": "{count, plural, one {# unsaved correction} other {# unsaved corrections}}"
+  "lists.captions.unsaved": "{count, plural, one {# unsaved correction} other {# unsaved corrections}}",
+  "lists.captions.pagerBottom": "Caption pages, end of list",
+  "lists.captions.emptyTrack": "This track has no captions",
+  "lists.captions.emptyTrackHint": "Nothing was said in this VOD that the captions picked up, so there is nothing to correct."
 }

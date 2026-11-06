@@ -364,7 +364,11 @@ function CueList({ vod, client }: { vod: Vod; client: CaptionsApi }): React.JSX.
   // Drafts for every cue, whatever page is on screen: paging and search only change what renders.
   const [edits, setEdits] = React.useState<Record<number, string>>({});
   const [query, setQuery] = React.useState("");
+  // Cues edited under the current search: they stay in its results while the edit stops matching,
+  // so the input being typed in does not vanish (and take focus with it).
+  const [editedInQuery, setEditedInQuery] = React.useState<ReadonlySet<number>>(() => new Set());
   const [page, setPage] = React.useState(0);
+  const pageLabel = React.useRef<HTMLSpanElement>(null);
   const [pending, setPending] = React.useState(false);
   if (track.failed)
     return (
@@ -389,10 +393,17 @@ function CueList({ vod, client }: { vod: Vod; client: CaptionsApi }): React.JSX.
     .filter((c) => edits[c.index] !== undefined && edits[c.index] !== c.text)
     .map((c) => ({ index: c.index, text: edits[c.index] ?? c.text }));
   // The original text matches too, so a cue being corrected does not vanish from its search.
-  const matched = data.cues.filter((c) => matchesQuery(query, [c.text, edits[c.index] ?? c.text]));
+  const matched = data.cues.filter(
+    (c) => editedInQuery.has(c.index) || matchesQuery(query, [c.text, edits[c.index] ?? c.text]),
+  );
   const pages = cuePages(matched);
   const current = clampPage(page, pages.length);
   const shown = pages[current];
+  // The lower pager moves the reader back to the top of the new page.
+  const pageFromBottom = (next: number): void => {
+    setPage(next);
+    pageLabel.current?.focus();
+  };
   const save = async (): Promise<void> => {
     if (pending || changed.length === 0) return;
     setPending(true);
@@ -410,18 +421,29 @@ function CueList({ vod, client }: { vod: Vod; client: CaptionsApi }): React.JSX.
   return (
     <div data-testid="captions-vod-editor" data-vod-id={vod.id} className="flex min-w-0 flex-col gap-3">
       <p className="text-sm text-muted-foreground">{t("captions.studio.vod.timingFixed")}</p>
-      <ListSearch
-        label={t("lists.captions.search")}
-        value={query}
-        onValueChange={(next) => {
-          setQuery(next);
-          setPage(0);
-        }}
-        loadedCount={data.cues.length}
-        partial={false}
-        data-testid="captions-cue-search"
-      />
-      {shown === undefined ? (
+      {data.cues.length > 0 && (
+        <ListSearch
+          label={t("lists.captions.search")}
+          value={query}
+          onValueChange={(next) => {
+            setQuery(next);
+            setEditedInQuery(new Set());
+            setPage(0);
+          }}
+          loadedCount={data.cues.length}
+          partial={false}
+          data-testid="captions-cue-search"
+        />
+      )}
+      {data.cues.length === 0 ? (
+        <EmptyState
+          data-testid="captions-cue-empty"
+          icon={ClosedCaptionIcon}
+          headingLevel={4}
+          title={t("lists.captions.emptyTrack")}
+          description={t("lists.captions.emptyTrackHint")}
+        />
+      ) : shown === undefined ? (
         <EmptyState
           data-testid="captions-cue-no-match"
           icon={Search01Icon}
@@ -438,6 +460,7 @@ function CueList({ vod, client }: { vod: Vod; client: CaptionsApi }): React.JSX.
               startMs={shown.startMs}
               endMs={shown.endMs}
               onPage={setPage}
+              labelRef={pageLabel}
             />
           )}
           <ol className="flex min-w-0 flex-col gap-2">
@@ -462,11 +485,23 @@ function CueList({ vod, client }: { vod: Vod; client: CaptionsApi }): React.JSX.
                   onChange={(e) => {
                     const text = e.currentTarget.value;
                     setEdits((prev) => ({ ...prev, [c.index]: text }));
+                    if (query.trim() !== "" && !editedInQuery.has(c.index))
+                      setEditedInQuery((prev) => new Set(prev).add(c.index));
                   }}
                 />
               </li>
             ))}
           </ol>
+          {pages.length > 1 && (
+            <CuePager
+              page={current}
+              count={pages.length}
+              startMs={shown.startMs}
+              endMs={shown.endMs}
+              onPage={pageFromBottom}
+              position="bottom"
+            />
+          )}
         </>
       )}
       <div className="flex flex-wrap items-center gap-3">
@@ -488,42 +523,53 @@ function CueList({ vod, client }: { vod: Vod; client: CaptionsApi }): React.JSX.
   );
 }
 
-/** Earlier and Later between the editor's pages of time. */
+/**
+ * Earlier and Later between the editor's pages of time: above the list (with the test ids and the
+ * live page label) and again below it, so a reader at the last cue need not scroll back up.
+ */
 function CuePager({
   page,
   count,
   startMs,
   endMs,
   onPage,
+  labelRef,
+  position = "top",
 }: {
   page: number;
   count: number;
   startMs: number;
   endMs: number;
   onPage: (page: number) => void;
+  labelRef?: React.Ref<HTMLSpanElement>;
+  position?: "top" | "bottom";
 }): React.JSX.Element {
+  const top = position === "top";
+  const id = (name: string): string | undefined => (top ? name : undefined);
   return (
     <nav
-      aria-label={t("lists.captions.pager")}
-      data-testid="captions-cue-pager"
+      aria-label={t(top ? "lists.captions.pager" : "lists.captions.pagerBottom")}
+      data-testid={top ? "captions-cue-pager" : "captions-cue-pager-bottom"}
       className="flex flex-wrap items-center gap-2"
     >
       <Button
         type="button"
         variant="outline"
         size="sm"
-        data-testid="captions-cue-prev"
+        data-testid={id("captions-cue-prev")}
         disabled={page === 0}
         onClick={() => onPage(page - 1)}
       >
         {t("lists.captions.previous")}
       </Button>
       <span
-        data-testid="captions-cue-page"
+        ref={labelRef}
+        tabIndex={top ? -1 : undefined}
+        data-testid={id("captions-cue-page")}
         data-page={String(page + 1)}
         data-pages={String(count)}
-        aria-live="polite"
-        className="text-sm text-muted-foreground tabular-nums"
+        aria-live={top ? "polite" : undefined}
+        className="rounded-sm text-sm text-muted-foreground tabular-nums outline-none focus-visible:ring-1 focus-visible:ring-ring"
       >
         {t("lists.captions.page", { page: page + 1, count, start: cueTime(startMs), end: cueTime(endMs) })}
       </span>
@@ -531,7 +577,7 @@ function CuePager({
         type="button"
         variant="outline"
         size="sm"
-        data-testid="captions-cue-next"
+        data-testid={id("captions-cue-next")}
         disabled={page >= count - 1}
         onClick={() => onPage(page + 1)}
       >

@@ -4,7 +4,7 @@
 
 /** The studio `/captions` page (ADR 0011): the mask list, the patch, and the page against a fake API. */
 import { LocaleProvider, TooltipProvider } from "@commonair/ui";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type * as React from "react";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { locale, uiMessages } from "../src/i18n/index.ts";
@@ -254,6 +254,42 @@ describe("CaptionsStudio", () => {
       search("");
       fireEvent.click(button("captions-cue-next"));
       expect((screen.getAllByTestId("captions-cue-text")[1] as HTMLInputElement).value).toBe("an answer");
+    });
+
+    it("a track with no cues says so, with no search and no no-match state", async () => {
+      const { client } = fakeApi([]);
+      render(<CaptionsStudio channel="alice" client={client as never} />, { wrapper: Wrap });
+      const empty = await screen.findByTestId("captions-cue-empty");
+      expect(empty.textContent).toContain("This track has no captions");
+      expect(screen.queryByTestId("captions-cue-search")).toBeNull();
+      expect(screen.queryByTestId("captions-cue-no-match")).toBeNull();
+      expect(screen.queryByTestId("captions-cue-pager")).toBeNull();
+      expect(button("captions-cue-save").disabled).toBe(true);
+    });
+
+    it("a cue edited under a search stays in it while the edit stops matching, until the search changes", async () => {
+      const { client } = fakeApi(longCues);
+      render(<CaptionsStudio channel="alice" client={client as never} />, { wrapper: Wrap });
+      await screen.findAllByTestId("captions-cue");
+      search("question");
+      fireEvent.change(screen.getAllByTestId("captions-cue-text")[0]!, { target: { value: "an answer" } });
+      search("answer");
+      // Matches only through its draft; typing on keeps it.
+      fireEvent.change(screen.getAllByTestId("captions-cue-text")[0]!, { target: { value: "a reply" } });
+      expect(starts()).toEqual([String(9 * MIN)]);
+      search("answe");
+      expect(screen.queryAllByTestId("captions-cue")).toHaveLength(0);
+    });
+
+    it("a second pager below the list moves focus back to the top of the new page", async () => {
+      const { client } = fakeApi(longCues);
+      render(<CaptionsStudio channel="alice" client={client as never} />, { wrapper: Wrap });
+      await screen.findAllByTestId("captions-cue");
+      const bottom = screen.getByTestId("captions-cue-pager-bottom");
+      const later = within(bottom).getByRole("button", { name: "Later" });
+      fireEvent.click(later);
+      expect(pageOf()).toEqual(["2", "3"]);
+      expect(document.activeElement).toBe(screen.getByTestId("captions-cue-page"));
     });
 
     it("a search with no match says so and keeps Save", async () => {
