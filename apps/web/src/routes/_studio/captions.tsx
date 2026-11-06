@@ -450,6 +450,20 @@ function CueList({ vod, client }: { vod: Vod; client: CaptionsApi }): React.JSX.
           headingLevel={4}
           title={t("lists.captions.noMatch", { query: query.trim() })}
           description={t("lists.captions.noMatchHint")}
+          action={
+            <Button
+              variant="outline"
+              size="sm"
+              data-testid="captions-cue-clear-search"
+              onClick={() => {
+                setQuery("");
+                setEditedInQuery(new Set());
+                setPage(0);
+              }}
+            >
+              {t("lists.captions.clearSearch")}
+            </Button>
+          }
         />
       ) : (
         <>

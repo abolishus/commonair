@@ -14,4 +14,5 @@ export type Key =
   | "lists.captions.unsaved"
   | "lists.captions.pagerBottom"
   | "lists.captions.emptyTrack"
-  | "lists.captions.emptyTrackHint";
+  | "lists.captions.emptyTrackHint"
+  | "lists.captions.clearSearch";

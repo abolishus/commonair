@@ -326,6 +326,17 @@ describe("CaptionsStudio", () => {
       expect(screen.queryByTestId("captions-cue-pager")).toBeNull();
       expect(screen.getByTestId("captions-cue-save")).toBeTruthy();
     });
+
+    it("Clear search on the no-match state brings every cue back", async () => {
+      const { client } = fakeApi(longCues);
+      render(<CaptionsStudio channel="alice" client={client as never} />, { wrapper: Wrap });
+      const before = (await screen.findAllByTestId("captions-cue")).length;
+      search("zebra");
+      fireEvent.click(screen.getByTestId("captions-cue-clear-search"));
+      expect(screen.queryByTestId("captions-cue-no-match")).toBeNull();
+      expect(screen.getAllByTestId("captions-cue")).toHaveLength(before);
+      expect((screen.getByTestId("captions-cue-search") as HTMLInputElement).value).toBe("");
+    });
   });
 });
 

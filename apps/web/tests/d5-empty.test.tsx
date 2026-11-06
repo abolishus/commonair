@@ -54,6 +54,8 @@ const NOT_OWNER_FILLABLE: Readonly<Record<string, string>> = {
   "mod-view.tsx|held.empty": "word filters fill it",
   "mod-view.tsx|studio.mod.logEmpty": "moderators fill it by acting in chat",
   "panel.tsx|attestations.panel.empty.title": "signed automatically after each broadcast",
+  "captions.tsx|lists.captions.emptyTrack":
+    "the caption worker fills a track; a track with no speech has no cues to correct",
 };
 
 function files(path: string): string[] {
