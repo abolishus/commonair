@@ -26,6 +26,8 @@ import {
   periodClose,
   refund,
   reversalSplit,
+  shareChargeback,
+  shareChargebackReversal,
   sharePurchase,
   shareRefund,
   splitNet,
@@ -665,6 +667,47 @@ describe("other rules", () => {
     expect(() => sharePurchase({ ...i, feeCents: -1 })).toThrow(/fee must be/);
     expect(() => sharePurchase({ ...i, feeCents: 501 })).toThrow(/exceed/);
     expect(() => sharePurchase({ ...i, feeCents: 1.5 })).toThrow(/fee must be/);
+  });
+
+  test("a card share chargeback takes the share capital and the fee from Stripe cash; a win restores both", () => {
+    const DISPUTE = "01890000-0000-7000-8000-0000000000dd";
+    const i = { shareId: PAYMENT, userId: USER, provider: "stripe", amountCents: 500, currency: "usd", occurredAt: AT };
+    const cb = shareChargeback({ ...i, disputeId: DISPUTE, disputeFeeCents: 1500 });
+    expectWellFormed(cb);
+    expect(cb.kind).toBe("share_chargeback");
+    expect(cb.idempotencyKey).toBe(`share-chargeback:${DISPUTE}`);
+    expect(cb).toMatchObject({ refType: "membership_share", refId: PAYMENT });
+    expect(on(cb, accounts.memberShare(USER))).toBe(500);
+    expect(on(cb, accounts.cash("stripe"))).toBe(-2000);
+    expect(on(cb, accounts.paymentFees())).toBe(1500);
+    // Ids and cents only (ADR 0004).
+    expect(cb.metadata).toEqual({ userId: USER, disputeId: DISPUTE, amountCents: 500, disputeFeeCents: 1500 });
+    const back = shareChargebackReversal({
+      ...i,
+      disputeId: DISPUTE,
+      feeRefundCents: 1500,
+      chargebackTransactionId: PAYMENT,
+    });
+    expectWellFormed(back);
+    expect(back.idempotencyKey).toBe(`share-chargeback-reversal:${DISPUTE}`);
+    expect(back.reversesId).toBe(PAYMENT);
+    expect(on(back, accounts.memberShare(USER))).toBe(-500);
+    expect(on(back, accounts.cash("stripe"))).toBe(2000);
+    expect(on(back, accounts.paymentFees())).toBe(-1500);
+    // No fee: two lines; the purchase, chargeback and win leave the member owed the price again.
+    expect(shareChargeback({ ...i, disputeId: DISPUTE }).entries).toHaveLength(2);
+    expect(shareChargebackReversal({ ...i, disputeId: DISPUTE }).entries).toHaveLength(2);
+    const net = [
+      sharePurchase(i),
+      shareChargeback({ ...i, disputeId: DISPUTE }),
+      shareChargebackReversal({ ...i, disputeId: DISPUTE }),
+    ];
+    expect(net.reduce((sum, p) => sum + on(p, accounts.memberShare(USER)), 0)).toBe(-500);
+    expect(() => shareChargeback({ ...i, disputeId: DISPUTE, amountCents: 0 })).toThrow(/amount must be/);
+    expect(() => shareChargeback({ ...i, disputeId: DISPUTE, disputeFeeCents: -1 })).toThrow(/disputeFee must be/);
+    expect(() => shareChargebackReversal({ ...i, disputeId: DISPUTE, feeRefundCents: 0.5 })).toThrow(
+      /feeRefund must be/,
+    );
   });
 
   test("infrastructure cost", () => {

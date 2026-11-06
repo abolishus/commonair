@@ -29,6 +29,10 @@ export const POSTING_KINDS = [
   // the money to the payable it was paid from.
   "payout_transfer_reversal",
   "patronage_payout_reversal",
+  // Follow-ups (unit money): a card share's dispute claws the share capital back, and a won
+  // dispute restores it. Migration fu_money freezes the share while one is outstanding.
+  "share_chargeback",
+  "share_chargeback_reversal",
 ] as const;
 export type PostingKind = (typeof POSTING_KINDS)[number];
 

@@ -27,7 +27,13 @@ import { endSubscriptions } from "./checkout-shared.ts";
 import { confirmPaymentTx, reversePaymentTx } from "./checkout-treasurer.ts";
 import { postPaymentWithSplit } from "./splits.ts";
 import { refundUpdated } from "./stripe-events/refunds.ts";
-import { shareChargeRefundedAction, shareCheckoutCompleted, shareCheckoutFailed } from "./stripe-events/shares.ts";
+import {
+  shareChargeRefundedAction,
+  shareCheckoutCompleted,
+  shareCheckoutFailed,
+  shareDisputeClosed,
+  shareDisputeOpened,
+} from "./stripe-events/shares.ts";
 import { transferReversed, transferUpdated } from "./stripe-events/transfers.ts";
 import { recordProviderRefundFailed } from "./stripe-refunds.ts";
 
@@ -516,6 +522,8 @@ async function disputeCreated(tx: Executor, a: DisputeAction, now: Date): Promis
   if (isInquiry(a.status)) return noop("inquiry");
   const p = await lockPaymentByRef(tx, a.paymentIntent);
   if (!p) return noop("unknown_payment");
+  // A card share has no channel to claw back from: its own rules (follow-ups, unit money).
+  if (p.kind === "membership_share") return shareDisputeOpened(tx, p, a, now);
   if (await disputeRow(tx, p.id, a.disputeId)) return noop("already_processed");
   return clawBack(tx, p, a, "open", now);
 }
@@ -523,6 +531,7 @@ async function disputeCreated(tx: Executor, a: DisputeAction, now: Date): Promis
 async function disputeClosed(tx: Executor, a: DisputeAction, now: Date): Promise<AppliedAction> {
   const p = await lockPaymentByRef(tx, a.paymentIntent);
   if (!p) return noop("unknown_payment");
+  if (p.kind === "membership_share") return shareDisputeClosed(tx, p, a, now);
   const d = await disputeRow(tx, p.id, a.disputeId);
   const won = a.status === "won" || a.status === "warning_closed";
   if (!d) {

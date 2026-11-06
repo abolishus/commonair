@@ -1081,6 +1081,75 @@ export function shareRefund(i: ShareInput): Posting {
   });
 }
 
+export interface ShareChargebackInput extends ShareInput {
+  /** The `disputes` row; keys the posting, so one dispute claws back once. */
+  disputeId: string;
+  /** The processor's dispute fee, the co-op's expense (0 or absent: none). */
+  disputeFeeCents?: number;
+}
+
+/**
+ * A card share's payment is disputed (follow-ups, unit money): the processor withdraws the money
+ * when the dispute opens, so the co-op no longer holds the member's share capital. Dr the member
+ * share, Cr the settlement account, as a refund would; the dispute fee is the co-op's expense.
+ * The share row itself is frozen by the database while this is outstanding (migration fu_money).
+ */
+export function shareChargeback(i: ShareChargebackInput): Posting {
+  assertCents("amount", i.amountCents, { allowZero: false });
+  const fee = i.disputeFeeCents ?? 0;
+  assertCents("disputeFee", fee);
+  const settle = settlementAccount(i.provider, i.settlement ?? "cash");
+  return finish({
+    kind: "share_chargeback",
+    description: "Member share charged back",
+    refType: "membership_share",
+    refId: i.shareId,
+    idempotencyKey: `share-chargeback:${i.disputeId}`,
+    currency: i.currency,
+    occurredAt: i.occurredAt,
+    metadata: { userId: i.userId, disputeId: i.disputeId, amountCents: i.amountCents, disputeFeeCents: fee },
+    entries: [
+      { code: accounts.memberShare(i.userId), amountCents: i.amountCents },
+      { code: settle, amountCents: -i.amountCents },
+      { code: accounts.paymentFees(), amountCents: fee, memo: "dispute fee" },
+      { code: settle, amountCents: -fee, memo: "dispute fee" },
+    ],
+  });
+}
+
+export interface ShareChargebackReversalInput extends ShareInput {
+  disputeId: string;
+  /** The dispute fee the processor returned, if any. */
+  feeRefundCents?: number;
+  /** The `share_chargeback` transaction this reverses. */
+  chargebackTransactionId?: string | null;
+}
+
+/** The co-op won a card share's dispute: the money is back, and so is the member's share capital. */
+export function shareChargebackReversal(i: ShareChargebackReversalInput): Posting {
+  assertCents("amount", i.amountCents, { allowZero: false });
+  const fee = i.feeRefundCents ?? 0;
+  assertCents("feeRefund", fee);
+  const settle = settlementAccount(i.provider, i.settlement ?? "cash");
+  return finish({
+    kind: "share_chargeback_reversal",
+    description: "Member share chargeback won",
+    refType: "membership_share",
+    refId: i.shareId,
+    idempotencyKey: `share-chargeback-reversal:${i.disputeId}`,
+    currency: i.currency,
+    occurredAt: i.occurredAt,
+    reversesId: i.chargebackTransactionId ?? null,
+    metadata: { userId: i.userId, disputeId: i.disputeId, amountCents: i.amountCents, feeRefundCents: fee },
+    entries: [
+      { code: settle, amountCents: i.amountCents, memo: "chargeback reversed" },
+      { code: accounts.memberShare(i.userId), amountCents: -i.amountCents },
+      { code: settle, amountCents: fee, memo: "dispute fee returned" },
+      { code: accounts.paymentFees(), amountCents: -fee, memo: "dispute fee returned" },
+    ],
+  });
+}
+
 // Costs, patronage, manual adapter -----------------------------------------------------------
 
 export interface InfrastructureCostInput {
