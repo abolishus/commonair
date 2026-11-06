@@ -51,7 +51,6 @@ export type Key =
   | "captions.studio.vod.timingFixed"
   | "captions.studio.vod.cueTime"
   | "captions.studio.vod.cueLabel"
-  | "captions.studio.vod.more"
   | "captions.studio.vod.save"
   | "captions.studio.vod.saved"
   | "captions.studio.vod.saveFailed";

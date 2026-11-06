@@ -111,25 +111,29 @@ it and never edit `controller.ts` or `player.tsx`.
 
 ### Captions (W2-captions)
 
-| Test id                               | Element and attributes                                                        |
-| ------------------------------------- | ----------------------------------------------------------------------------- |
-| `captions-page`                       | The `/captions` page container                                                |
-| `captions-enabled`                    | Enable switch; `data-state` `on`/`off`, `data-default` (the instance default) |
-| `captions-language`                   | Spoken-language `Select` trigger; `data-value`                                |
-| `captions-mask-words`                 | Mask list textarea (one pattern per line)                                     |
-| `captions-mask-error`                 | Inline error for an invalid pattern; `data-line`                              |
-| `captions-save`                       | Saves `channels.updateMediaSettings` (`captions`)                             |
-| `captions-track-state`                | Live track state; `data-state` `off`, `queued` or `active`                    |
-| `captions-vod-editor`                 | The per-VOD cue editor; `data-vod-id`                                         |
-| `captions-cue`                        | One cue; `data-start-ms`, `data-end-ms`                                       |
-| `captions-cue-text`                   | A cue's text input                                                            |
-| `captions-cue-save`                   | Saves `vods.captions.update`                                                  |
-| `captions-privacy-note`               | The draft privacy text on transcripts                                         |
-| `player-captions-toggle`              | The player's CC `IconButton`; `data-state` `on`/`off` (only with a track)     |
-| `player-captions-queued`              | The player's note that captions wait for capacity (`captionsState` `queued`)  |
-| `player-captions-style`               | The captions style menu trigger (beside the CC toggle)                        |
-| `player-captions-size-<size>`         | One size item (`small`, `medium`, `large`)                                    |
-| `player-captions-contrast-<contrast>` | One contrast item (`standard`, `high`)                                        |
+| Test id                               | Element and attributes                                                                                                                                             |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `captions-page`                       | The `/captions` page container                                                                                                                                     |
+| `captions-enabled`                    | Enable switch; `data-state` `on`/`off`, `data-default` (the instance default)                                                                                      |
+| `captions-language`                   | Spoken-language `Select` trigger; `data-value`                                                                                                                     |
+| `captions-mask-words`                 | Mask list textarea (one pattern per line)                                                                                                                          |
+| `captions-mask-error`                 | Inline error for an invalid pattern; `data-line`                                                                                                                   |
+| `captions-save`                       | Saves `channels.updateMediaSettings` (`captions`)                                                                                                                  |
+| `captions-track-state`                | Live track state; `data-state` `off`, `queued` or `active`                                                                                                         |
+| `captions-vod-editor`                 | The per-VOD cue editor; `data-vod-id`                                                                                                                              |
+| `captions-cue`                        | One cue; `data-start-ms`, `data-end-ms`                                                                                                                            |
+| `captions-cue-text`                   | A cue's text input                                                                                                                                                 |
+| `captions-cue-search`                 | Filters cues by text (original or draft); back to the first page                                                                                                   |
+| `captions-cue-pager`                  | Only with more than one page (5 minutes each, silent stretches skipped): `captions-cue-prev`, `captions-cue-next`, `captions-cue-page` (`data-page`, `data-pages`) |
+| `captions-cue-no-match`               | The search matched no cue                                                                                                                                          |
+| `captions-cue-unsaved`                | How many corrections are not saved yet (on any page)                                                                                                               |
+| `captions-cue-save`                   | Saves `vods.captions.update`                                                                                                                                       |
+| `captions-privacy-note`               | The draft privacy text on transcripts                                                                                                                              |
+| `player-captions-toggle`              | The player's CC `IconButton`; `data-state` `on`/`off` (only with a track)                                                                                          |
+| `player-captions-queued`              | The player's note that captions wait for capacity (`captionsState` `queued`)                                                                                       |
+| `player-captions-style`               | The captions style menu trigger (beside the CC toggle)                                                                                                             |
+| `player-captions-size-<size>`         | One size item (`small`, `medium`, `large`)                                                                                                                         |
+| `player-captions-contrast-<contrast>` | One contrast item (`standard`, `high`)                                                                                                                             |
 
 ### Analytics, group appeals and attestations (W2-rollup-analytics, W2b-group-appeals, W2b-attestations)
 

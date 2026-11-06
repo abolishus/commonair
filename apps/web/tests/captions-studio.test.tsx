@@ -53,7 +53,13 @@ describe("settings patch", () => {
 });
 
 describe("CaptionsStudio", () => {
-  function fakeApi() {
+  type Cue = { index: number; startMs: number; endMs: number; text: string };
+  function fakeApi(
+    cues: Cue[] = [
+      { index: 0, startMs: 0, endMs: 1500, text: "helo" },
+      { index: 1, startMs: 2000, endMs: 3000, text: "world" },
+    ],
+  ) {
     const updateMediaSettings = vi.fn<(input: { captions?: { maskWords?: string[] } }) => Promise<unknown>>(
       async (input) => ({
         captions: { enabled: true, spokenLanguage: null, maskWords: input.captions?.maskWords ?? [] },
@@ -89,10 +95,7 @@ describe("CaptionsStudio", () => {
             vodId: "v1",
             language: "en",
             status: "ready",
-            cues: [
-              { index: 0, startMs: 0, endMs: 1500, text: "helo" },
-              { index: 1, startMs: 2000, endMs: 3000, text: "world" },
-            ],
+            cues,
             editedAt: null,
           }),
           update,
@@ -152,5 +155,116 @@ describe("CaptionsStudio", () => {
         captions: { enabled: null, spokenLanguage: null, maskWords: ["ok", "fine"] },
       }),
     );
+  });
+
+  describe("cue editor paging and search (F36)", () => {
+    const MIN = 60_000;
+    // Three five-minute windows with cues (0-5, 5-10, 20-25 min); 10-20 min is silent.
+    const longCues: Cue[] = [
+      { index: 0, startMs: 0, endMs: 2000, text: "welcome everyone" },
+      { index: 1, startMs: 4 * MIN, endMs: 4 * MIN + 2000, text: "first topic" },
+      { index: 2, startMs: 5 * MIN, endMs: 5 * MIN + 2000, text: "second topic" },
+      { index: 3, startMs: 9 * MIN, endMs: 9 * MIN + 2000, text: "a question" },
+      { index: 4, startMs: 21 * MIN, endMs: 21 * MIN + 2000, text: "goodbye everyone" },
+    ];
+    const starts = () => screen.getAllByTestId("captions-cue").map((c) => c.dataset.startMs);
+    const pageOf = () => {
+      const p = screen.getByTestId("captions-cue-page");
+      return [p.dataset.page, p.dataset.pages];
+    };
+    const button = (id: string) => screen.getByTestId(id) as HTMLButtonElement;
+    const search = (q: string) => fireEvent.change(screen.getByTestId("captions-cue-search"), { target: { value: q } });
+
+    it("a short VOD is one page with no pager", async () => {
+      const { client } = fakeApi();
+      render(<CaptionsStudio channel="alice" client={client as never} />, { wrapper: Wrap });
+      await screen.findAllByTestId("captions-cue");
+      expect(screen.queryByTestId("captions-cue-pager")).toBeNull();
+    });
+
+    it("pages by five minutes, skipping silent stretches, with Earlier and Later at the ends", async () => {
+      const { client } = fakeApi(longCues);
+      render(<CaptionsStudio channel="alice" client={client as never} />, { wrapper: Wrap });
+      await screen.findAllByTestId("captions-cue");
+      // The first cue (the one the captions scenario corrects) is on the first page.
+      expect(starts()).toEqual(["0", String(4 * MIN)]);
+      expect(pageOf()).toEqual(["1", "3"]);
+      expect(button("captions-cue-prev").disabled).toBe(true);
+      expect(screen.getByTestId("captions-cue-page").textContent).toBe("00:00 to 04:02 · part 1 of 3");
+      fireEvent.click(button("captions-cue-next"));
+      expect(starts()).toEqual([String(5 * MIN), String(9 * MIN)]);
+      fireEvent.click(button("captions-cue-next"));
+      expect(starts()).toEqual([String(21 * MIN)]);
+      expect(pageOf()).toEqual(["3", "3"]);
+      expect(button("captions-cue-next").disabled).toBe(true);
+      fireEvent.click(button("captions-cue-prev"));
+      expect(pageOf()).toEqual(["2", "3"]);
+    });
+
+    it("edits on other pages survive paging and are saved together", async () => {
+      const { client, update } = fakeApi(longCues);
+      render(<CaptionsStudio channel="alice" client={client as never} />, { wrapper: Wrap });
+      await screen.findAllByTestId("captions-cue");
+      fireEvent.change(screen.getAllByTestId("captions-cue-text")[0]!, { target: { value: "welcome, everyone" } });
+      fireEvent.click(button("captions-cue-next"));
+      fireEvent.click(button("captions-cue-next"));
+      fireEvent.change(screen.getAllByTestId("captions-cue-text")[0]!, { target: { value: "goodbye, everyone" } });
+      expect(screen.getByTestId("captions-cue-unsaved").textContent).toBe("2 unsaved corrections");
+      fireEvent.click(button("captions-cue-prev"));
+      fireEvent.click(button("captions-cue-prev"));
+      expect((screen.getAllByTestId("captions-cue-text")[0] as HTMLInputElement).value).toBe("welcome, everyone");
+      fireEvent.click(button("captions-cue-save"));
+      await waitFor(() =>
+        expect(update).toHaveBeenCalledWith({
+          id: "v1",
+          language: "en",
+          cues: [
+            { index: 0, text: "welcome, everyone" },
+            { index: 4, text: "goodbye, everyone" },
+          ],
+        }),
+      );
+    });
+
+    it("search filters cues by text across pages, and back to page 1", async () => {
+      const { client } = fakeApi(longCues);
+      render(<CaptionsStudio channel="alice" client={client as never} />, { wrapper: Wrap });
+      await screen.findAllByTestId("captions-cue");
+      fireEvent.click(button("captions-cue-next"));
+      search("TOPIC");
+      // "first topic" (0-5 min) and "second topic" (5-10 min) are two windows.
+      expect(pageOf()).toEqual(["1", "2"]);
+      expect(starts()).toEqual([String(4 * MIN)]);
+      search("everyone");
+      expect(pageOf()).toEqual(["1", "2"]);
+      search("goodbye");
+      expect(starts()).toEqual([String(21 * MIN)]);
+      expect(screen.queryByTestId("captions-cue-pager")).toBeNull();
+    });
+
+    it("a cue being corrected stays in its search, and its edit stays when the search clears", async () => {
+      const { client } = fakeApi(longCues);
+      render(<CaptionsStudio channel="alice" client={client as never} />, { wrapper: Wrap });
+      await screen.findAllByTestId("captions-cue");
+      search("question");
+      fireEvent.change(screen.getAllByTestId("captions-cue-text")[0]!, { target: { value: "an answer" } });
+      expect(starts()).toEqual([String(9 * MIN)]);
+      search("answer");
+      expect(starts()).toEqual([String(9 * MIN)]);
+      search("");
+      fireEvent.click(button("captions-cue-next"));
+      expect((screen.getAllByTestId("captions-cue-text")[1] as HTMLInputElement).value).toBe("an answer");
+    });
+
+    it("a search with no match says so and keeps Save", async () => {
+      const { client } = fakeApi(longCues);
+      render(<CaptionsStudio channel="alice" client={client as never} />, { wrapper: Wrap });
+      await screen.findAllByTestId("captions-cue");
+      search("zebra");
+      expect(screen.queryAllByTestId("captions-cue")).toHaveLength(0);
+      expect(screen.getByTestId("captions-cue-no-match").textContent).toContain("No caption says “zebra”");
+      expect(screen.queryByTestId("captions-cue-pager")).toBeNull();
+      expect(screen.getByTestId("captions-cue-save")).toBeTruthy();
+    });
   });
 });

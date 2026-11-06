@@ -5,7 +5,8 @@
  * `/captions` (ADR 0011; docs/testing/w2-selectors.md "Captions"): the channel's live captions
  * (on or off, showing the instance default it follows otherwise; the spoken language; the mask
  * list), the live track's state, the draft privacy text on transcripts, and the per-VOD cue editor
- * (text only: timing is fixed in v1). Form logic is in `player/captions-studio.ts`.
+ * (text only: timing is fixed in v1), paged by time with a search (F36). Form logic is in
+ * `player/captions-studio.ts`, the pages in `player/cue-pages.ts`.
  */
 import { EmptyState, SkeletonGroup, SkeletonText, StatusBadge } from "@commonair/ui";
 import { PageHeader } from "@commonair/ui/blocks/headers";
@@ -18,7 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@commonair/ui/components/textarea";
 import { PageContainer } from "@commonair/ui/layouts";
 import { toast } from "@commonair/ui/toast";
-import { ClosedCaptionIcon, LockIcon, Video01Icon } from "@hugeicons/core-free-icons";
+import { ClosedCaptionIcon, LockIcon, Search01Icon, Video01Icon } from "@hugeicons/core-free-icons";
 import { Navigate, createFileRoute } from "@tanstack/react-router";
 import * as React from "react";
 import type { dto } from "@commonair/contracts";
@@ -26,6 +27,7 @@ import type { z } from "zod";
 import { LanguageLabel } from "../../components/locale/language-label.tsx";
 import { StudioLoadError, StudioSection } from "../../components/interact-studio/shared.tsx";
 import { useLoad } from "../../components/money/use-load.ts";
+import { ListSearch, matchesQuery } from "../../components/settings/list-window.tsx";
 import { FocusFormAction } from "../../components/studio/empty-action.tsx";
 import { StudioNote } from "../../components/studio/note.tsx";
 import { t } from "../../i18n/index.ts";
@@ -42,6 +44,7 @@ import {
   type CaptionsDraft,
   type MaskError,
 } from "../../player/captions-studio.ts";
+import { clampPage, cuePages } from "../../player/cue-pages.ts";
 import { titleHead } from "../../lib/page-title.ts";
 
 export const Route = createFileRoute("/_studio/captions")({
@@ -283,9 +286,6 @@ function cueTime(ms: number): string {
   return h > 0 ? `${h}:${body}` : body;
 }
 
-/** Cues shown per step: a long VOD has thousands. */
-const CUE_PAGE = 50;
-
 function VodCueEditor({ channel, client }: { channel: string; client: CaptionsApi }): React.JSX.Element {
   const vods = useLoad<Vod[]>(channel, async () => {
     const page = await client.vods.list({ channel, limit: 50 });
@@ -361,8 +361,10 @@ function VodCueEditor({ channel, client }: { channel: string; client: CaptionsAp
 function CueList({ vod, client }: { vod: Vod; client: CaptionsApi }): React.JSX.Element {
   const language = vod.captions[0]?.language ?? "en";
   const track = useLoad<VodCaptions>(`${vod.id}:${language}`, () => client.vods.captions.get({ id: vod.id, language }));
+  // Drafts for every cue, whatever page is on screen: paging and search only change what renders.
   const [edits, setEdits] = React.useState<Record<number, string>>({});
-  const [shown, setShown] = React.useState(CUE_PAGE);
+  const [query, setQuery] = React.useState("");
+  const [page, setPage] = React.useState(0);
   const [pending, setPending] = React.useState(false);
   if (track.failed)
     return (
@@ -386,6 +388,11 @@ function CueList({ vod, client }: { vod: Vod; client: CaptionsApi }): React.JSX.
   const changed = data.cues
     .filter((c) => edits[c.index] !== undefined && edits[c.index] !== c.text)
     .map((c) => ({ index: c.index, text: edits[c.index] ?? c.text }));
+  // The original text matches too, so a cue being corrected does not vanish from its search.
+  const matched = data.cues.filter((c) => matchesQuery(query, [c.text, edits[c.index] ?? c.text]));
+  const pages = cuePages(matched);
+  const current = clampPage(page, pages.length);
+  const shown = pages[current];
   const save = async (): Promise<void> => {
     if (pending || changed.length === 0) return;
     setPending(true);
@@ -403,39 +410,66 @@ function CueList({ vod, client }: { vod: Vod; client: CaptionsApi }): React.JSX.
   return (
     <div data-testid="captions-vod-editor" data-vod-id={vod.id} className="flex min-w-0 flex-col gap-3">
       <p className="text-sm text-muted-foreground">{t("captions.studio.vod.timingFixed")}</p>
-      <ol className="flex min-w-0 flex-col gap-2">
-        {data.cues.slice(0, shown).map((c) => (
-          <li
-            key={c.index}
-            data-testid="captions-cue"
-            data-start-ms={String(c.startMs)}
-            data-end-ms={String(c.endMs)}
-            className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-center sm:gap-3"
-          >
-            <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
-              {t("captions.studio.vod.cueTime", { start: cueTime(c.startMs), end: cueTime(c.endMs) })}
-            </span>
-            <Input
-              data-testid="captions-cue-text"
-              aria-label={t("captions.studio.vod.cueLabel", { start: cueTime(c.startMs) })}
-              value={edits[c.index] ?? c.text}
-              maxLength={500}
-              autoComplete="off"
-              className="min-w-0 flex-1"
-              onChange={(e) => {
-                const text = e.currentTarget.value;
-                setEdits((prev) => ({ ...prev, [c.index]: text }));
-              }}
+      <ListSearch
+        label={t("lists.captions.search")}
+        value={query}
+        onValueChange={(next) => {
+          setQuery(next);
+          setPage(0);
+        }}
+        loadedCount={data.cues.length}
+        partial={false}
+        data-testid="captions-cue-search"
+      />
+      {shown === undefined ? (
+        <EmptyState
+          data-testid="captions-cue-no-match"
+          icon={Search01Icon}
+          headingLevel={4}
+          title={t("lists.captions.noMatch", { query: query.trim() })}
+          description={t("lists.captions.noMatchHint")}
+        />
+      ) : (
+        <>
+          {pages.length > 1 && (
+            <CuePager
+              page={current}
+              count={pages.length}
+              startMs={shown.startMs}
+              endMs={shown.endMs}
+              onPage={setPage}
             />
-          </li>
-        ))}
-      </ol>
-      <div className="flex flex-wrap items-center gap-2">
-        {shown < data.cues.length && (
-          <Button type="button" variant="outline" size="sm" onClick={() => setShown((n) => n + CUE_PAGE)}>
-            {t("captions.studio.vod.more")}
-          </Button>
-        )}
+          )}
+          <ol className="flex min-w-0 flex-col gap-2">
+            {shown.cues.map((c) => (
+              <li
+                key={c.index}
+                data-testid="captions-cue"
+                data-start-ms={String(c.startMs)}
+                data-end-ms={String(c.endMs)}
+                className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-center sm:gap-3"
+              >
+                <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+                  {t("captions.studio.vod.cueTime", { start: cueTime(c.startMs), end: cueTime(c.endMs) })}
+                </span>
+                <Input
+                  data-testid="captions-cue-text"
+                  aria-label={t("captions.studio.vod.cueLabel", { start: cueTime(c.startMs) })}
+                  value={edits[c.index] ?? c.text}
+                  maxLength={500}
+                  autoComplete="off"
+                  className="min-w-0 flex-1"
+                  onChange={(e) => {
+                    const text = e.currentTarget.value;
+                    setEdits((prev) => ({ ...prev, [c.index]: text }));
+                  }}
+                />
+              </li>
+            ))}
+          </ol>
+        </>
+      )}
+      <div className="flex flex-wrap items-center gap-3">
         <Button
           type="button"
           data-testid="captions-cue-save"
@@ -444,7 +478,65 @@ function CueList({ vod, client }: { vod: Vod; client: CaptionsApi }): React.JSX.
         >
           {t("captions.studio.vod.save")}
         </Button>
+        {changed.length > 0 && (
+          <span data-testid="captions-cue-unsaved" className="text-sm text-muted-foreground">
+            {t("lists.captions.unsaved", { count: changed.length })}
+          </span>
+        )}
       </div>
     </div>
+  );
+}
+
+/** Earlier and Later between the editor's pages of time. */
+function CuePager({
+  page,
+  count,
+  startMs,
+  endMs,
+  onPage,
+}: {
+  page: number;
+  count: number;
+  startMs: number;
+  endMs: number;
+  onPage: (page: number) => void;
+}): React.JSX.Element {
+  return (
+    <nav
+      aria-label={t("lists.captions.pager")}
+      data-testid="captions-cue-pager"
+      className="flex flex-wrap items-center gap-2"
+    >
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        data-testid="captions-cue-prev"
+        disabled={page === 0}
+        onClick={() => onPage(page - 1)}
+      >
+        {t("lists.captions.previous")}
+      </Button>
+      <span
+        data-testid="captions-cue-page"
+        data-page={String(page + 1)}
+        data-pages={String(count)}
+        aria-live="polite"
+        className="text-sm text-muted-foreground tabular-nums"
+      >
+        {t("lists.captions.page", { page: page + 1, count, start: cueTime(startMs), end: cueTime(endMs) })}
+      </span>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        data-testid="captions-cue-next"
+        disabled={page >= count - 1}
+        onClick={() => onPage(page + 1)}
+      >
+        {t("lists.captions.next")}
+      </Button>
+    </nav>
   );
 }

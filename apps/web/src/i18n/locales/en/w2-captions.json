@@ -46,7 +46,6 @@
   "captions.studio.vod.timingFixed": "Timing stays as it is; only the text changes.",
   "captions.studio.vod.cueTime": "{start} to {end}",
   "captions.studio.vod.cueLabel": "Caption at {start}",
-  "captions.studio.vod.more": "Show more",
   "captions.studio.vod.save": "Save corrections",
   "captions.studio.vod.saved": "Corrections saved",
   "captions.studio.vod.saveFailed": "Your corrections could not be saved."

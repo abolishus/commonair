@@ -1,0 +1,10 @@
+{
+  "lists.captions.search": "Search captions",
+  "lists.captions.noMatch": "No caption says “{query}”",
+  "lists.captions.noMatchHint": "Check the spelling, or search for one word of the line.",
+  "lists.captions.pager": "Caption pages",
+  "lists.captions.previous": "Earlier",
+  "lists.captions.next": "Later",
+  "lists.captions.page": "{start} to {end} · part {page} of {count}",
+  "lists.captions.unsaved": "{count, plural, one {# unsaved correction} other {# unsaved corrections}}"
+}

@@ -46,7 +46,6 @@
   "captions.studio.vod.timingFixed": "Los tiempos no cambian; solo cambia el texto.",
   "captions.studio.vod.cueTime": "{start} a {end}",
   "captions.studio.vod.cueLabel": "Subtítulo en {start}",
-  "captions.studio.vod.more": "Mostrar más",
   "captions.studio.vod.save": "Guardar correcciones",
   "captions.studio.vod.saved": "Correcciones guardadas",
   "captions.studio.vod.saveFailed": "No se pudieron guardar las correcciones."

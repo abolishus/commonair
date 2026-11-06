@@ -1,0 +1,10 @@
+{
+  "lists.captions.search": "Buscar subtítulos",
+  "lists.captions.noMatch": "Ningún subtítulo dice «{query}»",
+  "lists.captions.noMatchHint": "Revisa la ortografía o busca una sola palabra de la línea.",
+  "lists.captions.pager": "Páginas de subtítulos",
+  "lists.captions.previous": "Antes",
+  "lists.captions.next": "Después",
+  "lists.captions.page": "{start} a {end} · parte {page} de {count}",
+  "lists.captions.unsaved": "{count, plural, one {# corrección sin guardar} other {# correcciones sin guardar}}"
+}
