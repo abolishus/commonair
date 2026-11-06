@@ -14,7 +14,9 @@
  *   component per `mailIntervalSeconds`, always with the recovery message;
  * - keeps the daily availability per component, so the page shows 90 days while Prometheus keeps
  *   30;
- * - renders index.html and status.json from that, plus the operator's notes and maintenance file.
+ * - renders index.html and status.json from that, plus the operator's notes and maintenance file,
+ *   and metrics.txt: status.json's age for the app side's Prometheus, which alerts when this
+ *   renderer or this droplet stops (docs/operators/monitoring.md#commonairstatuspagestale).
  *
  * Every time comes from Prometheus (its `time()` and sample timestamps), so skew between droplets
  * cannot move a state or a day boundary. The one exception is a run that cannot read Prometheus
@@ -1375,6 +1377,28 @@ export function renderJson(p: PageModel): string {
   )}\n`;
 }
 
+// ---------------------------------------------------------------- freshness
+
+/** Beside status.json in site/, so Caddy serves it at https://<status domain>/metrics.txt. */
+export const METRICS_FILE = "metrics.txt";
+
+/**
+ * status.json's `updatedAt` and `stale` in Prometheus's text format. The app droplet's Prometheus
+ * scrapes it (STATUS_PAGE_URL): a page that stops changing is the one failure this droplet cannot
+ * report itself, since the renderer that would mail it is what stopped. Times and a flag only.
+ */
+export function renderMetrics(updatedAt: number, stale: boolean): string {
+  return [
+    "# HELP commonair_status_page_updated_timestamp_seconds When status.json was last rendered (its updatedAt).",
+    "# TYPE commonair_status_page_updated_timestamp_seconds gauge",
+    `commonair_status_page_updated_timestamp_seconds ${Math.floor(updatedAt)}`,
+    "# HELP commonair_status_page_stale 1 while the renderer cannot read its probes (status.json stale).",
+    "# TYPE commonair_status_page_stale gauge",
+    `commonair_status_page_stale ${stale ? 1 : 0}`,
+    "",
+  ].join("\n");
+}
+
 // ---------------------------------------------------------------- one run
 
 export type Log = (level: "info" | "warn" | "error", msg: string, fields?: Record<string, unknown>) => void;
@@ -1495,6 +1519,7 @@ export async function runOnce(d: RunDeps): Promise<RunResult> {
   );
   writeAtomic(join(dataDir, "site", "index.html"), renderHtml(model, cfg));
   writeAtomic(join(dataDir, "site", "status.json"), renderJson(model));
+  writeAtomic(join(dataDir, "site", METRICS_FILE), renderMetrics(model.now, false));
 
   const save = (records: Record<string, ComponentRecord>) =>
     writeAtomic(
@@ -1557,6 +1582,8 @@ function markStale(dataDir: string, cfg: StatusConfig): boolean {
   if (!STALE_SLOT.test(html)) return false;
   writeAtomic(htmlPath, html.replace(STALE_SLOT, staleBanner(TEXT[cfg.locale], updatedAt)));
   writeAtomic(jsonPath, `${JSON.stringify({ ...json, stale: true }, null, 2)}\n`);
+  // Still the last good run's time: the app side's alert measures from it.
+  writeAtomic(join(dataDir, "site", METRICS_FILE), renderMetrics(updatedAt, true));
   return true;
 }
 

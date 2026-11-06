@@ -50,6 +50,9 @@ output "managed_state_secrets" {
 }
 
 output "observability_env" {
-  description = "Keys for this instance's commonair.env (docs/operators/monitoring.md#settings): U4's 99.9% target."
-  value       = { SLO_TARGET = "0.999" }
+  description = "Keys for this instance's commonair.env (docs/operators/monitoring.md#settings): U4's 99.9% target, and the status page whose freshness Prometheus checks."
+  value = merge(
+    { SLO_TARGET = "0.999" },
+    module.instance.status_page_url == null ? {} : { STATUS_PAGE_URL = module.instance.status_page_url },
+  )
 }

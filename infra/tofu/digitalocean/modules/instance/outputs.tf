@@ -19,6 +19,11 @@ output "monitoring_dns_records" {
   } : null
 }
 
+output "status_page_url" {
+  description = "The status page's origin, for STATUS_PAGE_URL in the instance's commonair.env (docs/operators/monitoring.md#settings). Null without the status stack."
+  value       = local.status_enabled ? "https://${local.status_domain}" : null
+}
+
 output "app_droplets" {
   description = "Name, public IPv4 and IPv6 of each app droplet, for SSH and selfhost.sh install."
   value = [for d in digitalocean_droplet.app : {

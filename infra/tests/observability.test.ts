@@ -112,6 +112,9 @@ const RECEIVER_METRICS = {
     "redis_net_output_bytes_total",
     "redis_uptime_seconds_total",
   ],
+  // The status page's metrics.txt (infra/status/render.ts renderMetrics), scraped by the
+  // status-page job that start.sh renders when STATUS_PAGE_URL is set.
+  status_page: ["commonair_status_page_updated_timestamp_seconds", "commonair_status_page_stale"],
   // The collector's own telemetry (:8888) and Prometheus's own.
   internal: [
     "otelcol_scraper_errored_metric_points",
@@ -537,7 +540,13 @@ describe("collector configuration", () => {
 // ---------------------------------------------------------------- start.sh
 
 describe("start.sh renders the operator's settings", () => {
-  function render(env: Record<string, string>): { code: number; err: string; rules: string; scrape: string | null } {
+  function render(env: Record<string, string>): {
+    code: number;
+    err: string;
+    rules: string;
+    scrape: string | null;
+    statusJob: string | null;
+  } {
     const out = mkdtempSync(join(tmpdir(), "commonair-prom-"));
     dirs.push(out);
     const r = Bun.spawnSync(["sh", join(PROM_DIR, "start.sh"), "--render-only"], {
@@ -551,11 +560,18 @@ describe("start.sh renders the operator's settings", () => {
     } catch {
       scrape = null;
     }
+    let statusJob: string | null = null;
+    try {
+      statusJob = readFileSync(join(out, "scrape/status-page.yml"), "utf8");
+    } catch {
+      statusJob = null;
+    }
     return {
       code: r.exitCode ?? -1,
       err: r.stderr.toString(),
       rules: readFileSync(join(out, "rules/configured.yml"), "utf8"),
       scrape,
+      statusJob,
     };
   }
   const records = (yml: string) =>
@@ -572,6 +588,7 @@ describe("start.sh renders the operator's settings", () => {
       labels: { slo_target: "0.995" },
     });
     expect(r.scrape).toBeNull();
+    expect(r.statusJob).toBeNull();
   });
 
   test("our instance: 0.999, an egress budget and a per-host stream number", () => {
@@ -602,6 +619,46 @@ describe("start.sh renders the operator's settings", () => {
     const r = render({ LIVE_STREAMS_PER_HOST: v });
     expect(r.err).toContain("LIVE_STREAMS_PER_HOST");
     expect(records(r.rules)["commonair:live_streams_per_host"]).toBeUndefined();
+  });
+
+  describe("the optional status-page job (STATUS_PAGE_URL)", () => {
+    test.each([["https://status.example.org"], ["https://status.example.org/"]])(
+      "%s: metrics.txt over verified HTTPS every minute",
+      (url) => {
+        const r = render({ STATUS_PAGE_URL: url });
+        expect(r.err).toBe("");
+        expect((parse(r.statusJob ?? "") as { scrape_configs: unknown[] }).scrape_configs).toEqual([
+          {
+            job_name: "status-page",
+            scheme: "https",
+            metrics_path: "/metrics.txt",
+            scrape_interval: "60s",
+            scrape_timeout: "15s",
+            fallback_scrape_protocol: "PrometheusText0.0.4",
+            tls_config: { insecure_skip_verify: false },
+            static_configs: [{ targets: ["status.example.org"] }],
+          },
+        ]);
+      },
+    );
+
+    test("a port is kept", () => {
+      const r = render({ STATUS_PAGE_URL: "https://status.example.org:8443" });
+      expect(r.statusJob).toContain('targets: ["status.example.org:8443"]');
+    });
+
+    test.each([
+      ["http://status.example.org"],
+      ["https://status.example.org/status.json"],
+      ["status.example.org"],
+      ['https://status.example.org"]'],
+      ["https://user@status.example.org"],
+    ])("%s: left out with a reason, not fatal", (url) => {
+      const r = render({ STATUS_PAGE_URL: url });
+      expect(r.code).toBe(0);
+      expect(r.statusJob).toBeNull();
+      expect(r.err).toContain("STATUS_PAGE_URL");
+    });
   });
 
   describe("the optional managed-db-metrics job", () => {
@@ -677,13 +734,14 @@ const PROMTOOL_SCRIPT = [
   "set -eu",
   "mkdir -p /tmp/commonair-pw && printf x > /tmp/commonair-pw/managed",
   "SLO_TARGET=0.999 EGRESS_BUDGET_GIB=500 LIVE_STREAMS_PER_HOST=8 MANAGED_DB_METRICS_TARGETS=db.example.net:9273" +
-    " MANAGED_DB_METRICS_USER=u MANAGED_DB_METRICS_PASSWORD_FILE=/tmp/commonair-pw/managed sh /etc/prometheus/start.sh --render-only",
+    " MANAGED_DB_METRICS_USER=u MANAGED_DB_METRICS_PASSWORD_FILE=/tmp/commonair-pw/managed" +
+    " STATUS_PAGE_URL=https://status.example.org sh /etc/prometheus/start.sh --render-only",
   "promtool check rules /etc/prometheus/rules/*.yml /tmp/commonair/rules/*.yml",
   "promtool check config /etc/prometheus/prometheus.yml",
 ].join("\n");
 
 describe.runIf(CAN_RUN_PROMTOOL)("promtool (the pinned Prometheus image's)", () => {
-  test("accepts the rules, the rendered rules, the config and the managed scrape job", () => {
+  test("accepts the rules, the rendered rules, the config, the managed scrape job and the status-page job", () => {
     expect(PROM_IMAGE).toMatch(/@sha256:[0-9a-f]{64}$/);
     const r = runPromtool(PROMTOOL_SCRIPT, 300_000);
     expect(r.code, r.out).toBe(0);

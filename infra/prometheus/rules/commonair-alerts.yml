@@ -171,3 +171,20 @@ groups:
           severity: ticket
           summary: No restore drill has reported within its window (8 days)
           runbook: docs/operators/monitoring.md#commonairrestoredrilloverdue
+
+  # The status page on the monitoring droplet (docs/operators/status-page.md). Its renderer mails
+  # the outside alerts, so it cannot report that it stopped; this side reads status.json's age
+  # from the page's metrics.txt (the status-page job, only with STATUS_PAGE_URL set).
+  - name: commonair-status-page
+    rules:
+      - alert: CommonairStatusPageStale
+        # The renderer runs every minute. More than 5 minutes old (it stopped, or cannot read its
+        # own Prometheus), or not readable at all (the droplet, its Caddy or DNS), for 10 minutes.
+        expr: >-
+          time() - max by (job) (commonair_status_page_updated_timestamp_seconds{job="status-page"}) > 300
+          or max by (job) (up{job="status-page"}) == 0
+        for: 10m
+        labels:
+          severity: ticket
+          summary: The status page has not been updated for 15 minutes, so outside alerts may not be sent
+          runbook: docs/operators/monitoring.md#commonairstatuspagestale

@@ -13,6 +13,9 @@
 #                           optional managed-db-metrics job is not rendered (the default).
 #   MANAGED_DB_METRICS_USER, MANAGED_DB_METRICS_CA_FILE, and the password in the file
 #   MANAGED_DB_METRICS_PASSWORD_FILE (default /run/secrets/managed-db-metrics-password).
+#   STATUS_PAGE_URL         the status page's origin, https://status.<domain> (docs/operators/
+#                           status-page.md). Set: the status-page job scrapes its metrics.txt, and
+#                           CommonairStatusPageStale fires when it stops changing. Unset: no job.
 # A bad value is reported and ignored, never fatal: a crash loop here would hide every metric.
 set -eu
 
@@ -95,6 +98,24 @@ if [ -n "$targets" ]; then
     } >"$OUT/scrape/managed-db-metrics.yml"
   else
     warn "the managed-db-metrics job is not configured; fix the values above and restart"
+  fi
+fi
+
+status_url=${STATUS_PAGE_URL:-}
+if [ -n "$status_url" ]; then
+  # https://host or https://host:port, nothing after it: the job reads /metrics.txt there.
+  status_host=$(printf '%s' "$status_url" | sed -n -E 's#^https://([A-Za-z0-9.-]+(:[0-9]{1,5})?)/?$#\1#p')
+  if [ -n "$status_host" ]; then
+    {
+      printf 'scrape_configs:\n  - job_name: status-page\n'
+      printf '    scheme: https\n    metrics_path: /metrics.txt\n    scrape_interval: 60s\n    scrape_timeout: 15s\n'
+      # Caddy serves the file as text/plain without a version.
+      printf '    fallback_scrape_protocol: PrometheusText0.0.4\n'
+      printf '    tls_config:\n      insecure_skip_verify: false\n'
+      printf '    static_configs:\n      - targets: ["%s"]\n' "$status_host"
+    } >"$OUT/scrape/status-page.yml"
+  else
+    warn "STATUS_PAGE_URL=$status_url is not https://<host>[:port]; the status page freshness check stays off"
   fi
 fi
 

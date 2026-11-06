@@ -219,3 +219,59 @@ tests:
               severity: ticket
               summary: No restore drill has reported within its window (8 days)
               runbook: docs/operators/monitoring.md#commonairrestoredrilloverdue
+
+  # The status page's metrics.txt: rendered every minute (the gauge is the test's own time), then
+  # the renderer stops at 30 min. Older than 5 minutes from 35 min, firing after 10 more.
+  - interval: 1m
+    input_series:
+      - series: 'commonair_status_page_updated_timestamp_seconds{job="status-page",instance="status.example.org"}'
+        values: "0+60x30 1800x40"
+      - series: 'up{job="status-page",instance="status.example.org"}'
+        values: "1x70"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: CommonairStatusPageStale
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: CommonairStatusPageStale
+        exp_alerts: []
+      - eval_time: 48m
+        alertname: CommonairStatusPageStale
+        exp_alerts:
+          - exp_labels:
+              job: status-page
+              severity: ticket
+              summary: The status page has not been updated for 15 minutes, so outside alerts may not be sent
+              runbook: docs/operators/monitoring.md#commonairstatuspagestale
+
+  # The monitoring droplet is gone from 11 min: the scrape fails and the gauge goes stale.
+  - interval: 1m
+    input_series:
+      - series: 'commonair_status_page_updated_timestamp_seconds{job="status-page",instance="status.example.org"}'
+        values: "0+60x10"
+      - series: 'up{job="status-page",instance="status.example.org"}'
+        values: "1x10 0x30"
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: CommonairStatusPageStale
+        exp_alerts: []
+      - eval_time: 24m
+        alertname: CommonairStatusPageStale
+        exp_alerts:
+          - exp_labels:
+              job: status-page
+              severity: ticket
+              summary: The status page has not been updated for 15 minutes, so outside alerts may not be sent
+              runbook: docs/operators/monitoring.md#commonairstatuspagestale
+
+  # A page rendered every minute: quiet.
+  - interval: 1m
+    input_series:
+      - series: 'commonair_status_page_updated_timestamp_seconds{job="status-page",instance="status.example.org"}'
+        values: "0+60x60"
+      - series: 'up{job="status-page",instance="status.example.org"}'
+        values: "1x60"
+    alert_rule_test:
+      - eval_time: 58m
+        alertname: CommonairStatusPageStale
+        exp_alerts: []

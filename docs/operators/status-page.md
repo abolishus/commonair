@@ -37,7 +37,9 @@ Each minute the renderer:
 4. keeps each day's availability in `/var/lib/commonair-status/state/state.json`, so the page shows
    90 days while Prometheus keeps 30;
 5. writes `index.html` and `status.json` to `/var/lib/commonair-status/site`, with the notes in
-   `/var/lib/commonair-status/notes/` and the maintenance file.
+   `/var/lib/commonair-status/notes/` and the maintenance file, and `metrics.txt`: `status.json`'s
+   `updatedAt` and `stale` in Prometheus's text format, which the app side reads (see
+   [When the renderer or the droplet stops](#when-the-renderer-or-the-droplet-stops)).
 
 Every time it uses is Prometheus's: its `time()`, the sample timestamps, and the UTC day boundaries
 derived from them. The droplets' clocks can drift apart without moving a state or a day. The one
@@ -156,9 +158,19 @@ ssh root@<monitoring> systemctl status commonair-status-prometheus
 ssh root@<monitoring> journalctl -u commonair-status-render -n 20 -o cat
 ```
 
-A dead monitoring droplet sends nothing at all. The app side watches for that only once it probes
-the page's `status.json` (a post-launch item); until then, the on-call checks the page as part of
-the [rota](on-call.md#rota).
+A dead monitoring droplet sends nothing at all; see the next section.
+
+## When the renderer or the droplet stops
+
+A renderer that never runs (its timer stopped, the unit fails before it can mark the page), or a
+droplet that is gone, cannot mail about itself. The app droplet's Prometheus watches for it from
+the other side: with `STATUS_PAGE_URL=https://status.<domain>` in the instance's
+`commonair.env` (production: `tofu output observability_env`), it reads
+`https://status.<domain>/metrics.txt` every minute and raises
+[CommonairStatusPageStale](monitoring.md#commonairstatuspagestale) through the inside route when
+the page is more than 5 minutes old, or cannot be read, for 10 minutes. The file carries two
+numbers, the time of the last good run and the stale flag, and nothing else. Without the setting,
+the on-call checks the page as part of the [rota](on-call.md#rota).
 
 ## When the monitor is blind
 
@@ -217,7 +229,8 @@ The cause is identified; a fix is deploying.
 - The next run (within a minute) shows it. A file it cannot read is skipped, and the journal says
   why. [incidents.md](incidents.md#the-status-page-note) says when to post and what to write.
 
-Notes live on the droplet only. Keep a copy with the incident's write-up: re-provisioning loses them.
+Notes live on the droplet, on its state volume (see [Re-provisioning](#re-provisioning)), which
+outlives the droplet but is not a backup. Keep a copy with the incident's write-up.
 
 ## Adding a component
 
@@ -259,13 +272,31 @@ variable, reaches the droplet only by replacing it:
 tofu -chdir=infra/tofu/digitalocean/envs/production apply -replace='module.instance.digitalocean_droplet.monitoring[0]'
 ```
 
-The droplet holds no state except the following, and replacing it loses all of it:
+**The page's state outlives the droplet.** `/var/lib/commonair-status` (the 90-day availability
+history in `state/state.json`, the notes, the maintenance file and the last page) is a 1 GiB block
+storage volume of its own, `<prefix>-status-state` in `monitoring_region`
+(`monitoring_state_volume`, default on, about 0.10 USD a month). Tofu attaches it to the
+replacement at creation and cloud-init mounts it before anything is written, so the new droplet's
+first run picks up where the old one stopped: no mail is resent, and the days the old droplet
+recorded keep their figures. The volume is created with the monitoring droplet and formatted
+once; `tofu destroy` deletes it.
 
-- 30 days of probe history;
-- **the page's 90-day availability history**. The page starts again with "no data" days. Keeping
-  `state.json` somewhere that outlives the droplet is a post-launch item;
-- the notes (copy them off first, then back);
-- `alert.env` (place it again).
+Replacing the droplet still loses:
+
+- 30 days of raw probe history (the monitoring Prometheus's own volume). The daily figures already
+  in `state.json` stay; a day that ended while no droplet ran shows "no data";
+- `alert.env` (place it again: [The alert route](#the-alert-route));
+- with `monitoring_state_volume = false`, or on a monitoring host you run yourself, everything
+  under `/var/lib/commonair-status` too. Copy it off first and back after the first boot:
+
+```sh
+ssh root@<old monitoring> tar -C /var/lib/commonair-status -czf - state notes > status-state.tgz
+ssh root@<new monitoring> 'systemctl stop commonair-status-render.timer && tar -C /var/lib/commonair-status -xzf - && chown -R 65534:65534 /var/lib/commonair-status/state && systemctl start commonair-status-render.timer' < status-state.tgz
+```
+
+Check the mount after a replacement: `ssh root@<monitoring> findmnt /var/lib/commonair-status`
+shows the volume's device. With `nofail`, a volume that did not attach leaves the directory on
+the root disk, and the page starts again from "no data".
 
 **The replacement gets new IP addresses.** Update the A and AAAA records by hand to the new
 `monitoring_dns_records` output. The status page is unreachable until they resolve.

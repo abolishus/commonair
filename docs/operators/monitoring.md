@@ -131,17 +131,18 @@ Labels name databases, tables, queues and devices, never people.
 
 ## Settings
 
-Prometheus reads four settings from `commonair.env` (its unit receives only them). Its entrypoint,
+Prometheus reads five settings from `commonair.env` (its unit receives only them). Its entrypoint,
 `infra/prometheus/start.sh`, turns them into recording rules at every start; a bad value is
 reported in the unit's log and ignored, never fatal. Edit `commonair.env`, then
 `systemctl --user restart commonair-prometheus`.
 
-| Key                     | Default | Meaning                                                                                                                                                                                                                     |
-| ----------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SLO_TARGET`            | `0.995` | The availability target, a number between 0 and 1. 0.995 is stage 0, the self-host default; our instance sets `0.999` (ADR 0032 §1, U4). It becomes the `slo_target` label of `commonair:slo_target` and of the burn rates. |
-| `EGRESS_BUDGET_GIB`     | unset   | The monthly origin egress budget in GiB, the stage 3 trigger. Unset: no egress alert and no line.                                                                                                                           |
-| `LIVE_STREAMS_PER_HOST` | unset   | S1-a's per-host live stream number ([capacity.md](capacity.md#results)), the stage 2 trigger. Unset: no alert.                                                                                                              |
-| `MANAGED_DB_METRICS_*`  | unset   | The optional provider scrape, below.                                                                                                                                                                                        |
+| Key                     | Default | Meaning                                                                                                                                                                                                                                                                                               |
+| ----------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SLO_TARGET`            | `0.995` | The availability target, a number between 0 and 1. 0.995 is stage 0, the self-host default; our instance sets `0.999` (ADR 0032 §1, U4). It becomes the `slo_target` label of `commonair:slo_target` and of the burn rates.                                                                           |
+| `EGRESS_BUDGET_GIB`     | unset   | The monthly origin egress budget in GiB, the stage 3 trigger. Unset: no egress alert and no line.                                                                                                                                                                                                     |
+| `LIVE_STREAMS_PER_HOST` | unset   | S1-a's per-host live stream number ([capacity.md](capacity.md#results)), the stage 2 trigger. Unset: no alert.                                                                                                                                                                                        |
+| `STATUS_PAGE_URL`       | unset   | The status page's origin, `https://status.<domain>` ([status-page.md](status-page.md)). Set: Prometheus reads the page's `metrics.txt` every minute and [CommonairStatusPageStale](#commonairstatuspagestale) fires when it stops changing. Production's value is in `tofu output observability_env`. |
+| `MANAGED_DB_METRICS_*`  | unset   | The optional provider scrape, below.                                                                                                                                                                                                                                                                  |
 
 ## Alerts
 
@@ -175,6 +176,7 @@ trigger**, so the next stage is built before the trigger is reached.
 | [CommonairCollectorDown](#commonaircollectordown)                 | ticket   | Prometheus cannot scrape the collector for 5 min                |                                       |
 | [CommonairRestoreDrillFailed](#commonairrestoredrillfailed)       | ticket   | a kind's latest restore drill in 8 days failed                  |                                       |
 | [CommonairRestoreDrillOverdue](#commonairrestoredrilloverdue)     | ticket   | a kind's restore drill reported nothing for 8 days              |                                       |
+| [CommonairStatusPageStale](#commonairstatuspagestale)             | ticket   | the status page is over 5 min old, or unreadable, for 10 min    |                                       |
 
 ### CommonairStage0PostgresCpu
 
@@ -311,6 +313,29 @@ Postgres, is enabled by the first successful `selfhost.sh backup --drill`. A dri
 did not reach Prometheus logged "the drill's result is not in Prometheus" (the collector was not
 running) or "could not push the drill's result" in its journal. Gaps in the collector's own data
 also hide the result: check [CommonairCollectorDown](#commonaircollectordown) first.
+
+### CommonairStatusPageStale
+
+The status page on the monitoring droplet ([status-page.md](status-page.md)) has not been
+rendered for more than 5 minutes, or this Prometheus could not read it, for 10 minutes. The
+renderer is also what sends the outside alerts, so **while this fires, an outage of the app
+droplet may page nobody**. Only with `STATUS_PAGE_URL` set: the `status-page` job reads
+`https://status.<domain>/metrics.txt`, which the renderer writes beside `status.json` with its
+`updatedAt` (`commonair_status_page_updated_timestamp_seconds`) and `stale` flag.
+
+- `up{job="status-page"}` is 0: the droplet, its Caddy, its certificate or the DNS record is
+  gone. `curl -sI https://status.<domain>/metrics.txt` from anywhere tells which.
+- The page answers but is old: the renderer stopped, or runs and cannot read its Prometheus
+  (`commonair_status_page_stale` is 1, and it mails "Status probes are not reporting" itself
+  if its route works). See
+  [When Prometheus itself fails](status-page.md#when-prometheus-itself-fails) and:
+
+```sh
+ssh root@<monitoring> systemctl status commonair-status-render.timer commonair-status-render.service
+ssh root@<monitoring> journalctl -u commonair-status-render -n 50 -o cat
+```
+
+Until it is fixed, watch the app droplet's own alerts (this list) and check the instance by hand.
 
 ## Metrics pushed by jobs
 

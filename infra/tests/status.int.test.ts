@@ -7,6 +7,8 @@
  * - the monitoring Prometheus and blackbox in one pod, with render.ts on the host: the renderer
  *   writes the targets, Prometheus probes them, the recording rule fills, and the page shows a
  *   live component up and an unreachable one down, with its mail sent to an injected transport;
+ * - the page's metrics.txt, served by the status Caddyfile, is scraped by the app side's Prometheus
+ *   with the job start.sh renders for STATUS_PAGE_URL (scheme switched to http for the test);
  * - Grafana provisions the contact point, the policy and the ALERTS rule, with route-env.sh and
  *   without it (as the stack ran before its entrypoint sourced it), and says when there is no route.
  * Needs podman; CI's integration job has it.
@@ -17,7 +19,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, test, vi } from "vite-plus/test";
 import { testOwnerArgs } from "../../scripts/test-owner.ts";
 import { hostPort, podman, podmanAvailable, podmanOk } from "../../packages/db/tests/external-owner-tls.ts";
-import { type MailSettings, httpProm, parseConfig, runOnce } from "../status/render.ts";
+import { METRICS_FILE, type MailSettings, httpProm, parseConfig, renderMetrics, runOnce } from "../status/render.ts";
 
 vi.setConfig({ testTimeout: 600_000, hookTimeout: 600_000 });
 
@@ -27,6 +29,8 @@ const imageOf = (unit: string) => /^Image=(.*)$/m.exec(read(unit))?.[1] ?? "";
 const BLACKBOX_IMAGE = imageOf("infra/status/units/commonair-status-blackbox.container");
 const PROM_IMAGE = imageOf("infra/status/units/commonair-status-prometheus.container");
 const GRAFANA_IMAGE = imageOf("infra/quadlet/commonair-grafana.container");
+const CADDY_IMAGE = imageOf("infra/status/units/commonair-status-caddy.container");
+const APP_PROM_IMAGE = imageOf("infra/quadlet/commonair-prometheus.container");
 
 const HAVE_PODMAN = podmanAvailable();
 if (!HAVE_PODMAN) {
@@ -176,6 +180,96 @@ describe.runIf(HAVE_PODMAN)("probes to page", () => {
       )
     ).json()) as { data: { result: { value: [number, string] }[] } };
     expect(rec.data.result[0]?.value[1]).toBe("1");
+  });
+});
+
+describe.runIf(HAVE_PODMAN)("metrics.txt to the app side's Prometheus", () => {
+  test("Caddy serves it with the page's headers, and the status-page job reads updatedAt", async () => {
+    const site = tmp();
+    const updatedAt = Math.floor(Date.now() / 1000) - 42;
+    writeFileSync(join(site, METRICS_FILE), renderMetrics(updatedAt, false));
+    chmodSync(join(site, METRICS_FILE), 0o644);
+    // The job start.sh renders, over plain HTTP inside the pod (the status Caddyfile at :8080).
+    const gen = tmp();
+    const r = Bun.spawnSync(["sh", join(ROOT, "infra/prometheus/start.sh"), "--render-only"], {
+      env: {
+        PATH: process.env.PATH ?? "/usr/bin:/bin",
+        COMMONAIR_PROMETHEUS_GENERATED: gen,
+        STATUS_PAGE_URL: "https://127.0.0.1:8080",
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    expect(r.exitCode, r.stderr.toString()).toBe(0);
+    const job = readFileSync(join(gen, "scrape/status-page.yml"), "utf8")
+      .replace("scheme: https", "scheme: http")
+      .replace("scrape_interval: 60s", "scrape_interval: 2s")
+      .replace("scrape_timeout: 15s", "scrape_timeout: 2s");
+    const etc = tmp();
+    writeFileSync(join(etc, "scrape.yml"), job);
+    writeFileSync(
+      join(etc, "prometheus.yml"),
+      "global:\n  scrape_interval: 2s\nscrape_config_files:\n  - /etc/prometheus/scrape.yml\n",
+    );
+    for (const f of ["scrape.yml", "prometheus.yml"]) chmodSync(join(etc, f), 0o644);
+
+    const pod = `commonair-status-metrics-${id}`;
+    podmanOk(["pod", "create", "--name", pod, ...testOwnerArgs(), "-p", "127.0.0.1::9090", "-p", "127.0.0.1::8080"]);
+    cleanup.push(() => void podman(["pod", "rm", "-f", "-t", "0", pod]));
+    podmanOk(
+      [
+        "run",
+        "-d",
+        "--pod",
+        pod,
+        "--name",
+        `${pod}-caddy`,
+        "-e",
+        "STATUS_DOMAIN=:8080",
+        "-v",
+        `${join(ROOT, "infra/status/Caddyfile")}:/etc/caddy/Caddyfile:ro,Z`,
+        "-v",
+        `${site}:/srv/status:ro,z`,
+        CADDY_IMAGE,
+      ],
+      { timeoutMs: 300_000 },
+    );
+    podmanOk(
+      [
+        "run",
+        "-d",
+        "--pod",
+        pod,
+        "--name",
+        `${pod}-prometheus`,
+        "-v",
+        `${etc}:/etc/prometheus:ro,z`,
+        APP_PROM_IMAGE,
+        "--config.file=/etc/prometheus/prometheus.yml",
+        "--storage.tsdb.path=/prometheus",
+      ],
+      { timeoutMs: 300_000 },
+    );
+    const caddy = `http://127.0.0.1:${hostPort(`${pod}-caddy`, 8080)}`;
+    const base = `http://127.0.0.1:${hostPort(`${pod}-prometheus`, 9090)}`;
+    const query = async (q: string) => {
+      const res = await fetch(`${base}/api/v1/query?query=${encodeURIComponent(q)}`);
+      return ((await res.json()) as { data: { result: { value: [number, string] }[] } }).data.result;
+    };
+    const deadline = Date.now() + 120_000;
+    let got: { value: [number, string] }[] = [];
+    let served: Response | null = null;
+    while (Date.now() < deadline) {
+      served ??= await fetch(`${caddy}/${METRICS_FILE}`).catch(() => null);
+      got = await query('commonair_status_page_updated_timestamp_seconds{job="status-page"}').catch(() => []);
+      if (got.length) break;
+      await sleep(2_000);
+    }
+    expect(served?.status).toBe(200);
+    expect(served?.headers.get("cache-control")).toBe("public, max-age=30");
+    expect(got[0]?.value[1]).toBe(String(updatedAt));
+    expect((await query('commonair_status_page_stale{job="status-page"}'))[0]?.value[1]).toBe("0");
+    expect((await query('up{job="status-page"}'))[0]?.value[1]).toBe("1");
   });
 });
 

@@ -32,6 +32,7 @@ import { afterAll, describe, expect, test } from "vite-plus/test";
 import { CAN_RUN_PROMTOOL, requirePromtool, runPromtool } from "./observability-promtool.ts";
 import {
   CERT_QUERY,
+  METRICS_FILE,
   TEXT,
   DAY_QUERY,
   PROBES_ID,
@@ -63,6 +64,7 @@ import {
   planAlerts,
   probeTargets,
   renderMarkdown,
+  renderMetrics,
   routeFrom,
   runFailed,
   runOnce,
@@ -907,6 +909,10 @@ describe("a run against the recorded Prometheus answers", () => {
     const targets = JSON.parse(readFileSync(join(data, "targets", "status.json"), "utf8")) as unknown[];
     expect(targets).toEqual(probeTargets(CFG));
 
+    // status.json's updatedAt again, for the app side's freshness alert.
+    expect(readFileSync(join(data, "site", METRICS_FILE), "utf8")).toBe(renderMetrics(NOW, false));
+    expect(renderMetrics(NOW, false)).toContain(`\ncommonair_status_page_updated_timestamp_seconds ${NOW}\n`);
+
     const state = JSON.parse(readFileSync(join(data, "state", "state.json"), "utf8")) as {
       components: Record<string, ComponentRecord>;
     };
@@ -1063,6 +1069,40 @@ describe("runs over time (built answers)", () => {
 });
 
 // ---------------------------------------------------------------- self-containment and units
+
+describe("metrics.txt (the app side's freshness probe)", () => {
+  test("two gauges in Prometheus's text format, whole seconds, nothing else", () => {
+    expect(renderMetrics(NOW + 0.9, false)).toBe(
+      [
+        "# HELP commonair_status_page_updated_timestamp_seconds When status.json was last rendered (its updatedAt).",
+        "# TYPE commonair_status_page_updated_timestamp_seconds gauge",
+        `commonair_status_page_updated_timestamp_seconds ${NOW}`,
+        "# HELP commonair_status_page_stale 1 while the renderer cannot read its probes (status.json stale).",
+        "# TYPE commonair_status_page_stale gauge",
+        "commonair_status_page_stale 0",
+        "",
+      ].join("\n"),
+    );
+    expect(renderMetrics(NOW, true)).toMatch(/\ncommonair_status_page_stale 1\n$/);
+  });
+
+  test("it matches status.json's updatedAt", async () => {
+    const data = setupData();
+    await runOnce({
+      cfg: CFG,
+      prom: fakeProm({ now: NOW, probes: allUp() }),
+      dataDir: data,
+      alertEnv: {},
+      transport: fakeTransport(),
+      log: quiet,
+    });
+    const json = JSON.parse(readFileSync(join(data, "site", "status.json"), "utf8")) as { updatedAt: string };
+    const m = /^commonair_status_page_updated_timestamp_seconds (\d+)$/m.exec(
+      readFileSync(join(data, "site", METRICS_FILE), "utf8"),
+    );
+    expect(Number(m?.[1])).toBe(Date.parse(json.updatedAt) / 1000);
+  });
+});
 
 describe("what the droplet runs", () => {
   test("render.ts imports only Bun's node: built-ins (cloud-init copies it alone)", () => {
@@ -1626,6 +1666,8 @@ describe("Prometheus on the monitoring droplet failing", () => {
     expect(htmlProblems(html)).toEqual([]);
     const json = JSON.parse(readFileSync(join(data, "site", "status.json"), "utf8")) as { stale: boolean };
     expect(json.stale).toBe(true);
+    // metrics.txt keeps the last good run's time and says stale.
+    expect(readFileSync(join(data, "site", METRICS_FILE), "utf8")).toBe(renderMetrics(NOW, true));
 
     await runFailed(deps, at + PROBES_SETTLE_SECONDS - 60);
     expect(t.mails).toEqual([]);

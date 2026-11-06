@@ -16,6 +16,16 @@ locals {
   # without an origin, and a failed check fails a tofu test run.
   status_enabled = var.enable_monitoring_droplet && var.monitoring_cloud_init && var.instance_origin != null
 
+  # The renderer's state lives on a volume of its own, so `tofu apply -replace` of the droplet
+  # keeps the 90-day history and the notes (status-page.md, "Re-provisioning"). DigitalOcean
+  # names the attached device after the volume.
+  status_volume      = local.status_enabled && var.monitoring_state_volume
+  status_volume_name = "${local.prefix}-status-state"
+  status_mount = local.status_volume ? {
+    device = "/dev/disk/by-id/scsi-0DO_Volume_${local.status_volume_name}"
+    path   = "/var/lib/commonair-status"
+  } : null
+
   # render.ts validates this (parseConfig); names and the domain come from here, never literals.
   status_config = jsonencode({
     siteName        = var.status_site_name
@@ -50,9 +60,31 @@ locals {
 
   monitoring_user_data = (
     local.status_enabled
-    ? templatefile("${path.module}/monitoring-cloud-init.yaml.tftpl", { updates = var.cloud_init_updates, files = local.status_files })
+    ? templatefile("${path.module}/monitoring-cloud-init.yaml.tftpl", { updates = var.cloud_init_updates, files = local.status_files, mount = local.status_mount })
     : (var.cloud_init_updates ? local.user_data : null)
   )
+}
+
+# Formatted once, at creation; every droplet that replaces the monitoring droplet mounts it. Not
+# prevent_destroy: losing it costs the page's history and notes, not data the instance needs.
+resource "digitalocean_volume" "status_state" {
+  count = local.status_volume ? 1 : 0
+
+  name                    = local.status_volume_name
+  region                  = var.monitoring_region
+  size                    = 1
+  initial_filesystem_type = "ext4"
+  description             = "CommonAir status page state: the 90-day history and the notes (docs/operators/status-page.md)"
+  tags                    = local.monitoring_tags
+
+  depends_on = [digitalocean_tag.this]
+
+  lifecycle {
+    precondition {
+      condition     = var.monitoring_region != null && var.monitoring_region != var.region
+      error_message = "enable_monitoring_droplet needs monitoring_region, set to a region other than region (or set enable_monitoring_droplet = false)."
+    }
+  }
 }
 
 resource "digitalocean_droplet" "monitoring" {
@@ -68,12 +100,15 @@ resource "digitalocean_droplet" "monitoring" {
   ssh_keys   = var.ssh_key_fingerprints
   tags       = local.monitoring_tags
   user_data  = local.monitoring_user_data
+  # Attached at creation, so cloud-init's mount finds the device on first boot.
+  volume_ids = digitalocean_volume.status_state[*].id
 
   depends_on = [digitalocean_tag.this]
 
   lifecycle {
     # A changed config means re-provisioning the droplet (`tofu apply -replace`): it holds no
-    # state but probe history and the page's daily figures (docs/operators/status-page.md).
+    # state but probe history, and the page's daily figures and notes unless they are on the
+    # status_state volume (docs/operators/status-page.md).
     ignore_changes = [ssh_keys, image, user_data]
 
     precondition {

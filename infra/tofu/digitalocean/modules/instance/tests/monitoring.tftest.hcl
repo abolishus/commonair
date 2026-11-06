@@ -101,6 +101,54 @@ run "status_cloud_init_installs_the_stack" {
     condition     = strcontains(local.monitoring_user_data, "package_upgrade: true")
     error_message = "cloud_init_updates still applies package updates on first boot."
   }
+
+  assert {
+    condition     = output.status_page_url == "https://status.stream.example.org"
+    error_message = "status_page_url is the status page's origin, for STATUS_PAGE_URL."
+  }
+}
+
+run "status_state_survives_the_droplet" {
+  command = plan
+
+  assert {
+    condition = (
+      length(digitalocean_volume.status_state) == 1 &&
+      digitalocean_volume.status_state[0].region == "fra1" &&
+      digitalocean_volume.status_state[0].size == 1 &&
+      digitalocean_volume.status_state[0].initial_filesystem_type == "ext4" &&
+      digitalocean_volume.status_state[0].name == "commonair-production-status-state"
+    )
+    error_message = "A 1 GiB ext4 volume in the monitoring region holds the status page's state."
+  }
+
+  assert {
+    condition     = strcontains(local.monitoring_user_data, "mounts:\n  - [\"/dev/disk/by-id/scsi-0DO_Volume_commonair-production-status-state\", \"/var/lib/commonair-status\", \"ext4\", \"defaults,nofail,discard,noatime\", \"0\", \"2\"]\n")
+    error_message = "Cloud-init mounts the volume at /var/lib/commonair-status, nofail."
+  }
+
+  assert {
+    condition     = strcontains(local.monitoring_user_data, "mounts:") && strcontains(local.monitoring_user_data, "runcmd:") && index(split("\n", local.monitoring_user_data), "mounts:") < index(split("\n", local.monitoring_user_data), "runcmd:")
+    error_message = "The mount comes before runcmd creates the directories."
+  }
+
+  assert {
+    condition     = can(yamldecode(local.monitoring_user_data))
+    error_message = "The user data is valid YAML with the mount."
+  }
+}
+
+run "status_state_volume_can_be_turned_off" {
+  command = plan
+
+  variables {
+    monitoring_state_volume = false
+  }
+
+  assert {
+    condition     = length(digitalocean_volume.status_state) == 0 && !strcontains(local.monitoring_user_data, "mounts:")
+    error_message = "monitoring_state_volume = false: no volume and no mount."
+  }
 }
 
 run "status_domain_override" {
@@ -127,6 +175,11 @@ run "no_origin_means_updates_only" {
   assert {
     condition     = digitalocean_droplet.monitoring[0].user_data != null && local.monitoring_user_data == local.user_data && length(local.status_files) == 0
     error_message = "Without instance_origin the monitoring droplet gets the package-updates user data only."
+  }
+
+  assert {
+    condition     = length(digitalocean_volume.status_state) == 0 && output.status_page_url == null
+    error_message = "Without the status stack there is no state volume and no status_page_url."
   }
 }
 

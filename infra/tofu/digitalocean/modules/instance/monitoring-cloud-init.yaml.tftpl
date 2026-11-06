@@ -13,6 +13,12 @@ package_upgrade: true
 %{ endif ~}
 packages:
   - podman
+%{ if mount != null ~}
+# The renderer's state volume (monitoring.tf status_state), mounted before runcmd creates the
+# directories in it. nofail: a missing volume leaves the directories on the root disk.
+mounts:
+  - ["${mount.device}", "${mount.path}", "ext4", "defaults,nofail,discard,noatime", "0", "2"]
+%{ endif ~}
 write_files:
 %{ for f in files ~}
   - path: ${f.path}

@@ -203,6 +203,13 @@ variable "monitoring_cloud_init" {
   nullable    = false
 }
 
+variable "monitoring_state_volume" {
+  description = "Keep the status page's state (/var/lib/commonair-status: the 90-day history, the notes, the maintenance file) on a 1 GiB block storage volume that outlives the monitoring droplet, so re-provisioning keeps it (about 0.10 USD a month). Off: replacing the droplet loses it."
+  type        = bool
+  default     = true
+  nullable    = false
+}
+
 variable "status_domain" {
   description = "Host name of the status page, served by the monitoring droplet with ACME. Defaults to status.<instance_origin's host>; point its A and AAAA records at monitoring_dns_records."
   type        = string
