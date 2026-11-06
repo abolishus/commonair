@@ -1,0 +1,328 @@
+<!--
+SPDX-FileCopyrightText: 2026 CommonAir contributors
+SPDX-License-Identifier: CC-BY-SA-4.0
+-->
+
+# CommonAir design overhaul: merged plan (2026-11-06)
+
+Merged from nine investigation reports (art-director, discovery, watch, growth-funnels,
+creator-studio, coop-trust, account-admin, responsive-a11y, market-research). They were made on
+staging (seeded, signed out and then as `streamer1`), from source, and from outside research. 66
+cross-team decisions are in `decisions-log.md`, all agreed by the teammates concerned. Nothing in
+the repo or on staging was changed.
+
+**Where it starts.** Since the 2026-11-03 review, the platform caught up on the Twitch basics:
+directory, categories, search, channel tabs, full player chrome, video and clip pages, and a
+studio control room. What it lacks now is the layer that **sells and retains**:
+
+- no brand;
+- a home page that is empty when few channels are live;
+- every signed-out action dead-ends at a bare `/signin`;
+- no page that pitches streaming here or joining the co-op;
+- no onboarding for new streamers;
+- no security settings;
+- no way to measure any of it.
+
+## Positioning (market-research, coop-trust)
+
+Lead with the money and the ownership, and be precise about both:
+
+- **What we can say:** 90% from the first sub, no audience gate to turn on support, card fees not
+  taken from the creator, the fee set by members' vote with a dated public history, and the
+  platform owned by its creators.
+- **What we can't say:** "highest share" (Kick pays 95% of a sub, after a status gate), "no
+  thresholds" (payouts have a $25 minimum, a 7-day hold and a monthly schedule), or any "share
+  of surplus" promise while the co-op runs a deficit.
+- **Competitor figures** on `/creators` carry a source and a "last checked" date.
+
+## Visual direction: "Open Broadcast" (art-director; spec in `art-direction-v1.md`)
+
+- Zinc greys and square corners (`--radius: 0`; 27 stray rounded corners removed). One
+  **marigold** brand colour (`--brand` oklch(0.83 0.155 84), #f7bd36, with zinc-950 text) on
+  **exactly one call to action per screen**. No streaming competitor uses golden yellow.
+- On creator pages (channel, video, clip) that one filled call to action is Follow, then Support,
+  in the **channel's accent colour**, never the brand colour. Never the brand on Sign in,
+  Report, settings, admin or destructive actions.
+- **Body text goes from 12 px to 14 px.** That is the largest single quality lift: 12 px is used
+  448 times today against 279 for 14 px. Page titles 24 px, section titles 18 px, tile titles
+  14 px, plus a display size for marketing pages.
+- **Five surface levels:** page, sunken, card, raised, overlay. Dark mode steps up with a lighter
+  fill and a thin ring, light mode with a shadow. Cards never sit inside cards.
+- **New tokens:** motion timings of 120, 200 and 320 ms, and page widths. The light theme is
+  generated once (today it is copied by hand three times). `--warning` moves to orange so it
+  never reads as the brand.
+- **Art system, all self-hosted inline SVG from tokens:** Arcs, SignalBars, EmptyArt,
+  MediaFallback and CategoryArt. It replaces the grey letter tiles, the bare error and empty
+  states, and the grey loading blocks.
+- **One shell for every area:** a full-width header with the nav below it, so the logo stops
+  moving between public, studio and admin pages.
+- **Breakpoints:** 640, 768, 1024, 1280 and 1536 px, with content capped at 1600 px. Boards in the
+  studio are 1600 wide, forms 1120 (768 inside), admin tables 1120.
+- **One focus style everywhere:** ring-2 with an offset. Nine form controls move off ring-1.
+  Status colours always come with an icon and a word. 10 px text only over video, on a scrim.
+
+## Fix first (bugs the team found; small, and some block the rest)
+
+| #   | Bug                                                                                                                                                                | Where                                                     | Found by                  |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------- | ------------------------- |
+| F1  | Any error from `/me`, a 429 included, counts as signed out, so signed-in users are sent to `/signin`. Only a 401 should; otherwise keep the page and show a Retry. | `apps/web/src/server/bootstrap.ts:80`                     | 5 agents                  |
+| F2  | A rate-limited server-side page load renders "Something went wrong" as a 500; shelves vanish silently.                                                             | SSR loaders                                               | watch, discovery          |
+| F3  | One failed request blanks the whole page. Make each section fail on its own with a Retry.                                                                          | `/coop`, `/coop/council`, `/coop/settings`, notifications | coop-trust, account-admin |
+| F4  | The transparency "Where every dollar went" bar adds creator earnings and co-op costs together, so it shows "Creators 27%" instead of 90%.                          | `transparency.tsx`                                        | coop-trust                |
+| F5  | The "two-factor enabled" email links to `/settings/security`, which returns 404.                                                                                   | live mail                                                 | account-admin             |
+| F6  | The dashboard says 16 verified viewers; analytics for the same broadcast says a peak of 4. Decide which is right.                                                  | studio                                                    | creator-studio            |
+| F7  | Home recommends the signed-in streamer's own channel to them.                                                                                                      | home, rail                                                | discovery                 |
+| F8  | streamer1's inbox has 58 unread "vote open" items created within a minute, some already closed, none naming its proposal.                                          | notifications                                             | account-admin             |
+| F9  | Cooking says "Nobody is live" while Cooking channels were live in the last hour. Tags and stream titles aren't searched (`lofi` returns nothing).                  | category, search                                          | discovery                 |
+| F10 | Reserve marketing usernames (`creators`, `fees`, `faq`, `join`, …) now, while there are no users. `/creators` currently says "This channel does not exist".        | signup                                                    | growth-funnels            |
+| F11 | Login always lands on `/dashboard`, viewers included. The page guards drop the return path.                                                                        | auth                                                      | growth-funnels            |
+
+## Batches
+
+Each batch is one unit of work, in this order. D1 is the foundation the rest build on. D2
+through D7 can then run side by side; overlapping files are noted.
+
+### D1. Design foundation (art-director's top 5) — M–L
+
+1. The `--brand` token, `Button variant="brand"`, and a lint or review rule for "one filled call to
+   action per screen".
+2. The type migration to a 14 px body, and the type scale.
+3. Surface, width and motion tokens; strip the stray radii; generate the light theme once.
+4. The art system components, replacing placeholders, empty and error states, and loading blocks.
+5. The card set:
+   - `StreamCard size="feature"` (62/38, stacks below 768);
+   - one `MediaCard kind="vod"|"clip"`;
+   - a `ChannelChip` row for offline channels;
+   - `CategoryArt` (3:4 portrait, 16:9 compact, and a muted state at 0 live with no zero badge).
+
+   Grids auto-fill at a minimum of 248 px.
+
+6. The shell:
+   - The header has a compact Sign up and Sign in at every width. Below 400 px the name collapses to the logo mark.
+   - A **bottom tab bar below 768 px on browsing pages only**: Home, Browse, Following or Co-op, You. It is hidden on watch, sign-in, studio, settings and admin pages, and while the keyboard is open.
+   - A three-column footer: Create, Co-op, Legal.
+7. One focus rule, larger tap targets (sliders at 24 px or more, icons at 40 to 44 px below 768).
+
+### D2. Acquisition and conversion (growth-funnels, coop-trust, market-research) — L, very high
+
+1. **`<AuthGatePrompt action>`:** one prompt for every signed-out action: follow, chat, support,
+   predict, clip and the 18+ gate.
+   - "Create account" is the main button and "Sign in" the second, both carrying `?redirect` and `?intent`.
+   - After verification the visitor lands back on the page with a one-tap confirm. It never follows or pays on its own.
+   - The intent list: none, follow, chat, support, predict, clip, watch, stream, import, join.
+2. **The sign-up page changes with intent** (its headline names the action that brought the
+   visitor). It says the account is free and what it gives. "Already a member?" becomes "Have an
+   account?".
+3. **Signed-out home hero:** one real live stream at feature size, a display headline, a "Create
+   free account" brand button, "Browse live" as a ghost button, a quiet "Stream on CommonAir" link,
+   and a co-op promise strip with one hard number.
+4. **`/creators`:** an honest fee calculator as the hero (CommonAir against Twitch, YouTube, Kick,
+   Patreon and Ko-fi, each figure sourced and dated). Under it: how it works, import from Twitch,
+   ownership, an FAQ, then a "claim your channel" field that pre-fills sign-up
+   (`intent=stream`).
+5. **Public membership pitch** on `/coop/membership`, plus a join band on `/coop`.
+   - It states the $5 refundable share, that a $3+/month subscription qualifies, and that streamers join automatically.
+   - `/coop/patronage` and `/coop/jury` get public explainers instead of a redirect.
+6. **In the support dialog:** an estimated breakdown of where the money goes, and "a $3+
+   subscription makes you a co-op member", ending in a "Welcome to the co-op" success state.
+7. **Public Terms, Privacy and Guidelines pages.** Today they open only inside the sign-up dialog.
+8. **First-party measurement with no tracking:**
+   - Most funnel steps are counted nightly from existing rows.
+   - Button views and clicks go to `POST /api/metrics/ui` as `{surface, action, step}`, checked against a closed list in the contract. The request carries no cookie and no user id, and counts are daily totals.
+   - A new `users.signup_intent` column and an `account.created` event.
+   - Results show on `/admin/growth`, with headline numbers on `/transparency`.
+9. Optional: a double opt-in interest list (creator interest, co-op news), sent through our own
+   mail.
+
+### D3. Content and discovery (discovery, watch) — L, very high
+
+1. **Home v2 that is full at 2 channels live and at 200:**
+   - the hero, or a compact live-status bar when you are live yourself;
+   - Live now and Continue watching;
+   - Catch up (videos) and Fresh clips;
+   - all categories, then a co-op band, then a start-streaming band.
+
+   "Recently live" shrinks to `ChannelChip` rows.
+
+2. **Category Overview tab** as the default: live, then recently live, then videos, then clips. No
+   dead ends.
+3. **Directory v2:** lead with what's live, with no "0 live" badges.
+4. **Search v2:** search tags and stream titles, rank live channels first, demote 0-follower
+   viewer accounts, and give empty queries a page.
+5. **The left rail:** a fuller signed-out version and steady loading rows, plus a new
+   **`/following`** page (Live now, then offline rows with alert controls).
+6. **Continue watching:** watch writes resume points to the browser
+   (`commonair.resume.v1`, 20 at most, videos only) and discovery reads them. Nothing goes to the
+   server.
+7. **A Clip button for viewers** in the live and video player bars. `clips.create` already exists
+   and nothing calls it. This is the biggest gain in new content for the effort.
+8. **The offline channel as a content page:**
+   - a Follow hero with the next stream;
+   - the latest video, clips and panels;
+   - the Live now shelf at the end.
+
+   Panels render markdown, not literal text.
+
+9. **Video and clip pages:** next-up and "More from" shelves that degrade properly. A clip offers
+   "Watch from this moment" in the full video. Sharing goes beyond copying the link. The embed
+   gets the channel name and "Watch on CommonAir". The giveaway verify page links back to its
+   channel.
+
+### D4. The watch page (watch, responsive-a11y) — M, very high
+
+1. **Phone and tablet layout below 1024 px:**
+   - a sticky 16:9 player and a compact header row;
+   - a "Chat | About" tab switch, with chat as the default while live;
+   - the chat box pinned to the bottom.
+
+   The site header scrolls away and there is no bottom bar on this page. Chat is `role=log` with an "N new messages" pill. Today chat starts about 1000 px down.
+
+2. Remove the "Quality and Data saver moved" note that covers the player.
+3. **The Following button gets a menu:** alert level, "email me if they move", and Unfollow
+   with a confirmation. After a viewer's **first follow only**, a one-time prompt asks whether
+   to be told when that channel goes live: Push, Email or Not now. That prompt also stands in for
+   the push-notification offer.
+4. Calm the chat column. Polls, predictions and giveaways stay a slim pinned strip.
+5. **Points:** the points chip becomes a popover explaining how points are earned. Redeeming
+   points is a contract request.
+6. **Owner shortcuts on their own channel:** stream manager and edit.
+7. **Trust marks:** a neutral council or member-owner badge on About and offline pages. The
+   viewer count says "Verified viewers", with a "How we count" link.
+
+### D5. Creator studio (creator-studio) — L, very high
+
+1. **A "Ready to go live" checklist on `/dashboard`.** The steps:
+   - `channel_profile`
+   - `stream_info`
+   - `stream_key`
+   - `encoder_connected` (a live check)
+   - `rehearsal` (optional)
+   - `first_live`
+   - `import_twitch`, when the sign-up intent was import
+
+   The page shows the WHIP URL, the recommended encoder settings and the OBS profile, which the API already returns. The step ids double as funnel steps.
+
+2. **A sticky live-status bar on every studio page.** The dashboard is reordered for live work:
+   the title editor and live numbers above the fold, and chat earlier on phones. Show Retry, not
+   "Reload the page".
+3. **A stream recap after each broadcast.** It also carries the one-time "you're a member-owner"
+   notice.
+4. **Overlays:** show all three links (alerts, chat, goals) with browser-source sizes.
+5. **Content library:** thumbnails and view counts instead of a column of forms.
+6. **Analytics:** daily charts as bars, and use `analytics.pnl`.
+7. **Revenue:** the tiles add up (add "Paid out"), no raw payment-processor ids, and the payout
+   card stops contradicting itself.
+8. **Studio navigation:**
+   - The groups become Home, Set up, Community, Content, Money, Grow, and Co-op & tools.
+   - **The account menu** becomes: Your channel, Creator studio, Following, Settings, Co-op membership, theme, Sign out. Relays moves into the studio.
+
+### D6. The co-op and trust (coop-trust) — M–L, high
+
+1. **Transparency as a selling point:**
+   - a numbers strip at the top;
+   - the fee promise with a dated comparison;
+   - two separate bars, one for the revenue split and one for co-op spending (this fixes F4);
+   - an honest note on the deficit;
+   - a short list of co-op commitments.
+
+   A money-flow diagram comes later.
+
+2. **Readable governance:**
+   - plain-language settings ("Creators keep 90%");
+   - proposal changes shown as "90% → 85%";
+   - form fields instead of typing JSON;
+   - proposal cards with deadline, author and result;
+   - vote results as bars with threshold marks;
+   - a timeline with the current step and next deadline;
+   - a neutral lock badge on protected decisions.
+3. **Council and board pages with people on them.** Governance lists become rows you can tap.
+4. **A co-op card in the studio.** Revenue reads the cut from `platform.cut`, never a hard-coded
+   number.
+
+### D7. Account, retention, admin and the installable app (account-admin, responsive-a11y) — L, high
+
+1. **The settings shell:**
+   - A left section nav at 1024 px and up, and a select menu below that.
+   - The groups: Account (Account, Security, Preferences), Activity (Notifications, Following, Subscriptions), Safety (Privacy & data, Appeals, Copyright), Apps.
+   - Bare `/settings` goes to `/settings/account`.
+   - One section-and-row pattern on every page, and a "danger zone" style for deletion.
+2. **`/settings/account`:** display name, avatar, and email sharing. **`/settings/security`:**
+   two-factor, passkeys, password, email change and sessions. The server already supports them.
+3. **Notifications:** a grid of every notification type against in-app, email and push. A full
+   `/inbox` page. An opt-in weekly "What you missed" email (unticked by default, with consent
+   recorded).
+4. **Account deletion:** a preview of what happens to subscriptions, payouts and the co-op share;
+   a "download first" step; the grace period stated; and a banner while deletion is pending.
+5. **The admin console:**
+   - an admin home with queue counts;
+   - one `QueueLayout` for every queue (a 384 px list beside a detail pane), with filters, counts, keyboard navigation, bulk actions and claiming;
+   - `/admin/audit` and `/admin/users/$username`.
+
+   The studio mod view reuses the queue layout in a compact form.
+
+6. **The installable app (PWA):** a fuller manifest (description, shortcuts, screenshots), an
+   offline page, and "Install CommonAir" always in the menus. It's offered in context only after a
+   second visit with 3+ minutes watched; that check stays in the browser.
+
+## Contract and schema requests (orchestrator)
+
+- **Discovery:**
+  - lists of videos and clips across all categories (`vods?sort=recent`, `clips?sort=recent`);
+  - a video count per category;
+  - `directory.recent?category=`;
+  - search over tags, stream titles, videos and clips, with live boost;
+  - the channel creation date.
+- **Watch:**
+  - `ChannelSchedule` (weekly slots plus one-offs, in the channel's time zone) and `nextStreamAt`;
+  - `Clip.vodId` and the offset into it;
+  - points redemption.
+- **Growth:**
+  - `POST /api/metrics/ui` and its closed list of names;
+  - two counter tables;
+  - `users.signup_intent`;
+  - an `account.created` event;
+  - `?intent` and `?username` on sign-up.
+- **Studio:**
+  - `stream.setupState` (or `me.creatorProgress`);
+  - per-video `views`;
+  - a "your video is ready" notification;
+  - the schedule (shared with watch).
+- **Co-op:**
+  - an optional treasurer note on each transparency month;
+  - the title of the proposal that last changed each setting.
+- **Account and admin:**
+  - auth routes for two-factor, passkeys, sessions, and password and email change;
+  - better-auth `changeEmail`;
+  - wider notification preference types (governance, payout, weekly);
+  - a `types` filter on notifications;
+  - `me.deletion.preview`;
+  - `admin.overview` counts;
+  - `moderation.assign` and an assignee field;
+  - an audited admin email reveal;
+  - a viewer avatar upload.
+
+## Open decisions (yours)
+
+1. **Approve the direction:** marigold `--brand`, square corners, 14 px body text. These touch
+   every screen.
+2. **The viewer count (F6):** which number is right, 16 on the dashboard or 4 in analytics?
+3. **The optional interest list (D2.9):** build now, or after `/creators` ships?
+4. **Points redemption (D4.5):** is it in scope at all?
+
+## What this pass did not cover
+
+- **Light theme live:** once signed in, the account's saved dark theme overrode the emulation.
+  It was checked on its colour values only.
+- **768 and 320 px:** spot-checked on the signed-in pages.
+- **The admin consoles:** reviewed from source only. `streamer1` is not an admin.
+- **Contrast sign-off:** responsive-a11y did not sign off contrast for the new brand colours or
+  the 14 px body text. That check belongs at the start of D1.
+- **Staging under load:** nine agents on one IP tripped the rate limit, which is how F1 to F3
+  surfaced. Some screenshots show error states for that reason.
+
+## Files (this folder)
+
+- Reports: `art-director.md`, `discovery.md`, `watch.md`, `growth-funnels.md`, `creator-studio.md`,
+  `coop-trust.md`, `account-admin.md`, `responsive-a11y.md`, `market-research.md`. Each has full
+  findings, ASCII wireframes, the components it uses, copy direction, and its references.
+- `art-direction-v1.md` is the visual spec. `decisions-log.md` holds all 66 cross-team agreements.
