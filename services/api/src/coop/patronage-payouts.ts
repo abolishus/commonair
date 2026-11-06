@@ -37,6 +37,7 @@ import { Valkey } from "iovalkey";
 import { B8_JOBS, PatronagePayoutJob, QUEUES, patronagePayoutJobId } from "@commonair/contracts/internal";
 import { type Executor, schema, uuidv7 } from "@commonair/db";
 import {
+  distributePatronageIfPaid,
   owedCents,
   patronagePayout,
   patronagePayoutReversed,
@@ -69,6 +70,8 @@ export const PAYOUT_ORPHANED = "patronage.payout_orphaned";
 /** The worker's marker on a Connect row whose transfer may or may not exist at Stripe. */
 export const PAYOUT_OUTCOME_UNKNOWN = "patronage.payout_outcome_unknown";
 export const PAYOUT_UNSENT = "patronage.payout_unsent";
+/** The period flipped to `distributed` when its last payout settled (system; follow-ups, unit money). */
+export const PERIOD_DISTRIBUTED = "patronage.distribute";
 const PAID_PERIODS = ["approved", "distributed"] as const;
 
 /**
@@ -328,6 +331,50 @@ async function recordPaid(
   return paid;
 }
 
+/**
+ * Lock the period of a payout row before the row itself: the order `pay` uses (period, then the
+ * allocation its rows lock), so settling a row and the automatic `distributed` flip after it never
+ * deadlock against a pay. Returns the row's period id, or null when there is no such row.
+ */
+async function lockPeriodOfPayout(tx: Executor, payoutId: string): Promise<string | null> {
+  const [r] = await tx
+    .select({ periodId: patronagePayouts.periodId })
+    .from(patronagePayouts)
+    .where(eq(patronagePayouts.id, payoutId));
+  if (!r) return null;
+  await tx
+    .select({ id: patronagePeriods.id })
+    .from(patronagePeriods)
+    .where(eq(patronagePeriods.id, r.periodId))
+    .for("update");
+  return r.periodId;
+}
+
+/**
+ * After a row was paid (period locked by the caller): the period becomes `distributed` when nothing
+ * is owed any more, with the `coop.patronage.update` event and a system audit row. Idempotent.
+ */
+export async function distributeIfPaid(tx: Executor, periodId: string, now: Date): Promise<boolean> {
+  const d = await distributePatronageIfPaid(tx, periodId);
+  if (!d) return false;
+  await audit(tx, {
+    actorType: "system",
+    actorId: null,
+    action: PERIOD_DISTRIBUTED,
+    subjectType: "patronage_period",
+    subjectId: periodId,
+    details: { periodId, totalCents: d.totalCents, members: d.members },
+  });
+  await emit(
+    tx,
+    "coop.patronage.update",
+    null,
+    { period_id: periodId, status: "distributed", total_cents: d.totalCents, members: d.members },
+    now,
+  );
+  return true;
+}
+
 // ── Views ───────────────────────────────────────────────────────────────────────────────────
 
 type Person = { id: string; username: string; displayName: string };
@@ -421,6 +468,7 @@ export async function markPatronagePayoutPaid(
   if (paidAt.getTime() > now.getTime()) throw badRequest("The payout cannot be paid in the future");
   const paid = await withCoopErrors(() =>
     deps.db.transaction(async (tx) => {
+      if (!(await lockPeriodOfPayout(tx, input.payoutId))) throw notFound("Payout not found");
       const [row] = await tx
         .select()
         .from(patronagePayouts)
@@ -444,6 +492,7 @@ export async function markPatronagePayoutPaid(
         throw precondition("account_deleted", "This member's account was deleted; it stays owed");
       const done = await recordPaid(tx, row, { reference, paidAt, now, actor: { type: STAFF, id: input.actorId } });
       if (!done) throw conflict("This payout changed; reload and try again");
+      await distributeIfPaid(tx, done.periodId, now);
       return done;
     }),
   );
@@ -534,15 +583,21 @@ export async function patronageTransferEvent(
   a: TransferAction,
   now: Date,
 ): Promise<AppliedAction | null> {
-  const byRef = await tx
-    .select()
+  // Found unlocked, then the period locked before the row (`lockPeriodOfPayout`).
+  const [byRef] = await tx
+    .select({ id: patronagePayouts.id })
     .from(patronagePayouts)
-    .where(and(eq(patronagePayouts.provider, "stripe"), eq(patronagePayouts.providerRef, a.transferRef)))
-    .for("update");
-  let row = byRef[0];
-  if (!row && a.transferId && UUID.test(a.transferId)) {
-    [row] = await tx.select().from(patronagePayouts).where(eq(patronagePayouts.id, a.transferId)).for("update");
+    .where(and(eq(patronagePayouts.provider, "stripe"), eq(patronagePayouts.providerRef, a.transferRef)));
+  let found = byRef?.id;
+  if (!found && a.transferId && UUID.test(a.transferId)) {
+    const [byId] = await tx
+      .select({ id: patronagePayouts.id })
+      .from(patronagePayouts)
+      .where(eq(patronagePayouts.id, a.transferId));
+    found = byId?.id;
   }
+  if (!found || !(await lockPeriodOfPayout(tx, found))) return null;
+  let [row] = await tx.select().from(patronagePayouts).where(eq(patronagePayouts.id, found)).for("update");
   if (!row) return null;
   if (
     row.provider !== "stripe" ||
@@ -587,12 +642,14 @@ export async function patronageTransferEvent(
       settled = true;
     }
   }
+
   const booked = (await patronageReversedCents(tx, [row.id])).get(row.id) ?? 0;
   const cumulative = Math.min(a.amountReversed, row.amountCents);
   if (cumulative > booked) {
     await recordReversal(tx, row, { cumulativeCents: cumulative, bookedCents: booked, now });
     return noop("patronage_payout_reversed");
   }
+  if (settled) await distributeIfPaid(tx, row.periodId, now);
   return noop(settled ? "patronage_payout_paid" : "duplicate");
 }
 

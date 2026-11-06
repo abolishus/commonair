@@ -226,6 +226,36 @@ describe("the patronage-payout job", () => {
     await expectLedgerBalanced();
   });
 
+  test("the last payout settled flips its period distributed, once, with its event and audit", async () => {
+    const m = await member();
+    const r = await approvedWithRow(m.id, 321);
+    const { adapter } = fakeAdapter(ok);
+    await runPatronagePayout(ctx(), { adapter }, r, NOT_LAST);
+    const [p] = await db().select().from(schema.patronagePeriods).where(eq(schema.patronagePeriods.id, r.periodId));
+    expect(p?.status).toBe("distributed");
+    const flips = await db()
+      .select()
+      .from(schema.auditLog)
+      .where(and(eq(schema.auditLog.action, "patronage.distribute"), eq(schema.auditLog.subjectId, r.periodId)));
+    expect(flips).toHaveLength(1);
+    expect(flips[0]?.details).toEqual({ periodId: r.periodId, totalCents: 321, members: 1 });
+    const events = await db().select().from(schema.events).where(eq(schema.events.type, "coop.patronage.update"));
+    expect(
+      events.filter((e) => (e.payload as Record<string, unknown>).period_id === r.periodId).map((e) => e.payload),
+    ).toEqual([{ period_id: r.periodId, status: "distributed", total_cents: 321, members: 1 }]);
+  });
+
+  test("a refused payout leaves its period approved (the manual follow-up is still owed)", async () => {
+    const m = await member();
+    const r = await approvedWithRow(m.id, 222);
+    const { adapter } = fakeAdapter(() => {
+      throw new StripeRequestError("no", 400, "account_invalid", null);
+    });
+    await runPatronagePayout(ctx(), { adapter }, r, NOT_LAST);
+    const [p] = await db().select().from(schema.patronagePeriods).where(eq(schema.patronagePeriods.id, r.periodId));
+    expect(p?.status).toBe("approved");
+  });
+
   test("a definite refusal (injected) fails the row and opens a manual one; nothing is posted", async () => {
     const m = await member();
     const r = await approvedWithRow(m.id, 800);

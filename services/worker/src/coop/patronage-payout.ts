@@ -32,6 +32,7 @@ import { type Executor, schema, uuidv7 } from "@commonair/db";
 import { emitEvent, systemAudit } from "@commonair/governance";
 import {
   PAYOUT_TRANSFER_KEY_WINDOW_MS,
+  distributePatronageIfPaid,
   owedCents,
   patronagePayout,
   patronageReversedCents,
@@ -42,7 +43,7 @@ import {
 import { type PaymentAdapter, StripeRequestError } from "@commonair/payments";
 import type { WorkerContext } from "../context.ts";
 
-const { patronagePayouts, patronageAllocations, payoutAccounts, users, auditLog } = schema;
+const { patronagePayouts, patronagePeriods, patronageAllocations, payoutAccounts, users, auditLog } = schema;
 type PayoutRow = typeof patronagePayouts.$inferSelect;
 
 export const PAYOUT_SENDING = "patronage.payout_sending";
@@ -51,6 +52,8 @@ export const PAYOUT_FAILED = "patronage.payout_failed";
 export const PAYOUT_TO_MANUAL = "patronage.payout_manual";
 export const PAYOUT_PAID = "patronage.payout_paid";
 export const PAYOUT_OPENED = "patronage.payout_open";
+/** The API's marker too (`coop/patronage-payouts.ts` PERIOD_DISTRIBUTED). */
+export const PERIOD_DISTRIBUTED = "patronage.distribute";
 
 export interface PatronagePayoutDeps {
   adapter: Pick<PaymentAdapter, "provider" | "transfer">;
@@ -202,9 +205,18 @@ export async function runPatronagePayout(
     throw err;
   }
   await ctx.db.transaction(async (tx) => {
+    // The period before the row, as the API's pay and webhook lock them (no deadlock with a pay).
+    await tx
+      .select({ id: patronagePeriods.id })
+      .from(patronagePeriods)
+      .where(eq(patronagePeriods.id, row.periodId))
+      .for("update");
     const [locked] = await tx.select().from(patronagePayouts).where(eq(patronagePayouts.id, row.id)).for("update");
     // The webhook may have recorded it first.
-    if (locked?.status === "pending") await recordPaid(tx, locked, providerRef, ctx.now());
+    if (locked?.status !== "pending") return;
+    const now = ctx.now();
+    await recordPaid(tx, locked, providerRef, now);
+    await distributeIfPaid(tx, locked.periodId, now);
   });
   ctx.logger.info("patronage payout sent", { payoutId: row.id });
   return { outcome: "paid", payoutId: row.id };
@@ -312,6 +324,33 @@ async function recordPaid(tx: Executor, row: PayoutRow, providerRef: string, now
     },
     now,
   );
+}
+
+/**
+ * The period becomes `distributed` once nothing is owed (the caller holds the period lock and just
+ * paid a row), with the `coop.patronage.update` event and a system audit row. Idempotent.
+ */
+export async function distributeIfPaid(tx: Executor, periodId: string, now: Date): Promise<boolean> {
+  const d = await distributePatronageIfPaid(tx, periodId);
+  if (!d) return false;
+  await systemAudit(
+    tx,
+    {
+      action: PERIOD_DISTRIBUTED,
+      subjectType: "patronage_period",
+      subjectId: periodId,
+      reason: "",
+      details: { periodId, totalCents: d.totalCents, members: d.members },
+    },
+    now,
+  );
+  await emitEvent(
+    tx,
+    "coop.patronage.update",
+    { period_id: periodId, status: "distributed", total_cents: d.totalCents, members: d.members },
+    now,
+  );
+  return true;
 }
 
 /** A new `manual` row for what the member is still owed for the period, unless one is open. */

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { describe, expect, test } from "vite-plus/test";
-import { computePayoutBatch, owedCents, reservableAt } from "../src/payouts.ts";
+import { computePayoutBatch, owedCents, patronageFullyPaid, reservableAt } from "../src/payouts.ts";
 
 describe("computePayoutBatch", () => {
   test("pays at or above the minimum, carries over the rest, in user-id order", () => {
@@ -132,5 +132,47 @@ describe("owedCents (patronage payouts)", () => {
     expect(owedCents(10, [{ status: "paid", amountCents: 20, reversedCents: 0 }])).toBe(0);
     expect(owedCents(100, [{ status: "reversed", amountCents: 50, reversedCents: 80 }])).toBe(100);
     expect(owedCents(0, [])).toBe(0);
+  });
+});
+
+describe("patronageFullyPaid (the automatic distributed flip)", () => {
+  const A = "01890000-0000-7000-8000-00000000000a";
+  const B = "01890000-0000-7000-8000-00000000000b";
+  type St = "pending" | "paid" | "failed" | "reversed";
+  const row = (userId: string, status: St, amountCents: number, reversedCents = 0) => ({
+    userId,
+    status,
+    amountCents,
+    reversedCents,
+  });
+
+  test("every member with a positive allocation paid in full, nothing pending", () => {
+    const alloc = [
+      { userId: A, amountCents: 700 },
+      { userId: B, amountCents: 300 },
+    ];
+    expect(patronageFullyPaid(alloc, [row(A, "paid", 700), row(B, "paid", 300)])).toBe(true);
+    expect(patronageFullyPaid(alloc, [row(A, "paid", 700), row(B, "pending", 300)])).toBe(false);
+    expect(patronageFullyPaid(alloc, [row(A, "paid", 700)])).toBe(false);
+    // A failed row is followed by a new one: still owed until that is paid.
+    expect(patronageFullyPaid(alloc, [row(A, "paid", 700), row(B, "failed", 300)])).toBe(false);
+    expect(patronageFullyPaid(alloc, [row(A, "paid", 700), row(B, "failed", 300), row(B, "paid", 300)])).toBe(true);
+  });
+
+  test("a reversal owes again until its follow-up is paid; partial reversals count what came back", () => {
+    const alloc = [{ userId: A, amountCents: 1000 }];
+    expect(patronageFullyPaid(alloc, [row(A, "reversed", 1000, 1000)])).toBe(false);
+    expect(patronageFullyPaid(alloc, [row(A, "reversed", 1000, 400), row(A, "paid", 400)])).toBe(true);
+    expect(patronageFullyPaid(alloc, [row(A, "reversed", 1000, 400), row(A, "paid", 300)])).toBe(false);
+  });
+
+  test("zero allocations need nothing; a period that allocated nothing is never flipped", () => {
+    const mixed = [
+      { userId: A, amountCents: 0 },
+      { userId: B, amountCents: 5 },
+    ];
+    expect(patronageFullyPaid(mixed, [row(B, "paid", 5)])).toBe(true);
+    expect(patronageFullyPaid([], [])).toBe(false);
+    expect(patronageFullyPaid([{ userId: A, amountCents: 0 }], [])).toBe(false);
   });
 });

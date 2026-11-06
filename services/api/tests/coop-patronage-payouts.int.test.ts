@@ -618,5 +618,77 @@ describe("patronage payouts", () => {
       expect(await owed(m1.userId)).toBe(265);
       await expectLedgerBalanced();
     });
+
+    test("the Connect settle flipped its period distributed; the later reversal left it so", async () => {
+      const [p] = await owner()
+        .select()
+        .from(schema.patronagePeriods)
+        .where(eq(schema.patronagePeriods.id, reversedPeriod));
+      expect(p?.status).toBe("distributed");
+      const flips = await auditOf("patronage.distribute", reversedPeriod);
+      expect(flips).toHaveLength(1);
+      expect(flips[0]).toMatchObject({ actorType: "system", actorId: null });
+    });
+  });
+
+  describe("the automatic distributed flip", () => {
+    const periodStatus = async (id: string) =>
+      (await owner().select().from(schema.patronagePeriods).where(eq(schema.patronagePeriods.id, id)))[0]?.status;
+
+    test("the period becomes distributed when its last payout is paid, once, with its event and audit", async () => {
+      const id = await approvedPeriod(owner(), [
+        { userId: m1.userId, cents: 110 },
+        { userId: m2.userId, cents: 220 },
+        { userId: outsider.userId, cents: 0 },
+      ]);
+      expect((await pay(t1, id)).body.state).toBe("awaiting_second_approver");
+      expect((await pay(t2, id)).body).toEqual({ state: "approved", created: 2 });
+      const rows = (await list(t1, id)).body;
+      const [first, second] = rows;
+      if (!first || !second) throw new Error("no rows");
+      await markPatronagePayoutPaid(api.deps, {
+        payoutId: first.id,
+        reference: "BANK-D1",
+        paidAt: new Date().toISOString(),
+        actorId: t1.userId,
+      });
+      expect(await periodStatus(id)).toBe("approved");
+      expect(await auditOf("patronage.distribute", id)).toHaveLength(0);
+      await markPatronagePayoutPaid(api.deps, {
+        payoutId: second.id,
+        reference: "BANK-D2",
+        paidAt: new Date().toISOString(),
+        actorId: t2.userId,
+      });
+      expect(await periodStatus(id)).toBe("distributed");
+      const [flip] = await auditOf("patronage.distribute", id);
+      expect(flip?.details).toEqual({ periodId: id, totalCents: 330, members: 2 });
+      const events = await owner().select().from(schema.events).where(eq(schema.events.type, "coop.patronage.update"));
+      const mine = events.filter((e) => (e.payload as Record<string, unknown>).period_id === id);
+      expect(mine.map((e) => e.payload)).toEqual([
+        { period_id: id, status: "distributed", total_cents: 330, members: 2 },
+      ]);
+      // A distributed period is still listed and paid out (a repeat changes nothing).
+      expect((await pay(t1, id)).body).toEqual({ state: "approved", created: 0 });
+      expect(await auditOf("patronage.distribute", id)).toHaveLength(1);
+    });
+
+    test("a member still owed (a deleted account's pending row) keeps the period approved", async () => {
+      const id = await approvedPeriod(owner(), [
+        { userId: m1.userId, cents: 40 },
+        { userId: gone.userId, cents: 10 },
+      ]);
+      await pay(t1, id);
+      await pay(t2, id);
+      const row = (await list(t1, id)).body.find((r) => r.user.id === m1.userId);
+      if (!row) throw new Error("no row");
+      await markPatronagePayoutPaid(api.deps, {
+        payoutId: row.id,
+        reference: "BANK-D3",
+        paidAt: new Date().toISOString(),
+        actorId: t1.userId,
+      });
+      expect(await periodStatus(id)).toBe("approved");
+    });
   });
 });

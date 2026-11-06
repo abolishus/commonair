@@ -1250,3 +1250,74 @@ export async function patronageReversedCents(tx: Executor, payoutIds: readonly s
     .groupBy(payoutId);
   return new Map(rows.map((r) => [r.payoutId, Number(r.cents)]));
 }
+
+/**
+ * Pure: whether a period is fully paid out (follow-ups, unit money; ADR 0020 decision (f)): every
+ * member with a positive allocation has no pending row and is owed nothing more (`owedCents`). A
+ * period that allocated nothing is never "paid out" here (it has nothing to distribute).
+ */
+export function patronageFullyPaid(
+  allocations: readonly { userId: string; amountCents: number }[],
+  rows: readonly { userId: string; status: PatronagePayoutStatus; amountCents: number; reversedCents: number }[],
+): boolean {
+  const owed = allocations.filter((a) => a.amountCents > 0);
+  if (owed.length === 0) return false;
+  return owed.every((a) => {
+    const mine = rows.filter((r) => r.userId === a.userId);
+    return !mine.some((r) => r.status === "pending") && owedCents(a.amountCents, mine) === 0;
+  });
+}
+
+export interface PatronageDistributed {
+  periodId: string;
+  currency: string;
+  totalCents: number;
+  members: number;
+}
+
+/**
+ * Flip an `approved` period to `distributed` once its last payout settled (decision (f) left this
+ * manual; it is automatic now). Run in the transaction that marked the row paid, after it did. The
+ * caller holds the period's row lock, taken before the payout row's (the order `coop.patronage.pay`
+ * uses), so two rows settling at once serialize and the flip happens once. Returns the period's
+ * totals when it flipped now, for the caller's audit row and `coop.patronage.update` event; null
+ * when it is not approved, already distributed or still owes someone. 0021's trigger allows only
+ * approved -> distributed. A later Connect reversal leaves the period distributed: its follow-up
+ * row is still paid out (0049 accepts rows for distributed periods).
+ */
+export async function distributePatronageIfPaid(tx: Executor, periodId: string): Promise<PatronageDistributed | null> {
+  const [period] = await tx
+    .select({ status: schema.patronagePeriods.status, currency: schema.patronagePeriods.currency })
+    .from(schema.patronagePeriods)
+    .where(eq(schema.patronagePeriods.id, periodId));
+  if (!period || period.status !== "approved") return null;
+  const allocations = await tx
+    .select({ userId: schema.patronageAllocations.userId, amountCents: schema.patronageAllocations.amountCents })
+    .from(schema.patronageAllocations)
+    .where(eq(schema.patronageAllocations.periodId, periodId));
+  const rows = await tx.select().from(schema.patronagePayouts).where(eq(schema.patronagePayouts.periodId, periodId));
+  const reversed = await patronageReversedCents(
+    tx,
+    rows.filter((r) => r.status === "reversed").map((r) => r.id),
+  );
+  const view = rows.map((r) => ({
+    userId: r.userId,
+    status: r.status,
+    amountCents: r.amountCents,
+    reversedCents: reversed.get(r.id) ?? 0,
+  }));
+  if (!patronageFullyPaid(allocations, view)) return null;
+  const [flipped] = await tx
+    .update(schema.patronagePeriods)
+    .set({ status: "distributed" })
+    .where(and(eq(schema.patronagePeriods.id, periodId), eq(schema.patronagePeriods.status, "approved")))
+    .returning({ id: schema.patronagePeriods.id });
+  if (!flipped) return null;
+  const positive = allocations.filter((a) => a.amountCents > 0);
+  return {
+    periodId,
+    currency: period.currency,
+    totalCents: positive.reduce((s, a) => s + a.amountCents, 0),
+    members: positive.length,
+  };
+}
