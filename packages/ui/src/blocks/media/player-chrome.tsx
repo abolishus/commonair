@@ -5,6 +5,7 @@ import * as React from "react";
 import { Cancel01Icon } from "@hugeicons/core-free-icons";
 import { AspectRatio } from "@commonair/ui/components/aspect-ratio";
 import { Slider } from "@commonair/ui/components/slider";
+import { PortalContainerProvider, usePortalContainer } from "@commonair/ui/lib/portal-container";
 import { cn } from "@commonair/ui/lib/utils";
 import { IconButton, LiveBadge, OverlayBadge, ViewerCount, type LiveBadgeProps } from "@commonair/ui";
 
@@ -280,6 +281,13 @@ export interface PlayerChromeProps extends React.ComponentProps<"section"> {
   controlsProps?: React.ComponentProps<"div"> & DataAttributes;
   volume?: PlayerVolumeProps;
   settings?: PlayerSettingsProps;
+  /**
+   * The player's popup layer (`data-slot="player-portal"`): an absolutely positioned, click-through
+   * layer over the player. While fullscreen, popups inside the chrome portal into it; pass it to a
+   * `PortalContainerProvider` around the chrome's siblings (dialogs) for the same. It sits out of
+   * the fullscreen grid's flow, so a mounted popup never takes a grid row from the picture.
+   */
+  portalRef?: (layer: HTMLDivElement | null) => void;
 }
 
 export function PlayerChrome({
@@ -299,6 +307,7 @@ export function PlayerChrome({
   controlsProps,
   volume,
   settings,
+  portalRef,
   className,
   ref,
   ...props
@@ -313,11 +322,22 @@ export function PlayerChrome({
     [ref],
   );
   const fullscreen = useIsFullscreen(section);
+  const [layer, setLayer] = React.useState<HTMLDivElement | null>(null);
+  const setLayerRef = React.useCallback(
+    (el: HTMLDivElement | null) => {
+      setLayer(el);
+      portalRef?.(el);
+    },
+    [portalRef],
+  );
+  // `<body>` is not painted while the player is fullscreen: popups go to the layer then.
+  const inherited = usePortalContainer() ?? null;
+  const portalContainer = fullscreen ? layer : inherited;
   const controlled = controlsVisible !== undefined;
   const hasEnd = settings !== undefined || controlsEnd !== undefined;
   const settingsState = useSettingsState(settings);
   return (
-    <>
+    <PortalContainerProvider container={portalContainer}>
       <section
         ref={setRef}
         data-slot="player-chrome"
@@ -374,8 +394,14 @@ export function PlayerChrome({
           </div>
           {settings && <SettingsPanel s={settings} state={settingsState} />}
         </AspectRatio>
+        {/* Absolute, so out of the fullscreen grid's flow; click-through except for the popups. */}
+        <div
+          ref={setLayerRef}
+          data-slot="player-portal"
+          className="pointer-events-none absolute inset-0 z-50 *:pointer-events-auto"
+        />
       </section>
-    </>
+    </PortalContainerProvider>
   );
 }
 

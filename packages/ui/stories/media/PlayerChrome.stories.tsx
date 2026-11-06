@@ -20,6 +20,9 @@ import {
   type PlayerChromeProps,
 } from "../../src/blocks/media/player-chrome.tsx";
 import { Button } from "../../src/components/button.tsx";
+import { Dialog, DialogContent, DialogTitle } from "../../src/components/dialog.tsx";
+import { Popover, PopoverContent, PopoverTrigger } from "../../src/components/popover.tsx";
+import { PortalContainerProvider } from "../../src/lib/portal-container.tsx";
 import { OverlayBadge } from "../../src/primitives/overlay-badge.tsx";
 
 /** The settings menu's content, as the web app fills it (quality, data saver). */
@@ -184,3 +187,57 @@ export const Offline: Story = {
     controlsEnd: undefined,
   },
 };
+
+/**
+ * Popups in fullscreen, wired like the web players: press Fullscreen, then hover a control
+ * (tooltip), open Captions style (popover) and Shortcuts (dialog). They portal into the popup
+ * layer, out of the fullscreen grid's flow, so the picture keeps its full size with any open.
+ */
+function FullscreenPopupsDemo(args: PlayerChromeProps) {
+  const [root, setRoot] = React.useState<HTMLElement | null>(null);
+  const [layer, setLayer] = React.useState<HTMLDivElement | null>(null);
+  const [fullscreen, setFullscreen] = React.useState(false);
+  const [dialog, setDialog] = React.useState(false);
+  React.useEffect(() => {
+    const sync = () => setFullscreen(root !== null && document.fullscreenElement === root);
+    document.addEventListener("fullscreenchange", sync);
+    return () => document.removeEventListener("fullscreenchange", sync);
+  }, [root]);
+  return (
+    <PortalContainerProvider container={fullscreen ? layer : null}>
+      <PlayerChrome
+        {...args}
+        ref={setRoot}
+        portalRef={setLayer}
+        controls={
+          <>
+            <PlayerControl label="Pause" icon={PauseIcon} shortcut="K" />
+            <Popover>
+              <PopoverTrigger render={<Button size="sm" variant="ghost" className="text-overlay-foreground" />}>
+                Captions style
+              </PopoverTrigger>
+              <PopoverContent>Size, colour and background.</PopoverContent>
+            </Popover>
+            <Button size="sm" variant="ghost" className="text-overlay-foreground" onClick={() => setDialog(true)}>
+              Shortcuts
+            </Button>
+          </>
+        }
+        controlsEnd={
+          <PlayerControl
+            label="Fullscreen"
+            icon={FullScreenIcon}
+            onClick={() => void (document.fullscreenElement ? document.exitFullscreen() : root?.requestFullscreen())}
+          />
+        }
+      />
+      <Dialog open={dialog} onOpenChange={setDialog}>
+        <DialogContent>
+          <DialogTitle>Keyboard shortcuts</DialogTitle>
+        </DialogContent>
+      </Dialog>
+    </PortalContainerProvider>
+  );
+}
+
+export const FullscreenPopups: Story = { render: (args) => <FullscreenPopupsDemo {...args} /> };

@@ -298,6 +298,8 @@ export function VodPlayer({
   // Data saver applies to live streams only (ADR 0018 decision 7): say so where it would be.
   // False on the server and while hydrating, so the first client render matches the server's.
   const dataSaverOn = React.useSyncExternalStore(subscribeNothing, readDataSaverOn, serverDataSaverOff);
+  // In fullscreen the player's popups (and this dialog) portal into its popup layer, not <body>.
+  const [popupLayer, setPopupLayer] = React.useState<HTMLDivElement | null>(null);
   // Stays in fullscreen: the dialog portals into the player (PortalContainerProvider below).
   const openShortcuts = () => {
     settings.setOpen(false);
@@ -389,9 +391,10 @@ export function VodPlayer({
   );
 
   return (
-    <PortalContainerProvider container={modes.fullscreen.element}>
+    <PortalContainerProvider container={modes.fullscreen.element ? popupLayer : null}>
       <PlayerChrome
         ref={containerRef}
+        portalRef={setPopupLayer}
         data-testid="vod-player"
         data-playhead={playhead}
         data-state={state}

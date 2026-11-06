@@ -4,8 +4,9 @@
 
 /**
  * Popups in fullscreen: `<body>` is not painted while the player is the fullscreen element, so the
- * captions style menu, the `?` shortcuts dialog and the tooltips portal into the player root then
- * (and to `<body>` otherwise). `?` no longer leaves fullscreen, and keys pressed inside a popup
+ * captions style menu, the `?` shortcuts dialog and the tooltips portal into the player's popup
+ * layer then (`data-slot="player-portal"`, out of the fullscreen grid's flow), and to `<body>`
+ * otherwise. `?` no longer leaves fullscreen, and keys pressed inside a popup
  * portalled into the player are the popup's, not shortcuts. `document.fullscreenElement` is stubbed.
  */
 import { LocaleProvider, TooltipProvider } from "@commonair/ui";
@@ -104,6 +105,12 @@ async function playingLive() {
   return c;
 }
 
+function layerOf(root: HTMLElement): Element {
+  const layer = root.querySelector(':scope > [data-slot="player-portal"]');
+  if (!layer) throw new Error("no popup layer");
+  return layer;
+}
+
 /** The browser made `el` the fullscreen element. */
 async function enterFullscreen(el: HTMLElement) {
   define(document, "fullscreenElement", el);
@@ -118,7 +125,7 @@ describe("the live player in fullscreen", () => {
     await enterFullscreen(root);
     fireEvent.keyDown(document.body, { key: "?", shiftKey: true });
     const dialog = await screen.findByTestId("player-shortcuts-dialog");
-    expect(root.contains(dialog)).toBe(true);
+    expect(layerOf(root).contains(dialog)).toBe(true);
     expect(exitSpy).not.toHaveBeenCalled();
     // Keys inside the portalled dialog are the dialog's: f does not toggle fullscreen from there.
     fireEvent.keyDown(dialog, { key: "f" });
@@ -140,7 +147,7 @@ describe("the live player in fullscreen", () => {
     await enterFullscreen(root);
     act(() => void fireEvent.click(screen.getByTestId("player-captions-style")));
     const size = await screen.findByTestId("player-captions-size-large");
-    expect(root.contains(size)).toBe(true);
+    expect(layerOf(root).contains(size)).toBe(true);
   });
 
   it("tooltips portal into the player too", async () => {
@@ -158,7 +165,7 @@ describe("the live player in fullscreen", () => {
       if (!el) throw new Error("no tooltip");
       return el;
     });
-    expect(root.contains(tip)).toBe(true);
+    expect(layerOf(root).contains(tip)).toBe(true);
   });
 });
 
@@ -178,7 +185,7 @@ describe("the VOD player in fullscreen", () => {
     await enterFullscreen(root);
     fireEvent.keyDown(document.body, { key: "?", shiftKey: true });
     const dialog = await screen.findByTestId("player-shortcuts-dialog");
-    expect(root.contains(dialog)).toBe(true);
+    expect(layerOf(root).contains(dialog)).toBe(true);
     expect(exitSpy).not.toHaveBeenCalled();
   });
 });

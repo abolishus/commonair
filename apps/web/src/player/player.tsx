@@ -349,6 +349,8 @@ export function Player({
   }, [hold, hintOpen]);
 
   const dvrShown = features.dvr !== null && features.dvr.windowSeconds > 0 && !(dataModeOn || appliedCeiling !== null);
+  // In fullscreen the player's popups (and this dialog) portal into its popup layer, not <body>.
+  const [popupLayer, setPopupLayer] = React.useState<HTMLDivElement | null>(null);
   // Stays in fullscreen: the dialog portals into the player (PortalContainerProvider below).
   const openShortcuts = () => {
     settings.setOpen(false);
@@ -474,9 +476,10 @@ export function Player({
   );
 
   return (
-    <PortalContainerProvider container={modes.fullscreen.element}>
+    <PortalContainerProvider container={modes.fullscreen.element ? popupLayer : null}>
       <PlayerChrome
         ref={containerRef}
+        portalRef={setPopupLayer}
         data-testid="player"
         data-state={state}
         data-source={source}

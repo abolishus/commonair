@@ -122,8 +122,8 @@ export interface ScreenModes {
     support: FullscreenSupport;
     active: boolean;
     /**
-     * The player container while it is the fullscreen element, else null: the portal container
-     * for the player's popups, since `<body>` is not painted in fullscreen.
+     * The player container while it is the fullscreen element, else null. While set, the player's
+     * popups portal into its popup layer, since `<body>` is not painted in fullscreen.
      */
     element: HTMLElement | null;
     toggle: () => void;
