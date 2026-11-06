@@ -6,9 +6,11 @@
  * through `databaseHooks.user.update`. The hook then writes `channel.suspension {suspended: false}`
  * for the member's channel, exactly once: not again on a second sign-in, not twice with two sign-ins
  * at once, and not twice when the `ban-expiry` sweep races it. A channel suspended in its own
- * right, and a member with no channel, get no event.
+ * right, and a member with no channel, get no event. Each event has one `user.ban_lapsed` audit row
+ * (actor `system`) in its transaction. An event the hook lost is the sweep's to recover
+ * (services/worker/tests/ban-expiry.int.test.ts); here, that recovery racing a sign-in writes once.
  */
-import { and, eq, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { schema, uuidv7 } from "@commonair/db";
 import { recordLapsedUnsuspension, recordLapsedWithRetry } from "../src/auth/index.ts";
@@ -56,6 +58,16 @@ async function banned(userId: string): Promise<boolean> {
   return u?.banned === true;
 }
 
+/** `[actorType, via]` of each `user.ban_lapsed` audit row about `userId`, oldest first. */
+async function lapses(userId: string): Promise<unknown[]> {
+  const rows = await db()
+    .select({ actorType: schema.auditLog.actorType, details: schema.auditLog.details })
+    .from(schema.auditLog)
+    .where(and(eq(schema.auditLog.action, "user.ban_lapsed"), eq(schema.auditLog.subjectId, userId)))
+    .orderBy(asc(schema.auditLog.createdAt), asc(schema.auditLog.id));
+  return rows.map((r) => [r.actorType, r.details.via]);
+}
+
 /** Wait for the after hook, which runs after the sign-in answered. */
 async function settled(channelId: string, length: number): Promise<unknown[]> {
   for (let i = 0; i < 50; i++) {
@@ -76,10 +88,12 @@ describe("a lapsed ban cleared at sign-in (decision (g))", () => {
     expect(r.status, JSON.stringify(r.body)).toBe(200);
     expect(await banned(m.userId)).toBe(false);
     expect(await settled(m.channelId, 2)).toEqual([true, false]);
+    expect(await lapses(m.userId)).toEqual([["system", "sign_in"]]);
 
     expect((await signIn(m)).status).toBe(200);
     await Bun.sleep(300);
     expect(await suspensions(db(), m.channelId)).toEqual([true, false]);
+    expect(await lapses(m.userId)).toEqual([["system", "sign_in"]]);
   });
 
   test("two sign-ins at once write one", async () => {
@@ -90,6 +104,47 @@ describe("a lapsed ban cleared at sign-in (decision (g))", () => {
     expect(await settled(m.channelId, 2)).toEqual([true, false]);
     await Bun.sleep(300);
     expect(await suspensions(db(), m.channelId)).toEqual([true, false]);
+    expect(await lapses(m.userId)).toEqual([["system", "sign_in"]]);
+  });
+
+  test("the sweep's lost-event recovery racing the sign-in: one event, one audit row", async () => {
+    const m = await member();
+    await lapsedBan(m);
+    // The recovery pass (`recoverLostUnsuspensions`, services/worker/src/moderation/ban-expiry.ts):
+    // lock the channel, and write only while its latest event says suspended, nothing suspends it
+    // and its owner is no longer marked banned.
+    const recovery = () =>
+      db().transaction(async (tx) => {
+        await tx.select({ id: channels.id }).from(channels).where(eq(channels.id, m.channelId)).for("update");
+        const [row] = (await tx.execute(
+          sql`select (c.suspended_at is null and not u.banned and (select (e.payload->>'suspended')::boolean from events e where e.channel_id = c.id and e.type = 'channel.suspension' order by e.occurred_at desc, e.id desc limit 1) is true) as owed from channels c join users u on u.id = c.owner_id where c.id = ${m.channelId}::uuid`,
+        )) as unknown as { owed: boolean }[];
+        if (row?.owed !== true) return 0;
+        await emit(tx, "channel.suspension", m.channelId, { channel_id: m.channelId, suspended: false });
+        await tx.insert(schema.auditLog).values({
+          actorType: "system",
+          action: "user.ban_lapsed",
+          subjectType: "user",
+          subjectId: m.userId,
+          channelId: m.channelId,
+          details: { userId: m.userId, via: "recovery" },
+        });
+        return 1;
+      });
+    const r = signIn(m);
+    // A sweep can land anywhere around the sign-in and its hook: keep running the recovery.
+    let recovered = 0;
+    for (let i = 0; i < 10; i++) {
+      recovered += await recovery();
+      await Bun.sleep(30);
+    }
+    expect((await r).status).toBe(200);
+    expect(await settled(m.channelId, 2)).toEqual([true, false]);
+    await Bun.sleep(300);
+    recovered += await recovery();
+    expect(recovered).toBeLessThanOrEqual(1);
+    expect(await suspensions(db(), m.channelId)).toEqual([true, false]);
+    expect(await lapses(m.userId)).toHaveLength(1);
   });
 
   test("the ban-expiry sweep racing the sign-in: still one", async () => {
@@ -105,8 +160,17 @@ describe("a lapsed ban cleared at sign-in (decision (g))", () => {
           .set({ banned: false, banReason: null, banExpires: null })
           .where(and(eq(users.id, m.userId), eq(users.banned, true)))
           .returning({ id: users.id });
-        if (cleared.length > 0)
+        if (cleared.length > 0) {
           await emit(tx, "channel.suspension", m.channelId, { channel_id: m.channelId, suspended: false });
+          await tx.insert(schema.auditLog).values({
+            actorType: "system",
+            action: "user.ban_lapsed",
+            subjectType: "user",
+            subjectId: m.userId,
+            channelId: m.channelId,
+            details: { userId: m.userId, via: "sweep" },
+          });
+        }
         return cleared.length;
       });
     const [r] = await Promise.all([signIn(m), sweep()]);
@@ -114,6 +178,7 @@ describe("a lapsed ban cleared at sign-in (decision (g))", () => {
     expect(await settled(m.channelId, 2)).toEqual([true, false]);
     await Bun.sleep(300);
     expect(await suspensions(db(), m.channelId)).toEqual([true, false]);
+    expect(await lapses(m.userId)).toHaveLength(1);
 
     // And the sweep first, then the sign-in: the sign-in finds the ban gone and writes nothing.
     const n = await member();
@@ -135,6 +200,7 @@ describe("a lapsed ban cleared at sign-in (decision (g))", () => {
     await Bun.sleep(300);
     expect(await banned(m.userId)).toBe(false);
     expect(await suspensions(db(), m.channelId)).toEqual([true]);
+    expect(await lapses(m.userId)).toEqual([]);
   });
 
   test("a ban still in force is refused, and nothing is written", async () => {
@@ -164,6 +230,7 @@ describe("recordLapsedUnsuspension", () => {
     await db().update(users).set({ banned: false, banExpires: null }).where(eq(users.id, m.userId));
     expect(await recordLapsedUnsuspension(db(), m.userId, new Date())).toBe(1);
     expect(await recordLapsedUnsuspension(db(), m.userId, new Date())).toBe(0);
+    expect(await lapses(m.userId)).toEqual([["system", "sign_in"]]);
     const [{ n }] = (await db().execute(
       sql`select count(*)::int as n from events where channel_id = ${m.channelId}::uuid and type = 'channel.suspension'`,
     )) as unknown as [{ n: number }];

@@ -17,6 +17,7 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import { ALTCHA_FIELD, AUTH_BASE_PATH, AUTH_ROUTES } from "@commonair/contracts/auth";
 import { schema, uuidv7, type Database, type Executor } from "@commonair/db";
 import type { Deps } from "../deps.ts";
+import { audit } from "../events/audit.ts";
 import { emit } from "../events/outbox.ts";
 import { publishUserControl } from "../lib/control.ts";
 import { instanceMediaBase, isInstanceMediaRef } from "../lib/media-ref.ts";
@@ -337,13 +338,14 @@ export type Auth = ReturnType<typeof createAuth>;
  * `suspended: true` and the channel is no longer suspended. The channel rows are locked first, as
  * the `ban-expiry` sweep's `withSuspensionState` locks them, so the sweep, a second sign-in and
  * this path serialize, and whichever comes second finds the unsuspension written. A channel
- * suspended in its own right stays suspended (no event), as does a user with no channel.
- */
-/**
- * The hook is not transactional: `banned = false` is already committed when it runs, and the
- * `ban-expiry` sweep selects banned users only, so it cannot recover an event lost here. Retry
- * once, then log at error level for an operator (contract request: the sweep also checks channels
- * whose latest `channel.suspension` is still `true`).
+ * suspended in its own right stays suspended (no event), as does a user with no channel. Each
+ * event comes with its `audit_log` row (`user.ban_lapsed`, actor `system`, `via: "sign_in"`) in
+ * the same transaction.
+ *
+ * The hook is not transactional: `banned = false` is already committed when it runs. Retry once,
+ * then log at error level; the `ban-expiry` sweep's `recoverLostUnsuspensions` (worker) writes an
+ * event lost here within 5 minutes, since it looks for channels whose latest `channel.suspension`
+ * is still `true` while nothing suspends them.
  */
 export async function recordLapsedWithRetry(
   db: Database,
@@ -393,6 +395,16 @@ export async function recordLapsedUnsuspension(db: Database, userId: string, now
         .limit(1);
       if (last?.suspended !== true) continue;
       await emit(tx, "channel.suspension", c.id, { channel_id: c.id, suspended: false }, now);
+      // Ids and enums only (append-only row, ADR 0004). A lift has no statement of reasons.
+      await audit(tx, {
+        actorType: "system",
+        actorId: null,
+        action: "user.ban_lapsed",
+        subjectType: "user",
+        subjectId: userId,
+        channelId: c.id,
+        details: { userId, via: "sign_in" },
+      });
       written++;
     }
     return written;
