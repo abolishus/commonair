@@ -107,6 +107,39 @@ links to the exact source it runs.
 | **Trust and safety**    | Reporting, moderation queues, appeals, transparency reports, DMCA handling             |
 | **Privacy and ops**     | Data export and deletion, metrics, logs, runbooks, backups, signed releases with SBOMs |
 
+## Find your way
+
+<table>
+  <tr>
+    <td width="25%" valign="top">
+      <h3>📺 Watch and stream</h3>
+      Where your money goes, data saver, Calm Chat, channel points, polls, raids and the channel bot.
+      <br><br>
+      <a href="docs/README.md#viewers-and-streamers"><b>Viewer and streamer guides →</b></a>
+    </td>
+    <td width="25%" valign="top">
+      <h3>🏠 Run an instance</h3>
+      From a fresh server to a signed, backed-up, monitored instance, plus on-call and incident runbooks.
+      <br><br>
+      <a href="docs/self-hosting/README.md"><b>Self-hosting guide →</b></a>
+    </td>
+    <td width="25%" valign="top">
+      <h3>🔌 Build on it</h3>
+      OAuth apps, EventSub webhooks, the SDK, rate limits and a guide to porting a Twitch bot.
+      <br><br>
+      <a href="docs/developers/README.md"><b>Developer docs →</b></a>
+    </td>
+    <td width="25%" valign="top">
+      <h3>🛠️ Help build it</h3>
+      Code, docs, design, translations, accessibility testing and review. No membership needed.
+      <br><br>
+      <a href="CONTRIBUTING.md"><b>Contributing guide →</b></a>
+    </td>
+  </tr>
+</table>
+
+Everything else is in the [documentation index](docs/README.md), grouped by who it is for.
+
 ## How it fits together
 
 ```mermaid
@@ -129,6 +162,22 @@ flowchart LR
 
 The full map, with ports and data flows, is in [docs/architecture.md](docs/architecture.md).
 Every significant decision behind it is an ADR in [docs/decisions/](docs/decisions/).
+
+## Trust, but verify
+
+Every promise above is checked by a machine, so you do not have to take it on faith.
+
+| Promise                           | How it is enforced                                                                                                                                     |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **The books balance**             | Ledger rows only append and every entry must balance: Postgres triggers refuse anything else, whatever the application asks                            |
+| **Member protections hold**       | Protected settings and vote rules live in the same triggers ([ADR 0004](docs/decisions/0004-governance-enforcement.md))                                |
+| **Free software only**            | A license check fails the gate on any non-OSI license in npm packages, container images or Go modules                                                  |
+| **Every file says its license**   | [REUSE](https://reuse.software) lint runs on every push                                                                                                |
+| **No surprise dependencies**      | Nothing younger than 7 days, exact versions, no unlisted install scripts, every package vetted first ([ADR 0022](docs/decisions/0022-supply-chain.md)) |
+| **No moving targets**             | GitHub Actions pinned to commit SHAs, third-party images pinned by digest                                                                              |
+| **No known holes**                | `bun audit` and govulncheck run daily and whenever a lockfile changes; CodeQL runs on every change and weekly                                          |
+| **What you run is what we built** | Releases are cosign-signed with SBOMs and SLSA provenance; [verifying.md](docs/self-hosting/verifying.md) shows how to check                           |
+| **You can read what you run**     | Every instance links to the exact source it runs, as the AGPL asks                                                                                     |
 
 ## Self-hosting
 
@@ -254,6 +303,20 @@ reviews. You do not need to be a co-op member.
 - Report security problems privately, as described in [SECURITY.md](SECURITY.md).
 
 Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+## Standing on the shoulders of
+
+CommonAir is glue and judgment on top of remarkable free software. Thank you to everyone behind
+[MediaMTX](https://github.com/bluenviron/mediamtx), [FFmpeg](https://ffmpeg.org),
+[PostgreSQL](https://www.postgresql.org), [Valkey](https://valkey.io),
+[Garage](https://garagehq.deuxfleurs.fr), [hls.js](https://github.com/video-dev/hls.js),
+[P2P Media Loader](https://github.com/Novage/p2p-media-loader), [Bun](https://bun.sh),
+[TanStack](https://tanstack.com), [oRPC](https://orpc.unnoq.com),
+[Drizzle](https://orm.drizzle.team), [Better Auth](https://www.better-auth.com),
+[Zod](https://zod.dev), [Base UI](https://base-ui.com), [shadcn/ui](https://ui.shadcn.com),
+[Caddy](https://caddyserver.com), [OpenTelemetry](https://opentelemetry.io),
+[Grafana](https://grafana.com/oss/), [Prometheus](https://prometheus.io),
+[Podman](https://podman.io) and the many smaller projects in our lockfiles.
 
 ## License and trademarks
 

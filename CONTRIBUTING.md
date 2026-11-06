@@ -88,6 +88,46 @@ flowchart LR
 
 Formatting, linting and tests run on Vite+: `vp fmt`, `vp lint --deny-warnings`, `vp test`.
 
+### What CI runs for your change
+
+CI runs the same gate, one job per group, and skips what a change cannot affect. Pull requests
+always get the whole gate; pushes to `main` are trimmed by
+[`scripts/ci-changes.ts`](scripts/ci-changes.ts):
+
+| The push                                                   | What runs                                                        |
+| ---------------------------------------------------------- | ---------------------------------------------------------------- |
+| Every commit subject starts `docs:` or `docs(scope):`      | The static group alone (format, lint, types, licenses, REUSE, …) |
+| Only prose and pictures (`*.md`, docs images, `.claude/`)  | The static group alone                                           |
+| Only web UI (components, routes, styles, message catalogs) | Static and unit, plus the UI harness scenarios                   |
+| Only tests                                                 | The gate, no harness scenarios                                   |
+| Harness code                                               | The gate, plus the scenarios that import what changed            |
+| Anything else                                              | The gate and every harness scenario                              |
+
+The nightly run and a manual dispatch run everything regardless.
+
+> [!WARNING]
+> **`docs:` is a promise.** A push made only of `docs:` commits skips unit, integration, relay
+> and harness tests even when it touches code, which is what makes a comment-only edit cheap. Use
+> it for documentation and comments, never for a change in behavior. The next push that is not
+> all `docs:` diffs from before those commits, so anything they changed still gets tested, but
+> not until then.
+
+<details>
+<summary><b>Setup trouble?</b></summary>
+
+<br>
+
+| Symptom                                                  | Fix                                                                                                         |
+| -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Containers die or the harness times out on macOS         | Give the Podman VM room: `podman machine init --cpus 8 --memory 12288 --disk-size 120` (see the README)     |
+| `podman compose` talks to a Docker socket nobody started | Install `podman-compose` and set `PODMAN_COMPOSE_PROVIDER=podman-compose`                                   |
+| `reuse lint` is not found                                | `pipx install reuse`                                                                                        |
+| `bun add` refuses a version                              | It is younger than 7 days (`minimumReleaseAge`). Pick an older one with `bun scripts/vet-package.ts <name>` |
+| Services complain about missing secrets                  | You have no `.env` yet: `bun scripts/init-env.ts`                                                           |
+| Integration tests cannot reach Postgres or Valkey        | Start them first: `bun scripts/infra.ts test`                                                               |
+
+</details>
+
 ## Pull request flow
 
 ```mermaid
@@ -160,13 +200,16 @@ commit message.
 | ------------------------ | ------------------------------------- | -------------------------------------------- |
 | `feat`                   | New behavior                          | `feat(irc): support CAP LS 302`              |
 | `fix`                    | A bug fix                             | `fix(chat): drop messages from banned users` |
-| `docs`                   | Documentation only                    | `docs(self-hosting): document relay ports`   |
+| `docs`                   | Docs or comments, no behavior change  | `docs(self-hosting): document relay ports`   |
 | `test`                   | Tests only                            | `test(ledger): cover zero-amount refunds`    |
 | `refactor`               | Restructuring with no behavior change | `refactor(api): split playback handlers`     |
 | `perf`                   | Faster or lighter                     | `perf(origin): cache rewritten playlists`    |
 | `build` · `ci` · `chore` | Tooling, pipelines, housekeeping      | `ci: pin setup-go to a commit SHA`           |
 
 Mark a breaking change with `!` after the type (`feat(api)!: …`) or a `BREAKING CHANGE:` footer.
+
+The type is not decoration: a push of only `docs` commits skips most of CI
+([what CI runs](#what-ci-runs-for-your-change)).
 
 ## The rules every change follows
 

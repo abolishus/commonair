@@ -177,6 +177,7 @@ docs/architecture.md first. Do not look outside the repository.
 
 ## Commits
 
-Conventional Commits with DCO sign-off (`git commit -s`). Small, focused commits; the
+Conventional Commits with DCO sign-off (`git commit -s`). A push made only of `docs:` commits
+runs CI's static group alone, whatever it touches: use `docs:` for docs and comments only. Small, focused commits; the
 orchestrator commits after verify is green and a reviewer subagent has checked the diff against
 this file. Push `main` at verified milestones.

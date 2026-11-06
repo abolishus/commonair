@@ -14,6 +14,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 ## Checklist
 
 - [ ] The PR title follows [Conventional Commits](https://www.conventionalcommits.org/) (`type(scope): summary`).
+- [ ] If the title starts with `docs`, the change is docs or comments only (a `docs:` push skips most of CI).
 - [ ] Every commit is signed off (`git commit -s`) under the [DCO](https://developercertificate.org/).
 - [ ] `bun run verify` is green locally.
 - [ ] Tests are added or updated for every behavior change.
