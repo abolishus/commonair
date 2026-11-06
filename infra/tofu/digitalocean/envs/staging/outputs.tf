@@ -32,3 +32,8 @@ output "object_backups_key" {
   value       = module.instance.object_backups_key
   sensitive   = true
 }
+
+output "status_page_url" {
+  description = "STATUS_PAGE_URL for the instance's commonair.env when this environment has its own status stack (null otherwise)."
+  value       = module.instance.status_page_url
+}

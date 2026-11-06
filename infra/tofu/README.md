@@ -113,7 +113,11 @@ the account; tofu never creates one, and a missing fingerprint fails the plan.
 - the monitoring droplet in `monitoring_region`, with a firewall for SSH and the status page.
   `monitoring_region` is required while `enable_monitoring_droplet` is true (the default). When
   `instance_origin` is set, its cloud-init installs the status stack (outside probes, the static
-  status page and the down alerts; [status-page.md](../../docs/operators/status-page.md)).
+  status page and the down alerts; [status-page.md](../../docs/operators/status-page.md)), plus
+  a 1 GiB volume for the page's state (`monitoring_state_volume`, default on) that a replaced
+  droplet mounts again, so the 90-day history and the notes survive re-provisioning.
+  `tofu output status_page_url` (production: `observability_env`) is the app side's
+  `STATUS_PAGE_URL`, whose Prometheus alerts when the page stops updating.
 
 App droplets are named `commonair-<env>` at every stage; stage 2 adds `commonair-<env>-app-2`,
 `-app-3` and so on, so raising `app_count` never renames the host that runs the stack.
