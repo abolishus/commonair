@@ -2,18 +2,22 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import type { PayoutTransferView } from "@commonair/contracts/dto";
+import type { TransferSettleOutcome } from "@commonair/contracts/enums";
 import { EmptyState, MoneyAmount, RelativeTime, StatusBadge, type StatusTone } from "@commonair/ui";
 import { DataTable, type DataTableColumn } from "@commonair/ui/blocks/data";
 import { AlertCallout } from "@commonair/ui/blocks/feedback";
 import { Button } from "@commonair/ui/components/button";
+import { toast } from "@commonair/ui/toast";
 import { MoneySend01Icon } from "@hugeicons/core-free-icons";
-import type * as React from "react";
+import * as React from "react";
 import type { z } from "zod";
 import { t, type MessageKey } from "../../i18n/index.ts";
 import { toastActionError } from "../../lib/action-error.ts";
-import { api } from "../../lib/api.ts";
+import { api, errorCode } from "../../lib/api.ts";
 import { monthKey, monthLabel } from "../../lib/money.ts";
 import { usePaged } from "../money/use-load.ts";
+import { OutcomeUnknownSummary } from "./outcome-unknown-summary.tsx";
+import { SettleTransferDialog } from "./transfer-settle.tsx";
 
 /**
  * Treasury `transfers` tab (batch 8, M1-connect; ADR 0007 Amendment 1): the Stripe Connect transfer
@@ -84,7 +88,21 @@ export interface PayoutTransfersPanelProps {
   hasMore?: boolean;
   loadingMore?: boolean;
   onLoadMore?: () => void;
+  /**
+   * Settle a transfer whose outcome is unknown from what Stripe shows (follow-ups, unit money);
+   * omitted: no settle action.
+   */
+  onSettle?: (
+    tr: PayoutTransferDto,
+    outcome: TransferSettleOutcome,
+    reference: string | undefined,
+    note: string,
+  ) => Promise<void>;
 }
+
+/** Whether a transfer is one a treasurer settles by hand (pure). */
+export const settleable = (tr: Pick<PayoutTransferDto, "status" | "failureCode">): boolean =>
+  tr.status === "pending" && tr.failureCode === OUTCOME_UNKNOWN;
 
 /** The transfers list from props (server-renderable with fixtures). */
 export function PayoutTransfersPanel({
@@ -94,6 +112,7 @@ export function PayoutTransfersPanel({
   hasMore = false,
   loadingMore = false,
   onLoadMore,
+  onSettle,
 }: PayoutTransfersPanelProps): React.JSX.Element {
   const columns: DataTableColumn<PayoutTransferDto>[] = [
     { id: "creator", header: t("payoutTransfers.col.creator"), cell: ({ row: { original: r } }) => r.user.username },
@@ -136,6 +155,12 @@ export function PayoutTransfersPanel({
               {view.label}
             </StatusBadge>
             {view.note && <span className="text-xs text-muted-foreground">{view.note}</span>}
+            {onSettle && settleable(r) && (
+              <SettleTransferDialog
+                transferId={r.id}
+                onSettle={(outcome, reference, note) => onSettle(r, outcome, reference, note)}
+              />
+            )}
           </div>
         );
       },
@@ -213,14 +238,39 @@ export function PayoutTransfers(): React.JSX.Element {
     (cursor) => api().money.treasurer.transfers({ limit: PAGE, cursor }),
     (err) => toastActionError(err, t("payoutTransfers.loadMoreFailed")),
   );
+  // Bumped after a settle, so the outcome-unknown summary reloads with the list.
+  const [version, setVersion] = React.useState(0);
+  const reload = () => {
+    transfers.reload();
+    setVersion((v) => v + 1);
+  };
   return (
-    <PayoutTransfersPanel
-      transfers={transfers.items}
-      failed={transfers.failed}
-      onRetry={transfers.reload}
-      hasMore={transfers.hasMore}
-      loadingMore={transfers.loadingMore}
-      onLoadMore={transfers.loadMore}
-    />
+    <div className="flex min-w-0 flex-col gap-4">
+      <OutcomeUnknownSummary version={version} />
+      <PayoutTransfersPanel
+        transfers={transfers.items}
+        failed={transfers.failed}
+        onRetry={transfers.reload}
+        hasMore={transfers.hasMore}
+        loadingMore={transfers.loadingMore}
+        onLoadMore={transfers.loadMore}
+        onSettle={async (tr, outcome, reference, note) => {
+          try {
+            await api().money.treasurer.settleTransfer({
+              transferId: tr.id,
+              outcome,
+              note,
+              ...(reference ? { reference } : {}),
+            });
+          } catch (err) {
+            // Settled meanwhile (the webhook, another treasurer): show the list as it is now.
+            if (errorCode(err) === "CONFLICT") reload();
+            throw err;
+          }
+          toast.success(t(outcome === "sent" ? "transferSettle.done.sent" : "transferSettle.done.notSent"));
+          reload();
+        }}
+      />
+    </div>
   );
 }

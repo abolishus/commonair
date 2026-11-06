@@ -12,7 +12,7 @@
  * it with fixtures.
  */
 import type { dto } from "@commonair/contracts";
-import type { REFUND_MARKER_ACTIONS, REFUND_REQUEST_FILTERS } from "@commonair/contracts/enums";
+import type { REFUND_MARKER_ACTIONS, REFUND_REQUEST_FILTERS, RefundRecheckResult } from "@commonair/contracts/enums";
 import {
   ConfirmDialog,
   EmptyState,
@@ -46,6 +46,8 @@ import { t, type MessageKey } from "../../i18n/index.ts";
 import { toastActionError } from "../../lib/action-error.ts";
 import { api, errorCode } from "../../lib/api.ts";
 import { usePaged } from "../money/use-load.ts";
+import { OutcomeUnknownSummary } from "./outcome-unknown-summary.tsx";
+import { RecheckRefundDialog, recheckToast } from "./refund-recheck.tsx";
 
 export type RefundRequestDto = z.infer<typeof dto.RefundRequestView>;
 export type RefundRequestFilter = (typeof REFUND_REQUEST_FILTERS)[number];
@@ -108,6 +110,8 @@ export interface RefundRequestsPanelProps {
   filter: RefundRequestFilter;
   onFilterChange: (f: RefundRequestFilter) => void;
   onResolve: (r: RefundRequestDto, outcome: RefundResolution, note: string) => Promise<void>;
+  /** Ask Stripe again about an unknown request (follow-ups, unit money); omitted: no button. */
+  onRecheck?: (r: RefundRequestDto) => Promise<void>;
   /** Injectable clock for the 15-minute rule. */
   now?: () => number;
   hasMore?: boolean;
@@ -120,6 +124,7 @@ export function RefundRequestsPanel({
   filter,
   onFilterChange,
   onResolve,
+  onRecheck,
   now = Date.now,
   hasMore = false,
   loadingMore = false,
@@ -158,7 +163,13 @@ export function RefundRequestsPanel({
       ) : (
         <ItemGroup className="gap-3" data-testid="refund-requests">
           {requests.map((r) => (
-            <RefundRequestItem key={r.id} request={r} onResolve={onResolve} nowMs={now()} />
+            <RefundRequestItem
+              key={r.id}
+              request={r}
+              onResolve={onResolve}
+              {...(onRecheck ? { onRecheck } : {})}
+              nowMs={now()}
+            />
           ))}
         </ItemGroup>
       )}
@@ -182,10 +193,12 @@ export function RefundRequestsPanel({
 function RefundRequestItem({
   request: r,
   onResolve,
+  onRecheck,
   nowMs,
 }: {
   request: RefundRequestDto;
   onResolve: RefundRequestsPanelProps["onResolve"];
+  onRecheck?: RefundRequestsPanelProps["onRecheck"];
   nowMs: number;
 }): React.JSX.Element {
   const unknown = r.state === "unknown";
@@ -217,7 +230,14 @@ function RefundRequestItem({
         {unknown && <p className="text-sm text-muted-foreground">{t("refundRequests.unknownHint")}</p>}
       </ItemContent>
       {unknown && (
-        <ItemActions className="self-start">
+        <ItemActions className="flex-wrap items-start self-start">
+          {onRecheck && (
+            <RecheckRefundDialog
+              requestId={r.id}
+              blockedReason={resolveBlockedReason(r, nowMs)}
+              onRecheck={() => onRecheck(r)}
+            />
+          )}
           <ResolveDialog request={r} blockedReason={resolveBlockedReason(r, nowMs)} onResolve={onResolve} />
         </ItemActions>
       )}
@@ -323,6 +343,8 @@ function ResolveDialog({
 /** The tab with its data (`money.treasurer.refundRequests.{list,resolve}`). */
 export function RefundRequests(): React.JSX.Element {
   const [filter, setFilter] = React.useState<RefundRequestFilter>("outstanding");
+  // Bumped after a settle, so the outcome-unknown summary reloads with the list.
+  const [version, setVersion] = React.useState(0);
   const list = usePaged(
     `refund-requests|${filter}`,
     (cursor) => api().money.treasurer.refundRequests.list({ state: filter, limit: PAGE, cursor }),
@@ -343,25 +365,44 @@ export function RefundRequests(): React.JSX.Element {
         }
       />
     );
+  const reload = () => {
+    list.reload();
+    setVersion((v) => v + 1);
+  };
   return (
-    <RefundRequestsPanel
-      requests={list.items}
-      filter={filter}
-      onFilterChange={setFilter}
-      hasMore={list.hasMore}
-      loadingMore={list.loadingMore}
-      onLoadMore={list.loadMore}
-      onResolve={async (r, outcome, note) => {
-        try {
-          await api().money.treasurer.refundRequests.resolve({ requestId: r.id, outcome, note });
-        } catch (err) {
-          // Settled meanwhile (a webhook, another treasurer): show the list as it is now.
-          if (errorCode(err) === "CONFLICT") list.reload();
-          throw err;
-        }
-        toast.success(t("refundRequests.resolve.done"));
-        list.reload();
-      }}
-    />
+    <>
+      <OutcomeUnknownSummary version={version} />
+      <RefundRequestsPanel
+        requests={list.items}
+        filter={filter}
+        onFilterChange={setFilter}
+        hasMore={list.hasMore}
+        loadingMore={list.loadingMore}
+        onLoadMore={list.loadMore}
+        onResolve={async (r, outcome, note) => {
+          try {
+            await api().money.treasurer.refundRequests.resolve({ requestId: r.id, outcome, note });
+          } catch (err) {
+            // Settled meanwhile (a webhook, another treasurer): show the list as it is now.
+            if (errorCode(err) === "CONFLICT") list.reload();
+            throw err;
+          }
+          toast.success(t("refundRequests.resolve.done"));
+          reload();
+        }}
+        onRecheck={async (r) => {
+          let result: RefundRecheckResult;
+          try {
+            ({ result } = await api().money.treasurer.refundRequests.recheck({ requestId: r.id }));
+          } catch (err) {
+            if (errorCode(err) === "CONFLICT") reload();
+            throw err;
+          }
+          const told = recheckToast(result);
+          toast[told.tone](told.message);
+          reload();
+        }}
+      />
+    </>
   );
 }
