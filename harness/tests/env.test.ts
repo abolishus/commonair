@@ -63,3 +63,22 @@ describe("the load test's variables live in env.ts", () => {
     expect(readers).toEqual([]);
   });
 });
+
+describe("the harness variables", () => {
+  test("DATABASE_URL: blank is unset, a value is trimmed", () => {
+    expect(loadHarnessEnv({ DATABASE_URL: "  " }).DATABASE_URL).toBeUndefined();
+    expect(loadHarnessEnv({ DATABASE_URL: " postgres://h/db " }).DATABASE_URL).toBe("postgres://h/db");
+  });
+
+  test("with no source both loaders read process.env", () => {
+    const saved = process.env.HARNESS_LOAD_TARGET_SSH;
+    process.env.HARNESS_LOAD_TARGET_SSH = "ops@from-env";
+    try {
+      expect(loadLoadEnv().HARNESS_LOAD_TARGET_SSH).toBe("ops@from-env");
+      expect(loadHarnessEnv().HARNESS_API_URL).toBe(loadHarnessEnv(process.env).HARNESS_API_URL);
+    } finally {
+      if (saved === undefined) delete process.env.HARNESS_LOAD_TARGET_SSH;
+      else process.env.HARNESS_LOAD_TARGET_SSH = saved;
+    }
+  });
+});

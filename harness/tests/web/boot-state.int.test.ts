@@ -18,9 +18,10 @@ const ENTRY = `<script type="module" src="/assets/index-T3st.js"></script>`;
 
 let browser: Browser;
 
+// A cold Chromium launch on a loaded CI runner takes well over the default hook timeout.
 beforeAll(async () => {
   browser = await chromium.launch();
-});
+}, 120_000);
 
 afterAll(async () => {
   await browser?.close();
@@ -41,51 +42,70 @@ async function open(body: string, path = "/chan?room=r1&invite=n0nce"): Promise<
   return page;
 }
 
+/** Each test opens a page; generous, as CI runs these beside the other integration suites. */
+const PAGE_MS = 60_000;
+
 describe("in Chromium", () => {
-  test("a bootstrap that ran and is still there", async () => {
-    const page = await open(`${BOOTSTRAP}${ENTRY}<div data-testid="player"></div>`);
-    const state: BootState = await page.evaluate(readBootState);
-    expect(state).toMatchObject({
-      readyState: "complete",
-      seroval: "object",
-      serovalTsr: true,
-      tsr: "object",
-      hydrated: false,
-      moduleScripts: ["/assets/index-T3st.js"],
-      entryFetches: 1,
-      navigationType: "navigate",
-    });
-    const d = await startupDiagnostics(page, []);
-    expect(d).toMatchObject({ path: "/chan", bootstrap: "present", players: 1 });
-    expect(d?.scripts[1]).toBe("module /assets/index-T3st.js");
-    await page.close();
-  });
+  test(
+    "a bootstrap that ran and is still there",
+    async () => {
+      const page = await open(`${BOOTSTRAP}${ENTRY}<div data-testid="player"></div>`);
+      const state: BootState = await page.evaluate(readBootState);
+      expect(state).toMatchObject({
+        readyState: "complete",
+        seroval: "object",
+        serovalTsr: true,
+        tsr: "object",
+        hydrated: false,
+        moduleScripts: ["/assets/index-T3st.js"],
+        entryFetches: 1,
+        navigationType: "navigate",
+      });
+      const d = await startupDiagnostics(page, []);
+      expect(d).toMatchObject({ path: "/chan", bootstrap: "present", players: 1 });
+      expect(d?.scripts[1]).toBe("module /assets/index-T3st.js");
+      await page.close();
+    },
+    PAGE_MS,
+  );
 
-  test("an earlier hydration cleaned up: $R stays without tsr, and the page says hydrated", async () => {
-    const page = await open(`${BOOTSTRAP}${CLEANUP}`);
-    expect(await page.evaluate(readBootState)).toMatchObject({
-      seroval: "object",
-      serovalTsr: false,
-      tsr: "undefined",
-      hydrated: true,
-      moduleScripts: [],
-    });
-    expect(await startupDiagnostics(page, [])).toMatchObject({ hydrated: true, bootstrap: "absent" });
-    await page.close();
-  });
+  test(
+    "an earlier hydration cleaned up: $R stays without tsr, and the page says hydrated",
+    async () => {
+      const page = await open(`${BOOTSTRAP}${CLEANUP}`);
+      expect(await page.evaluate(readBootState)).toMatchObject({
+        seroval: "object",
+        serovalTsr: false,
+        tsr: "undefined",
+        hydrated: true,
+        moduleScripts: [],
+      });
+      expect(await startupDiagnostics(page, [])).toMatchObject({ hydrated: true, bootstrap: "absent" });
+      await page.close();
+    },
+    PAGE_MS,
+  );
 
-  test("a document that never carried the bootstrap", async () => {
-    const page = await open(ENTRY);
-    expect(await page.evaluate(readBootState)).toMatchObject({ seroval: "undefined", tsr: "undefined" });
-    const d = await startupDiagnostics(page, ["pageerror: x at /chan?invite=n0nce"]);
-    expect(d).toMatchObject({ path: "/chan", bootstrap: "absent", players: 0, boot: null });
-    expect(d?.console).toEqual(["pageerror: x at /chan?invite=REDACTED"]);
-    await page.close();
-  });
+  test(
+    "a document that never carried the bootstrap",
+    async () => {
+      const page = await open(ENTRY);
+      expect(await page.evaluate(readBootState)).toMatchObject({ seroval: "undefined", tsr: "undefined" });
+      const d = await startupDiagnostics(page, ["pageerror: x at /chan?invite=n0nce"]);
+      expect(d).toMatchObject({ path: "/chan", bootstrap: "absent", players: 0, boot: null });
+      expect(d?.console).toEqual(["pageerror: x at /chan?invite=REDACTED"]);
+      await page.close();
+    },
+    PAGE_MS,
+  );
 
-  test("a closed page cannot be read: null, not a throw", async () => {
-    const page = await open("");
-    await page.close();
-    expect(await startupDiagnostics(page, [])).toBeNull();
-  });
+  test(
+    "a closed page cannot be read: null, not a throw",
+    async () => {
+      const page = await open("");
+      await page.close();
+      expect(await startupDiagnostics(page, [])).toBeNull();
+    },
+    PAGE_MS,
+  );
 });

@@ -12,7 +12,7 @@
 import { schema, uuidv7 } from "@commonair/db";
 import { createTestDatabase, type TestDatabase } from "@commonair/db/testing";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
-import { E5_GOVERNANCE_BOOTSTRAP, preflightGovernance, rowLeaks } from "../../src/coop.ts";
+import { SEED_GOVERNANCE_BOOTSTRAP, governancePeriods, preflightGovernance, rowLeaks } from "../../src/coop.ts";
 import { unit } from "../../src/seed/coop.ts";
 import {
   activeClassesByUser,
@@ -30,8 +30,8 @@ const channelId = uuidv7();
 const since = new Date(Date.now() - 1_000);
 
 beforeAll(async () => {
-  // The seed overlay's database: migrated with the e5 bootstrap (short periods).
-  t = await createTestDatabase({ governance: E5_GOVERNANCE_BOOTSTRAP });
+  // The seed overlay's database: migrated with its bootstrap (harness/compose.seed.yaml).
+  t = await createTestDatabase({ governance: SEED_GOVERNANCE_BOOTSTRAP });
   const { db } = t.app;
   const user = (id: string, handle: string, birthDate: string | null) => ({
     id,
@@ -86,6 +86,13 @@ describe("seed-coop readers as the app role", () => {
       .select({ key: schema.governanceSettings.key, value: schema.governanceSettings.value })
       .from(schema.governanceSettings);
     expect(preflightGovernance(settings).ok).toBe(true);
+    // The migration took the seed stack's shorter periods (the database checks them too).
+    expect(governancePeriods(settings)).toEqual({
+      discussionSeconds: 20,
+      councilReviewSeconds: 20,
+      votingSeconds: 30,
+      protectedVotingSeconds: 30,
+    });
     expect(rulesOf(settings).ordinary.quorum).toBe(0.01);
     expect(rulesOf(settings).protected.memberWideThreshold).toBeCloseTo(2 / 3);
     expect(seatsOf(settings)).toEqual({ streamer: 3, viewer: 3, worker: 1 });

@@ -17,7 +17,7 @@
 import { mapLimit } from "./load/async.ts";
 import { AccountStore, AuthPacer, provisionStreamers } from "./load/accounts.ts";
 import { type LoadEnv, loadLoadEnv, mbpsToBytesPerSecond } from "./env.ts";
-import { type HostSummary, HostSampler, localSnapshot } from "./load/host.ts";
+import { type HostSummary, HostSampler, type SnapshotReader, localSnapshot } from "./load/host.ts";
 import {
   type GeneratorThresholds,
   type GeneratorVerdict,
@@ -36,7 +36,14 @@ import {
 import { type LoadReport, buildLoadReport, loadVerdict } from "./load/report.ts";
 import { type ShardSpec, type WorkerSpec, shardCount, shardTotal, splitShards } from "./load/shard.ts";
 import { type CommandRunner, remotePodmanStats, remoteSnapshot, sshRunner } from "./load/ssh.ts";
-import { ORIGIN_EGRESS_QUERY, CpuSampler, Prometheus, podmanStats, summarize } from "./metrics.ts";
+import {
+  type ContainerCpuSample,
+  ORIGIN_EGRESS_QUERY,
+  CpuSampler,
+  Prometheus,
+  podmanStats,
+  summarize,
+} from "./metrics.ts";
 import type { ScenarioContext } from "./scenario.ts";
 import type { Streamer } from "./streamer.ts";
 import type { SignedInUser } from "./users.ts";
@@ -131,14 +138,30 @@ export interface LoadTopology {
   run: CommandRunner;
   /** Generator hosts other than this machine (SSH destinations). */
   remoteGenerators: string[];
+  /** This machine's container CPU, read when there is no target (`podman stats`). */
+  localStats: (prefix: string) => Promise<ContainerCpuSample[] | null>;
+  /** This machine's `/proc` (the `local` generator host). */
+  localSnapshot: SnapshotReader;
 }
 
-export function loadTopology(env: LoadEnv = loadLoadEnv(), run: CommandRunner = sshRunner()): LoadTopology {
+/** This machine's readers; the unit tests swap them so no real `podman` or `/proc` is read. */
+export interface LocalReaders {
+  stats?: LoadTopology["localStats"];
+  snapshot?: SnapshotReader;
+}
+
+export function loadTopology(
+  env: LoadEnv = loadLoadEnv(),
+  run: CommandRunner = sshRunner(),
+  local: LocalReaders = {},
+): LoadTopology {
   return {
     env,
     target: env.HARNESS_LOAD_TARGET_SSH ?? null,
     run,
     remoteGenerators: [...new Set(env.HARNESS_LOAD_GENERATOR_HOSTS.filter((h) => h !== LOCAL_HOST))],
+    localStats: local.stats ?? podmanStats,
+    localSnapshot: local.snapshot ?? localSnapshot,
   };
 }
 
@@ -271,7 +294,7 @@ export async function runAudience(
   const cpu = new CpuSampler(
     ctx.env.HARNESS_CONTAINER_PREFIX,
     5_000,
-    topo.target ? remotePodmanStats(topo.run, topo.target) : podmanStats,
+    topo.target ? remotePodmanStats(topo.run, topo.target) : topo.localStats,
   );
   cpu.start();
   ctx.defer(() => cpu.stop());
@@ -328,7 +351,7 @@ export async function runAudience(
 
   // Host samplers cover the hold only, so rates and per-viewer bytes match the egress window.
   const targetHost = topo.target ? new HostSampler(remoteSnapshot(topo.run, topo.target)) : null;
-  const generatorHosts: Record<string, HostSampler> = { [LOCAL_HOST]: new HostSampler(localSnapshot) };
+  const generatorHosts: Record<string, HostSampler> = { [LOCAL_HOST]: new HostSampler(topo.localSnapshot) };
   for (const g of topo.remoteGenerators) generatorHosts[g] = new HostSampler(remoteSnapshot(topo.run, g));
   const samplers = [targetHost, ...Object.values(generatorHosts)].filter((s): s is HostSampler => s !== null);
   for (const s of samplers) {

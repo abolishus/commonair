@@ -10,7 +10,7 @@
  */
 import { createLogger } from "@commonair/observability";
 import { describe, expect, test } from "vite-plus/test";
-import sweepScenario from "../scenarios/load-sweep.ts";
+import { loadSweepScenario } from "../scenarios/load-sweep.ts";
 import { loadHarnessEnv, loadLoadEnv } from "../src/env.ts";
 import {
   busiestTxP95,
@@ -134,14 +134,34 @@ function procRunner(o: { cpuBusy: number; txBytes: number }): { run: CommandRunn
   return { run, reads: () => reads };
 }
 
+/** These hold for real seconds (the remote sampler needs two reads); CI load must not time them out. */
+const SLOW_MS = 30_000;
+
 const offline: CommandRunner = async () => ({ code: 255, stdout: "" });
+
+/** What the local readers were asked: no test reads this machine's `podman` or `/proc`. */
+const localReads = { stats: [] as string[], snapshots: 0 };
 
 function topology(o: { target?: string; run?: CommandRunner; source?: Record<string, string> } = {}): LoadTopology {
   return loadTopology(
     loadLoadEnv({ ...(o.target ? { HARNESS_LOAD_TARGET_SSH: o.target } : {}), ...o.source }),
     o.run ?? offline,
+    {
+      stats: async (prefix) => {
+        localReads.stats.push(prefix);
+        return [{ name: `${prefix}api`, cpuPercent: 12, memBytes: 1_000_000 }];
+      },
+      // As on macOS: no /proc, so the local generator is not measured.
+      snapshot: async () => {
+        localReads.snapshots++;
+        return null;
+      },
+    },
   );
 }
+
+/** The sweep scenario over the stand-in topology. */
+const sweepScenario = loadSweepScenario(() => topology());
 
 async function inScenario(
   platform: Platform,
@@ -251,30 +271,40 @@ describe("runLoad against a local stack", () => {
     expect(result.data.loadPlan).toEqual({ viewers: 6, browserViewers: 4, shards: [] });
     expect(result.data.load).toMatchObject({ viewers: 6, generator: { host: null } });
     expect(result.steps.map((s) => s.name)).toContain("hold for 0 s");
+    // No target: container CPU and the generator host come from this machine's readers.
+    expect(localReads.stats.at(-1)).toBe(env.HARNESS_CONTAINER_PREFIX);
+    expect(localReads.snapshots).toBeGreaterThan(0);
+    expect(r.hosts.containersIncomplete).toBe(false);
+    expect(r.cpu[`${env.HARNESS_CONTAINER_PREFIX}api`]).toBeDefined();
+    expect(r.hosts.generators.local).toBeNull();
   });
 });
 
 describe("runAudience against a remote target", () => {
-  test("the target's CPU and NIC come over the runner; the generator is judged", async () => {
-    const { platform } = fakePlatform({ report: () => ({ ttffMs: 500, playedSeconds: 1 }) });
-    const proc = procRunner({ cpuBusy: 40, txBytes: 5_000_000 });
-    let load: LoadResult | null = null;
-    const result = await inScenario(platform, async (ctx) => {
-      const topo = topology({ target: "ops@target", run: proc.run });
-      load = await runLoad(ctx, { streamers: 1, viewers: 2, durationMs: 1_100, browserViewers: 0 }, topo);
-    });
-    expect(result.status).toBe("passed");
-    const r = load as unknown as LoadResult;
-    expect(proc.reads()).toBeGreaterThanOrEqual(2);
-    expect(r.hosts.containersSource).toBe("ssh");
-    // podman over SSH failed: the container stats are partial and say so.
-    expect(r.hosts.containersIncomplete).toBe(true);
-    expect(r.hosts.target?.cpu.p95).toBeCloseTo(40, 0);
-    expect(busiestTxP95(r.hosts.target)).toBeGreaterThan(0);
-    expect(r.generatorVerdict).not.toBeNull();
-    expect(result.metrics["target.cpu.p95"]?.unit).toBe("%");
-    expect(result.metrics["target.nic.eth0.tx_bytes_per_second"]?.value).toBeGreaterThan(0);
-  });
+  test(
+    "the target's CPU and NIC come over the runner; the generator is judged",
+    async () => {
+      const { platform } = fakePlatform({ report: () => ({ ttffMs: 500, playedSeconds: 1 }) });
+      const proc = procRunner({ cpuBusy: 40, txBytes: 5_000_000 });
+      let load: LoadResult | null = null;
+      const result = await inScenario(platform, async (ctx) => {
+        const topo = topology({ target: "ops@target", run: proc.run });
+        load = await runLoad(ctx, { streamers: 1, viewers: 2, durationMs: 1_100, browserViewers: 0 }, topo);
+      });
+      expect(result.status).toBe("passed");
+      const r = load as unknown as LoadResult;
+      expect(proc.reads()).toBeGreaterThanOrEqual(2);
+      expect(r.hosts.containersSource).toBe("ssh");
+      // podman over SSH failed: the container stats are partial and say so.
+      expect(r.hosts.containersIncomplete).toBe(true);
+      expect(r.hosts.target?.cpu.p95).toBeCloseTo(40, 0);
+      expect(busiestTxP95(r.hosts.target)).toBeGreaterThan(0);
+      expect(r.generatorVerdict).not.toBeNull();
+      expect(result.metrics["target.cpu.p95"]?.unit).toBe("%");
+      expect(result.metrics["target.nic.eth0.tx_bytes_per_second"]?.value).toBeGreaterThan(0);
+    },
+    SLOW_MS,
+  );
 });
 
 /** A host summary from two real reads of a fake `/proc`, with a fixed clock. */
@@ -421,54 +451,62 @@ function emptyAggregate() {
 }
 
 describe("the load-sweep scenario", () => {
-  test("steps the audience over one fleet, counts ladders, and passes when no step breaks", async () => {
-    const { platform, calls } = fakePlatform({
-      report: () => ({ ttffMs: 300, latencyMs: [800], playedSeconds: 1, bytesHttp: 10 }),
-      renditions: ["source", "720p"],
-    });
-    const r = await runOne(sweepScenario, platform, {
-      command: "run",
-      profile: "default",
-      env,
-      log,
-      platform,
-      runId: "r1",
-      params: { steps: "2,4", streamers: "2", seconds: "1", cooldownSeconds: "0", browserViewers: "0" },
-    });
-    expect(r.error).toBeUndefined();
-    expect(r.status).toBe("passed");
-    // The streams stay up across steps: two sign-ups, not four.
-    expect(calls.signUps).toHaveLength(2);
-    const rows = r.data.sweep as { viewers: number; status: string; ladders: number | null }[];
-    expect(rows.map((x) => [x.viewers, x.status, x.ladders])).toEqual([
-      [2, "pass", 2],
-      [4, "pass", 2],
-    ]);
-    expect(r.metrics["sweep.steps_run"]?.value).toBe(2);
-    expect(r.metrics["sweep.last_passing.viewers"]?.value).toBe(4);
-    expect(r.metrics["sweep.inconclusive"]?.value).toBe(0);
-  });
+  test(
+    "steps the audience over one fleet, counts ladders, and passes when no step breaks",
+    async () => {
+      const { platform, calls } = fakePlatform({
+        report: () => ({ ttffMs: 300, latencyMs: [800], playedSeconds: 1, bytesHttp: 10 }),
+        renditions: ["source", "720p"],
+      });
+      const r = await runOne(sweepScenario, platform, {
+        command: "run",
+        profile: "default",
+        env,
+        log,
+        platform,
+        runId: "r1",
+        params: { steps: "2,4", streamers: "2", seconds: "1", cooldownSeconds: "0", browserViewers: "0" },
+      });
+      expect(r.error).toBeUndefined();
+      expect(r.status).toBe("passed");
+      // The streams stay up across steps: two sign-ups, not four.
+      expect(calls.signUps).toHaveLength(2);
+      const rows = r.data.sweep as { viewers: number; status: string; ladders: number | null }[];
+      expect(rows.map((x) => [x.viewers, x.status, x.ladders])).toEqual([
+        [2, "pass", 2],
+        [4, "pass", 2],
+      ]);
+      expect(r.metrics["sweep.steps_run"]?.value).toBe(2);
+      expect(r.metrics["sweep.last_passing.viewers"]?.value).toBe(4);
+      expect(r.metrics["sweep.inconclusive"]?.value).toBe(0);
+    },
+    SLOW_MS,
+  );
 
-  test("a step that breaks stops the sweep and fails the run when it was the first", async () => {
-    const { platform } = fakePlatform({
-      // Nobody ever starts playing: every step breaks.
-      report: () => ({ ttffMs: null, errors: ["no media"] }),
-      renditions: "throw",
-    });
-    const r = await runOne(sweepScenario, platform, {
-      command: "run",
-      profile: "default",
-      env,
-      log,
-      platform,
-      runId: "r1",
-      params: { steps: "2,4", streamers: "1", seconds: "1", cooldownSeconds: "0", browserViewers: "0" },
-    });
-    expect(r.status).toBe("failed");
-    const rows = r.data.sweep as { viewers: number; status: string; ladders: number | null }[];
-    expect(rows).toHaveLength(1);
-    // playback.start failed on every channel: ladders unknown, not 0.
-    expect(rows[0]?.ladders).toBeNull();
-    expect(r.assertions.find((a) => a.name === "the first step met the targets")?.passed).toBe(false);
-  });
+  test(
+    "a step that breaks stops the sweep and fails the run when it was the first",
+    async () => {
+      const { platform } = fakePlatform({
+        // Nobody ever starts playing: every step breaks.
+        report: () => ({ ttffMs: null, errors: ["no media"] }),
+        renditions: "throw",
+      });
+      const r = await runOne(sweepScenario, platform, {
+        command: "run",
+        profile: "default",
+        env,
+        log,
+        platform,
+        runId: "r1",
+        params: { steps: "2,4", streamers: "1", seconds: "1", cooldownSeconds: "0", browserViewers: "0" },
+      });
+      expect(r.status).toBe("failed");
+      const rows = r.data.sweep as { viewers: number; status: string; ladders: number | null }[];
+      expect(rows).toHaveLength(1);
+      // playback.start failed on every channel: ladders unknown, not 0.
+      expect(rows[0]?.ladders).toBeNull();
+      expect(r.assertions.find((a) => a.name === "the first step met the targets")?.passed).toBe(false);
+    },
+    SLOW_MS,
+  );
 });

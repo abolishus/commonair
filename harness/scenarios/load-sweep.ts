@@ -20,6 +20,7 @@
  */
 import {
   type LoadResult,
+  type LoadTopology,
   type StreamerFleet,
   busiestTxP95,
   loadTopology,
@@ -74,124 +75,129 @@ function generatorCpuP95(r: LoadResult): number | null {
   return values.length ? Math.max(...values) : null;
 }
 
-export default defineScenario({
-  name: "load-sweep",
-  description:
-    "capacity sweep: steps viewers (or live streams) up until latency, TTFF, stalls, errors, target CPU or NIC breaks; one row per step",
-  needs: ["api", "mail", "media", "origin", "ffmpeg", "browser"],
-  inFull: false,
-  timeoutMs: 6 * 60 * 60_000,
-  async run(ctx) {
-    const sp = parseSweepParams(ctx.params);
-    const topo = loadTopology();
-    const targetCeiling = mbpsToBytesPerSecond(topo.env.HARNESS_LOAD_TARGET_NIC_MBPS);
-    ctx.data("params", { ...sp, target: topo.target, generators: topo.env.HARNESS_LOAD_GENERATOR_HOSTS });
-    ctx.log.info("sweep source", { axis: sp.axis, source: describeSource(sp.source) });
-    if (!topo.target) ctx.log.warn("load-sweep without HARNESS_LOAD_TARGET_SSH: no target host CPU or NIC");
+/** The scenario over `topology` (the unit tests pass one that reads no real host). */
+export function loadSweepScenario(topology: () => LoadTopology = () => loadTopology()) {
+  return defineScenario({
+    name: "load-sweep",
+    description:
+      "capacity sweep: steps viewers (or live streams) up until latency, TTFF, stalls, errors, target CPU or NIC breaks; one row per step",
+    needs: ["api", "mail", "media", "origin", "ffmpeg", "browser"],
+    inFull: false,
+    timeoutMs: 6 * 60 * 60_000,
+    async run(ctx) {
+      const sp = parseSweepParams(ctx.params);
+      const topo = topology();
+      const targetCeiling = mbpsToBytesPerSecond(topo.env.HARNESS_LOAD_TARGET_NIC_MBPS);
+      ctx.data("params", { ...sp, target: topo.target, generators: topo.env.HARNESS_LOAD_GENERATOR_HOSTS });
+      ctx.log.info("sweep source", { axis: sp.axis, source: describeSource(sp.source) });
+      if (!topo.target) ctx.log.warn("load-sweep without HARNESS_LOAD_TARGET_SSH: no target host CPU or NIC");
 
-    let fleet: StreamerFleet = { users: [], channels: [], streamers: [] };
-    const rows: SweepRow[] = [];
-    for (const [i, step] of sp.steps.entries()) {
-      if (ctx.signal.aborted) break;
-      const shape = stepShape(sp, step);
-      const label = `step ${i + 1}/${sp.steps.length} (${shape.streamers} streams, ${shape.viewers} viewers)`;
-      fleet = await startStreamers(ctx, shape.streamers, sp.source, topo, fleet);
-      let ladders: number | null = null;
-      const result = await runAudience(
-        ctx,
-        fleet,
-        {
+      let fleet: StreamerFleet = { users: [], channels: [], streamers: [] };
+      const rows: SweepRow[] = [];
+      for (const [i, step] of sp.steps.entries()) {
+        if (ctx.signal.aborted) break;
+        const shape = stepShape(sp, step);
+        const label = `step ${i + 1}/${sp.steps.length} (${shape.streamers} streams, ${shape.viewers} viewers)`;
+        fleet = await startStreamers(ctx, shape.streamers, sp.source, topo, fleet);
+        let ladders: number | null = null;
+        const result = await runAudience(
+          ctx,
+          fleet,
+          {
+            viewers: shape.viewers,
+            durationMs: sp.seconds * 1000,
+            browserViewers: Math.min(sp.browserViewers, shape.viewers),
+            httpPerProcess: sp.httpPerProcess,
+            label,
+            generatorThresholds: sp.generator,
+            beforeStop: async () => {
+              ladders = await countLadders(ctx, fleet.channels);
+            },
+          },
+          topo,
+        );
+        const row = sweepRow(
+          sp,
+          step,
+          shape,
+          {
+            ...result,
+            target: {
+              cpuP95: result.hosts.target?.cpu.p95 ?? null,
+              busiestTxP95: busiestTxP95(result.hosts.target),
+              totalTxMean: result.hosts.target?.nicTotal.tx.mean ?? null,
+            },
+            generatorCpuP95: generatorCpuP95(result),
+            generator: result.generatorVerdict ?? { inconclusive: false, limits: [], notes: [] },
+          },
+          targetCeiling,
+          ladders,
+        );
+        rows.push(row);
+        ctx.data("sweep", rows);
+        ctx.data(`sweep step ${i + 1}`, {
+          load: result.report,
+          target: result.hosts.target,
+          containers: { source: result.hosts.containersSource, incomplete: result.hosts.containersIncomplete },
+          generators: result.hosts.generators,
+          verdict: result.generatorVerdict,
+        });
+        ctx.log.info("sweep step", {
+          step: i + 1,
           viewers: shape.viewers,
-          durationMs: sp.seconds * 1000,
-          browserViewers: Math.min(sp.browserViewers, shape.viewers),
-          httpPerProcess: sp.httpPerProcess,
-          label,
-          generatorThresholds: sp.generator,
-          beforeStop: async () => {
-            ladders = await countLadders(ctx, fleet.channels);
-          },
-        },
-        topo,
-      );
-      const row = sweepRow(
-        sp,
-        step,
-        shape,
-        {
-          ...result,
-          target: {
-            cpuP95: result.hosts.target?.cpu.p95 ?? null,
-            busiestTxP95: busiestTxP95(result.hosts.target),
-            totalTxMean: result.hosts.target?.nicTotal.tx.mean ?? null,
-          },
-          generatorCpuP95: generatorCpuP95(result),
-          generator: result.generatorVerdict ?? { inconclusive: false, limits: [], notes: [] },
-        },
-        targetCeiling,
-        ladders,
-      );
-      rows.push(row);
-      ctx.data("sweep", rows);
-      ctx.data(`sweep step ${i + 1}`, {
-        load: result.report,
-        target: result.hosts.target,
-        containers: { source: result.hosts.containersSource, incomplete: result.hosts.containersIncomplete },
-        generators: result.hosts.generators,
-        verdict: result.generatorVerdict,
-      });
-      ctx.log.info("sweep step", {
-        step: i + 1,
-        viewers: shape.viewers,
-        streams: shape.streamers,
-        status: row.status,
-        broke: row.breaches.map((b) => b.metric),
-        invalid: row.invalidReasons,
-        ladders: row.ladders,
-      });
-      if (stopsSweep(row)) {
-        recordHostMetrics(ctx, "first_failing.target", result.hosts.target);
-        break;
+          streams: shape.streamers,
+          status: row.status,
+          broke: row.breaches.map((b) => b.metric),
+          invalid: row.invalidReasons,
+          ladders: row.ladders,
+        });
+        if (stopsSweep(row)) {
+          recordHostMetrics(ctx, "first_failing.target", result.hosts.target);
+          break;
+        }
+        recordHostMetrics(ctx, "last_passing.target", result.hosts.target);
+        recordHostMetrics(ctx, "last_passing.generator", result.hosts.generators[LOCAL_HOST] ?? null);
+        if (i < sp.steps.length - 1 && sp.cooldownSeconds > 0) {
+          await ctx.step(`cool down ${sp.cooldownSeconds} s`, () => Bun.sleep(sp.cooldownSeconds * 1000));
+        }
       }
-      recordHostMetrics(ctx, "last_passing.target", result.hosts.target);
-      recordHostMetrics(ctx, "last_passing.generator", result.hosts.generators[LOCAL_HOST] ?? null);
-      if (i < sp.steps.length - 1 && sp.cooldownSeconds > 0) {
-        await ctx.step(`cool down ${sp.cooldownSeconds} s`, () => Bun.sleep(sp.cooldownSeconds * 1000));
-      }
-    }
 
-    const summary = summarizeSweep(sp.axis, rows);
-    ctx.data("sweepSummary", summary);
-    ctx.metric("sweep.steps_run", summary.stepsRun);
-    ctx.metric("sweep.last_passing.viewers", summary.lastPassing?.viewers);
-    ctx.metric("sweep.last_passing.streams", summary.lastPassing?.streamers);
-    ctx.metric("sweep.last_passing.ladders", summary.lastPassing?.ladders);
-    ctx.metric("sweep.first_failing.viewers", summary.firstFailing?.viewers);
-    ctx.metric("sweep.first_failing.streams", summary.firstFailing?.streamers);
-    ctx.metric("sweep.per_viewer_egress", summary.perViewerEgressBytesPerSecond, "bytes/s");
-    ctx.metric("sweep.per_viewer_nic_tx", summary.perViewerNicTxBytesPerSecond, "bytes/s");
-    ctx.metric("sweep.last_passing.target_cpu_p95", summary.targetCpuP95, "%");
-    ctx.metric("sweep.inconclusive", summary.outcome === "inconclusive" ? 1 : 0);
-    ctx.log.info("sweep done", {
-      outcome: summary.outcome,
-      lastPassing: summary.lastPassing && {
-        viewers: summary.lastPassing.viewers,
-        streams: summary.lastPassing.streamers,
-      },
-      firstFailing: summary.firstFailing && {
-        viewers: summary.firstFailing.viewers,
-        streams: summary.firstFailing.streamers,
-        brokeBy: summary.brokeBy,
-      },
-    });
-    // A sweep is a measurement: finding the break is the point. It fails only when even the first
-    // step broke on the target (the range is wrong, or the instance is broken).
-    // Not report-only: an inconclusive sweep found no capacity number, so it fails the run.
-    for (const reason of sweepInconclusiveReasons(summary)) ctx.inconclusive(reason);
-    if (summary.outcome !== "inconclusive") {
-      ctx.check("the first step met the targets", summary.lastPassing !== null, {
-        firstFailing: summary.firstFailing?.step,
-        brokeBy: summary.brokeBy,
+      const summary = summarizeSweep(sp.axis, rows);
+      ctx.data("sweepSummary", summary);
+      ctx.metric("sweep.steps_run", summary.stepsRun);
+      ctx.metric("sweep.last_passing.viewers", summary.lastPassing?.viewers);
+      ctx.metric("sweep.last_passing.streams", summary.lastPassing?.streamers);
+      ctx.metric("sweep.last_passing.ladders", summary.lastPassing?.ladders);
+      ctx.metric("sweep.first_failing.viewers", summary.firstFailing?.viewers);
+      ctx.metric("sweep.first_failing.streams", summary.firstFailing?.streamers);
+      ctx.metric("sweep.per_viewer_egress", summary.perViewerEgressBytesPerSecond, "bytes/s");
+      ctx.metric("sweep.per_viewer_nic_tx", summary.perViewerNicTxBytesPerSecond, "bytes/s");
+      ctx.metric("sweep.last_passing.target_cpu_p95", summary.targetCpuP95, "%");
+      ctx.metric("sweep.inconclusive", summary.outcome === "inconclusive" ? 1 : 0);
+      ctx.log.info("sweep done", {
+        outcome: summary.outcome,
+        lastPassing: summary.lastPassing && {
+          viewers: summary.lastPassing.viewers,
+          streams: summary.lastPassing.streamers,
+        },
+        firstFailing: summary.firstFailing && {
+          viewers: summary.firstFailing.viewers,
+          streams: summary.firstFailing.streamers,
+          brokeBy: summary.brokeBy,
+        },
       });
-    }
-  },
-});
+      // A sweep is a measurement: finding the break is the point. It fails only when even the first
+      // step broke on the target (the range is wrong, or the instance is broken).
+      // Not report-only: an inconclusive sweep found no capacity number, so it fails the run.
+      for (const reason of sweepInconclusiveReasons(summary)) ctx.inconclusive(reason);
+      if (summary.outcome !== "inconclusive") {
+        ctx.check("the first step met the targets", summary.lastPassing !== null, {
+          firstFailing: summary.firstFailing?.step,
+          brokeBy: summary.brokeBy,
+        });
+      }
+    },
+  });
+}
+
+export default loadSweepScenario();

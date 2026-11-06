@@ -3,8 +3,8 @@
 
 /**
  * seed-media's plans (pure): the backdated broadcast history over seed-social's chat windows
- * (broadcasts, stream hours, health and egress samples) and the real recordings (who streams, in
- * which batch, with which viewers, chat, clips, room, rehearsal, captions and swarm). Writers turn
+ * (broadcasts, stream hours, health and egress samples) and the real recordings (who streams,
+ * in which start order, with which viewers, chat, clips, room, rehearsal, captions and swarm). Writers turn
  * these into inserts (`write.ts`) and API calls (`record.ts`).
  *
  * Content is keyed by owner handle and per-owner ordinal, never by a channel id: ids differ between

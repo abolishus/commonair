@@ -203,6 +203,32 @@ describe("runUnits", () => {
     expect(finished).toEqual(["social"]);
   });
 
+  test("side by side: a unit whose dependencies end after another unit failed never starts", async () => {
+    const gates = new Map<SeedUnitName, ReturnType<typeof deferred>>();
+    const started: SeedUnitName[] = [];
+    // media waits only for money, so money ending after interact's failure makes it ready.
+    const graph = [u("social"), u("interact", ["social"]), u("money", ["social"]), u("media", ["money"])];
+    const run = runUnits(
+      graph,
+      (x) => {
+        started.push(x.name);
+        const d = deferred();
+        gates.set(x.name, d);
+        return d.promise;
+      },
+      { concurrent: true },
+    );
+    void run.catch(() => undefined);
+    await tick();
+    gates.get("social")?.resolve();
+    await tick();
+    gates.get("interact")?.reject(new Error("interact broke"));
+    await tick();
+    gates.get("money")?.resolve();
+    await expect(run).rejects.toThrow("interact broke");
+    expect(started).toEqual(["social", "interact", "money"]);
+  });
+
   test("side by side: a unit that throws synchronously fails the run like a rejection", async () => {
     const run = runUnits(
       [u("social")],
