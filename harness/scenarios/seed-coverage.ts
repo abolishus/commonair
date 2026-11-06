@@ -30,14 +30,15 @@ import type { SeedStore } from "../src/seed/types.ts";
 import {
   CRAWL_CONCURRENCY,
   CRAWL_PACE,
+  CrawlBuckets,
   SIGN_IN_PACE,
   type VisitObservation,
   crawlConcurrency,
   crawlQueue,
-  crawlWaitMs,
   loginsOf,
   reportUrl,
   resolveSeedRoute,
+  takeRoom,
   visitProblems,
 } from "../src/seed/visit.ts";
 import { signInViaUi } from "../src/web/flows.ts";
@@ -200,6 +201,8 @@ interface Crawl {
   password: string;
   /** Sign-in times across every worker (one per-address `auth` bucket). */
   signIns: number[];
+  /** API calls per `default` bucket: each signed-in user's, and the address's shared by all. */
+  buckets: CrawlBuckets;
   /** A worker failed hard: the others start nothing more. */
   stopped: boolean;
   failed: number;
@@ -224,28 +227,30 @@ async function crawlLogin(
   });
   ctx.defer(() => session.close());
   const page = await session.page();
-  // This login's API calls (one user's rate-limit bucket), so the crawl can keep under it.
-  const calls: number[] = [];
+  // This login's API calls, in the bucket they spend (the address's until signed in, then the
+  // user's), so the crawl can keep under each.
+  let signedIn = false;
   page.on("request", (r) => {
-    if (new URL(r.url()).pathname.startsWith("/rpc/")) calls.push(Date.now());
+    if (new URL(r.url()).pathname.startsWith("/rpc/")) crawl.buckets.of(as, signedIn).push(Date.now());
   });
+  const pause = (ms: number) => sleep(ms, ctx.signal);
   if (as !== "anonymous") {
     const user = crawl.store.users.find((u) => u.handle === as);
     ctx.assert(`the seed made ${as}`, user !== undefined);
     if (!user) return;
-    // Re-checked after every sleep, and recorded with no await in between, so two workers
-    // waking together cannot both take the last slot.
-    for (let wait = crawlWaitMs(crawl.signIns, Date.now(), SIGN_IN_PACE); wait > 0;) {
-      ctx.log.info("seed-coverage: pacing sign-ins under the auth limit", { as, waitMs: wait });
-      await sleep(wait, ctx.signal);
-      wait = crawlWaitMs(crawl.signIns, Date.now(), SIGN_IN_PACE);
-    }
-    crawl.signIns.push(Date.now());
+    await takeRoom(crawl.signIns, SIGN_IN_PACE, 1, pause, Date.now, (waitMs) =>
+      ctx.log.info("seed-coverage: pacing sign-ins under the auth limit", { as, waitMs }),
+    );
+    // The sign-in page renders anonymously, in the address bucket the anonymous login is crawling.
+    await takeRoom(crawl.buckets.address, CRAWL_PACE, CRAWL_PACE.serverCallsPerPage, pause, Date.now, (waitMs) =>
+      ctx.log.info("seed-coverage: pacing the sign-in page under the address's API limit", { as, waitMs }),
+    );
     await ctx.step(`${as}: sign in through the web UI`, async () => {
       const page = await session.goto(ROUTES.signin);
       await signInViaUi(page, { email: user.email, password: crawl.password }, UI_TIMEOUT_MS, ctx.signal);
       await byTestId(page, T.navUser).first().waitFor({ timeout: UI_TIMEOUT_MS });
     });
+    signedIn = true;
   }
   for (const [path, route] of routes) {
     if (crawl.stopped) return;
@@ -256,13 +261,14 @@ async function crawlLogin(
       else ctx.skipStep(`${path} as ${as}`, `no ${resolved.missing}`);
       continue;
     }
-    const wait = crawlWaitMs(calls, Date.now());
-    if (wait > 0) {
-      ctx.log.info("seed-coverage: pacing under the API rate limit", { as, path, waitMs: wait });
-      await sleep(wait, ctx.signal);
-    }
-    const now = Date.now();
-    for (let i = 0; i < CRAWL_PACE.serverCallsPerPage; i++) calls.push(now);
+    await takeRoom(
+      crawl.buckets.of(as, signedIn),
+      CRAWL_PACE,
+      CRAWL_PACE.serverCallsPerPage,
+      pause,
+      Date.now,
+      (waitMs) => ctx.log.info("seed-coverage: pacing under the API rate limit", { as, path, waitMs }),
+    );
     const seen = await visit(page, resolved.url, ctx.env.HARNESS_API_URL, ctx.env.HARNESS_WEB_URL, route.expectData);
     const problems = visitProblems(route, seen);
     const ok = ctx.check(`${path} as ${as}`, problems.length === 0, {
@@ -299,7 +305,15 @@ export default defineScenario({
 
     // Logins side by side, each in its own browser context and rate-limit bucket. After a hard
     // failure no worker starts another route; the first error is rethrown once all have stopped.
-    const crawl: Crawl = { store, password, signIns: [], stopped: false, failed: 0, loginMs: {} };
+    const crawl: Crawl = {
+      store,
+      password,
+      signIns: [],
+      buckets: new CrawlBuckets(),
+      stopped: false,
+      failed: 0,
+      loginMs: {},
+    };
     const crawlStarted = Date.now();
     let next = 0;
     const settled = await Promise.allSettled(

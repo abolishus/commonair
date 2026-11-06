@@ -187,7 +187,8 @@ The walk is paced, not throttled by errors. Every page's API calls count against
 the logins run three at a time in their own browser contexts, the ones with the most routes first.
 One login's pacing never slows another, so the walk takes about as long as its slowest login
 (viewer1). The sign-ins share one address, so they are paced under the `auth` limit (six a minute,
-of its ten). `--set crawlConcurrency=1` walks the logins one by one. The report has the walk's
+of its ten), and every anonymous call (the anonymous login's pages and each sign-in page) is
+counted in one bucket for that address, which all the workers share. `--set crawlConcurrency=1` walks the logins one by one. The report has the walk's
 time (`seed-coverage.crawl`) and each login's (`data["seed-coverage.loginMs"]`); the
 `seed full` step's time is the seed's.
 

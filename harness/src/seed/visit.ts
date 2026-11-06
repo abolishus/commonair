@@ -151,3 +151,47 @@ export function crawlConcurrency(raw: number, logins: number): number {
   if (!Number.isInteger(raw) || raw < 1) throw new Error(`--set crawlConcurrency=${raw}: a positive integer`);
   return Math.max(1, Math.min(raw, logins));
 }
+
+/**
+ * The API `default` buckets a crawl spends. A signed-in login's calls are its own user's; every
+ * anonymous call (the anonymous login's pages, and each login's sign-in page before its cookie is
+ * set) is this machine's address, one bucket shared by every worker, so the anonymous login's
+ * pacing counts the other workers' sign-in pages too.
+ */
+export class CrawlBuckets {
+  /** Anonymous calls from this machine, across every worker. */
+  readonly address: number[] = [];
+  readonly #users = new Map<string, number[]>();
+
+  /** The bucket `as`'s calls land in now. */
+  of(as: string, signedIn: boolean): number[] {
+    if (as === "anonymous" || !signedIn) return this.address;
+    let bucket = this.#users.get(as);
+    if (!bucket) {
+      bucket = [];
+      this.#users.set(as, bucket);
+    }
+    return bucket;
+  }
+}
+
+/**
+ * Wait until `bucket` has room under `pace`, then record `count` hits in it. Re-checked after
+ * every sleep and recorded with no await in between, so workers sharing a bucket and waking
+ * together cannot both take the last room.
+ */
+export async function takeRoom(
+  bucket: number[],
+  pace: Parameters<typeof crawlWaitMs>[2],
+  count: number,
+  sleepFor: (ms: number) => Promise<void>,
+  now: () => number = Date.now,
+  onWait?: (ms: number) => void,
+): Promise<void> {
+  for (let wait = crawlWaitMs(bucket, now(), pace); wait > 0; wait = crawlWaitMs(bucket, now(), pace)) {
+    onWait?.(wait);
+    await sleepFor(wait);
+  }
+  const at = now();
+  for (let i = 0; i < count; i++) bucket.push(at);
+}

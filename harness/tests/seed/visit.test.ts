@@ -7,6 +7,7 @@ import type { SeedStore } from "../../src/seed/types.ts";
 import {
   CRAWL_CONCURRENCY,
   CRAWL_PACE,
+  CrawlBuckets,
   SIGN_IN_PACE,
   type VisitObservation,
   crawlConcurrency,
@@ -14,6 +15,7 @@ import {
   crawlWaitMs,
   loginsOf,
   reportUrl,
+  takeRoom,
   resolveSeedRoute,
   visitProblems,
 } from "../../src/seed/visit.ts";
@@ -227,5 +229,63 @@ describe("crawling logins side by side", () => {
     const six = [...five, 1_500];
     expect(crawlWaitMs(six, 2_000, SIGN_IN_PACE)).toBe(1_000 + SIGN_IN_PACE.windowMs - 2_000);
     expect(crawlWaitMs(six, 1_000 + SIGN_IN_PACE.windowMs, SIGN_IN_PACE)).toBe(0);
+  });
+});
+
+describe("the crawl's API buckets", () => {
+  test("anonymous calls and every sign-in page share the address bucket; signed in, each user has its own", () => {
+    const b = new CrawlBuckets();
+    expect(b.of("anonymous", false)).toBe(b.address);
+    expect(b.of("anonymous", true)).toBe(b.address);
+    expect(b.of("viewer1", false)).toBe(b.address);
+    const v1 = b.of("viewer1", true);
+    expect(v1).not.toBe(b.address);
+    expect(b.of("viewer1", true)).toBe(v1);
+    expect(b.of("member1", true)).not.toBe(v1);
+  });
+
+  test("takeRoom: no wait with room, then records the hits at once", async () => {
+    const bucket: number[] = [];
+    const sleeps: number[] = [];
+    await takeRoom(
+      bucket,
+      CRAWL_PACE,
+      6,
+      async (ms) => void sleeps.push(ms),
+      () => 1_000,
+    );
+    expect(sleeps).toEqual([]);
+    expect(bucket).toEqual(Array.from({ length: 6 }, () => 1_000));
+  });
+
+  test("takeRoom: two workers race for the last slot; the second waits for the oldest hit to leave", async () => {
+    let now = 2_000;
+    const bucket = [1_000, 1_100, 1_200, 1_300, 1_400];
+    const waits: number[] = [];
+    const advance = async (ms: number) => {
+      now += ms;
+    };
+    const clock = () => now;
+    // Started together: the first takes the sixth slot with no await, so the second must wait.
+    await Promise.all([
+      takeRoom(bucket, SIGN_IN_PACE, 1, advance, clock, (ms) => waits.push(ms)),
+      takeRoom(bucket, SIGN_IN_PACE, 1, advance, clock, (ms) => waits.push(ms)),
+    ]);
+    expect(waits).toEqual([1_000 + SIGN_IN_PACE.windowMs - 2_000]);
+    expect(bucket).toEqual([1_000, 1_100, 1_200, 1_300, 1_400, 2_000, 1_000 + SIGN_IN_PACE.windowMs]);
+  });
+
+  test("takeRoom: a sleep that rejects (the scenario aborted) records nothing", async () => {
+    const bucket = Array.from({ length: 6 }, () => 1_000);
+    await expect(
+      takeRoom(
+        bucket,
+        SIGN_IN_PACE,
+        1,
+        () => Promise.reject(new Error("aborted")),
+        () => 2_000,
+      ),
+    ).rejects.toThrow("aborted");
+    expect(bucket).toHaveLength(6);
   });
 });
