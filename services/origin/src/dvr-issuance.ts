@@ -15,10 +15,12 @@
  *
  * One DVR session plays the recording at 1× (the player pins DVR to rate 1), so in a minute it
  * fetches at most `DVR_ISSUANCE_SPAN_SECONDS` of it: 60 s of playback plus a seek's buffer refill
- * and room-sync catch-up. Its allowance is the heaviest objects of the pulls, largest first,
- * until they cover the span plus one segment (a run of playback starts and ends inside a
- * segment), plus the largest init segment. For the recorder's uniform 4 s segments this is at
- * least what any contiguous span could weigh; the receipt verifier's tolerance applies on top.
+ * and room-sync catch-up. Its allowance covers the span plus one segment (a run of playback starts
+ * and ends inside a segment), plus the largest init segment: bytes are the densest objects
+ * (bytes per media second) taken whole until they cover it, segments the shortest ones until
+ * they cover it. Each is an upper bound on any set of objects that short, contiguous or not, so
+ * it also holds for the short segments a stream restart leaves; for the recorder's uniform 4 s
+ * segments it is the heaviest 31. The receipt verifier's tolerance applies on top.
  */
 import type { Logger } from "@commonair/observability";
 import type { ValkeyClient } from "@commonair/service";
@@ -29,6 +31,12 @@ import { noopMetrics, type OriginMetrics } from "./metrics.ts";
 export const DVR_ISSUANCE_SPAN_SECONDS = 120;
 /** Pulls stay readable this long past the window, for the 5-minute recompute (as production's 20 min). */
 export const DVR_PULLS_GRACE_MS = 20 * 60_000;
+/**
+ * How much longer than the window a relay may keep serving a pulled object: its segment cache life
+ * is the cut playlist's span, which can overhang the window by the segment straddling its edge, and
+ * is never under 30 s (`dvrMinExpiry` in `relay/internal/server/dvr.go`).
+ */
+export const DVR_PULLS_SLACK_MS = 60_000;
 
 /**
  * ZSET of the DVR objects relays pulled for one VOD. Contract request: move to
@@ -60,22 +68,26 @@ export function dvrAllowance(objects: readonly DvrObject[], spanSeconds = DVR_IS
     const prev = byFile.get(o.file);
     if (!prev || o.bytes > prev.bytes) byFile.set(o.file, o);
   }
-  const all = [...byFile.values()];
-  const media = all.filter((o) => o.durationMs > 0).sort((a, b) => b.bytes - a.bytes);
-  const init = all.filter((o) => o.durationMs === 0).reduce((max, o) => Math.max(max, o.bytes), 0);
-  const need = spanSeconds * 1000 + Math.max(0, ...media.map((o) => o.durationMs));
-  let segments = 0;
-  let bytes = 0;
+  const media = [...byFile.values()].filter((o) => o.durationMs > 0);
+  if (media.length === 0) return { segments: 0, bytes: 0 };
+  const init = [...byFile.values()].filter((o) => o.durationMs === 0).reduce((max, o) => Math.max(max, o.bytes), 0);
+  const need = spanSeconds * 1000 + media.reduce((max, o) => Math.max(max, o.durationMs), 0);
+  // Fractional knapsack, last item whole: no set of objects lasting `need` or less weighs more.
+  const dense = [...media].sort((a, b) => b.bytes / b.durationMs - a.bytes / a.durationMs);
+  // No set lasting `need` or less has more objects than the shortest ones that cover it.
+  const short = [...media].sort((a, b) => a.durationMs - b.durationMs);
+  return {
+    segments: takeUntil(short, need).length + (init > 0 ? 1 : 0),
+    bytes: takeUntil(dense, need).reduce((sum, o) => sum + o.bytes, 0) + init,
+  };
+}
+
+/** The leading objects of `sorted` whose durations first reach `needMs` (all of them if they never do). */
+function takeUntil(sorted: readonly DvrObject[], needMs: number): DvrObject[] {
   let covered = 0;
-  for (const o of media) {
-    if (covered >= need) break;
-    segments++;
-    bytes += o.bytes;
-    covered += o.durationMs;
-  }
-  return media.length === 0
-    ? { segments: 0, bytes: 0 }
-    : { segments: segments + (init > 0 ? 1 : 0), bytes: bytes + init };
+  let n = 0;
+  while (n < sorted.length && covered < needMs) covered += sorted[n++]?.durationMs ?? 0;
+  return sorted.slice(0, n);
 }
 
 const RECORD_SCRIPT = `
@@ -107,13 +119,18 @@ export class DvrPullStore {
     return Math.max(0, this.opts.windowSeconds) * 1000;
   }
 
+  /** How far before a minute a pull can still be served in it: the window plus the relay's slack. */
+  get lookbackMs(): number {
+    return this.windowMs + DVR_PULLS_SLACK_MS;
+  }
+
   /** Count one whole DVR object served to a relay. Never awaited by a response. */
   record(vodId: string, obj: DvrObject, at: number): void {
     if (this.pending.size >= (this.opts.maxPending ?? 10_000)) {
       this.metrics.accountingDropped("dvr_pulls", 1);
       return;
     }
-    const keep = this.windowMs + DVR_PULLS_GRACE_MS;
+    const keep = this.lookbackMs + DVR_PULLS_GRACE_MS;
     const p = this.opts.valkey
       .eval(RECORD_SCRIPT, 1, dvrPullsKey(vodId), at, encodeDvrObject(obj), at - keep, keep)
       .catch((err: unknown) => {
@@ -128,9 +145,9 @@ export class DvrPullStore {
     await Promise.allSettled(this.pending);
   }
 
-  /** The objects a relay could have served in [startMs, endMs): pulled in [startMs − window, endMs). */
+  /** The objects a relay could have served in [startMs, endMs): pulled in [startMs − lookback, endMs). */
   async servable(vodId: string, startMs: number, endMs: number): Promise<DvrObject[]> {
-    const members = await this.opts.valkey.zrangebyscore(dvrPullsKey(vodId), startMs - this.windowMs, `(${endMs}`);
+    const members = await this.opts.valkey.zrangebyscore(dvrPullsKey(vodId), startMs - this.lookbackMs, `(${endMs}`);
     return members.flatMap((m) => decodeDvrObject(m) ?? []);
   }
 }

@@ -6,6 +6,7 @@ import {
   decodeDvrObject,
   DVR_ISSUANCE_SPAN_SECONDS,
   DVR_PULLS_GRACE_MS,
+  DVR_PULLS_SLACK_MS,
   dvrAllowance,
   DvrPullStore,
   dvrPullsKey,
@@ -52,6 +53,29 @@ describe("dvrAllowance", () => {
     }
   });
 
+  test("short segments (a stream restart) cannot outweigh or outnumber the allowance", () => {
+    // 60 long 8 s segments of 1000 bytes, and 40 short 1 s segments of 900 bytes after a restart.
+    const long = Array.from({ length: 60 }, (_, i) => seg(i, 1000, 8000));
+    const short = Array.from({ length: 40 }, (_, i) => seg(100 + i, 900, 1000));
+    const allow = dvrAllowance([...long, ...short]);
+    // 120 s + 8 s: the densest are the short ones (900 B/s), then 11 long ones to reach 128 s.
+    expect(allow).toEqual({ segments: 40 + 11, bytes: 40 * 900 + 11 * 1000 });
+    // Any contiguous run lasting 128 s or less: the 40 short ones plus 11 long, at most.
+    const ordered = [...long, ...short];
+    for (let start = 0; start < ordered.length; start++) {
+      let ms = 0;
+      let bytes = 0;
+      let n = 0;
+      for (let i = start; i < ordered.length && ms + (ordered[i]?.durationMs ?? 0) <= 128_000; i++) {
+        ms += ordered[i]?.durationMs ?? 0;
+        bytes += ordered[i]?.bytes ?? 0;
+        n++;
+      }
+      expect(allow.bytes).toBeGreaterThanOrEqual(bytes);
+      expect(allow.segments).toBeGreaterThanOrEqual(n);
+    }
+  });
+
   test("fewer pulls than the span: all of them", () => {
     expect(dvrAllowance([seg(0, 10), seg(1, 20), init(5)])).toEqual({ segments: 3, bytes: 35 });
   });
@@ -88,7 +112,7 @@ describe("DvrPullStore", () => {
     });
     store.record(VOD, seg(3, 999), 10_000_000);
     await store.flush();
-    const keep = 60_000 + DVR_PULLS_GRACE_MS;
+    const keep = 60_000 + DVR_PULLS_SLACK_MS + DVR_PULLS_GRACE_MS;
     expect(calls[0]?.slice(1)).toEqual([
       1,
       dvrPullsKey(VOD),
@@ -99,7 +123,7 @@ describe("DvrPullStore", () => {
     ]);
   });
 
-  test("servable reads pulls in [start − window, end) and drops malformed members", async () => {
+  test("servable reads pulls in [start − window − slack, end) and drops malformed members", async () => {
     const reads: unknown[][] = [];
     const store = new DvrPullStore({
       valkey: {
@@ -115,7 +139,7 @@ describe("DvrPullStore", () => {
       { file: "a.m4s", bytes: 10, durationMs: 4000 },
       { file: "r1_init.mp4", bytes: 0, durationMs: 0 },
     ]);
-    expect(reads).toEqual([[dvrPullsKey(VOD), 90_000, "(180000"]]);
+    expect(reads).toEqual([[dvrPullsKey(VOD), 120_000 - 30_000 - DVR_PULLS_SLACK_MS, "(180000"]]);
   });
 
   test("Valkey failures and a full write queue are counted, never thrown at callers", async () => {

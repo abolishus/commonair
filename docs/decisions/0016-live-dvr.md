@@ -373,20 +373,24 @@ harness scenario kept a live viewer to work around it (`5b133a98`).
 a relay (GET, 200, not HEAD and not a range) in a per-VOD Valkey sorted set (`issuance:dvr:<vodId>`,
 `services/origin/src/dvr-issuance.ts`): member `<bytes>:<durationMs>:<file>` (the duration from the
 recording's EXTINF, 0 for an init segment), score the latest pull time. Entries older than
-`DVR_MAX_WINDOW_SECONDS` + 20 minutes are trimmed on write and the key expires after the same.
+`DVR_MAX_WINDOW_SECONDS` + 21 minutes (A2.2's 60 s slack plus 20 minutes for the recompute) are
+trimmed on write and the key expires after the same.
 Every object a relay serves it first pulls from the origin, so these pulls are a superset of what
 any relay can serve.
 
-**A2.2 Which pulls a minute can use.** A relay caches a DVR segment for at most the DVR window
-(A1.3), so an object served in the minute `[start, end)` was pulled in
-`[start − DVR_MAX_WINDOW_SECONDS, end)`. Only those count: the bound is scoped to the window.
+**A2.2 Which pulls a minute can use.** A relay caches a DVR segment for the cut playlist's span
+(A1.3): the window, plus the segment straddling its edge, and never under 30 s. So an object served
+in the minute `[start, end)` was pulled in `[start − DVR_MAX_WINDOW_SECONDS − 60 s, end)`. Only
+those count: the bound is scoped to the window, with 60 s of slack for that overhang.
 
 **A2.3 One DVR session's allowance.** DVR plays at 1× (the player pins DVR to rate 1), so in a
 minute a session fetches at most **120 s** of the recording (`DVR_ISSUANCE_SPAN_SECONDS`): 60 s of
-playback plus a seek's buffer refill and room-sync catch-up. The allowance is the heaviest pulled
-segments, largest first, until their durations cover 120 s plus one segment (playback starts and
-ends inside a segment), plus the largest init segment. For the recorder's uniform 4 s segments
-this is at least what any contiguous 120 s weighs; the receipt verifier's tolerance applies on top.
+playback plus a seek's buffer refill and room-sync catch-up. The allowance covers 120 s plus one
+segment (playback starts and ends inside a segment), plus the largest init segment: its bytes are
+the densest pulled segments (bytes per media second), taken whole until they cover that, and its
+segment count is the shortest ones until they cover that. Each bounds any set of segments lasting
+that long, so it holds for the short segments a stream restart leaves; for the recorder's uniform
+4 s segments both are the heaviest 31. The receipt verifier's tolerance applies on top.
 Nothing pulled means nothing issued, as for live.
 
 **A2.4 Which sessions get it.** A relay session that has rewound (its last heartbeat mode is `dvr`,
@@ -417,7 +421,7 @@ sessions are judged on the origin's own fetch log as before.
 
 1. **Span:** 120 s of media per DVR session per minute (60 s at 1× plus a buffer refill).
 2. **Rewound:** mode `dvr` or `dvr_seconds > 0`; such a session gets max(live, DVR) per field.
-3. **Scope:** pulls in `[start − DVR_MAX_WINDOW_SECONDS, end)` (the instance cap, not the
+3. **Scope:** pulls in `[start − DVR_MAX_WINDOW_SECONDS − 60 s, end)` (the instance cap, not the
    channel's window, so a channel's later change of window never shrinks a past minute).
 4. **Key:** `issuance:dvr:<vodId>` lives in the origin until the orchestrator moves it to
    `KEYS` in `@commonair/contracts/internal`.
