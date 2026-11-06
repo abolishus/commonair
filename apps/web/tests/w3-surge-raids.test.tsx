@@ -233,5 +233,7 @@ describe("the outgoing raid panel", () => {
     wrap(<RaidPanel channel="ann" initial={initial} client={client} />);
     expect(screen.getByTestId("raid-protection-note").textContent).toBe(en["surgeRaids.panel.note"]);
     expect(screen.getByTestId("raid-form").contains(screen.getByTestId("raid-protection-note"))).toBe(true);
+    // The hint size, not a larger body size (F35).
+    expect(screen.getByTestId("raid-protection-note").dataset.slot).toBe("field-description");
   });
 });

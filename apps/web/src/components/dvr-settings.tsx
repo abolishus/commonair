@@ -131,7 +131,7 @@ export function DvrSettings({
           <SkeletonText lines={3} />
         ) : (
           <FieldGroup>
-            {instanceOff && <p className="text-sm text-muted-foreground">{t("dvr.settings.instanceOff")}</p>}
+            {instanceOff && <FieldDescription>{t("dvr.settings.instanceOff")}</FieldDescription>}
             <Field orientation="horizontal">
               <Switch
                 id={switchId}
@@ -176,11 +176,10 @@ export function DvrSettings({
                 </FieldDescription>
               )}
             </Field>
-            <p data-testid="dvr-needs-vods" className="text-sm text-muted-foreground">
-              {t("dvr.settings.needsVods")}
-            </p>
-            <p className="text-sm text-muted-foreground">{t("dvr.settings.sourceOnly")}</p>
-            <p className="text-sm text-muted-foreground">{t("dvr.settings.originOnly")}</p>
+            {/* Notes take the field hints' size, not a larger body size (F35). */}
+            <FieldDescription data-testid="dvr-needs-vods">{t("dvr.settings.needsVods")}</FieldDescription>
+            <FieldDescription>{t("dvr.settings.sourceOnly")}</FieldDescription>
+            <FieldDescription>{t("dvr.settings.originOnly")}</FieldDescription>
           </FieldGroup>
         )}
       </CardContent>

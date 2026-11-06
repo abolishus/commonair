@@ -163,7 +163,7 @@ export function DiscordWebhookPanel({
             <FieldDescription id={hintId}>{t("discord.url.hint")}</FieldDescription>
             {invalid && <FieldError id={errorId}>{t("discord.url.invalid")}</FieldError>}
           </Field>
-          <p className="text-sm break-words text-muted-foreground">{t("discord.terms")}</p>
+          <FieldDescription className="break-words">{t("discord.terms")}</FieldDescription>
           {docsUrl && (
             <div>
               {/* The label is Button's child; the lint rule cannot see through `render`, so it is named here too. */}
@@ -221,15 +221,18 @@ export function DiscordWebhookPanel({
   );
 }
 
+/** A note beside the field hints, so their size, not a larger body size (F35). */
 function StatusLine({ status }: { status: DiscordWebhookStatusDto }): React.JSX.Element {
   return (
     <div
       data-testid="discord-webhook-status"
       data-configured={String(status.configured)}
       data-error={status.lastError ?? ""}
-      className="flex min-w-0 flex-col gap-1 text-sm break-words"
+      className="flex min-w-0 flex-col gap-1 text-xs/relaxed break-words"
     >
-      <p>{status.configured ? t("discord.status.on") : t("discord.status.off")}</p>
+      <p className={status.configured ? undefined : "text-muted-foreground"}>
+        {status.configured ? t("discord.status.on") : t("discord.status.off")}
+      </p>
       {status.configured && (
         <p className="text-muted-foreground">
           {status.lastPostedAt

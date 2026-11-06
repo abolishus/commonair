@@ -10,7 +10,7 @@
  */
 import { ConfirmDialog, IconButton, SkeletonGroup, SkeletonText } from "@commonair/ui";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@commonair/ui/components/card";
-import { Field, FieldLabel } from "@commonair/ui/components/field";
+import { Field, FieldDescription, FieldLabel } from "@commonair/ui/components/field";
 import { Switch } from "@commonair/ui/components/switch";
 import { toast } from "@commonair/ui/toast";
 import { Copy01Icon } from "@hugeicons/core-free-icons";
@@ -166,7 +166,7 @@ function HandleRow({ handle }: { handle: string }): React.JSX.Element {
           onClick={() => void copy()}
         />
       </div>
-      <p className="text-sm text-muted-foreground">{t("federation.settings.handleHint")}</p>
+      <FieldDescription>{t("federation.settings.handleHint")}</FieldDescription>
     </div>
   );
 }
@@ -179,7 +179,7 @@ function FederationNotes(): React.JSX.Element {
       <h3 id={headingId} className="text-sm font-medium">
         {t("federation.notes.title")}
       </h3>
-      <ul className="flex list-disc flex-col gap-1 ps-5 text-sm text-muted-foreground">
+      <ul className="flex list-disc flex-col gap-1 ps-5 text-xs/relaxed text-muted-foreground">
         <li data-testid="federation-note-posted">{t("federation.notes.posted")}</li>
         <li data-testid="federation-note-mature">{t("federation.notes.mature")}</li>
         <li data-testid="federation-note-replies">{t("federation.notes.replies")}</li>

@@ -166,7 +166,7 @@ function PreviewBody(props: ImportViewProps & { dto: ImportDto; emotesChosen: bo
         <AlertCallout tone="warning" description={t("portability.import.standing.unverifiedHint")} />
       )}
       {pending ? (
-        <p className="text-sm text-muted-foreground">{t("portability.import.pending")}</p>
+        <p className="text-xs/relaxed text-muted-foreground">{t("portability.import.pending")}</p>
       ) : (
         <ul className="flex min-w-0 flex-col gap-2" aria-label={t("portability.import.itemsLabel")}>
           {dto.preview.items.map((item) => {

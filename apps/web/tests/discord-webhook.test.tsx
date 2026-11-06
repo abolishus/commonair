@@ -87,6 +87,16 @@ describe("DiscordWebhookPanel", () => {
     expect(guide?.getAttribute("href")).toContain("discord.md");
   });
 
+  it("the status line and the terms note take the hint size, not a larger body size (F35)", async () => {
+    const { client } = fake(OFF);
+    show(client);
+    await waitFor(() => expect(statusEl().getAttribute("data-configured")).toBe("false"));
+    expect(statusEl().className).toMatch(/\btext-xs\b/);
+    expect(statusEl().className).not.toMatch(/\btext-sm\b/);
+    const terms = [...document.querySelectorAll("p")].find((p) => p.textContent === t("discord.terms"));
+    expect(terms?.dataset.slot).toBe("field-description");
+  });
+
   it("configured: the last post and no error; the input is still never pre-filled", async () => {
     const { client } = fake(ON);
     show(client, null);

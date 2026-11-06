@@ -86,6 +86,16 @@ describe("DvrSettings", () => {
     expect((byId("dvr-save") as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it("the three notes use the field hint style, not a larger body size (F35)", async () => {
+    const { client } = fake({ dvr: { enabled: true, windowSeconds: 1800 }, dvrMaxWindowSeconds: 7200 });
+    await mount(client);
+    for (const key of ["dvr.settings.needsVods", "dvr.settings.sourceOnly", "dvr.settings.originOnly"] as const) {
+      const note = [...document.querySelectorAll("p")].find((p) => p.textContent === t(key));
+      expect(note?.dataset.slot).toBe("field-description");
+      expect(note?.className).not.toMatch(/\btext-sm\b/);
+    }
+  });
+
   it("turning DVR off and saving sends the change", async () => {
     const { client, saves } = fake({ dvr: { enabled: true, windowSeconds: 1800 }, dvrMaxWindowSeconds: 7200 });
     await mount(client);

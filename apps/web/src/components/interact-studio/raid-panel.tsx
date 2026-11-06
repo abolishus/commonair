@@ -10,6 +10,7 @@
 import { RelativeTime, StatusBadge, ViewerCount } from "@commonair/ui";
 import { SelectField } from "@commonair/ui/blocks/forms";
 import { Button } from "@commonair/ui/components/button";
+import { FieldDescription } from "@commonair/ui/components/field";
 import { toast } from "@commonair/ui/toast";
 import { Rocket01Icon } from "@hugeicons/core-free-icons";
 import * as React from "react";
@@ -134,9 +135,8 @@ function RaidForm({ onStart }: { onStart: (to: string) => Promise<void> }): Reac
         error={fieldError}
         description={t("interact.raid.targetHint")}
       />
-      <p data-testid="raid-protection-note" className="text-sm text-muted-foreground">
-        {t("surgeRaids.panel.note")}
-      </p>
+      {/* A note under the target's hint, so its size (F35). */}
+      <FieldDescription data-testid="raid-protection-note">{t("surgeRaids.panel.note")}</FieldDescription>
       {refusal ? (
         <p data-testid="raid-error" data-code={refusal} role="alert" className="text-sm text-destructive">
           {raidErrorMessage(refusal)}
