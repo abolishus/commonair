@@ -22,6 +22,129 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
 
 ## In flight
 
+**Platform-debt follow-ups (2026-11-06).** The non-UI engineering follow-ups toward `v0.1.0`
+(harness, relay, worker, infra and money), on `main` from `5df97a06` to the docs commit. There were
+two waves of six units each, run in parallel worktrees. Every unit was reviewed independently
+against AGENTS.md and fixed by its reviewer before the merge. The second wave was a coverage pass on
+every file the first wave touched, including older code in those files that had no tests. The
+orchestrator made every call below without the user and lists them for post-launch review.
+
+- **Seed shard over the cap** (decision (o)). The crawl runs three logins side by side, each with
+  its own rate-limit bucket. Anonymous calls are paced in one shared per-address bucket, and
+  sign-ins are paced under `auth`. The seed's waits are shorter:
+  - recordings run in a pool of five, not four batches of three;
+  - suspensions last 20 s, not 60;
+  - the seed stack and seed mode have shorter governance periods (20 s discussion and council
+    review, 30 s votes);
+  - money runs beside media.
+
+  Estimated at 9 to 9.5 min, down from 15m33s. That is only an estimate until CI records
+  `seed-coverage.seed.<unit>` and `seed-coverage.crawl`. If the runner can't take five recordings
+  at once, lower `RECORDING_CONCURRENCY` to 4. The shard was not split, because each half would
+  pay the ~10 min seed.
+
+- **Relay drain test flake:** the fake API now answers a resent receipt nonce 409 without storing
+  it, as `relays.receipt` does. The test also tolerates one late, abandoned normal heartbeat.
+  `-race -count` runs at `-cpu 1,4` passed 80 times.
+- **DVR via relay (ADR 0016 Amendment 2, accepted for review):** issuance now counts the DVR
+  objects a relay pulled in the minute (`KEYS.issuanceDvrPulls`, only whole 200 GETs from
+  authenticated relays). Each DVR session is allowed up to 120 s of media per minute, bounded
+  densest-first for bytes and shortest-first for segments. The scope is the instance DVR cap plus
+  60 s of relay cache life. A rewound session gets max(live, DVR) per field, so it can be
+  over-reported by about 2 minutes of segments. The `relay-dvr` scenario still keeps its live
+  viewer; dropping it is a follow-up for a live run.
+- **WebKit start-up hydration flake:** the cause is TanStack's `hydrate()` reading a missing
+  `window.$_TSR` (router-core 1.171.34). It happens after a WebKit full-page navigation right after
+  sign-in, and was seen in 41922495854 attempt 3, 42134001057, 42215129857 and 42255758489.
+  - The CI logs never show "Can't find variable", so the evidence points to an earlier hydration
+    deleting the global, not to it never being sent. That is still a hypothesis.
+  - Mitigation: `hydration-guard.ts` reloads the page once, at most once per 60 s per tab. It
+    never reloads without sessionStorage, and never when the URL carries one-time params (token,
+    code, state, nonce).
+  - Diagnostics: watch-room members record their start-up state (`data-boot`, globals, script
+    order), alongside `88ecab2f`'s session-wide hydration log.
+- **`e7-admin` "egress page" timeout:** fixed earlier by `1127e4f0`; nothing else in that file
+  needed it.
+- **Lapsed ban at sign-in:** the unsuspension also writes a `user.ban_lapsed` audit row (actor
+  system, `via` sign_in, sweep or recovery). The `ban-expiry` sweep recovers an event the
+  sign-in hook lost: a channel whose latest `channel.suspension` still says suspended while
+  nothing suspends it. It handles up to 200 channels a run, under the same channel lock. A
+  recovered event sorts after the one it answers.
+- **Public `/readyz` rate limit:** 60 per minute per address.
+  - Caddy rewrites `/readyz/{api,origin}` to each service's `/readyz/public`; the bare `/readyz`
+    stays unlimited and is not reachable through Caddy.
+  - The API's limiter runs on Valkey and fails open; the origin's runs in process, per replica.
+  - A 429 on a status probe counts as no data, not down.
+  - The Caddyfile and the services must ship in the same release.
+- **Ops:**
+  - **Restore-drill alerts:** failed and overdue (8 days), plus never-ran on installs older than
+    15 days, grouped by (kind, instance). A drill turned off on purpose gets a documented 35-day
+    silence.
+  - **Status page freshness:** an alert on `metrics.txt` (`STATUS_PAGE_URL` now reaches
+    Prometheus in compose and the selfhost unit env).
+  - **Status history:** kept on a small state volume (on by default, about $0.10 a month), with
+    tar steps for self-hosters. The status stack is tofu-only, not part of selfhost.sh.
+  - **Tofu:** stage 1 creates the `backups` bucket. `managed_state` sets `DATABASE_POOL_MAX` for
+    the measured sizes (8 at `db-s-1vcpu-2gb`, 3 at 1gb).
+  - **Dev compose:** observability dependencies wait for start, not health (R0-d), in both compose
+    files.
+- **Money:**
+  - **Card-share chargebacks:**
+    - a dispute books `share_chargeback` when it opens and a reversal when it is won;
+    - a lost dispute cancels the share;
+    - while a dispute is open the share is frozen and the membership is untouched.
+  - **The `distributed` flip:** a patronage period flips to `distributed` in the same transaction
+    as its last payout settling, idempotent, with an event and an audit row.
+  - **Outcome unknown:**
+    - `money.treasurer.outcomeUnknown`, a batched summary of refunds, transfers and patronage
+      payouts;
+    - a refund recheck at Stripe, 15 minutes after the outcome became unknown;
+    - a transfer settle checked at Stripe through `transferStatus`, matching amount, currency,
+      destination and `payout_id` (refused and audited on a mismatch, refused with nothing
+      written if Stripe doesn't answer);
+    - `PatronagePayoutView.outcomeUnknown` with "Mark paid" and "Not sent" on those rows;
+    - the settle UI on the treasury tabs.
+- **Database security reviews:** migrations `0051` and `0052`. Three bypasses were proven as the
+  app role and closed, each with regression tests:
+  - a chargeback could race a refund (the guard read the share before locking it);
+  - a refund could be posted on a charged-back share;
+  - a repeatable read or serializable transaction could act on a stale snapshot. The share checks
+    now run only under read committed.
+
+  `0052` also limits a chargeback to the share's amount, one outstanding at a time.
+  Accepted residual risks: the app role can still write `disputes` rows, and a `share_refund`'s
+  amount is not checked against the share.
+
+- **S1-a:** `HARNESS_LOAD_*` moved into `harness/src/env.ts`. A new `inconclusive` scenario status
+  fails the run unless the scenario is `reportOnly`, so an inconclusive load run now exits 1.
+- **Tests:** about 300 new tests across the two waves, plus mutation spot-checks by every
+  reviewer. Per-file coverage, before → after (lines):
+  - harness: `load.ts` 26 → 94, `load-sweep.ts` 0 → 97, `web/hydration.ts` 22 → 100;
+  - origin: `metrics.ts` 8 → 100, `main.ts` 0 → 100, `origin.ts` 78 → 100;
+  - relay package: 85 → 98.5;
+  - web: `client.tsx` 0 → 100, the treasury tabs 59–97 → 100;
+  - api: `transfers.ts` 89 → 100, `patronage-payouts.ts` 88 → 99, `http.ts` 61 → 96;
+  - payments: `factory.ts` 44 → 93;
+  - unit-env: `unit-env.ts` 78 → 100;
+  - ledger (with int): `payouts.ts` 92 → 99.
+
+  Still low, because they need the full stack: `watch-rooms/index.ts` (33) and
+  `seed-coverage.ts` (10 unit).
+
+- **Flake found on the way:** harness browser sessions all share the runner's address. Every
+  browser in a shard therefore shares the per-address `auth` (10/min) and anonymous `default`
+  (120/min) buckets, and the D pages' extra calls now exhaust them: run 42275521131's `e4b-money`
+  got 429s on almost every `/rpc` call. Fixed by `6ce329a8` and `bff2968a`. Each `WebSession` now has its own simulated residential address, and apps/web's server render forwards the request's address chain on its own API calls; anonymous SSR calls had shared the web server's address in production too. Only CI can prove the runner's peer falls inside `TRUSTED_PROXY_CIDRS`.
+
+Left for the user or later:
+
+- Patronage "Mark paid" and "Not sent" on Connect rows are not yet checked at Stripe; settle
+  transfers are.
+- The relay-dvr scenario's live viewer; staging's seed mode on the new governance periods.
+- `packages/service`'s graceful stop takes about 8 s after a request.
+- `relay/internal/receipts` `Queue.Add` can drop a receipt from memory on a clock jump; it is
+  kept on disk.
+
 **UI-polish follow-up wave (2026-11-06).** The `packages/ui` and web polish follow-ups from D wave
 2 and D wave 3, on `main` (`68d1e2e8`..the docs commit). Five units (time, cards, chrome, notes,
 lists), each built in its own worktree, independently reviewed against AGENTS.md and fixed, then
@@ -197,9 +320,8 @@ Flakes seen:
 
 Still open:
 
-- seed shard over the cap (item 4);
-- the relay drain test's duplicate receipt (above): its fake API should accept a resent
-  nonce the way the server does;
+- ~~seed shard over the cap (item 4)~~ trimmed to an estimated 9 to 9.5 min (platform-debt);
+- ~~the relay drain test's duplicate receipt~~ fixed (platform-debt);
 - `## [0.1.0]`'s date, at the release.
 
 **D wave 3 merged (2026-11-04): D3-watch, D5-studio and D5-settings on `main`. The D plan is
@@ -496,10 +618,8 @@ Differs from the briefs:
   tree with their own script.
 - S1-h's timers live in `infra/systemd/`, because Quadlet doesn't process timers.
 - Declined, now follow-ups:
-  - a restore-drill alert (L1-observability's rules);
-  - a `status.json` freshness probe;
-  - a rate limit on the public `/readyz` routes;
-  - the `outcomeUnknown` statement field;
+  - ~~a restore-drill alert~~, ~~a `status.json` freshness probe~~, ~~a rate limit on the public
+    `/readyz` routes~~, ~~the `outcomeUnknown` statement field~~: done (platform-debt);
   - the terms and privacy wording (milestone).
 
 Flakes seen, once each, all passing on rerun or the next run (for `docs/operators/flakes.md`):
@@ -518,12 +638,12 @@ Follow-ups:
 - ~~un-quarantine the edge-sync convergence assertions before `v0.1.0`~~ done (release follow-ups, item 1);
 - edge-sync: rate-based correction (`b8d16571`, merge `8cecdab5`) failed its first CI run (run `41776964782`: Chromium p90 968 ms against 500) and was reverted to the seek-based `c42fe1a2` behaviour; a local repro against the real stack with browser-side diagnostics is the next step, since the step is load-sensitive on CI;
 - ~~the DVR-swap root cause~~ found and fixed (release follow-ups, item 2);
-- a product gap: issuance gives a relay nothing for DVR pulls, so a DVR session on a channel with
+- ~~a product gap~~ (built: ADR 0016 Amendment 2, platform-debt): issuance gives a relay nothing for DVR pulls, so a DVR session on a channel with
   no live viewer can never verify through a relay (ADR 0016 Amendment 1);
 - ~~`shards.ts` timings from the first push run's PASS lines~~ done (release follow-ups, item 4);
 - dating `## [0.1.0]` in CHANGELOG.md before the tag;
-- the units' undone items (card-share chargebacks, the automatic `distributed` flip, the
-  outcome-unknown settle UI, status history persistence).
+- ~~the units' undone items~~ (card-share chargebacks, the automatic `distributed` flip, the
+  outcome-unknown settle UI, status history persistence): done (platform-debt).
 
 **Batch 8 agent track (U5) ran 2026-11-04** with the operator's `doctl` context under the
 guardrails of ADR 0025's amendment (project `commonair-agent-checks`, tag `commonair-agent-check`).
@@ -547,8 +667,8 @@ Found and fixed:
 Found, open:
 
 - DigitalOcean Valkey is publicly trusted (no `--valkey-ca`; docs fixed);
-- `db-s-1vcpu-2gb` needs `DATABASE_POOL_MAX=8`;
-- storage-init wants a `backups` bucket that stage 1 never creates;
+- ~~`db-s-1vcpu-2gb` needs `DATABASE_POOL_MAX=8`~~ (tofu sets it, platform-debt);
+- ~~storage-init wants a `backups` bucket that stage 1 never creates~~ (stage 1 creates it);
 - the account offers nothing in NYC3 and no size above about $0.17/h, so production's size and
   region need a limit increase;
 - a `c-4` holds about 100 viewers, CPU-bound, with the live classifier at about 0.2 core per
@@ -830,7 +950,7 @@ the ~12 min cap; split it at the milestone.
 
 Open items:
 
-- Better Auth clears a lapsed ban at sign-in without an event, so the unsuspension can be missed
+- ~~Better Auth clears a lapsed ban at sign-in without an event~~ (event, audit row and sweep backstop: platform-debt), so the unsuspension can be missed
   when that sign-in comes before the 5-minute sweep (`services/api/src/auth/index.ts`).
 - The seed (seed-full session) must publish `interact.giveawayId` and `social.moveLinkNonce`.
 - N3 needs a browser-facing authorize base, or a `page.route` rewrite, because the harness host
@@ -1526,8 +1646,8 @@ CI on `56ba674`: everything green but the registry timeout fixed in `9a72f3e`.
 restore onto a second droplet, timed; ACME renewal; Fedora 42 with SELinux enforcing; arm64; a
 rollback on a real host. Then rc.3 from a green `ci-ok`, and `v0.1.0`.
 
-**Still open from batch 1:** R0-d's optional compose `depends_on` change; an `IRC_LISTEN=systemd`
-opt-in (R0-a); S1-a's requests 1 and 3 (harness env move, `inconclusive` status); S1-g's accepted
+**Still open from batch 1:** ~~R0-d's optional compose `depends_on` change~~ (done, platform-debt); an `IRC_LISTEN=systemd`
+opt-in (R0-a); ~~S1-a's requests 1 and 3~~ (done, platform-debt); S1-g's accepted
 risks (versioning vs a stolen key, Spaces lifecycle rule, staging monitoring); chat acknowledges
 before storing, so a SIGKILL loses the last flush interval (ADR 0032 accepts it).
 
