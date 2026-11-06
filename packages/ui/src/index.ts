@@ -26,6 +26,8 @@ export {
   formatDateTime,
   formatBytes,
   formatDuration,
+  formatHour,
+  formatIsoDuration,
   formatLanguageName,
   formatUnitCost,
   formatPercent,

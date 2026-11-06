@@ -193,6 +193,33 @@ export function formatDateTime(date: Date, locale: string, timeZone?: string): s
 }
 
 /**
+ * An hour of the day (0–23) on the locale's own clock, for hour pickers and hour axes: "12 AM",
+ * "3 PM" in en-US (12-hour, with the day period), "0", "15" in es and "00", "15" in de or en-GB
+ * (24-hour: the hour alone, without a word such as "Uhr" or "h", so it sits beside a minute).
+ * Formatted as UTC from a fixed date, so no time zone or DST shift can move it. Throws a
+ * `RangeError` for anything that is not an integer from 0 to 23: an hour outside the day is a bug
+ * upstream, not something to wrap or clamp silently.
+ */
+export function formatHour(hour: number, locale: string): string {
+  if (!Number.isInteger(hour) || hour < 0 || hour > 23)
+    throw new RangeError(`formatHour: hour must be an integer from 0 to 23, got ${hour}`);
+  const fmt = cached(`hour|${locale}`, () => new Intl.DateTimeFormat(locale, { hour: "numeric", timeZone: "UTC" }));
+  const at = Date.UTC(2000, 0, 1, hour);
+  const cycle = fmt.resolvedOptions().hourCycle;
+  if (cycle === "h12" || cycle === "h11") return fmt.format(at);
+  return fmt.formatToParts(at).find((p) => p.type === "hour")?.value ?? String(hour);
+}
+
+/** Whole seconds as an ISO 8601 duration for `<time dateTime>`: 3723 -> "PT1H2M3S", 0 or less -> "PT0S". */
+export function formatIsoDuration(seconds: number): string {
+  const total = Math.max(0, Math.floor(Number.isFinite(seconds) ? seconds : 0));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  return `PT${h > 0 ? `${h}H` : ""}${m > 0 ? `${m}M` : ""}${s > 0 || total === 0 ? `${s}S` : ""}`;
+}
+
+/**
  * A language's name for a locale switcher: `formatLanguageName("es")` -> "Español" (its own
  * name), `formatLanguageName("es", "en")` -> "Spanish". The first letter is upper-cased for the
  * display locale, as a menu item starts; an unknown or malformed tag comes back as given.
