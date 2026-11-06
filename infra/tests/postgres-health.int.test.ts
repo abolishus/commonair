@@ -247,7 +247,9 @@ describe("commonair-pg-health", () => {
   }, 300_000);
 
   test("a replay that is stuck is reported failing after the bound and the server is stopped", async () => {
-    const bound = ["-e", "COMMONAIR_PG_STALL_SECONDS=6"];
+    // 20 s, not 6: each check is a `podman exec`, and on a loaded CI runner the first one came back
+    // after a 6 s bound had already passed (run 42297899416), so it never saw "starting".
+    const bound = ["-e", "COMMONAIR_PG_STALL_SECONDS=20"];
     const c = startRecovery("stuck", "stuck", "sleep 3600", bound);
     // Until the startup process waits on the hung restore_command, it is starting.
     await until("startup process", 60_000, () =>
