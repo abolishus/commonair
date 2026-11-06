@@ -9,10 +9,11 @@
 import type { Logger } from "@commonair/observability";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import type { BrowserContext, Locator, Page, Request } from "playwright";
+import type { BrowserContext, Locator, Page, Request, Response } from "playwright";
 import type { ProbeVideoStats } from "../../player/probe.ts";
 import { type BrowserEngine, type BrowserFleet, HUMANIZE_SCRIPT } from "../browser-viewer.ts";
 import { PendingCalls, apiPath } from "./api-calls.ts";
+import { documentScriptOrder, isHydrationBootError, readBootState } from "./hydration.ts";
 import { type TestId, tid } from "./selectors.ts";
 
 export interface WebSessionOptions {
@@ -102,6 +103,7 @@ export class WebSession {
     page.on("pageerror", (err) =>
       this.log?.warn("web page error", { session: this.label, page: name, error: err.message }),
     );
+    this.trackHydration(page, name);
     this.trackApiCalls(page, name);
     this.pages.set(name, page);
     return page;
@@ -130,6 +132,42 @@ export class WebSession {
       if (res.status() < 400) return;
       const path = apiPath(res.url(), this.webUrl);
       if (path) this.log?.warn("web api error", { ...fields, path, status: res.status() });
+    });
+  }
+
+  /**
+   * When TanStack's client hydration finds no bootstrap data (the page then stays inert), log
+   * what the window holds and where the served document put the bootstrap and the entry module,
+   * once per document.
+   */
+  private trackHydration(page: Page, name: string): void {
+    let lastDocument: Response | null = null;
+    const reported = new WeakSet<Response>();
+    page.on("response", (res) => {
+      const req = res.request();
+      if (req.isNavigationRequest() && req.frame() === page.mainFrame()) lastDocument = res;
+    });
+    page.on("pageerror", (err) => {
+      const doc = lastDocument;
+      if (!isHydrationBootError(err.message) || (doc && reported.has(doc))) return;
+      if (doc) reported.add(doc);
+      void (async () => {
+        const state = await page.evaluate(readBootState).catch((e: unknown) => ({ error: String(e) }));
+        const served = doc
+          ? await Promise.race([
+              doc.text().then(documentScriptOrder, (e: unknown) => ({ error: String(e) })),
+              new Promise((resolve) => setTimeout(() => resolve({ error: "body not read in 5 s" }), 5_000)),
+            ])
+          : null;
+        this.log?.warn("web hydration found no bootstrap", {
+          session: this.label,
+          page: name,
+          path: doc ? new URL(doc.url()).pathname : null,
+          status: doc?.status() ?? null,
+          state,
+          served,
+        });
+      })();
     });
   }
 
