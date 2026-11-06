@@ -70,6 +70,8 @@ export const broadcasts = pgTable(
   },
   (t) => [
     index("broadcasts_channel_idx").on(t.channelId, t.startedAt),
+    /** `vods.listByCategory` / `clips.listByCategory` reach media through the broadcast's category. */
+    index("broadcasts_category_idx").on(t.categoryId),
     index("broadcasts_live_idx")
       .on(t.channelId)
       .where(sql`${t.endedAt} is null`),

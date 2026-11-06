@@ -15,8 +15,10 @@ import {
   ChannelChatSettingsPatch,
   ChannelDvrSettingsPatch,
   ChannelFederationSettingsPatch,
+  ChannelSocial,
   ChannelTheme,
   GiveawayEligibility,
+  MAX_CHANNEL_SOCIALS,
   GovernanceChange,
   MAX_UPLOAD_BYTES,
   UPLOAD_CONTENT_TYPES,
@@ -95,6 +97,15 @@ const ChannelUpdate = z.object({
   theme: ChannelTheme.optional(),
   vodEnabled: z.boolean().optional(),
   vodRetentionDays: z.number().int().min(1).max(60).optional(),
+  /** Replaces the whole list (order kept). */
+  socials: z.array(ChannelSocial).max(MAX_CHANNEL_SOCIALS).optional(),
+});
+
+/** `clips.list` / `clips.listByCategory` window: clips created in the last 7 or 30 days, or all. */
+export const CLIP_RANGES = ["7d", "30d", "all"] as const;
+const ClipListFilter = z.object({
+  sort: z.enum(["recent", "top"]).default("recent"),
+  range: z.enum(CLIP_RANGES).default("all"),
 });
 
 export const contract = {
@@ -925,6 +936,16 @@ export const contract = {
       })
       .input(ChannelRef.extend(PageInput.shape))
       .output(page(D.Vod)),
+    /** Public, ready VODs whose broadcast was in the category, newest first; mature ones only with `includeMature`. */
+    listByCategory: base
+      .route({
+        method: "GET",
+        path: "/categories/{slug}/vods",
+        summary: "Past broadcasts in a category",
+        ...tag("VODs"),
+      })
+      .input(PageInput.extend({ slug: ShortText, includeMature: z.boolean().default(false) }))
+      .output(page(D.Vod)),
     get: base
       .route({ method: "GET", path: "/vods/{id}", summary: "One VOD", ...tag("VODs") })
       .input(z.object({ id: Id }))
@@ -1012,10 +1033,18 @@ export const contract = {
         summary: "A channel's clips",
         ...tag("Clips"),
       })
+      .input(ChannelRef.extend(PageInput.shape).extend(ClipListFilter.shape))
+      .output(page(D.Clip)),
+    /** Ready clips of public broadcasts in the category; mature ones only with `includeMature`. */
+    listByCategory: base
+      .route({
+        method: "GET",
+        path: "/categories/{slug}/clips",
+        summary: "Clips in a category",
+        ...tag("Clips"),
+      })
       .input(
-        ChannelRef.extend(PageInput.shape).extend({
-          sort: z.enum(["recent", "top"]).default("recent"),
-        }),
+        PageInput.extend(ClipListFilter.shape).extend({ slug: ShortText, includeMature: z.boolean().default(false) }),
       )
       .output(page(D.Clip)),
     get: base
@@ -4307,6 +4336,17 @@ export const contract = {
         })
         .input(ChannelRef.extend({ enabled: z.boolean() }))
         .output(z.object({ enabled: z.boolean() })),
+      /** "All on / All off" in one call: sets the grant on every listed channel (unknown slugs are skipped). */
+      setMany: user
+        .meta({ access: "user", rateLimit: "write" })
+        .route({
+          method: "PUT",
+          path: "/me/portability-grants",
+          summary: "Ask (or stop asking) to hear from several channels at once",
+          ...tag("Portability"),
+        })
+        .input(z.object({ channels: z.array(Slug).min(1).max(500), enabled: z.boolean() }))
+        .output(z.object({ enabled: z.boolean(), updated: z.number().int().nonnegative() })),
       mine: user
         .route({
           method: "GET",

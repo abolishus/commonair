@@ -351,6 +351,13 @@
       "when": 1793724481754,
       "tag": "0049_b8_protections",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1793985441452,
+      "tag": "0050_channel_socials_category_media",
+      "breakpoints": true
     }
   ]
 }

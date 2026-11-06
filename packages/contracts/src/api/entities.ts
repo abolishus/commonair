@@ -10,6 +10,7 @@ import {
   ChannelCaptionsSettings,
   ChannelChatSettings,
   ChannelDvrSettings,
+  ChannelSocial,
   ChannelTheme,
   EmoteRange,
   GiveawayEligibility,
@@ -59,6 +60,10 @@ export const Category = z.object({
   boxArtUrl: z.string().nullable(),
   mature: z.boolean(),
   liveChannels: z.number().int(),
+  /** Verified live viewers across the category's listed live streams (the sum of their public counts). */
+  viewerCount: z.number().int().nonnegative(),
+  /** The most used tags on the category's listed live streams, most used first (at most 10). */
+  tags: z.array(z.string()),
 });
 export type Category = z.infer<typeof Category>;
 
@@ -110,6 +115,10 @@ export const Channel = z.object({
   owner: UserPublic,
   followerCount: z.number().int(),
   live: BroadcastSummary.nullable(),
+  /** When the last broadcast ended; null while it never broadcast (or only the live one so far). */
+  lastLiveAt: Timestamp.nullable(),
+  /** Links shown on the About tab, in the order the streamer set. */
+  socials: z.array(ChannelSocial),
   panels: z.array(Panel),
   vodEnabled: z.boolean(),
   subTiers: z.array(z.object({ tier: z.number().int(), name: z.string(), price: Money, benefits: z.string() })),
@@ -158,6 +167,8 @@ export const ChannelCard = z.object({
   lastLiveAt: Timestamp.nullable(),
   followerCount: z.number().int().nonnegative(),
   mature: z.boolean(),
+  /** The newest VOD the caller may watch (ready, public), for the card's thumbnail and duration. */
+  latestVod: z.object({ id: Id, thumbnailUrl: z.string().nullable(), durationSeconds: z.number() }).nullable(),
 });
 export type ChannelCard = z.infer<typeof ChannelCard>;
 
@@ -243,6 +254,8 @@ export const Vod = z.object({
   failedReason: z.enum(E.VOD_FAILED_REASONS).nullable(),
   /** W2-captions: the VOD's ready caption tracks (empty when none or not yet stitched). */
   captions: z.array(CaptionTrack),
+  /** The broadcast's category when it was recorded; null when it had none. */
+  category: Category.pick({ slug: true, name: true }).nullable(),
 });
 export const Clip = z.object({
   id: Id,
@@ -261,6 +274,8 @@ export const Clip = z.object({
    * the MP4's `currentTime`. Null when the clip has no broadcast.
    */
   windowStartedAt: Timestamp.nullable(),
+  /** The category of the broadcast the clip was cut from; null when it had none (or no broadcast). */
+  category: Category.pick({ slug: true, name: true }).nullable(),
 });
 export const SimulcastTarget = z.object({
   id: Id,
@@ -439,6 +454,8 @@ export const SubTierInfo = z.object({
 export const Subscription = z.object({
   id: Id,
   channelSlug: Slug,
+  /** The channel subscribed to, for lists that show its name and avatar. */
+  channel: StreamCard.shape.channel.omit({ id: true }),
   subscriber: UserPublic.pick({ id: true, username: true, displayName: true }),
   tier: z.number().int(),
   status: z.enum(E.SUBSCRIPTION_STATUSES),

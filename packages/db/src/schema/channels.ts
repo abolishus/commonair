@@ -18,6 +18,7 @@ import {
 import {
   ChannelCaptionsSettings,
   ChannelChatSettings,
+  type ChannelSocial,
   ChannelFederationSettings,
   type ChannelTheme,
 } from "@commonair/contracts/shapes";
@@ -96,6 +97,8 @@ export const channels = pgTable(
     followerCount: integer().notNull().default(0),
     suspendedAt: ts(),
     suspendedReason: text(),
+    /** About-tab links (jsonb array, parsed with `ChannelSocial`; at most `MAX_CHANNEL_SOCIALS`). */
+    socials: jsonb().$type<ChannelSocial[]>().notNull().default([]),
     /** Batch 7 decision (l): where the channel says it moved (an https URL) and when. */
     movedTo: text(),
     movedAt: ts(),

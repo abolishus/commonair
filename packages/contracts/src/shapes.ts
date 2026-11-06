@@ -30,6 +30,34 @@ export const ChannelTheme = z.object({
 });
 export type ChannelTheme = z.infer<typeof ChannelTheme>;
 
+/** Where a channel's social links point; `website` and `other` cover anything else. */
+export const SOCIAL_PLATFORMS = [
+  "website",
+  "mastodon",
+  "bluesky",
+  "youtube",
+  "twitch",
+  "x",
+  "instagram",
+  "tiktok",
+  "discord",
+  "github",
+  "other",
+] as const;
+/** One social link on the channel's About tab (`channels.socials`, jsonb). https only, no credentials. */
+export const ChannelSocial = z.object({
+  platform: z.enum(SOCIAL_PLATFORMS),
+  url: z
+    .url({ protocol: /^https$/ })
+    .max(500)
+    .refine((u) => {
+      const p = URL.parse(u);
+      return p !== null && p.username === "" && p.password === "";
+    }, "an https URL without credentials"),
+});
+export type ChannelSocial = z.infer<typeof ChannelSocial>;
+export const MAX_CHANNEL_SOCIALS = 10;
+
 /**
  * Each chat setting's validator without its default. `ChannelChatSettings` adds the defaults; the
  * PATCH input (`ChannelChatSettingsPatch`) must not, because Zod applies `.default()` even inside
