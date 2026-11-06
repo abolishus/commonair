@@ -6,7 +6,7 @@
  * role: each rule attacked the way a caller with ordinary DML would, plus 0052's bounds on what a
  * chargeback, its reversal and a share refund may post.
  */
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vite-plus/test";
 
 vi.setConfig({ hookTimeout: 60_000 });
@@ -69,27 +69,37 @@ interface Line {
   cents: number;
 }
 
+type Tx = Parameters<Parameters<Database["transaction"]>[0]>[0];
+type Ref = { type: string | null; id: string | null };
+
 /** One posting with the given lines, in its own transaction (so deferred checks run). */
-function post(key: string, kind: string, ref: { type: string | null; id: string | null }, lines: Line[]) {
-  return app.transaction(async (tx) => {
-    const [txn] = await tx
-      .insert(s.ledgerTransactions)
-      .values({
-        kind,
-        description: kind,
-        occurredAt: new Date(),
-        idempotencyKey: key,
-        refType: ref.type,
-        refId: ref.id,
-      })
-      .returning({ id: s.ledgerTransactions.id });
-    await tx
-      .insert(s.ledgerEntries)
-      .values(
-        lines.map((l) => ({ transactionId: txn!.id, accountId: l.accountId, amountCents: l.cents, currency: "usd" })),
-      );
-    return txn!.id;
-  });
+function post(key: string, kind: string, ref: Ref, lines: Line[]) {
+  return app.transaction((tx) => insertPosting(tx, key, kind, ref, lines));
+}
+
+async function insertPosting(tx: Tx, key: string, kind: string, ref: Ref, lines: Line[]): Promise<string> {
+  const [txn] = await tx
+    .insert(s.ledgerTransactions)
+    .values({ kind, description: kind, occurredAt: new Date(), idempotencyKey: key, refType: ref.type, refId: ref.id })
+    .returning({ id: s.ledgerTransactions.id });
+  await tx
+    .insert(s.ledgerEntries)
+    .values(
+      lines.map((l) => ({ transactionId: txn!.id, accountId: l.accountId, amountCents: l.cents, currency: "usd" })),
+    );
+  return txn!.id;
+}
+
+/** Until another session of this database waits on a lock (bounded, so a missed wait fails loudly). */
+async function lockWaiter(): Promise<void> {
+  for (let i = 0; i < 1500; i++) {
+    const rows = await app.execute(sql`
+      select 1 from pg_stat_activity
+       where datname = current_database() and wait_event_type = 'Lock' and state = 'active'`);
+    if (rows.length > 0) return;
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  throw new Error("no session ever waited on the share's row lock");
 }
 
 const setShare = (id: string, v: Partial<typeof s.membershipShares.$inferInsert>) =>
@@ -240,16 +250,14 @@ describe("0051 under attack: what the first pass already refuses", () => {
           )
           .returning({ id: s.ledgerTransactions.id });
         for (const r of rows)
-          await tx
-            .insert(s.ledgerEntries)
-            .values(
-              clawback(a, 500).map((l) => ({
-                transactionId: r.id,
-                accountId: l.accountId,
-                amountCents: l.cents,
-                currency: "usd",
-              })),
-            );
+          await tx.insert(s.ledgerEntries).values(
+            clawback(a, 500).map((l) => ({
+              transactionId: r.id,
+              accountId: l.accountId,
+              amountCents: l.cents,
+              currency: "usd",
+            })),
+          );
       }),
     );
     expect(err).toMatch(/already charged back/);
@@ -286,25 +294,122 @@ describe("0051 under attack: what the first pass already refuses", () => {
           refId: a.shareId,
         })
         .returning({ id: s.ledgerTransactions.id });
-      await tx
-        .insert(s.ledgerEntries)
-        .values(
-          clawback(a, 500).map((l) => ({
-            transactionId: txn!.id,
-            accountId: l.accountId,
-            amountCents: l.cents,
-            currency: "usd",
-          })),
-        );
+      await tx.insert(s.ledgerEntries).values(
+        clawback(a, 500).map((l) => ({
+          transactionId: txn!.id,
+          accountId: l.accountId,
+          amountCents: l.cents,
+          currency: "usd",
+        })),
+      );
       started();
       await gate;
     });
     await holding;
     const refund = refusal(post(`share-refund:${a.shareId}`, "share_refund", a.ref, clawback(a, 500)));
-    await new Promise((r) => setTimeout(r, 300));
+    // The refund really waits on the share's lock (not merely runs after the chargeback).
+    await lockWaiter();
     release();
     await chargeback;
     expect(await refund).toMatch(/charged-back share is never refunded/);
+  });
+});
+
+describe("0052: a snapshot older than the statement never decides a chargeback or a refund", () => {
+  /**
+   * Opens `level`, takes its snapshot, commits `first` in another session, then runs `second` in
+   * the old snapshot: 0051 alone let both stand (the lock waited, the read was stale).
+   */
+  async function staleSnapshot(
+    level: "repeatable read" | "serializable",
+    first: (tx: Tx) => Promise<unknown>,
+    second: (tx: Tx) => Promise<unknown>,
+  ) {
+    return refusal(
+      app.transaction(
+        async (tx) => {
+          await tx.execute(sql`select 1`);
+          await app.transaction(first);
+          await second(tx);
+        },
+        { isolationLevel: level },
+      ),
+    );
+  }
+  const kinds = (shareId: string) =>
+    app
+      .select({ kind: s.ledgerTransactions.kind })
+      .from(s.ledgerTransactions)
+      .where(eq(s.ledgerTransactions.refId, shareId))
+      .then((rows) =>
+        rows
+          .map((r) => r.kind)
+          .filter((k) => k !== "share_purchase")
+          .sort(),
+      );
+
+  for (const level of ["repeatable read", "serializable"] as const) {
+    test(`${level}: a second chargeback after one committed meanwhile is refused`, async () => {
+      const a = await heldShare();
+      const [d1, d2] = [await dispute(a.paymentId), await dispute(a.paymentId)];
+      const err = await staleSnapshot(
+        level,
+        (o) => insertPosting(o, `share-chargeback:${d1}`, "share_chargeback", a.ref, clawback(a, 500)),
+        (tx) => insertPosting(tx, `share-chargeback:${d2}`, "share_chargeback", a.ref, clawback(a, 500)),
+      );
+      expect(err).toMatch(/under read committed only/);
+      expect(await kinds(a.shareId)).toEqual(["share_chargeback"]);
+    });
+
+    test(`${level}: a chargeback after a refund committed meanwhile, and the reverse, are refused`, async () => {
+      const a = await heldShare();
+      await setShare(a.shareId, { status: "refund_pending" });
+      const d = await dispute(a.paymentId);
+      const refund = (tx: Tx) =>
+        insertPosting(tx, `share-refund:${a.shareId}`, "share_refund", a.ref, clawback(a, 500));
+      const chargeback = (tx: Tx) =>
+        insertPosting(tx, `share-chargeback:${d}`, "share_chargeback", a.ref, clawback(a, 500));
+      expect(await staleSnapshot(level, refund, chargeback)).toMatch(/under read committed only/);
+      expect(await kinds(a.shareId)).toEqual(["share_refund"]);
+
+      const b = await heldShare();
+      await setShare(b.shareId, { status: "refund_pending" });
+      const db = await dispute(b.paymentId);
+      const err = await staleSnapshot(
+        level,
+        (o) => insertPosting(o, `share-chargeback:${db}`, "share_chargeback", b.ref, clawback(b, 500)),
+        (tx) => insertPosting(tx, `share-refund:${b.shareId}`, "share_refund", b.ref, clawback(b, 500)),
+      );
+      expect(err).toMatch(/under read committed only/);
+      expect(await kinds(b.shareId)).toEqual(["share_chargeback"]);
+    });
+
+    test(`${level}: a share is not cancelled after its chargeback was reversed meanwhile`, async () => {
+      const a = await heldShare();
+      const d = await dispute(a.paymentId);
+      await post(`share-chargeback:${d}`, "share_chargeback", a.ref, clawback(a, 500));
+      const err = await staleSnapshot(
+        level,
+        (o) => insertPosting(o, `share-chargeback-reversal:${d}`, "share_chargeback_reversal", a.ref, restore(a, 500)),
+        (tx) => tx.update(s.membershipShares).set({ status: "cancelled" }).where(eq(s.membershipShares.id, a.shareId)),
+      );
+      expect(err).toMatch(/under read committed only/);
+      const [row] = await app.select().from(s.membershipShares).where(eq(s.membershipShares.id, a.shareId));
+      expect(row!.status).toBe("held");
+    });
+  }
+
+  test("read committed, the default, still posts each of them", async () => {
+    const a = await heldShare();
+    const d = await dispute(a.paymentId);
+    await app.transaction(
+      (tx) => insertPosting(tx, `share-chargeback:${d}`, "share_chargeback", a.ref, clawback(a, 500)),
+      {
+        isolationLevel: "read committed",
+      },
+    );
+    await setShare(a.shareId, { status: "cancelled" });
+    expect(await kinds(a.shareId)).toEqual(["share_chargeback"]);
   });
 });
 

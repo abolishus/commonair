@@ -15,8 +15,35 @@
 --      refunded transition and 0051's chargeback guard read that exact key). 0051 let any other
 --      key through, so a refund posted while the share was charged back, or under an upper-case
 --      key that a later chargeback did not see, paid the member back twice.
+--   4. Every check that counts a share's outstanding chargebacks (a chargeback, a share refund
+--      posting, refund_pending -> refunded, a paid share cancelled) runs under read committed
+--      only. 0051 orders them by the share's row lock and reads after it, which needs a fresh
+--      snapshot per statement: a repeatable read or serializable caller kept the snapshot from
+--      before a concurrent chargeback or refund committed, did not see it, and posted a second
+--      chargeback, or a refund beside a chargeback (a lock alone raises no serialization error).
 -- 1 and 2 run at commit (the entries follow the transaction row). Functions pin search_path and
 -- schema-qualify tables (ADR 0004).
+
+-- 4. 0051's count, refusing a snapshot older than the statement (see above). Every 0051 caller
+-- reads it after locking the share, so the refusal covers each of them.
+CREATE OR REPLACE FUNCTION commonair_share_chargebacks_outstanding(share_id uuid) RETURNS bigint
+LANGUAGE plpgsql STABLE SET search_path = pg_catalog, public, pg_temp AS $$
+DECLARE
+  n bigint;
+BEGIN
+  IF current_setting('transaction_isolation') <> 'read committed' THEN
+    RAISE EXCEPTION 'share chargebacks and refunds are posted under read committed only (this transaction is %)',
+      current_setting('transaction_isolation') USING ERRCODE = 'check_violation';
+  END IF;
+  SELECT count(*) FILTER (WHERE t.kind = 'share_chargeback')
+       - count(*) FILTER (WHERE t.kind = 'share_chargeback_reversal')
+    INTO n
+    FROM public.ledger_transactions t
+   WHERE t.ref_type = 'membership_share' AND t.ref_id = share_id
+     AND t.kind IN ('share_chargeback', 'share_chargeback_reversal');
+  RETURN n;
+END $$;
+--> statement-breakpoint
 
 CREATE FUNCTION commonair_share_chargeback_amount_check() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp AS $$

@@ -508,6 +508,17 @@ describe.runIf(HAVE_PODMAN)("migrations and the protections, applied by the owne
         values (gen_random_uuid(), 'share_refund', 's1d', now(), 's1d-probe-refund')`,
       refused: /keyed share-refund/,
     },
+    {
+      family: "follow-ups (0052): chargebacks are counted under read committed only",
+      as: "app",
+      run: (h) =>
+        h.sql.begin(
+          "isolation level repeatable read",
+          (q) => q`
+          select commonair_share_chargebacks_outstanding(gen_random_uuid())`,
+        ),
+      refused: /under read committed only/,
+    },
   ];
 
   test.each([...PROBES, ...B8_PROBES, ...FU_PROBES].map((p) => [p.family, p] as const))("%s", async (_name, p) => {

@@ -7,7 +7,7 @@
  * that chargeback, a charged-back share is never refunded, and a paid share is cancelled only by a
  * chargeback. 0021's share rules still hold (re-asserted where 0050 redefines the guard).
  */
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vite-plus/test";
 
 vi.setConfig({ hookTimeout: 60_000 });
@@ -27,6 +27,18 @@ async function expectPgError(p: PromiseLike<unknown>, pattern: RegExp): Promise<
   expect(err, "expected the database to reject").toBeInstanceOf(Error);
   const e = err as Error & { cause?: Error };
   expect(e.cause?.message ?? e.message).toMatch(pattern);
+}
+
+/** Until another session of this database waits on a lock (bounded, so a missed wait fails loudly). */
+async function lockWaiter(): Promise<void> {
+  for (let i = 0; i < 1500; i++) {
+    const rows = await app.execute(sql`
+      select 1 from pg_stat_activity
+       where datname = current_database() and wait_event_type = 'Lock' and state = 'active'`);
+    if (rows.length > 0) return;
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  throw new Error("no session ever waited on the share's row lock");
 }
 
 beforeAll(async () => {
@@ -265,7 +277,8 @@ describe("share chargebacks (0050)", () => {
       () => ({ err: null as unknown }),
       (err: unknown) => ({ err }),
     );
-    await new Promise((r) => setTimeout(r, 300));
+    // The chargeback really waits on the share's lock (not merely runs after the refund).
+    await lockWaiter();
     release();
     await refund;
     const { err } = await chargeback;
