@@ -152,12 +152,15 @@ import http-{$CADDY_LISTEN:ports}
 
 	# Readiness for the status page's outside probes (docs/operators/status-page.md#what-is-probed):
 	# pass or fail per check only (packages/service/src/server.ts never exposes error text).
+	# The stock image has no rate-limit module, so each service limits /readyz/public per client
+	# address (services/api/src/readyz.ts, services/origin/src/readyz.ts) and relays its own
+	# /readyz, which stays unlimited for compose and internal probes.
 	handle /readyz/api {
-		rewrite * /readyz
+		rewrite * /readyz/public
 		reverse_proxy api:3001
 	}
 	handle /readyz/origin {
-		rewrite * /readyz
+		rewrite * /readyz/public
 		reverse_proxy origin:3003
 	}
 

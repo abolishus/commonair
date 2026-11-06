@@ -59,5 +59,6 @@ test("default buckets match the documented limits", () => {
     playback: { max: 3000, windowMs: 60_000 },
     app: { max: 6000, windowMs: 60_000 },
     eventsub: { max: 60, windowMs: 60_000 },
+    readyz: { max: 60, windowMs: 60_000 },
   });
 });

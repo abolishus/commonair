@@ -81,8 +81,13 @@ MediaMTX's HLS listener), so it catches the outages a playlist probe would, exce
 transcode of one stream, which the stream health dashboards cover.
 
 `/readyz/api` and `/readyz/origin` are Caddy routes on the app droplet that pass to each service's
-`/readyz`. That answer is pass or fail per check only; it never carries error text
-(`packages/service/src/server.ts`).
+`/readyz/public`, which relays the service's own `/readyz`. That answer is pass or fail per check
+only; it never carries error text (`packages/service/src/server.ts`). The routes are public, so
+each service allows 60 requests a minute per client address (the API's limiter on Valkey, the
+origin's in process) and answers `429` past that. The probes stay far below it (one per component
+every `probeIntervalSeconds`, at least 5 s apart), so they are never limited; a `429` would count
+as a failed sample. The services' bare `/readyz`, which compose and the API's own status probes
+use, is not reachable through Caddy and is not limited.
 
 ## The alert route
 

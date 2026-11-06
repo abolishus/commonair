@@ -20,7 +20,11 @@ const built = await buildDeps(env, { logger });
 // Fail closed: a missing key, unreadable hash list or unloadable classifier stops the API here,
 // not on the first upload.
 await startModeration(built.deps);
-const app = createApp(built.deps);
+// The public readiness route relays the listener's own `/readyz`, so it answers exactly as
+// compose's health check does (including 503 while shutting down).
+const app = createApp(built.deps, {
+  readyz: () => fetch(`http://127.0.0.1:${env.API_PORT}/readyz`, { signal: AbortSignal.timeout(5000) }),
+});
 const overlay = startOverlayHub(built.deps);
 // Before runService: E9-ws registers its SIGTERM drain here, so it runs before the server stops.
 const eventsub = startEventSub(built.deps);

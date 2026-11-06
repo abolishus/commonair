@@ -30,7 +30,7 @@ describe("routing", () => {
   test("each public path reaches the service that owns it", () => {
     expect(Object.fromEntries(handles())).toEqual({
       "@internal": "respond 404",
-      // The status page's outside probes (L1-status): pass or fail only, rewritten to /readyz.
+      // The status page's outside probes (L1-status): pass or fail only, rate-limited per address.
       "/readyz/api": "api:3001",
       "/readyz/origin": "origin:3003",
       "/api/*": "api:3001",
@@ -72,6 +72,21 @@ describe("routing", () => {
   test("everything else goes to the web app, last", () => {
     expect(site).toMatch(/\thandle \{\n\t\treverse_proxy web:3000\n\t\}\n/);
     expect(site.lastIndexOf("reverse_proxy web:3000")).toBeGreaterThan(site.lastIndexOf("reverse_proxy tracker:8000"));
+  });
+
+  test("the public readiness routes reach each service's rate-limited /readyz/public, never /readyz", () => {
+    // services/api/src/readyz.ts and services/origin/src/readyz.ts limit per address; the bare
+    // /readyz is the unlimited one compose and the API's status probe use.
+    for (const [svc, upstream] of [
+      ["api", "api:3001"],
+      ["origin", "origin:3003"],
+    ])
+      expect(site).toContain(
+        `\thandle /readyz/${svc} {\n\t\trewrite * /readyz/public\n\t\treverse_proxy ${upstream}\n\t}\n`,
+      );
+    expect(lines).not.toContain("rewrite * /readyz");
+    // No other route lands on a service's /readyz either: it is not under any proxied prefix.
+    expect(handles().filter(([m]) => m.startsWith("/readyz"))).toHaveLength(2);
   });
 
   test("the EventSub WebSocket is a plain proxy to the API (no rewrite)", () => {

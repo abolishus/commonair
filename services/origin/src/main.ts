@@ -21,6 +21,7 @@ import { storageFromEnv } from "@commonair/storage";
 import { MAX_BLOCKING_MS } from "./llhls.ts";
 import { createMetrics } from "./metrics.ts";
 import { createOrigin } from "./origin.ts";
+import { createPublicReadyz, PUBLIC_READYZ_PATH } from "./readyz.ts";
 
 const env = loadEnv(
   coreEnv
@@ -59,6 +60,13 @@ const origin = await createOrigin({
   metrics: createMetrics(),
 });
 origin.start();
+// The public readiness route relays the listener's own `/readyz`, so it answers exactly as
+// compose's health check does (including 503 while shutting down).
+const publicReadyz = createPublicReadyz({
+  trustedProxyCidrs: env.TRUSTED_PROXY_CIDRS,
+  ready: () => fetch(`http://127.0.0.1:${env.ORIGIN_PORT}/readyz`, { signal: AbortSignal.timeout(5000) }),
+  logger,
+});
 
 runService({
   name: "origin",
@@ -77,7 +85,10 @@ runService({
       await res.body?.cancel();
     },
   },
-  fetch: (req, server) => origin.fetch(req, server.requestIP(req)?.address),
+  fetch: (req, server) => {
+    const peer = server.requestIP(req)?.address;
+    return new URL(req.url).pathname === PUBLIC_READYZ_PATH ? publicReadyz(req, peer) : origin.fetch(req, peer);
+  },
   async onShutdown() {
     await origin.stop();
     await Promise.allSettled([db.close(), valkey.quit(), telemetry.shutdown()]);

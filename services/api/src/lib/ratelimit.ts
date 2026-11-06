@@ -18,7 +18,8 @@ export type RateLimitBucket =
   | "mail"
   | "playback"
   | "app"
-  | "eventsub";
+  | "eventsub"
+  | "readyz";
 export interface RateLimitRule {
   max: number;
   windowMs: number;
@@ -42,6 +43,12 @@ export const DEFAULT_RATE_LIMITS: Record<RateLimitBucket, RateLimitRule> = {
   app: { max: 6000, windowMs: 60_000 },
   /** Per address for new EventSub WebSocket connects; kept apart from `auth` so sign-ins and sockets do not starve each other. */
   eventsub: { max: 60, windowMs: 60_000 },
+  /**
+   * Per address for the public readiness route (`readyz.ts`). The status stack probes once per
+   * `probeIntervalSeconds` (5 s at the fastest, so 12 a minute): five times that, so it is never
+   * throttled.
+   */
+  readyz: { max: 60, windowMs: 60_000 },
 };
 
 export interface RateLimitResult {

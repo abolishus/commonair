@@ -26,6 +26,7 @@ import { clientIp, looksProxied } from "./lib/ip.ts";
 import { canonicalIp, rateLimitSubjectIp } from "./lib/netrange.ts";
 import { overlayTokenOf, type BaseContext, type RequestInfo } from "./lib/orpc.ts";
 import { rateLimitKey } from "./lib/ratelimit.ts";
+import { PUBLIC_READYZ_PATH, publicReadyz } from "./readyz.ts";
 import { coopHook, isCoopHookPath } from "./coop/hooks.ts";
 import { isOpsHookPath, opsHook } from "./ops/hooks.ts";
 import { analyticsHook, isAnalyticsHookPath } from "./ops/analytics-hooks.ts";
@@ -61,7 +62,15 @@ export interface ApiApp {
 const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
   Response.json(body, { status, headers: { "cache-control": "no-store", ...headers } });
 
-export function createApp(deps: Deps): ApiApp {
+export interface AppOptions {
+  /**
+   * The service's own `/readyz` answer, which `PUBLIC_READYZ_PATH` relays under a rate limit
+   * (main.ts asks the listener over loopback). Without it the public route is 404.
+   */
+  readyz?: () => Promise<Response>;
+}
+
+export function createApp(deps: Deps, opts: AppOptions = {}): ApiApp {
   const auth = createAuth(deps);
   if (deps.env.COOP_TEST_HOOKS)
     deps.logger.warn(
@@ -280,6 +289,26 @@ export function createApp(deps: Deps): ApiApp {
       return interactHook(deps, raw.method, await readJson(raw));
     }
     if (path.startsWith("/internal/")) return new Response(null, { status: 404 });
+
+    // The status page's outside probe (Caddy's `/readyz/api`): pass or fail only, per address.
+    if (path === PUBLIC_READYZ_PATH) {
+      const ready = opts.readyz;
+      if (!ready) return json({ code: "NOT_FOUND", message: "Not found" }, 404);
+      const info = await requestInfo(raw, url, server);
+      return publicReadyz(raw.method, {
+        hit: () => {
+          const nowMs = deps.now().getTime();
+          return deps.rateLimitStore.hit(
+            rateLimitKey("readyz", `ip:${info.rateLimitHash}`),
+            deps.rateLimits.readyz,
+            nowMs,
+            `${nowMs}:${crypto.randomUUID()}`,
+          );
+        },
+        ready,
+        logger: deps.logger,
+      });
+    }
 
     // RFC 8058 one-click unsubscribe (ADR 0028): mail clients POST here with no session or origin.
     if (isEmailUnsubscribePath(path)) {
