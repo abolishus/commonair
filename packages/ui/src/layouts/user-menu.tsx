@@ -51,7 +51,15 @@ export function UserMenu({
             <React.Fragment key={item.id}>
               {item.separatorBefore ? <DropdownMenuSeparator /> : null}
               <DropdownMenuItem
-                render={item.render ?? (item.href ? <a href={item.href}>{item.label}</a> : undefined)}
+                render={
+                  item.render ??
+                  (item.href ? (
+                    <a href={item.href}>
+                      {item.icon}
+                      {item.label}
+                    </a>
+                  ) : undefined)
+                }
                 onClick={item.onSelect}
                 variant={item.destructive ? "destructive" : "default"}
                 data-testid={item.testId}

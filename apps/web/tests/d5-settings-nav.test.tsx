@@ -123,6 +123,28 @@ describe("the settings layout", () => {
     expect(screen.getByTestId("settings-nav").dataset.current).toBe("connections");
   });
 
+  it("the phone select stays put when the current page is picked again", async () => {
+    const router = await mount("/settings/privacy?from=mail");
+    const navigate = vi.spyOn(router, "navigate");
+    fireEvent.click(screen.getByTestId("settings-nav-select"));
+    const option = await screen.findByTestId("settings-nav-option-privacy");
+    fireEvent.pointerDown(option, { pointerType: "mouse" });
+    fireEvent.click(option);
+    await waitFor(() => expect(screen.queryByTestId("settings-nav-option-privacy")).toBeNull());
+    expect(navigate).not.toHaveBeenCalled();
+    // The query survives: no navigation replaced it.
+    expect(router.state.location.searchStr).toBe("?from=mail");
+  });
+
+  it("each tab and option carries its translated label", async () => {
+    await mount("/settings/subscriptions");
+    fireEvent.click(screen.getByTestId("settings-nav-select"));
+    for (const tab of SETTINGS_TABS) {
+      expect(screen.getByTestId(`settings-tab-${tab.id}`).textContent).toBe(settingsTabLabel(tab.id));
+      expect((await screen.findByTestId(`settings-nav-option-${tab.id}`)).textContent).toBe(settingsTabLabel(tab.id));
+    }
+  });
+
   it("a tab is a link: clicking one navigates", async () => {
     const router = await mount("/settings/appeals");
     await act(async () => {
