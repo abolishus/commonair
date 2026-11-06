@@ -3,7 +3,8 @@
 #
 # Backstop CI: runs the same `bun run verify` used locally, one job per group of its steps. If it
 # goes red on main, fix main immediately. A push of docs alone runs only the static group (format,
-# REUSE, stray domains): nothing else reads them. A push of web UI alone (components, routes,
+# lint, types, REUSE, stray domains): nothing else reads them. So does a push whose commits all
+# have a `docs:` subject, whatever files they touch (a comment-only edit to code). A push of web UI alone (components, routes,
 # styles, catalogs) skips the integration and relay groups and runs only the UI scenarios. Pull requests run the gate; main, the nightly schedule
 # and a manual dispatch also run the full harness scenario, a release dry run (release.yml) and
 # the self-host end-to-end test. On a push to main, `changes` (scripts/ci-changes.ts) runs only the

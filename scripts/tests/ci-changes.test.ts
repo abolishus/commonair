@@ -7,15 +7,18 @@ import { describe, expect, test } from "vite-plus/test";
 import { FULL_SHARDS, PATH_FILTERED_SHARDS } from "../../harness/src/shards.ts";
 import {
   ALL,
+  DOCS_ONLY,
   EVERYTHING,
   type ImportGraph,
   UI_SCENARIOS,
   changesFor,
   classify,
+  diffBase,
   filteredShardsReached,
   harnessGraph,
   isDeploy,
   isDocsOnly,
+  isDocsSubject,
   isTestOnly,
   isUi,
   matrixShards,
@@ -50,6 +53,23 @@ describe("isDocsOnly", () => {
     "apps/web/src/i18n/locales/en/core.json",
     "harness/src/e9/consent.ts",
   ])("%s is not", (p) => expect(isDocsOnly(p)).toBe(false));
+});
+
+describe("isDocsSubject", () => {
+  test.each([
+    ["docs: the seed shard's measured time", true],
+    ["docs(progress): batch 3 waves merged", true],
+    ["docs(ui): AppShell story", true],
+    ["docs!: drop the old guide", false], // breaking: the gate runs
+    ["docs:no space", false],
+    ["docs: ", false],
+    ["docs(a b): spaced scope", false],
+    ["doc: typo", false],
+    ["fix(docs): a docs build bug", false],
+    ["Docs: capitalised", false],
+    ["Merge branch 'docs'", false],
+    ["chore: docs: nested", false],
+  ])("%s → %s", (subject, want) => expect(isDocsSubject(subject)).toBe(want));
 });
 
 describe("isTestOnly", () => {
@@ -372,6 +392,25 @@ describe("changesFor", () => {
       deploy: false,
       filteredShards: [],
     });
+  });
+
+  test.skipIf(!hasHistory)("a push of docs: commits alone is docs-only whatever it touches", () => {
+    // A story file under packages/ui, which the path rules alone would test and run scenarios for.
+    expect(changesFor({ EVENT_NAME: "push", BASE: "f3a48480~1", SHA: "f3a48480" }, ROOT)).toEqual(DOCS_ONLY);
+    // Two docs: commits in one push.
+    expect(changesFor({ EVENT_NAME: "push", BASE: "15619b0a", SHA: "af2d21d6" }, ROOT)).toEqual(DOCS_ONLY);
+    // One test(harness) commit among them: the paths decide again.
+    expect(changesFor({ EVENT_NAME: "push", BASE: "bff2968a", SHA: "af2d21d6" }, ROOT).docsOnly).toBeUndefined();
+  });
+
+  test.skipIf(!hasHistory)("diffBase walks past docs: commits to the last one that ran the gate", () => {
+    const full = (rev: string): string =>
+      execFileSync("git", ["rev-parse", rev], { cwd: ROOT, encoding: "utf8" }).trim();
+    expect(diffBase(full("af2d21d6"), ROOT)).toBe(full("15619b0a"));
+    expect(diffBase(full("d16972e4"), ROOT)).toBe(full("15619b0a"));
+    expect(diffBase(full("15619b0a"), ROOT)).toBe(full("15619b0a"));
+    // The story commit's code change counts against the next push that is not all docs.
+    expect(diffBase(full("f3a48480"), ROOT)).not.toBe(full("f3a48480"));
   });
 
   test("classify combines the selection with the deploy check", () => {

@@ -11,8 +11,9 @@
  * scenarios. The release dry run and the self-host end-to-end run only when
  * something they build or install changed. A push of web UI alone (`isUi`: components, routes,
  * styles, message catalogs) skips the gate's integration and relay groups and runs only the UI
- * scenarios (`UI_SCENARIOS`); the other browser scenarios wait for the nightly run. The nightly run
- * and a manual dispatch run everything, as does any push whose diff cannot be read.
+ * scenarios (`UI_SCENARIOS`); the other browser scenarios wait for the nightly run. A push whose
+ * commits all have a `docs:` subject (`isDocsSubject`) is docs-only whatever it touches. The
+ * nightly run and a manual dispatch run everything, as does any push whose diff cannot be read.
  *
  * Usage (CI): `bun scripts/ci-changes.ts` with EVENT_NAME, BASE (the last green run's commit on
  * main) and SHA set; writes `code`, `scenarios` (`all`, a comma list or empty), `shards` (a JSON
@@ -215,6 +216,40 @@ export function matrixShards(c: Changes): string[] {
   return shards.filter((s) => !(s in PATH_FILTERED_SHARDS) || c.filteredShards.includes(s));
 }
 
+/**
+ * A Conventional Commits `docs` subject (`docs: …`, `docs(scope): …`). A push made only of these
+ * runs the static group alone whatever files it touches, so a comment-only edit to code skips the
+ * expensive groups; lint and typecheck still read it. A breaking `docs!:` is not one.
+ */
+export const isDocsSubject = (subject: string): boolean => /^docs(\([^)\s]*\))?: \S/.test(subject);
+
+/** What a push of `docs:` commits alone runs: the gate's static group, no harness, no deploy. */
+export const DOCS_ONLY: Changes = { scenarios: [], deploy: false, filteredShards: [], docsOnly: true };
+
+/** How far back `diffBase` walks past `docs:` commits before it settles for where it stopped. */
+const DOCS_WALK_LIMIT = 200;
+
+const git = (root: string, args: readonly string[]): string =>
+  execFileSync("git", args, { encoding: "utf8", cwd: root, maxBuffer: 64 * 1024 * 1024 });
+
+/**
+ * The commit to diff against: BASE, or, when BASE is a `docs:` commit, the newest first-parent
+ * ancestor that is not one. A green run on a `docs:` push skipped most of the gate, so anything
+ * those commits changed in code must still count against the next push that runs it.
+ */
+export function diffBase(base: string, root: string): string {
+  const lines = git(root, ["log", "--first-parent", `--max-count=${DOCS_WALK_LIMIT}`, "--format=%H%x09%s", base])
+    .split("\n")
+    .filter(Boolean);
+  let at = base;
+  for (const line of lines) {
+    const [sha = "", subject = ""] = line.split("\t");
+    at = sha;
+    if (!isDocsSubject(subject)) break;
+  }
+  return at;
+}
+
 /** A push's changes since BASE, or everything when the event is not a push or the diff cannot be read. */
 export function changesFor(
   env: { EVENT_NAME?: string; BASE?: string; SHA?: string },
@@ -223,8 +258,14 @@ export function changesFor(
   const { EVENT_NAME, BASE, SHA } = env;
   if (EVENT_NAME !== "push" || !BASE || !SHA || /^0+$/.test(BASE)) return EVERYTHING;
   try {
-    const out = execFileSync("git", ["diff", "--name-only", BASE, SHA], { encoding: "utf8", cwd: root });
-    const files = out.split("\n").filter(Boolean);
+    // Merge commits count too: their subject is never a docs one, so a merge runs the gate.
+    const subjects = git(root, ["log", "--format=%s", `${BASE}..${SHA}`])
+      .split("\n")
+      .filter(Boolean);
+    if (subjects.length > 0 && subjects.every(isDocsSubject)) return DOCS_ONLY;
+    const files = git(root, ["diff", "--name-only", diffBase(BASE, root), SHA])
+      .split("\n")
+      .filter(Boolean);
     return files.length === 0 ? EVERYTHING : classify(files, harnessGraph(root));
   } catch {
     return EVERYTHING;
