@@ -22,6 +22,52 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
 
 ## In flight
 
+**UI-polish follow-up wave (2026-11-06).** The `packages/ui` and web polish follow-ups from D wave
+2 and D wave 3, on `main` (`68d1e2e8`..the docs commit). Five units (time, cards, chrome, notes,
+lists), each built in its own worktree, independently reviewed against AGENTS.md and fixed, then
+given a coverage pass on every file it touched (new and older untested code), also reviewed.
+
+- **`packages/ui`:** `formatHour(hour, locale)` (the locale's 12/24-hour clock) and
+  `formatIsoDuration`; `RelativeTime mode="elapsed"` (a running clock, hydration-safe; the channel
+  uptime uses it); `StreamCard` link slots (`channelLink`, `categoryLink`, `tagLink`; the title is
+  the stretched primary link, so no anchor nests); a portal `container` on `PopoverContent`,
+  `DropdownMenuContent`, `DialogContent` and `TooltipContent`, with a `PortalContainerProvider`;
+  `PlayerChrome` renders an out-of-flow `player-portal` layer that popups use while fullscreen;
+  `site-header.tsx` centres search on `lg`, puts it first in the phone Sheet and closes the Sheet
+  on navigation (`locationKey`, the full href); the user and account menus take the avatar
+  initial from `displayName` (F38; a test also caught href items dropping their icon); an AppShell
+  `sidebarPlacement="below"` story.
+- **Web:** one `components/forms/date-time-field.tsx` (`minuteStep`: crew 5, admin 1; hour labels
+  through `formatHour`), replacing the studio and admin fields; Rehearse and Move render their
+  `PageHeader` in the route (`PENDING_ROUTE_HEADER` is empty); F35 notes at `FieldDescription`'s
+  size in DVR settings, rehearsal, portability, raid protection, Discord and federation; F28: the
+  VOD player loads behind a busy skeleton (`coop/overview.tsx` already used `SkeletonGroup`);
+  `SettingsNav` on `PageTabs` (the phone Select stays); `CardLinks` retired; F36: captions paged
+  in 5-minute windows (at most 100 cues) with a search, drafts kept across pages, and Clear search
+  on no match; the appeals queue and admin OAuth apps as rows that open in place (suspend/lift
+  stays in the app row, which e9 clicks).
+- **Harness:** e7's egress hour pick uses the 12-hour English label ("12 PM").
+- **Bugs the coverage pass found, fixed:** the invitee-limit toast showed a raw `{max}`; a refused
+  rehearsal invite left an unhandled rejection; menu link items lost their icon.
+- **Coverage** (Istanbul, `scripts/coverage.ts`' settings): the 43 source files the wave touched,
+  lines 79.8 % → 98.4 %, branches 72.4 % → 93.7 %. `packages/ui` lines 87.7 % → 90.3 %; `apps/web`
+  85.1 % → 88.2 % (that one also counts the API-fields wave, measured from `079cfc83`).
+- **Calls made without the user:** the notes use `FieldDescription` (text-xs), not `text-sm`, which
+  is the size the review saw jumping; no new `Note` primitive. The settings tab row takes
+  PageTabs' own line style (its old `border-b` is gone). Merging with the API-fields wave, main's
+  category tag list and offline-tile VOD link were kept, and the tile's category link sits under
+  the channel link.
+- **Waiting on the user (visual checks, dark and light, 320/375/1440 px, en and es):** `/` and
+  `/directory` cards (category and tag links inside the card, Tab order); `/directory/<category>`;
+  the header at `lg` (search centred) and the phone Sheet (search first, closes on a link or a
+  search); the account avatar initial; `/settings/*` tab row; `/crew` and `/admin/egress`
+  date-time selects (12-hour hours in en, 24-hour in es); `/legal` NCMEC filed-at;
+  `/<channel>` uptime and its tooltip; the live and VOD players in real fullscreen: captions style
+  menu, `?` dialog, tooltips; `/rehearse` (owner and `?channel=`), `/move`, `/dashboard/settings`
+  notes; `/captions` paging, search and Clear search; `/admin/appeals` and `/admin/apps` rows;
+  Storybook: Formatting (Elapsed, Hours), StreamCard slots, PortalContainer, PlayerChrome
+  FullscreenPopups, Shells (AppShellSidebarBelow).
+
 **API-fields follow-up wave (2026-11-06).** The D1–D5 contract placeholders, on `main`: contracts
 and migration `0050` (`a9ac6ea3`), API (`ad9a6089`, `7132acf9`), chat (`a123e933`), web
 (`7b703e5d`, `6a7fa22f`, `949c4b19`, `d36af78f`, `aaf07401`), and coverage for every file touched
@@ -224,22 +270,13 @@ primitives):
   notifications.
 - **Two date-time fields**, one per unit (`components/studio/date-time-field.tsx` 5-minute steps,
   `components/admin/date-time-field.tsx` every minute), both Selects in the locale's order. Merging
-  them is a follow-up.
-- **Hours stay 24-hour** until `packages/ui` has a `formatHour`.
+  them is a follow-up. *Merged by fu-ui-polish (2026-11-06): one `components/forms/date-time-field.tsx`
+  with a `minuteStep`, hours through `formatHour`.*
 
 Left open, now follow-ups:
 
 - **API/contracts:** all built in the API-fields follow-up wave (see "In flight").
-- **`packages/ui`:** `formatHour(hour, locale)`; the header avatar's initial from `displayName`
-  (F38, `layouts/user-menu.tsx:37`).
-- **Web:**
-  - `PageHeader` into the routes for Rehearse and Move (`PENDING_ROUTE_HEADER` lists them);
-  - F35's note style in `dvr-settings.tsx`, rehearsal, portability, interact-studio and the
-    Discord/federation "Not set up." line;
-  - F28's loading text in `coop/overview.tsx:191` and `vod-watch/vod-player.tsx:237`;
-  - `SettingsNav` onto `PageTabs` now that F30 is fixed;
-  - one shared date-time field;
-  - F36's captions paging and the admin queues collapsed to rows.
+- **`packages/ui` and web polish:** all built in the UI-polish follow-up wave (see "In flight").
 - **Check on a live stack:** whether the dashboard's muted preview counts the streamer as a
   verified viewer through the player heartbeat. If it does, the count is wrong and needs a fix.
 
@@ -340,7 +377,9 @@ primitives):
   card. Scenarios that click cards expand it first.
 - **The settings menu is an in-player disclosure panel, not a portalled Popover.** Base UI's
   `Popover` and `DropdownMenu` portal to `<body>`, which is invisible in fullscreen. The captions
-  style menu and the tooltips still portal, so the `?` dialog leaves fullscreen first.
+  style menu and the tooltips still portal, so the `?` dialog leaves fullscreen first. *Since
+  fu-ui-polish, popups portal into the player's `player-portal` layer while fullscreen, and `?`
+  stays in fullscreen.*
 - **At the live edge only the LIVE badge marks the position.** "Back to live" appears once the
   viewer is behind. D2-player declined to add a pressed, inert "Live" control, and I accept that.
 - **DVR's `L` key stays in `DvrControls`' own listener**, so B8's DVR behaviour and tests stay
@@ -355,21 +394,13 @@ primitives):
 - **Clips have no 7d/30d/all filter.** `clips.list` takes no range, so clips are newest first.
 - **The About tab has no social links.** No API field holds them, and panels carry links today.
 - **Uptime uses its own one-second clock in `channel-meta.tsx`.** `RelativeTime` has no elapsed
-  mode.
+  mode. *Replaced by `<RelativeTime mode="elapsed">` in fu-ui-polish.*
 
 Left open: contract requests, now follow-ups.
 
 - **API/contracts:** built in the API-fields follow-up wave (see "In flight"), except
   `Category.followerCount`, written up there.
-- **`packages/ui`:**
-  - link slots on `StreamCard`; D1 renders a `CardLinks` row under the card meanwhile;
-  - in `site-header.tsx`: search centred on `lg`, the mobile Sheet order (search first), and
-    closing the Sheet on navigation;
-  - an elapsed mode on `RelativeTime`;
-  - a portal `container` on `PopoverContent`, `DropdownMenuContent` and `DialogContent`, so menus
-    show in fullscreen.
-- **Web:**
-  - an AppShell story for `sidebarPlacement="below"`.
+- **`packages/ui`** and the AppShell story: built in the UI-polish follow-up wave (see "In flight").
 
 Flakes seen, for `docs/operators/flakes.md`:
 
