@@ -9,6 +9,7 @@
 import { ConfirmDialog, EmptyState, RelativeTime, SkeletonGroup, SkeletonText, StatusBadge } from "@commonair/ui";
 import { SwitchField } from "@commonair/ui/blocks/forms";
 import { Button } from "@commonair/ui/components/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@commonair/ui/components/collapsible";
 import {
   Dialog,
   DialogContent,
@@ -21,7 +22,7 @@ import { Field, FieldError, FieldLabel, FieldLegend, FieldSet } from "@commonair
 import { Input } from "@commonair/ui/components/input";
 import { RadioGroup, RadioGroupItem } from "@commonair/ui/components/radio-group";
 import { toast } from "@commonair/ui/toast";
-import { ShieldBanIcon, SourceCodeIcon, SquareUnlock01Icon } from "@hugeicons/core-free-icons";
+import { ArrowDown01Icon, ShieldBanIcon, SourceCodeIcon, SquareUnlock01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import * as React from "react";
 import { t } from "../../i18n/index.ts";
@@ -174,52 +175,83 @@ function AdminAppRow({
       data-suspended={app.suspended ? "true" : "false"}
       data-grants={String(app.grants)}
       data-subscriptions={String(app.subscriptions)}
-      className="flex flex-wrap items-start gap-3 p-3"
+      className="min-w-0"
     >
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm font-medium break-words">{app.name}</span>
-          <StatusBadge tone="neutral">
-            {app.confidential ? t("developer.app.kind.confidential") : t("developer.app.kind.public")}
-          </StatusBadge>
-          {app.suspended ? (
-            <StatusBadge tone="danger">
-              {t("developer.admin.suspendedWith", { reason: t(SUSPENSION_REASON_KEYS[app.suspended.reason]) })}
+      {/* F36: a row of the key facts and the one action; the toggle opens the rest. */}
+      <Collapsible>
+        <div className="flex flex-wrap items-center gap-3 p-3">
+          <CollapsibleTrigger
+            data-testid="adminapp-toggle"
+            className="group/app flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 rounded-sm text-start outline-none hover:underline focus-visible:ring-1 focus-visible:ring-ring"
+          >
+            <HugeiconsIcon
+              icon={ArrowDown01Icon}
+              strokeWidth={2}
+              aria-hidden
+              className="size-4 shrink-0 text-muted-foreground transition-transform group-aria-expanded/app:rotate-180 motion-reduce:transition-none"
+            />
+            <span className="text-sm font-medium break-words">{app.name}</span>
+            <StatusBadge tone="neutral">
+              {app.confidential ? t("developer.app.kind.confidential") : t("developer.app.kind.public")}
             </StatusBadge>
-          ) : null}
+            {app.suspended ? (
+              <StatusBadge tone="danger">
+                {t("developer.admin.suspendedWith", { reason: t(SUSPENSION_REASON_KEYS[app.suspended.reason]) })}
+              </StatusBadge>
+            ) : null}
+            <span className="text-xs text-muted-foreground">
+              {fillNodes(t("developer.admin.owner"), {
+                owner: <span className="font-medium">@{app.owner.username}</span>,
+              })}
+            </span>
+            <span className="text-xs text-muted-foreground">
+              {t("developer.admin.counts", { grants: app.grants, subscriptions: app.subscriptions })}
+            </span>
+          </CollapsibleTrigger>
+          <AdminAppAction app={app} onSuspend={onSuspend} onUnsuspend={onUnsuspend} onError={onError} />
         </div>
-        <code className="text-xs break-all text-muted-foreground">{app.clientId}</code>
-        <span className="text-xs text-muted-foreground">
-          {fillNodes(t("developer.admin.owner"), { owner: <span className="font-medium">@{app.owner.username}</span> })}
-        </span>
-        <span className="text-xs text-muted-foreground">
-          {t("developer.admin.counts", { grants: app.grants, subscriptions: app.subscriptions })}
-        </span>
-        <span className="text-xs text-muted-foreground">
-          {fillNodes(t("developer.app.registered"), { time: <RelativeTime date={app.createdAt} /> })}
-        </span>
-      </div>
-      {app.suspended ? (
-        <ConfirmDialog
-          trigger={
-            <Button type="button" variant="outline" size="sm" data-testid="adminapp-unsuspend">
-              <HugeiconsIcon icon={SquareUnlock01Icon} strokeWidth={2} aria-hidden data-icon="inline-start" />
-              {t("developer.admin.unsuspend")}
-            </Button>
-          }
-          title={t("developer.admin.unsuspendTitle", { name: app.name })}
-          description={t("developer.admin.unsuspendBody")}
-          confirmLabel={t("developer.admin.unsuspendConfirm")}
-          onConfirm={onUnsuspend}
-          onError={onError}
-        />
-      ) : (
-        <Button type="button" variant="destructive" size="sm" data-testid="adminapp-suspend" onClick={onSuspend}>
-          <HugeiconsIcon icon={ShieldBanIcon} strokeWidth={2} aria-hidden data-icon="inline-start" />
-          {t("developer.admin.suspend")}
-        </Button>
-      )}
+        <CollapsibleContent data-testid="adminapp-detail" className="flex flex-col gap-1 px-3 pb-3 ps-9">
+          <code className="text-xs break-all text-muted-foreground">{app.clientId}</code>
+          <span className="text-xs text-muted-foreground">
+            {fillNodes(t("developer.app.registered"), { time: <RelativeTime date={app.createdAt} /> })}
+          </span>
+        </CollapsibleContent>
+      </Collapsible>
     </li>
+  );
+}
+
+/** Suspend, or lift a suspension: in the row itself, so it needs no opening. */
+function AdminAppAction({
+  app,
+  onSuspend,
+  onUnsuspend,
+  onError,
+}: {
+  app: AdminOAuthAppDto;
+  onSuspend: () => void;
+  onUnsuspend: () => Promise<void>;
+  onError: (err: unknown) => void;
+}): React.JSX.Element {
+  return app.suspended ? (
+    <ConfirmDialog
+      trigger={
+        <Button type="button" variant="outline" size="sm" data-testid="adminapp-unsuspend">
+          <HugeiconsIcon icon={SquareUnlock01Icon} strokeWidth={2} aria-hidden data-icon="inline-start" />
+          {t("developer.admin.unsuspend")}
+        </Button>
+      }
+      title={t("developer.admin.unsuspendTitle", { name: app.name })}
+      description={t("developer.admin.unsuspendBody")}
+      confirmLabel={t("developer.admin.unsuspendConfirm")}
+      onConfirm={onUnsuspend}
+      onError={onError}
+    />
+  ) : (
+    <Button type="button" variant="destructive" size="sm" data-testid="adminapp-suspend" onClick={onSuspend}>
+      <HugeiconsIcon icon={ShieldBanIcon} strokeWidth={2} aria-hidden data-icon="inline-start" />
+      {t("developer.admin.suspend")}
+    </Button>
   );
 }
 

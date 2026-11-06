@@ -91,12 +91,12 @@ against this file.
 
 ### Apps (`/admin/apps`)
 
-| Test id                 | Element / meaning                                                                                                                         |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `admin-apps-link`       | In the admin sidebar                                                                                                                      |
-| `adminapps`             | Page wrapper; `adminapps-search`, `adminapps-filter-suspended` (switch); `adminapps-empty`                                                |
-| `adminapp`              | One app: `data-app-id`, `data-client-id`, `data-suspended`, `data-grants`, `data-subscriptions`; `adminapp-suspend`, `adminapp-unsuspend` |
-| `adminapp-suspend-form` | `adminapp-reason` (items `adminapp-reason-<reason>`, `APP_SUSPENSION_REASONS`), `adminapp-suspend-submit` (`ConfirmDialog`)               |
+| Test id                 | Element / meaning                                                                                                                                                                                                                              |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `admin-apps-link`       | In the admin sidebar                                                                                                                                                                                                                           |
+| `adminapps`             | Page wrapper; `adminapps-search`, `adminapps-filter-suspended` (switch); `adminapps-empty`                                                                                                                                                     |
+| `adminapp`              | One app: `data-app-id`, `data-client-id`, `data-suspended`, `data-grants`, `data-subscriptions`; `adminapp-suspend`, `adminapp-unsuspend` (in the row, no opening needed); `adminapp-toggle` opens `adminapp-detail` (client id, registration) |
+| `adminapp-suspend-form` | `adminapp-reason` (items `adminapp-reason-<reason>`, `APP_SUSPENSION_REASONS`), `adminapp-suspend-submit` (`ConfirmDialog`)                                                                                                                    |
 
 ## Scenarios
 

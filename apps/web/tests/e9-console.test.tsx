@@ -930,6 +930,27 @@ describe("/admin/apps", () => {
     expect(within(b as HTMLElement).queryByTestId("adminapp-suspend")).toBeNull();
   });
 
+  it("rows are closed to the key facts and the action, and open to the client id (F36)", async () => {
+    const { client } = fakeAdmin();
+    wrap(<AdminAppsPage client={client} />);
+    await waitFor(() => expect(screen.getAllByTestId("adminapp")).toHaveLength(2));
+    const a = screen.getAllByTestId("adminapp")[0] as HTMLElement;
+    const toggle = within(a).getByTestId("adminapp-toggle");
+    expect(toggle.tagName).toBe("BUTTON");
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(within(a).queryByTestId("adminapp-detail")).toBeNull();
+    expect(a.textContent).not.toContain("ca_client_1");
+    // The action needs no opening (the e9 console scenario clicks it straight from the row).
+    expect(within(a).getByTestId("adminapp-suspend")).toBeTruthy();
+    expect(toggle.contains(within(a).getByTestId("adminapp-suspend"))).toBe(false);
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(within(a).getByTestId("adminapp-detail").textContent).toContain("ca_client_1");
+    record();
+    fireEvent.click(toggle);
+    expect(within(a).queryByTestId("adminapp-detail")).toBeNull();
+  });
+
   it("searches and filters", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
