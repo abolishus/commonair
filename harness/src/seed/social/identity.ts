@@ -8,11 +8,14 @@
  * image (`/update-user`) so chat and member lists show the avatar too. The art is `../art.ts`'s,
  * drawn from the unit's PRNG with the user id as the salt, so a resume draws the same pictures.
  *
- * Idempotent: an avatar, banner or panel set already on the channel is never uploaded again.
+ * The showcase channels also get social links (`channels.update` with `socials`, the About tab),
+ * all under RFC 2606 reserved hosts.
+ *
+ * Idempotent: an avatar, banner, panel set or social list already on the channel is never set again.
  * Category box art is planned but not uploaded: no procedure sets `categories.box_art_key` yet.
  */
 import { AUTH_BASE_PATH } from "@commonair/contracts/auth";
-import type { ChannelTheme, UploadPurpose } from "@commonair/contracts/shapes";
+import type { ChannelSocial, ChannelTheme, UploadPurpose } from "@commonair/contracts/shapes";
 import type { DbHandle } from "@commonair/db";
 import type { Api } from "../../api/client.ts";
 import { putPresigned } from "../../safety-io.ts";
@@ -44,6 +47,8 @@ export interface IdentityPlan {
   avatars: string[];
   banners: string[];
   panels: { handle: string; panels: IdentityPanel[] }[];
+  /** The showcase channels' About-tab links, in display order. */
+  socials: { handle: string; socials: ChannelSocial[] }[];
   /** Category slugs whose 3:4 box art the seed would upload once an API takes it. */
   boxArt: string[];
 }
@@ -80,6 +85,32 @@ const PANEL_TEXTS: Record<(typeof SHOWCASE_STREAMERS)[number], readonly PanelTex
   ],
 };
 
+/**
+ * A showcase channel's links: a website and two or three platforms, every host under
+ * `example.org` / `example.com` (reserved), so nothing points at a real account.
+ */
+const SOCIAL_SETS: Record<
+  (typeof SHOWCASE_STREAMERS)[number],
+  readonly (readonly [ChannelSocial["platform"], string])[]
+> = {
+  streamer1: [
+    ["website", "https://example.org/{slug}"],
+    ["mastodon", "https://mastodon.example.org/@{slug}"],
+    ["bluesky", "https://bsky.example.org/profile/{slug}"],
+    ["instagram", "https://instagram.example.com/{slug}"],
+  ],
+  streamer2: [
+    ["website", "https://example.org/{slug}/music"],
+    ["youtube", "https://youtube.example.com/@{slug}"],
+    ["discord", "https://discord.example.com/invite/{slug}"],
+  ],
+  streamer3: [
+    ["github", "https://github.example.com/{slug}"],
+    ["mastodon", "https://mastodon.example.org/@{slug}"],
+    ["other", "https://example.org/{slug}/notes"],
+  ],
+};
+
 /** Who gets which art. Pure given `rng` (the unit's `identity` fork). */
 export function planIdentity(rng: Rng, plan: Pick<SocialPlan, "accounts" | "channels" | "categories">): IdentityPlan {
   const streaming = new Set(plan.channels.filter((c) => c.streamer).map((c) => c.ownerHandle));
@@ -106,18 +137,26 @@ export function planIdentity(rng: Rng, plan: Pick<SocialPlan, "accounts" | "chan
       })),
     };
   });
-  return { avatars, banners: [...present], panels, boxArt: plan.categories.map((c) => c.slug) };
+  const socials = present.map((handle) => {
+    const slug = plan.channels.find((c) => c.ownerHandle === handle)?.slug ?? handle;
+    return {
+      handle,
+      socials: SOCIAL_SETS[handle].map(([platform, url]) => ({ platform, url: url.replace("{slug}", slug) })),
+    };
+  });
+  return { avatars, banners: [...present], panels, socials, boxArt: plan.categories.map((c) => c.slug) };
 }
 
 export function identityCounts(
   p: IdentityPlan,
-): Record<"avatars" | "banners" | "panels" | "panelImages" | "boxArt", number> {
+): Record<"avatars" | "banners" | "panels" | "panelImages" | "socials" | "boxArt", number> {
   const all = p.panels.flatMap((x) => x.panels);
   return {
     avatars: p.avatars.length,
     banners: p.banners.length,
     panels: all.length,
     panelImages: all.filter((x) => x.image).length,
+    socials: p.socials.reduce((n, x) => n + x.socials.length, 0),
     boxArt: p.boxArt.length,
   };
 }
@@ -134,6 +173,8 @@ export interface IdentityClient {
     channel: string,
     panels: { title: string; body: string; imageKey: string | null; linkUrl: string | null }[],
   ): Promise<void>;
+  /** `channels.update` with `socials` (replaces the whole list). */
+  setSocials(channel: string, socials: ChannelSocial[]): Promise<void>;
 }
 
 export function apiIdentityClient(api: Api, signal: AbortSignal): IdentityClient {
@@ -161,6 +202,9 @@ export function apiIdentityClient(api: Api, signal: AbortSignal): IdentityClient
     async setPanels(channel, panels) {
       await c.setPanels({ channel, panels });
     },
+    async setSocials(channel, socials) {
+      await c.update({ channel, socials });
+    },
   };
 }
 
@@ -173,6 +217,8 @@ export interface IdentityExisting {
   banners: ReadonlySet<string>;
   /** Channels already showing this step's panels (links under `PANEL_LINK_ORIGIN`). */
   panels: ReadonlySet<string>;
+  /** Channels with any social link already. */
+  socials: ReadonlySet<string>;
 }
 
 /** Reads `IdentityExisting` for the planned accounts (by username). */
@@ -181,13 +227,16 @@ export async function readIdentityExisting(
   accounts: readonly { handle: string; username: string }[],
 ): Promise<IdentityExisting> {
   const handleOf = new Map(accounts.map((a) => [a.username, a.handle]));
-  const rows = await db.sql<{ username: string; avatar: boolean; image: boolean; banner: boolean; panels: boolean }[]>`
+  const rows = await db.sql<
+    { username: string; avatar: boolean; image: boolean; banner: boolean; panels: boolean; socials: boolean }[]
+  >`
     select u.username,
            c.theme ->> 'avatarKey' is not null as avatar,
            u.image is not null as image,
            c.theme ->> 'bannerKey' is not null as banner,
            exists (select 1 from channel_panels p
-                    where p.channel_id = c.id and p.link_url like ${`${PANEL_LINK_ORIGIN}/%`}) as panels
+                    where p.channel_id = c.id and p.link_url like ${`${PANEL_LINK_ORIGIN}/%`}) as panels,
+           jsonb_array_length(c.socials) > 0 as socials
       from users u join channels c on c.owner_id = u.id
      where u.username = any(${[...handleOf.keys()]}::text[])`;
   const set = (pick: (r: (typeof rows)[number]) => boolean) =>
@@ -197,6 +246,7 @@ export async function readIdentityExisting(
     profileImages: set((r) => r.image),
     banners: set((r) => r.banner),
     panels: set((r) => r.panels),
+    socials: set((r) => r.socials),
   };
 }
 
@@ -220,6 +270,8 @@ export interface IdentityResult {
   banners: number;
   panels: number;
   panelImages: number;
+  /** Social links set (summed over channels). */
+  socials: number;
   /** Already there, so not uploaded again. */
   skipped: number;
 }
@@ -246,7 +298,15 @@ export async function inPool<T>(items: readonly T[], n: number, fn: (item: T) =>
 
 /** Uploads the plan's art through the API, skipping what exists. */
 export async function seedIdentity(i: IdentityInput): Promise<IdentityResult> {
-  const out: IdentityResult = { avatars: 0, profileImages: 0, banners: 0, panels: 0, panelImages: 0, skipped: 0 };
+  const out: IdentityResult = {
+    avatars: 0,
+    profileImages: 0,
+    banners: 0,
+    panels: 0,
+    panelImages: 0,
+    socials: 0,
+    skipped: 0,
+  };
   const step = async <T>(who: string, what: string, f: () => Promise<T>): Promise<T> => {
     i.signal.throwIfAborted();
     try {
@@ -318,6 +378,16 @@ export async function seedIdentity(i: IdentityInput): Promise<IdentityResult> {
     }
     await step(handle, "set the panels", () => c.setPanels(channel, rows));
     out.panels += rows.length;
+  }
+
+  for (const { handle, socials } of i.plan.socials) {
+    if (i.existing.socials.has(handle)) {
+      out.skipped++;
+      continue;
+    }
+    const c = await step(handle, "sign-in", () => i.clientFor(handle));
+    await step(handle, "set the social links", () => c.setSocials(i.slugOf(handle), socials));
+    out.socials += socials.length;
   }
   return out;
 }

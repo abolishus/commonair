@@ -48,7 +48,7 @@ export function live(
 export function offline(
   slug: string,
   lastLiveAt: string | null = "2026-11-01T12:00:00.000Z",
-  over: { name?: string; category?: ChannelCard["category"] } = {},
+  over: { name?: string; category?: ChannelCard["category"]; latestVod?: ChannelCard["latestVod"] } = {},
 ): ChannelCard {
   return {
     channel: { id: `id-${slug}`, slug, displayName: over.name ?? slug, avatarUrl: null, accent: "zinc" },
@@ -57,6 +57,7 @@ export function offline(
     lastLiveAt,
     followerCount: 0,
     mature: false,
+    latestVod: over.latestVod ?? null,
   };
 }
 
@@ -64,8 +65,12 @@ export const ART = { id: "cat-art", slug: "art", name: "Art" };
 export const MUSIC = { id: "cat-music", slug: "music", name: "Music" };
 export const GAMES = { id: "cat-games", slug: "games", name: "Games" };
 
-export function category(ref: { id: string; slug: string; name: string }, liveChannels: number): Category {
-  return { ...ref, boxArtUrl: null, mature: false, liveChannels };
+export function category(
+  ref: { id: string; slug: string; name: string },
+  liveChannels: number,
+  over: Partial<Pick<Category, "viewerCount" | "tags">> = {},
+): Category {
+  return { ...ref, boxArtUrl: null, mature: false, liveChannels, viewerCount: 0, tags: [], ...over };
 }
 
 export function home(over: Partial<DirectoryHome> = {}): DirectoryHome {

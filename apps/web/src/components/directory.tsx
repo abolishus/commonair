@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import type { Category, ChannelCard, StreamCard } from "@commonair/contracts/dto";
-import { ChannelAvatar, EmptyState, RelativeTime } from "@commonair/ui";
+import { ChannelAvatar, EmptyState, formatDuration, OverlayBadge, RelativeTime } from "@commonair/ui";
+import { cn } from "@commonair/ui/lib/utils";
 import { Section } from "@commonair/ui/blocks/headers";
 import { Button } from "@commonair/ui/components/button";
 import { AlertCircleIcon, ArrowRight01Icon, LiveStreaming02Icon } from "@hugeicons/core-free-icons";
@@ -189,9 +190,10 @@ function ShowAll({ to, label }: { to: "/directory"; label: string }): React.JSX.
 }
 
 /**
- * An offline channel: a 16:9 tile (the initial avatar on the channel's accent; the latest VOD's
- * thumbnail once the directory returns one), its name, last title and when it was last live, then
- * its category as a link.
+ * An offline channel: a 16:9 tile, its name, last title and when it was last live, then its
+ * category as a link. With a watchable VOD the tile is that VOD's thumbnail and length, a link of
+ * its own to the VOD (`channel-card-vod`); without one it is the initial avatar on the channel's
+ * accent inside the channel link.
  */
 function RecentTile({
   card,
@@ -202,27 +204,63 @@ function RecentTile({
   collisions: ReadonlySet<string>;
   recent: boolean;
 }): React.JSX.Element {
+  const vod = card.latestVod;
+  const avatarFrame = (
+    <span
+      data-accent={card.channel.accent}
+      className="grid aspect-video w-full place-items-center overflow-hidden bg-channel-accent/15 ring-channel-accent transition-shadow group-hover:ring-2"
+    >
+      <ChannelAvatar
+        name={card.channel.displayName}
+        src={card.channel.avatarUrl}
+        accent={card.channel.accent}
+        size="lg"
+        decorative
+      />
+    </span>
+  );
+  const focus =
+    "group rounded-none outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
   return (
-    <div data-testid={recent ? "home-recent-tile" : undefined} className="flex min-w-0 flex-col gap-1">
+    <div data-testid={recent ? "home-recent-tile" : undefined} className="flex min-w-0 flex-col gap-2">
+      {vod ? (
+        <Link
+          to="/$channel/vods/$vodId"
+          params={{ channel: card.channel.slug, vodId: vod.id }}
+          data-testid="channel-card-vod"
+          data-vod={vod.id}
+          aria-label={t("fuChannel.recent.watchLatest", {
+            name: card.channel.displayName,
+            duration: formatDuration(vod.durationSeconds),
+          })}
+          className={cn("relative block min-w-0", focus)}
+        >
+          {vod.thumbnailUrl ? (
+            <span className="block aspect-video w-full overflow-hidden bg-muted">
+              <img
+                src={vod.thumbnailUrl}
+                alt=""
+                loading="lazy"
+                decoding="async"
+                className="size-full object-cover transition-opacity group-hover:opacity-90"
+              />
+            </span>
+          ) : (
+            avatarFrame
+          )}
+          <OverlayBadge size="sm" className="absolute end-2 bottom-2">
+            {formatDuration(vod.durationSeconds)}
+          </OverlayBadge>
+        </Link>
+      ) : null}
       <Link
         to="/$channel"
         params={{ channel: card.channel.slug }}
         data-testid="channel-card"
         data-channel={card.channel.slug}
-        className="group flex min-w-0 flex-col gap-2 rounded-none outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className={cn("flex min-w-0 flex-col gap-2", focus)}
       >
-        <span
-          data-accent={card.channel.accent}
-          className="grid aspect-video w-full place-items-center overflow-hidden bg-channel-accent/15 ring-channel-accent transition-shadow group-hover:ring-2"
-        >
-          <ChannelAvatar
-            name={card.channel.displayName}
-            src={card.channel.avatarUrl}
-            accent={card.channel.accent}
-            size="lg"
-            decorative
-          />
-        </span>
+        {vod ? null : avatarFrame}
         <span className="flex min-w-0 flex-col">
           <span dir="auto" className="truncate text-sm font-medium">
             {displayLabel(collisions, card.channel)}

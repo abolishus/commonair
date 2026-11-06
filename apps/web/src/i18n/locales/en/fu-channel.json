@@ -1,0 +1,23 @@
+{
+  "fuChannel.clips.sortLabel": "Sort",
+  "fuChannel.clips.sortRecent": "Recent",
+  "fuChannel.clips.sortTop": "Top",
+  "fuChannel.clips.rangeLabel": "From",
+  "fuChannel.clips.range7d": "7 days",
+  "fuChannel.clips.range30d": "30 days",
+  "fuChannel.clips.rangeAll": "All time",
+  "fuChannel.clips.rangeEmpty": "No clips in this range",
+  "fuChannel.clips.rangeEmptyHint": "Try a longer range to see older clips.",
+  "fuChannel.socials.label": "{name}'s links",
+  "fuChannel.socials.linkLabel": "{platform}: {link} (opens in a new tab)",
+  "fuChannel.socials.website": "Website",
+  "fuChannel.socials.other": "Link",
+  "fuChannel.category.tabVideos": "Videos",
+  "fuChannel.category.tabClips": "Clips",
+  "fuChannel.category.tags": "Popular tags in {category}",
+  "fuChannel.category.videosEmpty": "No videos in {category} yet",
+  "fuChannel.category.videosEmptyHint": "Past broadcasts in this category show up here once they are saved.",
+  "fuChannel.category.clipsEmpty": "No clips in {category} yet",
+  "fuChannel.category.clipsEmptyHint": "Clips cut from broadcasts in this category show up here.",
+  "fuChannel.recent.watchLatest": "Watch {name}'s latest video ({duration})"
+}

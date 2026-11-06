@@ -8,9 +8,11 @@
  * the components so the boundaries are unit-tested.
  */
 import type * as D from "@commonair/contracts/dto";
+import { SOCIAL_PLATFORMS, type ChannelSocial } from "@commonair/contracts/shapes";
 import { formatDuration } from "@commonair/ui";
 import type { z } from "zod";
 import type { Api } from "../../lib/api.ts";
+import { clipFilterSearch, parseClipFilter, type ClipFilter, type ClipFilterSearch } from "./clip-filters.tsx";
 
 type ChannelDto = Awaited<ReturnType<Api["channels"]["get"]>>;
 export type VodItem = z.infer<typeof D.Vod>;
@@ -26,15 +28,19 @@ export interface MediaPage<T> {
 export const CHANNEL_TABS = ["home", "videos", "clips", "about"] as const;
 export type ChannelTab = (typeof CHANNEL_TABS)[number];
 
-/** `/$channel`'s search params: `?tab=videos|clips|about`; Home is the bare URL. */
-export interface ChannelSearch {
+/**
+ * `/$channel`'s search params: `?tab=videos|clips|about`; Home is the bare URL. The Clips tab adds
+ * its sort and range (`&sort=top&range=7d`), dropped on every other tab.
+ */
+export interface ChannelSearch extends ClipFilterSearch {
   tab?: Exclude<ChannelTab, "home">;
 }
 
 /** The route's `validateSearch`: an unknown or missing `tab` is Home, so a bad link never errors. */
 export function parseChannelSearch(search: Record<string, unknown>): ChannelSearch {
   const raw = search.tab;
-  return raw === "videos" || raw === "clips" || raw === "about" ? { tab: raw } : {};
+  if (raw === "clips") return { tab: raw, ...parseClipFilter(search) };
+  return raw === "videos" || raw === "about" ? { tab: raw } : {};
 }
 
 export function isChannelTab(value: unknown): value is ChannelTab {
@@ -46,30 +52,43 @@ export function tabSearch(tab: ChannelTab): ChannelSearch {
   return tab === "home" ? {} : { tab };
 }
 
+/** The Clips tab with a sort and range (the defaults drop out of the URL). */
+export function clipsSearch(filter: ClipFilter): ChannelSearch {
+  return { tab: "clips", ...clipFilterSearch(filter) };
+}
+
 // ── About and live metadata ─────────────────────────────────────────────────────────────────────
 
 export interface ChannelAbout {
   /** `Channel.description`, trimmed; "" when the streamer wrote none. */
   bio: string;
-  /** The live broadcast's category, else the channel's. */
-  category: { slug: string; name: string } | null;
-  tags: string[];
+  /** `Channel.socials`, in the streamer's order. (Category and tags are polled: `ChannelSummary`.) */
+  socials: ChannelSocial[];
 }
 
-export const NO_ABOUT: ChannelAbout = Object.freeze({ bio: "", category: null, tags: [] });
+export const NO_ABOUT: ChannelAbout = Object.freeze({ bio: "", socials: [] });
 
-export function channelAbout(c: Pick<ChannelDto, "description" | "category" | "tags" | "live">): ChannelAbout {
-  const category = c.live?.category ?? c.category;
+export function channelAbout(c: Pick<ChannelDto, "description" | "socials">): ChannelAbout {
+  // Defensive: a malformed entry (or an older API without the field) never breaks the page.
+  const socials = (c.socials as ChannelSocial[] | undefined) ?? [];
   return {
     bio: c.description.trim(),
-    category: category ? { slug: category.slug, name: category.name } : null,
-    // Case-insensitive dedupe keeps the first spelling; empty tags are dropped.
-    tags: c.tags.reduce<string[]>((out, tag) => {
-      const clean = tag.trim();
-      if (clean !== "" && !out.some((o) => o.toLowerCase() === clean.toLowerCase())) out.push(clean);
-      return out;
-    }, []),
+    socials: socials.filter((s) => SOCIAL_PLATFORMS.includes(s.platform) && isHttpsUrl(s.url)),
   };
+}
+
+/** Only https links without credentials are rendered (the API checks too; this is the page's own guard). */
+export function isHttpsUrl(url: string): boolean {
+  const parsed = URL.parse(url);
+  return parsed !== null && parsed.protocol === "https:" && parsed.username === "" && parsed.password === "";
+}
+
+/** The link's visible text: the host and path without the scheme or a trailing slash. */
+export function socialLabel(url: string): string {
+  const parsed = URL.parse(url);
+  if (!parsed) return url;
+  const path = parsed.pathname === "/" ? "" : parsed.pathname.replace(/\/+$/, "");
+  return `${parsed.host.replace(/^www\./, "")}${path}`;
 }
 
 /**
@@ -124,21 +143,6 @@ export function playableVods(items: readonly VodItem[]): VodItem[] {
 
 export function playableClips(items: readonly ClipItem[]): ClipItem[] {
   return items.filter((c) => c.status === "ready");
-}
-
-/**
- * When the channel was last live, from its newest VOD: the recording starts with the broadcast, so
- * its end is `createdAt + durationSeconds`. Null without a VOD. (`Channel.lastLiveAt` is a contract
- * request; this is the stand-in until `channels.get` serves it.)
- */
-export function lastLiveFrom(items: readonly VodItem[]): string | null {
-  const newest = items
-    .filter((v) => v.status === "ready" || v.status === "processing")
-    .reduce<VodItem | null>((best, v) => (best === null || v.createdAt > best.createdAt ? v : best), null);
-  if (!newest) return null;
-  const start = Date.parse(newest.createdAt);
-  if (!Number.isFinite(start)) return null;
-  return new Date(start + Math.max(0, newest.durationSeconds) * 1000).toISOString();
 }
 
 /** Append a page, dropping ids already shown (a cursor page can overlap after a new recording). */

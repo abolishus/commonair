@@ -102,6 +102,7 @@ function vod(n: number, over: Partial<Vod> = {}): Vod {
     expiresAt: null,
     failedReason: null,
     captions: [],
+    category: null,
     ...over,
   };
 }
@@ -119,6 +120,7 @@ function clip(n: number, over: Partial<Clip> = {}): Clip {
     views: n,
     createdAt: new Date(Date.UTC(2026, 9, 30 - n)).toISOString(),
     windowStartedAt: null,
+    category: null,
     ...over,
   };
 }
@@ -134,13 +136,16 @@ function page(over: Partial<ChannelPage> = {}): ChannelPage {
       accent: null,
       mature: false,
       live: null,
+      category: { id: "0192f000-0000-7000-8000-0000000000c1", slug: "art", name: "Art" },
+      tags: ["cozy"],
+      lastLiveAt: null,
       followerCount: 12,
       following: null,
       portabilityGrant: null,
       movedTo: null,
     },
     extras: { bannerUrl: null, panels: [], suspended: false },
-    about: { bio: "I build villages.", category: { slug: "art", name: "Art" }, tags: ["cozy"] },
+    about: { bio: "I build villages.", socials: [] },
     vods: { items: [vod(1), vod(2)], nextCursor: null },
     clips: { items: [clip(1)], nextCursor: null },
     ...over,
@@ -150,6 +155,8 @@ function page(over: Partial<ChannelPage> = {}): ChannelPage {
 const neverClient: MediaClient = {
   vods: () => Promise.reject(new Error("unexpected")),
   clips: () => Promise.reject(new Error("unexpected")),
+  categoryVods: () => Promise.reject(new Error("unexpected")),
+  categoryClips: () => Promise.reject(new Error("unexpected")),
 };
 
 function renderPage(
@@ -508,5 +515,86 @@ describe("going offline", () => {
         `/fern/vods/${uuid(101)}`,
       ),
     );
+  });
+});
+
+describe("the Clips tab's sort and range", () => {
+  it("parseChannelSearch keeps sort and range on Clips only, dropping unknown values", () => {
+    expect(parseChannelSearch({ tab: "clips", sort: "top", range: "30d" })).toEqual({
+      tab: "clips",
+      sort: "top",
+      range: "30d",
+    });
+    expect(parseChannelSearch({ tab: "clips", sort: "recent", range: "all" })).toEqual({ tab: "clips" });
+    expect(parseChannelSearch({ tab: "clips", sort: "hot", range: "90d" })).toEqual({ tab: "clips" });
+    expect(parseChannelSearch({ tab: "videos", sort: "top", range: "7d" })).toEqual({ tab: "videos" });
+    expect(parseChannelSearch({ sort: "top", range: "7d" })).toEqual({});
+  });
+
+  it("the default filter uses the loader's page; a range is in the URL and asks for its own first page", async () => {
+    const clips = vi.fn<MediaClient["clips"]>(async (_channel, _cursor, filter) => ({
+      items: filter?.range === "7d" ? [clip(3)] : [clip(4), clip(5)],
+      nextCursor: null,
+    }));
+    const { router } = renderPage(page(), "/fern?tab=clips", { ...neverClient, clips });
+    await waitFor(() => expect(screen.getAllByTestId("channel-video-card")).toHaveLength(1));
+    expect(clips).not.toHaveBeenCalled();
+    expect(screen.getByTestId("clip-range-all").getAttribute("aria-pressed")).toBe("true");
+
+    act(() => {
+      fireEvent.click(screen.getByTestId("clip-range-7d"));
+    });
+    await waitFor(() => expect(router.state.location.search).toEqual({ tab: "clips", range: "7d" }));
+    await waitFor(() =>
+      expect(screen.getAllByTestId("channel-video-card").map((c) => c.getAttribute("data-id"))).toEqual([uuid(203)]),
+    );
+    expect(clips).toHaveBeenLastCalledWith("fern", undefined, { sort: "recent", range: "7d" });
+
+    act(() => {
+      fireEvent.click(screen.getByTestId("clip-sort-top"));
+    });
+    await waitFor(() => expect(router.state.location.search).toEqual({ tab: "clips", sort: "top", range: "7d" }));
+    expect(clips).toHaveBeenLastCalledWith("fern", undefined, { sort: "top", range: "7d" });
+    // Another tab drops the filter from the URL.
+    clickTab("videos");
+    await waitFor(() => expect(router.state.location.search).toEqual({ tab: "videos" }));
+  });
+
+  it("a deep link with a range asks for that range; nothing in it is the filtered empty state", async () => {
+    const clips = vi.fn<MediaClient["clips"]>(async () => ({ items: [], nextCursor: null }));
+    renderPage(page(), "/fern?tab=clips&range=30d", { ...neverClient, clips });
+    expect(await screen.findByTestId("clips-filtered-empty")).toBeTruthy();
+    expect(clips).toHaveBeenCalledWith("fern", undefined, { sort: "recent", range: "30d" });
+    expect(screen.queryByTestId("channel-media-empty")).toBeNull();
+  });
+
+  it("top over all time with nothing is the channel's own empty state (sort alone never filters out)", async () => {
+    const clips = vi.fn<MediaClient["clips"]>(async () => ({ items: [], nextCursor: null }));
+    renderPage(page(), "/fern?tab=clips&sort=top", { ...neverClient, clips });
+    expect(await screen.findByTestId("channel-media-empty")).toBeTruthy();
+    expect(clips).toHaveBeenCalledWith("fern", undefined, { sort: "top", range: "all" });
+    expect(screen.queryByTestId("clips-filtered-empty")).toBeNull();
+  });
+});
+
+describe("the polled summary drives the header metadata", () => {
+  it("a new category and tags from the poll replace the header's", async () => {
+    const live = livePage();
+    renderPage(live, "/fern", neverClient, (node) => <TheatreHost>{node}</TheatreHost>);
+    const first = await screen.findAllByTestId("channel-meta-category");
+    expect(first[0]?.textContent).toBe("Art");
+    expect(screen.getAllByTestId("channel-meta-tag").map((a) => a.textContent)).toEqual(["cozy"]);
+
+    polled.summary = {
+      ...live.summary,
+      category: { id: uuid(70), slug: "music", name: "Music" },
+      tags: ["lofi", "beats"],
+    };
+    act(() => {
+      fireEvent.click(screen.getByTestId("toggle-theatre"));
+    });
+    await waitFor(() => expect(screen.getAllByTestId("channel-meta-category")[0]?.textContent).toBe("Music"));
+    expect(screen.getAllByTestId("channel-meta-category")[0]?.getAttribute("href")).toBe("/directory/music");
+    expect(screen.getAllByTestId("channel-meta-tag").map((a) => a.textContent)).toEqual(["lofi", "beats"]);
   });
 });

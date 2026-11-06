@@ -14,7 +14,7 @@ import { ChannelAboutSection } from "../../components/channel/about.tsx";
 import { ChannelBanner, ChannelBannerSkeleton } from "../../components/channel/banner.tsx";
 import {
   channelUrl,
-  lastLiveFrom,
+  clipsSearch,
   parseChannelSearch,
   SHELF_SIZE,
   showsJustStarted,
@@ -30,12 +30,25 @@ import {
   Uptime,
 } from "../../components/channel/channel-meta.tsx";
 import { ChannelTabs } from "../../components/channel/channel-tabs.tsx";
+import {
+  ClipFilters,
+  clipFilterFrom,
+  isDefaultClipFilter,
+  type ClipFilter,
+} from "../../components/channel/clip-filters.tsx";
 import { ChannelNotFoundPage } from "../../components/channel/live-now-shelf.tsx";
 import { OfflineHero } from "../../components/channel/offline-hero.tsx";
 import { bannerVisible } from "../../components/channel/panels-data.ts";
 import { getChannelPage, type ChannelPage as ChannelPageData } from "../../components/channel/panels-loader.ts";
 import { useChannelClips, useChannelVods } from "../../components/channel/use-media-list.ts";
-import { clipTiles, MediaEmptyState, MediaShelf, VideoGrid, vodTiles } from "../../components/channel/video-grid.tsx";
+import {
+  ClipsFilteredEmpty,
+  clipTiles,
+  MediaEmptyState,
+  MediaShelf,
+  VideoGrid,
+  vodTiles,
+} from "../../components/channel/video-grid.tsx";
 import { FollowButton, FollowerCount, useFollow } from "../../components/channel-follow.tsx";
 import { FollowGrantToggle } from "../../components/portability/grants.tsx";
 import { MovedNotice } from "../../components/portability/moved-notice.tsx";
@@ -52,7 +65,8 @@ import { Player } from "../../player/player.tsx";
 import { TheatreProvider, useTheatre, useTheatreChat } from "../../player/theatre.ts";
 
 export const Route = createFileRoute("/_app/$channel")({
-  // `?tab=videos|clips|about` (F2): each tab is a link and Back steps through them.
+  // `?tab=videos|clips|about` (F2): each tab is a link and Back steps through them. Clips adds
+  // `&sort=top&range=7d|30d`.
   validateSearch: parseChannelSearch,
   loader: async ({ params }) => {
     // One `channels.get` (the summary the page polls, plus the banner, panels, suspension, bio and
@@ -77,14 +91,28 @@ export const Route = createFileRoute("/_app/$channel")({
 function ChannelPage(): React.JSX.Element {
   const page = Route.useLoaderData();
   // Parsed again: unvalidated keys from the raw URL reach `useSearch` beside the validated ones.
-  const { tab = "home" } = parseChannelSearch(Route.useSearch());
+  const search = parseChannelSearch(Route.useSearch());
+  const { tab = "home" } = search;
+  const { sort, range } = clipFilterFrom(search);
+  const clipFilter = React.useMemo<ClipFilter>(() => ({ sort, range }), [sort, range]);
   const navigate = Route.useNavigate();
   const onTabChange = React.useCallback((next: ChannelTab) => void navigate({ search: tabSearch(next) }), [navigate]);
+  const onClipFilterChange = React.useCallback(
+    (next: ClipFilter) => void navigate({ search: clipsSearch(next) }),
+    [navigate],
+  );
   // Keyed by channel so per-channel state (follow, chat, lists) never leaks across navigations.
   // D2-player's theatre state (per tab): the player's toggle and this layout read the same provider.
   return (
     <TheatreProvider>
-      <ChannelView key={page.summary.slug} page={page} tab={tab} onTabChange={onTabChange} />
+      <ChannelView
+        key={page.summary.slug}
+        page={page}
+        tab={tab}
+        onTabChange={onTabChange}
+        clipFilter={clipFilter}
+        onClipFilterChange={onClipFilterChange}
+      />
     </TheatreProvider>
   );
 }
@@ -93,10 +121,14 @@ function ChannelView({
   page,
   tab,
   onTabChange,
+  clipFilter,
+  onClipFilterChange,
 }: {
   page: ChannelPageData;
   tab: ChannelTab;
   onTabChange: (tab: ChannelTab) => void;
+  clipFilter: ClipFilter;
+  onClipFilterChange: (filter: ClipFilter) => void;
 }): React.JSX.Element {
   const { extras, about } = page;
   const { me, config, now } = useBootstrap();
@@ -112,14 +144,15 @@ function ChannelView({
   const { chatHidden } = useTheatreChat();
   const vods = useChannelVods(channel.slug, page.vods);
   // Live -> offline: the loaded list predates the broadcast that just ended (it was still recording,
-  // so it was left out); ask again so the hero and "Last live" are that broadcast.
+  // so it was left out); ask again so the hero is that broadcast.
   const wasLive = React.useRef(live);
   const refreshVods = vods.retry;
   React.useEffect(() => {
     if (wasLive.current && !live) refreshVods();
     wasLive.current = live;
   }, [live, refreshVods]);
-  const clips = useChannelClips(channel.slug, page.clips);
+  // The loader's first page is the default filter's; another sort or range asks for its own.
+  const clips = useChannelClips(channel.slug, isDefaultClipFilter(clipFilter) ? page.clips : null, clipFilter);
   const videoTiles = vodTiles(vods.items);
   const clipTileList = clipTiles(clips.items);
   const hasBanner = extras.bannerUrl !== null && !extras.suspended;
@@ -150,7 +183,7 @@ function ChannelView({
   const panels = extras.suspended ? [] : extras.panels;
   // Offline with a playable VOD: the latest one is the hero instead of the offline card (F2).
   const hero = !live && stage === "player" ? (videoTiles[0] ?? null) : null;
-  const lastLive = live ? null : lastLiveFrom(vods.items);
+  const lastLive = live ? null : channel.lastLiveAt;
 
   const player = (
     <Player
@@ -196,8 +229,8 @@ function ChannelView({
       badges={justStarted ? <JustStartedBadge /> : undefined}
       // F12: below the threshold the count is replaced by "Just started", never padded.
       viewerCount={live && !justStarted ? channel.live?.viewerCount : undefined}
-      category={live && about.category ? <CategoryLink category={about.category} /> : undefined}
-      tags={about.tags}
+      category={live && channel.category ? <CategoryLink category={channel.category} /> : undefined}
+      tags={channel.tags}
       tagsLabel={t("channel.meta.tags")}
       tagLink={tagLink}
       uptime={channel.live ? <Uptime startedAt={channel.live.startedAt} now={now} /> : undefined}
@@ -215,10 +248,10 @@ function ChannelView({
             <span>
               {t("channel.offline.lastLive")} <RelativeTime date={lastLive} />
             </span>
-            {about.category ? (
+            {channel.category ? (
               <>
                 <span aria-hidden>·</span>
-                <CategoryLink category={about.category} />
+                <CategoryLink category={channel.category} />
               </>
             ) : null}
           </span>
@@ -268,6 +301,7 @@ function ChannelView({
     <ChannelAboutSection
       name={channel.displayName}
       about={about}
+      category={channel.category}
       followers={
         // Its own id: the header's `follower-count` is the one other units read.
         <span data-testid="channel-about-followers" data-count={follow.state.count}>
@@ -318,12 +352,22 @@ function ChannelView({
           />
         ),
         clips: (
-          <VideoGrid
-            kind="clips"
-            tiles={clipTileList}
-            list={clips}
-            empty={<MediaEmptyState kind="clips" own={own} channelName={channel.displayName} />}
-          />
+          <div className="flex min-w-0 flex-col gap-4">
+            <ClipFilters value={clipFilter} onChange={onClipFilterChange} />
+            <VideoGrid
+              kind="clips"
+              tiles={clipTileList}
+              list={clips}
+              empty={
+                // Sort alone never empties the list: only a narrower range gets the filtered empty state.
+                clipFilter.range === "all" ? (
+                  <MediaEmptyState kind="clips" own={own} channelName={channel.displayName} />
+                ) : (
+                  <ClipsFilteredEmpty />
+                )
+              }
+            />
+          </div>
         ),
         // Live, the banner moves into About; offline it already heads the page.
         about: aboutSection(live),

@@ -6,8 +6,8 @@
  * D2-channel (F2): an offline channel is no longer a dead end. With a playable VOD it shows the
  * banner on top, "Last live <time> · <category>", the latest VOD as the hero (a poster linking to
  * its watch page, `channel-offline-hero`) and the rest as a Videos shelf; without one it keeps
- * today's offline card plus the About content. "Last live" comes from the newest VOD until
- * `Channel.lastLiveAt` exists. Going live swaps the hero for the player.
+ * today's offline card plus the About content. "Last live" is `Channel.lastLiveAt` (polled with
+ * the summary), with or without a VOD. Going live swaps the hero for the player.
  */
 import { LocaleProvider, TooltipProvider } from "@commonair/ui";
 import {
@@ -44,7 +44,7 @@ vi.mock("../src/chat/chat-panel.tsx", () => ({ ChatPanel: () => <div data-testid
 vi.mock("../src/components/support/support-dialog.tsx", () => ({ SupportButton: () => null }));
 
 const { Route } = await import("../src/routes/_app/$channel.tsx");
-const { lastLiveFrom, playableVods } = await import("../src/components/channel/channel-data.ts");
+const { playableVods } = await import("../src/components/channel/channel-data.ts");
 const { OfflineHero } = await import("../src/components/channel/offline-hero.tsx");
 const { vodTile } = await import("../src/components/channel/video-grid.tsx");
 type ChannelPage = import("../src/components/channel/panels-loader.ts").ChannelPage;
@@ -69,6 +69,7 @@ function vod(n: number, over: Partial<Vod> = {}): Vod {
     expiresAt: null,
     failedReason: null,
     captions: [],
+    category: null,
     ...over,
   };
 }
@@ -84,6 +85,9 @@ function page(over: Partial<ChannelPage> = {}): ChannelPage {
       accent: null,
       mature: false,
       live: null,
+      category: { id: "0192f000-0000-7000-8000-0000000000c1", slug: "art", name: "Art" },
+      tags: [],
+      lastLiveAt: "2026-10-29T19:00:00.000Z",
       followerCount: 3,
       following: null,
       portabilityGrant: null,
@@ -94,7 +98,7 @@ function page(over: Partial<ChannelPage> = {}): ChannelPage {
       panels: [{ id: uuid(7), title: "Schedule", body: "Evenings", imageUrl: null, linkUrl: null }],
       suspended: false,
     },
-    about: { bio: "I build villages.", category: { slug: "art", name: "Art" }, tags: [] },
+    about: { bio: "I build villages.", socials: [] },
     vods: { items: [vod(1), vod(2), vod(3)], nextCursor: null },
     clips: { items: [], nextCursor: null },
     ...over,
@@ -123,28 +127,7 @@ function renderPage(data: ChannelPage) {
   );
 }
 
-describe("lastLiveFrom", () => {
-  it("is the newest recording's end: createdAt plus its length", () => {
-    expect(lastLiveFrom([vod(2), vod(1)])).toBe(new Date(Date.UTC(2026, 9, 29, 19)).toISOString());
-  });
-
-  it("counts a VOD still processing (the broadcast ended) but not a failed or deleted one", () => {
-    expect(lastLiveFrom([vod(3), vod(1, { status: "processing" })])).toBe(
-      new Date(Date.UTC(2026, 9, 29, 19)).toISOString(),
-    );
-    expect(lastLiveFrom([vod(1, { status: "failed" }), vod(3)])).toBe(
-      new Date(Date.UTC(2026, 9, 27, 19)).toISOString(),
-    );
-    expect(lastLiveFrom([vod(1, { status: "deleted" })])).toBeNull();
-  });
-
-  it("is null with no VODs, and a negative or zero length ends where it started", () => {
-    expect(lastLiveFrom([])).toBeNull();
-    expect(lastLiveFrom([vod(1, { durationSeconds: 0 })])).toBe(vod(1).createdAt);
-    expect(lastLiveFrom([vod(1, { durationSeconds: -5 })])).toBe(vod(1).createdAt);
-    expect(lastLiveFrom([vod(1, { createdAt: "not a date" })])).toBeNull();
-  });
-
+describe("playableVods", () => {
   it("playableVods keeps ready ones only, in order", () => {
     const out = playableVods([vod(1), vod(2, { status: "recording" }), vod(3), vod(4, { status: "processing" })]);
     expect(out.map((v) => v.id)).toEqual([uuid(101), uuid(103)]);
@@ -166,7 +149,7 @@ describe("the offline page with VODs", () => {
 
     const last = screen.getByTestId("channel-last-live");
     expect(last.textContent).toMatch(/^Last live /);
-    expect(last.querySelector("time")?.getAttribute("datetime")).toBe(lastLiveFrom(page().vods?.items ?? []));
+    expect(last.querySelector("time")?.getAttribute("datetime")).toBe("2026-10-29T19:00:00.000Z");
     expect(last.querySelector('[data-testid="channel-meta-category"]')?.getAttribute("href")).toBe("/directory/art");
 
     // Banner first in the main column, above the header.
@@ -213,7 +196,9 @@ describe("the offline page with VODs", () => {
 
 describe("the offline page with no VODs", () => {
   it("keeps today's offline card plus the About content on Home", async () => {
-    renderPage(page({ vods: { items: [], nextCursor: null } }));
+    const never = page({ vods: { items: [], nextCursor: null } });
+    never.summary.lastLiveAt = null;
+    renderPage(never);
     const offline = await screen.findByTestId("offline-state");
     expect(offline.textContent).toContain("Fernsby is offline");
     expect(screen.queryByTestId("channel-offline-hero")).toBeNull();
@@ -226,8 +211,15 @@ describe("the offline page with no VODs", () => {
     expect(screen.getAllByTestId("channel-banner")).toHaveLength(1);
   });
 
+  it("Last live comes from the channel, not the VOD list: it shows with no VOD left", async () => {
+    renderPage(page({ vods: { items: [], nextCursor: null } }));
+    const last = await screen.findByTestId("channel-last-live");
+    expect(last.querySelector("time")?.getAttribute("datetime")).toBe("2026-10-29T19:00:00.000Z");
+    expect(screen.queryByTestId("channel-offline-hero")).toBeNull();
+  });
+
   it("with no bio, About says so instead of a blank card", async () => {
-    renderPage(page({ vods: { items: [], nextCursor: null }, about: { bio: "", category: null, tags: [] } }));
+    renderPage(page({ vods: { items: [], nextCursor: null }, about: { bio: "", socials: [] } }));
     expect((await screen.findByTestId("channel-about-bio-empty")).textContent).toBe(
       "Fernsby has not written a bio yet.",
     );

@@ -30,6 +30,12 @@ export interface ChannelSummary {
     restricted: "under_review" | null;
   } | null;
   followerCount: number;
+  /** The live broadcast's category, else the channel's; polled, so the header's link follows a change. */
+  category: { id: string; slug: string; name: string } | null;
+  /** `Channel.tags`, trimmed and deduped case-insensitively (first spelling kept). */
+  tags: string[];
+  /** `Channel.lastLiveAt`: when the last broadcast ended; null when it never did. */
+  lastLiveAt: string | null;
   /** The caller's follow state; null when anonymous (or the API did not say). */
   following: boolean | null;
   /** The caller asked to be told if the channel moves (decision (l)); null when anonymous or unknown. */
@@ -38,6 +44,22 @@ export interface ChannelSummary {
   movedTo: { url: string; at: string } | null;
   /** When the browser poll that produced this started (ms); absent for the SSR snapshot. */
   requestedAt?: number;
+}
+
+type CategoryRef = ChannelDto["category"];
+
+/** Trimmed, empty ones dropped, deduped case-insensitively keeping the first spelling. */
+export function cleanTags(tags: readonly string[] | undefined): string[] {
+  return (tags ?? []).reduce<string[]>((out, tag) => {
+    const clean = tag.trim();
+    if (clean !== "" && !out.some((o) => o.toLowerCase() === clean.toLowerCase())) out.push(clean);
+    return out;
+  }, []);
+}
+
+// Older callers (and test doubles) may leave the field out: treat that as no category.
+function categoryRef(category: CategoryRef | undefined): ChannelSummary["category"] {
+  return category ? { id: category.id, slug: category.slug, name: category.name } : null;
 }
 
 export function summarize(c: ChannelDto): ChannelSummary {
@@ -60,6 +82,9 @@ export function summarize(c: ChannelDto): ChannelSummary {
           restricted: c.live.restricted ?? null,
         }
       : null,
+    category: categoryRef(c.live?.category ?? c.category),
+    tags: cleanTags(c.tags),
+    lastLiveAt: c.lastLiveAt ?? null,
     followerCount: c.followerCount,
     following: c.viewer?.following ?? null,
     portabilityGrant: c.viewer ? (c.viewer.portabilityGrant ?? false) : null,

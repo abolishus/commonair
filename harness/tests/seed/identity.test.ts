@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /** seed-social's identity step: who gets which art, and the API calls (against a fake), resume-safe. */
-import type { ChannelTheme } from "@commonair/contracts/shapes";
+import { ChannelSocial, type ChannelTheme } from "@commonair/contracts/shapes";
 import { describe, expect, test } from "vite-plus/test";
 import { decodePng } from "../../src/png.ts";
 import { selectUnits } from "../../src/seed/checkpoint.ts";
@@ -88,6 +88,20 @@ describe("planIdentity", () => {
     }
   });
 
+  test("showcase socials: each channel's links pass the contract and stay on reserved hosts", () => {
+    const plan = identity();
+    expect(plan.socials.map((p) => p.handle)).toEqual([...SHOWCASE_STREAMERS]);
+    for (const { handle, socials } of plan.socials) {
+      expect(socials.length, handle).toBeGreaterThanOrEqual(3);
+      for (const social of socials) {
+        expect(ChannelSocial.safeParse(social).success, social.url).toBe(true);
+        expect(new URL(social.url).hostname).toMatch(/(^|\.)example\.(org|com)$/);
+        expect(social.url).toContain("demo_");
+      }
+    }
+    expect(identityCounts(plan).socials).toBe(plan.socials.reduce((n, p) => n + p.socials.length, 0));
+  });
+
   test("deterministic per seed", () => {
     expect(identity(SMALL, 7)).toEqual(identity(SMALL, 7));
     expect(identity(SMALL, 7).avatars).not.toEqual(identity(SMALL, 8).avatars);
@@ -100,6 +114,7 @@ function fakeApi() {
   const themes = new Map<string, ChannelTheme>();
   const panels = new Map<string, { imageKey: string | null; linkUrl: string | null }[]>();
   const images = new Map<string, string>();
+  const socials = new Map<string, ChannelSocial[]>();
   const uploads: { channel: string; purpose: string; png: Uint8Array }[] = [];
   const clientFor = async (handle: string): Promise<IdentityClient> => {
     calls.push(`sign-in ${handle}`);
@@ -118,12 +133,21 @@ function fakeApi() {
       async setPanels(channel, rows) {
         panels.set(channel, rows);
       },
+      async setSocials(channel, list) {
+        socials.set(channel, list);
+      },
     };
   };
-  return { calls, themes, panels, images, uploads, clientFor };
+  return { calls, themes, panels, images, socials, uploads, clientFor };
 }
 
-const NONE: IdentityExisting = { avatars: new Set(), profileImages: new Set(), banners: new Set(), panels: new Set() };
+const NONE: IdentityExisting = {
+  avatars: new Set(),
+  profileImages: new Set(),
+  banners: new Set(),
+  panels: new Set(),
+  socials: new Set(),
+};
 const PLAN: IdentityPlan = {
   avatars: ["streamer1", "v00001", "v00002"],
   banners: ["streamer1"],
@@ -136,6 +160,7 @@ const PLAN: IdentityPlan = {
       ],
     },
   ],
+  socials: [{ handle: "streamer1", socials: [{ platform: "website", url: "https://example.org/demo_streamer1" }] }],
   boxArt: ["art"],
 };
 const input = (api: ReturnType<typeof fakeApi>, existing = NONE, plan = PLAN) => ({
@@ -152,7 +177,10 @@ describe("seedIdentity", () => {
   test("uploads each avatar, banner and panel image as a PNG and points the theme and profile at it", async () => {
     const api = fakeApi();
     const r = await seedIdentity(input(api));
-    expect(r).toEqual({ avatars: 3, profileImages: 3, banners: 1, panels: 2, panelImages: 1, skipped: 0 });
+    expect(r).toEqual({ avatars: 3, profileImages: 3, banners: 1, panels: 2, panelImages: 1, socials: 1, skipped: 0 });
+    expect(api.socials.get("demo_streamer1")).toEqual([
+      { platform: "website", url: "https://example.org/demo_streamer1" },
+    ]);
     expect(api.uploads.map((u) => u.purpose).sort()).toEqual(["avatar", "avatar", "avatar", "banner", "panel"]);
     for (const u of api.uploads) expect(decodePng(u.png).width).toBeGreaterThan(0);
     const t = api.themes.get("demo_streamer1");
@@ -188,18 +216,23 @@ describe("seedIdentity", () => {
       profileImages: new Set(["streamer1", "v00001", "v00002"]),
       banners: new Set(["streamer1"]),
       panels: new Set(["streamer1"]),
+      socials: new Set(["streamer1"]),
     };
     const r = await seedIdentity(input(api, done));
     expect(api.uploads).toEqual([]);
     expect(api.calls).toEqual([]);
-    expect(r).toEqual({ avatars: 0, profileImages: 0, banners: 0, panels: 0, panelImages: 0, skipped: 5 });
+    expect(r).toEqual({ avatars: 0, profileImages: 0, banners: 0, panels: 0, panelImages: 0, socials: 0, skipped: 6 });
   });
 
   test("an avatar set without the profile image (an interrupted attempt) is reused, not re-uploaded", async () => {
     const api = fakeApi();
     api.themes.set("demo_v00001", { avatarKey: "channels/demo_v00001/avatar/old.png" });
     const r = await seedIdentity(
-      input(api, { ...NONE, avatars: new Set(["v00001"]) }, { ...PLAN, avatars: ["v00001"], banners: [], panels: [] }),
+      input(
+        api,
+        { ...NONE, avatars: new Set(["v00001"]) },
+        { ...PLAN, avatars: ["v00001"], banners: [], panels: [], socials: [] },
+      ),
     );
     expect(api.uploads).toEqual([]);
     expect(api.images.get("v00001")).toBe("channels/demo_v00001/avatar/old.png");

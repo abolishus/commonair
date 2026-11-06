@@ -7,6 +7,8 @@
  * - F2: `demo_streamer1`'s Videos tab (`?tab=videos`) lists its ready VODs, and Back returns Home;
  * - F2: an offline seeded channel with a ready VOD shows `channel-offline-hero`, linking to it;
  * - F2: About shows the bio card and the channel's panels (once B8-web and D1-seed are merged);
+ * - follow-ups: About lists the channel's social links (seed-social sets them on streamer1), and
+ *   the Clips tab's range filter is a search param;
  * - F9: a live channel's header links its category and has Share and uptime;
  * - F4: at 375 px the name keeps its width and Report sits in the "More" menu.
  *
@@ -21,6 +23,20 @@ import type { DContext } from "./context.ts";
 const UI_TIMEOUT_MS = 15_000;
 /** The seeded streamer with data (`demo_streamer1`, live in Art under `seed live`). */
 const STREAMER = "streamer1";
+/**
+ * The follow-up ids (data-testid), beside D_TEST_IDS / TEST_IDS until the orchestrator folds them
+ * into `web/selectors.ts`.
+ */
+export const FU_CHANNEL_IDS = {
+  channelSocials: "channel-socials",
+  channelSocialLink: "channel-social-link",
+  clipFilters: "clip-filters",
+  clipRange: (range: "7d" | "30d" | "all") => `clip-range-${range}`,
+  clipSort: (sort: "recent" | "top") => `clip-sort-${sort}`,
+  clipsFilteredEmpty: "clips-filtered-empty",
+} as const;
+const fid = (id: string): string => `[data-testid="${id}"]`;
+
 /** A 375 px phone (screenshots 13 and 24). */
 const PHONE = { width: 375, height: 812 };
 
@@ -99,6 +115,43 @@ export async function steps(ctx: DContext): Promise<void> {
     const panels = page.locator('[data-testid="channel-about"] [data-testid="channel-panel"]');
     await panels.first().waitFor({ timeout: UI_TIMEOUT_MS });
     s.check("About lists the channel's panels", (await panels.count()) > 0, { panels: dto.panels.length });
+  });
+
+  if (dto.socials.length === 0)
+    s.skipStep("d2-channel: About social links", `${streamer} has no social links (seed-social sets them)`);
+  else
+    await s.step("d2-channel: About lists the social links, in order, opening a new tab", async () => {
+      await open(ctx, page, `${ROUTES.channel(streamer)}?tab=about`);
+      const list = page.locator(fid(FU_CHANNEL_IDS.channelSocials));
+      await list.waitFor({ timeout: UI_TIMEOUT_MS });
+      const links = list.locator(fid(FU_CHANNEL_IDS.channelSocialLink));
+      const hrefs = await links.evaluateAll((els) => els.map((el) => el.getAttribute("href") ?? ""));
+      s.check(
+        "every link, in the streamer's order",
+        JSON.stringify(hrefs) === JSON.stringify(dto.socials.map((x) => x.url)),
+        { hrefs },
+      );
+      const rel = await links.first().getAttribute("rel");
+      s.check("rel is noopener noreferrer me", rel === "noopener noreferrer me", { rel });
+      s.check("it opens a new tab", (await links.first().getAttribute("target")) === "_blank");
+    });
+
+  await s.step("d2-channel: the Clips range filter is a search param", async () => {
+    await open(ctx, page, `${ROUTES.channel(streamer)}?tab=clips`);
+    await page.locator(fid(FU_CHANNEL_IDS.clipFilters)).waitFor({ timeout: UI_TIMEOUT_MS });
+    await page.locator(fid(FU_CHANNEL_IDS.clipRange("7d"))).click({ timeout: UI_TIMEOUT_MS });
+    await page.waitForURL(/[?&]range=7d\b/, { timeout: UI_TIMEOUT_MS });
+    const grid = page.locator(`${tid(T.channelVideoGrid, { kind: "clips" })}:not([data-state="loading"])`);
+    await grid.waitFor({ timeout: UI_TIMEOUT_MS });
+    const recent = await api.clips.list({ channel: streamer, limit: 1, range: "7d" });
+    const shown = Number((await grid.getAttribute("data-count")) ?? "0");
+    s.check(
+      "the grid matches clips.list for the last 7 days",
+      recent.items.length === 0
+        ? (await page.locator(fid(FU_CHANNEL_IDS.clipsFilteredEmpty)).count()) === 1 || shown === 0
+        : shown > 0,
+      { shown, apiHasAny: recent.items.length > 0 },
+    );
   });
 
   if (dto.live === null) s.skipStep("d2-channel: live metadata", `${streamer} is not live (run \`seed live\`)`);

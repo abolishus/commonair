@@ -147,7 +147,14 @@ export function VideoThumbnail({
   );
 }
 
-export function VideoCard({ tile }: { tile: VideoTile }): React.JSX.Element {
+/** `showChannel`: lists that mix channels (a category's) name the channel on each card. */
+export function VideoCard({
+  tile,
+  showChannel = false,
+}: {
+  tile: VideoTile;
+  showChannel?: boolean;
+}): React.JSX.Element {
   return (
     <article data-testid="channel-video-card" data-kind={tile.kind} data-id={tile.id} className="min-w-0">
       <WatchLink
@@ -156,6 +163,11 @@ export function VideoCard({ tile }: { tile: VideoTile }): React.JSX.Element {
       >
         <VideoThumbnail tile={tile} />
         <span className="line-clamp-2 text-sm font-medium break-words group-hover:underline">{tileTitle(tile)}</span>
+        {showChannel ? (
+          <span data-testid="channel-video-card-channel" className="truncate text-xs text-muted-foreground">
+            {tile.channelSlug}
+          </span>
+        ) : null}
         <span className="flex min-w-0 flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
           <RelativeTime date={tile.createdAt} tooltip={false} />
           {tile.views !== null ? <span>{t("channel.tabs.views", { count: tile.views })}</span> : null}
@@ -170,12 +182,20 @@ export function VideoCard({ tile }: { tile: VideoTile }): React.JSX.Element {
 
 const GRID = "grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3";
 
-export function VideoTileList({ tiles, className }: { tiles: readonly VideoTile[]; className?: string }) {
+export function VideoTileList({
+  tiles,
+  className,
+  showChannel,
+}: {
+  tiles: readonly VideoTile[];
+  className?: string;
+  showChannel?: boolean;
+}) {
   return (
     <ul className={cn(GRID, className)}>
       {tiles.map((tile) => (
         <li key={tile.id} className="min-w-0">
-          <VideoCard tile={tile} />
+          <VideoCard tile={tile} showChannel={showChannel} />
         </li>
       ))}
     </ul>
@@ -203,10 +223,12 @@ export interface VideoGridProps {
   list: Pick<MediaList<unknown>, "status" | "hasMore" | "loadingMore" | "moreFailed" | "loadMore" | "retry">;
   /** Shown when the list loaded and has nothing playable. */
   empty: React.ReactNode;
+  /** Name the channel on each card (a list across channels). */
+  showChannel?: boolean;
 }
 
 /** A full grid (the Videos and Clips tabs): loading frames, the error with Try again, empty, "Show more". */
-export function VideoGrid({ kind, tiles, list, empty }: VideoGridProps): React.JSX.Element {
+export function VideoGrid({ kind, tiles, list, empty, showChannel }: VideoGridProps): React.JSX.Element {
   return (
     <div
       data-testid="channel-video-grid"
@@ -231,7 +253,7 @@ export function VideoGrid({ kind, tiles, list, empty }: VideoGridProps): React.J
         empty
       ) : (
         <>
-          <VideoTileList tiles={tiles} />
+          <VideoTileList tiles={tiles} showChannel={showChannel} />
           {list.hasMore ? (
             <div className="flex flex-col items-center gap-2">
               <Button
@@ -288,6 +310,18 @@ export function MediaEmptyState({
           </Button>
         ) : undefined
       }
+    />
+  );
+}
+
+/** The Clips tab under a sort or range that matched nothing (the channel may still have clips). */
+export function ClipsFilteredEmpty(): React.JSX.Element {
+  return (
+    <EmptyState
+      data-testid="clips-filtered-empty"
+      icon={Scissor01Icon}
+      title={t("fuChannel.clips.rangeEmpty")}
+      description={t("fuChannel.clips.rangeEmptyHint")}
     />
   );
 }

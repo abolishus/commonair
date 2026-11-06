@@ -1,0 +1,23 @@
+{
+  "fuChannel.clips.sortLabel": "Ordenar",
+  "fuChannel.clips.sortRecent": "Recientes",
+  "fuChannel.clips.sortTop": "Más vistos",
+  "fuChannel.clips.rangeLabel": "Desde",
+  "fuChannel.clips.range7d": "7 días",
+  "fuChannel.clips.range30d": "30 días",
+  "fuChannel.clips.rangeAll": "Siempre",
+  "fuChannel.clips.rangeEmpty": "No hay clips en este periodo",
+  "fuChannel.clips.rangeEmptyHint": "Prueba un periodo más largo para ver clips más antiguos.",
+  "fuChannel.socials.label": "Enlaces de {name}",
+  "fuChannel.socials.linkLabel": "{platform}: {link} (se abre en una pestaña nueva)",
+  "fuChannel.socials.website": "Sitio web",
+  "fuChannel.socials.other": "Enlace",
+  "fuChannel.category.tabVideos": "Videos",
+  "fuChannel.category.tabClips": "Clips",
+  "fuChannel.category.tags": "Etiquetas populares en {category}",
+  "fuChannel.category.videosEmpty": "Aún no hay videos en {category}",
+  "fuChannel.category.videosEmptyHint": "Las emisiones pasadas de esta categoría aparecen aquí cuando se guardan.",
+  "fuChannel.category.clipsEmpty": "Aún no hay clips en {category}",
+  "fuChannel.category.clipsEmptyHint": "Los clips de emisiones de esta categoría aparecen aquí.",
+  "fuChannel.recent.watchLatest": "Ver el último video de {name} ({duration})"
+}

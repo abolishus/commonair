@@ -151,6 +151,7 @@ describe("composition-rendered selectors", () => {
                 lastLiveAt: "2026-10-18T12:00:00.000Z",
                 followerCount: 3,
                 mature: false,
+                latestVod: null,
               },
             ],
           },

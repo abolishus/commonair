@@ -9,16 +9,25 @@
 import * as React from "react";
 import { api } from "../../lib/api.ts";
 import { appendPage, CHANNEL_MEDIA_PAGE, type ClipItem, type MediaPage, type VodItem } from "./channel-data.ts";
+import { DEFAULT_CLIP_FILTER, type ClipFilter } from "./clip-filters.tsx";
 
 export interface ChannelMediaClient {
   vods(channel: string, cursor?: string): Promise<MediaPage<VodItem>>;
-  clips(channel: string, cursor?: string): Promise<MediaPage<ClipItem>>;
+  clips(channel: string, cursor?: string, filter?: ClipFilter): Promise<MediaPage<ClipItem>>;
+  /** A category's VODs and clips (the category page's tabs). */
+  categoryVods(slug: string, cursor?: string): Promise<MediaPage<VodItem>>;
+  categoryClips(slug: string, cursor?: string, filter?: ClipFilter): Promise<MediaPage<ClipItem>>;
 }
 
+const at = (cursor: string | undefined) => (cursor ? { cursor } : {});
+
 export const channelMediaClient = (): ChannelMediaClient => ({
-  vods: (channel, cursor) => api().vods.list({ channel, limit: CHANNEL_MEDIA_PAGE, ...(cursor ? { cursor } : {}) }),
-  clips: (channel, cursor) =>
-    api().clips.list({ channel, limit: CHANNEL_MEDIA_PAGE, sort: "recent", ...(cursor ? { cursor } : {}) }),
+  vods: (channel, cursor) => api().vods.list({ channel, limit: CHANNEL_MEDIA_PAGE, ...at(cursor) }),
+  clips: (channel, cursor, filter = DEFAULT_CLIP_FILTER) =>
+    api().clips.list({ channel, limit: CHANNEL_MEDIA_PAGE, ...filter, ...at(cursor) }),
+  categoryVods: (slug, cursor) => api().vods.listByCategory({ slug, limit: CHANNEL_MEDIA_PAGE, ...at(cursor) }),
+  categoryClips: (slug, cursor, filter = DEFAULT_CLIP_FILTER) =>
+    api().clips.listByCategory({ slug, limit: CHANNEL_MEDIA_PAGE, ...filter, ...at(cursor) }),
 });
 
 /** Tests provide a fake here; without a provider the page talks to the API. */
@@ -51,12 +60,41 @@ export function useChannelVods(channel: string, initial: MediaPage<VodItem> | nu
   return useMediaList(fetchPage, initial);
 }
 
-export function useChannelClips(channel: string, initial: MediaPage<ClipItem> | null): MediaList<ClipItem> {
+/** A new sort or range starts the list over (a fresh first page). */
+export function useChannelClips(
+  channel: string,
+  initial: MediaPage<ClipItem> | null,
+  filter: ClipFilter = DEFAULT_CLIP_FILTER,
+): MediaList<ClipItem> {
   const client = useMediaClient();
-  const fetchPage = React.useCallback((cursor?: string) => client.clips(channel, cursor), [client, channel]);
+  const { sort, range } = filter;
+  const fetchPage = React.useCallback(
+    (cursor?: string) => client.clips(channel, cursor, { sort, range }),
+    [client, channel, sort, range],
+  );
   return useMediaList(fetchPage, initial);
 }
 
+export function useCategoryVods(slug: string): MediaList<VodItem> {
+  const client = useMediaClient();
+  const fetchPage = React.useCallback((cursor?: string) => client.categoryVods(slug, cursor), [client, slug]);
+  return useMediaList(fetchPage, null);
+}
+
+export function useCategoryClips(slug: string, filter: ClipFilter = DEFAULT_CLIP_FILTER): MediaList<ClipItem> {
+  const client = useMediaClient();
+  const { sort, range } = filter;
+  const fetchPage = React.useCallback(
+    (cursor?: string) => client.categoryClips(slug, cursor, { sort, range }),
+    [client, slug, sort, range],
+  );
+  return useMediaList(fetchPage, null);
+}
+
+/**
+ * `initial` seeds the first `fetchPage` only: a different `fetchPage` (a new filter) drops what is
+ * shown and asks for its own first page.
+ */
 export function useMediaList<T extends { id: string }>(
   fetchPage: (cursor?: string) => Promise<MediaPage<T>>,
   initial: MediaPage<T> | null,
@@ -65,8 +103,21 @@ export function useMediaList<T extends { id: string }>(
   const [status, setStatus] = React.useState<MediaListStatus>(initial ? "ready" : "loading");
   const [loadingMore, setLoadingMore] = React.useState(false);
   const [moreFailed, setMoreFailed] = React.useState(false);
+  const [source, setSource] = React.useState(() => fetchPage);
+  if (source !== fetchPage) {
+    // Adjusting state while rendering (not in an effect), so the old list never shows under the new filter.
+    setSource(() => fetchPage);
+    setPage(null);
+    setStatus("loading");
+    setMoreFailed(false);
+  }
   // A double click in one frame must not ask for the same page twice.
   const inFlight = React.useRef(false);
+  // A "Show more" answer for a previous filter is dropped.
+  const current = React.useRef(fetchPage);
+  React.useEffect(() => {
+    current.current = fetchPage;
+  }, [fetchPage]);
   const retry = React.useCallback(() => setStatus("loading"), []);
 
   React.useEffect(() => {
@@ -93,10 +144,16 @@ export function useMediaList<T extends { id: string }>(
     inFlight.current = true;
     setLoadingMore(true);
     setMoreFailed(false);
+    const asked = fetchPage;
     fetchPage(cursor)
       .then(
-        (next) => setPage((cur) => ({ items: appendPage(cur?.items ?? [], next.items), nextCursor: next.nextCursor })),
-        () => setMoreFailed(true),
+        (next) => {
+          if (current.current !== asked) return;
+          setPage((cur) => ({ items: appendPage(cur?.items ?? [], next.items), nextCursor: next.nextCursor }));
+        },
+        () => {
+          if (current.current === asked) setMoreFailed(true);
+        },
       )
       .finally(() => {
         inFlight.current = false;

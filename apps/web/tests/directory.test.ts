@@ -28,6 +28,7 @@ const offline = (slug: string, lastLiveAt: string | null = "2026-10-18T12:00:00.
   lastLiveAt,
   followerCount: 0,
   mature: false,
+  latestVod: null,
 });
 
 const home = (over: Partial<DirectoryHome> = {}): DirectoryHome => ({

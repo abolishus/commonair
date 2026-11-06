@@ -6,6 +6,8 @@
  *
  * - F1: `/directory` lists every category the API counts a live channel in;
  * - F1: `/directory/art` shows streamer1 (live in Art under `seed live`);
+ * - follow-ups: its header's verified viewers and tags, and the Videos and Clips tabs
+ *   (`?tab=videos|clips`) list what `vods.listByCategory` / `clips.listByCategory` return;
  * - F1: a search for "streamer" finds the demo streamers (streamer1..3);
  * - F7: the left rail shows a live row (skipped, with the reason, until `_app.tsx` mounts it).
  */
@@ -16,6 +18,17 @@ import { waitForHydration } from "../web/session.ts";
 import type { DContext } from "./context.ts";
 
 const UI_TIMEOUT_MS = 15_000;
+
+/** The category page's follow-up ids, until the orchestrator folds them into `web/selectors.ts`. */
+export const FU_CATEGORY_IDS = {
+  categoryViewerCount: "category-viewer-count",
+  categoryTags: "category-tags",
+  categoryTag: "category-tag",
+  categoryMediaEmpty: "category-media-empty",
+  videoGrid: "channel-video-grid",
+  videoCard: "channel-video-card",
+} as const;
+const fid = (id: string): string => `[data-testid="${id}"]`;
 const STREAMERS = ["streamer1", "streamer2", "streamer3"] as const;
 
 async function open(ctx: DContext, page: Page, path: string): Promise<void> {
@@ -71,6 +84,52 @@ export async function steps(ctx: DContext): Promise<void> {
     s.assert(`${slug} is live in Art`, found, { slug });
     s.check("the page has a title of its own", / · \S/.test(await page.title()), { title: await page.title() });
   });
+
+  await s.step("d1-web: /directory/art's header has its viewers and tags", async () => {
+    const art = await api.client.categories.get({ slug: "art" });
+    await open(ctx, page, ROUTES.category("art"));
+    await page.locator(tid(D.categoryPage)).waitFor({ timeout: UI_TIMEOUT_MS });
+    if (art.liveChannels > 0) {
+      const shown = await page.locator(fid(FU_CATEGORY_IDS.categoryViewerCount)).getAttribute("data-count");
+      s.check("the viewer count is the category's", shown === String(art.viewerCount), {
+        shown,
+        api: art.viewerCount,
+      });
+    }
+    const tags = await attr(page, fid(FU_CATEGORY_IDS.categoryTag), "data-tag");
+    s.check("the tags are the category's, in order", JSON.stringify(tags) === JSON.stringify(art.tags), {
+      tags,
+      api: art.tags,
+    });
+  });
+
+  for (const tab of ["videos", "clips"] as const)
+    await s.step(`d1-web: /directory/art's ${tab} tab lists the category's ${tab}`, async () => {
+      const listed =
+        tab === "videos"
+          ? (await api.client.vods.listByCategory({ slug: "art", limit: 12 })).items.filter((v) => v.status === "ready")
+          : (await api.client.clips.listByCategory({ slug: "art", limit: 12 })).items.filter(
+              (c) => c.status === "ready",
+            );
+      await open(ctx, page, ROUTES.category("art"));
+      await page.locator(tid(D.categoryPage)).waitFor({ timeout: UI_TIMEOUT_MS });
+      await page.locator(tid(tab === "videos" ? D.categoryTabVideos : D.categoryTabClips)).click({
+        timeout: UI_TIMEOUT_MS,
+      });
+      await page.waitForURL(new RegExp(`[?&]tab=${tab}\\b`), { timeout: UI_TIMEOUT_MS });
+      const grid = page.locator(`${fid(FU_CATEGORY_IDS.videoGrid)}[data-state="ready"]`);
+      await grid.waitFor({ timeout: UI_TIMEOUT_MS });
+      if (listed.length === 0) {
+        s.check(
+          `no ${tab} in Art: the empty state`,
+          (await page.locator(fid(FU_CATEGORY_IDS.categoryMediaEmpty)).count()) === 1,
+        );
+        return;
+      }
+      const ids = await attr(page, `${fid(FU_CATEGORY_IDS.videoGrid)} ${fid(FU_CATEGORY_IDS.videoCard)}`, "data-id");
+      const missing = listed.map((x) => x.id).filter((id) => !ids.includes(id));
+      s.check(`the grid shows the first page of Art's ${tab}`, missing.length === 0, { missing, shown: ids.length });
+    });
 
   await s.step("d1-web: an unknown category is a not-found page with a way out", async () => {
     await open(ctx, page, ROUTES.category("d1-no-such-category-xyz"));

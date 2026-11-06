@@ -45,6 +45,7 @@ vi.mock("../src/components/site-chrome.tsx", () => ({ AppHeader: () => null, App
 
 const { Route } = await import("../src/routes/_app/$channel.tsx");
 const data = await import("../src/components/channel/channel-data.ts");
+const { summarize } = await import("../src/lib/channel-summary.ts");
 const { ShareButton, Uptime, CategoryLink } = await import("../src/components/channel/channel-meta.tsx");
 const { ChannelNotFoundPage } = await import("../src/components/channel/live-now-shelf.tsx");
 type ChannelPage = import("../src/components/channel/panels-loader.ts").ChannelPage;
@@ -79,13 +80,16 @@ function livePage(viewerCount: number, startedAt = new Date(Date.now() - 90_000)
         mature: false,
         restricted: null,
       },
+      category: { id: "0192f000-0000-7000-8000-0000000000c1", slug: "art", name: "Art" },
+      tags: ["cozy", "watercolor"],
+      lastLiveAt: null,
       followerCount: 2,
       following: null,
       portabilityGrant: null,
       movedTo: null,
     },
     extras: { bannerUrl: null, panels: [], suspended: false },
-    about: { bio: "", category: { slug: "art", name: "Art" }, tags: ["cozy", "watercolor"] },
+    about: { bio: "", socials: [] },
     vods: { items: [], nextCursor: null },
     clips: { items: [], nextCursor: null },
   };
@@ -224,15 +228,39 @@ describe("category and tags (F9)", () => {
     expect(link.getAttribute("href")).toBe("/directory/music%20%26%20dj");
   });
 
-  it("channelAbout prefers the live broadcast's category and dedupes tags", () => {
-    const about = data.channelAbout({
-      description: "  Hello\n",
+  it("summarize prefers the live broadcast's category and dedupes tags", () => {
+    const base = {
+      id: "c",
+      slug: "fern",
+      displayName: "Fern",
+      title: "",
+      avatarUrl: null,
+      followerCount: 0,
+      theme: {},
+      lastLiveAt: null,
+    };
+    const live = summarize({
+      ...base,
       category: { id: "c1", slug: "art", name: "Art" },
-      live: { category: { id: "c2", slug: "music", name: "Music" } } as never,
+      live: {
+        id: "b",
+        title: "",
+        viewerCount: 1,
+        startedAt: START,
+        category: { id: "c2", slug: "music", name: "Music" },
+      },
       tags: ["Cozy", "cozy", " ", "lofi", "LOFI "],
-    });
-    expect(about).toEqual({ bio: "Hello", category: { slug: "music", name: "Music" }, tags: ["Cozy", "lofi"] });
-    expect(data.channelAbout({ description: "", category: null, live: null, tags: [] }).category).toBeNull();
+    } as never);
+    expect(live.category).toEqual({ id: "c2", slug: "music", name: "Music" });
+    expect(live.tags).toEqual(["Cozy", "lofi"]);
+    const offline = summarize({
+      ...base,
+      category: { id: "c1", slug: "art", name: "Art" },
+      live: null,
+      tags: [],
+    } as never);
+    expect(offline.category).toEqual({ id: "c1", slug: "art", name: "Art" });
+    expect(summarize({ ...base, category: null, live: null, tags: [] } as never).category).toBeNull();
   });
 });
 
