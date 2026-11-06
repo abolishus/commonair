@@ -9,6 +9,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -100,6 +102,11 @@ func TestOtherHeartbeatErrorsKeepState(t *testing.T) {
 	}
 }
 
+// The drain window is long enough that the checks "during the drain" still
+// run inside it on a loaded runner: with 600 ms the relay had closed its
+// listener before them under parallel -race runs.
+const testDrain = 2 * time.Second
+
 func TestGracefulStopSendsOneDrainingHeartbeat(t *testing.T) {
 	h := newHarness(t)
 	rel := h.start(200)
@@ -114,10 +121,16 @@ func TestGracefulStopSendsOneDrainingHeartbeat(t *testing.T) {
 		t.Fatalf("before drain: %d", status)
 	}
 	stopped := make(chan error, 1)
-	go func() { stopped <- rel.GracefulStop(h.relaySrv.Config, 600*time.Millisecond, 2*time.Second) }()
+	go func() { stopped <- rel.GracefulStop(h.relaySrv.Config, testDrain, 2*time.Second) }()
+	// Any draining heartbeat, not the last one: a normal heartbeat the drain
+	// cancelled in flight may still be handled after it (see below).
 	h.eventually("draining heartbeat", func() bool {
-		b := h.api.beats()
-		return len(b) > 0 && b[len(b)-1].Draining
+		for _, b := range h.api.beats() {
+			if b.Draining {
+				return true
+			}
+		}
+		return false
 	})
 	// The current viewer keeps being served during the drain; new ones are not.
 	status, _, _ := h.get(t, "/hls/live/alice/seg2.mp4?t="+h.token(sid(7)))
@@ -133,7 +146,10 @@ func TestGracefulStopSendsOneDrainingHeartbeat(t *testing.T) {
 	if err := <-stopped; err != nil {
 		t.Fatalf("graceful stop: %v", err)
 	}
-	beats := h.api.beats()
+	h.api.mu.Lock()
+	beats := append([]apiclient.HeartbeatRequest(nil), h.api.heartbeats...)
+	times := append([]hbTiming(nil), h.api.heartbeatTimes...)
+	h.api.mu.Unlock()
 	drainAt := -1
 	for i, b := range beats {
 		if b.Draining {
@@ -143,8 +159,18 @@ func TestGracefulStopSendsOneDrainingHeartbeat(t *testing.T) {
 			drainAt = i
 		}
 	}
-	if drainAt != len(beats)-1 {
-		t.Fatalf("normal heartbeats after the draining one: %+v", beats[drainAt:])
+	if drainAt < 0 {
+		t.Fatal("no draining heartbeat")
+	}
+	// No normal heartbeat was sent after the draining one. Judged by arrival,
+	// not by the order handlers ran in: BeginDrain cancels a normal heartbeat
+	// in flight, and the API may still handle that one after the draining
+	// heartbeat (the real API keeps a draining relay out anyway: its health
+	// probe sees "draining").
+	for i, b := range beats {
+		if !b.Draining && times[i].arrived.After(times[drainAt].answered) {
+			t.Fatalf("a normal heartbeat arrived after the draining one was answered: %+v", beats[i])
+		}
 	}
 	if beats[drainAt].ActiveViewers != 1 {
 		t.Fatalf("draining heartbeat viewers %d", beats[drainAt].ActiveViewers)
@@ -156,6 +182,38 @@ func TestGracefulStopSendsOneDrainingHeartbeat(t *testing.T) {
 	}
 	if bytes[sid(8)] != 0 {
 		t.Fatal("refused viewer was counted")
+	}
+}
+
+// The API stores a receipt but its answer never reaches the relay: shutdown
+// cancels the send in flight, and the final flush sends the same receipt
+// again. The API answers the resend 409 (a used nonce), the relay discards
+// it, and the session is counted once. Under CI load this is what happened to
+// TestGracefulStopSendsOneDrainingHeartbeat's "bad payload" (a fake API that
+// stored the resend as a second receipt).
+func TestReceiptResentAfterLostAnswerCountsOnce(t *testing.T) {
+	h := newHarness(t)
+	h.api.set(func(a *fakeAPI) { a.holdNextReceipt = true })
+	rel := h.start(200)
+	served, objects := h.mustWatch(t, sid(7))
+	h.eventually("a receipt stored but not answered", func() bool { return h.api.hanging.Load() > 0 })
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := rel.Shutdown(ctx); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+	h.api.mu.Lock()
+	dups := h.api.duplicateReceipts
+	h.api.mu.Unlock()
+	if dups < 1 {
+		t.Fatal("the unanswered receipt was not resent")
+	}
+	bytes, segments := h.api.receiptTotals(t)
+	if bytes[sid(7)] != served || segments[sid(7)] != objects {
+		t.Fatalf("receipts %d bytes/%d segments, served %d/%d", bytes[sid(7)], segments[sid(7)], served, objects)
+	}
+	if left, _ := os.ReadDir(filepath.Join(h.dataDir, "receipts")); len(left) != 0 {
+		t.Fatalf("%d receipt files left: the 409 should discard the resend", len(left))
 	}
 }
 

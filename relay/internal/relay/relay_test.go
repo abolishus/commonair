@@ -130,12 +130,22 @@ type fakeAPI struct {
 	relayPub      string
 	registrations int
 	heartbeats    []apiclient.HeartbeatRequest
-	receipts      []tokens.SignedReceipt
-	status        string
-	receiptStatus int // non-zero: fail receipts with this status
-	unknownOnce   bool
-	heartbeatFail int // non-zero: fail heartbeats with this status
-	allFail       int // non-zero: fail every call with this status
+	// heartbeatTimes[i]: when heartbeats[i]'s request reached the API and was answered.
+	// Handlers run concurrently, so a heartbeat the relay sent and then abandoned can be
+	// recorded after a later one; arrival times keep the order the relay sent them in.
+	heartbeatTimes []hbTiming
+	receipts       []tokens.SignedReceipt
+	status         string
+	receiptStatus  int // non-zero: fail receipts with this status
+	// nonces the API accepted; duplicateReceipts counts resends answered 409.
+	nonces            map[string]bool
+	duplicateReceipts int
+	// holdNextReceipt: the next accepted receipt is stored but never answered
+	// (the request hangs until the relay gives up), like an answer lost under load.
+	holdNextReceipt bool
+	unknownOnce     bool
+	heartbeatFail   int // non-zero: fail heartbeats with this status
+	allFail         int // non-zero: fail every call with this status
 
 	// purges answers GET /api/relay/purges: the next queued batch, else an
 	// empty one at the request's cursor after a short hold. purgeAfters
@@ -157,7 +167,10 @@ func newFakeAPI(t *testing.T, originURL string, originKey ed25519.PublicKey) *fa
 	return a
 }
 
+type hbTiming struct{ arrived, answered time.Time }
+
 func (a *fakeAPI) serve(w http.ResponseWriter, r *http.Request) {
+	arrived := time.Now()
 	if r.Method == http.MethodGet && r.URL.Path == "/api/relay/purges" && r.Header.Get("Authorization") == "Bearer "+relayToken {
 		a.servePurges(w, r)
 		return
@@ -209,6 +222,7 @@ func (a *fakeAPI) serve(w http.ResponseWriter, r *http.Request) {
 		var in apiclient.HeartbeatRequest
 		_ = json.NewDecoder(r.Body).Decode(&in)
 		a.heartbeats = append(a.heartbeats, in)
+		a.heartbeatTimes = append(a.heartbeatTimes, hbTiming{arrived: arrived, answered: time.Now()})
 		writeJSON(w, http.StatusOK, apiclient.HeartbeatResponse{Status: a.status, OriginPublicKey: tokens.EncodeB64URL(a.originKey)})
 	case "/api/relay/receipts":
 		if a.receiptStatus != 0 {
@@ -217,11 +231,57 @@ func (a *fakeAPI) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		var in tokens.SignedReceipt
 		_ = json.NewDecoder(r.Body).Decode(&in)
+		// As services/api's relays.receipt: a receipt that does not verify is a 400,
+		// and a nonce this relay already used is a 409 whatever the payload (the
+		// (relay_id, nonce) unique index). A relay resends a receipt whose answer it
+		// lost (its send was cancelled at shutdown, or timed out under load); the
+		// first copy counts and the 409 makes the relay discard the resend.
+		nonce, ok := a.receiptNonce(in)
+		if !ok {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"code": "BAD_REQUEST"})
+			return
+		}
+		if a.nonces[nonce] {
+			a.duplicateReceipts++
+			writeJSON(w, http.StatusConflict, map[string]any{"code": "CONFLICT", "message": "Receipt nonce already used"})
+			return
+		}
+		if a.nonces == nil {
+			a.nonces = map[string]bool{}
+		}
+		a.nonces[nonce] = true
 		a.receipts = append(a.receipts, in)
+		if a.holdNextReceipt {
+			a.holdNextReceipt = false
+			a.hanging.Add(1)
+			a.mu.Unlock()
+			<-r.Context().Done()
+			a.mu.Lock() // the deferred unlock
+			a.hanging.Add(-1)
+			return
+		}
 		writeJSON(w, http.StatusOK, apiclient.ReceiptResponse{ReceiptID: "01890000-0000-7000-8000-0000000000ee", Status: "pending"})
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]any{"code": "NOT_FOUND"})
 	}
+}
+
+// receiptNonce verifies a receipt with the registered key and returns its
+// nonce; false when it does not verify or parse. The caller holds a.mu.
+func (a *fakeAPI) receiptNonce(r tokens.SignedReceipt) (string, bool) {
+	pubRaw, err := tokens.DecodeB64URL(a.relayPub)
+	if err != nil {
+		return "", false
+	}
+	payload, ok := tokens.VerifyReceipt(ed25519.PublicKey(pubRaw), r)
+	if !ok {
+		return "", false
+	}
+	var p tokens.ReceiptPayload
+	if json.Unmarshal(payload, &p) != nil || p.Nonce == "" {
+		return "", false
+	}
+	return p.Nonce, true
 }
 
 func (a *fakeAPI) servePurges(w http.ResponseWriter, r *http.Request) {
