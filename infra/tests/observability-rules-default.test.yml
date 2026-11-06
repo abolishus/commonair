@@ -116,3 +116,106 @@ tests:
       - eval_time: 16m
         alertname: CommonairStateScrapeFailing
         exp_alerts: []
+
+  # Restore drills, one sample per push (the collector keeps a gauge five minutes; at 1 h
+  # sampling each push is one sample). The dump drill succeeds at 0 h and fails at 168 h; the
+  # WAL-G drill succeeds at 0 h and never runs again.
+  - interval: 1h
+    input_series:
+      - series: 'commonair_restore_drill_success{kind="dump",service_name="commonair-selfhost"}'
+        values: "1 _x167 0"
+      - series: 'commonair_restore_drill_success{kind="walg",service_name="commonair-selfhost"}'
+        values: "1"
+    alert_rule_test:
+      # A week in: both last reported a success.
+      - eval_time: 167h
+        alertname: CommonairRestoreDrillFailed
+        exp_alerts: []
+      - eval_time: 167h
+        alertname: CommonairRestoreDrillOverdue
+        exp_alerts: []
+      # The dump drill's latest result is a failure.
+      - eval_time: 169h
+        alertname: CommonairRestoreDrillFailed
+        exp_alerts:
+          - exp_labels:
+              kind: dump
+              severity: ticket
+              summary: The last restore drill failed, so the newest backup is not known to restore
+              runbook: docs/operators/monitoring.md#commonairrestoredrillfailed
+      # Past 8 days and the 1 h hold: WAL-G has reported nothing (overdue); the dump drill's
+      # failure is still in the window, so it is failed, not overdue.
+      - eval_time: 194h
+        alertname: CommonairRestoreDrillOverdue
+        exp_alerts:
+          - exp_labels:
+              kind: walg
+              severity: ticket
+              summary: No restore drill has reported within its window (8 days)
+              runbook: docs/operators/monitoring.md#commonairrestoredrilloverdue
+      - eval_time: 194h
+        alertname: CommonairRestoreDrillFailed
+        exp_alerts:
+          - exp_labels:
+              kind: dump
+              severity: ticket
+              summary: The last restore drill failed, so the newest backup is not known to restore
+              runbook: docs/operators/monitoring.md#commonairrestoredrillfailed
+      # 8 days after the failure with no run since: overdue now, no longer failed.
+      - eval_time: 362h
+        alertname: CommonairRestoreDrillFailed
+        exp_alerts: []
+      - eval_time: 362h
+        alertname: CommonairRestoreDrillOverdue
+        exp_alerts:
+          - exp_labels:
+              kind: dump
+              severity: ticket
+              summary: No restore drill has reported within its window (8 days)
+              runbook: docs/operators/monitoring.md#commonairrestoredrilloverdue
+          - exp_labels:
+              kind: walg
+              severity: ticket
+              summary: No restore drill has reported within its window (8 days)
+              runbook: docs/operators/monitoring.md#commonairrestoredrilloverdue
+
+  # Weekly successes, a failure, then a success again: quiet once the success lands.
+  - interval: 1h
+    input_series:
+      - series: 'commonair_restore_drill_success{kind="walg"}'
+        values: "1 _x167 1 _x167 0 _x5 1"
+    alert_rule_test:
+      - eval_time: 340h
+        alertname: CommonairRestoreDrillFailed
+        exp_alerts:
+          - exp_labels:
+              kind: walg
+              severity: ticket
+              summary: The last restore drill failed, so the newest backup is not known to restore
+              runbook: docs/operators/monitoring.md#commonairrestoredrillfailed
+      - eval_time: 345h
+        alertname: CommonairRestoreDrillFailed
+        exp_alerts: []
+      - eval_time: 345h
+        alertname: CommonairRestoreDrillOverdue
+        exp_alerts: []
+
+  # No drill ever reported. Quiet while Prometheus is younger than 15 days (a new install, whose
+  # first drill is up to a week away), then kind="none". Prometheus scrapes its own metrics, so
+  # this series is continuous (sampled within the 5-minute lookback).
+  - interval: 4m
+    input_series:
+      - series: 'prometheus_tsdb_lowest_timestamp_seconds{job="prometheus",instance="127.0.0.1:9090"}'
+        values: "0x6000"
+    alert_rule_test:
+      - eval_time: 14d
+        alertname: CommonairRestoreDrillOverdue
+        exp_alerts: []
+      - eval_time: 16d
+        alertname: CommonairRestoreDrillOverdue
+        exp_alerts:
+          - exp_labels:
+              kind: none
+              severity: ticket
+              summary: No restore drill has reported within its window (8 days)
+              runbook: docs/operators/monitoring.md#commonairrestoredrilloverdue

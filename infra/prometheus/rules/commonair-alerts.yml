@@ -142,3 +142,32 @@ groups:
           severity: ticket
           summary: Prometheus cannot scrape the OpenTelemetry Collector
           runbook: docs/operators/monitoring.md#commonaircollectordown
+
+  # S1-h's restore drills (commonair-drill.timer, commonair-drill-walg.timer: weekly per kind).
+  # Each run pushes commonair_restore_drill_success{kind="dump"|"walg"}, 1 or 0, and the collector
+  # drops the gauge five minutes later, so these read windows: 8 days is a week plus the timer's
+  # randomized delay and the run itself, and 35 days is Prometheus's retention.
+  - name: commonair-backups
+    rules:
+      - alert: CommonairRestoreDrillFailed
+        # The latest result of a kind within 8 days is a failure; the next success ends it.
+        expr: max by (kind) (last_over_time(commonair_restore_drill_success[8d])) == 0
+        labels:
+          severity: ticket
+          summary: The last restore drill failed, so the newest backup is not known to restore
+          runbook: docs/operators/monitoring.md#commonairrestoredrillfailed
+      - alert: CommonairRestoreDrillOverdue
+        # A kind that reported within 35 days has reported nothing for 8 (its timer stopped, or
+        # the push fails), or no drill of any kind reported in 35 days on a Prometheus that has
+        # collected for 15 (kind="none": the drills never ran, or never reached the collector).
+        # A failed run is CommonairRestoreDrillFailed's, not this one's.
+        expr: >-
+          (max by (kind) (last_over_time(commonair_restore_drill_success[35d]))
+            unless on (kind) max by (kind) (last_over_time(commonair_restore_drill_success[8d])))
+          or (label_replace(absent_over_time(commonair_restore_drill_success[35d]), "kind", "none", "", "")
+            and on () (time() - min(prometheus_tsdb_lowest_timestamp_seconds) > 15 * 86400))
+        for: 1h
+        labels:
+          severity: ticket
+          summary: No restore drill has reported within its window (8 days)
+          runbook: docs/operators/monitoring.md#commonairrestoredrilloverdue

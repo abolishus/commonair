@@ -564,7 +564,10 @@ Each drill records its result in `~/.local/state/commonair/restore-drill-dump` o
 `restore-drill-walg` (`status` shows them), and pushes two gauges to the metrics collector, with
 `kind="dump"` or `kind="walg"`: `commonair_restore_drill_success` (1 or 0) and, after a success,
 `commonair_restore_drill_seconds`, which the restore-time alert reads
-([monitoring.md](../operators/monitoring.md#metrics-pushed-by-jobs)).
+([monitoring.md](../operators/monitoring.md#metrics-pushed-by-jobs)). A failed drill raises
+[CommonairRestoreDrillFailed](../operators/monitoring.md#commonairrestoredrillfailed), and a drill
+that stops reporting for 8 days raises
+[CommonairRestoreDrillOverdue](../operators/monitoring.md#commonairrestoredrilloverdue).
 
 `commonair-drill-walg.timer` is on with the bundled Postgres. `commonair-drill.timer` is on with
 an external one; with the bundled one, the first successful `backup --drill` turns it on. The

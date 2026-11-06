@@ -173,6 +173,8 @@ trigger**, so the next stage is built before the trigger is reached.
 | [CommonairStateScrapeFailing](#commonairstatescrapefailing)       | ticket   | the collector failed to read Postgres or Valkey for 5 min       |                                       |
 | [CommonairDiskFilling](#commonairdiskfilling)                     | ticket   | the root filesystem over 80% for 30 min                         |                                       |
 | [CommonairCollectorDown](#commonaircollectordown)                 | ticket   | Prometheus cannot scrape the collector for 5 min                |                                       |
+| [CommonairRestoreDrillFailed](#commonairrestoredrillfailed)       | ticket   | a kind's latest restore drill in 8 days failed                  |                                       |
+| [CommonairRestoreDrillOverdue](#commonairrestoredrilloverdue)     | ticket   | a kind's restore drill reported nothing for 8 days              |                                       |
 
 ### CommonairStage0PostgresCpu
 
@@ -274,18 +276,57 @@ The root filesystem, which holds Podman's storage and volumes, is over 80% full.
 Prometheus has not scraped the collector for 5 minutes. Every other alert goes quiet with it, so
 this one comes first: `systemctl --user status commonair-otel-collector`.
 
+### CommonairRestoreDrillFailed
+
+The latest restore drill of one kind (`kind="dump"` or `kind="walg"`) within 8 days failed:
+`commonair_restore_drill_success` was 0. The newest backup is not known to restore, so treat it
+as a backup outage. `selfhost.sh status` shows each drill's last run and result, and the drill's
+journal says why:
+
+```sh
+journalctl --user -u commonair-drill.service -n 100 -o cat        # kind="dump"
+journalctl --user -u commonair-drill-walg.service -n 100 -o cat   # kind="walg"
+```
+
+Fix the cause ([backups.md](../self-hosting/backups.md#automatic-restore-drills) lists what each
+drill checks), then run the drill by hand (`selfhost.sh backup --drill`, with `--walg` for WAL-G). The
+alert ends with the next success. A failure that is never retried turns into
+[CommonairRestoreDrillOverdue](#commonairrestoredrilloverdue) after 8 days.
+
+### CommonairRestoreDrillOverdue
+
+A drill that reported within Prometheus's 35 days has reported nothing for 8 days, a week plus the
+timer's randomized delay. `kind="none"`: no drill of any kind reported in 35 days, on a Prometheus
+that has collected for at least 15 (so a new install is quiet until its first drill is due). The
+drills run weekly from `commonair-drill.timer` (dump, Sunday) and `commonair-drill-walg.timer`
+(WAL-G, Saturday, bundled Postgres only):
+
+```sh
+systemctl --user list-timers 'commonair-drill*'
+systemctl --user status commonair-drill.service commonair-drill-walg.service
+```
+
+A timer that is missing or inactive was never enabled: the dump drill's timer, with the bundled
+Postgres, is enabled by the first successful `selfhost.sh backup --drill`. A drill that ran but
+did not reach Prometheus logged "the drill's result is not in Prometheus" (the collector was not
+running) or "could not push the drill's result" in its journal. Gaps in the collector's own data
+also hide the result: check [CommonairCollectorDown](#commonaircollectordown) first.
+
 ## Metrics pushed by jobs
 
 Two triggers are measured by jobs that run now and then, not by a receiver. They push a gauge over
 OTLP to `http://otel-collector:4318/v1/metrics` from inside the Podman network:
 
-| Gauge                                | Unit    | Pushed by                       | Labels                           |
-| ------------------------------------ | ------- | ------------------------------- | -------------------------------- |
-| `commonair_restore_drill_seconds`    | seconds | the restore drill, after a run  | none needed                      |
-| `commonair_upgrade_downtime_seconds` | seconds | `selfhost.sh upgrade`, after it | `upgrade_id`, unique per upgrade |
+| Gauge                                | Unit    | Pushed by                          | Labels                           |
+| ------------------------------------ | ------- | ---------------------------------- | -------------------------------- |
+| `commonair_restore_drill_success`    | 1 or 0  | the restore drill, after a run     | `kind` (`dump` or `walg`)        |
+| `commonair_restore_drill_seconds`    | seconds | the restore drill, after a success | `kind` (`dump` or `walg`)        |
+| `commonair_upgrade_downtime_seconds` | seconds | `selfhost.sh upgrade`, after it    | `upgrade_id`, unique per upgrade |
 
 The collector forgets a gauge five minutes after its last value, so the rules look back over a
-window (8 days for the drill, 30 for upgrades) instead of reading the current value.
+window (8 days for the drill, 30 for upgrades) instead of reading the current value. The drill
+alerts read the latest result within 8 days, and 35 days (the retention) to know which kinds ran
+at all.
 
 The collector's OTLP port is not published on the host; a job on the host posts through the
 collector's own busybox:

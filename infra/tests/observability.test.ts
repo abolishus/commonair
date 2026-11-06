@@ -113,12 +113,18 @@ const RECEIVER_METRICS = {
     "redis_uptime_seconds_total",
   ],
   // The collector's own telemetry (:8888) and Prometheus's own.
-  internal: ["otelcol_scraper_errored_metric_points", "otelcol_scraper_scraped_metric_points", "up"],
+  internal: [
+    "otelcol_scraper_errored_metric_points",
+    "otelcol_scraper_scraped_metric_points",
+    "prometheus_tsdb_lowest_timestamp_seconds",
+    "up",
+  ],
 } as const;
 
 /** Gauges that jobs push over OTLP (docs/operators/monitoring.md, "Metrics pushed by jobs"). */
 const PUSHED_METRICS = [
   "commonair_restore_drill_seconds", // S1-h's restore drill
+  "commonair_restore_drill_success", // S1-h's restore drill, 1 or 0 per kind
   "commonair_upgrade_downtime_seconds", // selfhost.sh upgrade
 ];
 
