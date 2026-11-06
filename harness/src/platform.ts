@@ -136,7 +136,11 @@ export class Platform {
   }
 
   get fleet(): BrowserFleet {
-    this.fleetInstance ??= new BrowserFleet({ headless: !this.env.HARNESS_HEADFUL, log: this.log });
+    this.fleetInstance ??= new BrowserFleet({
+      headless: !this.env.HARNESS_HEADFUL,
+      log: this.log,
+      addresses: this.residential,
+    });
     return this.fleetInstance;
   }
 

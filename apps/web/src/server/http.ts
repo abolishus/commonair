@@ -3,7 +3,15 @@
 
 /** Request routing for the production web server (see `server.ts`). */
 import { join, normalize } from "node:path";
-import { isProxied, proxy, type Fetcher, type ProxyFailureLog } from "./proxy.ts";
+import {
+  forwardedFor,
+  forwardingFetch,
+  isProxied,
+  proxy,
+  withForwardedFor,
+  type Fetcher,
+  type ProxyFailureLog,
+} from "./proxy.ts";
 import { securityHeaders } from "./security.ts";
 
 export { securityHeaders } from "./security.ts";
@@ -80,13 +88,18 @@ export function createHandler(opts: Omit<WebServerOptions, "port" | "hostname">)
         });
       }
     }
+    // The render's own API calls carry the visitor's chain, as proxied calls do (`forwardingFetch`).
+    const chain = forwardedFor(req.headers.get("x-forwarded-for"), clientAddress);
+    const res = await withForwardedFor(chain, () => opts.ssr(req));
     // Rendered pages and server-function results carry the visitor's session: never cache them shared.
-    return withHeaders(await opts.ssr(req), { "cache-control": "private, no-store", ...security });
+    return withHeaders(res, { "cache-control": "private, no-store", ...security });
   };
 }
 
 export function createWebServer(opts: WebServerOptions) {
   const handle = createHandler(opts);
+  // The SSR bundle calls the API with the global fetch, and this process serves nothing else.
+  globalThis.fetch = forwardingFetch(globalThis.fetch, opts.apiUrl);
   return Bun.serve({
     port: opts.port,
     hostname: opts.hostname,

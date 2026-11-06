@@ -7,11 +7,13 @@ import {
   HOP_BY_HOP,
   downstreamResponse,
   forwardedFor,
+  forwardingFetch,
   isProxied,
   proxy,
   reportablePath,
   stripHopByHop,
   upstreamRequest,
+  withForwardedFor,
 } from "../src/server/proxy.ts";
 
 const API = "http://api.internal:3001";
@@ -294,6 +296,103 @@ describe("createHandler", () => {
     const res = await handler(new Request("http://localhost/manifest.webmanifest"), null);
     expect(await res.text()).toBe("ssr");
     expect(res.headers.get("cache-control")).toBe("private, no-store");
+  });
+});
+
+/** `forwardingFetch` over a base fetch that records what it was asked for. */
+function recorder() {
+  const calls: { url: string; method: string; xff: string | null; cookie: string | null; body: string }[] = [];
+  const base = Object.assign(
+    async (input: string | URL | Request, init?: RequestInit) => {
+      const req = new Request(input, init);
+      calls.push({
+        url: req.url,
+        method: req.method,
+        xff: req.headers.get("x-forwarded-for"),
+        cookie: req.headers.get("cookie"),
+        body: await req.text(),
+      });
+      return new Response("ok");
+    },
+    { preconnect: () => undefined },
+  ) as typeof fetch;
+  return { calls, fetch: forwardingFetch(base, `${API}/`) };
+}
+
+describe("forwardingFetch", () => {
+  it("puts the rendering request's chain on the render's API calls", async () => {
+    const { calls, fetch } = recorder();
+    await withForwardedFor("203.0.113.7, 10.89.42.1", () =>
+      fetch(`${API}/rpc/directory/home`, {
+        method: "POST",
+        headers: { cookie: "s=1", "content-type": "application/json" },
+        body: '{"json":{}}',
+      }),
+    );
+    expect(calls).toEqual([
+      {
+        url: `${API}/rpc/directory/home`,
+        method: "POST",
+        xff: "203.0.113.7, 10.89.42.1",
+        cookie: "s=1",
+        body: '{"json":{}}',
+      },
+    ]);
+  });
+
+  it("keeps the chain through awaits inside the render", async () => {
+    const { calls, fetch } = recorder();
+    await withForwardedFor("203.0.113.7", async () => {
+      await Bun.sleep(1);
+      await Promise.all([fetch(`${API}/rpc/a`), fetch(new Request(`${API}/rpc/b`))]);
+    });
+    expect(calls.map((c) => c.xff)).toEqual(["203.0.113.7", "203.0.113.7"]);
+  });
+
+  it("leaves other origins, requests with their own chain, and calls outside a render alone", async () => {
+    const { calls, fetch } = recorder();
+    await withForwardedFor("203.0.113.7", async () => {
+      await fetch("http://other.internal:3001/rpc/a");
+      await fetch(`${API}/rpc/b`, { headers: { "x-forwarded-for": "198.51.100.1" } });
+    });
+    await fetch(`${API}/rpc/c`);
+    await withForwardedFor(null, () => fetch(`${API}/rpc/d`));
+    expect(calls.map((c) => c.xff)).toEqual([null, "198.51.100.1", null, null]);
+  });
+
+  it("two renders at once keep their own chains", async () => {
+    const { calls, fetch } = recorder();
+    await Promise.all(
+      ["198.51.100.1", "198.51.100.2"].map((chain) =>
+        withForwardedFor(chain, async () => {
+          await Bun.sleep(chain.endsWith("1") ? 5 : 1);
+          await fetch(`${API}/rpc/${chain}`);
+        }),
+      ),
+    );
+    for (const c of calls) expect(c.url.endsWith(c.xff ?? "none")).toBe(true);
+  });
+});
+
+describe("createHandler forwarding for the render", () => {
+  it("renders with the visitor's chain: the forwarded header plus the address it accepted", async () => {
+    const { calls, fetch } = recorder();
+    const handler = createHandler({
+      apiUrl: API,
+      publicUrl: "https://stream.example.org",
+      clientDir: "/nonexistent-dir-for-tests/",
+      ssr: async () => {
+        await fetch(`${API}/rpc/directory/home`);
+        return new Response("ssr");
+      },
+    });
+    await handler(
+      new Request("http://localhost/", { headers: { "x-forwarded-for": "203.0.113.7" } }),
+      "::ffff:10.89.42.10",
+    );
+    await handler(new Request("http://localhost/"), "10.89.42.10");
+    await handler(new Request("http://localhost/"), null);
+    expect(calls.map((c) => c.xff)).toEqual(["203.0.113.7, 10.89.42.10", "10.89.42.10", null]);
   });
 });
 

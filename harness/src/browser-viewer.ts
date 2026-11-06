@@ -14,6 +14,7 @@ import type { Logger } from "@commonair/observability";
 import { type Browser, type BrowserContext, type Page, chromium, webkit } from "playwright";
 import type { PlayerInfo } from "../player/player.ts";
 import type { ProbeVideoStats } from "../player/probe.ts";
+import { AddressPool, RESIDENTIAL_CIDRS_FILE, loadCidrList } from "./cidrs.ts";
 import { type HeartbeatTiming, timingParams } from "./fingerprint.ts";
 import type { PlayerServer } from "./player-server.ts";
 import { type Viewer, type ViewerReport, type ViewerTarget, emptyReport } from "./viewer.ts";
@@ -117,14 +118,29 @@ export interface P2PStatus {
 export interface BrowserFleetOptions {
   headless?: boolean;
   log?: Logger;
+  /**
+   * Where browser sessions' simulated client addresses come from (`nextAddress`): the platform
+   * passes its residential pool, so no API client and no browser of a run share an address.
+   * Absent: a pool over the residential fixture.
+   */
+  addresses?: AddressPool;
 }
 
 /** Owns one browser process per engine for the whole run. */
 export class BrowserFleet {
   private browsers = new Map<BrowserEngine, Promise<Browser>>();
   private hls = new Map<BrowserEngine, Promise<boolean>>();
+  private addresses: AddressPool | null;
 
-  constructor(private readonly opts: BrowserFleetOptions = {}) {}
+  constructor(private readonly opts: BrowserFleetOptions = {}) {
+    this.addresses = opts.addresses ?? null;
+  }
+
+  /** A simulated client address for a new browser session, one this fleet has not handed out. */
+  nextAddress(): string {
+    this.addresses ??= new AddressPool(loadCidrList(RESIDENTIAL_CIDRS_FILE));
+    return this.addresses.next();
+  }
 
   browser(engine: BrowserEngine): Promise<Browser> {
     let b = this.browsers.get(engine);

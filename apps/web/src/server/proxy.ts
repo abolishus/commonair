@@ -6,6 +6,7 @@
  * cookies first-party and lets the verification link (PUBLIC_URL + /api/auth/…) work.
  * Bodies stream in both directions; redirects and `set-cookie` reach the browser untouched.
  */
+import { AsyncLocalStorage } from "node:async_hooks";
 
 /** RFC 9110 §7.6.1 connection-specific headers, plus the de-facto `proxy-connection`. */
 export const HOP_BY_HOP = new Set([
@@ -144,4 +145,40 @@ export async function proxy(
       { status: 502, headers: { "cache-control": "no-store" } },
     );
   }
+}
+
+// ------------------------------------------------------------------ the render's own API calls
+
+/**
+ * The forwarding chain of the request being rendered. Server rendering and server functions call
+ * the API themselves (`serverApi`, in the SSR bundle); without the chain every anonymous visitor's
+ * render would share the web server's own address as one rate-limit subject.
+ */
+const renderChain = new AsyncLocalStorage<string | null>();
+
+/** Run `fn` (an SSR render) with the visitor's `x-forwarded-for` chain, for `forwardingFetch`. */
+export function withForwardedFor<T>(chain: string | null, fn: () => T): T {
+  return renderChain.run(chain, fn);
+}
+
+/**
+ * `base`, plus the rendering request's chain on requests to the API that set no
+ * `x-forwarded-for` of their own. Any other request, and every request outside a render, passes
+ * through untouched. The chain is what `forwardedFor` built from the request this server accepted,
+ * exactly as for proxied calls, so the API still believes only the hops it trusts. Bun's own fetch
+ * options (`decompress`, `proxy`, …) are not carried over on the requests it changes.
+ */
+export function forwardingFetch(base: typeof fetch, apiUrl: string): typeof fetch {
+  const apiOrigin = new URL(apiUrl).origin;
+  const wrapped = (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    const chain = renderChain.getStore();
+    const url = input instanceof Request ? input.url : String(input);
+    if (!chain || URL.parse(url)?.origin !== apiOrigin) return base(input, init);
+    const req = new Request(input, init);
+    if (req.headers.has("x-forwarded-for")) return base(req);
+    const headers = new Headers(req.headers);
+    headers.set("x-forwarded-for", chain);
+    return base(new Request(req, { headers }));
+  };
+  return Object.assign(wrapped, { preconnect: base.preconnect });
 }

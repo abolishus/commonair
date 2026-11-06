@@ -33,6 +33,45 @@ export interface WebSessionOptions {
    * that `Accept-Language` (and report it as `navigator.language`). Absent: today's `en-US`.
    */
   locale?: string | WebSessionLocale;
+  /**
+   * This person's simulated client address (`simulateClientAddress`). Absent: the fleet's next
+   * (`BrowserFleet.nextAddress`); null: none, so the API sees the runner's own address.
+   */
+  clientIp?: string | null;
+}
+
+/**
+ * The headers for a request to the web origin from a session at `clientIp`: its own, with
+ * `x-forwarded-for` set to that address (any spelling the page sent replaced). Pure.
+ */
+export function withSimulatedAddress(headers: Record<string, string>, clientIp: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(headers)) if (k.toLowerCase() !== "x-forwarded-for") out[k] = v;
+  out["x-forwarded-for"] = clientIp;
+  return out;
+}
+
+/**
+ * Give every request this context sends to the web origin `x-forwarded-for: <clientIp>`, as the
+ * harness forwarding proxy does for API clients (harness/src/proxy.ts). The web server appends
+ * the address it accepted the connection from, and the API walks the chain right to left past
+ * the hops in TRUSTED_PROXY_CIDRS (the harness stack trusts its compose network, the host side of
+ * a published port included), so each browser session is its own client: its own `auth` and
+ * `default` rate-limit subjects, rather than one shared by every browser of a shard. Other origins
+ * (HLS, object storage) are left alone: a header their CORS rules never allowed would fail the
+ * preflight. A context route, not `extraHTTPHeaders`, for exactly that reason.
+ */
+export async function simulateClientAddress(context: BrowserContext, webUrl: string, clientIp: string): Promise<void> {
+  const origin = new URL(webUrl).origin;
+  await context.route(
+    (url) => url.origin === origin,
+    async (route) => {
+      // The Cookie header stays the browser's own (Playwright never overrides it here).
+      await route.fallback({ headers: withSimulatedAddress(route.request().headers(), clientIp) }).catch(() => {
+        // The page or context closed while the request was paused: nothing left to send it.
+      });
+    },
+  );
 }
 
 export interface WebSessionLocale {
@@ -74,16 +113,20 @@ export class WebSession {
     readonly engine: BrowserEngine,
     readonly context: BrowserContext,
     private readonly webUrl: string,
+    /** The simulated client address the web app and the API see for this session, if any. */
+    readonly clientIp: string | null,
     private readonly log?: Logger,
   ) {}
 
   static async open(opts: WebSessionOptions): Promise<WebSession> {
     const browser = await opts.fleet.browser(opts.engine);
+    const clientIp = opts.clientIp === undefined ? opts.fleet.nextAddress() : opts.clientIp;
     const context = await browser.newContext({
       viewport: { width: 1280, height: 800 },
       locale: browserLocale(opts.locale),
     });
     try {
+      if (clientIp) await simulateClientAddress(context, opts.webUrl, clientIp);
       const cookie = localeCookie(opts.webUrl, opts.locale);
       if (cookie) await context.addCookies([cookie]);
       await context.addInitScript({ content: opts.probeScript });
@@ -92,7 +135,7 @@ export class WebSession {
       await context.close().catch(() => undefined);
       throw err;
     }
-    return new WebSession(opts.label, opts.engine, context, opts.webUrl, opts.log);
+    return new WebSession(opts.label, opts.engine, context, opts.webUrl, clientIp, opts.log);
   }
 
   /** A named page in this session (created on first use). */

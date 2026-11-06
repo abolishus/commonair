@@ -212,6 +212,17 @@ small sample of published hosting-provider ranges (ADR 0003, decision 8). Browse
 address to the player server, which forwards the same way. Media requests go straight to the
 origin (sessions are identified by token, not address). IPv4 only.
 
+Web sessions (`src/web/session.ts`, one Playwright context each) get their own residential
+address too, from the same pool (`BrowserFleet.nextAddress`): a context route adds
+`x-forwarded-for: <address>` to every request for the web origin, and to no other origin (a
+header the origin's CORS rules never allowed would fail its preflight). The harness stack has no
+Caddy (profile `tls`), so browsers reach the web server straight through its published port; the
+web server appends the address it accepted the connection from, for `/rpc` and `/api` and for the
+API calls its own rendering makes (`forwardingFetch`), and the API walks the chain past its
+trusted hops (the compose network, the port's host side included). So every browser has its own
+`auth` and `default` rate-limit subjects instead of one shared by a whole shard. Pass
+`clientIp: null` for a session that should arrive from the runner's own address.
+
 ### P2P viewers (`src/p2p.ts`, `src/proxy.ts`, `harness/compose.p2p.yaml`; P1)
 
 Only `--player web` Chromium viewers can run P2P (the harness player has no P2P loader), so
