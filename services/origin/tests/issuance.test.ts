@@ -110,6 +110,62 @@ describe("computeIssuance", () => {
     );
   });
 
+  test("DVR-only: a rewound session on a broadcast with no live production is issued the DVR allowance", () => {
+    const dvr = (b: string) => (b === B1 ? { segments: 32, bytes: 4_000_000 } : undefined);
+    const rows = computeIssuance(
+      [{ relayId: R1, broadcastId: B1, path: "live/none", sessions: 2, dvrSessions: 2 }],
+      production,
+      at,
+      dvr,
+    );
+    expect(rows).toEqual([{ relayId: R1, bucketStart: at, sessions: 2, segmentTokens: 64, bytesIssued: 8_000_000 }]);
+  });
+
+  test("rewound sessions get the larger of live and DVR per field; the others keep live only", () => {
+    // live/a: 122 objects, 15_001_000 bytes per session.
+    const dvr = () => ({ segments: 32, bytes: 20_000_000 });
+    const rows = computeIssuance(
+      [{ relayId: R1, broadcastId: B1, path: "live/a", sessions: 3, dvrSessions: 1 }],
+      production,
+      at,
+      dvr,
+    );
+    expect(rows).toEqual([
+      {
+        relayId: R1,
+        bucketStart: at,
+        sessions: 3,
+        segmentTokens: 2 * 122 + 1 * 122,
+        bytesIssued: 2 * 15_001_000 + 1 * 20_000_000,
+      },
+    ]);
+  });
+
+  test("no DVR pulls, no broadcast, or no rewound sessions: the live formula unchanged", () => {
+    const counts = [{ relayId: R1, broadcastId: B1, path: "live/a", sessions: 2, dvrSessions: 0 }];
+    const live = computeIssuance(counts, production, at);
+    expect(computeIssuance(counts, production, at, () => ({ segments: 999, bytes: 999e6 }))).toEqual(live);
+    expect(computeIssuance([{ ...counts[0]!, dvrSessions: 2 }], production, at, () => undefined)).toEqual(live);
+    expect(
+      computeIssuance(
+        [{ relayId: R1, broadcastId: null, path: null, sessions: 1, dvrSessions: 1 }],
+        production,
+        at,
+        () => ({ segments: 1, bytes: 1 }),
+      ),
+    ).toEqual([{ relayId: R1, bucketStart: at, sessions: 1, segmentTokens: 0, bytesIssued: 0 }]);
+  });
+
+  test("dvrSessions is clamped to sessions", () => {
+    const rows = computeIssuance(
+      [{ relayId: R1, broadcastId: B1, path: "live/none", sessions: 1, dvrSessions: 5 }],
+      production,
+      at,
+      () => ({ segments: 3, bytes: 300 }),
+    );
+    expect(rows[0]).toMatchObject({ sessions: 1, segmentTokens: 3, bytesIssued: 300 });
+  });
+
   test("linear in sessions: doubling sessions doubles issuance", () => {
     const one = computeIssuance([{ relayId: R1, broadcastId: B1, path: "live/a", sessions: 1 }], production, at)[0];
     const two = computeIssuance([{ relayId: R1, broadcastId: B1, path: "live/a", sessions: 2 }], production, at)[0];

@@ -365,4 +365,72 @@ describe("/relay-pull/dvr/ with real relay auth, state and storage", () => {
     }
     expect(status).toBe(404);
   });
+
+  test("whole segments a relay pulls are counted for issuance; HEAD and viewer fetches are not", async () => {
+    const r = await recording();
+    const before = Date.now();
+    expect((await pull(r, "r1_000029.m4s")).status).toBe(200);
+    expect((await pull(r, "r1_init.mp4")).status).toBe(200);
+    expect((await pull(r, "r1_000028.m4s", relayToken, { method: "HEAD" })).status).toBe(200);
+    expect((await get(r, "r1_000027.m4s")).status).toBe(200);
+    expect((await pull(r, "index.m3u8")).status).toBe(200);
+    await origin.dvrPulls.flush();
+    const pulled = await origin.dvrPulls.servable(r.vod, before, Date.now() + 1);
+    expect(pulled.sort((a, b) => a.file.localeCompare(b.file))).toEqual([
+      { file: "r1_000029.m4s", bytes: "segment-29".length, durationMs: 4000 },
+      { file: "r1_init.mp4", bytes: "init".length, durationMs: 0 },
+    ]);
+    // Pulled long before the minute (more than the window back): no longer servable in it.
+    const later = before + 7200_000 + 120_000;
+    expect(await origin.dvrPulls.servable(r.vod, later, later + 60_000)).toEqual([]);
+  });
+
+  test("relay issuance: a DVR-only session with no live production verifies through the relay", async () => {
+    const r = await recording();
+    const session = (over: Partial<typeof schema.playbackSessions.$inferInsert>) => ({
+      channelId: r.channel,
+      broadcastId: r.broadcast,
+      deviceHash: "d",
+      ipHash: "i",
+      assignedSource: "relay" as const,
+      relayId,
+      lastHeartbeatAt: new Date(),
+      ...over,
+    });
+    // One session rewinding on the relay, one that never left live; nobody pulls live media.
+    await t.db.insert(schema.playbackSessions).values([session({ playbackMode: "dvr" }), session({})]);
+    for (const f of ["r1_init.mp4", "r1_000026.m4s", "r1_000027.m4s", "r1_000028.m4s", "r1_000029.m4s"])
+      expect((await pull(r, f)).status).toBe(200);
+    await origin.dvrPulls.flush();
+    // Alive in the minute after the pulls, so a minute boundary between them cannot split the test.
+    const heartbeat = Date.now();
+    await t.db
+      .update(schema.playbackSessions)
+      .set({ lastHeartbeatAt: new Date(heartbeat) })
+      .where(eq(schema.playbackSessions.broadcastId, r.broadcast));
+    const bucket = Math.floor(heartbeat / 60_000) * 60_000;
+    const rows = await origin.runIssuance(bucket);
+    // Four 4 s segments of "segment-2x" (10 bytes) and the 4-byte init: all of them fit the span.
+    expect(rows).toEqual([{ relayId, bucketStart: new Date(bucket), sessions: 2, segmentTokens: 5, bytesIssued: 44 }]);
+    const [stored] = await t.db
+      .select()
+      .from(schema.relayIssuance)
+      .where(eq(schema.relayIssuance.bucketStart, new Date(bucket)));
+    expect(stored).toMatchObject({ relayId, sessions: 2, segmentTokens: 5, bytesIssued: 44 });
+    // The same session before it rewound is issued nothing: live issuance alone has no production.
+    await t.db
+      .update(schema.playbackSessions)
+      .set({ playbackMode: "live" })
+      .where(eq(schema.playbackSessions.broadcastId, r.broadcast));
+    expect(await origin.runIssuance(bucket)).toEqual([
+      { relayId, bucketStart: new Date(bucket), sessions: 2, segmentTokens: 0, bytesIssued: 0 },
+    ]);
+    // Credited DVR seconds keep it counted as rewound after it returns to live.
+    await t.db
+      .update(schema.playbackSessions)
+      .set({ dvrSeconds: 12 })
+      .where(eq(schema.playbackSessions.broadcastId, r.broadcast));
+    expect((await origin.runIssuance(bucket))[0]).toMatchObject({ sessions: 2, segmentTokens: 10, bytesIssued: 88 });
+    await t.db.delete(schema.playbackSessions).where(eq(schema.playbackSessions.broadcastId, r.broadcast));
+  });
 });

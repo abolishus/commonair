@@ -12,7 +12,7 @@ export interface OriginMetrics {
   cache(result: "hit" | "miss" | "coalesced", kind: string): void;
   upstream(kind: string, status: number, ms: number): void;
   egress(source: string, bytes: number): void;
-  accountingDropped(what: "segment_fetch" | "production", n: number): void;
+  accountingDropped(what: "segment_fetch" | "production" | "dvr_pulls", n: number): void;
 }
 
 export function createMetrics(): OriginMetrics {

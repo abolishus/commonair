@@ -27,7 +27,8 @@
  * limited per peer). The state checks and the window cut are the same; playlist URIs are bare
  * relative ones (the relay adds its viewers' tokens). Fetches go to the segment log as `src:
  * relay` with the relay's id. The viewer route keeps refusing relay tokens: a relay's viewers
- * rewind on the relay.
+ * rewind on the relay. Each whole segment a relay pulls is also counted in `DvrPullStore`, the
+ * bound relay issuance gives the relay's DVR sessions (ADR 0016 Amendment 2).
  */
 import { eq } from "drizzle-orm";
 import { DVR_RULES } from "@commonair/contracts/enums";
@@ -214,7 +215,7 @@ export function cutToWindow(rec: RecordingPlaylist, windowSeconds: number): DvrW
 
 export type DvrDeps = Pick<
   OriginRouteContext,
-  "publicKey" | "vodStates" | "media" | "segments" | "dvrMaxWindowSeconds" | "metrics" | "logger" | "now"
+  "publicKey" | "vodStates" | "media" | "segments" | "dvrMaxWindowSeconds" | "dvrPulls" | "metrics" | "logger" | "now"
 > & {
   /** The channel's `dvr_window_seconds`; the default reads Postgres (cached `DVR_WINDOW_TTL_MS`). */
   channelWindow: (channelId: string) => Promise<number>;
@@ -389,7 +390,18 @@ export function createDvrHandler(deps: DvrDeps): RouteHandler {
       return new Response(null, { status: res.status, headers });
     }
     const length = Number(res.headers.get("content-length") ?? "0");
-    account("segment", Number.isFinite(length) && length > 0 ? length : 0);
+    const bytes = Number.isFinite(length) && length > 0 ? length : 0;
+    account("segment", bytes);
+    // A whole object a relay may now serve its DVR viewers: the DVR side of relay issuance
+    // (ADR 0016 Amendment 2). A range answer is not the object's size, so only a 200 counts.
+    if (who.kind === "relay" && res.status === 200 && bytes > 0) {
+      const seg = rec.segments.find((s) => s.uri === path.file);
+      deps.dvrPulls?.record(
+        path.vodId,
+        { file: path.file, bytes, durationMs: seg ? Math.round(seg.durationSeconds * 1000) : 0 },
+        deps.now(),
+      );
+    }
     return new Response(res.body, { status: res.status, headers });
   };
 }

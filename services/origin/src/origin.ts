@@ -14,6 +14,7 @@ import { liveSubtitleTracks, registerCaptionsRoutes } from "./captions.ts";
 import { ChannelDirectory } from "./channels.ts";
 import { parseCidr, type Cidr } from "./clientip.ts";
 import { ContentStore, type ObjectRef, type MediaObject, type TtlPolicy } from "./content.ts";
+import { DvrPullStore } from "./dvr-issuance.ts";
 import { registerDvrRoutes } from "./dvr.ts";
 import { createHandler, type OriginFetch } from "./handler.ts";
 import { createMediaHandler, MEDIA_ROUTE, type MediaDeps } from "./media.ts";
@@ -67,6 +68,8 @@ export interface Origin {
   store: ContentStore;
   segments: SegmentLog;
   production: ProductionStore;
+  /** Relays' DVR pulls, the DVR side of relay issuance (ADR 0016 Amendment 2). */
+  dvrPulls: DvrPullStore;
   /** The feature routes registered at startup (`dvr.ts`, `captions.ts`). */
   routes: OriginRouteRegistry;
   /** Compute and store relay issuance for one minute bucket, without the leader lock. */
@@ -82,6 +85,13 @@ export async function createOrigin(opts: OriginOptions): Promise<Origin> {
   const metrics = opts.metrics ?? noopMetrics;
   const signingKey = await importSigningKey(opts.playbackSigningKey);
   const production = new ProductionStore({ valkey: opts.valkey, logger: opts.logger, metrics });
+  const dvrMaxWindowSeconds = opts.dvrMaxWindowSeconds ?? 7200;
+  const dvrPulls = new DvrPullStore({
+    valkey: opts.valkey,
+    windowSeconds: dvrMaxWindowSeconds,
+    logger: opts.logger,
+    metrics,
+  });
 
   const upstream = new MediaUpstream({
     baseUrl: opts.mediamtxHlsUrl,
@@ -163,7 +173,8 @@ export async function createOrigin(opts: OriginOptions): Promise<Origin> {
     refresher,
     vodStates,
     media: opts.media,
-    dvrMaxWindowSeconds: opts.dvrMaxWindowSeconds ?? 7200,
+    dvrMaxWindowSeconds,
+    dvrPulls,
     metrics,
     logger: opts.logger,
     now,
@@ -189,6 +200,7 @@ export async function createOrigin(opts: OriginOptions): Promise<Origin> {
     db: opts.db,
     valkey: opts.valkey,
     production,
+    dvrPulls,
     lookbackMinutes: opts.issuance?.lookbackMinutes,
     logger: opts.logger,
     now,
@@ -213,8 +225,9 @@ export async function createOrigin(opts: OriginOptions): Promise<Origin> {
     store,
     segments,
     production,
+    dvrPulls,
     routes,
-    runIssuance: (bucketStartMs) => runIssuance(opts.db, production, bucketStartMs),
+    runIssuance: (bucketStartMs) => runIssuance(opts.db, production, bucketStartMs, dvrPulls),
     issuanceTick,
     start() {
       segments.start();
@@ -232,7 +245,7 @@ export async function createOrigin(opts: OriginOptions): Promise<Origin> {
       clearTimeout(align);
       clearInterval(every);
       await issuing;
-      await Promise.allSettled([segments.stop(), production.flush()]);
+      await Promise.allSettled([segments.stop(), production.flush(), dvrPulls.flush()]);
       // A last tick, so the minutes this replica just finished are not left to a successor.
       if (opts.issuance?.enabled) await issuanceTick();
     },

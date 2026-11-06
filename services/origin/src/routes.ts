@@ -13,6 +13,7 @@ import type { ValkeyClient } from "@commonair/service";
 import type { SegmentLog } from "./accounting.ts";
 import type { ChannelDirectory } from "./channels.ts";
 import type { ContentStore } from "./content.ts";
+import type { DvrPullStore } from "./dvr-issuance.ts";
 import type { MediaDeps } from "./media.ts";
 import type { OriginMetrics } from "./metrics.ts";
 import type { TokenRefresher } from "./refresh.ts";
@@ -53,6 +54,8 @@ export interface OriginRouteContext {
   media?: Omit<MediaDeps, "logger" | "vodStates">;
   /** `DVR_MAX_WINDOW_SECONDS`. */
   dvrMaxWindowSeconds: number;
+  /** Where `/relay-pull/dvr/` counts the objects it serves relays, for relay issuance; absent = not counted. */
+  dvrPulls?: DvrPullStore;
   metrics: OriginMetrics;
   logger?: Logger;
   /** Milliseconds. */

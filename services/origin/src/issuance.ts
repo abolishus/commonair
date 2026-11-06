@@ -36,6 +36,12 @@
  * verifier applies its own tolerance on top. Sessions on a broadcast with no recorded
  * production still count toward `sessions` but issue nothing.
  *
+ * DVR (ADR 0016 Amendment 2): a session that has played DVR (its mode is `dvr`, or it has
+ * credited DVR seconds) may be fetching the recording instead of the live edge, which no
+ * live production covers. Its allowance is the larger, per field, of the live one and
+ * `dvrAllowance` over the recording objects relays pulled that could be served in B
+ * (`dvr-issuance.ts`). Sessions that never rewound keep the live allowance alone.
+ *
  * Every tick (60 s, 10 s after the minute boundary, and once on shutdown) recomputes
  * the last 5 closed minutes, so late production writes and heartbeats are picked up.
  * Rows are recomputed, not added, so recomputation is idempotent. A Valkey leader
@@ -43,12 +49,13 @@
  * lifetime (shorter than the tick interval), so a replica whose timer fires later in the
  * same minute finds it taken. It is released early only when the computation fails.
  */
-import { and, eq, gte, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import type { Executor } from "@commonair/db";
 import { schema } from "@commonair/db";
 import type { Logger } from "@commonair/observability";
 import type { ValkeyClient } from "@commonair/service";
 import { MINUTE_MS } from "./accounting.ts";
+import { dvrAllowance, type DvrPullStore } from "./dvr-issuance.ts";
 import { ISSUANCE_KEYS, type ChannelMinute, type DirProduction, type ProductionStore } from "./production.ts";
 
 export interface Allowance {
@@ -78,6 +85,8 @@ export interface RelaySessionCount {
   /** MediaMTX path of the broadcast (`live/<slug>`), the production key. */
   path: string | null;
   sessions: number;
+  /** Of `sessions`, those that have played DVR (mode `dvr` or `dvr_seconds > 0`). */
+  dvrSessions?: number;
 }
 
 export interface IssuanceRow {
@@ -88,11 +97,12 @@ export interface IssuanceRow {
   bytesIssued: number;
 }
 
-/** The formula above, as a pure function. */
+/** The formula above, as a pure function. `dvr` gives a broadcast's DVR allowance for the minute. */
 export function computeIssuance(
   counts: RelaySessionCount[],
   production: (path: string) => ChannelMinute | undefined,
   bucketStart: Date,
+  dvr: (broadcastId: string) => Allowance | undefined = () => undefined,
 ): IssuanceRow[] {
   const byRelay = new Map<string, IssuanceRow>();
   for (const c of counts) {
@@ -102,10 +112,16 @@ export function computeIssuance(
       row = { relayId: c.relayId, bucketStart, sessions: 0, segmentTokens: 0, bytesIssued: 0 };
       byRelay.set(c.relayId, row);
     }
-    const allow = sessionAllowance(c.path ? production(c.path) : undefined);
+    const live = sessionAllowance(c.path ? production(c.path) : undefined);
+    const rewound = Math.min(c.sessions, Math.max(0, c.dvrSessions ?? 0));
+    const fromDvr = rewound > 0 && c.broadcastId ? dvr(c.broadcastId) : undefined;
+    const either = {
+      segments: Math.max(live.segments, fromDvr?.segments ?? 0),
+      bytes: Math.max(live.bytes, fromDvr?.bytes ?? 0),
+    };
     row.sessions += c.sessions;
-    row.segmentTokens += c.sessions * allow.segments;
-    row.bytesIssued += c.sessions * allow.bytes;
+    row.segmentTokens += (c.sessions - rewound) * live.segments + rewound * either.segments;
+    row.bytesIssued += (c.sessions - rewound) * live.bytes + rewound * either.bytes;
   }
   return [...byRelay.values()].sort((a, b) => a.relayId.localeCompare(b.relayId));
 }
@@ -126,6 +142,7 @@ export async function relaySessionCounts(db: Executor, start: Date, end: Date): 
       broadcastId: ps.broadcastId,
       path: b.path,
       sessions: sql<number>`count(*)::int`,
+      dvrSessions: sql<number>`(count(*) filter (where ${ps.playbackMode} = 'dvr' or ${ps.dvrSeconds} > 0))::int`,
     })
     .from(ps)
     .leftJoin(b, eq(b.id, ps.broadcastId))
@@ -139,7 +156,43 @@ export async function relaySessionCounts(db: Executor, start: Date, end: Date): 
       ),
     )
     .groupBy(ps.relayId, ps.broadcastId, b.path);
-  return rows.flatMap((r) => (r.relayId ? [{ ...r, relayId: r.relayId, sessions: Number(r.sessions) }] : []));
+  return rows.flatMap((r) =>
+    r.relayId ? [{ ...r, relayId: r.relayId, sessions: Number(r.sessions), dvrSessions: Number(r.dvrSessions) }] : [],
+  );
+}
+
+/**
+ * Each broadcast's DVR allowance for the minute: over the broadcast's VODs (one, unless the
+ * recording was split), the largest `dvrAllowance` of the objects relays pulled that could be
+ * served in it. VOD status is not filtered: a recompute after the stream ended must give the
+ * same answer as the tick during it.
+ */
+export async function dvrAllowances(
+  db: Executor,
+  pulls: DvrPullStore,
+  broadcastIds: readonly string[],
+  start: Date,
+  end: Date,
+): Promise<Map<string, Allowance>> {
+  const out = new Map<string, Allowance>();
+  if (broadcastIds.length === 0) return out;
+  const v = schema.vods;
+  const vods = await db
+    .select({ id: v.id, broadcastId: v.broadcastId })
+    .from(v)
+    .where(inArray(v.broadcastId, [...broadcastIds]));
+  await Promise.all(
+    vods.map(async ({ id, broadcastId }) => {
+      if (!broadcastId) return;
+      const allow = dvrAllowance(await pulls.servable(id, start.getTime(), end.getTime()));
+      const prev = out.get(broadcastId);
+      out.set(broadcastId, {
+        segments: Math.max(prev?.segments ?? 0, allow.segments),
+        bytes: Math.max(prev?.bytes ?? 0, allow.bytes),
+      });
+    }),
+  );
+  return out;
 }
 
 export async function upsertIssuance(db: Executor, rows: IssuanceRow[]): Promise<void> {
@@ -163,11 +216,21 @@ export async function runIssuance(
   db: Executor,
   production: ProductionStore,
   bucketStartMs: number,
+  dvrPulls?: DvrPullStore,
 ): Promise<IssuanceRow[]> {
   const start = new Date(bucketStartMs);
   const end = new Date(bucketStartMs + MINUTE_MS);
   const [counts, minute] = await Promise.all([relaySessionCounts(db, start, end), production.read(bucketStartMs)]);
-  const rows = computeIssuance(counts, (path) => minute.get(path), start);
+  const rewound = [
+    ...new Set(counts.flatMap((c) => ((c.dvrSessions ?? 0) > 0 && c.broadcastId ? [c.broadcastId] : []))),
+  ];
+  const dvr = dvrPulls ? await dvrAllowances(db, dvrPulls, rewound, start, end) : new Map<string, Allowance>();
+  const rows = computeIssuance(
+    counts,
+    (path) => minute.get(path),
+    start,
+    (b) => dvr.get(b),
+  );
   await upsertIssuance(db, rows);
   return rows;
 }
@@ -180,6 +243,8 @@ export interface IssuanceRunnerOptions {
   db: Executor;
   valkey: Pick<ValkeyClient, "set" | "eval">;
   production: ProductionStore;
+  /** Relays' DVR pulls (ADR 0016 Amendment 2); absent = DVR sessions get the live allowance only. */
+  dvrPulls?: DvrPullStore;
   /** Closed minutes recomputed per tick. */
   lookbackMinutes?: number;
   /** Lock lifetime: longer than a tick takes, shorter than the tick interval. */
@@ -204,7 +269,7 @@ export class IssuanceRunner {
     try {
       const rows: IssuanceRow[] = [];
       for (const bucket of recomputeBuckets(this.now(), this.opts.lookbackMinutes ?? 5))
-        rows.push(...(await runIssuance(this.opts.db, this.opts.production, bucket)));
+        rows.push(...(await runIssuance(this.opts.db, this.opts.production, bucket, this.opts.dvrPulls)));
       ok = true;
       return rows;
     } finally {

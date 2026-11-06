@@ -8,7 +8,9 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - Status: accepted (2026-10-27; the maintainer accepted the recommended answers, see
   [Decisions at acceptance](#decisions-at-acceptance-2026-10-27)).
   [Amendment 1](#amendment-1-the-signed-relay-purge-relay-dvr-and-relay-captions) (relay purge,
-  relay DVR, relay captions) proposed 2026-11-01, maintainer to accept
+  relay DVR, relay captions) proposed 2026-11-01, maintainer to accept.
+  [Amendment 2](#amendment-2-relay-issuance-for-dvr) (relay issuance for DVR) accepted by the
+  orchestrator 2026-11-06, for post-launch review
 - Date: 2026-10-27 (code checked at `ccf9c17`)
 - Gates: W2-dvr ([W2 plan](../../.claude/briefs/next/W2-feature-wave.md)); its v2 gates
   W3-dvr-relay ([W3 plan](../../.claude/briefs/next/W3-feature-wave.md))
@@ -349,3 +351,73 @@ For the maintainer. Each item is the recommended default; accepting the amendmen
    purge, 60 s tombstones, `private, no-store`, counted in receipts; still no CDN DVR.
 5. **Captions (y):** `.vtt` on relays is neither counted nor pinned (30 s cache, `max-age=30`);
    `captionsReachable` flips for relay pulls at the W3-dvr-relay merge.
+
+## Amendment 2: relay issuance for DVR
+
+- Status: accepted (by the orchestrator, 2026-11-06, with the conservative defaults below; listed
+  for the maintainer's post-launch review)
+- Date: 2026-11-06 (code checked at `079cfc83`)
+- Gates: the release follow-up "issuance gives a relay nothing for DVR pulls"
+
+**No counsel retained; listed for post-launch review.** Nothing here turns on a legal question.
+
+**The gap.** Relay receipts are checked against `relay_issuance`, which the origin computes per
+relay and minute as sessions × what MediaMTX produced in that minute (`services/origin/src/issuance.ts`).
+A relay that serves only DVR pulls nothing live, so a minute with only DVR sessions on it had
+sessions and zero bytes issued. The worker reads that as a gap in the record (`gap_minutes`), so
+the receipt is "issuance unknown", which proves nothing for the fetch signal (decision 6). A DVR
+session on a channel with no live viewer could never verify through a relay; the `relay-dvr`
+harness scenario kept a live viewer to work around it (`5b133a98`).
+
+**A2.1 What the origin counts.** `/relay-pull/dvr/` (A1.3) records every whole segment it serves
+a relay (GET, 200, not HEAD and not a range) in a per-VOD Valkey sorted set (`issuance:dvr:<vodId>`,
+`services/origin/src/dvr-issuance.ts`): member `<bytes>:<durationMs>:<file>` (the duration from the
+recording's EXTINF, 0 for an init segment), score the latest pull time. Entries older than
+`DVR_MAX_WINDOW_SECONDS` + 20 minutes are trimmed on write and the key expires after the same.
+Every object a relay serves it first pulls from the origin, so these pulls are a superset of what
+any relay can serve.
+
+**A2.2 Which pulls a minute can use.** A relay caches a DVR segment for at most the DVR window
+(A1.3), so an object served in the minute `[start, end)` was pulled in
+`[start − DVR_MAX_WINDOW_SECONDS, end)`. Only those count: the bound is scoped to the window.
+
+**A2.3 One DVR session's allowance.** DVR plays at 1× (the player pins DVR to rate 1), so in a
+minute a session fetches at most **120 s** of the recording (`DVR_ISSUANCE_SPAN_SECONDS`): 60 s of
+playback plus a seek's buffer refill and room-sync catch-up. The allowance is the heaviest pulled
+segments, largest first, until their durations cover 120 s plus one segment (playback starts and
+ends inside a segment), plus the largest init segment. For the recorder's uniform 4 s segments
+this is at least what any contiguous 120 s weighs; the receipt verifier's tolerance applies on top.
+Nothing pulled means nothing issued, as for live.
+
+**A2.4 Which sessions get it.** A relay session that has rewound (its last heartbeat mode is `dvr`,
+or it has credited `dvr_seconds`) gets, per field, the larger of its live allowance and its
+broadcast's DVR allowance (the largest over the broadcast's VODs, whatever their status, so a
+recompute after the stream ended gives the same answer). A session that never rewound keeps the
+live allowance alone. Using `dvr_seconds` as well as the mode keeps a session that returned to
+live covered for the minutes it spent in DVR, which the 5-minute recompute revisits.
+
+**A2.5 What does not change.** No contract or schema change: `relay_issuance` keeps its columns,
+the receipt has no mode (A1.3), and the worker's check, tolerance and standing rules are as before.
+The live formula is unchanged for sessions that never rewound. Origin- and CDN-assigned DVR
+sessions are judged on the origin's own fetch log as before.
+
+**Consequences.**
+
+- A DVR-only relay session can verify; the `relay-dvr` scenario no longer needs a live viewer for
+  that (dropping it is left to the harness owner).
+- A rewound session's live minutes are bounded by max(live, DVR) instead of live: a relay can
+  over-report a rewound session by up to about two minutes of the heaviest recording segments per
+  minute and stay verified. That is the price of not knowing, per minute, which mode a session was
+  in; the heartbeat mode history would tighten it and is not stored.
+- One more Valkey write per DVR segment a relay pulls (pulls, not viewer fetches: a relay pulls
+  each segment once per window), and one range read per VOD with rewound relay sessions per
+  recomputed minute.
+
+### Amendment 2 decisions (taken by the orchestrator, conservative)
+
+1. **Span:** 120 s of media per DVR session per minute (60 s at 1× plus a buffer refill).
+2. **Rewound:** mode `dvr` or `dvr_seconds > 0`; such a session gets max(live, DVR) per field.
+3. **Scope:** pulls in `[start − DVR_MAX_WINDOW_SECONDS, end)` (the instance cap, not the
+   channel's window, so a channel's later change of window never shrinks a past minute).
+4. **Key:** `issuance:dvr:<vodId>` lives in the origin until the orchestrator moves it to
+   `KEYS` in `@commonair/contracts/internal`.
