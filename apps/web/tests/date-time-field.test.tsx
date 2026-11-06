@@ -257,6 +257,33 @@ describe("DateTimeField (parts)", () => {
     fireEvent.focusOut(screen.getByTestId("dt-day"), { relatedTarget: screen.getByTestId("outside") });
     expect(onBlur).toHaveBeenCalledTimes(1);
   });
+
+  it("stays inside while focus is in its own select popup, not another field's", async () => {
+    const onBlur = vi.fn<() => void>();
+    wrap(
+      <>
+        <DateTimeField
+          data-testid="dt"
+          legend="Starts"
+          value={EMPTY_DATE_TIME}
+          onValueChange={() => undefined}
+          onBlur={onBlur}
+          years={[2026]}
+        />
+        <div data-slot="select-content" data-field="someone-else">
+          <button type="button" data-testid="foreign">
+            Foreign
+          </button>
+        </div>
+      </>,
+    );
+    fireEvent.click(screen.getByTestId("dt-hour"));
+    const own = await screen.findAllByRole("option");
+    fireEvent.focusOut(screen.getByTestId("dt-day"), { relatedTarget: own[0] });
+    expect(onBlur).not.toHaveBeenCalled();
+    fireEvent.focusOut(screen.getByTestId("dt-day"), { relatedTarget: screen.getByTestId("foreign") });
+    expect(onBlur).toHaveBeenCalledTimes(1);
+  });
 });
 
 // ── The text field (egress, legal) ───────────────────────────────────────────────────────────

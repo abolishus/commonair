@@ -125,7 +125,7 @@ export function DateTimeField({
         >
           <SelectValue placeholder={labels[part]} />
         </SelectTrigger>
-        <SelectContent>
+        <SelectContent data-field={id}>
           {options[part].map((o) => (
             <SelectItem key={o.value} value={o.value}>
               {o.label}
@@ -145,8 +145,10 @@ export function DateTimeField({
       className="min-w-0 gap-2"
       onBlur={(e) => {
         const next = e.relatedTarget;
-        // Opening a select moves focus into its (portalled) popup: still inside the field.
-        if (next instanceof Element && (e.currentTarget.contains(next) || next.closest('[data-slot="select-content"]')))
+        // Opening one of this field's selects moves focus into its (portalled) popup: still inside
+        // the field. Another field's popup is outside it.
+        const popup = next instanceof Element ? next.closest('[data-slot="select-content"]') : null;
+        if (next instanceof Element && (e.currentTarget.contains(next) || popup?.getAttribute("data-field") === id))
           return;
         onBlur?.();
       }}
