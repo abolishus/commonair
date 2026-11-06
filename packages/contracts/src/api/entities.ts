@@ -751,6 +751,26 @@ export const PayoutTransferView = z.object({
 });
 export type PayoutTransferView = z.infer<typeof PayoutTransferView>;
 
+/** How many money movements of one kind have an unknown Stripe outcome, and their sum per currency. */
+export const OutcomeUnknownTotal = z.object({
+  count: z.number().int().nonnegative(),
+  /** One entry per currency, by currency code; empty when `count` is 0. */
+  amounts: z.array(Money),
+});
+/**
+ * Follow-ups (unit money; ADR 0007 decision 3, Amendment 1): what the treasurer must settle by
+ * hand, derived from the audit markers and transfer rows ("outcome unknown" is not a column):
+ * refund requests whose provider call never answered (listed until settled, also past the TTL),
+ * creator payout transfers left `outcome_unknown`, and co-op patronage payouts carrying the
+ * worker's outcome-unknown marker that are still pending.
+ */
+export const OutcomeUnknownSummary = z.object({
+  refunds: OutcomeUnknownTotal,
+  transfers: OutcomeUnknownTotal,
+  patronagePayouts: OutcomeUnknownTotal,
+});
+export type OutcomeUnknownSummary = z.infer<typeof OutcomeUnknownSummary>;
+
 /** Batch 8 (M1-coop-money): one member's patronage payout for a period. */
 export const PatronagePayoutView = z.object({
   id: Id,

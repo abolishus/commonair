@@ -16,7 +16,7 @@ import { Queue } from "bullmq";
 import { and, desc, eq, lt } from "drizzle-orm";
 import { Valkey } from "iovalkey";
 import { B8_JOBS, QUEUES, payoutTransferJobId, type PayoutTransferJob } from "@commonair/contracts/internal";
-import { schema } from "@commonair/db";
+import { type Executor, schema } from "@commonair/db";
 import { PAYOUT_TRANSFER_ATTEMPTS, PAYOUT_TRANSFER_BACKOFF_MS, schedulePayoutTransfers } from "@commonair/ledger";
 import { createAdapter } from "@commonair/payments";
 import { valkeyTls } from "@commonair/service";
@@ -118,6 +118,44 @@ export async function startPayoutTransfers(deps: Deps): Promise<{ scheduled: num
 
 const money = (cents: number, currency: string) => ({ cents, currency });
 
+type TransferJoin = {
+  t: typeof payoutTransfers.$inferSelect;
+  periodStart: Date;
+  u: { id: string; username: string; name: string };
+};
+
+/** The treasurer's view of one transfer (`money.treasurer.transfers`, `settleTransfer`). */
+export function transferView({ t, periodStart, u }: TransferJoin) {
+  return {
+    id: t.id,
+    payoutId: t.payoutId,
+    user: { id: u.id, username: u.username, displayName: u.name },
+    periodStart: periodStart.toISOString(),
+    amount: money(t.amountCents, t.currency),
+    reversed: money(t.reversedCents, t.currency),
+    status: t.status,
+    failureCode: t.failureCode,
+    providerRef: t.providerRef,
+    createdAt: t.createdAt.toISOString(),
+    updatedAt: t.updatedAt.toISOString(),
+  };
+}
+
+/** One transfer with its payout's run and payee, or null. */
+export async function transferRow(db: Executor, transferId: string): Promise<TransferJoin | null> {
+  const [row] = await db
+    .select({
+      t: payoutTransfers,
+      periodStart: payouts.periodStart,
+      u: { id: users.id, username: users.username, name: users.name },
+    })
+    .from(payoutTransfers)
+    .innerJoin(payouts, eq(payouts.id, payoutTransfers.payoutId))
+    .innerJoin(users, eq(users.id, payouts.userId))
+    .where(eq(payoutTransfers.id, transferId));
+  return row ?? null;
+}
+
 export const treasurerTransferHandlers = {
   transfers: os.money.treasurer.transfers.handler(async ({ context, input }) => {
     const { db } = context.deps;
@@ -141,23 +179,6 @@ export const treasurerTransferHandlers = {
       )
       .orderBy(desc(payoutTransfers.id))
       .limit(input.limit + 1);
-    return pageOf(
-      rows,
-      input.limit,
-      ({ t, periodStart, u }) => ({
-        id: t.id,
-        payoutId: t.payoutId,
-        user: { id: u.id, username: u.username, displayName: u.name },
-        periodStart: periodStart.toISOString(),
-        amount: money(t.amountCents, t.currency),
-        reversed: money(t.reversedCents, t.currency),
-        status: t.status,
-        failureCode: t.failureCode,
-        providerRef: t.providerRef,
-        createdAt: t.createdAt.toISOString(),
-        updatedAt: t.updatedAt.toISOString(),
-      }),
-      ({ t }) => encodeCursor({ id: t.id }),
-    );
+    return pageOf(rows, input.limit, transferView, ({ t }) => encodeCursor({ id: t.id }));
   }),
 };

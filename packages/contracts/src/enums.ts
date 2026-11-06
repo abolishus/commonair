@@ -744,6 +744,20 @@ export const REFUND_REQUEST_STATES = ["outstanding", "unknown", "resolved"] as c
 /** `money.treasurer.refundRequests.resolve`: what the treasurer found at Stripe. */
 export const REFUND_REQUEST_RESOLUTIONS = ["refunded", "failed"] as const;
 /**
+ * Follow-ups (unit money): what `money.treasurer.refundRequests.recheck` found when it asked Stripe
+ * again. `refunded` / `pending`: Stripe has the refund (its webhook posts it); `failed` / `none`:
+ * definitely not refunded, so the request is released; `ambiguous`: refunds Stripe lists that
+ * cannot be tied to this request (left for the treasurer); `unavailable`: Stripe could not be asked.
+ */
+export const REFUND_RECHECK_RESULTS = ["refunded", "pending", "failed", "none", "ambiguous", "unavailable"] as const;
+export type RefundRecheckResult = (typeof REFUND_RECHECK_RESULTS)[number];
+/**
+ * Follow-ups (unit money): how a treasurer settles a Connect transfer whose outcome is unknown,
+ * from what Stripe's dashboard shows: `sent` (with its `tr_` id) or `not_sent`.
+ */
+export const TRANSFER_SETTLE_OUTCOMES = ["sent", "not_sent"] as const;
+export type TransferSettleOutcome = (typeof TRANSFER_SETTLE_OUTCOMES)[number];
+/**
  * The staff actions whose statement of reasons carries `facts.code = "staff_action"` (B7 CR6):
  * applied by staff with no moderation case behind them, so the statement cites no case.
  */

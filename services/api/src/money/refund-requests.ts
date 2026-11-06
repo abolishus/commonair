@@ -56,7 +56,11 @@ const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
 const SCAN_BATCH = 200;
 
 /** The views of these request markers, from their payments' full history (one query per table). */
-async function viewsFor(db: Executor, rows: readonly RequestRow[], now: Date): Promise<Map<string, RefundRequestView>> {
+export async function viewsFor(
+  db: Executor,
+  rows: readonly RequestRow[],
+  now: Date,
+): Promise<Map<string, RefundRequestView>> {
   const out = new Map<string, RefundRequestView>();
   if (rows.length === 0) return out;
   const paymentIds = [...new Set(rows.map((r) => r.subjectId))].filter((id) => UUID.test(id));
@@ -157,7 +161,7 @@ function prefilter(state: Filter, now: Date) {
   return undefined;
 }
 
-async function requestMarker(db: Executor, requestId: string): Promise<RequestRow | null> {
+export async function requestMarker(db: Executor, requestId: string): Promise<RequestRow | null> {
   const [row] = await db
     .select()
     .from(auditLog)

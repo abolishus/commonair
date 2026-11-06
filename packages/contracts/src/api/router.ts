@@ -1696,7 +1696,54 @@ export const contract = {
             }),
           )
           .output(D.RefundRequestView),
+        /**
+         * Follow-ups (unit money): ask Stripe again about a request whose outcome is unknown. A
+         * definite answer that nothing was refunded releases it (audited); a refund Stripe has is
+         * posted by its webhook, never here. Refused while the reconciler has its first 15 minutes.
+         */
+        recheck: treasurer
+          .route({
+            method: "POST",
+            path: "/treasurer/refund-requests/{requestId}/recheck",
+            summary: "Ask Stripe again about a refund request whose outcome is unknown",
+            ...tag("Treasury"),
+          })
+          .input(z.object({ requestId: Id }))
+          .output(z.object({ result: z.enum(E.REFUND_RECHECK_RESULTS), request: D.RefundRequestView })),
       },
+      /** Follow-ups (unit money): money movements whose Stripe outcome is unknown, by kind. */
+      outcomeUnknown: treasurer
+        .route({
+          method: "GET",
+          path: "/treasurer/outcome-unknown",
+          summary: "Refunds, transfers and patronage payouts whose Stripe outcome is unknown",
+          ...tag("Treasury"),
+        })
+        .output(D.OutcomeUnknownSummary),
+      /**
+       * Follow-ups (unit money): settle a creator payout transfer whose outcome is unknown, from
+       * what Stripe's dashboard shows: `sent` with its `tr_` id (the payout is paid), or `not_sent`
+       * (the transfer fails and the payout returns to the payable). Never the treasurer's own
+       * payout. Audited.
+       */
+      settleTransfer: treasurer
+        .route({
+          method: "POST",
+          path: "/treasurer/payout-transfers/{transferId}/settle",
+          summary: "Settle a payout transfer whose Stripe outcome is unknown",
+          ...tag("Treasury"),
+        })
+        .errors(SECOND_APPROVER)
+        .input(
+          z.object({
+            transferId: Id,
+            outcome: z.enum(E.TRANSFER_SETTLE_OUTCOMES),
+            /** The `tr_` id Stripe shows; required for `sent`. */
+            reference: z.string().max(64).optional(),
+            note: z.string().max(500).default(""),
+          }),
+        )
+        .output(D.PayoutTransferView),
       /** Batch 8 (M1-connect, ADR 0007 Amendment 1): the Connect transfer of each Stripe payout. */
       transfers: treasurer
         .route({

@@ -8,6 +8,7 @@
 import { breakdownHandlers } from "../money/breakdown.ts";
 import { checkoutHandlers, treasurerCheckoutHandlers } from "../money/checkout.ts";
 import { treasurerFraudHandlers } from "../money/fraud.ts";
+import { refundRecheckHandler, treasurerOutcomeHandlers } from "../money/outcome-unknown.ts";
 import { treasurerRefundRequestHandlers } from "../money/refund-requests.ts";
 import { reportHandlers, treasurerReportHandlers } from "../money/reports.ts";
 import { splitHandlers, treasurerSplitHandlers } from "../money/splits.ts";
@@ -22,8 +23,9 @@ export const money = {
     ...treasurerCheckoutHandlers,
     ...treasurerReportHandlers,
     ...treasurerTransferHandlers,
+    ...treasurerOutcomeHandlers,
     fraudFlags: treasurerFraudHandlers,
     splits: treasurerSplitHandlers,
-    refundRequests: treasurerRefundRequestHandlers,
+    refundRequests: { ...treasurerRefundRequestHandlers, recheck: refundRecheckHandler },
   },
 };
