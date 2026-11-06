@@ -85,6 +85,22 @@ export const NoCategoryNoTags: Story = {
   args: { stream: makeStream({ category: null, tags: [] }), showReason: false },
 };
 
+/** Link slots: the category and each tag are their own links above the stretched channel link. */
+const slotArgs = {
+  categoryLink: { href: "#category" },
+  tagLink: (tag: string) => ({ href: `#tag-${tag}` }),
+};
+export const WithLinkSlots: Story = { args: slotArgs };
+export const WithLinkSlotsLight: Story = { args: slotArgs, globals: { theme: "light" } };
+export const WithLinkSlotsMobile320: Story = {
+  args: { ...slotArgs, stream: makeStream({ title: LONG_TITLE, displayName: LONG_NAME }) },
+  globals: { viewport: { value: "mobile320" } },
+};
+/** `channelLink` too, for a card whose primary link is the watch page rather than the channel. */
+export const WithChannelLinkSlot: Story = {
+  args: { ...slotArgs, href: "#watch", channelLink: { href: "#pixel_pioneer" } },
+};
+
 export const Loading: Story = {
   render: () => (
     <SkeletonGroup>

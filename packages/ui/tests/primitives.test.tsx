@@ -395,21 +395,76 @@ function imagesStillLoading(): void {
 }
 
 describe("StreamCard", () => {
-  test("is one keyboard-focusable link with title, channel, category, live and viewer count", async () => {
+  test("the title is the one primary link; channel, category, live and viewers are in the card", async () => {
     imagesStillLoading();
     const user = userEvent.setup();
     const { container } = render(<StreamCard stream={stream} href="/pixel_pioneer" locale="en" />);
     const link = screen.getByRole("link");
     expect(link.getAttribute("href")).toBe("/pixel_pioneer");
+    expect(link.getAttribute("data-slot")).toBe("stream-card-link");
     await user.tab();
     expect(document.activeElement).toBe(link);
-    expect(within(link).getByRole("heading", { level: 3 }).textContent).toBe(stream.broadcast.title);
-    expect(within(link).getByText("Pixel Pioneer")).toBeTruthy();
-    expect(within(link).getByText("Retro")).toBeTruthy();
-    expect(within(link).getByText("Live")).toBeTruthy();
-    expect(within(link).getByText("15,300 verified viewers")).toBeTruthy();
-    expect(container.querySelector("article")!.getAttribute("data-accent")).toBe("teal");
+    // The heading names the link; its ::after overlay stretches the hit area over the article.
+    expect(screen.getByRole("heading", { level: 3 }).textContent).toBe(stream.broadcast.title);
+    expect(within(screen.getByRole("heading")).getByRole("link")).toBe(link);
+    expect(link.className).toContain("after:inset-0");
+    const card = container.querySelector("article")!;
+    expect(card.className).toContain("relative");
+    expect(within(card).getByText("Pixel Pioneer")).toBeTruthy();
+    expect(within(card).getByText("Retro")).toBeTruthy();
+    expect(within(card).getByText("Live")).toBeTruthy();
+    expect(within(card).getByText("15,300 verified viewers")).toBeTruthy();
+    expect(card.getAttribute("data-accent")).toBe("teal");
     expect(container.querySelector("img")!.getAttribute("alt")).toBe("");
+  });
+
+  test("link slots: channel, category and tags are sibling links, never nested, in reading order", async () => {
+    const user = userEvent.setup();
+    const { container } = render(
+      <StreamCard
+        stream={stream}
+        href="/watch/1"
+        channelLink={{ href: "/pixel_pioneer" }}
+        categoryLink={{ href: "/directory/retro", render: <RouterLink data-testid="cat" /> }}
+        tagLink={(tag) => ({ href: `/directory?tag=${tag}`, render: <RouterLink aria-label={`Tag ${tag}`} /> })}
+        maxTags={2}
+      />,
+    );
+    const links = screen.getAllByRole("link");
+    expect(links.map((a) => a.getAttribute("href"))).toEqual([
+      "/watch/1",
+      "/pixel_pioneer",
+      "/directory/retro",
+      "/directory?tag=speedrun",
+      "/directory?tag=co-op",
+    ]);
+    expect(container.querySelector("a a")).toBeNull();
+    expect(links.map((a) => a.getAttribute("data-slot"))).toEqual([
+      "stream-card-link",
+      "stream-card-channel-link",
+      "stream-card-category-link",
+      "stream-card-tag-link",
+      "stream-card-tag-link",
+    ]);
+    // Slot links stack above the stretched primary link so they take their own clicks.
+    for (const slot of links.slice(1)) expect(slot.className).toContain("z-10");
+    expect(screen.getByTestId("cat").getAttribute("data-router")).toBe("yes");
+    expect(screen.getByRole("link", { name: "Tag co-op" })).toBe(links[4]);
+    for (const expected of links) {
+      await user.tab();
+      expect(document.activeElement).toBe(expected);
+    }
+  });
+
+  test("a category slot without a category renders nothing; no slots means plain text", () => {
+    const none = { ...stream, broadcast: { ...stream.broadcast, category: null } };
+    const { rerender } = render(<StreamCard stream={none} href="/x" categoryLink={{ href: "/directory/x" }} />);
+    expect(screen.getAllByRole("link")).toHaveLength(1);
+    expect(screen.queryByText("Retro")).toBeNull();
+    rerender(<StreamCard stream={stream} href="/x" />);
+    expect(screen.getAllByRole("link")).toHaveLength(1);
+    expect(screen.getByText("Retro").closest("a")).toBeNull();
+    expect(screen.getByText("speedrun").closest("a")).toBeNull();
   });
 
   test("shows the discovery reason and at most maxTags tags", () => {

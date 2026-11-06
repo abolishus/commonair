@@ -76,7 +76,7 @@ describe("StreamCard uptime overlay", () => {
     expect(badge?.textContent).toBe("3:41:09");
     expect(badge?.className).toContain("end-2");
     expect(badge?.className).toContain("bottom-2");
-    expect(screen.getByRole("link").textContent).toContain("3:41:09");
+    expect(container.querySelector("article")?.textContent).toContain("3:41:09");
   });
 
   test("no uptimeLabel, no overlay", () => {
