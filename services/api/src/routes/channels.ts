@@ -81,6 +81,8 @@ export const channelsRoutes = {
     if (input.vodEnabled !== undefined) set.vodEnabled = input.vodEnabled;
     if (input.vodRetentionDays !== undefined) set.vodRetentionDays = input.vodRetentionDays;
 
+    // Nothing to change: drizzle refuses an empty SET, which was a 500 for `PATCH {}`.
+    if (Object.keys(set).length === 0) return toChannelDto(deps, c);
     const announced = ["title", "categoryId", "tags", "language", "mature"].some((k) => k in set);
     const updated = await deps.db.transaction(async (tx) => {
       if (input.theme !== undefined) {
