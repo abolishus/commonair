@@ -121,10 +121,15 @@ App droplets are named `commonair-<env>` at every stage; stage 2 adds `commonair
 **Stage 1** (`enable_managed_state = true`): managed PostgreSQL (`pg_version`, default 17 to
 match `infra/postgres/Containerfile`) and managed Valkey (`noeviction`, RDB persistence, TLS),
 each with `node_count = 2` (one standby) in the VPC; a database firewall per cluster that admits
-the app tag; the media, exports and evidence buckets in the app region with CORS on media for
-`instance_origin`; one Spaces key limited to those three buckets. Tofu creates the clusters and
-nothing inside them: **the non-owner app role is created by the app's migrations**
-(`infra/postgres/app-role.sql`) when `selfhost.sh` runs them as the `doadmin` owner.
+the app tag; the media, exports, backups and evidence buckets in the app region with CORS on
+media for `instance_origin`; one Spaces key limited to media, exports and backups, and an evidence
+key limited to the evidence bucket (ADR 0006 Q4). The backups bucket stays empty (WAL-G does not
+run against a managed Postgres); it exists because storage-init checks all four roles. Tofu
+creates the clusters and nothing inside them: **the non-owner app role is created by the app's
+migrations** (`infra/postgres/app-role.sql`) when `selfhost.sh` runs them as the `doadmin` owner.
+`tofu output managed_state` names the buckets and, for a node size whose connection limit is
+measured, the `database_pool_max` that `install` needs in its environment (8 at the default
+`db-s-1vcpu-2gb`; null means the default of 10, which the preflight checks against the server).
 
 **Stage 2** (`app_count > 1`, needs stage 1): `app_count` app droplets and a regional network
 (layer 4) load balancer, dual-stack, in the VPC, selecting droplets by the app tag, forwarding

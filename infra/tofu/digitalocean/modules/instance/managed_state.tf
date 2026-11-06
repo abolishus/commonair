@@ -10,11 +10,30 @@
 locals {
   managed = var.enable_managed_state ? 1 : 0
 
+  # The four bucket roles storage-init checks (S3_BUCKET_MEDIA, _EXPORTS, _BACKUPS, _EVIDENCE).
+  # WAL-G never runs against a managed Postgres, so nothing writes to backups here; it exists
+  # because storage-init refuses a store without it (unless AWS_ENDPOINT or WALG_S3_PREFIX is
+  # set). The real backups are the walg and object_backups buckets in backup_region (backups.tf).
   instance_buckets = var.enable_managed_state ? {
     media    = "${local.prefix}-media"
     exports  = "${local.prefix}-exports"
+    backups  = "${local.prefix}-backups"
     evidence = "${local.prefix}-evidence"
   } : {}
+
+  # DATABASE_POOL_MAX for the measured node sizes: DigitalOcean's max_connections less its three
+  # reserved slots, less migrate and three spare, over the five pooled services
+  # (infra/selfhost/state-check.ts, docs/self-hosting/managed-services.md). Other sizes: null,
+  # meaning the default of 10; selfhost.sh's preflight still checks the real server.
+  pg_usable_connections = {
+    "db-s-1vcpu-1gb" = 22 # 25 less 3 reserved
+    "db-s-1vcpu-2gb" = 47 # 50 less 3, measured 2026-11-04 (agent track U5)
+  }
+  database_pool_max = (
+    contains(keys(local.pg_usable_connections), var.pg_size)
+    ? min(10, floor((local.pg_usable_connections[var.pg_size] - 1 - 3) / 5))
+    : null
+  )
 }
 
 resource "digitalocean_database_cluster" "pg" {
@@ -79,7 +98,7 @@ resource "digitalocean_database_firewall" "valkey" {
   }
 }
 
-# Media, exports and evidence (R0-b). Same region as the app, so traffic stays unbilled
+# Media, exports, backups and evidence (R0-b). Same region as the app, so traffic stays unbilled
 # through the VPC resolver.
 resource "digitalocean_spaces_bucket" "instance" {
   for_each = local.instance_buckets

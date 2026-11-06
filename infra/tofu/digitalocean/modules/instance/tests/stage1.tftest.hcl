@@ -86,8 +86,13 @@ run "instance_buckets_and_cors" {
   command = plan
 
   assert {
-    condition     = toset(keys(digitalocean_spaces_bucket.instance)) == toset(["media", "exports", "evidence"])
-    error_message = "Stage 1 creates the media, exports and evidence buckets."
+    condition     = toset(keys(digitalocean_spaces_bucket.instance)) == toset(["media", "exports", "backups", "evidence"])
+    error_message = "Stage 1 creates the media, exports, backups and evidence buckets: the four storage-init checks."
+  }
+
+  assert {
+    condition     = digitalocean_spaces_bucket.instance["backups"].name == "commonair-production-backups"
+    error_message = "The backups bucket is <prefix>-backups (S3_BUCKET_BACKUPS)."
   }
 
   assert {
@@ -105,10 +110,15 @@ run "instance_buckets_and_cors" {
 
   assert {
     condition = (
-      length(digitalocean_spaces_key.instance[0].grant) == 2 &&
-      alltrue([for g in digitalocean_spaces_key.instance[0].grant : g.permission == "readwrite" && g.bucket != "" && !endswith(g.bucket, "-evidence")])
+      length(digitalocean_spaces_key.instance[0].grant) == 3 &&
+      alltrue([for g in digitalocean_spaces_key.instance[0].grant : g.permission == "readwrite" && g.bucket != "" && !endswith(g.bucket, "-evidence")]) &&
+      toset([for g in digitalocean_spaces_key.instance[0].grant : g.bucket]) == toset([
+        digitalocean_spaces_bucket.instance["media"].name,
+        digitalocean_spaces_bucket.instance["exports"].name,
+        digitalocean_spaces_bucket.instance["backups"].name,
+      ])
     )
-    error_message = "The instance key is limited to the media and exports buckets (an empty bucket would mean every bucket)."
+    error_message = "The instance key is limited to the media, exports and backups buckets, as storage-init checks it (an empty bucket would mean every bucket)."
   }
 
   assert {
@@ -117,6 +127,47 @@ run "instance_buckets_and_cors" {
       one(digitalocean_spaces_key.evidence[0].grant).bucket == digitalocean_spaces_bucket.instance["evidence"].name
     )
     error_message = "The evidence key reaches the evidence bucket only, and differs from the instance key (ADR 0006 Q4)."
+  }
+}
+
+run "pool_size_for_the_default_node" {
+  command = plan
+
+  # db-s-1vcpu-2gb allows 47 connections: (47 - migrate - 3 spare) / 5 services = 8.
+  assert {
+    condition     = output.managed_state.database_pool_max == 8
+    error_message = "At the default db-s-1vcpu-2gb, install needs DATABASE_POOL_MAX=8."
+  }
+
+  assert {
+    condition     = output.managed_state.backups_bucket == "commonair-production-backups"
+    error_message = "managed_state names the backups bucket for S3_BUCKET_BACKUPS."
+  }
+}
+
+run "pool_size_for_the_small_node" {
+  command = plan
+
+  variables {
+    pg_size = "db-s-1vcpu-1gb"
+  }
+
+  assert {
+    condition     = output.managed_state.database_pool_max == 3
+    error_message = "At db-s-1vcpu-1gb (22 connections), install needs DATABASE_POOL_MAX=3."
+  }
+}
+
+run "pool_size_unmeasured_node_keeps_the_default" {
+  command = plan
+
+  variables {
+    pg_size = "db-s-2vcpu-4gb"
+  }
+
+  assert {
+    condition     = output.managed_state.database_pool_max == null
+    error_message = "An unmeasured size gives no pool size (the default, checked by the preflight)."
   }
 }
 

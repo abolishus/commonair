@@ -108,7 +108,18 @@ which production sets by default); `selfhost.sh install` points the instance at 
    default, `db-s-1vcpu-2gb` (a standby needs at least that), allows 50, so 47 for us (measured
    2026-11-04): the default pool of 10 needs 54 and the preflight refuses it. Install with
    `DATABASE_POOL_MAX=8` in the environment (44 needed). An idle instance used 22. A larger node
-   may be needed for connections alone, before the data needs it.
+   may be needed for connections alone, before the data needs it. Tofu prints the value for the
+   sizes measured so far: `tofu output -json managed_state | jq .database_pool_max` (8 at
+   `db-s-1vcpu-2gb`, 3 at `db-s-1vcpu-1gb`; `null` for any other size, where the default of 10
+   applies and the preflight still checks it against the server's `max_connections`):
+
+   ```sh
+   DATABASE_POOL_MAX=8 sh ~/commonair/selfhost.sh install --database-url … --valkey-url … …
+   ```
+
+   The variable stays in `commonair.env`, so `upgrade` keeps it. Resizing the cluster later
+   changes `max_connections`; the preflight runs again at `upgrade`.
+
 5. **Valkey's certificate is publicly trusted** (Let's Encrypt, `*.i.db.ondigitalocean.com`;
    measured 2026-11-04). The CA from the control panel or `get-ca` is the project CA, which signs
    only the Postgres certificates: given to `--valkey-ca`, verification fails. Leave
@@ -121,8 +132,10 @@ which production sets by default); `selfhost.sh install` points the instance at 
    **Objects in Spaces: not tried end to end yet** (the 2026-11-04 run used bundled Garage).
    Give `S3_EVIDENCE_*` the evidence key from `managed_state_secrets.evidence_*`, not the
    instance key: storage-init refuses two equal keys. storage-init also checks a fourth,
-   `backups` bucket at the S3 endpoint unless `AWS_ENDPOINT` or `WALG_S3_PREFIX` is set, and
-   stage 1 creates no such bucket; that gap is open.
+   `backups` bucket at the S3 endpoint unless `AWS_ENDPOINT` or `WALG_S3_PREFIX` is set: stage 1
+   creates it (`managed_state.backups_bucket`, `<prefix>-backups`) and the instance key may use
+   it, so set `S3_BUCKET_BACKUPS` to that name. Nothing writes to it, since WAL-G does not run
+   against a managed Postgres; the backups that matter are the dump store below.
 8. **The dump store** is the `object_backups` bucket tofu creates in `backup_region` (another
    region than the droplet's, private, versioned, with `object_backups_key` limited to it):
    `BACKUP_OBJECTS_REMOTE_ENDPOINT` and `_REGION` from `tofu output backups`, `_BUCKET` its

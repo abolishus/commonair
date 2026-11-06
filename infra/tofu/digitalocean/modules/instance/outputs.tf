@@ -80,7 +80,10 @@ output "managed_state" {
     s3_region       = var.region
     media_bucket    = digitalocean_spaces_bucket.instance["media"].name
     exports_bucket  = digitalocean_spaces_bucket.instance["exports"].name
+    backups_bucket  = digitalocean_spaces_bucket.instance["backups"].name
     evidence_bucket = digitalocean_spaces_bucket.instance["evidence"].name
+    # install's DATABASE_POOL_MAX at pg_size (null: the default, 10).
+    database_pool_max = local.database_pool_max
   } : null
 }
 
