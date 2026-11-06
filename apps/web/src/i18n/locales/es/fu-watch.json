@@ -1,0 +1,9 @@
+{
+  "chat.strip.kind.goal": "Meta",
+  "chat.strip.dismiss.goal": "Ocultar esta meta",
+  "chat.strip.state.achieved": "Conseguida",
+  "chat.strip.goal.label": "Progreso",
+  "chat.strip.goal.progress": "{current} / {target}",
+  "chat.strip.goal.percent": "{percent} %",
+  "chat.offline.lastMessage": "Último mensaje"
+}

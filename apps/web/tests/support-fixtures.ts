@@ -15,6 +15,7 @@ export function subscription(over: Partial<SubscriptionDto> = {}): SubscriptionD
   return {
     id: "0192f000-0000-7000-8000-000000000001",
     channelSlug: "rivertide",
+    channel: { slug: "rivertide", displayName: "Rivertide", avatarUrl: null, accent: "teal" },
     subscriber: { id: "u1", username: "fan", displayName: "Fan" },
     tier: 2,
     status: "active",

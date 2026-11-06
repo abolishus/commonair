@@ -158,6 +158,7 @@ export function VodWatchPage({
       slug={vod.channelSlug}
       createdAt={vod.createdAt}
       durationSeconds={vod.durationSeconds}
+      category={vod.category}
       captions={vod.captions}
       source={source}
       fetch={fetch}
@@ -218,6 +219,7 @@ export function ClipWatchPage({
       slug={clip.channelSlug}
       createdAt={clip.createdAt}
       durationSeconds={clip.durationSeconds}
+      category={clip.category}
       captions={[]}
       source={source}
       fetch={fetch}
@@ -262,6 +264,7 @@ interface LayoutProps {
   slug: string;
   createdAt: string;
   durationSeconds: number;
+  category: VodDto["category"];
   captions: VodDto["captions"];
   source: WatchSource | null;
   fetch: ReplayFetch;
@@ -343,7 +346,7 @@ function WatchLayout(p: LayoutProps): React.JSX.Element {
                 title={p.title}
                 createdAt={p.createdAt}
                 durationSeconds={p.durationSeconds}
-                category={null}
+                category={p.category}
                 views={p.views ?? null}
                 clippedBy={p.creator ?? null}
                 publicUrl={p.publicUrl ?? pageOrigin()}

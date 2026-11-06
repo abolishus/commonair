@@ -6,7 +6,7 @@
  * D5-settings copy slips: the counter-notice receipt reads "restored in 2 weeks" (F39, a catalogue
  * fix with its interpolation checked in every locale); an ended suspension reads "Ended … ago",
  * never "Until … ago" (F39); subscriptions name channels by display name with `@slug` beside it,
- * and the avatar's initial comes from that name (F38); the copyright strike note is the card's
+ * from `Subscription.channel`, and the avatar's initial comes from that name (F38); the copyright strike note is the card's
  * note style (F35).
  */
 import { LocaleProvider, NowProvider, TooltipProvider } from "@commonair/ui";
@@ -25,7 +25,6 @@ import type * as React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { CounterReceipt } from "../src/components/dmca/copyright.tsx";
 import { RestrictionEnd, restrictionEnded } from "../src/components/safety/enforcement.tsx";
-import { LOOKUP_CONCURRENCY, loadSubscriptionChannels } from "../src/components/settings/subscription-channels.ts";
 import { SubscriptionList, subscriptionChannelName } from "../src/components/support/subscription-list.tsx";
 import { locale, t, uiMessages } from "../src/i18n/index.ts";
 import { subscription } from "./support-fixtures.ts";
@@ -141,24 +140,21 @@ describe("restriction end (F39)", () => {
 // ── F38: subscriptions by display name ───────────────────────────────────────────────────────
 
 describe("subscription names (F38)", () => {
-  const names = new Map([["demo_streamer1", { displayName: "Aurora Pixel", avatarUrl: null }]]);
+  const aurora = { slug: "demo_streamer1", displayName: "Aurora Pixel", avatarUrl: null };
 
-  it("display name first, @slug second; the slug alone while the name is unknown", () => {
-    expect(subscriptionChannelName("demo_streamer1", names)).toEqual({
+  it("display name first, @slug second; the slug alone when the name is blank", () => {
+    expect(subscriptionChannelName(subscription({ channelSlug: "demo_streamer1", channel: aurora }))).toEqual({
       name: "Aurora Pixel",
       handle: "@demo_streamer1",
     });
-    expect(subscriptionChannelName("other", names)).toEqual({ name: "other", handle: null });
-    expect(subscriptionChannelName("other", undefined)).toEqual({ name: "other", handle: null });
-    const blank = new Map([["x", { displayName: "  ", avatarUrl: null }]]);
-    expect(subscriptionChannelName("x", blank)).toEqual({ name: "x", handle: null });
+    const blank = subscription({ channelSlug: "x", channel: { slug: "x", displayName: "  ", avatarUrl: null } });
+    expect(subscriptionChannelName(blank)).toEqual({ name: "x", handle: null });
   });
 
   it("the row shows the display name, the handle and the name's initial", async () => {
     wrap(
       <SubscriptionList
-        subscriptions={[subscription({ channelSlug: "demo_streamer1" })]}
-        channels={names}
+        subscriptions={[subscription({ channelSlug: "demo_streamer1", channel: aurora })]}
         onCancel={async () => {}}
         onCancelError={() => {}}
       />,
@@ -172,40 +168,10 @@ describe("subscription names (F38)", () => {
     expect(row.dataset.channel).toBe("demo_streamer1");
   });
 
-  it("looks each channel up once and skips the ones that fail", async () => {
-    const lookup = vi.fn<(slug: string) => Promise<{ displayName: string; avatarUrl: null }>>(async (slug) => {
-      if (slug === "gone") throw new Error("404");
-      return { displayName: slug.toUpperCase(), avatarUrl: null };
-    });
-    const map = await loadSubscriptionChannels(["a", "b", "a", "gone"], lookup);
-    expect(lookup).toHaveBeenCalledTimes(3);
-    expect([...map.entries()]).toEqual([
-      ["a", { displayName: "A", avatarUrl: null }],
-      ["b", { displayName: "B", avatarUrl: null }],
-    ]);
-  });
-
-  it("keeps at most four lookups in flight", async () => {
-    let inFlight = 0;
-    let peak = 0;
-    const lookup = async (slug: string) => {
-      inFlight += 1;
-      peak = Math.max(peak, inFlight);
-      await new Promise((r) => setTimeout(r, 1));
-      inFlight -= 1;
-      return { displayName: slug, avatarUrl: null };
-    };
-    const slugs = Array.from({ length: 20 }, (_, i) => `ch${i}`);
-    const map = await loadSubscriptionChannels(slugs, lookup);
-    expect(peak).toBe(LOOKUP_CONCURRENCY);
-    expect([...map.keys()]).toEqual(slugs);
-  });
-
   it("the avatar takes the channel's accent", async () => {
     wrap(
       <SubscriptionList
-        subscriptions={[subscription({ channelSlug: "demo_streamer1" })]}
-        channels={new Map([["demo_streamer1", { displayName: "Aurora Pixel", avatarUrl: null, accent: "violet" }]])}
+        subscriptions={[subscription({ channelSlug: "demo_streamer1", channel: { ...aurora, accent: "violet" } })]}
         onCancel={async () => {}}
         onCancelError={() => {}}
       />,
@@ -214,9 +180,11 @@ describe("subscription names (F38)", () => {
     expect(row.querySelector("[data-accent]")?.getAttribute("data-accent")).toBe("violet");
   });
 
-  it("the page asks for the names", () => {
+  it("the page reads names from the subscriptions, with no per-channel lookups", () => {
     const route = readFileSync(join(import.meta.dirname, "../src/routes/_app/settings.subscriptions.tsx"), "utf8");
-    expect(route).toContain("useSubscriptionChannels(subscriptions)");
-    expect(route).toContain("channels={channels}");
+    expect(route).not.toContain("channels.get");
+    expect(route).not.toContain("useSubscriptionChannels");
+    const list = readFileSync(join(import.meta.dirname, "../src/components/support/subscription-list.tsx"), "utf8");
+    expect(list).not.toContain("channels.get");
   });
 });

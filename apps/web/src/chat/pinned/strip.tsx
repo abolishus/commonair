@@ -3,7 +3,7 @@
 
 /**
  * The pinned strip (`chat-pinned-strip`, design review F6): one line at the top of the chat log
- * for the highest-priority prediction, poll or giveaway, with a "+N" chip when there are more.
+ * for the highest-priority prediction, poll, giveaway or goal, with a "+N" chip when there are more.
  * The line expands the full cards inline, pushing the log down. The cards stay mounted while the
  * strip is collapsed, so a half-typed bet or a grace-window countdown survives a collapse.
  */
@@ -14,6 +14,7 @@ import {
   ArrowUp01Icon,
   Cancel01Icon,
   ChartBarLineIcon,
+  Flag02Icon,
   GiftIcon,
   Target02Icon,
 } from "@hugeicons/core-free-icons";
@@ -34,6 +35,7 @@ const ICONS: Readonly<Record<PinnedKind, IconSvgElement>> = {
   prediction: Target02Icon,
   poll: ChartBarLineIcon,
   giveaway: GiftIcon,
+  goal: Flag02Icon,
 };
 
 /**
@@ -65,6 +67,20 @@ export function usePinnedAnnouncement(items: readonly PinnedItem[], ready: boole
     setSt({ sig, ready, seen: new Set(keys), text: news ? announcement(news) : st.text });
   }
   return st.text;
+}
+
+/** A goal's bar on the one line, only where the column has room (the label carries the numbers). */
+function MiniBar({ percent }: { percent: number }): React.JSX.Element {
+  return (
+    <span
+      aria-hidden
+      data-part="bar"
+      data-percent={percent}
+      className="hidden h-1.5 w-12 shrink-0 bg-muted @xs/strip:block"
+    >
+      <span className="block h-full bg-primary" style={{ width: `${percent}%` }} />
+    </span>
+  );
 }
 
 export interface PinnedStripProps {
@@ -109,7 +125,7 @@ export function PinnedStrip({ items, renderCard, onDismiss, now = systemNow }: P
       data-state={top?.state.phase}
       data-count={items.length}
       data-expanded={expanded ? "true" : "false"}
-      className="grid min-w-0 gap-2"
+      className="@container/strip grid min-w-0 gap-2"
     >
       {top && (
         <div className="flex min-w-0 items-center gap-1">
@@ -134,6 +150,7 @@ export function PinnedStrip({ items, renderCard, onDismiss, now = systemNow }: P
             <span data-part="title" className="min-w-0 truncate font-medium">
               {top.title}
             </span>
+            {top.progress && <MiniBar percent={top.progress.percent} />}
             <span data-part="state" className="shrink-0 text-muted-foreground tabular-nums">
               {stateLabel(top, nowMs)}
             </span>

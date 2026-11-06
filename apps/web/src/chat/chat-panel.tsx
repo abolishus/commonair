@@ -43,6 +43,8 @@ import { MessageMenu, TIMEOUT_SECONDS } from "./mod-menu.tsx";
 import { useDismissed, type DismissStore } from "./pinned/dismissed.ts";
 import { pinnedItems, undismissed, type PinnedItem } from "./pinned/model.ts";
 import { PinnedStrip, usePinnedAnnouncement } from "./pinned/strip.tsx";
+import { GoalCard } from "./pinned/goal-card.tsx";
+import { ChatOffline } from "./offline.tsx";
 import { presentationQueue } from "./presentation.ts";
 import { chatReducer, EMPTY_GATE, gateReducer, Tombstones, type ChatRow } from "./state.ts";
 import { SurgeBanner } from "./surge-banner.tsx";
@@ -356,13 +358,16 @@ export function ChatPanel({
   const statusView = chatStatusView(status);
   const inputDisabled = status !== "open" || !canChat;
   const isBroadcaster = self !== null && self === channel.toLowerCase();
-  const { poll, prediction, giveaway, points, raid } = interact;
+  const { poll, prediction, giveaway, goals, points, raid } = interact;
   // The banner area opens only when there is something to say, so an empty bordered box never shows.
   const surgeActive = surge !== null && surge.state !== "off";
   // The viewer's gate hint (ADR 0015); the banner checks features.watchGate and renders nothing otherwise.
   const gated = !canModerate && (settings?.minVerifiedWatchSeconds ?? 0) > 0;
   // Predictions, polls and giveaways fold into one line at the top of the log (design review F6).
-  const allPinned = React.useMemo(() => pinnedItems({ poll, prediction, giveaway }), [poll, prediction, giveaway]);
+  const allPinned = React.useMemo(
+    () => pinnedItems({ poll, prediction, giveaway, goals }),
+    [poll, prediction, giveaway, goals],
+  );
   const { dismissed, dismiss } = useDismissed(dismissStore);
   const shownPinned = React.useMemo(() => undismissed(allPinned, dismissed), [allPinned, dismissed]);
   const pinnedNews = usePinnedAnnouncement(allPinned, interact.loaded);
@@ -424,6 +429,8 @@ export function ChatPanel({
           onEntered={interact.setGiveaway}
         />
       );
+    const goal = item.kind === "goal" ? goals.find((g) => g.id === item.id) : undefined;
+    if (goal) return <GoalCard key={goal.id} goal={goal} item={item} />;
     return null;
   };
   const pinned =
@@ -573,13 +580,7 @@ export function ChatPanel({
   // Offline with nothing said yet: why it is quiet, not "No messages yet".
   const offline = stream !== undefined && !stream.live;
   const empty = offline ? (
-    <EmptyState
-      data-testid="chat-offline"
-      className="flex-1"
-      icon={Message01Icon}
-      title={t("chat.column.offlineTitle", { name })}
-      headingLevel={3}
-    />
+    <ChatOffline channel={channel} name={name} />
   ) : (
     <EmptyState icon={Message01Icon} title={t("chat.empty")} headingLevel={3} />
   );

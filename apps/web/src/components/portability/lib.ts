@@ -202,3 +202,24 @@ export const isImportRunning = (dto: Pick<ImportDto, "status">): boolean =>
 // Landing ---------------------------------------------------------------------------------------
 
 export type LandingState = "active" | "revoked" | "expired" | "unknown";
+
+// Move-notice grants ----------------------------------------------------------------------------
+
+/** `portability.grants.setMany` takes at most this many channels per call. */
+export const GRANTS_SET_MANY_MAX = 500;
+
+/** `items` in runs of at most `size`, in order. */
+export function chunked<T>(items: readonly T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+/** `rows` with every channel in `slugs` switched to `on`, the rest untouched. */
+export function withGrantStates<R extends { slug: string; on: boolean }>(
+  rows: readonly R[],
+  slugs: ReadonlySet<string>,
+  on: boolean,
+): R[] {
+  return rows.map((r) => (slugs.has(r.slug) && r.on !== on ? { ...r, on } : r));
+}

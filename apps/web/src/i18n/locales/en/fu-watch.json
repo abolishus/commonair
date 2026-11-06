@@ -1,0 +1,9 @@
+{
+  "chat.strip.kind.goal": "Goal",
+  "chat.strip.dismiss.goal": "Hide this goal",
+  "chat.strip.state.achieved": "Achieved",
+  "chat.strip.goal.label": "Progress",
+  "chat.strip.goal.progress": "{current} / {target}",
+  "chat.strip.goal.percent": "{percent}%",
+  "chat.offline.lastMessage": "Last message"
+}

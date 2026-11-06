@@ -7,9 +7,10 @@
  *
  * - streamer1's channel (a live poll, a locked prediction and giveaways under `seed full`) shows
  *   `chat-pinned-strip` folded to one line; expanding it shows the full card of the top item, and
- *   a pinned prediction's card when there is one;
+ *   a pinned prediction's card when there is one, and a running goal's card (`chat-goal`);
  * - at 1440×900 the chat column reaches the bottom of the viewport;
- * - an offline channel with a quiet chat says so instead of "No messages yet".
+ * - an offline channel with a quiet chat says so instead of "No messages yet", with when someone
+ *   last spoke (`chat-offline-last`) exactly when `chat.history` has a message.
  */
 import type { Page } from "playwright";
 import { E8_TEST_IDS as E8 } from "../e8/selectors.ts";
@@ -23,6 +24,7 @@ const CARD: Record<string, string> = {
   prediction: E8.chatPrediction,
   poll: E8.chatPoll,
   giveaway: "chat-giveaway",
+  goal: "chat-goal",
 };
 /** Ids outside the web registry (other units' cards). */
 const byTestId = (id: string) => `[data-testid="${id}"]`;
@@ -85,6 +87,18 @@ export async function steps(ctx: DContext): Promise<void> {
         prediction: current.id,
       });
     }
+    // Goals load from `interact.goals.list`; a running one is a pinned card with its numbers.
+    const goals = await api.interact.goals.list({ channel: streamer1 }).catch(() => []);
+    const running = goals.find((g) => g.endedAt === null);
+    if (!running) s.skipStep("d2-chat: the pinned goal card", "streamer1 has no running goal");
+    else {
+      const card = page.locator(`${byTestId(CARD.goal ?? "chat-goal")}[data-goal-id="${running.id}"]`);
+      await card.waitFor({ state: "visible", timeout: UI_TIMEOUT_MS }).catch(() => undefined);
+      s.check("expanding shows the running goal's card", await card.isVisible(), { goal: running.id });
+      s.check("the goal card carries its target", (await card.getAttribute("data-target")) === String(running.target), {
+        target: await card.getAttribute("data-target"),
+      });
+    }
     await page.keyboard.press("Escape");
     s.check("Escape folds it again", (await toggle.getAttribute("aria-expanded")) === "false");
   });
@@ -141,5 +155,14 @@ export async function steps(ctx: DContext): Promise<void> {
       (await quiet.count()) === 1 || (await spoken.count()) > 0,
       { channel: offline },
     );
+    if ((await quiet.count()) === 1) {
+      const kept = await api.chat.history({ channel: offline, limit: 1 }).catch(() => []);
+      const last = quiet.locator(byTestId("chat-offline-last"));
+      if (kept.length > 0) await last.waitFor({ timeout: UI_TIMEOUT_MS }).catch(() => undefined);
+      s.check("the last message's time shows exactly when chat.history has one", (await last.count()) === kept.length, {
+        channel: offline,
+        kept: kept.length,
+      });
+    }
   });
 }

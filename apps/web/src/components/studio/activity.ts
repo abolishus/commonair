@@ -3,9 +3,9 @@
 
 /**
  * The stream manager's activity feed (F21): what happened in the channel while the streamer was
- * live, newest first, from the `op:"event"` frames the chat socket already delivers (subs, gifts,
- * tips and raids). Follows and giveaway results are parsed too, so they show up as soon as the chat
- * service forwards them to the broadcaster (a contract request; it does not today). Pure.
+ * live, newest first, from the `op:"event"` frames the chat socket delivers: subs, gifts, tips,
+ * raids and giveaway results to everyone, follows only to the broadcaster's and moderators'
+ * connections (they name the follower). Pure.
  */
 import { EVENTS } from "@commonair/contracts/events";
 import { chatEventView } from "../../chat/events.ts";

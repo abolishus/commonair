@@ -4,8 +4,8 @@
 /**
  * Unit D3-WATCH's `d-surfaces` steps (.claude/briefs/d/D3-watch.md, F11), on the seeded stack:
  *
- * - a `demo_streamer1` VOD shows `watch-meta` (title, Share) and `watch-channel-card`, with
- *   "Watch live" while the channel is live;
+ * - a `demo_streamer1` VOD shows `watch-meta` (title, Share, its category's directory link) and
+ *   `watch-channel-card`, with "Watch live" while the channel is live;
  * - its "More from" grid (`watch-more-grid`) lists the channel's other VODs, never this one;
  * - the document title is "<VOD title> · <channel> · <site>";
  * - Share's "Start at" adds `?t=` and a `?t=` link opens the page;
@@ -66,6 +66,17 @@ export async function steps(ctx: DContext): Promise<void> {
     s.check("the document title is <VOD> · <channel> · <site>", title.includes(` · ${channel.displayName} · `), {
       title,
     });
+    // `Vod.category`: the broadcast's category links into the directory; none, no link.
+    const category = page.locator(`${tid(T.watchMeta)} ${tid(T.channelMetaCategory)}`);
+    if (vod.category) {
+      await category.waitFor({ timeout: UI_TIMEOUT_MS });
+      const href = await category.getAttribute("href");
+      s.check("the category links to its directory page", href === `/directory/${vod.category.slug}`, {
+        href,
+        category: vod.category.slug,
+      });
+      s.check("the category reads its name", (await category.textContent())?.trim() === vod.category.name);
+    } else s.check("a VOD without a category shows no category link", (await category.count()) === 0);
   });
 
   if (channel.live === null) s.skipStep("d3-watch: Watch live", `${streamer} is not live (run \`seed live\`)`);

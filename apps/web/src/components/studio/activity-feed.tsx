@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * The stream manager's activity feed (F21): subs, gifts, tips and raids as they happen, from the
- * channel's chat socket (`op:"event"` frames; `activity.ts` parses them). It listens on its own
- * read-only connection, so it needs nothing from the chat panel beside it. The feed starts empty on
+ * The stream manager's activity feed (F21): follows, subs, gifts, tips, raids and giveaway results
+ * as they happen, from the channel's chat socket (`op:"event"` frames; `activity.ts` parses them).
+ * It listens on its own connection, signed in as the streamer, so the follows (sent only to the
+ * broadcaster and moderators) reach it, and it needs nothing from the chat panel beside it. The feed starts empty on
  * each visit: the socket has no history, and the page never invents activity to look busy.
  */
 import { EmptyState, MoneyAmount, RelativeTime } from "@commonair/ui";

@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * The chat panel's poll, prediction, giveaway and raid state (E8; giveaways batch 7). Polls,
- * predictions and giveaways start from `interact.*.current` and follow the channel's
- * `channel.poll.*` / `channel.prediction.*` / `channel.giveaway.*` event frames (validated against
- * the event catalog; anything that fails is dropped); the outgoing raid follows the source's `raid`
- * control frames. Pure, for unit tests.
+ * The chat panel's poll, prediction, giveaway, goal and raid state (E8; giveaways batch 7). Polls,
+ * predictions and giveaways start from `interact.*.current`, goals from `interact.goals.list`, and
+ * all follow the channel's `channel.poll.*` / `channel.prediction.*` / `channel.giveaway.*` /
+ * `channel.goal.*` event frames (validated against the event catalog; anything that fails is
+ * dropped); the outgoing raid follows the source's `raid` control frames. Pure, for unit tests.
  */
 import type * as D from "@commonair/contracts/dto";
 import { EVENTS } from "@commonair/contracts/events";
@@ -16,6 +16,7 @@ export type PollViewDto = z.infer<typeof D.PollView>;
 export type PredictionViewDto = z.infer<typeof D.PredictionView>;
 export type LoyaltyBalanceDto = z.infer<typeof D.LoyaltyBalance>;
 export type GiveawayDto = z.infer<typeof D.Giveaway>;
+export type GoalDto = z.infer<typeof D.Goal>;
 
 /** How long an ended poll or prediction stays pinned with its results. */
 export const RESULTS_VISIBLE_MS = 120_000;
@@ -32,9 +33,11 @@ export const PREDICTION_EVENT_TYPES = [
   "channel.prediction.end",
 ] as const;
 export const GIVEAWAY_EVENT_TYPES = ["channel.giveaway.begin", "channel.giveaway.end"] as const;
+export const GOAL_EVENT_TYPES = ["channel.goal.begin", "channel.goal.progress", "channel.goal.end"] as const;
 type PollEventType = (typeof POLL_EVENT_TYPES)[number];
 type PredictionEventType = (typeof PREDICTION_EVENT_TYPES)[number];
 type GiveawayEventType = (typeof GIVEAWAY_EVENT_TYPES)[number];
+type GoalEventType = (typeof GOAL_EVENT_TYPES)[number];
 
 export const isPollEvent = (type: string): type is PollEventType =>
   (POLL_EVENT_TYPES as readonly string[]).includes(type);
@@ -42,6 +45,8 @@ export const isPredictionEvent = (type: string): type is PredictionEventType =>
   (PREDICTION_EVENT_TYPES as readonly string[]).includes(type);
 export const isGiveawayEvent = (type: string): type is GiveawayEventType =>
   (GIVEAWAY_EVENT_TYPES as readonly string[]).includes(type);
+export const isGoalEvent = (type: string): type is GoalEventType =>
+  (GOAL_EVENT_TYPES as readonly string[]).includes(type);
 
 /**
  * Where an event frame goes: the poll, prediction or giveaway card (a parsed frame), the log
@@ -51,6 +56,7 @@ export type InteractFrame =
   | { kind: "poll"; frame: PollFrame }
   | { kind: "prediction"; frame: PredictionFrame }
   | { kind: "giveaway"; frame: GiveawayFrame }
+  | { kind: "goal"; frame: GoalFrame }
   | { kind: "row" }
   | { kind: "drop" };
 
@@ -66,6 +72,10 @@ export function routeEventFrame(type: string, data: unknown): InteractFrame {
   if (isGiveawayEvent(type)) {
     const frame = parseGiveawayFrame(type, data);
     return frame ? { kind: "giveaway", frame } : { kind: "drop" };
+  }
+  if (isGoalEvent(type)) {
+    const frame = parseGoalFrame(type, data);
+    return frame ? { kind: "goal", frame } : { kind: "drop" };
   }
   return { kind: "row" };
 }
@@ -342,6 +352,96 @@ export function giveawayVisible(g: GiveawayDto | null, now: number): g is Giveaw
   if (g.status === "open" || g.status === "closed") return true;
   const drawn = Date.parse(g.drawnAt ?? "");
   return Number.isFinite(drawn) && now - drawn < RESULTS_VISIBLE_MS;
+}
+
+// ------------------------------------------------------------------ goals
+
+/** A goal as the strip shows it: the list's `Goal`, plus whether an ended one reached its target. */
+export interface GoalView extends GoalDto {
+  /** Null while running; the end frame's `is_achieved`, or current >= target for a listed one. */
+  achieved: boolean | null;
+}
+
+export interface GoalFrame {
+  type: GoalEventType;
+  goal: GoalView;
+}
+
+export function parseGoalFrame(type: string, data: unknown): GoalFrame | null {
+  if (type === "channel.goal.begin" || type === "channel.goal.progress") {
+    const p = EVENTS[type].payload.safeParse(data);
+    if (!p.success || p.data.target_amount <= 0) return null;
+    return {
+      type,
+      goal: {
+        id: p.data.id,
+        type: p.data.type,
+        title: p.data.description,
+        current: p.data.current_amount,
+        target: p.data.target_amount,
+        startedAt: p.data.started_at,
+        endedAt: null,
+        achieved: null,
+      },
+    };
+  }
+  if (type === "channel.goal.end") {
+    const p = EVENTS[type].payload.safeParse(data);
+    if (!p.success || p.data.target_amount <= 0) return null;
+    return {
+      type,
+      goal: {
+        id: p.data.id,
+        type: p.data.type,
+        title: p.data.description,
+        current: p.data.current_amount,
+        target: p.data.target_amount,
+        startedAt: p.data.started_at,
+        endedAt: p.data.ended_at,
+        achieved: p.data.is_achieved,
+      },
+    };
+  }
+  return null;
+}
+
+/** A listed goal as a view: an ended one counts as achieved when it reached its target. */
+export function goalView(g: GoalDto): GoalView {
+  return { ...g, achieved: g.endedAt === null ? null : g.current >= g.target };
+}
+
+const byStart = (a: GoalView, b: GoalView) => a.startedAt.localeCompare(b.startedAt) || a.id.localeCompare(b.id);
+
+/**
+ * Apply a goal frame: it adds the goal or replaces the one with its id. Frames can arrive out of
+ * order across instances, so a late begin or progress never reopens a goal that ended.
+ */
+export function applyGoalFrame(goals: readonly GoalView[], f: GoalFrame): GoalView[] {
+  const current = goals.find((g) => g.id === f.goal.id);
+  if (current && current.endedAt !== null && f.goal.endedAt === null) return [...goals];
+  return [...goals.filter((g) => g.id !== f.goal.id), f.goal].sort(byStart);
+}
+
+/**
+ * The listed goals merged under what frames already said: a goal a frame touched keeps the
+ * frame's state (it is newer than the list's answer, which may have left before the frame).
+ */
+export function mergeLoadedGoals(fromFrames: readonly GoalView[], listed: readonly GoalDto[]): GoalView[] {
+  const seen = new Set(fromFrames.map((g) => g.id));
+  return [...fromFrames, ...listed.filter((g) => !seen.has(g.id)).map(goalView)].sort(byStart);
+}
+
+/** Pinned while running, and for a while after it ended (like an ended poll). */
+export function goalVisible(g: GoalView, now: number): boolean {
+  if (g.endedAt === null) return true;
+  const ended = Date.parse(g.endedAt);
+  return Number.isFinite(ended) && now - ended < RESULTS_VISIBLE_MS;
+}
+
+/** Progress as a whole percentage, 0 to 100 (a goal can overshoot its target). */
+export function goalPercent(g: Pick<GoalDto, "current" | "target">): number {
+  if (g.target <= 0) return 0;
+  return Math.max(0, Math.min(100, Math.floor((g.current / g.target) * 100)));
 }
 
 // ------------------------------------------------------------------ raids

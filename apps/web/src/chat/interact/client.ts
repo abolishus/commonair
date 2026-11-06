@@ -14,7 +14,7 @@ import {
   playheadWallclock as clockPlayhead,
   type PlaybackMode,
 } from "../../player/media-clock.ts";
-import type { GiveawayDto, LoyaltyBalanceDto, PollViewDto, PredictionViewDto } from "./state.ts";
+import type { GiveawayDto, GoalDto, LoyaltyBalanceDto, PollViewDto, PredictionViewDto } from "./state.ts";
 
 export interface BetInput {
   id: string;
@@ -39,6 +39,8 @@ export interface InteractClient {
   giveawayCurrent(channel: string): Promise<GiveawayDto | null>;
   /** Enter a giveaway (one entry per account; free). */
   giveawayEnter(input: { id: string }): Promise<GiveawayDto>;
+  /** The channel's goals (`interact.goals.list`, running and ended); absent: no goals in the strip. */
+  goals?(channel: string): Promise<GoalDto[]>;
 }
 
 type InstanceClient = Pick<Api, "instance">;
@@ -69,6 +71,7 @@ export function browserInteractClient(): InteractClient {
     giveawayCurrent: async (channel) =>
       (await giveawaysEnabled(client)) ? client.interact.giveaways.current({ channel }) : null,
     giveawayEnter: (input) => client.interact.giveaways.enter(input),
+    goals: (channel) => client.interact.goals.list({ channel }),
   };
 }
 

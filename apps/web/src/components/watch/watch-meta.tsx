@@ -145,7 +145,7 @@ export interface WatchMetaProps {
   title: string;
   createdAt: string;
   durationSeconds: number;
-  /** The item's category; the VOD and clip DTOs carry none yet, so null today (a contract request). */
+  /** `Vod.category` / `Clip.category`: the broadcast's category, linking to its directory page. */
   category?: { slug: string; name: string } | null;
   /** `Clip.views`; VODs have no count, so null. */
   views?: number | null;

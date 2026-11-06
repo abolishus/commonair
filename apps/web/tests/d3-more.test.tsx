@@ -67,6 +67,7 @@ const vodItem = (n: number, over: Partial<VodItem> = {}): VodItem => ({
   expiresAt: null,
   failedReason: null,
   captions: [],
+  category: null,
   ...over,
 });
 const clipItem = (n: number): ClipItem => ({
@@ -78,6 +79,7 @@ const clipItem = (n: number): ClipItem => ({
   durationSeconds: 30,
   url: null,
   thumbnailUrl: null,
+  category: null,
   views: n,
   createdAt: "2026-11-01T12:00:00.000Z",
   windowStartedAt: null,

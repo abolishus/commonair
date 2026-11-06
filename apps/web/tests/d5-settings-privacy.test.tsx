@@ -28,10 +28,10 @@ import {
   GrantsView,
   PortabilityGrants,
   grantRows,
-  runLimited,
   withMoreFollows,
   type GrantRow,
 } from "../src/components/portability/grants.tsx";
+import { GRANTS_SET_MANY_MAX, chunked, withGrantStates } from "../src/components/portability/lib.ts";
 import { LIST_PAGE_SIZE, foldForSearch, matchesQuery, windowRows } from "../src/components/settings/list-window.tsx";
 import { locale, t, uiMessages } from "../src/i18n/index.ts";
 import type { FollowDto, FollowPage, NotificationPreferencesDto, SettingsClient } from "../src/lib/notifications.ts";
@@ -43,7 +43,11 @@ const fake = vi.hoisted(() => ({
   follows: [] as { items: unknown[]; nextCursor: string | null }[],
   grants: [] as unknown[],
   set: [] as { channel: string; enabled: boolean }[],
+  setMany: [] as { channels: string[]; enabled: boolean }[],
   failSet: new Set<string>(),
+  failSetMany: false,
+  /** Holds every setMany call until released, to see the optimistic state. */
+  holdSetMany: null as Promise<void> | null,
 }));
 
 vi.mock("../src/lib/bootstrap.ts", () => ({
@@ -75,6 +79,12 @@ vi.mock("../src/lib/api.ts", () => {
           fake.set.push(input);
           return { enabled: input.enabled };
         },
+        setMany: async (input: { channels: string[]; enabled: boolean }) => {
+          fake.setMany.push(input);
+          if (fake.holdSetMany) await fake.holdSetMany;
+          if (fake.failSetMany) throw new Error("down");
+          return { enabled: input.enabled, updated: input.channels.length };
+        },
       },
     },
   });
@@ -86,7 +96,10 @@ afterEach(() => {
   fake.follows = [];
   fake.grants = [];
   fake.set = [];
+  fake.setMany = [];
   fake.failSet = new Set();
+  fake.failSetMany = false;
+  fake.holdSetMany = null;
 });
 
 const WEB = join(import.meta.dirname, "..");
@@ -264,7 +277,10 @@ describe("PortabilityGrants bulk (F36)", () => {
     nextCursor: next,
   });
 
-  it("all on loads the unloaded follows first, then turns on every channel that is off", async () => {
+  const state = (slug: string) =>
+    screen.getAllByTestId("portability-grant").find((r) => r.dataset.channel === slug)?.dataset.state;
+
+  it("all on loads the unloaded follows first, then turns on every channel that is off in one call", async () => {
     fake.follows = [followPage(0, 30, "1"), followPage(30, 45, null)];
     fake.grants = [{ channel: channel(3) }];
     wrap(<PortabilityGrants />);
@@ -272,9 +288,11 @@ describe("PortabilityGrants bulk (F36)", () => {
     await act(async () => {
       fireEvent.click(screen.getByTestId("portability-grants-all-on"));
     });
-    await waitFor(() => expect(fake.set).toHaveLength(44));
-    expect(fake.set.every((s) => s.enabled)).toBe(true);
-    expect(fake.set.map((s) => s.channel)).not.toContain("ch003");
+    await waitFor(() => expect(fake.setMany).toHaveLength(1));
+    expect(fake.set).toEqual([]);
+    expect(fake.setMany[0]?.enabled).toBe(true);
+    expect(fake.setMany[0]?.channels).toHaveLength(44);
+    expect(fake.setMany[0]?.channels).not.toContain("ch003");
     await waitFor(() =>
       expect(screen.getAllByTestId("portability-grant").every((r) => r.dataset.state === "on")).toBe(true),
     );
@@ -285,41 +303,71 @@ describe("PortabilityGrants bulk (F36)", () => {
     expect(screen.queryByTestId("portability-grants-more")).toBeNull();
   });
 
-  it("all off within a search touches only the matches that are on; a failure is counted", async () => {
+  it("all off within a search touches only the matches that are on", async () => {
     fake.follows = [followPage(0, 12, null)];
     fake.grants = [{ channel: channel(1) }, { channel: channel(10) }, { channel: channel(11) }];
-    fake.failSet = new Set(["ch011"]);
     wrap(<PortabilityGrants />);
     fireEvent.change(await screen.findByTestId("portability-grants-search"), { target: { value: "ch01" } });
     await act(async () => {
       fireEvent.click(screen.getByTestId("portability-grants-all-off"));
     });
-    await waitFor(() => expect(fake.set).toEqual([{ channel: "ch010", enabled: false }]));
+    await waitFor(() => expect(fake.setMany).toEqual([{ channels: ["ch010", "ch011"], enabled: false }]));
     // ch001 is on but outside the search: untouched.
     await waitFor(() => expect(screen.getByTestId("portability-grants-all-off").getAttribute("aria-busy")).toBeNull());
     fireEvent.change(screen.getByTestId("portability-grants-search"), { target: { value: "" } });
-    const state = (slug: string) =>
-      screen.getAllByTestId("portability-grant").find((r) => r.dataset.channel === slug)?.dataset.state;
     expect(state("ch001")).toBe("on");
     expect(state("ch010")).toBe("off");
-    expect(state("ch011")).toBe("on");
+    expect(state("ch011")).toBe("off");
+  });
+
+  it("flips the switches before the server answers, and flips them back when it refuses", async () => {
+    fake.follows = [followPage(0, 3, null)];
+    fake.grants = [{ channel: channel(0) }];
+    let release = () => {};
+    fake.holdSetMany = new Promise<void>((r) => {
+      release = r;
+    });
+    fake.failSetMany = true;
+    wrap(<PortabilityGrants />);
+    await screen.findByTestId("portability-grants-all-on");
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("portability-grants-all-on"));
+    });
+    // Optimistic: on while the call is in flight.
+    await waitFor(() => expect(state("ch001")).toBe("on"));
+    expect(state("ch002")).toBe("on");
+    expect(fake.setMany).toEqual([{ channels: ["ch001", "ch002"], enabled: true }]);
+    await act(async () => {
+      release();
+    });
+    // Refused: back off, and the channel that was already on stays on.
+    await waitFor(() => expect(state("ch001")).toBe("off"));
+    expect(state("ch002")).toBe("off");
+    expect(state("ch000")).toBe("on");
+    await waitFor(() => expect(screen.getByTestId("portability-grants-all-on").getAttribute("aria-busy")).toBeNull());
   });
 });
 
-describe("runLimited and withMoreFollows", () => {
-  it("keeps at most `limit` tasks running and returns the failures", async () => {
-    let running = 0;
-    let peak = 0;
-    const failed = await runLimited([1, 2, 3, 4, 5, 6, 7], 3, async (n) => {
-      running++;
-      peak = Math.max(peak, running);
-      await new Promise((r) => setTimeout(r, 1));
-      running--;
-      if (n % 3 === 0) throw new Error("x");
-    });
-    expect(peak).toBe(3);
-    expect(failed.sort((a, b) => a - b)).toEqual([3, 6]);
-    expect(await runLimited([], 4, async () => {})).toEqual([]);
+describe("grant helpers and withMoreFollows", () => {
+  it("chunks into runs of at most the batch size, in order", () => {
+    expect(chunked([1, 2, 3, 4, 5], 2)).toEqual([[1, 2], [3, 4], [5]]);
+    expect(chunked([], 3)).toEqual([]);
+    expect(chunked([1, 2], 2)).toEqual([[1, 2]]);
+    const big = Array.from({ length: GRANTS_SET_MANY_MAX + 1 }, (_, i) => i);
+    expect(chunked(big, GRANTS_SET_MANY_MAX).map((c) => c.length)).toEqual([GRANTS_SET_MANY_MAX, 1]);
+  });
+
+  it("switches only the listed channels, keeping the same object when nothing changes", () => {
+    const rows: GrantRow[] = [
+      { ...channel(1), on: false },
+      { ...channel(2), on: true },
+      { ...channel(3), on: false },
+    ];
+    const next = withGrantStates(rows, new Set(["ch001", "ch002"]), true);
+    expect(next.map((r) => r.on)).toEqual([true, true, false]);
+    expect(next[1]).toBe(rows[1]);
+    expect(next[2]).toBe(rows[2]);
+    expect(withGrantStates(rows, new Set(), true)).toEqual(rows);
   });
 
   it("adds only new channels, keeps current switch states, and sorts by name", () => {

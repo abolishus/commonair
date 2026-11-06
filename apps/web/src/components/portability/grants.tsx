@@ -19,6 +19,7 @@ import { t } from "../../i18n/index.ts";
 import { toastActionError } from "../../lib/action-error.ts";
 import { api } from "../../lib/api.ts";
 import { FormError } from "../form-error.tsx";
+import { GRANTS_SET_MANY_MAX, chunked, withGrantStates } from "./lib.ts";
 import { ListLoadMore, ListSearch, NoMatch, useListWindow } from "../settings/list-window.tsx";
 
 export interface GrantRow {
@@ -209,33 +210,8 @@ function GrantSwitch({
   );
 }
 
-/** Requests a bulk change keeps in flight at once (one per channel; there is no bulk call). */
-const BULK_CONCURRENCY = 4;
-
 type FollowPage = Awaited<ReturnType<ReturnType<typeof api>["me"]["follows"]>>;
 type FollowChannel = FollowPage["items"][number]["channel"];
-
-/** Runs `task` over `items`, at most `limit` at a time; resolves with the items that failed. */
-export async function runLimited<T>(
-  items: readonly T[],
-  limit: number,
-  task: (item: T) => Promise<void>,
-): Promise<T[]> {
-  const failed: T[] = [];
-  let next = 0;
-  const worker = async () => {
-    while (next < items.length) {
-      const item = items[next++] as T;
-      try {
-        await task(item);
-      } catch {
-        failed.push(item);
-      }
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
-  return failed;
-}
 
 /** The `/settings/notifications` section (moved from privacy, F37). */
 export function PortabilityGrants(): React.JSX.Element {
@@ -320,9 +296,20 @@ export function PortabilityGrants(): React.JSX.Element {
       }
       const wanted = new Set(scope.everything ? all.map((r) => r.slug) : scope.slugs);
       const changes = all.filter((r) => wanted.has(r.slug) && r.on !== on).map((r) => r.slug);
-      const missed = await runLimited(changes, BULK_CONCURRENCY, (slug) => setOne(slug, on));
-      if (missed.length > 0) toast.error(t("settings.grants.allFailed", { count: missed.length }));
-      else toast.success(on ? t("settings.grants.allOnDone") : t("settings.grants.allOffDone"));
+      // Optimistic: the switches flip now; a batch the server refuses flips back.
+      setRows((rs) => (rs ? withGrantStates(rs, new Set(changes), on) : rs));
+      const missed: string[] = [];
+      for (const batch of chunked(changes, GRANTS_SET_MANY_MAX)) {
+        try {
+          await api().portability.grants.setMany({ channels: batch, enabled: on });
+        } catch {
+          missed.push(...batch);
+        }
+      }
+      if (missed.length > 0) {
+        setRows((rs) => (rs ? withGrantStates(rs, new Set(missed), !on) : rs));
+        toast.error(t("settings.grants.allFailed", { count: missed.length }));
+      } else toast.success(on ? t("settings.grants.allOnDone") : t("settings.grants.allOffDone"));
     })()
       .catch((err: unknown) => toastActionError(err, t("portability.grants.saveFailed")))
       .finally(() => setBulkBusy(false));

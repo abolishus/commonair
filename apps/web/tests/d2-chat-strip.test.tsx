@@ -111,7 +111,7 @@ describe("pinnedItems (pure)", () => {
       giveaway: giveaway(),
     });
     expect(kinds(items)).toEqual(["giveaway:open", "prediction:locked", "poll:won"]);
-    expect(items.map(pinnedPriority)).toEqual([2, 3, 4]);
+    expect(items.map(pinnedPriority)).toEqual([2, 4, 5]);
   });
 
   it("is empty with nothing pinned, and keeps a single item", () => {

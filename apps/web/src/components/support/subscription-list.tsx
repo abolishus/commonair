@@ -9,7 +9,6 @@ import {
   SkeletonGroup,
   SkeletonText,
   StatusBadge,
-  type Accent,
 } from "@commonair/ui";
 import { Button } from "@commonair/ui/components/button";
 import {
@@ -34,42 +33,28 @@ import {
   type SubscriptionDto,
 } from "../../lib/support.ts";
 
-/** What a row shows of its channel; the subscription itself carries only the slug. */
-export interface SubscriptionChannel {
-  displayName: string;
-  avatarUrl: string | null;
-  /** The channel's accent, so the avatar matches the one on its other rows. */
-  accent?: Accent | null;
-}
-
 /**
  * F38: the channel as people know it, its display name, with `@slug` beside it; the slug alone
- * until (or unless) the channel's name has loaded.
+ * when the channel has no display name.
  */
-export function subscriptionChannelName(
-  slug: string,
-  channels: ReadonlyMap<string, SubscriptionChannel> | undefined,
-): { name: string; handle: string | null } {
-  const name = channels?.get(slug)?.displayName.trim();
+export function subscriptionChannelName(subscription: Pick<SubscriptionDto, "channelSlug" | "channel">): {
+  name: string;
+  handle: string | null;
+} {
+  const slug = subscription.channelSlug;
+  const name = subscription.channel.displayName.trim();
   return name ? { name, handle: `@${slug}` } : { name: slug, handle: null };
 }
 
 export interface SubscriptionListProps {
   /** Null while loading. */
   subscriptions: readonly SubscriptionDto[] | null;
-  /** Display names and avatars by channel slug (F38). */
-  channels?: ReadonlyMap<string, SubscriptionChannel>;
   onCancel: (subscription: SubscriptionDto) => Promise<void>;
   onCancelError: (err: unknown) => void;
 }
 
 /** `/settings/subscriptions`: one `subscription-row` per subscription, or `subscriptions-empty`. */
-export function SubscriptionList({
-  subscriptions,
-  channels,
-  onCancel,
-  onCancelError,
-}: SubscriptionListProps): React.JSX.Element {
+export function SubscriptionList({ subscriptions, onCancel, onCancelError }: SubscriptionListProps): React.JSX.Element {
   if (subscriptions === null)
     return (
       <SkeletonGroup label={t("subscriptions.loading")}>
@@ -89,7 +74,7 @@ export function SubscriptionList({
     <ItemGroup>
       {sortSubscriptions(subscriptions).map((s) => {
         const status = SUBSCRIPTION_STATUS_VIEW[s.status];
-        const channel = subscriptionChannelName(s.channelSlug, channels);
+        const channel = subscriptionChannelName(s);
         return (
           <Item
             key={s.id}
@@ -106,8 +91,8 @@ export function SubscriptionList({
             <ItemMedia>
               <ChannelAvatar
                 name={channel.name}
-                src={channels?.get(s.channelSlug)?.avatarUrl ?? null}
-                accent={channels?.get(s.channelSlug)?.accent ?? null}
+                src={s.channel.avatarUrl}
+                accent={s.channel.accent ?? null}
                 size="md"
                 decorative
               />

@@ -7,7 +7,6 @@ import { Navigate, createFileRoute } from "@tanstack/react-router";
 import * as React from "react";
 import { FormError } from "../../components/form-error.tsx";
 import { YourPayments } from "../../components/money/breakdown-payments.tsx";
-import { useSubscriptionChannels } from "../../components/settings/subscription-channels.ts";
 import { SubscriptionList } from "../../components/support/subscription-list.tsx";
 import { t } from "../../i18n/index.ts";
 import { toastActionError } from "../../lib/action-error.ts";
@@ -44,9 +43,6 @@ function SubscriptionsPage(): React.JSX.Element {
     };
   }, []);
 
-  // F38: the subscription names only the slug; the channel gives its display name and avatar.
-  const channels = useSubscriptionChannels(subscriptions);
-
   const cancel = async (subscription: SubscriptionDto) => {
     const updated = await api().money.cancelSubscription({ id: subscription.id });
     setSubscriptions((list) => list?.map((s) => (s.id === updated.id ? updated : s)) ?? list);
@@ -62,7 +58,6 @@ function SubscriptionsPage(): React.JSX.Element {
       ) : (
         <SubscriptionList
           subscriptions={subscriptions}
-          channels={channels}
           onCancel={cancel}
           onCancelError={(err) => toastActionError(err, t("subscriptions.cancelFailed"))}
         />

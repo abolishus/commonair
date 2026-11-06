@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * The chat panel's interactivity state for one channel: the current poll, prediction and giveaway
- * (loaded on join, then kept current by event frames), the viewer's points (on join, after their
+ * The chat panel's interactivity state for one channel: the current poll, prediction, giveaway and
+ * goals (loaded on join, then kept current by event frames), the viewer's points (on join, after their
  * own votes and bets, and every 60 s) and the outgoing-raid banner. The panel feeds it frames from
  * its `ChatConnection` and renders what it returns.
  */
@@ -14,15 +14,21 @@ import {
   POINTS_REFRESH_MS,
   RESULTS_VISIBLE_MS,
   applyGiveawayFrame,
+  applyGoalFrame,
   applyPollFrame,
   applyPredictionFrame,
   giveawayVisible,
+  goalVisible,
+  mergeLoadedGoals,
   pollVisible,
   predictionVisible,
   raidStep,
   routeEventFrame,
   type GiveawayDto,
   type GiveawayFrame,
+  type GoalDto,
+  type GoalFrame,
+  type GoalView,
   type LoyaltyBalanceDto,
   type PollFrame,
   type PollViewDto,
@@ -45,6 +51,8 @@ export interface ChatInteract {
   prediction: PredictionViewDto | null;
   /** The open (or just drawn) giveaway; always null while the instance has giveaways off. */
   giveaway: GiveawayDto | null;
+  /** Running goals, and ended ones for RESULTS_VISIBLE_MS after they end; oldest first. */
+  goals: readonly GoalView[];
   points: LoyaltyBalanceDto | null;
   raid: RaidBannerState | null;
   /**
@@ -66,6 +74,7 @@ interface InteractState {
   poll: PollViewDto | null;
   prediction: PredictionViewDto | null;
   giveaway: GiveawayDto | null;
+  goals: GoalView[];
   points: LoyaltyBalanceDto | null;
   raid: RaidBannerState | null;
   loaded: boolean;
@@ -79,6 +88,8 @@ type InteractAction =
   | { type: "predictionLoaded"; prediction: PredictionViewDto | null }
   | { type: "giveaway"; giveaway: GiveawayDto | null }
   | { type: "giveawayFrame"; frame: GiveawayFrame }
+  | { type: "goalsLoaded"; goals: GoalDto[] }
+  | { type: "goalFrame"; frame: GoalFrame }
   | { type: "poll"; poll: PollViewDto }
   | { type: "prediction"; prediction: PredictionViewDto | null }
   | { type: "pollFrame"; frame: PollFrame }
@@ -90,6 +101,7 @@ const EMPTY: InteractState = {
   poll: null,
   prediction: null,
   giveaway: null,
+  goals: [],
   points: null,
   raid: null,
   loaded: false,
@@ -132,6 +144,10 @@ function interactReducer(state: InteractState, action: InteractAction): Interact
       return { ...state, giveaway: action.giveaway };
     case "giveawayFrame":
       return { ...state, giveaway: applyGiveawayFrame(state.giveaway, action.frame) };
+    case "goalsLoaded":
+      return { ...state, goals: mergeLoadedGoals(state.goals, action.goals) };
+    case "goalFrame":
+      return { ...state, goals: applyGoalFrame(state.goals, action.frame) };
     case "points":
       return { ...state, points: action.points };
     case "raid":
@@ -194,7 +210,7 @@ export function useChatInteract({
   React.useEffect(() => {
     dispatch({ type: "reset" });
     let gone = false;
-    let pending = 3;
+    let pending = 4;
     const settled = () => {
       pending -= 1;
       if (!gone && pending === 0) dispatch({ type: "loaded" });
@@ -226,6 +242,16 @@ export function useChatInteract({
         () => undefined,
       )
       .finally(settled);
+    // Once per join: frames keep them current after that.
+    Promise.resolve()
+      .then(() => client.goals?.(channel) ?? [])
+      .then(
+        (goals) => {
+          if (!gone && goals.length > 0) dispatch({ type: "goalsLoaded", goals });
+        },
+        () => undefined,
+      )
+      .finally(settled);
     return () => {
       gone = true;
     };
@@ -243,11 +269,12 @@ export function useChatInteract({
   }, [channel, signedIn, self, refreshPoints]);
 
   // An ended card leaves after RESULTS_VISIBLE_MS; tick only while one is showing results.
-  const { poll, prediction, giveaway } = state;
+  const { poll, prediction, giveaway, goals } = state;
   const showingResults =
     (poll !== null && poll.status !== "active") ||
     (prediction !== null && (prediction.status === "resolved" || prediction.status === "canceled")) ||
-    giveaway?.status === "drawn";
+    giveaway?.status === "drawn" ||
+    goals.some((g) => g.endedAt !== null && goalVisible(g, now));
   React.useEffect(() => {
     if (!showingResults) return;
     const timer = setInterval(() => setNow(Date.now()), Math.min(5_000, RESULTS_VISIBLE_MS));
@@ -272,7 +299,7 @@ export function useChatInteract({
       } else if (routed.kind === "giveaway") {
         dispatch({ type: "giveawayFrame", frame: routed.frame });
         refreshGiveaway();
-      }
+      } else if (routed.kind === "goal") dispatch({ type: "goalFrame", frame: routed.frame });
       return true;
     },
     [refreshPrediction, refreshPoints, refreshGiveaway],
@@ -292,12 +319,14 @@ export function useChatInteract({
   );
   const setGiveaway = React.useCallback((g: GiveawayDto) => dispatch({ type: "giveaway", giveaway: g }), []);
 
+  const visibleGoals = React.useMemo(() => goals.filter((g) => goalVisible(g, now)), [goals, now]);
   // `now` moves only while results show: a card that ended long before the panel mounted is
   // hidden at once, one that ends later leaves within a tick of RESULTS_VISIBLE_MS.
   return {
     poll: pollVisible(poll, now) ? poll : null,
     prediction: predictionVisible(prediction, now) ? prediction : null,
     giveaway: giveawayVisible(giveaway, now) ? giveaway : null,
+    goals: visibleGoals,
     points: signedIn && state.points?.enabled ? state.points : null,
     raid: state.raid,
     loaded: state.loaded,

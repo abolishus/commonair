@@ -6,7 +6,7 @@
  * D5-studio F21: the stream manager as a control room. The grid's panels (preview and chat slots,
  * live stats and health, stream info, quick actions, activity), "Edit stream info" saving
  * optimistically and rolling back on error, the health numbers from the newest sample, and the
- * activity feed from platform event frames (follows and giveaways too, once they are forwarded).
+ * activity feed from platform event frames (follows and giveaway results included).
  */
 import { LocaleProvider, TooltipProvider } from "@commonair/ui";
 import { RouterContextProvider, createMemoryHistory, createRootRoute, createRouter } from "@tanstack/react-router";
@@ -18,7 +18,7 @@ import { activityFromEvent, pushActivity } from "../src/components/studio/activi
 import type { ActivitySource } from "../src/components/studio/activity-feed.tsx";
 import { StreamManager } from "../src/components/studio/stream-manager.tsx";
 import { streamInfoError, type StreamInfo, type StreamInfoClient } from "../src/components/studio/stream-info.tsx";
-import { locale, uiMessages } from "../src/i18n/index.ts";
+import { locale, t, uiMessages } from "../src/i18n/index.ts";
 import type { PollEnv, StreamHealthDto } from "../src/lib/stream-health.ts";
 
 // The control room's defaults are the real player and chat; these tests pass their own slots.
@@ -269,6 +269,44 @@ describe("activity", () => {
     const items = await screen.findAllByTestId("stream-activity-item");
     expect(items.map((i) => i.getAttribute("data-kind"))).toEqual(["follow", "raid"]);
     expect(items[0]?.textContent).toContain("Pip followed");
+  });
+
+  it("shows follows and giveaway results now that chat forwards them, once each", async () => {
+    let emit: (type: string, data: unknown) => void = () => undefined;
+    const source: ActivitySource = (_channel, onEvent) => {
+      emit = onEvent;
+      return () => undefined;
+    };
+    wrap(manager({ activitySource: source }));
+    const follow = {
+      ...broadcaster,
+      user_id: "01900000-0000-7000-8000-000000000003",
+      user_login: "pip",
+      user_name: "",
+      followed_at: "2026-11-04T10:00:00.000Z",
+    };
+    const giveawayEnd = (id: string, status: "drawn" | "cancelled") => ({
+      ...broadcaster,
+      id,
+      title: "Prints",
+      status,
+      entries: 40,
+      winners: status === "drawn" ? 2 : 0,
+      seed: status === "drawn" ? "abc" : null,
+      started_at: "2026-11-04T09:00:00.000Z",
+      ended_at: "2026-11-04T09:30:00.000Z",
+    });
+    act(() => emit("channel.follow", follow));
+    // The broadcaster's and a moderator's connection can both see it: one item.
+    act(() => emit("channel.follow", follow));
+    act(() => emit("channel.giveaway.end", giveawayEnd("01900000-0000-7000-8000-0000000000a1", "drawn")));
+    act(() => emit("channel.giveaway.end", giveawayEnd("01900000-0000-7000-8000-0000000000a2", "cancelled")));
+    const items = await screen.findAllByTestId("stream-activity-item");
+    expect(items.map((i) => i.getAttribute("data-kind"))).toEqual(["giveaway", "giveaway", "follow"]);
+    expect(items[0]?.textContent).toContain(t("studio.activity.giveawayCancelled", { title: "Prints" }));
+    expect(items[1]?.textContent).toContain(t("studio.activity.giveawayDrawn", { title: "Prints", count: 2 }));
+    // No display name: the login.
+    expect(items[2]?.textContent).toContain(t("studio.activity.follow", { name: "pip" }));
   });
 
   it("parses giveaway results and drops what does not validate", () => {

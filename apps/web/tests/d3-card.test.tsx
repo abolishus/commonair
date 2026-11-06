@@ -207,6 +207,7 @@ const vod: VodDto = {
   expiresAt: null,
   failedReason: null,
   captions: [],
+  category: null,
 };
 
 const client = (live: boolean): WatchClient => ({

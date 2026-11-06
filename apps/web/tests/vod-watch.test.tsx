@@ -24,8 +24,22 @@ import { locale, t, uiMessages } from "../src/i18n/index.ts";
 
 vi.mock("@tanstack/react-router", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tanstack/react-router")>()),
-  Link: ({ children, className, ...rest }: { children: React.ReactNode; className?: string }) => (
-    <a href="/rivertide" className={className} data-testid={(rest as { "data-testid"?: string })["data-testid"]}>
+  Link: ({
+    children,
+    className,
+    params,
+    ...rest
+  }: {
+    children: React.ReactNode;
+    className?: string;
+    params?: { category?: string };
+  }) => (
+    <a
+      href={params?.category ? `/directory/${params.category}` : "/rivertide"}
+      className={className}
+      data-testid={(rest as { "data-testid"?: string })["data-testid"]}
+      data-slug={(rest as { "data-slug"?: string })["data-slug"]}
+    >
       {children}
     </a>
   ),
@@ -88,6 +102,7 @@ const vod = (over: Partial<VodDto> = {}): VodDto => ({
   expiresAt: null,
   failedReason: null,
   captions: [],
+  category: null,
   ...over,
 });
 
@@ -103,6 +118,7 @@ const clip = (over: Partial<ClipDto> = {}): ClipDto => ({
   views: 3,
   createdAt: iso(0),
   windowStartedAt: iso(100),
+  category: null,
   ...over,
 });
 
@@ -287,6 +303,20 @@ describe("VOD watch page", () => {
     expect(byId(container, "vod-captions-toggle")).toBeNull();
   });
 
+  it("links the VOD's category into the directory, and shows none without one", async () => {
+    const withCategory = client({ vod: async () => vod({ category: { slug: "art", name: "Art" } }) });
+    const first = wrap(<VodWatchPage channel="rivertide" vodId={VOD_ID} viewer={null} client={withCategory} />);
+    await waitFor(() => expect(byId(first.container, "watch-meta")).not.toBeNull());
+    const link = byId(first.container, "channel-meta-category");
+    expect(link?.textContent).toBe("Art");
+    expect(link?.getAttribute("href")).toBe("/directory/art");
+    expect(link?.getAttribute("data-slug")).toBe("art");
+    first.unmount();
+    const second = wrap(<VodWatchPage channel="rivertide" vodId={VOD_ID} viewer={null} client={client()} />);
+    await waitFor(() => expect(byId(second.container, "watch-meta")).not.toBeNull());
+    expect(byId(second.container, "channel-meta-category")).toBeNull();
+  });
+
   it("the captions toggle shows only with tracks and turns the track on and off", async () => {
     const c = client({
       vod: async () => vod({ captions: [{ language: "en", label: "English", url: "/media/vods/v/captions/en.vtt" }] }),
@@ -427,6 +457,15 @@ describe("clip watch page", () => {
       />,
     );
     await waitFor(() => expect(byId(processing.container, "watch-not-ready")).not.toBeNull());
+  });
+
+  it("links the clip's category into the directory", async () => {
+    const c = client({ clip: async () => clip({ category: { slug: "speedruns", name: "Speedruns" } }) });
+    const { container } = wrap(<ClipWatchPage channel="rivertide" clipId={CLIP_ID} viewer={null} client={c} />);
+    await waitFor(() => expect(byId(container, "watch-meta")).not.toBeNull());
+    const link = byId(container, "channel-meta-category");
+    expect(link?.textContent).toBe("Speedruns");
+    expect(link?.getAttribute("href")).toBe("/directory/speedruns");
   });
 
   it("plays the MP4 and maps its time onto the clip window; a row's time seeks", async () => {

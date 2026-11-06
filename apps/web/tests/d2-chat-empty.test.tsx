@@ -4,7 +4,8 @@
 
 /**
  * D2-chat's panel states on the real `ChatPanel` (design review F6): offline with nothing said
- * shows why it is quiet instead of "No messages yet", the 18+ gate shows no log frame and no
+ * shows why it is quiet instead of "No messages yet", and when someone last spoke (one
+ * `chat.history` call with limit 1), the 18+ gate shows no log frame and no
  * composer, a live channel keeps "No messages yet"; and the panel's wiring of the pinned strip
  * (what was there on load is shown but not announced) and of the points chip in the input row.
  */
@@ -24,13 +25,26 @@ import { ChatPanel, type ChatPanelProps } from "../src/chat/chat-panel.tsx";
 import type { ChatMessageFrame, SocketLike } from "../src/chat/connection.ts";
 import type { InteractClient } from "../src/chat/interact/client.ts";
 import type { LoyaltyBalanceDto, PredictionViewDto } from "../src/chat/interact/state.ts";
+import { newestAt } from "../src/chat/offline.tsx";
 import type { DismissStore } from "../src/chat/pinned/dismissed.ts";
 import { locale, t, uiMessages } from "../src/i18n/index.ts";
+
+/** `chat.history`: what the offline state's "last message" call answers. */
+const history = vi.hoisted(() => ({
+  calls: [] as { channel: string; limit?: number }[],
+  answer: async (): Promise<{ createdAt: string }[]> => [],
+}));
 
 vi.mock("../src/lib/api.ts", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/lib/api.ts")>();
   const client = {
-    chat: { connectToken: async () => ({ token: "t", url: "ws://chat.test/ws" }) },
+    chat: {
+      connectToken: async () => ({ token: "t", url: "ws://chat.test/ws" }),
+      history: async (input: { channel: string; limit?: number }) => {
+        history.calls.push(input);
+        return history.answer();
+      },
+    },
     legal: { current: async () => [] },
   };
   return { ...actual, api: () => client };
@@ -59,6 +73,8 @@ class FakeSocket implements SocketLike {
 }
 
 beforeEach(() => {
+  history.calls = [];
+  history.answer = async () => [];
   FakeSocket.all = [];
   vi.stubGlobal("WebSocket", FakeSocket);
 });
@@ -168,12 +184,52 @@ describe("offline", () => {
     );
   });
 
+  it("says when someone last spoke, from one chat.history call with limit 1", async () => {
+    const at = new Date(Date.now() - 3 * 3_600_000).toISOString();
+    history.answer = async () => [{ createdAt: at }];
+    panel({ stream: OFFLINE, channelName: "Indigo" });
+    const last = await screen.findByTestId("chat-offline-last");
+    expect(last.dataset.at).toBe(at);
+    expect(last.textContent).toContain(t("chat.offline.lastMessage"));
+    expect(last.querySelector("time")?.getAttribute("datetime")).toBe(at);
+    expect(history.calls).toEqual([{ channel: CHANNEL, limit: 1 }]);
+  });
+
+  it("shows no time when chat.history is empty or refuses", async () => {
+    panel({ stream: OFFLINE, channelName: "Indigo" });
+    await screen.findByTestId("chat-offline");
+    await waitFor(() => expect(history.calls).toHaveLength(1));
+    expect(screen.queryByTestId("chat-offline-last")).toBeNull();
+    cleanup();
+    history.answer = async () => {
+      throw Object.assign(new Error("nope"), { code: "FORBIDDEN" });
+    };
+    panel({ stream: OFFLINE, channelName: "Indigo" });
+    await screen.findByTestId("chat-offline");
+    await waitFor(() => expect(history.calls).toHaveLength(2));
+    expect(screen.queryByTestId("chat-offline-last")).toBeNull();
+  });
+
   it("gives way to the log once someone speaks", async () => {
     panel({ stream: OFFLINE, channelName: "Indigo" });
     const ws = await socket();
     act(() => ws.push({ op: "message", channel: CHANNEL, message: message(1, "hello") }));
     await screen.findByTestId("chat-message");
     expect(screen.queryByTestId("chat-offline")).toBeNull();
+  });
+});
+
+describe("newestAt", () => {
+  it("picks the newest valid time, null for none", () => {
+    expect(newestAt([])).toBeNull();
+    expect(newestAt([{ createdAt: "nope" }])).toBeNull();
+    expect(
+      newestAt([
+        { createdAt: "2026-11-06T10:00:00.000Z" },
+        { createdAt: "2026-11-06T11:00:00.000Z" },
+        { createdAt: "bad" },
+      ]),
+    ).toBe("2026-11-06T11:00:00.000Z");
   });
 });
 
@@ -185,6 +241,8 @@ describe("live", () => {
     cleanup();
     panel();
     expect(await screen.findByText(t("chat.empty"))).toBeTruthy();
+    // Live (or unknown) chat never asks for the last message.
+    expect(history.calls).toEqual([]);
   });
 });
 
