@@ -8,6 +8,7 @@
  */
 import { ConfirmDialog, EmptyState, RelativeTime, SkeletonGroup, SkeletonText } from "@commonair/ui";
 import { Button } from "@commonair/ui/components/button";
+import { FieldDescription } from "@commonair/ui/components/field";
 import { toast } from "@commonair/ui/toast";
 import { UserGroupIcon } from "@hugeicons/core-free-icons";
 import * as React from "react";
@@ -83,7 +84,7 @@ export function FederationFollowers({
         <h3 id={headingId} className="text-sm font-medium">
           {t("federation.followers.title")}
         </h3>
-        <p className="text-sm text-muted-foreground">{t("federation.followers.intro")}</p>
+        <FieldDescription data-testid="federation-followers-intro">{t("federation.followers.intro")}</FieldDescription>
       </div>
       {loadFailed ? (
         <FormError>{t("federation.followers.loadFailed")}</FormError>

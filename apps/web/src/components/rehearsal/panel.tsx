@@ -205,7 +205,7 @@ function InviteesCard(props: RehearsalPanelProps): React.JSX.Element {
         <CardDescription>{t("rehearsal.invitees.hint", { max: MAX_INVITEES })}</CardDescription>
       </CardHeader>
       <CardContent className="flex min-w-0 flex-col gap-4">
-        {!armed && <FieldDescription>{t("rehearsal.invitees.notArmed")}</FieldDescription>}
+        {!armed && <FieldDescription className="nth-last-2:mt-0">{t("rehearsal.invitees.notArmed")}</FieldDescription>}
         {armed && invitees.length === 0 && (
           <EmptyState
             icon={UserGroupIcon}
@@ -237,7 +237,7 @@ function InviteesCard(props: RehearsalPanelProps): React.JSX.Element {
           </ul>
         )}
         {full ? (
-          <FieldDescription data-testid="rehearsal-invitee-limit">
+          <FieldDescription data-testid="rehearsal-invitee-limit" className="nth-last-2:mt-0">
             {t("rehearsal.invitees.limit", { max: MAX_INVITEES })}
           </FieldDescription>
         ) : (
@@ -284,7 +284,7 @@ function InviteesCard(props: RehearsalPanelProps): React.JSX.Element {
           )
         )}
         {armed && (
-          <FieldDescription className="break-words">
+          <FieldDescription className="break-words nth-last-2:mt-0">
             {t("rehearsal.invitees.watchLink")}{" "}
             <Link to="/rehearse" search={{ channel: props.channel }} className="break-all underline">
               {props.watchHref}

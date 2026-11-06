@@ -176,10 +176,13 @@ export function DvrSettings({
                 </FieldDescription>
               )}
             </Field>
-            {/* Notes take the field hints' size, not a larger body size (F35). */}
-            <FieldDescription data-testid="dvr-needs-vods">{t("dvr.settings.needsVods")}</FieldDescription>
-            <FieldDescription>{t("dvr.settings.sourceOnly")}</FieldDescription>
-            <FieldDescription>{t("dvr.settings.originOnly")}</FieldDescription>
+            {/* Notes take the field hints' size, not a larger body size (F35). nth-last-2:mt-0
+                cancels the field-hint pull-up so the standalone notes keep even gaps. */}
+            <FieldDescription data-testid="dvr-needs-vods" className="nth-last-2:mt-0">
+              {t("dvr.settings.needsVods")}
+            </FieldDescription>
+            <FieldDescription className="nth-last-2:mt-0">{t("dvr.settings.sourceOnly")}</FieldDescription>
+            <FieldDescription className="nth-last-2:mt-0">{t("dvr.settings.originOnly")}</FieldDescription>
           </FieldGroup>
         )}
       </CardContent>

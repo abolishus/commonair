@@ -388,6 +388,14 @@ describe("the studio section", () => {
 });
 
 describe("the remote followers", () => {
+  it("the intro takes the notes' hint size, one note size per card (F35)", async () => {
+    const { container } = await mountSettings(fakeClient({ followers: [] }));
+    const intro = q(container, "federation-followers-intro");
+    expect(intro?.textContent).toBe(t("federation.followers.intro"));
+    expect(intro?.className).toMatch(/\btext-xs\b/);
+    expect(intro?.className).not.toMatch(/\btext-sm\b/);
+  });
+
   it("empty: an empty state naming the handle", async () => {
     const { container } = await mountSettings(fakeClient({ followers: [] }));
     await waitFor(() => expect(container.textContent).toContain(t("federation.followers.empty")));
