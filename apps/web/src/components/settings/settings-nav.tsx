@@ -9,7 +9,7 @@
  * render is already right at either width.
  */
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@commonair/ui/components/select";
-import { Tabs, TabsList, TabsTrigger } from "@commonair/ui/components/tabs";
+import { PageTabs } from "@commonair/ui/blocks/headers";
 import { Link, useNavigate } from "@tanstack/react-router";
 import * as React from "react";
 import { t } from "../../i18n/index.ts";
@@ -86,26 +86,17 @@ export function SettingsNav({ current }: { current: SettingsTabId }): React.JSX.
   const items = Object.fromEntries(SETTINGS_TABS.map((tab) => [tab.id, settingsTabLabel(tab.id)]));
   return (
     <nav aria-label={t("settings.nav.label")} data-testid="settings-nav" data-current={current} className="min-w-0">
-      {/* sm and up: the tab row. Controlled, so the active style follows the route, not the first tab. */}
-      <Tabs value={current} className="hidden min-w-0 sm:flex">
-        <div className="-mb-1.5 min-w-0 overflow-x-auto border-b pb-1.5">
-          <TabsList variant="line" className="h-10 min-w-max">
-            {SETTINGS_TABS.map((tab) => (
-              <TabsTrigger
-                key={tab.id}
-                value={tab.id}
-                nativeButton={false}
-                render={tabLink(tab.id)}
-                data-testid={`settings-tab-${tab.id}`}
-                aria-current={tab.id === current ? "page" : undefined}
-                className="px-3 text-sm"
-              >
-                {settingsTabLabel(tab.id)}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </div>
-      </Tabs>
+      {/* sm and up: the shared tab row in link mode; the current tab follows the route (F30). */}
+      <PageTabs
+        className="hidden sm:flex"
+        items={SETTINGS_TABS.map((tab) => ({
+          id: tab.id,
+          label: settingsTabLabel(tab.id),
+          render: tabLink(tab.id),
+          current: tab.id === current,
+          "data-testid": `settings-tab-${tab.id}`,
+        }))}
+      />
       {/* Below sm: seven tabs do not fit 320 px, so the same choice as a select. */}
       <div className="flex flex-col gap-1 sm:hidden">
         <label htmlFor={selectId} className="text-xs text-muted-foreground">

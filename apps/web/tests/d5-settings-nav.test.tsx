@@ -23,7 +23,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type * as React from "react";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
-import { SETTINGS_TABS, settingsTabFor } from "../src/components/settings/settings-nav.tsx";
+import { SETTINGS_TABS, settingsTabFor, settingsTabLabel } from "../src/components/settings/settings-nav.tsx";
 import { locale, uiMessages } from "../src/i18n/index.ts";
 import { Route as SettingsRoute } from "../src/routes/_app/settings.tsx";
 
@@ -137,6 +137,20 @@ describe("the settings layout", () => {
     expect(tabs?.className).toMatch(/\bhidden\b/);
     expect(tabs?.className).toMatch(/\bsm:flex\b/);
     expect(screen.getByTestId("settings-nav-select").parentElement?.className).toMatch(/\bsm:hidden\b/);
+  });
+
+  it("the tab row is the shared PageTabs: a line list in its own sideways scroller, in tab order", async () => {
+    await mount("/settings/copyright");
+    const list = screen.getByTestId("settings-tab-copyright").closest("[data-slot=tabs-list]") as HTMLElement;
+    expect(list.dataset.variant).toBe("line");
+    expect(list.parentElement?.className).toMatch(/\boverflow-x-auto\b/);
+    const triggers = [...list.querySelectorAll("[data-slot=tabs-trigger]")];
+    expect(triggers.map((el) => el.getAttribute("data-testid"))).toEqual(
+      SETTINGS_TABS.map((tab) => `settings-tab-${tab.id}`),
+    );
+    expect(triggers.map((el) => el.textContent)).toEqual(SETTINGS_TABS.map((tab) => settingsTabLabel(tab.id)));
+    // Exactly one tab is selected, the route's.
+    expect(list.querySelectorAll("[data-active]")).toHaveLength(1);
   });
 
   it("the unsubscribe page and a signed-out visitor get no tab row", async () => {
