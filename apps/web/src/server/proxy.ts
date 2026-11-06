@@ -114,15 +114,31 @@ export type Fetcher = (req: Request) => Promise<Response>;
 /** Bun-specific `decompress: false` keeps encoded bodies and their content-encoding consistent. */
 const bunFetch: Fetcher = (req) => fetch(req, { redirect: "manual", decompress: false } as RequestInit);
 
+/** Where an upstream failure is reported; the path only, since a query can carry a token. */
+export type ProxyFailureLog = (fields: { path: string; error: string }) => void;
+
+/** The path to report for a proxied request: `/rpc/...` in full, `/api/...` cut to three segments. */
+export function reportablePath(pathname: string): string {
+  if (pathname === "/rpc" || pathname.startsWith("/rpc/")) return pathname;
+  // `/api/auth/<flow>/<token>`: anything past the flow name may be a secret.
+  return pathname.split("/").slice(0, 4).join("/");
+}
+
 export async function proxy(
   req: Request,
   target: UpstreamTarget,
   clientAddress: string | null,
   doFetch: Fetcher = bunFetch,
+  onFailure?: ProxyFailureLog,
 ): Promise<Response> {
   try {
     return downstreamResponse(await doFetch(upstreamRequest(req, target, clientAddress)));
-  } catch {
+  } catch (err) {
+    // A silent 502 left the browser's "could not load" state as the only trace; say what failed.
+    onFailure?.({
+      path: reportablePath(new URL(req.url).pathname),
+      error: err instanceof Error ? `${err.name}: ${err.message}` : String(err),
+    });
     return Response.json(
       { code: "BAD_GATEWAY", message: "API unavailable" },
       { status: 502, headers: { "cache-control": "no-store" } },

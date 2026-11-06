@@ -26,6 +26,7 @@ const server = createWebServer({
   clientDir: new URL("client/", distDir).pathname,
   ssr: (req) => ssr.default.fetch(req),
   manifest: () => manifestResponse(publicConfig(env)),
+  onProxyFailure: (fields) => logger.warn("api proxy failed", fields),
 });
 
 logger.info("web listening", { port: server.port });

@@ -864,6 +864,7 @@ async function e4bMoney(ctx: ScenarioContext, sessions: WebSession[], check: Sce
     chargedBack: pay(sub),
     stripe: webhook,
     hooks: w1HooksFor(ctx),
+    sessions,
   };
   const W1_STEPS: Readonly<Record<W1Extension<"e4b-money">, (e: MoneyExtension) => Promise<void>>> = {
     breakdown: stepBreakdown,

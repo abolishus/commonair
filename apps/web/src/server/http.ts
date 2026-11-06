@@ -3,7 +3,7 @@
 
 /** Request routing for the production web server (see `server.ts`). */
 import { join, normalize } from "node:path";
-import { isProxied, proxy, type Fetcher } from "./proxy.ts";
+import { isProxied, proxy, type Fetcher, type ProxyFailureLog } from "./proxy.ts";
 import { securityHeaders } from "./security.ts";
 
 export { securityHeaders } from "./security.ts";
@@ -21,6 +21,8 @@ export interface WebServerOptions {
   /** `/manifest.webmanifest`, built from the instance (ADR 0028 decision 7). Absent: SSR answers it. */
   manifest?: () => Response;
   fetchUpstream?: Fetcher;
+  /** Upstream failures the proxy answers with 502. */
+  onProxyFailure?: ProxyFailureLog;
 }
 
 /** Request bodies are small JSON (auth forms, RPC inputs); uploads go straight to object storage. */
@@ -54,7 +56,7 @@ export function createHandler(opts: Omit<WebServerOptions, "port" | "hostname">)
   return async (req: Request, clientAddress: string | null): Promise<Response> => {
     const url = new URL(req.url);
     // The API sets its own headers on what it answers.
-    if (isProxied(url.pathname)) return proxy(req, target, clientAddress, opts.fetchUpstream);
+    if (isProxied(url.pathname)) return proxy(req, target, clientAddress, opts.fetchUpstream, opts.onProxyFailure);
     const security = securityHeaders(url.pathname);
     // The web server has no dependencies of its own to be ready for: liveness = readiness.
     if (url.pathname === "/healthz" || url.pathname === "/readyz")

@@ -9,9 +9,10 @@
 import type { Logger } from "@commonair/observability";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import type { BrowserContext, Locator, Page } from "playwright";
+import type { BrowserContext, Locator, Page, Request } from "playwright";
 import type { ProbeVideoStats } from "../../player/probe.ts";
 import { type BrowserEngine, type BrowserFleet, HUMANIZE_SCRIPT } from "../browser-viewer.ts";
+import { PendingCalls, apiPath } from "./api-calls.ts";
 import { type TestId, tid } from "./selectors.ts";
 
 export interface WebSessionOptions {
@@ -59,8 +60,12 @@ export function browserLocale(locale: WebSessionOptions["locale"]): string {
   return (typeof locale === "object" && locale.acceptLanguage) || DEFAULT_BROWSER_LOCALE;
 }
 
+/** An API call unanswered this long when a failure screenshot is taken is reported as pending. */
+const PENDING_REPORT_MS = 5_000;
+
 export class WebSession {
   private readonly pages = new Map<string, Page>();
+  private readonly pending = new Map<string, PendingCalls<Request>>();
   private closed = false;
 
   private constructor(
@@ -97,8 +102,35 @@ export class WebSession {
     page.on("pageerror", (err) =>
       this.log?.warn("web page error", { session: this.label, page: name, error: err.message }),
     );
+    this.trackApiCalls(page, name);
     this.pages.set(name, page);
     return page;
+  }
+
+  /**
+   * Log the API calls a page gets an error for (status >= 400), or none at all (network
+   * failure), and remember the unanswered ones for `screenshotAll`: a page waiting on data it
+   * never gets otherwise shows up only as a selector timeout.
+   */
+  private trackApiCalls(page: Page, name: string): void {
+    const pending = new PendingCalls<Request>();
+    this.pending.set(name, pending);
+    const fields = { session: this.label, page: name };
+    page.on("request", (req) => {
+      const path = apiPath(req.url(), this.webUrl);
+      if (path) pending.start(req, path, Date.now());
+    });
+    page.on("requestfinished", (req) => pending.finish(req));
+    page.on("requestfailed", (req) => {
+      pending.finish(req);
+      const path = apiPath(req.url(), this.webUrl);
+      if (path) this.log?.warn("web api request failed", { ...fields, path, error: req.failure()?.errorText ?? "" });
+    });
+    page.on("response", (res) => {
+      if (res.status() < 400) return;
+      const path = apiPath(res.url(), this.webUrl);
+      if (path) this.log?.warn("web api error", { ...fields, path, status: res.status() });
+    });
   }
 
   /** Navigate a page to a web app path (or absolute URL). */
@@ -132,6 +164,8 @@ export class WebSession {
     }
     for (const [name, page] of this.pages) {
       if (page.isClosed()) continue;
+      for (const call of this.pending.get(name)?.olderThan(Date.now(), PENDING_REPORT_MS) ?? [])
+        this.log?.warn("web api call pending", { session: this.label, page: name, ...call });
       if (redact.length > 0) {
         const redacted = await page
           .evaluate(

@@ -9,6 +9,7 @@ import {
   forwardedFor,
   isProxied,
   proxy,
+  reportablePath,
   stripHopByHop,
   upstreamRequest,
 } from "../src/server/proxy.ts";
@@ -167,6 +168,45 @@ describe("proxy", () => {
     );
     expect(res.status).toBe(502);
     expect(((await res.json()) as { code: string }).code).toBe("BAD_GATEWAY");
+  });
+
+  it("reports an upstream failure with the path and error, never the query", async () => {
+    const failures: { path: string; error: string }[] = [];
+    const res = await proxy(
+      new Request("http://localhost:3000/rpc/coop/feeSchedule?token=secret"),
+      TARGET,
+      null,
+      () => Promise.reject(new TypeError("socket closed")),
+      (f) => failures.push(f),
+    );
+    expect(res.status).toBe(502);
+    expect(failures).toEqual([{ path: "/rpc/coop/feeSchedule", error: "TypeError: socket closed" }]);
+  });
+
+  it("reports nothing when the upstream answers, even with an error status", async () => {
+    const failures: unknown[] = [];
+    const res = await proxy(
+      new Request("http://localhost:3000/rpc/x"),
+      TARGET,
+      null,
+      async () => new Response("{}", { status: 429 }),
+      (f) => failures.push(f),
+    );
+    expect(res.status).toBe(429);
+    expect(failures).toEqual([]);
+  });
+});
+
+describe("reportablePath", () => {
+  it("keeps an RPC procedure path whole", () => {
+    expect(reportablePath("/rpc/money/paymentBreakdowns")).toBe("/rpc/money/paymentBreakdowns");
+    expect(reportablePath("/rpc")).toBe("/rpc");
+  });
+
+  it("cuts /api paths after the flow name, where tokens can sit", () => {
+    expect(reportablePath("/api/auth/reset-password/abc123secret")).toBe("/api/auth/reset-password");
+    expect(reportablePath("/api/auth/get-session")).toBe("/api/auth/get-session");
+    expect(reportablePath("/api/health")).toBe("/api/health");
   });
 });
 

@@ -131,7 +131,7 @@ async function openSession(ext: MoneyExtension, who: string, user: SignedInUser)
     label: `w1-breakdown-${who}`,
     log: ctx.log,
   });
-  ctx.defer(() => session.close());
+  ext.sessions.push(session);
   await ctx.step(`${who}: sign in through the web UI`, async () => {
     const page = await session.goto(ROUTES.signin);
     await signInViaUi(page, user, UI_TIMEOUT_MS, ctx.signal);

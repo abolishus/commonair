@@ -24,6 +24,7 @@ import type { Streamer } from "../streamer.ts";
 import type { SignedInUser } from "../users.ts";
 import type { Viewer } from "../viewer.ts";
 import { waitFor } from "../wait.ts";
+import type { WebSession } from "../web/session.ts";
 
 const ROLE_CLI_TIMEOUT_MS = 30_000;
 const LIVE_TIMEOUT_MS = 30_000;
@@ -203,6 +204,11 @@ export interface MoneyExtension {
   stripe: StripeWebhook | null;
   /** The ops hook (`money-reconcile`, `money-fraud-scan`). */
   hooks: W1Hooks;
+  /**
+   * The scenario's web sessions. An extension adds the ones it opens: the scenario screenshots
+   * them on failure and closes them (a session's own deferred close would run first).
+   */
+  sessions: WebSession[];
 }
 
 /** What `e2e-social` hands its W1 extension steps (`flood`, `block`). The channel is still live. */
