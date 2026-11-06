@@ -395,14 +395,15 @@ export class ChatCore {
   // ── bus handlers ───────────────────────────────────────────────────────────
 
   onChat(channelId: string, raw: string): void {
-    let env: Partial<ChatFanout>;
+    // `null` parses too: without the guard it threw out of the bus handler.
+    let env: Partial<ChatFanout> | null;
     try {
-      env = JSON.parse(raw) as Partial<ChatFanout>;
+      env = JSON.parse(raw) as Partial<ChatFanout> | null;
     } catch {
       return;
     }
     // Our own publishers write this channel; a structural check is enough on the hot path.
-    if (env.v !== 1 || !env.frame || typeof env.frame.op !== "string") return;
+    if (env?.v !== 1 || !env.frame || typeof env.frame.op !== "string") return;
     if (typeof env.sentAt === "number") this.d.metrics.fanoutLatency(Date.now() - env.sentAt);
     const frame = env.frame;
     if (frame.op === "message" && !frame.held)
@@ -472,14 +473,14 @@ export class ChatCore {
   }
 
   onEvent(raw: string): void {
-    let loose: { type?: unknown; channelId?: unknown };
+    let loose: { type?: unknown; channelId?: unknown } | null;
     try {
       loose = JSON.parse(raw) as typeof loose;
     } catch {
       return;
     }
     // Cheap filters first: most bus traffic is chat messages and rooms this instance does not host.
-    if (typeof loose.type !== "string" || typeof loose.channelId !== "string") return;
+    if (typeof loose?.type !== "string" || typeof loose.channelId !== "string") return;
     const audience = eventAudience(loose.type);
     if (!audience) return;
     const room = this.d.rooms.get(loose.channelId);
