@@ -22,7 +22,7 @@ import {
   type OfflineSectionId,
 } from "../lib/directory-sections.ts";
 import { DiscoveryCategoryGrid } from "./discovery/category-tiles.tsx";
-import { CardLinks, DiscoveryStreamCard, DiscoveryStreamGrid } from "./discovery/stream-cards.tsx";
+import { DiscoveryStreamCard, DiscoveryStreamGrid } from "./discovery/stream-cards.tsx";
 
 /** With the hero shown, the rest of Spotlight gets its own heading, so the outline has one "Spotlight". */
 function sectionTitle(id: DirectorySectionId, hasHero: boolean): string {
@@ -281,7 +281,15 @@ function RecentTile({
           </span>
         </span>
       </Link>
-      <CardLinks category={card.category} />
+      {card.category && (
+        <Link
+          {...categoryLink(card.category.slug)}
+          data-testid="card-category-link"
+          className="max-w-full self-start truncate text-xs font-medium text-muted-foreground underline-offset-4 outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <span dir="auto">{card.category.name}</span>
+        </Link>
+      )}
     </div>
   );
 }

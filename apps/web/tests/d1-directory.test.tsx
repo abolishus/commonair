@@ -267,6 +267,11 @@ describe("the tag filter and the Live channels view", () => {
     );
     expect(screen.getByTestId("card-category-link").getAttribute("href")).toBe("/directory/art");
     expect(screen.getByTestId("card-tag-link").getAttribute("href")).toBe("/directory?tag=cozy");
+    // Link slots inside the card, not a row under it.
+    const card = screen.getByTestId("stream-card");
+    expect(card.contains(screen.getByTestId("card-category-link"))).toBe(true);
+    expect(card.contains(screen.getByTestId("card-tag-link"))).toBe(true);
+    expect(card.querySelector("a a")).toBeNull();
   });
 
   it("says when the directory could not be loaded", async () => {

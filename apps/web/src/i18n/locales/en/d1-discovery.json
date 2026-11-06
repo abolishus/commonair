@@ -1,5 +1,4 @@
 {
-  "discovery.card.links": "Category and tags",
   "discovery.card.nameWithHandle": "{name} (@{handle})",
   "discovery.card.tag": "Live channels tagged {tag}",
   "discovery.card.tagText": "#{tag}",

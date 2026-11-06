@@ -14,6 +14,7 @@ import { Link } from "@tanstack/react-router";
 import * as React from "react";
 import { t } from "../../i18n/index.ts";
 import { api } from "../../lib/api.ts";
+import { cardLinkSlots } from "../discovery/stream-cards.tsx";
 import { ChannelNotFoundState } from "../not-found.tsx";
 
 export const LIVE_NOW_COUNT = 6;
@@ -50,7 +51,11 @@ export function LiveNowShelf({ load = liveNow }: { load?: LiveNowLoader }): Reac
         loadingCount={3}
         hrefFor={(card) => `/${card.channel.slug}`}
         renderLink={(card) => <Link to="/$channel" params={{ channel: card.channel.slug }} />}
-        cardProps={(card) => ({ "data-testid": "stream-card", "data-channel": card.channel.slug })}
+        cardProps={(card) => ({
+          "data-testid": "stream-card",
+          "data-channel": card.channel.slug,
+          ...cardLinkSlots(card),
+        })}
       />
     </Section>
   );

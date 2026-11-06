@@ -2,9 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * Live stream cards for the discovery pages. `<StreamCard>` is one link to the channel, so the
- * category and tags (which link elsewhere, F1) sit in a row under it instead of inside it; the
- * card gets its stream without them so nothing shows twice.
+ * Live stream cards for the discovery pages. The card's primary link goes to the channel; its
+ * category and tags are link slots inside the card (F1), to the category page and the tag filter.
  */
 import type { StreamCard as StreamCardData } from "@commonair/contracts/dto";
 import { StreamCard, StreamCardSkeleton, type StreamCardProps } from "@commonair/ui";
@@ -12,62 +11,28 @@ import { cn } from "@commonair/ui/lib/utils";
 import { Link } from "@tanstack/react-router";
 import type * as React from "react";
 import { t } from "../../i18n/index.ts";
-import { categoryLink, tagLink } from "../../lib/category-route.ts";
+import { categoryHref, categoryLink, tagHref, tagLink } from "../../lib/category-route.ts";
 import { displayLabel } from "../../lib/directory-sections.ts";
 
-/** Tags shown per card (StreamCard's own default). */
-const MAX_TAGS = 3;
-
-export interface CardLinksProps {
-  category: { slug: string; name: string } | null;
-  tags?: readonly string[];
-  className?: string;
-}
-
-/** The category and tag links under a card: each to its category page or the tag filter. */
-export function CardLinks({ category, tags = [], className }: CardLinksProps): React.JSX.Element | null {
-  const shown = tags.slice(0, MAX_TAGS);
-  if (!category && shown.length === 0) return null;
-  return (
-    <ul
-      aria-label={t("discovery.card.links")}
-      data-slot="card-links"
-      className={cn("flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs", className)}
-    >
-      {category && (
-        <li className="min-w-0">
-          <Link
-            {...categoryLink(category.slug)}
-            data-testid="card-category-link"
-            className="block truncate font-medium text-muted-foreground underline-offset-4 outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <span dir="auto">{category.name}</span>
-          </Link>
-        </li>
-      )}
-      {shown.map((tag) => (
-        <li key={tag} className="min-w-0">
-          <Link
-            {...tagLink(tag)}
-            data-testid="card-tag-link"
-            aria-label={t("discovery.card.tag", { tag })}
-            className="block truncate text-muted-foreground underline-offset-4 outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <span dir="auto">{t("discovery.card.tagText", { tag })}</span>
-          </Link>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-/** The stream as the card shows it: the name with `@handle` when it collides, no category or tags. */
+/** The stream as the card shows it: the name with `@handle` when it collides. */
 export function cardStream(card: StreamCardData, collisions: ReadonlySet<string>): StreamCardData {
+  return { ...card, channel: { ...card.channel, displayName: displayLabel(collisions, card.channel) } };
+}
+
+/** The card's category and tag slots, as router links (test ids `card-category-link`, `card-tag-link`). */
+export function cardLinkSlots(card: StreamCardData): Pick<StreamCardProps, "categoryLink" | "tagLink"> {
+  const category = card.broadcast.category;
   return {
-    ...card,
-    channel: { ...card.channel, displayName: displayLabel(collisions, card.channel) },
-    broadcast: { ...card.broadcast, category: null },
-    tags: [],
+    categoryLink: category
+      ? {
+          href: categoryHref(category.slug),
+          render: <Link {...categoryLink(category.slug)} data-testid="card-category-link" />,
+        }
+      : undefined,
+    tagLink: (tag) => ({
+      href: tagHref(tag),
+      render: <Link {...tagLink(tag)} data-testid="card-tag-link" aria-label={t("discovery.card.tag", { tag })} />,
+    }),
   };
 }
 
@@ -88,20 +53,19 @@ export function DiscoveryStreamCard({
   ...data
 }: DiscoveryStreamCardProps): React.JSX.Element {
   return (
-    <div className={cn("flex min-w-0 flex-col gap-1", className)}>
-      <StreamCard
-        data-testid="stream-card"
-        data-channel={card.channel.slug}
-        {...data}
-        stream={cardStream(card, collisions)}
-        href={`/${card.channel.slug}`}
-        render={<Link to="/$channel" params={{ channel: card.channel.slug }} />}
-        headingLevel={headingLevel}
-        lazy={lazy}
-        showReason={showReason}
-      />
-      <CardLinks category={card.broadcast.category} tags={card.tags} className="ps-10" />
-    </div>
+    <StreamCard
+      data-testid="stream-card"
+      data-channel={card.channel.slug}
+      {...data}
+      stream={cardStream(card, collisions)}
+      href={`/${card.channel.slug}`}
+      render={<Link to="/$channel" params={{ channel: card.channel.slug }} />}
+      {...cardLinkSlots(card)}
+      headingLevel={headingLevel}
+      lazy={lazy}
+      showReason={showReason}
+      className={className}
+    />
   );
 }
 
