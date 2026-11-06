@@ -42,9 +42,13 @@ export function fullscreenSupport(
   return "none";
 }
 
-export function isFullscreen(doc: Document, container: HTMLElement | null, video: HTMLVideoElement | null): boolean {
+function fullscreenElement(doc: Document): Element | null {
   const d = doc as WebkitDocument;
-  const el = d.fullscreenElement ?? d.webkitFullscreenElement ?? null;
+  return d.fullscreenElement ?? d.webkitFullscreenElement ?? null;
+}
+
+export function isFullscreen(doc: Document, container: HTMLElement | null, video: HTMLVideoElement | null): boolean {
+  const el = fullscreenElement(doc);
   if (container && el === container) return true;
   return (video as WebkitVideo | null)?.webkitDisplayingFullscreen === true;
 }
@@ -114,7 +118,16 @@ export async function togglePip(doc: Document, video: HTMLVideoElement | null): 
 }
 
 export interface ScreenModes {
-  fullscreen: { support: FullscreenSupport; active: boolean; toggle: () => void };
+  fullscreen: {
+    support: FullscreenSupport;
+    active: boolean;
+    /**
+     * The player container while it is the fullscreen element, else null: the portal container
+     * for the player's popups, since `<body>` is not painted in fullscreen.
+     */
+    element: HTMLElement | null;
+    toggle: () => void;
+  };
   pip: { support: PipSupport; active: boolean; toggle: () => void };
 }
 
@@ -136,6 +149,7 @@ export function useScreenModes(
   const [state, setState] = React.useState({
     fullscreen: "none" as FullscreenSupport,
     fullscreenOn: false,
+    element: null as HTMLElement | null,
     pip: "none" as PipSupport,
     pipOn: false,
   });
@@ -143,15 +157,19 @@ export function useScreenModes(
     const v = video.current;
     const sync = () => {
       const c = container.current;
+      const fullscreenOn = isFullscreen(document, c, v);
       const next = {
         fullscreen: fullscreenSupport(document, c, v),
-        fullscreenOn: isFullscreen(document, c, v),
+        fullscreenOn,
+        // iOS's video-only fullscreen draws the system player: nothing of ours to portal into.
+        element: fullscreenOn && fullscreenElement(document) === c ? c : null,
         pip: pipSupport(document, v),
         pipOn: isPip(document, v),
       };
       setState((prev) =>
         prev.fullscreen === next.fullscreen &&
         prev.fullscreenOn === next.fullscreenOn &&
+        prev.element === next.element &&
         prev.pip === next.pip &&
         prev.pipOn === next.pipOn
           ? prev
@@ -170,6 +188,7 @@ export function useScreenModes(
     fullscreen: {
       support: state.fullscreen,
       active: state.fullscreenOn,
+      element: state.element,
       toggle: () => void toggleFullscreen(document, container.current, video.current),
     },
     pip: {

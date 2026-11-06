@@ -15,7 +15,7 @@
  * The control bar is the live player's (D2-player, F3): volume, captions, settings (quality on
  * HLS, speed), PiP, theatre where the page offers it, fullscreen, and the same shortcuts.
  */
-import { formatDuration, IconButton, useLocale } from "@commonair/ui";
+import { formatDuration, IconButton, PortalContainerProvider, useLocale } from "@commonair/ui";
 import { PlayerChrome, PlayerControl, PlayerScrubber } from "@commonair/ui/blocks/media";
 import type * as D from "@commonair/contracts/dto";
 import { ClosedCaptionIcon, PauseIcon, PlayIcon } from "@hugeicons/core-free-icons";
@@ -298,8 +298,8 @@ export function VodPlayer({
   // Data saver applies to live streams only (ADR 0018 decision 7): say so where it would be.
   // False on the server and while hydrating, so the first client render matches the server's.
   const dataSaverOn = React.useSyncExternalStore(subscribeNothing, readDataSaverOn, serverDataSaverOff);
+  // Stays in fullscreen: the dialog portals into the player (PortalContainerProvider below).
   const openShortcuts = () => {
-    if (modes.fullscreen.active) modes.fullscreen.toggle();
     settings.setOpen(false);
     setShortcutsOpen(true);
   };
@@ -389,7 +389,7 @@ export function VodPlayer({
   );
 
   return (
-    <>
+    <PortalContainerProvider container={modes.fullscreen.element}>
       <PlayerChrome
         ref={containerRef}
         data-testid="vod-player"
@@ -466,7 +466,7 @@ export function VodPlayer({
         onOpenChange={setShortcutsOpen}
         entries={shortcutsFor({ seek: true, dvr: false, theatre: theatreAvailable })}
       />
-    </>
+    </PortalContainerProvider>
   );
 }
 

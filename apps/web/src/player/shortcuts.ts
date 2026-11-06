@@ -83,6 +83,9 @@ function ownsKey(target: Element, key: string): boolean {
   return false;
 }
 
+/** Popups that portal into the player while it is fullscreen. */
+const POPUP_SELECTOR = "[role=dialog], [role=alertdialog], [role=menu]";
+
 /** Focus on the page itself, not on any control. */
 function onBody(target: Element | null): boolean {
   return target === null || target === document.body || target === document.documentElement;
@@ -99,6 +102,9 @@ export function shortcutFor(
   const inPlayer = root !== null && target !== null && root.contains(target);
   if (!inPlayer && !onBody(target)) return null;
   if (inPlayer && target && target !== root && ownsKey(target, e.key)) return null;
+  // A dialog or menu portalled into the player (fullscreen) handles its own keys, as it does on <body>.
+  const popup = target?.closest(POPUP_SELECTOR);
+  if (inPlayer && popup && popup !== root && root.contains(popup)) return null;
   const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
   return PLAYER_SHORTCUTS.find((s) => s.keys.includes(key))?.action ?? null;
 }

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { useLocale } from "@commonair/ui";
+import { PortalContainerProvider, useLocale } from "@commonair/ui";
 import { PlayerChrome, PlayerControl } from "@commonair/ui/blocks/media";
 import { cn } from "@commonair/ui/lib/utils";
 import { PauseIcon, PlayIcon } from "@hugeicons/core-free-icons";
@@ -349,8 +349,8 @@ export function Player({
   }, [hold, hintOpen]);
 
   const dvrShown = features.dvr !== null && features.dvr.windowSeconds > 0 && !(dataModeOn || appliedCeiling !== null);
+  // Stays in fullscreen: the dialog portals into the player (PortalContainerProvider below).
   const openShortcuts = () => {
-    if (modes.fullscreen.active) modes.fullscreen.toggle();
     settings.setOpen(false);
     setShortcutsOpen(true);
   };
@@ -474,7 +474,7 @@ export function Player({
   );
 
   return (
-    <>
+    <PortalContainerProvider container={modes.fullscreen.element}>
       <PlayerChrome
         ref={containerRef}
         data-testid="player"
@@ -544,7 +544,7 @@ export function Player({
           entries={shortcutsFor({ seek: dvrShown, dvr: dvrShown, theatre: theatreAvailable })}
         />
       )}
-    </>
+    </PortalContainerProvider>
   );
 }
 
