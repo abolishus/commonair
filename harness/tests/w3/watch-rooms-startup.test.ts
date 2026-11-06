@@ -7,6 +7,7 @@ import {
   CONSOLE_CHARS,
   CONSOLE_KEEP,
   consoleBuffer,
+  startupDiagnostics,
   summarizeStartup,
   withStartup,
   type StartupRaw,
@@ -98,5 +99,39 @@ describe("withStartup", () => {
 
   it("says so when the page could not be read", () => {
     expect(withStartup("boom", null).message).toBe("boom\nstart-up: unreadable");
+  });
+});
+
+type ReadablePage = Parameters<typeof startupDiagnostics>[0];
+const fakePage = (evaluate: () => Promise<unknown>) => ({ evaluate }) as unknown as ReadablePage;
+
+describe("startupDiagnostics", () => {
+  it("summarizes what the page reports", async () => {
+    const d = await startupDiagnostics(
+      fakePage(() => Promise.resolve(raw())),
+      ["error: x"],
+    );
+    expect(d).toMatchObject({ path: "/wredge_1", bootstrap: "absent", console: ["error: x"] });
+  });
+
+  it("is null when the page throws (closed, navigating)", async () => {
+    expect(
+      await startupDiagnostics(
+        fakePage(() => Promise.reject(new Error("Target closed"))),
+        [],
+      ),
+    ).toBeNull();
+  });
+
+  it("is null, not a hang, when the page never answers", async () => {
+    const started = performance.now();
+    expect(
+      await startupDiagnostics(
+        fakePage(() => new Promise(() => undefined)),
+        [],
+        20,
+      ),
+    ).toBeNull();
+    expect(performance.now() - started).toBeLessThan(1_000);
   });
 });

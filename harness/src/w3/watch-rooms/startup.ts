@@ -100,16 +100,29 @@ function readStartup(): StartupRaw {
   };
 }
 
-/** Read the page's start-up state; null when the page cannot be read (closed, navigating). */
+/** How long the page gets to answer: `page.evaluate` has no timeout of its own. */
+export const STARTUP_READ_TIMEOUT_MS = 5_000;
+
+/**
+ * Read the page's start-up state; null when the page cannot be read (closed, navigating, or not
+ * answering within `timeoutMs`: a wedged page must not turn the step's timeout into a hang).
+ */
 export async function startupDiagnostics(
-  page: Page,
+  page: Pick<Page, "evaluate">,
   consoleLines: readonly string[],
+  timeoutMs = STARTUP_READ_TIMEOUT_MS,
 ): Promise<StartupDiagnostics | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), timeoutMs);
+  });
   try {
-    const raw = await page.evaluate(readStartup);
-    return summarizeStartup(raw, consoleLines);
+    const raw = await Promise.race([page.evaluate(readStartup), timedOut]);
+    return raw === null ? null : summarizeStartup(raw, consoleLines);
   } catch {
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
