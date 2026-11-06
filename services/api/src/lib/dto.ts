@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /** Row → DTO mapping shared by route files. DTOs (not rows) are what the API returns. */
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull } from "drizzle-orm";
 import type { z } from "zod";
 import type { dto } from "@commonair/contracts";
-import { ChannelTheme } from "@commonair/contracts/shapes";
+import { ChannelSocial, ChannelTheme } from "@commonair/contracts/shapes";
 import { schema } from "@commonair/db";
 import type { Deps } from "../deps.ts";
 import { instanceMediaBase } from "./media-ref.ts";
@@ -94,6 +94,29 @@ export const channelTheme = (c: ChannelRow) => {
   return parsed.success ? parsed.data : {};
 };
 
+/** Stored socials, dropping any entry that no longer parses (the column is plain jsonb). */
+export const channelSocials = (c: Pick<ChannelRow, "socials">): ChannelSocial[] =>
+  Array.isArray(c.socials)
+    ? (c.socials as unknown[]).flatMap((s) => {
+        const parsed = ChannelSocial.safeParse(s);
+        return parsed.success ? [parsed.data] : [];
+      })
+    : [];
+
+/**
+ * When the channel's newest ended broadcast ended. Rehearsals are private (decision (f)), as in
+ * the directory's offline cards, so they never set it.
+ */
+export async function lastLiveAt(deps: Deps, channelId: string): Promise<string | null> {
+  const [row] = await deps.db
+    .select({ endedAt: broadcasts.endedAt })
+    .from(broadcasts)
+    .where(and(eq(broadcasts.channelId, channelId), isNotNull(broadcasts.endedAt), eq(broadcasts.kind, "live")))
+    .orderBy(desc(broadcasts.endedAt))
+    .limit(1);
+  return isoOrNull(row?.endedAt);
+}
+
 /** Avatar: the channel theme's avatar, else the owner's profile image. */
 export const channelAvatar = (deps: Deps, c: ChannelRow, ownerImage: string | null) =>
   mediaUrl(deps, channelTheme(c).avatarKey ?? ownerImage);
@@ -139,7 +162,7 @@ export async function liveSummaries(deps: Deps, chans: readonly ChannelRow[]): P
 }
 
 export async function toChannelDto(deps: Deps, c: ChannelRow): Promise<z.infer<typeof dto.Channel>> {
-  const [owner, category, panels, tiers, live] = await Promise.all([
+  const [owner, category, panels, tiers, live, endedAt] = await Promise.all([
     loadUserPublic(deps, c.ownerId),
     c.categoryId
       ? deps.db
@@ -155,6 +178,7 @@ export async function toChannelDto(deps: Deps, c: ChannelRow): Promise<z.infer<t
       .where(eq(channelSubTiers.channelId, c.id))
       .orderBy(asc(channelSubTiers.tier)),
     liveSummary(deps, c),
+    lastLiveAt(deps, c.id),
   ]);
   if (!owner) throw new Error(`channel ${c.id} has no owner row`);
   const theme = channelTheme(c);
@@ -175,6 +199,8 @@ export async function toChannelDto(deps: Deps, c: ChannelRow): Promise<z.infer<t
     owner,
     followerCount: c.followerCount,
     live,
+    lastLiveAt: endedAt,
+    socials: channelSocials(c),
     panels: panels.map(toPanelDto(deps)),
     vodEnabled: c.vodEnabled,
     subTiers: tiers.map((t) => ({

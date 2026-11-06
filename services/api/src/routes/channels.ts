@@ -76,6 +76,8 @@ export const channelsRoutes = {
     if (input.theme !== undefined) {
       set.theme = input.theme;
     }
+    // The contract validated each entry; the list replaces the stored one in the given order.
+    if (input.socials !== undefined) set.socials = input.socials;
     if (input.vodEnabled !== undefined) set.vodEnabled = input.vodEnabled;
     if (input.vodRetentionDays !== undefined) set.vodRetentionDays = input.vodRetentionDays;
 

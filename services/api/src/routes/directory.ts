@@ -3,6 +3,8 @@
 
 /** `directory.*` (fair discovery, see ../discovery/README.md) and `categories.*`. */
 import { and, desc, eq, gt, ilike, inArray, isNotNull, isNull, not, or, sql, type SQL } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
+import { vodPrefix } from "@commonair/contracts/storage";
 import { schema } from "@commonair/db";
 import type { Deps } from "../deps.ts";
 import {
@@ -23,6 +25,8 @@ import {
   type ChannelCard,
   type StreamCard,
 } from "../lib/dto.ts";
+import { topTags } from "../discovery/tags.ts";
+import { vodVisible } from "../media/visibility.ts";
 import { decodeCursor, encodeCursor, isOffsetCursor } from "../lib/cursor.ts";
 import { notFound } from "../lib/errors.ts";
 import { os } from "../lib/orpc.ts";
@@ -30,7 +34,7 @@ import { discoveryRanking } from "../lib/settings.ts";
 import { catchingUpCounts, viewerCounts } from "../lib/viewers.ts";
 import { confirmedAdult } from "./me.ts";
 
-const { channels, broadcasts, categories, users, follows } = schema;
+const { channels, broadcasts, categories, users, follows, vods } = schema;
 const MAX_LIVE = 2000;
 const HOME_SECTION = 24;
 
@@ -128,7 +132,7 @@ function cardsFor(rows: LiveRow[], ordered: LiveEntry[], reason: Reason, limit =
  */
 async function loadOffline(
   deps: Deps,
-  opts: { allowMature: boolean; language?: string | undefined; followerId?: string },
+  opts: { allowMature: boolean; adult: boolean; language?: string | undefined; followerId?: string },
 ): Promise<ChannelCard[]> {
   const last = deps.db
     .selectDistinctOn([broadcasts.channelId], {
@@ -175,6 +179,10 @@ async function loadOffline(
     .where(and(...conditions))
     .orderBy(sql`${last.endedAt} desc nulls last`, channels.slug)
     .limit(HOME_SECTION);
+  const latest = await latestVods(
+    deps,
+    rows.map((r) => r.c.id),
+  );
   return rows.map(({ c, ownerImage, endedAt, lastTitle, cat, mature: isMature }) => ({
     channel: {
       id: c.id,
@@ -188,7 +196,60 @@ async function loadOffline(
     lastLiveAt: endedAt ? endedAt.toISOString() : null,
     followerCount: c.followerCount,
     mature: isMature,
+    latestVod: latestVodRef(deps, latest.get(c.id), isMature, opts.adult),
   }));
+}
+
+interface LatestVodRow {
+  id: string;
+  storagePrefix: string;
+  thumbnailKey: string | null;
+  durationSeconds: number;
+  /** The VOD's broadcast, its channel or either one's category is mature (as `urlsWithheld`). */
+  mature: boolean;
+}
+
+const vodChannelCategory = alias(categories, "vod_channel_category");
+
+/**
+ * Each channel's newest VOD anyone may watch (ready, public, nothing removed or restricted: the
+ * public audience of `vodVisible`), in one DISTINCT ON query for every card.
+ */
+async function latestVods(deps: Deps, channelIds: readonly string[]): Promise<Map<string, LatestVodRow>> {
+  if (channelIds.length === 0) return new Map();
+  const rows = await deps.db
+    .selectDistinctOn([vods.channelId], {
+      channelId: vods.channelId,
+      id: vods.id,
+      storagePrefix: vods.storagePrefix,
+      thumbnailKey: vods.thumbnailKey,
+      durationSeconds: vods.durationSeconds,
+      mature: sql<boolean>`(${broadcasts.mature} or ${channels.mature} or coalesce(${categories.mature}, false) or coalesce(${vodChannelCategory.mature}, false))`,
+    })
+    .from(vods)
+    .innerJoin(broadcasts, eq(broadcasts.id, vods.broadcastId))
+    .innerJoin(channels, eq(channels.id, vods.channelId))
+    .leftJoin(categories, eq(categories.id, broadcasts.categoryId))
+    .leftJoin(vodChannelCategory, eq(vodChannelCategory.id, channels.categoryId))
+    .where(and(inArray(vods.channelId, [...channelIds]), vodVisible("public")))
+    .orderBy(vods.channelId, desc(vods.createdAt), desc(vods.id));
+  return new Map(rows.map(({ channelId, ...v }) => [channelId, v]));
+}
+
+/**
+ * The card's VOD. The thumbnail is the public `/media` URL `vods.get` gives a public VOD whose
+ * objects already moved to the public prefix; one still moving has none here (a card does not
+ * mint playback tokens). A mature thumbnail goes only to confirmed adults, as in `vods.*`.
+ */
+function latestVodRef(deps: Deps, v: LatestVodRow | undefined, cardMature: boolean, adult: boolean) {
+  if (!v) return null;
+  const withheld = !adult && (cardMature || v.mature);
+  const placed = v.storagePrefix === vodPrefix(v.id, "public");
+  return {
+    id: v.id,
+    thumbnailUrl: withheld || !placed ? null : mediaUrl(deps, v.thumbnailKey),
+    durationSeconds: v.durationSeconds,
+  };
 }
 
 const lowerTag = (tags: string[], tag: string) => tags.some((t) => t.toLowerCase() === tag.toLowerCase());
@@ -207,9 +268,9 @@ export const directory = {
     );
     const allowMature = input.includeMature && adult;
     const [recentlyLive, followingOffline] = await Promise.all([
-      loadOffline(deps, { allowMature, language: input.language }),
+      loadOffline(deps, { allowMature, adult, language: input.language }),
       caller
-        ? loadOffline(deps, { allowMature, language: input.language, followerId: caller.user.id })
+        ? loadOffline(deps, { allowMature, adult, language: input.language, followerId: caller.user.id })
         : Promise.resolve([]),
     ]);
     const entries = rows.map((r) => r.entry);
@@ -324,7 +385,7 @@ export const directory = {
           live: l,
           followerCount: r.c.followerCount,
         })),
-      categories: catRows.map((r) => toCategory(deps, r.c, Number(r.n))),
+      categories: await categoryDtos(deps, catRows),
     };
   }),
 
@@ -334,7 +395,13 @@ export const directory = {
   }),
 };
 
-export function toCategory(deps: Deps, c: typeof categories.$inferSelect, liveChannels: number) {
+type CategoryRow = typeof categories.$inferSelect;
+interface CategoryStats {
+  viewerCount: number;
+  tags: string[];
+}
+
+export function toCategory(deps: Deps, c: CategoryRow, liveChannels: number, stats: CategoryStats) {
   return {
     id: c.id,
     slug: c.slug,
@@ -342,7 +409,60 @@ export function toCategory(deps: Deps, c: typeof categories.$inferSelect, liveCh
     boxArtUrl: mediaUrl(deps, c.boxArtKey),
     mature: c.mature,
     liveChannels,
+    viewerCount: stats.viewerCount,
+    tags: stats.tags,
   };
+}
+
+/**
+ * A live stream counts toward its broadcast's category (not the channel's) when the default
+ * `directory.live?category=<slug>` lists it: the directory's visibility predicate, and
+ * mature-exclusive. Over `channels ⋈ broadcasts (live) ⋈ users (owner) ⋈ categories`.
+ */
+const listedInCategory = () =>
+  and(inLiveDirectory(), eq(broadcasts.mature, false), eq(channels.mature, false), eq(categories.mature, false));
+
+/**
+ * Viewers and tags of these categories' listed live streams: one query for the streams and one
+ * viewer-count read for all of them (Valkey, then Postgres for misses), however many categories.
+ */
+async function categoryStats(deps: Deps, categoryIds: readonly string[]): Promise<Map<string, CategoryStats>> {
+  const out = new Map<string, CategoryStats>();
+  const ids = [...new Set(categoryIds)];
+  if (ids.length === 0) return out;
+  const streams = await deps.db
+    .select({ channelId: channels.id, categoryId: categories.id, tags: channels.tags })
+    .from(channels)
+    .innerJoin(broadcasts, eq(broadcasts.id, channels.liveBroadcastId))
+    .innerJoin(users, eq(users.id, channels.ownerId))
+    .innerJoin(categories, eq(categories.id, broadcasts.categoryId))
+    .where(and(listedInCategory(), inArray(categories.id, ids)))
+    .limit(MAX_LIVE);
+  const counts = await viewerCounts(
+    deps,
+    streams.map((r) => r.channelId),
+  );
+  const byCategory = new Map<string, { viewers: number; tags: string[][] }>();
+  for (const r of streams) {
+    const agg = byCategory.get(r.categoryId) ?? { viewers: 0, tags: [] };
+    agg.viewers += counts.get(r.channelId) ?? 0;
+    agg.tags.push(r.tags);
+    byCategory.set(r.categoryId, agg);
+  }
+  for (const id of ids) {
+    const agg = byCategory.get(id);
+    out.set(id, { viewerCount: agg?.viewers ?? 0, tags: agg ? topTags(agg.tags) : [] });
+  }
+  return out;
+}
+
+/** Category rows with their live counts as DTOs, stats loaded for all of them at once. */
+async function categoryDtos(deps: Deps, rows: readonly { c: CategoryRow; n: number }[]) {
+  const stats = await categoryStats(
+    deps,
+    rows.map((r) => r.c.id),
+  );
+  return rows.map((r) => toCategory(deps, r.c, Number(r.n), stats.get(r.c.id) ?? { viewerCount: 0, tags: [] }));
 }
 
 /**
@@ -361,9 +481,7 @@ function liveCounts(deps: Deps) {
     .innerJoin(broadcasts, eq(broadcasts.id, channels.liveBroadcastId))
     .innerJoin(users, eq(users.id, channels.ownerId))
     .innerJoin(categories, eq(categories.id, broadcasts.categoryId))
-    .where(
-      and(inLiveDirectory(), eq(broadcasts.mature, false), eq(channels.mature, false), eq(categories.mature, false)),
-    )
+    .where(listedInCategory())
     .groupBy(broadcasts.categoryId)
     .as("live_counts");
 }
@@ -387,10 +505,12 @@ function categoriesWithCounts(deps: Deps) {
   };
 }
 
-/** One category's live count, as `categories.get` reports it. */
-export async function liveChannelCount(deps: Deps, categoryId: string): Promise<number> {
-  const [row] = await categoriesWithCounts(deps).query.where(eq(categories.id, categoryId)).limit(1);
-  return Number(row?.n ?? 0);
+/** One category as `categories.get` reports it (admin upserts return the same). */
+export async function categoryDto(deps: Deps, c: CategoryRow) {
+  const [row] = await categoriesWithCounts(deps).query.where(eq(categories.id, c.id)).limit(1);
+  const [dto] = await categoryDtos(deps, [{ c: row?.c ?? c, n: Number(row?.n ?? 0) }]);
+  if (!dto) throw new Error("categoryDtos returned no row");
+  return dto;
 }
 
 export const categoriesRoutes = {
@@ -405,13 +525,15 @@ export const categoriesRoutes = {
       .limit(input.limit + 1)
       .offset(offset);
     return {
-      items: rows.slice(0, input.limit).map((r) => toCategory(deps, r.c, Number(r.n))),
+      items: await categoryDtos(deps, rows.slice(0, input.limit)),
       nextCursor: rows.length > input.limit ? encodeCursor({ o: offset + input.limit }) : null,
     };
   }),
   get: os.categories.get.handler(async ({ context: { deps }, input }) => {
     const [row] = await categoriesWithCounts(deps).query.where(eq(categories.slug, input.slug)).limit(1);
     if (!row) throw notFound("Category not found");
-    return toCategory(deps, row.c, Number(row.n));
+    const [dto] = await categoryDtos(deps, [row]);
+    if (!dto) throw notFound("Category not found");
+    return dto;
   }),
 };

@@ -13,7 +13,7 @@ import { publishUserControl } from "../lib/control.ts";
 import { userByUsername } from "../lib/dto.ts";
 import { badRequest, forbidden, notFound } from "../lib/errors.ts";
 import { os, requireCaller } from "../lib/orpc.ts";
-import { liveChannelCount, toCategory } from "./directory.ts";
+import { categoryDto } from "./directory.ts";
 
 const { categories, users } = schema;
 
@@ -42,7 +42,7 @@ export const admin = {
       });
       return c;
     });
-    return toCategory(deps, row, await liveChannelCount(deps, row.id));
+    return categoryDto(deps, row);
   }),
 
   setRole: os.admin.setRole.handler(async ({ context, input }) => {

@@ -50,6 +50,12 @@ deterministic: every API replica shows the same spotlight in the same window.
 - **Random** (`/directory/random`): uniform over live channels matching the filters.
 - **Search**: Postgres full-text search on channel name, title and description (the
   `channels_search_idx` expression) plus category names.
+- **Categories**: `liveChannels`, `viewerCount` (the sum of verified viewers) and `tags` (the ten
+  most used, ties by name: [`tags.ts`](tags.ts)) all count the same streams, the ones the default
+  `directory.live?category=<slug>` lists: by the live broadcast's category, never restricted, and
+  mature-exclusive.
+- **Recently live / following offline**: each card's `latestVod` is the channel's newest ready,
+  public VOD; a mature one's thumbnail goes only to confirmed adults.
 
 Mature streams are excluded everywhere unless the request sets `includeMature` **and** the caller
 is a signed-in adult who confirmed 18+. Suspended channels never appear.
