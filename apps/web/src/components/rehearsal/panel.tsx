@@ -194,6 +194,8 @@ function InviteesCard(props: RehearsalPanelProps): React.JSX.Element {
     try {
       await props.onInvite(u);
       setName("");
+    } catch {
+      // The container has toasted the refusal; keep the name so it can be corrected.
     } finally {
       setBusy(false);
     }

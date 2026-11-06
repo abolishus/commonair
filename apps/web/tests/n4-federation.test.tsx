@@ -29,6 +29,7 @@ import {
   type FederationFollowerDto,
   type FederationSettingsDto,
 } from "../src/components/federation/client.ts";
+import { FederationFollowers } from "../src/components/federation/followers.tsx";
 import { FederationSettings, FederationSettingsSection } from "../src/components/federation/settings.tsx";
 import { locale, t, uiMessages } from "../src/i18n/index.ts";
 
@@ -432,6 +433,73 @@ describe("the remote followers", () => {
     expect(q(container, "federation-followers-more")).toBeNull();
     expect(fake.calls.cursors).toEqual([null, "2", "4"]);
     expect(qa(container, "federation-follower").map((r) => r.dataset.followerId)).toEqual(items.map((f) => f.id));
+  });
+
+  it("a failed first load says so instead of the list, with no Show more", async () => {
+    const { client } = fakeClient({ followers: [follower(1)] });
+    client.followers = async () => {
+      throw new Error("down");
+    };
+    const { container } = wrap(<FederationFollowers channel="ada" client={client} handle={HANDLE} />);
+    await waitFor(() => expect(container.textContent).toContain(t("federation.followers.loadFailed")));
+    expect(qa(container, "federation-follower")).toHaveLength(0);
+    expect(q(container, "federation-followers-more")).toBeNull();
+  });
+
+  it("a failed Show more toasts and re-enables the button; the retry appends without repeats", async () => {
+    const items = Array.from({ length: 3 }, (_, i) => follower(i + 1));
+    const source = fakeClient({ followers: items, pageSize: 2 }).client;
+    let failNext = true;
+    let release: () => void = () => undefined;
+    const client: FederationClient = {
+      ...source,
+      followers: async (channel, cursor) => {
+        if (cursor === null) return source.followers(channel, cursor);
+        await new Promise<void>((r) => (release = r));
+        if (failNext) {
+          failNext = false;
+          throw new Error("down");
+        }
+        // Removing one meanwhile shifts the page: the overlap must not be listed twice.
+        const page = await source.followers(channel, "1");
+        return { items: page.items, nextCursor: null };
+      },
+    };
+    const { container } = wrap(<FederationFollowers channel="ada" client={client} handle={HANDLE} />);
+    await waitFor(() => expect(qa(container, "federation-follower")).toHaveLength(2));
+    const more = q(container, "federation-followers-more") as HTMLButtonElement;
+    fireEvent.click(more);
+    await waitFor(() => expect(more.disabled).toBe(true));
+    expect(more.getAttribute("aria-busy")).toBe("true");
+    // A second press while loading sends nothing more.
+    fireEvent.click(more);
+    release();
+    await waitFor(() => expect(toasts.error).toEqual([t("federation.followers.loadMoreFailed")]));
+    await waitFor(() => expect(more.disabled).toBe(false));
+    expect(more.getAttribute("aria-busy")).toBeNull();
+    expect(qa(container, "federation-follower")).toHaveLength(2);
+    fireEvent.click(more);
+    await waitFor(() => expect(more.disabled).toBe(true));
+    release();
+    await waitFor(() => expect(qa(container, "federation-follower")).toHaveLength(3));
+    expect(qa(container, "federation-follower").map((r) => r.dataset.followerId)).toEqual(items.map((f) => f.id));
+    expect(q(container, "federation-followers-more")).toBeNull();
+  });
+
+  it("empty with federation off names no handle; removing a follower calls onRemoved", async () => {
+    const empty = fakeClient({ followers: [] });
+    const a = wrap(<FederationFollowers channel="ada" client={empty.client} handle={null} />);
+    await waitFor(() => expect(a.container.textContent).toContain(t("federation.followers.emptyHintOff")));
+    cleanup();
+    const onRemoved = vi.fn<() => void>();
+    const fake = fakeClient({ followers: [follower(1)] });
+    const b = wrap(<FederationFollowers channel="ada" client={fake.client} handle={HANDLE} onRemoved={onRemoved} />);
+    await waitFor(() => expect(qa(b.container, "federation-follower")).toHaveLength(1));
+    fireEvent.click(q(b.container, "federation-follower-remove")!);
+    fireEvent.click(await confirmButton());
+    await waitFor(() => expect(onRemoved).toHaveBeenCalledOnce());
+    expect(fake.calls.removed).toEqual([follower(1).id]);
+    await waitFor(() => expect(b.container.textContent).toContain(t("federation.followers.empty")));
   });
 
   it("remove asks first; cancel keeps the follower", async () => {

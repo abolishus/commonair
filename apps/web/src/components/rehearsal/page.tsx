@@ -13,7 +13,7 @@ import type { RehearsalReport, RehearsalStatus } from "@commonair/contracts/dto"
 import { t } from "../../i18n/index.ts";
 import { api, errorCode } from "../../lib/api.ts";
 import { browserPollEnv, pollWhileVisible } from "../../lib/stream-health.ts";
-import { armErrorKey, inviteErrorKey, REHEARSAL_POLL_MS, suggestions } from "./lib.ts";
+import { armErrorKey, inviteErrorKey, MAX_INVITEES, REHEARSAL_POLL_MS, suggestions } from "./lib.ts";
 import { RehearsalPanel } from "./panel.tsx";
 import { RehearsalPlayer, type RehearsalPlayerState } from "./watch-player.tsx";
 
@@ -118,7 +118,8 @@ export function RehearsePage({ channel }: { channel: string }): React.JSX.Elemen
           setStatus(await api().stream.rehearsal.invite({ channel, username, remove: false }));
           toast.success(t("rehearsal.invitees.added", { username }));
         } catch (err) {
-          toast.error(t(inviteErrorKey(err)));
+          // `max` fills the limit refusal's placeholder; the other refusals ignore it.
+          toast.error(t(inviteErrorKey(err), { max: MAX_INVITEES }));
           throw err;
         }
       }}
@@ -126,7 +127,7 @@ export function RehearsePage({ channel }: { channel: string }): React.JSX.Elemen
         try {
           setStatus(await api().stream.rehearsal.invite({ channel, username, remove: true }));
         } catch (err) {
-          toast.error(t(inviteErrorKey(err)));
+          toast.error(t(inviteErrorKey(err), { max: MAX_INVITEES }));
         }
       }}
     />

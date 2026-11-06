@@ -10,9 +10,10 @@
  * pure helpers.
  */
 import { LocaleProvider, TooltipProvider } from "@commonair/ui";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type * as React from "react";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { PORTABILITY_LIMITS } from "@commonair/contracts/portability";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { grantRows, GrantsView } from "../src/components/portability/grants.tsx";
 import {
   ImportCard,
@@ -24,6 +25,7 @@ import { MoveLandingView, type MoveLandingViewProps } from "../src/components/po
 import {
   defaultChoices,
   expiresAtFor,
+  IMPORT_POLL_MS,
   importErrorReason,
   isChosen,
   isValidMovedTo,
@@ -62,7 +64,22 @@ vi.mock("@tanstack/react-router", () => ({
   ),
 }));
 
-afterEach(() => cleanup());
+const toasts = vi.hoisted(() => ({ success: [] as string[], error: [] as string[] }));
+vi.mock("@commonair/ui/toast", () => ({
+  toast: {
+    success: (m: string) => toasts.success.push(m),
+    error: (m: string) => toasts.error.push(m),
+  },
+}));
+
+beforeEach(() => {
+  toasts.success.length = 0;
+  toasts.error.length = 0;
+});
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 const NOW = Date.parse("2026-11-01T12:00:00Z");
 const link = (n: number, over: Partial<MoveLinkDto> = {}): MoveLinkDto => ({
@@ -183,6 +200,53 @@ describe("the move page", () => {
     const { container, fns } = panel();
     fireEvent.click(q(container, "bundle-export")!);
     await waitFor(() => expect(fns.onExport).toHaveBeenCalledOnce());
+  });
+
+  it("picking an expiry changes the select and is what create sends", async () => {
+    const { container, fns } = panel();
+    fireEvent.click(q(container, "move-link-expiry")!);
+    const option = await screen.findByRole("option", { name: t("portability.links.expiry.days30") });
+    fireEvent.pointerDown(option, { pointerType: "mouse" });
+    fireEvent.click(option);
+    await waitFor(() => expect(q(container, "move-link-expiry")?.dataset.value).toBe("30"));
+    fireEvent.click(q(container, "move-link-create")!);
+    await waitFor(() => expect(fns.onCreate).toHaveBeenCalledWith("30"));
+  });
+
+  it("create is busy until its call settles, then usable again", async () => {
+    let done: () => void = () => undefined;
+    const { container } = panel({ onCreate: () => new Promise<void>((r) => (done = r)) });
+    const create = q(container, "move-link-create") as HTMLButtonElement;
+    fireEvent.click(create);
+    await waitFor(() => expect(create.disabled).toBe(true));
+    expect(create.getAttribute("aria-busy")).toBe("true");
+    await act(async () => done());
+    await waitFor(() => expect(create.disabled).toBe(false));
+    expect(create.getAttribute("aria-busy")).toBeNull();
+  });
+
+  it("an invalid moved-to address is marked only once the field was left, with the message", () => {
+    const { container } = panel();
+    const input = q(container, "move-to-url") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "not a url" } });
+    // Still typing: no error yet.
+    expect(input.getAttribute("aria-invalid")).toBeNull();
+    expect(container.textContent).not.toContain(t("portability.moved.invalid"));
+    fireEvent.blur(input);
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    expect(container.textContent).toContain(t("portability.moved.invalid"));
+    fireEvent.change(input, { target: { value: "https://new.example/me" } });
+    expect(input.getAttribute("aria-invalid")).toBeNull();
+    expect(container.textContent).not.toContain(t("portability.moved.invalid"));
+    // Emptied after leaving: invalid for saving, but no message to nag with.
+    fireEvent.change(input, { target: { value: "" } });
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    expect(container.textContent).not.toContain(t("portability.moved.invalid"));
+  });
+
+  it("a failed load says so above the cards", () => {
+    const { container } = panel({ loadFailed: true });
+    expect(container.textContent).toContain(t("portability.loadFailed"));
   });
 
   for (const theme of ["dark", "light"] as const)
@@ -380,6 +444,251 @@ describe("the import", () => {
     fireEvent.change(q(container, "bundle-import-file")!, { target: { files: [file] } });
     await waitFor(() => expect(q(container, "bundle-import-standing")?.dataset.state).toBe("refused"));
     expect(container.textContent).toContain(t("portability.reason.standingLegalHold"));
+  });
+});
+
+function fakeImportClient(over: Partial<ImportClient> = {}) {
+  const dto = previewDto();
+  const upload = vi.fn<ImportClient["upload"]>(async () => ({
+    key: "k",
+    uploadUrl: "https://s3.test/put",
+    headers: {},
+  }));
+  const client: ImportClient = {
+    upload,
+    put: vi.fn<ImportClient["put"]>(async () => ({ ok: true })),
+    preview: vi.fn<ImportClient["preview"]>(async () => dto),
+    start: vi.fn<ImportClient["start"]>(async () => ({ ...dto, status: "running" as const })),
+    get: vi.fn<ImportClient["get"]>(async () => dto),
+    ...over,
+  };
+  return client;
+}
+const zip = (bytes = 4) => new File([new Uint8Array(bytes)], "bundle.zip", { type: "application/zip" });
+function pick(container: HTMLElement, file: File) {
+  fireEvent.change(q(container, "bundle-import-file")!, { target: { files: [file] } });
+}
+/** Runs `ms` of fake intervals and lets the answers they asked for land. */
+const poll = (ms = IMPORT_POLL_MS) =>
+  act(async () => {
+    await vi.advanceTimersByTimeAsync(ms);
+  });
+
+describe("the import view's states", () => {
+  it("uploading: the picker is disabled and the button says it is reading", () => {
+    const { container } = importView({ phase: { kind: "uploading" } });
+    expect((q(container, "bundle-import-file") as HTMLInputElement).disabled).toBe(true);
+    const button = screen.getByRole("button", { name: t("portability.import.reading") }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(button.getAttribute("aria-busy")).toBe("true");
+  });
+
+  it("the choose button opens the hidden picker", () => {
+    const { container } = importView({ phase: { kind: "idle" } });
+    const input = q(container, "bundle-import-file") as HTMLInputElement;
+    const click = vi.spyOn(input, "click").mockImplementation(() => undefined);
+    fireEvent.click(screen.getByRole("button", { name: t("portability.import.choose") }));
+    expect(click).toHaveBeenCalledOnce();
+  });
+
+  it("an emptied picker (cancelled) reports no file", () => {
+    const { container, fns } = importView({ phase: { kind: "idle" } });
+    fireEvent.change(q(container, "bundle-import-file")!, { target: { files: [] } });
+    expect(fns.onFile).not.toHaveBeenCalled();
+  });
+
+  it("verified shows the issuer; schedule items read as a count; an empty label is untitled", () => {
+    const dto = previewDto({
+      preview: {
+        channel: { state: "ready", title: "Night owls" },
+        items: [item("panel", "9", { label: "" }), item("schedule", "schedule", { label: "3" })],
+      },
+    });
+    const { container } = importView({ phase: { kind: "preview", dto }, choices: defaultChoices(dto.preview.items) });
+    expect(container.textContent).toContain(t("portability.import.standing.issuer", { issuer: "https://old.example" }));
+    expect(container.textContent).not.toContain(t("portability.import.standing.unverifiedHint"));
+    expect(container.textContent).toContain(t("portability.import.untitled"));
+    expect(container.textContent).toContain(t("portability.import.scheduleCount", { count: 3 }));
+    // No emote chosen: no rights assertion to give.
+    expect(q(container, "bundle-import-assert")).toBeNull();
+  });
+
+  it("a pending preview says it is still reading and cannot start; nothing chosen cannot start either", () => {
+    const pending = previewDto({ preview: { channel: { state: "pending", title: null }, items: [] } });
+    const a = importView({ phase: { kind: "preview", dto: pending } });
+    expect(a.container.textContent).toContain(t("portability.import.pending"));
+    expect(qa(a.container, "bundle-import-item")).toHaveLength(0);
+    expect((q(a.container, "bundle-import-start") as HTMLButtonElement).disabled).toBe(true);
+    cleanup();
+    const b = importView({ choices: { channel: false, panels: false, emotes: [] } });
+    expect((q(b.container, "bundle-import-start") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("the rights checkbox reports its state; cancel resets", () => {
+    const { container, fns } = importView();
+    fireEvent.click(q(container, "bundle-import-assert")!);
+    expect(fns.onAssert).toHaveBeenCalledWith(true);
+    fireEvent.click(screen.getByRole("button", { name: t("portability.import.cancel") }));
+    expect(fns.onReset).toHaveBeenCalledOnce();
+  });
+
+  it("running: says so, with no result list and no way out yet; failed says so and offers another", () => {
+    const running = importView({ phase: { kind: "applying", dto: previewDto({ status: "running" }) } });
+    expect(q(running.container, "bundle-import-result")?.textContent).toContain(t("portability.import.running"));
+    expect(qa(running.container, "bundle-import-result-item")).toHaveLength(0);
+    expect(screen.queryByRole("button", { name: t("portability.import.another") })).toBeNull();
+    cleanup();
+    const failed = importView({
+      phase: { kind: "applying", dto: previewDto({ status: "failed", result: null }) },
+    });
+    expect(failed.container.textContent).toContain(t("portability.import.failed"));
+    fireEvent.click(screen.getByRole("button", { name: t("portability.import.another") }));
+    expect(failed.fns.onReset).toHaveBeenCalledOnce();
+  });
+});
+
+describe("the import card", () => {
+  it("an empty or oversized file is refused before any upload", async () => {
+    const upload = vi.fn<ImportClient["upload"]>();
+    const client = fakeImportClient({ upload });
+    const { container } = wrap(<ImportCard channel="ada" client={client} />);
+    pick(container, new File([], "empty.zip", { type: "application/zip" }));
+    await waitFor(() => expect(container.textContent).toContain(t(reasonKey("bundle_archive_too_large")!)));
+    const big = zip(1);
+    Object.defineProperty(big, "size", { value: PORTABILITY_LIMITS.maxArchiveBytes + 1 });
+    pick(container, big);
+    await waitFor(() => expect(container.textContent).toContain(t(reasonKey("bundle_archive_too_large")!)));
+    expect(upload).not.toHaveBeenCalled();
+    // A size refusal is not a standing refusal: no badge.
+    expect(q(container, "bundle-import-standing")).toBeNull();
+  });
+
+  it("a failed upload goes back to the picker with a toast; an expired session asks to sign in", async () => {
+    const preview = vi.fn<ImportClient["preview"]>();
+    const client = fakeImportClient({ put: vi.fn<ImportClient["put"]>(async () => ({ ok: false })), preview });
+    const { container } = wrap(<ImportCard channel="ada" client={client} />);
+    pick(container, zip());
+    await waitFor(() => expect(toasts.error).toEqual([t("portability.import.uploadFailed")]));
+    expect(preview).not.toHaveBeenCalled();
+    expect(q(container, "bundle-import-file")).not.toBeNull();
+    expect((q(container, "bundle-import-file") as HTMLInputElement).disabled).toBe(false);
+    cleanup();
+    toasts.error.length = 0;
+    const put = vi.fn<ImportClient["put"]>();
+    const expired = fakeImportClient({
+      put,
+      upload: vi.fn<ImportClient["upload"]>(async () => {
+        throw Object.assign(new Error("gone"), { code: "UNAUTHORIZED" });
+      }),
+    });
+    const second = wrap(<ImportCard channel="ada" client={expired} />);
+    pick(second.container, zip());
+    await waitFor(() => expect(toasts.error).toEqual([t("auth.sessionExpired")]));
+    expect(put).not.toHaveBeenCalled();
+  });
+
+  it("start refused for the rights assertion says so; another failure says start failed; the preview stays", async () => {
+    const start = vi
+      .fn<ImportClient["start"]>()
+      .mockRejectedValueOnce(Object.assign(new Error("x"), { code: "PRECONDITION_FAILED" }))
+      .mockRejectedValueOnce(new Error("down"));
+    const client = fakeImportClient({ start });
+    const { container } = wrap(<ImportCard channel="ada" client={client} />);
+    pick(container, zip());
+    await waitFor(() => expect(q(container, "bundle-import-assert")).not.toBeNull());
+    fireEvent.click(q(container, "bundle-import-assert")!);
+    await waitFor(() => expect((q(container, "bundle-import-start") as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(q(container, "bundle-import-start")!);
+    await waitFor(() => expect(toasts.error).toEqual([t("portability.import.assertNeeded")]));
+    expect(start).toHaveBeenLastCalledWith(expect.objectContaining({ assertEmoteRights: true }));
+    fireEvent.click(q(container, "bundle-import-start")!);
+    await waitFor(() =>
+      expect(toasts.error).toEqual([t("portability.import.assertNeeded"), t("portability.import.startFailed")]),
+    );
+    expect(q(container, "bundle-import-preview")).not.toBeNull();
+    expect(toasts.success).toEqual([]);
+  });
+
+  it("follows a running import until it is done, toasts the start, and resets for another", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const dto = previewDto();
+    const get = vi
+      .fn<ImportClient["get"]>()
+      .mockRejectedValueOnce(new Error("blip"))
+      .mockResolvedValueOnce({ ...dto, status: "running" })
+      .mockResolvedValue({ ...dto, status: "done", result: [item("channel", "channel", { outcome: "imported" })] });
+    const client = fakeImportClient({ get });
+    const { container } = wrap(<ImportCard channel="ada" client={client} />);
+    pick(container, zip());
+    await poll(0);
+    expect(q(container, "bundle-import-preview")).not.toBeNull();
+    // A ready preview is not followed.
+    await poll(IMPORT_POLL_MS * 2);
+    expect(get).not.toHaveBeenCalled();
+    fireEvent.click(q(container, "bundle-import-assert")!);
+    fireEvent.click(q(container, "bundle-import-start")!);
+    await poll(0);
+    expect(toasts.success).toEqual([t("portability.import.started")]);
+    expect(q(container, "bundle-import-result")?.dataset.status).toBe("running");
+    // A failed poll is ignored; the next ones bring it to done.
+    await poll();
+    expect(q(container, "bundle-import-result")?.dataset.status).toBe("running");
+    await poll();
+    await poll();
+    expect(q(container, "bundle-import-result")?.dataset.status).toBe("done");
+    expect(get).toHaveBeenCalledWith({ channel: "ada", id: dto.id });
+    const calls = get.mock.calls.length;
+    await poll(IMPORT_POLL_MS * 3);
+    expect(get.mock.calls.length).toBe(calls);
+    fireEvent.click(screen.getByRole("button", { name: t("portability.import.another") }));
+    expect(q(container, "bundle-import-file")).not.toBeNull();
+  });
+
+  it("follows a pending preview until it is ready, or until its standing refuses it", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const pending = previewDto({ preview: { channel: { state: "pending", title: null }, items: [] } });
+    const ready = previewDto();
+    const client = fakeImportClient({
+      preview: vi.fn<ImportClient["preview"]>(async () => pending),
+      get: vi.fn<ImportClient["get"]>(async () => ready),
+    });
+    const { container } = wrap(<ImportCard channel="ada" client={client} />);
+    pick(container, zip());
+    await poll(0);
+    expect(container.textContent).toContain(t("portability.import.pending"));
+    await poll();
+    expect(qa(container, "bundle-import-item")).toHaveLength(ready.preview.items.length);
+    expect(container.textContent).not.toContain(t("portability.import.pending"));
+    cleanup();
+
+    const refused = previewDto({
+      status: "failed",
+      preview: { channel: { state: "refused", title: null }, items: [] },
+      result: [item("channel", "channel", { outcome: "rejected", reason: "standing_suspended" })],
+    });
+    const second = fakeImportClient({
+      preview: vi.fn<ImportClient["preview"]>(async () => pending),
+      get: vi.fn<ImportClient["get"]>(async () => refused),
+    });
+    const view = wrap(<ImportCard channel="ada" client={second} />);
+    pick(view.container, zip());
+    await poll(0);
+    await poll();
+    expect(q(view.container, "bundle-import-standing")?.dataset.state).toBe("refused");
+    expect(view.container.textContent).toContain(t("portability.reason.standingSuspended"));
+    cleanup();
+
+    // A refusal without a reason still refuses, in general words.
+    const bare = fakeImportClient({
+      preview: vi.fn<ImportClient["preview"]>(async () => pending),
+      get: vi.fn<ImportClient["get"]>(async () => ({ ...refused, result: null })),
+    });
+    const third = wrap(<ImportCard channel="ada" client={bare} />);
+    pick(third.container, zip());
+    await poll(0);
+    await poll();
+    expect(third.container.textContent).toContain(t(reasonKey("refused") ?? "portability.reason.other"));
+    expect(q(third.container, "bundle-import-preview")).toBeNull();
   });
 });
 

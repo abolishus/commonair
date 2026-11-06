@@ -23,7 +23,7 @@ import {
 } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type * as React from "react";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 import { locale, uiMessages } from "../src/i18n/index.ts";
 
 const boot = vi.hoisted(() => ({
@@ -43,6 +43,13 @@ vi.mock("../src/components/support/support-dialog.tsx", () => ({
 
 const { Route } = await import("../src/routes/_app/$channel.tsx");
 type ChannelPage = import("../src/components/channel/panels-loader.ts").ChannelPage;
+
+beforeAll(async () => {
+  // The route's component is code-split (lazy): load it once here, so the first test does not
+  // spend its 1 s findBy budget importing the channel page (it timed out under full-suite load).
+  const c = Route.options.component as { preload?: () => Promise<void> } | undefined;
+  await c?.preload?.();
+});
 
 afterEach(() => {
   cleanup();
