@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: CC-BY-SA-4.0
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import type * as React from "react";
 import {
   AppShell,
   AdminShell,
@@ -30,6 +31,16 @@ const groups: NavGroup[] = [
     items: [
       { id: "overview", label: "Overview", href: "#overview", current: true },
       { id: "moderation", label: "Moderation", href: "#moderation", badge: { label: "3", tone: "destructive" } },
+    ],
+  },
+];
+const railGroups: React.ComponentProps<typeof ChannelSidebar>["groups"] = [
+  {
+    id: "live",
+    label: "Live now",
+    channels: [
+      { id: "one", name: "Nadia", category: "Creative", href: "#nadia", live: true, viewers: 1284, accent: "red" },
+      { id: "two", name: "Aurora Pixel", category: "Music", href: "#aurora", live: true, viewers: 312 },
     ],
   },
 ];
@@ -91,6 +102,8 @@ export const SiteHeaderStory: Story = {
       navLabel="Main navigation"
       menuLabel="Open navigation"
       search={<HeaderSearch label="Search CommonAir" placeholder="Search" shortcut="⌘ K" />}
+      // From lg the search is centred on the page, not pushed by the nav or the account controls.
+      user={<UserMenu username="demo_streamer1" displayName="Aurora Pixel" menuLabel="Account menu" items={[]} />}
     />
   ),
 };
@@ -308,4 +321,70 @@ export const PageLayoutsMobile320: Story = {
   ...PageLayoutsStory,
   name: "PageLayouts Mobile320",
   globals: { viewport: { value: "mobile320" } },
+};
+
+/** The public pages' shell (F7): the header spans the page and stays put; the rail starts under it. */
+export const AppShellSidebarBelow: Story = {
+  name: "AppShell sidebar below",
+  render: () => (
+    <AppShell
+      header={
+        <SiteHeader
+          brand={header.props.brand}
+          nav={nav}
+          navLabel="Main navigation"
+          menuLabel="Open navigation"
+          search={<HeaderSearch label="Search CommonAir" placeholder="Search" shortcut="⌘ K" />}
+        />
+      }
+      sidebar={<ChannelSidebar label="Live channels" groups={railGroups} />}
+      sidebarPlacement="below"
+      footer={footer}
+      skipLabel="Skip to content"
+    >
+      <PageContainer>
+        <PageHeader title="Browse" description="Find channels live now." />
+        <p>Page content</p>
+      </PageContainer>
+    </AppShell>
+  ),
+};
+export const AppShellSidebarBelowLight: Story = {
+  ...AppShellSidebarBelow,
+  name: "AppShell sidebar below Light",
+  globals: { theme: "light" },
+};
+export const AppShellSidebarBelowMobile320: Story = {
+  ...AppShellSidebarBelow,
+  name: "AppShell sidebar below Mobile320",
+  globals: { viewport: { value: "mobile320" } },
+};
+
+/** Phones: the sheet opens with the search first, above the nav; a link inside closes it. */
+export const SiteHeaderMobileMenuWithSearch: Story = {
+  name: "SiteHeader Mobile320 menu with search",
+  render: () => (
+    <SiteHeader
+      brand={header.props.brand}
+      nav={nav}
+      navLabel="Main navigation"
+      menuLabel="Open navigation"
+      search={<HeaderSearch label="Search CommonAir" placeholder="Search" shortcut="⌘ K" />}
+      mobileMenuOpen
+    />
+  ),
+  globals: { viewport: { value: "mobile320" } },
+};
+
+/** F38: the initial comes from the display name ("A"), not the username ("d"). */
+export const UserMenuDisplayName: Story = {
+  name: "UserMenu display name",
+  render: () => (
+    <UserMenu
+      username="demo_streamer1"
+      displayName="Aurora Pixel"
+      menuLabel="Account menu"
+      items={[{ id: "settings", label: "Settings", href: "#settings" }]}
+    />
+  ),
 };
