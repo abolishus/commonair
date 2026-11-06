@@ -37,10 +37,11 @@ export interface SiteHeaderProps extends React.ComponentProps<"header"> {
   mobileMenuOpen?: boolean;
   onMobileMenuOpenChange?: (open: boolean) => void;
   /**
-   * The router's current path. The mobile sheet closes when it changes, which also covers
-   * navigation that is not a link click (a search submit, a redirect).
+   * A key for the router's current location: pass the full href (path, search and hash), not only
+   * the pathname, so a search submitted on /search still counts. The mobile sheet closes when it
+   * changes, which covers navigation that is not a link click (a search submit, a redirect).
    */
-  pathname?: string;
+  locationKey?: string;
   /** Shown at the bottom of the mobile sheet (theme switch, account links). */
   mobileActions?: React.ReactNode;
   /** Shown in the bar from `md` up only; pair with `mobileActions` for the same controls on phones. */
@@ -59,7 +60,7 @@ export function SiteHeader({
   menuLabel,
   mobileMenuOpen,
   onMobileMenuOpenChange,
-  pathname,
+  locationKey,
   mobileActions,
   desktopActions,
   className,
@@ -76,12 +77,19 @@ export function SiteHeader({
     [controlled, onMobileMenuOpenChange],
   );
   // Close when the location changes; not on mount, where a caller may open the sheet on purpose.
-  const lastPath = React.useRef(pathname);
+  const lastLocation = React.useRef(locationKey);
+  // Read by the effect below, so a change of `open` alone does not re-run it. Declared first, so it
+  // is current by the time that effect runs.
+  const openRef = React.useRef(open);
   React.useEffect(() => {
-    if (lastPath.current === pathname) return;
-    lastPath.current = pathname;
-    setOpen(false);
-  }, [pathname, setOpen]);
+    openRef.current = open;
+  }, [open]);
+  React.useEffect(() => {
+    if (lastLocation.current === locationKey) return;
+    lastLocation.current = locationKey;
+    // Only an open sheet is closed, so a controlled caller hears nothing on ordinary navigation.
+    if (openRef.current) setOpen(false);
+  }, [locationKey, setOpen]);
   // Any link activated in the sheet closes it, whatever the router. A modified click opens another
   // tab and leaves this page, and the sheet, as they are.
   const onSheetClick = (event: React.MouseEvent) => {

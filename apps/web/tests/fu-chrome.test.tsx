@@ -85,4 +85,18 @@ describe("the phone sheet", () => {
     });
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
+
+  it("closes when a search is submitted from it on /search (only the query changes)", async () => {
+    const { router } = await renderInRouter(header, "/search?q=a");
+    const dialog = await openSheet();
+    const form = dialog.querySelector('[data-testid="header-search"]')?.closest("form") ?? dialog.querySelector("form");
+    const input = form?.querySelector("input") as HTMLInputElement;
+    await act(async () => {
+      fireEvent.change(input, { target: { value: "b" } });
+      fireEvent.submit(form as HTMLFormElement);
+    });
+    await waitFor(() => expect(router.state.location.search).toEqual({ q: "b" }));
+    expect(router.state.location.pathname).toBe("/search");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
 });

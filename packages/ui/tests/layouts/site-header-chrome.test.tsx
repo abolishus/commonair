@@ -112,25 +112,38 @@ describe("the mobile sheet", () => {
     }
   });
 
-  test("closes when the pathname changes, and not on the first render", async () => {
-    const view = render(header({ pathname: "/", mobileMenuOpen: true }));
+  test("closes when the location key changes, and not on the first render", async () => {
+    const view = render(header({ locationKey: "/", mobileMenuOpen: true }));
     expect(screen.getByRole("dialog")).toBeTruthy();
-    view.rerender(header({ pathname: "/", mobileMenuOpen: true }));
+    view.rerender(header({ locationKey: "/", mobileMenuOpen: true }));
     expect(screen.getByRole("dialog")).toBeTruthy();
-    view.rerender(header({ pathname: "/directory", mobileMenuOpen: true }));
+    view.rerender(header({ locationKey: "/directory", mobileMenuOpen: true }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
   test("controlled: reports open and close to the caller instead of keeping its own state", async () => {
     const onChange = vi.fn<(open: boolean) => void>();
-    const view = render(header({ mobileMenuOpen: false, onMobileMenuOpenChange: onChange, pathname: "/" }));
+    const view = render(header({ mobileMenuOpen: false, onMobileMenuOpenChange: onChange, locationKey: "/" }));
     await userEvent.setup().click(screen.getByRole("button", { name: "Open navigation" }));
     expect(onChange).toHaveBeenLastCalledWith(true);
     expect(screen.queryByRole("dialog")).toBeNull();
-    view.rerender(header({ mobileMenuOpen: true, onMobileMenuOpenChange: onChange, pathname: "/" }));
+    view.rerender(header({ mobileMenuOpen: true, onMobileMenuOpenChange: onChange, locationKey: "/" }));
     expect(screen.getByRole("dialog")).toBeTruthy();
-    view.rerender(header({ mobileMenuOpen: true, onMobileMenuOpenChange: onChange, pathname: "/coop" }));
+    view.rerender(header({ mobileMenuOpen: true, onMobileMenuOpenChange: onChange, locationKey: "/coop" }));
     await waitFor(() => expect(onChange).toHaveBeenLastCalledWith(false));
+  });
+
+  test("closes when only the search part of the location key changes", async () => {
+    const view = render(header({ locationKey: "/search?q=a", mobileMenuOpen: true }));
+    view.rerender(header({ locationKey: "/search?q=b", mobileMenuOpen: true }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  test("controlled: a location change while the sheet is closed tells the caller nothing", () => {
+    const onChange = vi.fn<(open: boolean) => void>();
+    const view = render(header({ mobileMenuOpen: false, onMobileMenuOpenChange: onChange, locationKey: "/" }));
+    view.rerender(header({ mobileMenuOpen: false, onMobileMenuOpenChange: onChange, locationKey: "/coop" }));
+    expect(onChange).not.toHaveBeenCalled();
   });
 });
 

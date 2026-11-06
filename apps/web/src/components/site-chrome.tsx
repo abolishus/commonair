@@ -212,6 +212,8 @@ export function AppHeader({ studio = false }: { studio?: boolean }): React.JSX.E
   const { me, instance } = useBootstrap();
   const { theme, setTheme } = React.useContext(ThemeContext);
   const pathname = useLocation({ select: (location) => location.pathname });
+  // The whole href, so a new search submitted on /search also closes the phone sheet.
+  const locationKey = useLocation({ select: (location) => location.href });
   const [searchOpen, setSearchOpen] = React.useState(false);
   const [paletteOpen, setPaletteOpen] = React.useState(false);
 
@@ -247,7 +249,7 @@ export function AppHeader({ studio = false }: { studio?: boolean }): React.JSX.E
         nav={nav}
         navLabel={t("nav.main")}
         menuLabel={t("nav.menu")}
-        pathname={pathname}
+        locationKey={locationKey}
         search={<HeaderSearchField />}
         searchLabel={t("discovery.search.open")}
         onOpenPalette={() => setSearchOpen(true)}
