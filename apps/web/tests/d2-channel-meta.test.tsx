@@ -10,7 +10,7 @@
  * started" instead of an eye and a tiny number, and never changes the count. Also the live-aware
  * document title, and the unknown-channel page with its Live now shelf.
  */
-import { LocaleProvider, TooltipProvider } from "@commonair/ui";
+import { LocaleProvider, TooltipProvider, formatIsoDuration } from "@commonair/ui";
 import { SITE } from "@commonair/config/site";
 import {
   Outlet,
@@ -142,21 +142,16 @@ describe("uptime", () => {
     expect(data.uptimeSeconds(START, Number.NaN)).toBe(0);
   });
 
-  it("isoDuration gives the <time> a machine value", () => {
-    expect(data.isoDuration(0)).toBe("PT0S");
-    expect(data.isoDuration(59)).toBe("PT59S");
-    expect(data.isoDuration(3600)).toBe("PT1H");
-    expect(data.isoDuration(3661)).toBe("PT1H1M1S");
-    expect(data.isoDuration(172_800)).toBe("PT48H");
-    expect(data.isoDuration(-1)).toBe("PT0S");
-  });
-
   it("<Uptime> renders the request time first, then ticks every second, with a label for screen readers", () => {
     vi.useFakeTimers({ now: at(59) });
     render(providers(<Uptime startedAt={START} now={at(59)} />));
     const el = screen.getByTestId("channel-meta-uptime");
     expect(el.textContent).toBe("Live for 0:59");
-    expect(el.querySelector("time")?.getAttribute("datetime")).toBe("PT59S");
+    // The shared primitive's elapsed mode, with the ISO duration as the machine value.
+    const time = el.querySelector("time");
+    expect(time?.getAttribute("data-mode")).toBe("elapsed");
+    expect(time?.getAttribute("datetime")).toBe("PT59S");
+    expect(time?.getAttribute("datetime")).toBe(formatIsoDuration(59));
     expect(el.closest("[aria-live]")).toBeNull();
     act(() => {
       vi.advanceTimersByTime(1000);
@@ -173,6 +168,15 @@ describe("uptime", () => {
     // The bootstrap `now` is from before the broadcast started.
     render(providers(<Uptime startedAt={START} now={at(-600)} />));
     expect(screen.getByTestId("channel-meta-uptime").textContent).toBe("Live for 2:00:00");
+  });
+
+  it("<Uptime> shows when the broadcast started in its tooltip", async () => {
+    vi.useFakeTimers({ now: at(90), shouldAdvanceTime: true });
+    render(providers(<Uptime startedAt={START} now={at(90)} />));
+    const time = screen.getByTestId("channel-meta-uptime").querySelector("time");
+    expect(time).not.toBeNull();
+    if (time) fireEvent.focus(time);
+    expect(await screen.findByText(/November 4, 2026/)).toBeTruthy();
   });
 });
 

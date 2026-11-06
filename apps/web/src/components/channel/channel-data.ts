@@ -114,15 +114,6 @@ export function formatUptime(seconds: number): string {
   return formatDuration(seconds);
 }
 
-/** ISO 8601 duration for `<time dateTime>` (`PT1H2M3S`). */
-export function isoDuration(seconds: number): string {
-  const total = Math.max(0, Math.floor(Number.isFinite(seconds) ? seconds : 0));
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const s = total % 60;
-  return `PT${h > 0 ? `${h}H` : ""}${m > 0 ? `${m}M` : ""}${s > 0 || total === 0 ? `${s}S` : ""}`;
-}
-
 /** The channel's canonical URL, for Share: the instance's public origin plus `/<slug>`. */
 export function channelUrl(publicUrl: string, slug: string): string {
   return `${publicUrl.replace(/\/+$/, "")}/${encodeURIComponent(slug)}`;

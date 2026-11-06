@@ -7,7 +7,7 @@
  * toast), "Just started" for a low verified count, and the phone overflow menu that holds Report.
  * Category and tag URLs come from `lib/category-route.ts` (D1-web's), never written here.
  */
-import { IconButton, StatusBadge } from "@commonair/ui";
+import { IconButton, RelativeTime, StatusBadge } from "@commonair/ui";
 import { Dialog, DialogContent } from "@commonair/ui/components/dialog";
 import {
   DropdownMenu,
@@ -24,7 +24,6 @@ import { t } from "../../i18n/index.ts";
 import { categoryLink, tagLink as tagRoute } from "../../lib/category-route.ts";
 import { reportClient, type ReportClient, type ReportSubject } from "../safety/client.ts";
 import { ReportForm } from "../safety/report-dialog.tsx";
-import { formatUptime, isoDuration, uptimeSeconds } from "./channel-data.ts";
 
 /** The category, linking to its directory page. */
 export function CategoryLink({ category }: { category: { slug: string; name: string } }): React.JSX.Element {
@@ -45,38 +44,18 @@ export function tagLink(tag: string): React.ReactElement {
   return <Link data-testid="channel-meta-tag" data-tag={tag} {...tagRoute(tag)} aria-label={tag} />;
 }
 
-const subscribeSeconds = (tick: () => void) => {
-  const id = setInterval(tick, 1000);
-  return () => clearInterval(id);
-};
-// Whole seconds, so repeated reads within one render agree.
-const currentSecond = () => Math.floor(Date.now() / 1000) * 1000;
-
 /**
- * The time, re-read once a second while mounted. The server render and hydration use `initial`
- * (the SSR request time) so they match; a client-side navigation, when that time is long stale,
- * starts from the real clock.
- */
-function useSecondClock(initial: number): number {
-  return React.useSyncExternalStore(subscribeSeconds, currentSecond, () => initial);
-}
-
-/**
- * How long the broadcast has been live, as a clock (0:59, 1:00:00, 48:00:00). The server render
- * and hydration use `now` (the request time) so they match; it ticks after.
+ * How long the broadcast has been live, as a clock (0:59, 1:00:00, 48:00:00), with the start time
+ * in its tooltip. The server render and hydration use `now` (the request time) so they match; it
+ * ticks after (`<RelativeTime mode="elapsed">`).
  * It is not a live region: a screen reader reads it when it reaches it, not every second.
  */
 export function Uptime({ startedAt, now }: { startedAt: string; now: number }): React.JSX.Element {
-  const clock = useSecondClock(now);
-  const seconds = uptimeSeconds(startedAt, clock);
-  const text = formatUptime(seconds);
   return (
     <span data-testid="channel-meta-uptime" className="inline-flex items-center gap-1 tabular-nums">
       <HugeiconsIcon icon={Clock01Icon} strokeWidth={2} aria-hidden className="size-3.5" />
-      <time dateTime={isoDuration(seconds)} suppressHydrationWarning>
-        <span className="sr-only">{t("channel.meta.uptimeLabel")} </span>
-        {text}
-      </time>
+      <span className="sr-only">{t("channel.meta.uptimeLabel")} </span>
+      <RelativeTime mode="elapsed" date={startedAt} now={now} />
     </span>
   );
 }
