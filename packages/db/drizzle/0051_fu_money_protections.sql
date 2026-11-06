@@ -11,7 +11,9 @@
 --      chargeback row of the share's own payment, references the share (`membership_share`), and
 --      is posted only while the share is held or refund_pending and not already charged back. A
 --      `share_chargeback_reversal` is keyed `share-chargeback-reversal:<disputes.id>` and needs that
---      dispute's chargeback posted for the same share.
+--      dispute's chargeback posted for the same share, on a share still held or refund_pending
+--      (a lost dispute cancelled it for good). A `share_refund` posting is refused while the share
+--      is charged back, and a share whose refund is posted is never charged back.
 --   2. membership_shares (commonair_share_guard, redefined from 0021): a charged-back share is
 --      never refunded (refund_pending -> refunded needs no outstanding chargeback, so the member
 --      is never paid back twice), and held | refund_pending -> cancelled is allowed only while it
@@ -38,7 +40,10 @@ BEGIN
   IF NEW.ref_type IS DISTINCT FROM 'membership_share' OR NEW.ref_id IS NULL THEN
     RAISE EXCEPTION 'a share chargeback posting references its member share' USING ERRCODE = 'check_violation';
   END IF;
-  SELECT m.id, m.status::text AS status, m.payment_id INTO sh FROM public.membership_shares m WHERE m.id = NEW.ref_id;
+  -- Lock the share before reading it: a refund or another dispute of the same share committing
+  -- meanwhile is then seen here (a status read before the lock could be stale).
+  SELECT m.id, m.status::text AS status, m.payment_id INTO sh FROM public.membership_shares m
+   WHERE m.id = NEW.ref_id FOR UPDATE;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'no such member share' USING ERRCODE = 'foreign_key_violation';
   END IF;
@@ -55,10 +60,11 @@ BEGIN
       RAISE EXCEPTION 'only a held or refund_pending share is charged back (this one is %)', sh.status
         USING ERRCODE = 'check_violation';
     END IF;
-    -- The share row lock serializes two disputes of the same share.
-    PERFORM 1 FROM public.membership_shares m WHERE m.id = sh.id FOR UPDATE;
     IF public.commonair_share_chargebacks_outstanding(sh.id) > 0 THEN
       RAISE EXCEPTION 'this share is already charged back' USING ERRCODE = 'check_violation';
+    END IF;
+    IF EXISTS (SELECT 1 FROM public.ledger_transactions t WHERE t.idempotency_key = 'share-refund:' || sh.id::text) THEN
+      RAISE EXCEPTION 'a refunded share is never charged back' USING ERRCODE = 'check_violation';
     END IF;
   ELSE
     IF NEW.idempotency_key !~ '^share-chargeback-reversal:[0-9a-f-]{36}$' THEN
@@ -70,6 +76,11 @@ BEGIN
                       AND t.kind = 'share_chargeback' AND t.ref_id = sh.id) THEN
       RAISE EXCEPTION 'a share chargeback reversal needs that dispute''s chargeback' USING ERRCODE = 'check_violation';
     END IF;
+    -- A lost dispute cancelled the share: nothing gives its capital back any more.
+    IF sh.status NOT IN ('held', 'refund_pending') THEN
+      RAISE EXCEPTION 'only a held or refund_pending share''s chargeback is reversed (this one is %)', sh.status
+        USING ERRCODE = 'check_violation';
+    END IF;
   END IF;
   RETURN NEW;
 END $$;
@@ -77,6 +88,30 @@ END $$;
 CREATE TRIGGER ledger_transactions_share_chargeback BEFORE INSERT ON public.ledger_transactions
   FOR EACH ROW WHEN (NEW.kind IN ('share_chargeback', 'share_chargeback_reversal'))
   EXECUTE FUNCTION commonair_share_chargeback_guard();
+--> statement-breakpoint
+-- A share refund posting while a chargeback stands would pay the member back twice (the
+-- processor already returned the money). Keyed `share-refund:<share id>` (0021's guard reads
+-- that key), so the share is found from the key whatever the posting references.
+CREATE FUNCTION commonair_share_refund_posting_guard() RETURNS trigger
+LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp AS $$
+DECLARE
+  share_ref text;
+BEGIN
+  IF NEW.idempotency_key !~* '^share-refund:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN
+    RETURN NEW;
+  END IF;
+  share_ref := substr(NEW.idempotency_key, length('share-refund:') + 1);
+  -- The share row lock orders this against a chargeback of the same share.
+  PERFORM 1 FROM public.membership_shares m WHERE m.id = share_ref::uuid FOR UPDATE;
+  IF FOUND AND public.commonair_share_chargebacks_outstanding(share_ref::uuid) > 0 THEN
+    RAISE EXCEPTION 'a charged-back share is never refunded' USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END $$;
+--> statement-breakpoint
+CREATE TRIGGER ledger_transactions_share_refund_posting BEFORE INSERT ON public.ledger_transactions
+  FOR EACH ROW WHEN (NEW.kind = 'share_refund')
+  EXECUTE FUNCTION commonair_share_refund_posting_guard();
 --> statement-breakpoint
 
 -- 2. Member shares (0021's guard, plus the chargeback rules) ---------------------------------

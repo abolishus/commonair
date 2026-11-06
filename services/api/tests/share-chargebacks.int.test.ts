@@ -314,4 +314,34 @@ describe("card share chargebacks", () => {
     expect((await shareOf(m.paymentId)).status).toBe("cancelled");
     await expectLedgerBalanced();
   });
+
+  test("a dispute on a share already refunded books nothing, opened or closed, and is audited", async () => {
+    const m = await cardMember();
+    expect((await m.who.client.call("POST", "/api/coop/membership/viewer/exit")).status).toBe(200);
+    const refunded = await deliver(
+      event("charge.refunded", {
+        id: `ch_${rand()}`,
+        object: "charge",
+        payment_intent: m.pi,
+        amount_refunded: m.amount,
+        currency: "usd",
+        refunds: { data: [{ id: `re_${rand()}`, amount: m.amount, status: "succeeded" }] },
+      }),
+    );
+    expect(refunded.body.outcome).toBe("share_refunded");
+    expect((await shareOf(m.paymentId)).status).toBe("refunded");
+    const id = `dp_${rand()}`;
+    const opened = await deliver(
+      dispute("charge.dispute.created", { id, pi: m.pi, amount: m.amount, status: "needs_response" }),
+    );
+    expect(opened.status).toBe(200);
+    expect(opened.body.outcome).toBe("share_dispute_unmatched");
+    expect(await audits("coop.share.dispute_unmatched", m.paymentId)).toHaveLength(1);
+    const lost = await deliver(dispute("charge.dispute.closed", { id, pi: m.pi, amount: m.amount, status: "lost" }));
+    expect(lost.body.outcome).toBe("share_dispute_lost_unmatched");
+    expect(await postings(m.shareId)).toEqual(["share_purchase", "share_refund"]);
+    expect((await shareOf(m.paymentId)).status).toBe("refunded");
+    expect(await paymentOf(m.paymentId)).toMatchObject({ status: "refunded" });
+    await expectLedgerBalanced();
+  });
 });

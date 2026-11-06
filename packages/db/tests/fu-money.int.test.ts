@@ -167,9 +167,20 @@ describe("share chargebacks (0050)", () => {
     const d = await chargebackRow(a.paymentId);
     await post(`share-chargeback:${d}`, "share_chargeback", a.shareId, liability, cash);
     await setShare(a.shareId, { status: "refund_pending" });
-    await post(`share-refund:${a.shareId}`, "share_refund", a.shareId, liability, cash);
-    await expectPgError(setShare(a.shareId, { status: "refunded", refundedAt: new Date() }), /never refunded/);
+    // The ledger refuses the second payback itself, whatever the posting references.
+    for (const [key, ref] of [
+      [`share-refund:${a.shareId}`, a.shareId],
+      [`share-refund:${a.shareId}`, null],
+      [`share-refund:${a.shareId.toUpperCase()}`, null],
+    ] as const)
+      await expectPgError(post(key, "share_refund", ref, liability, cash), /charged-back share is never refunded/);
+    await expectPgError(setShare(a.shareId, { status: "refunded", refundedAt: new Date() }), /refund is posted/);
     await setShare(a.shareId, { status: "cancelled" });
+    // A lost dispute is final: its chargeback is never reversed on the cancelled share.
+    await expectPgError(
+      post(`share-chargeback-reversal:${d}`, "share_chargeback_reversal", a.shareId, cash, liability),
+      /chargeback is reversed/,
+    );
     // No longer open: the member may buy a share again.
     await app.insert(s.membershipShares).values({ userId: a.userId, amountCents: 500, currency: "usd" });
     // A cancelled share is never charged back (nor reopened).
@@ -179,6 +190,64 @@ describe("share chargebacks (0050)", () => {
       /only a held or refund_pending share/,
     );
     await expectPgError(setShare(a.shareId, { status: "held" }), /cannot go from cancelled to held/);
+  });
+
+  test("a share whose refund is posted is never charged back", async () => {
+    const a = await heldShare();
+    await setShare(a.shareId, { status: "refund_pending" });
+    await post(`share-refund:${a.shareId}`, "share_refund", a.shareId, liability, cash);
+    const d = await chargebackRow(a.paymentId);
+    await expectPgError(
+      post(`share-chargeback:${d}`, "share_chargeback", a.shareId, liability, cash),
+      /refunded share is never charged back/,
+    );
+  });
+
+  test("a chargeback waiting on a concurrent refund sees the share refunded", async () => {
+    const a = await heldShare();
+    await setShare(a.shareId, { status: "refund_pending" });
+    const d = await chargebackRow(a.paymentId);
+    // The refund holds the share's row lock when the chargeback arrives; once it commits, the
+    // chargeback must see `refunded`, not the `refund_pending` a read before the lock returned.
+    let release = (): void => undefined;
+    const gate = new Promise<void>((r) => (release = r));
+    let locked = (): void => undefined;
+    const holding = new Promise<void>((r) => (locked = r));
+    const refund = app.transaction(async (tx) => {
+      await tx.select().from(s.membershipShares).where(eq(s.membershipShares.id, a.shareId)).for("update");
+      locked();
+      await gate;
+      const [txn] = await tx
+        .insert(s.ledgerTransactions)
+        .values({
+          kind: "share_refund",
+          description: "share_refund",
+          occurredAt: new Date(),
+          idempotencyKey: `share-refund:${a.shareId}`,
+          refType: "membership_share",
+          refId: a.shareId,
+        })
+        .returning({ id: s.ledgerTransactions.id });
+      await tx.insert(s.ledgerEntries).values([
+        { transactionId: txn!.id, accountId: liability, amountCents: 500, currency: "usd" },
+        { transactionId: txn!.id, accountId: cash, amountCents: -500, currency: "usd" },
+      ]);
+      await tx
+        .update(s.membershipShares)
+        .set({ status: "refunded", refundedAt: new Date() })
+        .where(eq(s.membershipShares.id, a.shareId));
+    });
+    await holding;
+    // Settled at once (handled), so its rejection is never unhandled while the refund commits.
+    const chargeback = post(`share-chargeback:${d}`, "share_chargeback", a.shareId, liability, cash).then(
+      () => ({ err: null as unknown }),
+      (err: unknown) => ({ err }),
+    );
+    await new Promise((r) => setTimeout(r, 300));
+    release();
+    await refund;
+    const { err } = await chargeback;
+    await expectPgError(err ? Promise.reject(err as Error) : Promise.resolve(), /only a held or refund_pending share/);
   });
 
   test("0021's rules still hold under the redefined guard", async () => {

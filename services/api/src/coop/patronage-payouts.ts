@@ -513,6 +513,9 @@ export async function markPatronagePayoutUnsent(
   const actor = { type: STAFF, id: input.actorId } as const;
   const r = await withCoopErrors(() =>
     deps.db.transaction(async (tx) => {
+      // The period first, as every other path that settles a row locks them: the follow-up row
+      // below needs the period too (openMissingPayouts), so row-then-period could deadlock.
+      if (!(await lockPeriodOfPayout(tx, input.payoutId))) throw notFound("Payout not found");
       const [row] = await tx
         .select()
         .from(patronagePayouts)
