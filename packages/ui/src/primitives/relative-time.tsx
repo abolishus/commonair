@@ -3,7 +3,7 @@
 
 import * as React from "react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../components/tooltip.tsx";
-import { formatDateTime, formatRelativeTime } from "../lib/format.ts";
+import { formatDateTime, formatDuration, formatIsoDuration, formatRelativeTime } from "../lib/format.ts";
 import { useLocale } from "../lib/locale.tsx";
 import { toEpochMs, useRequestNow } from "../lib/now.tsx";
 import { cn } from "../lib/utils.ts";
@@ -22,11 +22,40 @@ export interface RelativeTimeProps extends Omit<React.ComponentProps<"time">, "c
   now?: number | Date | string;
   /** Show the absolute time in a tooltip on hover/focus (default). */
   tooltip?: boolean;
+  /**
+   * `"relative"` (default): "5 minutes ago". `"elapsed"`: the time since `date` as a running clock
+   * ("4:05", "1:02:03", hours never roll into days), ticking every second while `live`; the
+   * `<time dateTime>` is then the ISO duration and the tooltip still the absolute start.
+   */
+  mode?: "relative" | "elapsed";
 }
 
 const noopSubscribe = (): (() => void) => () => {};
 const isClient = (): boolean => true;
 const isServer = (): boolean => false;
+
+const subscribeSeconds = (tick: () => void): (() => void) => {
+  const id = setInterval(tick, 1000);
+  return () => clearInterval(id);
+};
+// Whole seconds, so repeated reads within one render (and one second) agree.
+const currentSecond = (): number => Math.floor(Date.now() / 1000) * 1000;
+
+/**
+ * The clock for the elapsed mode, re-read once a second while `ticking`. The server render and
+ * hydration use `initial` so they match; a client-only render (a client-side navigation, when the
+ * request time is long stale) starts from the real clock. Reading `Date.now()` at render, not in
+ * the timer, means a late or throttled tick still shows the right time.
+ */
+function useSecondClock(ticking: boolean, initial: number | undefined): number {
+  const [mountedAt] = React.useState(currentSecond);
+  const fixed = initial ?? mountedAt;
+  return React.useSyncExternalStore(
+    ticking ? subscribeSeconds : noopSubscribe,
+    ticking ? currentSecond : () => fixed,
+    () => fixed,
+  );
+}
 
 function toDate(value: string | Date | number): Date {
   return value instanceof Date ? value : new Date(value);
@@ -34,7 +63,8 @@ function toDate(value: string | Date | number): Date {
 
 /**
  * "5 minutes ago" in a `<time dateTime>` element that re-renders exactly when its
- * text would change, with the absolute time in a tooltip.
+ * text would change, with the absolute time in a tooltip. `mode="elapsed"` shows the time since
+ * `date` as a clock instead (a broadcast's uptime).
  */
 export function RelativeTime({
   date,
@@ -43,6 +73,7 @@ export function RelativeTime({
   live = true,
   tooltip = true,
   now: nowProp,
+  mode = "relative",
   className,
   ...props
 }: RelativeTimeProps): React.JSX.Element {
@@ -60,7 +91,15 @@ export function RelativeTime({
   const useRequestTime = initialNow !== undefined && (!hydrated || !live);
   const now = useRequestTime ? initialNow : clock;
 
-  const result = valid ? formatRelativeTime(parsed, now, resolvedLocale) : { text: "", nextUpdateMs: null };
+  const elapsed = mode === "elapsed";
+  const secondClock = useSecondClock(elapsed && live, initialNow);
+  const elapsedSeconds = valid ? Math.max(0, Math.floor((secondClock - parsed.getTime()) / 1000)) : 0;
+
+  const result = !valid
+    ? { text: "", nextUpdateMs: null }
+    : elapsed
+      ? { text: formatDuration(elapsedSeconds), nextUpdateMs: null }
+      : formatRelativeTime(parsed, now, resolvedLocale);
 
   React.useEffect(() => {
     if (!live || result.nextUpdateMs === null) return;
@@ -73,7 +112,8 @@ export function RelativeTime({
   const element = (
     <time
       data-slot="relative-time"
-      dateTime={parsed.toISOString()}
+      data-mode={mode}
+      dateTime={elapsed ? formatIsoDuration(elapsedSeconds) : parsed.toISOString()}
       // The text may legitimately differ from the server render by the time the client hydrates.
       suppressHydrationWarning
       className={cn("tabular-nums", className)}

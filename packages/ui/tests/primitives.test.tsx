@@ -3,6 +3,8 @@
 
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
+import { hydrateRoot } from "react-dom/client";
+import { renderToString } from "react-dom/server";
 import type * as React from "react";
 import { afterEach, describe, expect, test, vi } from "vite-plus/test";
 import type { StreamCard as StreamCardData } from "@commonair/contracts/dto";
@@ -194,6 +196,98 @@ describe("RelativeTime", () => {
   test("renders an empty time element for an invalid date instead of throwing", () => {
     const { container } = render(<RelativeTime date="not a date" />);
     expect(container.querySelector("time")!.textContent).toBe("");
+  });
+});
+
+describe("RelativeTime elapsed mode", () => {
+  const START = "2026-06-15T10:00:00.000Z";
+  const at = (seconds: number) => Date.parse(START) + seconds * 1000;
+
+  test("a running clock that ticks every second, with an ISO duration", () => {
+    vi.useFakeTimers({ now: at(59) });
+    render(<RelativeTime mode="elapsed" date={START} locale="en" />);
+    const time = screen.getByText("0:59");
+    expect(time.tagName).toBe("TIME");
+    expect(time.getAttribute("datetime")).toBe("PT59S");
+    expect(time.getAttribute("data-mode")).toBe("elapsed");
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+    });
+    expect(time.textContent).toBe("1:00");
+    expect(time.getAttribute("datetime")).toBe("PT1M");
+    act(() => {
+      vi.advanceTimersByTime(3_539_000);
+    });
+    expect(time.textContent).toBe("59:59");
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+    });
+    expect(time.textContent).toBe("1:00:00");
+    act(() => {
+      vi.advanceTimersByTime(47 * 3_600_000 + 3_723_000);
+    });
+    // Hours never roll into days.
+    expect(time.textContent).toBe("49:02:03");
+    expect(vi.getTimerCount()).toBe(1);
+  });
+
+  test("the request time is the first render; a stale one is not used once mounted on the client", () => {
+    vi.useFakeTimers({ now: at(2 * 3600) });
+    // Server render (and hydration): the request time, so the markup matches.
+    const html = renderToString(<RelativeTime mode="elapsed" date={START} locale="en" now={at(65)} tooltip={false} />);
+    expect(html).toContain(">1:05<");
+    expect(html).toContain('dateTime="PT1M5S"');
+    // A client-only render (a client-side navigation hours later) reads the real clock.
+    render(<RelativeTime mode="elapsed" date={START} locale="en" now={at(65)} />);
+    expect(screen.getByText("2:00:00")).toBeTruthy();
+  });
+
+  test("hydrates with the server text, then follows the clock", async () => {
+    vi.useFakeTimers({ now: at(600) });
+    const node = <RelativeTime mode="elapsed" date={START} locale="en" now={at(65)} tooltip={false} />;
+    const container = document.createElement("div");
+    container.innerHTML = renderToString(node);
+    document.body.append(container);
+    expect(container.textContent).toBe("1:05");
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    let root: ReturnType<typeof hydrateRoot> | undefined;
+    await act(async () => {
+      root = hydrateRoot(container, node);
+    });
+    expect(errors).not.toHaveBeenCalled();
+    expect(container.textContent).toBe("10:00");
+    act(() => root?.unmount());
+    container.remove();
+  });
+
+  test("does not tick when live is off, and stops its timer on unmount", () => {
+    vi.useFakeTimers({ now: at(30) });
+    const { unmount } = render(<RelativeTime mode="elapsed" date={START} locale="en" live={false} now={at(30)} />);
+    expect(vi.getTimerCount()).toBe(0);
+    act(() => {
+      vi.advanceTimersByTime(5_000);
+    });
+    expect(screen.getByText("0:30")).toBeTruthy();
+    unmount();
+
+    const live = render(<RelativeTime mode="elapsed" date={START} locale="en" />);
+    expect(vi.getTimerCount()).toBe(1);
+    live.unmount();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  test("a start in the future reads 0:00", () => {
+    vi.useFakeTimers({ now: at(-30) });
+    render(<RelativeTime mode="elapsed" date={START} locale="en" />);
+    expect(screen.getByText("0:00").getAttribute("datetime")).toBe("PT0S");
+  });
+
+  test("the tooltip is still the absolute start time", async () => {
+    vi.useFakeTimers({ now: at(90), shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(<RelativeTime mode="elapsed" date={START} locale="en" timeZone="UTC" />);
+    await user.hover(screen.getByText("1:30"));
+    expect(await screen.findByText("June 15, 2026 at 10:00 AM")).toBeTruthy();
   });
 });
 

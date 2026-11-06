@@ -3,7 +3,7 @@
 
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { Table, TableBody, TableCaption, TableCell, TableRow } from "../src/components/table.tsx";
-import { MoneyAmount, RelativeTime } from "../src/index.ts";
+import { MoneyAmount, RelativeTime, formatHour } from "../src/index.ts";
 
 const meta = {
   title: "Primitives/RelativeTime and MoneyAmount",
@@ -45,6 +45,49 @@ export const Range: Story = {
 export const RangeFrench: Story = { ...Range, globals: { locale: "fr" } };
 export const RangeArabicRtl: Story = { ...Range, globals: { locale: "ar", dir: "rtl" } };
 export const InvalidDate: Story = { args: { date: "not a date" } };
+
+const ELAPSED = [5_000, 4 * 60_000 + 5_000, 3_723_000, 49 * 3_600_000];
+
+/** `mode="elapsed"`: an uptime clock that ticks every second. Hover a value for the start time. */
+export const Elapsed: Story = {
+  render: () => {
+    const now = Date.now();
+    return (
+      <ul className="flex flex-col gap-1 text-sm">
+        {ELAPSED.map((ago) => (
+          <li key={ago}>
+            <RelativeTime mode="elapsed" date={now - ago} />
+          </li>
+        ))}
+      </ul>
+    );
+  },
+};
+
+export const ElapsedStatic: Story = { args: { mode: "elapsed", live: false } };
+
+const HOUR_LOCALES = ["en-US", "en-GB", "es", "de", "ja", "ko"];
+
+/** `formatHour`: each locale's own clock for an hour picker (12-hour with the day period, or 24-hour). */
+export const Hours: Story = {
+  render: () => (
+    <Table className="w-auto">
+      <TableCaption className="sr-only">Hour formatting samples</TableCaption>
+      <TableBody>
+        {HOUR_LOCALES.map((locale) => (
+          <TableRow key={locale}>
+            <TableCell className="text-muted-foreground">{locale}</TableCell>
+            {[0, 9, 12, 15, 23].map((hour) => (
+              <TableCell key={hour} className="text-end tabular-nums">
+                {formatHour(hour, locale)}
+              </TableCell>
+            ))}
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  ),
+};
 
 const AMOUNTS: { cents: number; currency: string }[] = [
   { cents: 499, currency: "USD" },
