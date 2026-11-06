@@ -30,6 +30,7 @@ import { ROUTES } from "../../web/selectors.ts";
 import { WebSession } from "../../web/session.ts";
 import { type WatchRoomStep, watchRoomTitle } from "../steps.ts";
 import { directMemberInsert, reportRow, roomCounts } from "./db.ts";
+import { consoleBuffer, startupDiagnostics, withStartup } from "./startup.ts";
 import {
   refusalCode,
   summarizeDelta,
@@ -81,6 +82,8 @@ export interface Member {
   user: SignedInUser;
   session: WebSession;
   page: Page;
+  /** The page's recent console warnings and errors and its uncaught errors (start-up diagnostics). */
+  console?: { lines(): string[] };
 }
 
 export interface WatchRoomRun {
@@ -183,6 +186,12 @@ export async function openMember(
   ctx.defer(() => session.close());
   run.open.sessions.push(session);
   const page = await session.goto(ROUTES.signin);
+  const consoleLines = consoleBuffer();
+  page.on("console", (msg) => {
+    const type = msg.type();
+    if (type === "error" || type === "warning") consoleLines.push(`${type}: ${msg.text()}`);
+  });
+  page.on("pageerror", (err) => consoleLines.push(`pageerror: ${err.message}`));
   await signInViaUi(page, user, UI_TIMEOUT_MS, ctx.signal);
   if (record) {
     const list: PlayheadSample[] = [];
@@ -207,7 +216,7 @@ export async function openMember(
       }
     });
   }
-  return { label, user, session, page };
+  return { label, user, session, page, console: consoleLines };
 }
 
 async function openDrawer(page: Page): Promise<void> {
@@ -267,7 +276,12 @@ export async function joinRoom(
 /** A browser member watching the room: the channel page, playing live, the drawer on the room. */
 export async function watchInRoom(member: Member, channel: string, roomId: string): Promise<void> {
   if (!member.page.url().includes(`/${channel}`)) await member.session.goto(`/${channel}`);
-  await member.page.locator(`[data-testid="player"][data-state="playing"]`).waitFor({ timeout: PLAYING_TIMEOUT_MS });
+  try {
+    await member.page.locator(`[data-testid="player"][data-state="playing"]`).waitFor({ timeout: PLAYING_TIMEOUT_MS });
+  } catch (err) {
+    // Never played: say whether the page even started (hydrated, bootstrap, scripts, console).
+    throw withStartup(err, await startupDiagnostics(member.page, member.console?.lines() ?? []));
+  }
   await openDrawer(member.page);
   await member.page.locator(sel(WR.drawer, { "room-id": roomId })).waitFor({ timeout: UI_TIMEOUT_MS });
 }
