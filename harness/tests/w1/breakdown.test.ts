@@ -10,6 +10,8 @@ import {
   grossSide,
   sameView,
   settledByBreakdown,
+  FAILED_LOAD_RELOAD_MS,
+  shouldReloadFailedLoad,
 } from "../../src/w1/breakdown.ts";
 
 type Kind = "tax" | "creator" | "coop_share" | "processor_fee" | "coop_net" | "reversal" | "dispute_fee";
@@ -95,5 +97,21 @@ describe("breakdown checks", () => {
     expect(sameView(view, dialogViewOf(breakdown()))).toBe(true);
     expect(sameView(view, { ...view, lines: [...view.lines].reverse() })).toBe(false);
     expect(sameView(view, { ...view, grossCents: 999 })).toBe(false);
+  });
+});
+
+describe("shouldReloadFailedLoad", () => {
+  const t0 = 1_000_000;
+  test("never reloads a page that has not failed", () => {
+    expect(shouldReloadFailedLoad(false, t0, t0 + 10 * FAILED_LOAD_RELOAD_MS)).toBe(false);
+  });
+  test("waits the full interval after a load before reloading it", () => {
+    expect(shouldReloadFailedLoad(true, t0, t0)).toBe(false);
+    expect(shouldReloadFailedLoad(true, t0, t0 + FAILED_LOAD_RELOAD_MS - 1)).toBe(false);
+    expect(shouldReloadFailedLoad(true, t0, t0 + FAILED_LOAD_RELOAD_MS)).toBe(true);
+  });
+  test("leaves room for a few reloads inside the step's wait", () => {
+    expect(FAILED_LOAD_RELOAD_MS).toBeGreaterThanOrEqual(5_000);
+    expect(FAILED_LOAD_RELOAD_MS * 3).toBeLessThan(75_000);
   });
 });
