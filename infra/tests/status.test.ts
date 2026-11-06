@@ -37,7 +37,9 @@ import {
   DAY_QUERY,
   PROBES_ID,
   PROBES_SETTLE_SECONDS,
+  RATE_LIMITED,
   SAMPLE_QUERY,
+  STATUS_CODE_QUERY,
   type AlertPlan,
   type ComponentRecord,
   type Judgement,
@@ -49,13 +51,16 @@ import {
   alertText,
   applyDelivered,
   dayOf,
+  defaultTransport,
   deliver,
+  httpProm,
   emptyState,
   isPlaceholder,
   judge,
   judgeCert,
   judgeProbe,
   last90,
+  observe,
   main,
   parseConfig,
   parseEnvFile,
@@ -63,6 +68,7 @@ import {
   percent,
   planAlerts,
   probeTargets,
+  readNotes,
   renderMarkdown,
   renderMetrics,
   routeFrom,
@@ -111,6 +117,8 @@ interface Scenario {
   certExpiry?: number | null;
   /** Availability answer for a day query, by evaluation time. */
   day?: (time: number, seconds: number) => Record<string, number>;
+  /** probe_http_status_code per component, aligned with `probes` (none: no HTTP probes). */
+  codes?: Record<string, number[]>;
 }
 
 function fakeProm(s: Scenario, calls: string[] = []): PromQuery {
@@ -122,6 +130,14 @@ function fakeProm(s: Scenario, calls: string[] = []): PromQuery {
         "matrix",
         Object.entries(s.probes).map(([component, vals]) => ({
           metric: { __name__: "probe_success", job: "status", component },
+          values: vals.map((v, i) => [s.now - (vals.length - 1 - i) * 30, String(v)]),
+        })),
+      );
+    if (expr === STATUS_CODE_QUERY(CFG))
+      return ok(
+        "matrix",
+        Object.entries(s.codes ?? {}).map(([component, vals]) => ({
+          metric: { __name__: "probe_http_status_code", job: "status", component },
           values: vals.map((v, i) => [s.now - (vals.length - 1 - i) * 30, String(v)]),
         })),
       );
@@ -316,6 +332,88 @@ describe("judging probes", () => {
     expect(j.states[PROBES_ID]).toBe("down");
     expect(j.states.web).toBe("unknown");
     expect(j.blind).toBe(false);
+  });
+});
+
+describe("a rate-limited probe (429) is no data, not a failure", () => {
+  const L = RATE_LIMITED;
+  const codes = (vals: number[]) => ({ api: vals });
+  const seen = (api: number[], apiCodes: number[]) =>
+    observe(fakeProm({ now: NOW, probes: { ...allUp(), api }, codes: codes(apiCodes) }), CFG);
+
+  test("only the limited samples of that component are dropped, by timestamp", async () => {
+    const o = await seen([1, 0, 1, 0], [200, L, 200, L]);
+    expect(o.samples.api).toEqual([
+      [NOW - 90, 1],
+      [NOW - 30, 1],
+    ]);
+    // A 503 (the readiness failing) stays a failure; other components keep every sample.
+    expect((await seen([1, 1, 0, 0], [200, 200, 503, 503])).samples.api?.map(([, v]) => v)).toEqual([1, 1, 0, 0]);
+    expect(o.samples.web).toHaveLength(4);
+  });
+
+  test("a status code at a time with no probe_success sample drops nothing", async () => {
+    const prom = fakeProm({ now: NOW, probes: { ...allUp(), api: [1, 1] }, codes: { api: [L, L, 200, 200] } });
+    expect((await observe(prom, CFG)).samples.api).toEqual([
+      [NOW - 30, 1],
+      [NOW, 1],
+    ]);
+  });
+
+  test("series without a component are ignored", async () => {
+    const base = fakeProm({ now: NOW, probes: allUp() });
+    const prom: PromQuery = async (expr, time) =>
+      expr === STATUS_CODE_QUERY(CFG)
+        ? ok("matrix", [{ metric: { job: "status" }, values: [[NOW, String(L)]] }, { metric: { component: "web" } }])
+        : base(expr, time);
+    expect((await observe(prom, CFG)).samples.web).toHaveLength(4);
+  });
+
+  test("a failing status code query fails the run, like the sample query", async () => {
+    const base = fakeProm({ now: NOW, probes: allUp() });
+    const prom: PromQuery = async (expr, time) =>
+      expr === STATUS_CODE_QUERY(CFG) ? { status: "error", error: "bad" } : base(expr, time);
+    await expect(observe(prom, CFG)).rejects.toThrow(/prometheus: probe_http_status_code.*: bad/);
+  });
+
+  test("the confirmed state comes from the samples around a 429", async () => {
+    const state = async (api: number[], apiCodes: number[], prev?: "up" | "down") => {
+      const p = emptyState();
+      if (prev) p.components.api = { state: prev, since: NOW - 600, alerted: null, lastMailAt: null };
+      return judge(CFG, await seen(api, apiCodes), p).states.api;
+    };
+    // Two good probes, then limited: still up.
+    expect(await state([1, 1, 0, 0], [200, 200, L, L])).toBe("up");
+    // Two real failures, then limited: still down.
+    expect(await state([0, 0, 0, 0], [503, 503, L, L], "up")).toBe("down");
+    // One real sample left: the previous state stands.
+    expect(await state([1, 0, 0, 0], [200, L, L, L], "down")).toBe("down");
+    // Limited for the whole window (more than 3 intervals): no data.
+    expect(await state([0, 0, 0, 0], [L, L, L, L], "up")).toBe("unknown");
+  });
+
+  test("a run with the API limited throughout mails nothing and shows no data", async () => {
+    const data = setupData();
+    const t = fakeTransport();
+    const run = (now: number, api: number[], apiCodes?: number[]) =>
+      runOnce({
+        cfg: CFG,
+        prom: fakeProm({ now, probes: { ...allUp(), api }, codes: apiCodes ? { api: apiCodes } : undefined }),
+        dataDir: data,
+        alertEnv: ALERT_ENV,
+        transport: t,
+        log: quiet,
+      });
+    await run(NOW, [1, 1, 1, 1]);
+    const r = await run(NOW + 120, [0, 0, 0, 0], [L, L, L, L]);
+    expect(r.judgement.states.api).toBe("unknown");
+    expect(r.judgement.states[PROBES_ID]).toBe("up");
+    expect(r.judgement.blind).toBe(false);
+    expect(t.mails).toEqual([]);
+    // The same answers as 503s are an outage, and mailed.
+    const r2 = await run(NOW + 240, [0, 0, 0, 0], [503, 503, 503, 503]);
+    expect(r2.judgement.states.api).toBe("down");
+    expect(t.mails.map((m) => m.subject)).toEqual(["[CommonAir status] API and database is down"]);
   });
 });
 
@@ -1759,5 +1857,303 @@ describe("the page's language and name", () => {
   test("no site name: the page shows the instance's host, not a literal", () => {
     const cfg = parseConfig({ ...RAW_CONFIG, siteName: null });
     expect(cfg.siteName).toBe("stream.example.org");
+  });
+});
+
+// ---------------------------------------------------------------- edges
+
+describe("status.json validation, every refusal", () => {
+  const bad = (patch: Record<string, unknown>) => () => parseConfig({ ...RAW_CONFIG, ...patch });
+
+  test("not an object, or a field of the wrong shape", () => {
+    expect(() => parseConfig(null)).toThrow(/not an object/);
+    expect(() => parseConfig("{}")).toThrow(/not an object/);
+    expect(bad({ origin: undefined })).toThrow(/origin must be a non-empty string/);
+    expect(bad({ rtmp: "stream.example.org" })).toThrow(/rtmp must be host:port/);
+    expect(bad({ extraComponents: { id: "x" } })).toThrow(/extraComponents must be a list/);
+    expect(bad({ extraComponents: ["x"] })).toThrow(/each extra component is an object/);
+    expect(bad({ extraComponents: [null] })).toThrow(/each extra component is an object/);
+    expect(bad({ canaries: "9.9.9.9:53" })).toThrow(/canaries/);
+    expect(bad({ canaries: [53] })).toThrow(/canaries/);
+    expect(bad({ statusDomain: "status page" })).toThrow(/statusDomain must be a host name/);
+  });
+
+  test("whole numbers within their range, the bounds included", () => {
+    expect(bad({ probeIntervalSeconds: 4 })).toThrow(/probeIntervalSeconds must be a whole number from 5 to 300/);
+    expect(bad({ probeIntervalSeconds: 301 })).toThrow(/probeIntervalSeconds/);
+    expect(bad({ probeIntervalSeconds: 30.5 })).toThrow(/probeIntervalSeconds/);
+    expect(bad({ probeIntervalSeconds: "30" })).toThrow(/probeIntervalSeconds/);
+    expect(parseConfig({ ...RAW_CONFIG, probeIntervalSeconds: 5 }).probeIntervalSeconds).toBe(5);
+    expect(parseConfig({ ...RAW_CONFIG, probeIntervalSeconds: 300 }).probeIntervalSeconds).toBe(300);
+    expect(parseConfig({ ...RAW_CONFIG, mailIntervalSeconds: 0 }).mailIntervalSeconds).toBe(0);
+    expect(bad({ certWarnDays: 91 })).toThrow(/certWarnDays/);
+    expect(bad({ retentionDays: 0 })).toThrow(/retentionDays/);
+  });
+
+  test("defaults: rtmp on the origin's host, status.<host>, an IPv6 canary", () => {
+    const cfg = parseConfig({
+      origin: "https://stream.example.org",
+      canaries: ["[2620:fe::fe]:53"],
+    });
+    expect(cfg.components.find((c) => c.id === "ingest")).toMatchObject({ target: "stream.example.org:1935" });
+    expect(cfg.statusDomain).toBe("status.stream.example.org");
+    expect(cfg.canaries).toEqual(["[2620:fe::fe]:53"]);
+    expect(cfg).toMatchObject({ probeIntervalSeconds: 30, confirmSamples: 2, locale: "en" });
+  });
+
+  test("a certificate whose component is missing has no target", () => {
+    const cfg = { ...CFG, components: [{ id: "cert2", name: "C", kind: "cert" as const, from: "nope" }] };
+    expect(() => probeTargets(cfg)).toThrow(/certificate cert2: no component nope/);
+  });
+});
+
+describe("the Prometheus client", () => {
+  test("asks /api/v1/query with the query, and the time only when given", async () => {
+    const urls: string[] = [];
+    const fetchFn = (async (url: URL | string) => {
+      urls.push(String(url));
+      return Response.json(ok("scalar", [NOW, String(NOW)]));
+    }) as unknown as typeof fetch;
+    const prom = httpProm("http://prometheus:9090/ignored", fetchFn);
+    expect(await prom("time()")).toEqual(ok("scalar", [NOW, String(NOW)]));
+    await prom('up{job="x"}', NOW);
+    expect(urls).toEqual([
+      "http://prometheus:9090/api/v1/query?query=time%28%29",
+      `http://prometheus:9090/api/v1/query?query=up%7Bjob%3D%22x%22%7D&time=${NOW}`,
+    ]);
+  });
+
+  test("an answer of the wrong type, or with no data, fails the run with the query in the message", async () => {
+    const wrongType: PromQuery = async (expr) => (expr === "time()" ? ok("vector", []) : ok("matrix", []));
+    await expect(observe(wrongType, CFG)).rejects.toThrow(/time\(\): expected scalar, got vector/);
+    const noData: PromQuery = async () => ({ status: "success" });
+    await expect(observe(noData, CFG)).rejects.toThrow(/prometheus: time\(\): error/);
+  });
+});
+
+describe("the alert route, partial settings", () => {
+  const env = { SMTP_HOST: "smtp.relay.test", MAIL_FROM: "status@status.test", ALERT_EMAIL_TO: "oncall@ops.test" };
+
+  test("each missing piece of the mail route is named; the webhook still works", () => {
+    expect(routeFrom({ ...env, SMTP_HOST: "" }, CFG).problems).toEqual(["SMTP_HOST is unset or a placeholder"]);
+    expect(routeFrom({ ...env, MAIL_FROM: undefined }, CFG).problems).toEqual(["MAIL_FROM is unset or a placeholder"]);
+    const r = routeFrom({ ...env, SMTP_PORT: "0", ALERT_WEBHOOK_URL: "https://hooks.ops.test/x" }, CFG);
+    expect(r).toMatchObject({ mail: null, webhook: "https://hooks.ops.test/x", problems: ["SMTP_PORT is not a port"] });
+    expect(routeFrom({ ...env, SMTP_PORT: "65536" }, CFG).mail).toBeNull();
+  });
+
+  test("defaults: port 2587, STARTTLS, no user; an implicit-TLS relay and a CA when set", () => {
+    expect(routeFrom(env, CFG).mail).toMatchObject({
+      host: "smtp.relay.test",
+      port: 2587,
+      secure: false,
+      user: null,
+      password: null,
+      ca: null,
+      helo: "status.stream.example.org",
+    });
+    expect(
+      routeFrom({ ...env, SMTP_PORT: "2465", SMTP_SECURE: "true", SMTP_USER: " ", SMTP_CA_PEM: "PEM" }, CFG).mail,
+    ).toMatchObject({ port: 2465, secure: true, user: null, ca: "PEM" });
+  });
+
+  test("a run with half a route warns; with none it says so loudly", async () => {
+    const logs: string[] = [];
+    const log: Log = (level, msg) => void logs.push(`${level} ${msg}`);
+    const deps = { cfg: CFG, prom: fakeProm({ now: NOW, probes: allUp() }), transport: fakeTransport(), log };
+    await runOnce({ ...deps, dataDir: setupData(), alertEnv: { ...env, ALERT_WEBHOOK_URL: "not a url" } });
+    expect(logs).toContain("warn alert route incomplete");
+    logs.length = 0;
+    await runOnce({ ...deps, dataDir: setupData(), alertEnv: {} });
+    expect(logs.some((l) => l.startsWith("error NO ALERT ROUTE"))).toBe(true);
+  });
+});
+
+describe("the default transport's webhook", () => {
+  test("POSTs the body as JSON; a non-2xx answer is an error", async () => {
+    const got: unknown[] = [];
+    let status = 204;
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      async fetch(req) {
+        got.push({ method: req.method, type: req.headers.get("content-type"), body: await req.json() });
+        return new Response(status === 204 ? null : "no", { status });
+      },
+    });
+    try {
+      const url = `http://127.0.0.1:${server.port}/hook`;
+      await defaultTransport.webhook(url, { component: "api" }, new AbortController().signal);
+      expect(got).toEqual([{ method: "POST", type: "application/json", body: { component: "api" } }]);
+      status = 500;
+      await expect(defaultTransport.webhook(url, { a: 1 }, new AbortController().signal)).rejects.toThrow(
+        "webhook: HTTP 500",
+      );
+    } finally {
+      await server.stop(true);
+    }
+  });
+});
+
+describe("SMTP replies the client refuses", () => {
+  /** A relay that says `greeting` and then, if asked, hangs up. */
+  async function rudeRelay(greeting: string, hangUp: boolean) {
+    const server = createServer((sock) => {
+      sock.write(greeting);
+      if (hangUp) sock.end();
+    });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    return { port: (server.address() as AddressInfo).port, close: () => server.close() };
+  }
+
+  test("a line that is not a reply", async () => {
+    const relay = await rudeRelay("hello there\r\n", false);
+    try {
+      await expect(smtpSend(mailSettings(relay.port), MSG)).rejects.toThrow("smtp: malformed reply");
+    } finally {
+      relay.close();
+    }
+  });
+
+  test("a relay that hangs up mid-reply", async () => {
+    const relay = await rudeRelay("220-relay.test\r\n", true);
+    try {
+      await expect(smtpSend(mailSettings(relay.port), MSG)).rejects.toThrow("connection closed");
+    } finally {
+      relay.close();
+    }
+  });
+
+  test("a signal already aborted sends nothing", async () => {
+    await expect(smtpSend(mailSettings(9), MSG, { signal: AbortSignal.abort(new Error("spent")) })).rejects.toThrow(
+      "spent",
+    );
+  });
+});
+
+describe("the renderer's own files", () => {
+  test("an unreadable or foreign state file starts fresh, with a warning for the unreadable one", async () => {
+    for (const [text, warns] of [
+      ["{not json", true],
+      [JSON.stringify({ version: 2, components: { api: { state: "down" } } }), false],
+    ] as const) {
+      const data = setupData();
+      mkdirSync(join(data, "state"), { recursive: true });
+      writeFileSync(join(data, "state", "state.json"), text);
+      const logs: string[] = [];
+      const r = await runOnce({
+        cfg: CFG,
+        prom: fakeProm({ now: NOW, probes: allUp() }),
+        dataDir: data,
+        alertEnv: {},
+        transport: fakeTransport(),
+        log: (level, msg) => void logs.push(`${level} ${msg}`),
+      });
+      expect(r.plan.records.api?.since).toBe(NOW);
+      expect(logs.includes("warn state unreadable, starting fresh")).toBe(warns);
+    }
+  });
+
+  test("notes: only .md files, and none without the directory", () => {
+    const d = tmp();
+    writeFileSync(join(d, "README.txt"), "not a note");
+    writeFileSync(join(d, "a.md"), "---\ntitle: A\ndate: 2026-11-03T13:00:00Z\n---\nBody\n");
+    expect(readNotes(d, quiet).map((n) => n.file)).toEqual(["a.md"]);
+    expect(readNotes(join(d, "absent"), quiet)).toEqual([]);
+  });
+
+  test("markdown: a list after a paragraph and a paragraph after a list are separate blocks", () => {
+    expect(renderMarkdown("Intro\n- one\n- two\nAfter")).toBe(
+      "<p>Intro</p>\n<ul><li>one</li><li>two</li></ul>\n<p>After</p>",
+    );
+  });
+
+  test("a failed run with no page yet, or a page without the stale slot, marks nothing", async () => {
+    const deps = {
+      cfg: CFG,
+      prom: fakeProm({ now: NOW, probes: allUp() }),
+      alertEnv: {},
+      transport: fakeTransport(),
+      log: quiet,
+    };
+    expect((await runFailed({ ...deps, dataDir: setupData() }, NOW)).markedStale).toBe(false);
+    const data = setupData();
+    await runOnce({ ...deps, dataDir: data });
+    writeFileSync(join(data, "site", "index.html"), "<html>edited by hand</html>");
+    expect((await runFailed({ ...deps, dataDir: data }, NOW + 60)).markedStale).toBe(false);
+    expect(readFileSync(join(data, "site", "index.html"), "utf8")).toBe("<html>edited by hand</html>");
+  });
+});
+
+describe("main", () => {
+  /** main's JSON log lines, with stdout muted. */
+  async function run(env: Record<string, string>): Promise<{ code: number; logs: Record<string, unknown>[] }> {
+    const logs: Record<string, unknown>[] = [];
+    const write = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((chunk: string) => {
+      for (const l of String(chunk).split("\n").filter(Boolean)) logs.push(JSON.parse(l) as Record<string, unknown>);
+      return true;
+    }) as typeof process.stdout.write;
+    try {
+      return { code: await main(env), logs };
+    } finally {
+      process.stdout.write = write;
+    }
+  }
+
+  test("a good run against a Prometheus over HTTP exits 0 and writes the page; the CA file is read", async () => {
+    const answers = fakeProm({ now: NOW, probes: allUp() });
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      async fetch(req) {
+        const u = new URL(req.url);
+        const t = u.searchParams.get("time");
+        return Response.json(await answers(u.searchParams.get("query") ?? "", t === null ? undefined : Number(t)));
+      },
+    });
+    try {
+      const etc = tmp();
+      writeFileSync(join(etc, "status.json"), JSON.stringify(RAW_CONFIG));
+      writeFileSync(join(etc, "ca.pem"), "-----BEGIN CERTIFICATE-----\n");
+      writeFileSync(join(etc, "alert.env"), `SMTP_CA_FILE=${join(etc, "ca.pem")}\n`);
+      const data = setupData();
+      const { code, logs } = await run({
+        STATUS_CONFIG: join(etc, "status.json"),
+        STATUS_ALERT_ENV: join(etc, "alert.env"),
+        STATUS_DATA: data,
+        STATUS_PROMETHEUS_URL: `http://127.0.0.1:${server.port}`,
+      });
+      expect(code).toBe(0);
+      expect(logs.at(-1)).toMatchObject({ level: "info", msg: "rendered", service: "status-render", overall: "up" });
+      expect(readFileSync(join(data, "site", METRICS_FILE), "utf8")).toContain(
+        `commonair_status_page_updated_timestamp_seconds ${NOW}`,
+      );
+    } finally {
+      await server.stop(true);
+    }
+  });
+
+  test("an unreadable config exits 1 before touching anything", async () => {
+    const data = setupData();
+    const { code, logs } = await run({ STATUS_CONFIG: join(data, "absent.json"), STATUS_DATA: data });
+    expect(code).toBe(1);
+    expect(logs).toEqual([expect.objectContaining({ level: "error", msg: "render failed: unreadable config" })]);
+    expect(existsSync(join(data, "site", "index.html"))).toBe(false);
+  });
+
+  test("a data directory it cannot write: both the run and its record fail, logged, exit 1", async () => {
+    const etc = tmp();
+    writeFileSync(join(etc, "status.json"), JSON.stringify(RAW_CONFIG));
+    // A file where the directory should be.
+    writeFileSync(join(etc, "data"), "");
+    const { code, logs } = await run({
+      STATUS_CONFIG: join(etc, "status.json"),
+      STATUS_ALERT_ENV: join(etc, "absent.env"),
+      STATUS_DATA: join(etc, "data"),
+      STATUS_PROMETHEUS_URL: "http://127.0.0.1:9",
+    });
+    expect(code).toBe(1);
+    expect(logs.map((l) => l.msg)).toEqual(["render failed", "could not record the failed run"]);
   });
 });

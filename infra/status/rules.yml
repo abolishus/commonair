@@ -5,6 +5,8 @@
 # result, kept only while at least one canary answers. When every canary fails too, the
 # monitoring droplet has lost its own network, and that time counts for nobody
 # (docs/operators/status-page.md#when-the-monitor-is-blind). Planned maintenance still counts.
+# A probe a service rate limited (HTTP 429, its /readyz/public limiter) is no data either, as in
+# render.ts STATUS_CODE_QUERY: it says nothing about the component.
 groups:
   - name: commonair-status
     interval: 30s
@@ -12,4 +14,5 @@ groups:
       - record: commonair_status:probe_success:sighted
         expr: |
           probe_success{job="status",role="component"}
+            unless on (component) (probe_http_status_code{job="status",role="component"} == 429)
             and on () (max(probe_success{job="status",role="canary"}) == 1)

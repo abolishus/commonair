@@ -346,6 +346,16 @@ describe("caddy live: presigned object routes", () => {
         '\theader X-Stub "chat {method} {uri}"',
         '\trespond "chat" 426',
         "}",
+        // The services' readiness: the API ready, the origin's limiter refusing (its 429 must
+        // reach the probe as it is, so the status page reads it as no data).
+        ":3001 {",
+        '\theader X-Stub "api {method} {uri} xff={header.X-Forwarded-For}"',
+        '\trespond `{"ok":true}` 200',
+        "}",
+        ":3003 {",
+        '\theader X-Stub "origin {method} {uri}"',
+        '\trespond "slow down" 429',
+        "}",
         "",
       ].join("\n"),
     );
@@ -364,6 +374,10 @@ describe("caddy live: presigned object routes", () => {
       "web",
       "--network-alias",
       "chat",
+      "--network-alias",
+      "api",
+      "--network-alias",
+      "origin",
       "-v",
       `${dir}/Caddyfile:/etc/caddy/Caddyfile:ro,Z`,
       IMAGE,
@@ -441,6 +455,20 @@ describe("caddy live: presigned object routes", () => {
     expect(curl("GET", "/chat").stub).toBe("chat GET /ws");
     // Only the exact path: the studio's other pages were never chat's.
     expect(curl("GET", "/chat/x", { headers: { accept: html } }).stub).toBe("web GET /chat/x");
+  });
+
+  test("the status probes' readiness routes reach each service's /readyz/public, with the client address", () => {
+    const api = curl("GET", "/readyz/api");
+    expect(api.status).toBe(200);
+    expect(api.stub).toMatch(/^api GET \/readyz\/public xff=\S+$/);
+    expect(api.body).toBe('{"ok":true}');
+    // The limiter's answer passes through unchanged.
+    const origin = curl("GET", "/readyz/origin");
+    expect(origin).toMatchObject({ status: 429, stub: "origin GET /readyz/public" });
+    // Only the two exact paths: nothing else reaches a service's readiness.
+    expect(curl("GET", "/readyz/api/x").stub).toBe("web GET /readyz/api/x");
+    expect(curl("GET", "/readyz").stub).toBe("web GET /readyz");
+    expect(curl("GET", "/readyz/public").stub).toBe("web GET /readyz/public");
   });
 
   test("the web app's responses are still compressed", () => {

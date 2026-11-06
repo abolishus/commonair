@@ -103,6 +103,60 @@
         ]
       }
     },
+    "probe_http_status_code{job=\"status\"}[120s]": {
+      "status": "success",
+      "data": {
+        "resultType": "matrix",
+        "result": [
+          {
+            "metric": {
+              "__name__": "probe_http_status_code",
+              "component": "web",
+              "instance": "https://stream.example.org/",
+              "job": "status",
+              "module": "http_web",
+              "role": "component"
+            },
+            "values": [
+              [1793714310.123, "200"],
+              [1793714340.123, "200"],
+              [1793714370.123, "200"],
+              [1793714400, "200"]
+            ]
+          },
+          {
+            "metric": {
+              "__name__": "probe_http_status_code",
+              "component": "api",
+              "instance": "https://stream.example.org/readyz/api",
+              "job": "status",
+              "module": "http_ready",
+              "role": "component"
+            },
+            "values": [
+              [1793714311.456, "200"],
+              [1793714341.456, "200"],
+              [1793714371.456, "503"],
+              [1793714399.456, "503"]
+            ]
+          },
+          {
+            "metric": {
+              "__name__": "probe_http_status_code",
+              "component": "video",
+              "instance": "https://stream.example.org/readyz/origin",
+              "job": "status",
+              "module": "http_ready",
+              "role": "component"
+            },
+            "values": [
+              [1793714370.5, "200"],
+              [1793714399.5, "200"]
+            ]
+          }
+        ]
+      }
+    },
     "min by (component) (probe_ssl_earliest_cert_expiry{job=\"status\",role=\"cert\"})": {
       "status": "success",
       "data": {

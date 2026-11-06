@@ -224,8 +224,18 @@ function resultOf(a: PromAnswer, want: "matrix" | "vector" | "scalar", expr: str
   return a.data.result;
 }
 
-export const SAMPLE_QUERY = (cfg: StatusConfig) =>
-  `probe_success{job="status"}[${cfg.probeIntervalSeconds * (cfg.confirmSamples + 2)}s]`;
+const sampleWindow = (cfg: StatusConfig) => cfg.probeIntervalSeconds * (cfg.confirmSamples + 2);
+export const SAMPLE_QUERY = (cfg: StatusConfig) => `probe_success{job="status"}[${sampleWindow(cfg)}s]`;
+/**
+ * The HTTP status of the same probes over the same window. A 429 is a service's /readyz/public
+ * limiter answering (docs/operators/status-page.md#what-is-probed), which says nothing about the
+ * component, so that sample is dropped rather than read as a failure: the samples around it
+ * decide, and a component limited for more than 3 intervals has no recent sample and shows
+ * unknown, not down.
+ */
+export const STATUS_CODE_QUERY = (cfg: StatusConfig) => `probe_http_status_code{job="status"}[${sampleWindow(cfg)}s]`;
+/** The probe answer that is no data rather than a failure. */
+export const RATE_LIMITED = 429;
 export const CERT_QUERY = `min by (component) (probe_ssl_earliest_cert_expiry{job="status",role="cert"})`;
 /** Daily availability; blind periods (canaries down too) are not counted (status-rules.yml). */
 export const DAY_QUERY = (seconds: number) =>
@@ -244,11 +254,23 @@ export async function observe(prom: PromQuery, cfg: StatusConfig): Promise<Obser
   const nowResult = resultOf(await prom("time()"), "scalar", "time()") as [number, string];
   const now = Math.floor(nowResult[0]);
   const sq = SAMPLE_QUERY(cfg);
-  const samples: Record<string, Sample[]> = {};
-  for (const s of resultOf(await prom(sq, now), "matrix", sq) as PromSeries[]) {
+  const sampled = resultOf(await prom(sq, now), "matrix", sq) as PromSeries[];
+  // Component id → the scrape times whose probe was rate limited. probe_success and
+  // probe_http_status_code come from the same scrape, so they share its timestamp.
+  const cq = STATUS_CODE_QUERY(cfg);
+  const limited = new Map<string, Set<number>>();
+  for (const s of resultOf(await prom(cq, now), "matrix", cq) as PromSeries[]) {
     const id = s.metric.component;
     if (!id) continue;
-    const list = (s.values ?? []).map(([ts, v]): Sample => [ts, Number(v)]);
+    for (const [ts, v] of s.values ?? [])
+      if (Number(v) === RATE_LIMITED) limited.set(id, (limited.get(id) ?? new Set<number>()).add(ts));
+  }
+  const samples: Record<string, Sample[]> = {};
+  for (const s of sampled) {
+    const id = s.metric.component;
+    if (!id) continue;
+    const skip = limited.get(id);
+    const list = (s.values ?? []).filter(([ts]) => !skip?.has(ts)).map(([ts, v]): Sample => [ts, Number(v)]);
     // Two series for one component (a relabel change) merge by time.
     samples[id] = [...(samples[id] ?? []), ...list].sort((a, b) => a[0] - b[0]);
   }
@@ -476,7 +498,9 @@ export function routeFrom(env: Record<string, string | undefined>, cfg: StatusCo
   if (to.length === 0 || to.some(isPlaceholder)) problems.push("ALERT_EMAIL_TO is unset or a placeholder");
   else if (isPlaceholder(env.SMTP_HOST)) problems.push("SMTP_HOST is unset or a placeholder");
   else if (isPlaceholder(env.MAIL_FROM)) problems.push("MAIL_FROM is unset or a placeholder");
-  else if (env.SMTP_USER && isPlaceholder(env.SMTP_PASSWORD)) problems.push("SMTP_PASSWORD is unset or a placeholder");
+  // The same test as `user` below: a blank user sends no AUTH, so it needs no password.
+  else if (env.SMTP_USER?.trim() && isPlaceholder(env.SMTP_PASSWORD))
+    problems.push("SMTP_PASSWORD is unset or a placeholder");
   else {
     const port = Number(env.SMTP_PORT ?? "2587");
     if (!Number.isInteger(port) || port < 1 || port > 65_535) problems.push("SMTP_PORT is not a port");

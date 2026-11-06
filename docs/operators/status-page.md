@@ -87,8 +87,12 @@ transcode of one stream, which the stream health dashboards cover.
 only; it never carries error text (`packages/service/src/server.ts`). The routes are public, so
 each service allows 60 requests a minute per client address (the API's limiter on Valkey, the
 origin's in process) and answers `429` past that. The probes stay far below it (one per component
-every `probeIntervalSeconds`, at least 5 s apart), so they are never limited; a `429` would count
-as a failed sample. The services' bare `/readyz`, which compose and the API's own status probes
+every `probeIntervalSeconds`, at least 5 s apart), so they should never be limited. If they are
+(someone else probing from the monitoring droplet's address, say), a `429` is no data, not a
+failure: the renderer drops that sample (`probe_http_status_code`, render.ts
+`STATUS_CODE_QUERY`) and the daily figure skips it (`rules.yml`). The samples around it decide the
+state, and a component limited for longer than 3 intervals shows **No data** rather than down,
+and is never mailed as an outage. The services' bare `/readyz`, which compose and the API's own status probes
 use, is not reachable through Caddy and is not limited.
 
 ## The alert route

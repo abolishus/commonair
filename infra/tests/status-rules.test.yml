@@ -59,3 +59,44 @@ tests:
         exp_samples:
           - labels: 'commonair_status:probe_success:sighted{job="status",role="component",component="api",module="http_ready"}'
             value: 1
+
+  # The API's /readyz/public limiter answers 429 from 1 min to 2 min: no data, not a failure. A
+  # 503 is the readiness failing, and counts.
+  - interval: 30s
+    input_series:
+      - series: 'probe_success{job="status",role="component",component="api",module="http_ready"}'
+        values: "1 1 0 0 0 1 0 0"
+      - series: 'probe_http_status_code{job="status",role="component",component="api",module="http_ready"}'
+        values: "200 200 429 429 429 200 503 503"
+      # Another component's 429 does not hide this one.
+      - series: 'probe_success{job="status",role="component",component="video",module="http_ready"}'
+        values: "0x7"
+      - series: 'probe_http_status_code{job="status",role="component",component="video",module="http_ready"}'
+        values: "503x7"
+      - series: 'probe_success{job="status",role="canary",component="canary-0",module="tcp_connect"}'
+        values: "1x7"
+    promql_expr_test:
+      - expr: commonair_status:probe_success:sighted{component="api"}
+        eval_time: 30s
+        exp_samples:
+          - labels: 'commonair_status:probe_success:sighted{job="status",role="component",component="api",module="http_ready"}'
+            value: 1
+      - expr: commonair_status:probe_success:sighted{component="api"}
+        eval_time: 1m30s
+        exp_samples: []
+      - expr: commonair_status:probe_success:sighted{component="video"}
+        eval_time: 1m30s
+        exp_samples:
+          - labels: 'commonair_status:probe_success:sighted{job="status",role="component",component="video",module="http_ready"}'
+            value: 0
+      - expr: commonair_status:probe_success:sighted{component="api"}
+        eval_time: 3m
+        exp_samples:
+          - labels: 'commonair_status:probe_success:sighted{job="status",role="component",component="api",module="http_ready"}'
+            value: 0
+      # (0, 3m30s]: 1 at 30 s and 2m30s, 0 at 3 min and 3m30s; the three 429s count for nothing.
+      - expr: avg_over_time(commonair_status:probe_success:sighted{component="api"}[3m30s])
+        eval_time: 3m30s
+        exp_samples:
+          - labels: '{job="status",role="component",component="api",module="http_ready"}'
+            value: 0.5

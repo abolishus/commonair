@@ -14,7 +14,6 @@ mock_provider "digitalocean" {
       ip_address = "192.0.2.10"
     }
   }
-
   mock_data "digitalocean_ssh_keys" {
     defaults = {
       ssh_keys = [{
@@ -138,6 +137,33 @@ run "status_state_survives_the_droplet" {
   }
 }
 
+run "status_state_volume_is_attached_at_creation" {
+  command = plan
+
+  # The volume's id is known only once it exists; the plan shows one attachment.
+  assert {
+    condition     = length(digitalocean_droplet.monitoring[0].volume_ids) == 1
+    error_message = "The monitoring droplet is created with the state volume attached, so cloud-init's mount finds it."
+  }
+
+  assert {
+    condition     = toset(digitalocean_volume.status_state[0].tags) == toset(digitalocean_droplet.monitoring[0].tags)
+    error_message = "The volume carries the monitoring droplet's tags."
+  }
+}
+
+run "status_state_volume_in_the_app_region_is_rejected" {
+  command = plan
+
+  variables {
+    monitoring_region = "nyc3"
+  }
+
+  # The volume checks the region as the droplet does. It is planned first (the droplet attaches
+  # it), so a plan with the status stack stops there, before a volume is ever created.
+  expect_failures = [digitalocean_volume.status_state]
+}
+
 run "status_state_volume_can_be_turned_off" {
   command = plan
 
@@ -148,6 +174,11 @@ run "status_state_volume_can_be_turned_off" {
   assert {
     condition     = length(digitalocean_volume.status_state) == 0 && !strcontains(local.monitoring_user_data, "mounts:")
     error_message = "monitoring_state_volume = false: no volume and no mount."
+  }
+
+  assert {
+    condition     = length(digitalocean_droplet.monitoring[0].volume_ids) == 0 && can(yamldecode(local.monitoring_user_data))
+    error_message = "Without the volume nothing is attached, and the user data is still valid YAML."
   }
 }
 

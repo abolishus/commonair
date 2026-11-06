@@ -540,14 +540,17 @@ describe("collector configuration", () => {
 // ---------------------------------------------------------------- start.sh
 
 describe("start.sh renders the operator's settings", () => {
-  function render(env: Record<string, string>): {
+  /** start.sh --render-only into `out` (a fresh directory unless given: a restart reuses one). */
+  function render(
+    env: Record<string, string>,
+    out = mkdtempSync(join(tmpdir(), "commonair-prom-")),
+  ): {
     code: number;
     err: string;
     rules: string;
     scrape: string | null;
     statusJob: string | null;
   } {
-    const out = mkdtempSync(join(tmpdir(), "commonair-prom-"));
     dirs.push(out);
     const r = Bun.spawnSync(["sh", join(PROM_DIR, "start.sh"), "--render-only"], {
       env: { PATH: process.env.PATH ?? "/usr/bin:/bin", COMMONAIR_PROMETHEUS_GENERATED: out, ...env },
@@ -647,6 +650,20 @@ describe("start.sh renders the operator's settings", () => {
       expect(r.statusJob).toContain('targets: ["status.example.org:8443"]');
     });
 
+    test("set to empty: no job and nothing to report", () => {
+      const r = render({ STATUS_PAGE_URL: "" });
+      expect(r).toMatchObject({ code: 0, err: "", statusJob: null });
+    });
+
+    test("unset on a restart: the job rendered by the previous start is gone", () => {
+      const out = mkdtempSync(join(tmpdir(), "commonair-prom-"));
+      expect(render({ STATUS_PAGE_URL: "https://status.example.org" }, out).statusJob).not.toBeNull();
+      expect(render({}, out).statusJob).toBeNull();
+      // And a value that turned bad drops it too, rather than keeping the old one.
+      render({ STATUS_PAGE_URL: "https://status.example.org" }, out);
+      expect(render({ STATUS_PAGE_URL: "http://status.example.org" }, out).statusJob).toBeNull();
+    });
+
     test.each([
       ["http://status.example.org"],
       ["https://status.example.org/status.json"],
@@ -654,6 +671,10 @@ describe("start.sh renders the operator's settings", () => {
       ['https://status.example.org"]'],
       ["https://user@status.example.org"],
       ["https://status.example.org\nhttps://other.example.org"],
+      ["https://status.example.org:123456"],
+      ["https://status.example.org:"],
+      ["https://status example.org"],
+      ["https://"],
     ])("%s: left out with a reason, not fatal", (url) => {
       const r = render({ STATUS_PAGE_URL: url });
       expect(r.code).toBe(0);

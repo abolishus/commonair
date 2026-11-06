@@ -275,3 +275,99 @@ tests:
       - eval_time: 58m
         alertname: CommonairStatusPageStale
         exp_alerts: []
+
+  # No STATUS_PAGE_URL: no status-page job, so nothing to be stale.
+  - interval: 1m
+    input_series:
+      - series: 'up{job="otel-collector",instance="otel-collector:9464"}'
+        values: "1x60"
+    alert_rule_test:
+      - eval_time: 58m
+        alertname: CommonairStatusPageStale
+        exp_alerts: []
+
+  # Two hosts' collectors in one Prometheus: host a's weekly successes never hide host b's
+  # failure (a `max by (kind)` would read 1 and stay quiet), and b alone goes overdue.
+  - interval: 1h
+    input_series:
+      - series: 'commonair_restore_drill_success{kind="dump",job="otel-collector",instance="a:9464"}'
+        values: "1 _x167 1 _x167 1"
+      - series: 'commonair_restore_drill_success{kind="dump",job="otel-collector",instance="b:9464"}'
+        values: "0"
+    alert_rule_test:
+      - eval_time: 100h
+        alertname: CommonairRestoreDrillFailed
+        exp_alerts:
+          - exp_labels:
+              kind: dump
+              instance: b:9464
+              severity: ticket
+              summary: The last restore drill failed, so the newest backup is not known to restore
+              runbook: docs/operators/monitoring.md#commonairrestoredrillfailed
+      - eval_time: 100h
+        alertname: CommonairRestoreDrillOverdue
+        exp_alerts: []
+      - eval_time: 200h
+        alertname: CommonairRestoreDrillFailed
+        exp_alerts: []
+      - eval_time: 200h
+        alertname: CommonairRestoreDrillOverdue
+        exp_alerts:
+          - exp_labels:
+              kind: dump
+              instance: b:9464
+              severity: ticket
+              summary: No restore drill has reported within its window (8 days)
+              runbook: docs/operators/monitoring.md#commonairrestoredrilloverdue
+
+  # The windows' edges, one drill at 0 h. A failure is the latest result while the 8-day window
+  # (left-open) still holds it: through 191h56m, not at 192 h.
+  - interval: 1h
+    input_series:
+      - series: 'commonair_restore_drill_success{kind="dump"}'
+        values: "0"
+    alert_rule_test:
+      - eval_time: 191h56m
+        alertname: CommonairRestoreDrillFailed
+        exp_alerts:
+          - exp_labels:
+              kind: dump
+              severity: ticket
+              summary: The last restore drill failed, so the newest backup is not known to restore
+              runbook: docs/operators/monitoring.md#commonairrestoredrillfailed
+      - eval_time: 192h
+        alertname: CommonairRestoreDrillFailed
+        exp_alerts: []
+
+  # A success at 0 h: overdue from 192 h, firing after the 1 h hold (193 h, not 192h56m), and
+  # gone once the 35-day window no longer holds it (then kind="none" takes over, as Prometheus
+  # has collected for over 15 days).
+  - interval: 4m
+    input_series:
+      - series: 'commonair_restore_drill_success{kind="walg"}'
+        values: "1"
+      - series: 'prometheus_tsdb_lowest_timestamp_seconds{job="prometheus",instance="127.0.0.1:9090"}'
+        values: "0x12700"
+    alert_rule_test:
+      - eval_time: 191h56m
+        alertname: CommonairRestoreDrillOverdue
+        exp_alerts: []
+      - eval_time: 192h56m
+        alertname: CommonairRestoreDrillOverdue
+        exp_alerts: []
+      - eval_time: 193h
+        alertname: CommonairRestoreDrillOverdue
+        exp_alerts:
+          - exp_labels:
+              kind: walg
+              severity: ticket
+              summary: No restore drill has reported within its window (8 days)
+              runbook: docs/operators/monitoring.md#commonairrestoredrilloverdue
+      - eval_time: 841h
+        alertname: CommonairRestoreDrillOverdue
+        exp_alerts:
+          - exp_labels:
+              kind: none
+              severity: ticket
+              summary: No restore drill has reported within its window (8 days)
+              runbook: docs/operators/monitoring.md#commonairrestoredrilloverdue

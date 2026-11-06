@@ -36,6 +36,7 @@ import {
   parseKeysFile,
   partKeys,
   sampleEnv,
+  syncKeyLists,
   unitEnvLines,
   unitKeyLists,
   unitSetKeys,
@@ -77,6 +78,71 @@ describe("the committed key lists", () => {
   test("--check passes on the committed lists", () => {
     const r = Bun.spawnSync(["bun", join(ROOT, "scripts/selfhost/unit-env.ts"), "--check"]);
     expect(r.exitCode, r.stderr.toString()).toBe(0);
+    expect(r.stdout.toString()).toMatch(/^\d+ key lists are up to date\n$/);
+  });
+
+  describe("syncKeyLists (the script itself, in a scratch root)", () => {
+    const files = new Map([
+      [`${KEYS_DIR}/commonair-a.keys`, "A\n"],
+      [`${KEYS_DIR}/commonair-b.keys`, "B\nC\n"],
+    ]);
+    const run = (check: boolean, root: string) => {
+      const out = { log: [] as string[], error: [] as string[] };
+      const bad = syncKeyLists(check, root, files, {
+        log: (l) => void out.log.push(l),
+        error: (l) => void out.error.push(l),
+      });
+      return { bad, ...out };
+    };
+
+    test("--check on a root with none: each list is out of date, nothing is written", () => {
+      const root = mkdtempSync(join(tmpdir(), "commonair-unit-env-"));
+      const r = run(true, root);
+      expect(r.bad).toBe(2);
+      expect(r.error).toEqual([
+        `${KEYS_DIR}/commonair-a.keys is out of date: run bun scripts/selfhost/unit-env.ts`,
+        `${KEYS_DIR}/commonair-b.keys is out of date: run bun scripts/selfhost/unit-env.ts`,
+      ]);
+      expect(existsSync(join(root, KEYS_DIR))).toBe(false);
+    });
+
+    test("writes what is missing or edited, then --check passes; an unchanged list is not rewritten", () => {
+      const root = mkdtempSync(join(tmpdir(), "commonair-unit-env-"));
+      expect(run(false, root)).toEqual({
+        bad: 0,
+        log: [`wrote ${KEYS_DIR}/commonair-a.keys`, `wrote ${KEYS_DIR}/commonair-b.keys`],
+        error: [],
+      });
+      expect(readFileSync(join(root, KEYS_DIR, "commonair-b.keys"), "utf8")).toBe("B\nC\n");
+      writeFileSync(join(root, KEYS_DIR, "commonair-b.keys"), "B\n");
+      expect(run(true, root).bad).toBe(1);
+      expect(run(false, root).log).toEqual([`wrote ${KEYS_DIR}/commonair-b.keys`]);
+      expect(run(true, root)).toEqual({ bad: 0, log: ["2 key lists are up to date"], error: [] });
+    });
+
+    test("a list of no unit is reported in both modes and never deleted; other files are ignored", () => {
+      const root = mkdtempSync(join(tmpdir(), "commonair-unit-env-"));
+      run(false, root);
+      writeFileSync(join(root, KEYS_DIR, "commonair-gone.keys"), "X\n");
+      writeFileSync(join(root, KEYS_DIR, "README"), "notes\n");
+      for (const check of [true, false]) {
+        const r = run(check, root);
+        expect(r.bad).toBe(1);
+        expect(r.error).toEqual([`${KEYS_DIR}/commonair-gone.keys belongs to no unit: remove it`]);
+      }
+      expect(existsSync(join(root, KEYS_DIR, "commonair-gone.keys"))).toBe(true);
+    });
+  });
+
+  test("the derivation refuses what it cannot derive", () => {
+    const schema = Object.keys(ALL_ENV_SCHEMAS)[0] as keyof typeof ALL_ENV_SCHEMAS;
+    expect(() => partKeys([[schema, ["COMMONAIR_NOT_A_KEY"]]])).toThrow(`${schema} has no COMMONAIR_NOT_A_KEY`);
+    expect(() => unitKeyLists(new Map())).toThrow("no unit commonair-api.container");
+    // `Secret=` without a target= is a file secret, so it sets no variable.
+    const set = unitSetKeys(
+      "[Container]\nEnvironment=EMPTY=\nSecret=db-password,type=mount\nSecret=k,type=env,target=K\n",
+    );
+    expect([...set].sort()).toEqual(["EMPTY", "K"]);
   });
 
   test("carry an SPDX header and only valid keys", () => {

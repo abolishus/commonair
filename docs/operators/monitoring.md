@@ -281,7 +281,9 @@ this one comes first: `systemctl --user status commonair-otel-collector`.
 ### CommonairRestoreDrillFailed
 
 The latest restore drill of one kind (`kind="dump"` or `kind="walg"`) within 8 days failed:
-`commonair_restore_drill_success` was 0. The newest backup is not known to restore, so treat it
+`commonair_restore_drill_success` was 0. Both drill alerts are per kind and per `instance` (the
+collector Prometheus scraped the result from), so with several hosts in one Prometheus each host
+reports on its own. The newest backup is not known to restore, so treat it
 as a backup outage. `selfhost.sh status` shows each drill's last run and result, and the drill's
 journal says why:
 
@@ -313,6 +315,16 @@ Postgres, is enabled by the first successful `selfhost.sh backup --drill`. A dri
 did not reach Prometheus logged "the drill's result is not in Prometheus" (the collector was not
 running) or "could not push the drill's result" in its journal. Gaps in the collector's own data
 also hide the result: check [CommonairCollectorDown](#commonaircollectordown) first.
+
+**A drill turned off on purpose.** Moving to managed Postgres ends the WAL-G drill (its timer is
+off, and the provider's own backups replace WAL-G's), but its last result stays in Prometheus for
+its 35 days, so this alert fires for `kind="walg"` until that result ages out. Nothing is wrong:
+silence it for those 35 days instead of re-enabling the timer. In Grafana, Alerting → Silences →
+New silence, with the matchers `prometheus_alert = CommonairRestoreDrillOverdue` and
+`kind = walg` (add `prometheus_alert = CommonairRestoreDrillFailed` in a second silence if the
+last WAL-G run failed), a duration of `35d`, and a comment that says why. The silence expires on
+its own once the series is gone, and the alert does not come back. The dump drill keeps running
+against the managed database, so never silence `kind="dump"` or `kind="none"` this way.
 
 ### CommonairStatusPageStale
 

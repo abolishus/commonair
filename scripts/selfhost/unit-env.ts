@@ -427,10 +427,18 @@ export function parseKeysFile(text: string): string[] {
     .filter((l) => l && !l.startsWith("#"));
 }
 
-if (import.meta.main) {
-  const check = process.argv.includes("--check");
-  const files = keysFiles();
-  const dir = join(REPO_ROOT, KEYS_DIR);
+/**
+ * Writes the key lists under `root` (or, with `check`, only compares them) and reports a list
+ * that is out of date or belongs to no unit. Returns how many problems it reported. A stale list
+ * is never deleted, even without `check`: removing a file is the operator's call.
+ */
+export function syncKeyLists(
+  check: boolean,
+  root: string = REPO_ROOT,
+  files: Map<string, string> = keysFiles(),
+  out: { log: (line: string) => void; error: (line: string) => void } = console,
+): number {
+  const dir = join(root, KEYS_DIR);
   if (!check) mkdirSync(dir, { recursive: true });
   const listed = existsSync(dir) ? readdirSync(dir) : [];
   const stale = new Set(listed.filter((f) => f.endsWith(".keys") && !files.has(`${KEYS_DIR}/${f}`)));
@@ -438,23 +446,25 @@ if (import.meta.main) {
   for (const [path, text] of files) {
     let current = "";
     try {
-      current = readFileSync(join(REPO_ROOT, path), "utf8");
+      current = readFileSync(join(root, path), "utf8");
     } catch {
       // missing: written below, or reported with --check
     }
     if (current === text) continue;
     if (check) {
-      console.error(`${path} is out of date: run bun scripts/selfhost/unit-env.ts`);
+      out.error(`${path} is out of date: run bun scripts/selfhost/unit-env.ts`);
       bad++;
     } else {
-      writeFileSync(join(REPO_ROOT, path), text);
-      console.log(`wrote ${path}`);
+      writeFileSync(join(root, path), text);
+      out.log(`wrote ${path}`);
     }
   }
   for (const f of stale) {
-    console.error(`${KEYS_DIR}/${f} belongs to no unit: remove it`);
+    out.error(`${KEYS_DIR}/${f} belongs to no unit: remove it`);
     bad++;
   }
-  if (bad) process.exit(1);
-  if (check) console.log(`${files.size} key lists are up to date`);
+  if (!bad && check) out.log(`${files.size} key lists are up to date`);
+  return bad;
 }
+
+if (import.meta.main && syncKeyLists(process.argv.includes("--check"))) process.exit(1);
