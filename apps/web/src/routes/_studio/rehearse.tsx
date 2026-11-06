@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { PageHeader } from "@commonair/ui/blocks/headers";
 import { PageContainer } from "@commonair/ui/layouts";
 import { Navigate, createFileRoute } from "@tanstack/react-router";
 import type * as React from "react";
@@ -33,9 +34,15 @@ function RehearseRoute(): React.JSX.Element {
   return (
     <PageContainer className="flex flex-col gap-6 py-8">
       {channel === own ? (
-        <RehearsePage key={channel} channel={channel} />
+        <>
+          <PageHeader title={t("rehearsal.pageTitle")} description={t("rehearsal.pageIntro")} />
+          <RehearsePage key={channel} channel={channel} />
+        </>
       ) : (
-        <RehearsalWatchView key={channel} channel={channel} />
+        <>
+          <PageHeader title={t("rehearsal.watch.title")} description={t("rehearsal.watch.intro", { channel })} />
+          <RehearsalWatchView key={channel} channel={channel} />
+        </>
       )}
     </PageContainer>
   );

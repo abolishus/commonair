@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { PageHeader } from "@commonair/ui/blocks/headers";
 import { PageContainer } from "@commonair/ui/layouts";
 import { Navigate, createFileRoute } from "@tanstack/react-router";
 import type * as React from "react";
@@ -28,6 +29,7 @@ function MoveRoute(): React.JSX.Element {
   const channel = ownChannel(me);
   return (
     <PageContainer className="flex flex-col gap-6 py-8">
+      <PageHeader title={t("portability.pageTitle")} description={t("portability.pageIntro")} />
       <MovePage key={channel} channel={channel} />
     </PageContainer>
   );

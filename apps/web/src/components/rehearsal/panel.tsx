@@ -20,7 +20,6 @@ import {
   type StatusTone,
 } from "@commonair/ui";
 import { KeyValueList } from "@commonair/ui/blocks/data";
-import { PageHeader } from "@commonair/ui/blocks/headers";
 import { Button } from "@commonair/ui/components/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@commonair/ui/components/card";
 import { Field, FieldDescription, FieldLabel } from "@commonair/ui/components/field";
@@ -82,7 +81,6 @@ export function RehearsalPanel(props: RehearsalPanelProps): React.JSX.Element {
   const view = viewState(status, report);
   return (
     <div data-testid="rehearse-page" className="flex min-w-0 flex-col gap-6">
-      <PageHeader title={t("rehearsal.pageTitle")} description={t("rehearsal.pageIntro")} />
       {props.loadFailed && <FormError>{t("rehearsal.loadFailed")}</FormError>}
       <StatusCard {...props} view={view} />
       <InviteesCard {...props} />
@@ -157,21 +155,24 @@ function StatusCard(props: RehearsalPanelProps & { view: ViewState }): React.JSX
   );
 }
 
+/** The key line is a note: the card's hint size under a label, not a larger body size (F35). */
 function KeyReminder({ keyPrefix }: { keyPrefix: string | null | undefined }): React.JSX.Element {
   return (
-    <div data-testid="rehearsal-key-reminder" className="flex min-w-0 flex-col gap-1 text-sm">
-      <span className="font-medium">{t("rehearsal.key.title")}</span>
+    <div data-testid="rehearsal-key-reminder" className="flex min-w-0 flex-col gap-1">
+      <span className="text-sm font-medium">{t("rehearsal.key.title")}</span>
       {keyPrefix === undefined ? (
         <SkeletonText lines={1} />
       ) : keyPrefix === null ? (
-        <span className="text-muted-foreground">
+        <FieldDescription>
           {t("rehearsal.key.none")}{" "}
           <Link to="/dashboard" className="underline">
             {t("rehearsal.key.dashboard")}
           </Link>
-        </span>
+        </FieldDescription>
       ) : (
-        <span className="break-words text-muted-foreground">{t("rehearsal.key.reminder", { prefix: keyPrefix })}</span>
+        <FieldDescription className="break-words">
+          {t("rehearsal.key.reminder", { prefix: keyPrefix })}
+        </FieldDescription>
       )}
     </div>
   );
@@ -204,7 +205,7 @@ function InviteesCard(props: RehearsalPanelProps): React.JSX.Element {
         <CardDescription>{t("rehearsal.invitees.hint", { max: MAX_INVITEES })}</CardDescription>
       </CardHeader>
       <CardContent className="flex min-w-0 flex-col gap-4">
-        {!armed && <p className="text-sm text-muted-foreground">{t("rehearsal.invitees.notArmed")}</p>}
+        {!armed && <FieldDescription>{t("rehearsal.invitees.notArmed")}</FieldDescription>}
         {armed && invitees.length === 0 && (
           <EmptyState
             icon={UserGroupIcon}
@@ -236,9 +237,9 @@ function InviteesCard(props: RehearsalPanelProps): React.JSX.Element {
           </ul>
         )}
         {full ? (
-          <p data-testid="rehearsal-invitee-limit" className="text-sm text-muted-foreground">
+          <FieldDescription data-testid="rehearsal-invitee-limit">
             {t("rehearsal.invitees.limit", { max: MAX_INVITEES })}
-          </p>
+          </FieldDescription>
         ) : (
           armed && (
             <form
@@ -269,7 +270,7 @@ function InviteesCard(props: RehearsalPanelProps): React.JSX.Element {
               </Field>
               {props.suggestions.length > 0 && (
                 <div className="flex min-w-0 flex-col gap-1">
-                  <span className="text-sm text-muted-foreground">{t("rehearsal.invitees.suggestions")}</span>
+                  <span className="text-xs/relaxed text-muted-foreground">{t("rehearsal.invitees.suggestions")}</span>
                   <div className="flex flex-wrap gap-1">
                     {props.suggestions.slice(0, 12).map((u) => (
                       <Button key={u} type="button" variant="outline" size="sm" onClick={() => setName(u)}>
@@ -283,12 +284,12 @@ function InviteesCard(props: RehearsalPanelProps): React.JSX.Element {
           )
         )}
         {armed && (
-          <p className="text-sm break-words text-muted-foreground">
+          <FieldDescription className="break-words">
             {t("rehearsal.invitees.watchLink")}{" "}
             <Link to="/rehearse" search={{ channel: props.channel }} className="break-all underline">
               {props.watchHref}
             </Link>
-          </p>
+          </FieldDescription>
         )}
       </CardContent>
     </Card>

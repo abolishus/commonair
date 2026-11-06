@@ -572,10 +572,7 @@ export const STUDIO_WIDE: ReadonlySet<string> = new Set([
   "src/routes/_studio/content.tsx",
 ]);
 
-export const PENDING_ROUTE_HEADER: Readonly<Record<string, string>> = {
-  "src/routes/_studio/rehearse.tsx": "components/rehearsal (RehearsalPanel, RehearsalWatchView) renders it",
-  "src/routes/_studio/move.tsx": "components/portability/move-panel.tsx renders it",
-};
+export const PENDING_ROUTE_HEADER: Readonly<Record<string, string>> = {};
 
 describe("studio widths and headers (F26)", () => {
   const studio = sources(join(SRC, "routes/_studio"))

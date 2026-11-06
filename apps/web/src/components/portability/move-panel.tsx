@@ -9,7 +9,6 @@
  */
 import { ConfirmDialog, EmptyState, IconButton, RelativeTime, StatusBadge, type StatusTone } from "@commonair/ui";
 import { AlertCallout } from "@commonair/ui/blocks/feedback";
-import { PageHeader } from "@commonair/ui/blocks/headers";
 import { Button } from "@commonair/ui/components/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@commonair/ui/components/card";
 import { Field, FieldDescription, FieldLabel } from "@commonair/ui/components/field";
@@ -59,7 +58,6 @@ const STATE_TONE: Record<LinkState, StatusTone> = { active: "success", revoked: 
 export function MovePanel(props: MovePanelProps): React.JSX.Element {
   return (
     <div data-testid="move-page" className="flex min-w-0 flex-col gap-6">
-      <PageHeader title={t("portability.pageTitle")} description={t("portability.pageIntro")} />
       {props.loadFailed && <FormError>{t("portability.loadFailed")}</FormError>}
       <LinksCard {...props} />
       <MovedToCard {...props} />
@@ -125,7 +123,7 @@ function LinksCard(props: MovePanelProps): React.JSX.Element {
                 onClick={() => void props.onCopy(props.created?.url ?? "")}
               />
             </div>
-            <p className="text-sm text-muted-foreground">{t("portability.links.newHint")}</p>
+            <p className="text-muted-foreground">{t("portability.links.newHint")}</p>
           </AlertCallout>
         )}
         {links === null ? null : links.length === 0 ? (
@@ -201,9 +199,10 @@ function MovedToCard(props: MovePanelProps): React.JSX.Element {
         <CardDescription>{t("portability.moved.intro")}</CardDescription>
       </CardHeader>
       <CardContent className="flex min-w-0 flex-col gap-4">
-        <p data-testid="move-subscriptions-note" className="text-sm text-muted-foreground">
+        {/* A note: the card's hint size, not a larger body size (F35). */}
+        <FieldDescription data-testid="move-subscriptions-note">
           {t("portability.moved.subscriptions")}
-        </p>
+        </FieldDescription>
         {props.movedTo && (
           <div className="flex min-w-0 flex-wrap items-center gap-3">
             <span className="min-w-0 text-sm">

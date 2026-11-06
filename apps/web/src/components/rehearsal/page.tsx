@@ -6,7 +6,6 @@
  * every 5 s while the tab is visible, and the invitee's watch view (`/rehearse?channel=<slug>`).
  */
 import { EmptyState } from "@commonair/ui";
-import { PageHeader } from "@commonair/ui/blocks/headers";
 import { toast } from "@commonair/ui/toast";
 import { VideoOffIcon } from "@hugeicons/core-free-icons";
 import * as React from "react";
@@ -164,7 +163,6 @@ export function RehearsalWatchView({ channel }: { channel: string }): React.JSX.
   const shown: RehearsalPlayerState = waiting ? "unavailable" : state;
   return (
     <div data-testid="rehearsal-watch" data-state={shown} className="flex min-w-0 flex-col gap-6">
-      <PageHeader title={t("rehearsal.watch.title")} description={t("rehearsal.watch.intro", { channel })} />
       {waiting ? (
         <EmptyState
           icon={VideoOffIcon}

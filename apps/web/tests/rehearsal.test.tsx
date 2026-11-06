@@ -161,6 +161,20 @@ describe("rehearse page states", () => {
     expect(q(container, "rehearsal-key-reminder")?.textContent).toContain(t("rehearsal.key.none"));
   });
 
+  it("the key line and the invitee notes use the hint style, not a larger body size (F35)", () => {
+    const { container } = panel();
+    const keyLine = q(container, "rehearsal-key-reminder")?.querySelector("p");
+    expect(keyLine?.dataset.slot).toBe("field-description");
+    expect(keyLine?.textContent).toContain("ca_live_ab12");
+    const notArmed = [...container.querySelectorAll("p")].find(
+      (p) => p.textContent === t("rehearsal.invitees.notArmed"),
+    );
+    expect(notArmed?.dataset.slot).toBe("field-description");
+    const five = [1, 2, 3, 4, 5].map(user);
+    const full = panel({ status: armed({ invitees: five }) }).container;
+    expect(q(full, "rehearsal-invitee-limit")?.dataset.slot).toBe("field-description");
+  });
+
   it("armed: the countdown, disarm behind a confirm dialog, the invitee picker and a pending checklist", async () => {
     const { container, props } = panel({ status: armed(), suggestions: ["fan7", "fan8"] });
     const s = q(container, "rehearsal-status")!;

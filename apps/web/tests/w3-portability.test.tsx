@@ -158,6 +158,8 @@ describe("the move page", () => {
   it("moved to: only an https address enables save; it asks first; clear and the subscriptions note", async () => {
     const { container, fns } = panel({ movedTo: { url: "https://old.example/x", at: new Date(NOW).toISOString() } });
     expect(q(container, "move-subscriptions-note")?.textContent).toBe(t("portability.moved.subscriptions"));
+    // The card's hint size, not a larger body size (F35).
+    expect(q(container, "move-subscriptions-note")?.dataset.slot).toBe("field-description");
     expect(q(container, "move-to-current")?.dataset.url).toBe("https://old.example/x");
     const input = q(container, "move-to-url") as HTMLInputElement;
     const save = q(container, "move-to-save") as HTMLButtonElement;
