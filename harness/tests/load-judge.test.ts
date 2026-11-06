@@ -3,7 +3,7 @@
 
 import { describe, expect, test } from "vite-plus/test";
 import { judgeLoadRun } from "../src/load.ts";
-import { type LoadEnv, loadLoadEnv, mbpsToBytesPerSecond } from "../src/load/env.ts";
+import { type LoadEnv, loadLoadEnv, mbpsToBytesPerSecond } from "../src/env.ts";
 import { type HostSummary, summarizeHost } from "../src/load/host.ts";
 import { DEFAULT_GENERATOR_THRESHOLDS, describeLimit, judgeGenerators } from "../src/load/judge.ts";
 import type { LoadReport } from "../src/load/report.ts";
@@ -119,8 +119,10 @@ describe("judgeLoadRun", () => {
       checks: [] as string[],
       data: {} as Record<string, unknown>,
       metrics: {} as Record<string, unknown>,
+      inconclusive: [] as string[],
     };
     const ctx = {
+      inconclusive: (reason: string) => void out.inconclusive.push(reason),
       assert: (name: string) => void out.asserts.push(name),
       check: (name: string) => {
         out.checks.push(name);
@@ -141,6 +143,8 @@ describe("judgeLoadRun", () => {
     expect(out.checks).toEqual([]);
     expect(out.metrics["load.inconclusive"]).toBe(1);
     expect(out.data.verdict).toMatchObject({ outcome: "inconclusive", limits: ["local: CPU p95 99.0 % > 80 %"] });
+    // The scenario status is inconclusive too, with the limit as the reason.
+    expect(out.inconclusive).toEqual(["local: CPU p95 99.0 % > 80 %"]);
   });
 
   test("a local run (no verdict) is judged exactly as before", () => {
@@ -149,6 +153,7 @@ describe("judgeLoadRun", () => {
     expect(out.asserts).toEqual(["every viewer started playback"]);
     expect(out.checks).toHaveLength(4);
     expect(out.data.verdict).toBeUndefined();
+    expect(out.inconclusive).toEqual([]);
   });
 
   test("remote: failed heartbeats above the threshold make the run inconclusive", () => {
@@ -162,6 +167,7 @@ describe("judgeLoadRun", () => {
       limits: [],
       invalid: ["1 failed heartbeats > 0: the generator's address was rate-limited"],
     });
+    expect(out.inconclusive).toEqual(["1 failed heartbeats > 0: the generator's address was rate-limited"]);
   });
 
   test("remote: exactly at a set threshold is judged, one above is not", () => {
@@ -169,6 +175,7 @@ describe("judgeLoadRun", () => {
     const at = recorder();
     expect(judgeLoadRun(at.ctx, { report, generatorVerdict: fine, heartbeatErrors: 5 }, 5)).toBe("judged");
     expect(at.out.data.verdict).toMatchObject({ outcome: "judged" });
+    expect(at.out.inconclusive).toEqual([]);
     expect(judgeLoadRun(recorder().ctx, { report, generatorVerdict: fine, heartbeatErrors: 6 }, 5)).toBe(
       "inconclusive",
     );

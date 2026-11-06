@@ -12,7 +12,7 @@ import type { HarnessEnv } from "./env.ts";
 import { probeFfmpeg } from "./ffmpeg.ts";
 import { Platform } from "./platform.ts";
 import { stopAll } from "./process.ts";
-import { type RunReport, summarizeResults } from "./report.ts";
+import { type RunReport, runOk, summarizeResults } from "./report.ts";
 import {
   AssertionFailure,
   type Need,
@@ -195,6 +195,10 @@ function makeContext(
       if (!condition) log.warn("check failed", { check: name });
       return condition;
     },
+    inconclusive(reason) {
+      rec.inconclusive.push(reason);
+      log.warn("scenario inconclusive", { reason });
+    },
     metric: (name, value, unit) => rec.metric(name, value, unit),
     data: (key, value) => {
       rec.extra[key] = value;
@@ -265,11 +269,13 @@ export async function runOne(
     await rec.runCleanups(ctx.log);
     await stopAll();
   }
-  const status = error === undefined && !rec.failedSoftly ? "passed" : "failed";
+  const status = rec.status(error);
   opts.log.info("scenario finished", { scenario: scenario.name, status, error });
   return {
     ...base,
     status,
+    ...(status === "inconclusive" ? { inconclusiveReasons: [...rec.inconclusive] } : {}),
+    ...(scenario.reportOnly ? { reportOnly: true } : {}),
     durationMs: Math.round(performance.now() - started),
     steps: rec.steps,
     assertions: rec.assertions,
@@ -379,7 +385,7 @@ export async function runScenarios(scenarios: readonly Scenario[], opts: RunOpti
     },
     scenarios: results,
     summary,
-    ok: summary.failed === 0 && results.length > 0,
+    ok: runOk(results),
   };
 }
 

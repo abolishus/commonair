@@ -244,13 +244,19 @@ viewers axis, 1920x1080 at 6000 kbps on the streams axis), the targets `maxLaten
 the generator judge's `generatorCpuP95` (80) and `generatorNicHeadroom` (0.15), and
 `maxHeartbeatErrors` (0; `load-plan` takes it too). The harness README has the full list.
 
-**Read the outcome from the report, not the scenario status.** The harness has no
-"inconclusive" scenario status yet, so an inconclusive run shows as passed. Before using any
-number, check the outcome in the report: `data.verdict.outcome` for `load-plan` (`judged` or
-`inconclusive`, with `limits` and `invalid` saying why) and `data.sweepSummary.outcome` for
-`load-sweep` (`completed`, `break` or `inconclusive`; each row's `status`, `generatorLimits` and
-`invalidReasons` say which step and why). The metric `load.inconclusive` or
-`sweep.inconclusive` is 1 in the same case. An inconclusive run is not a capacity number.
+**An inconclusive run has its own scenario status.** The harness prints it as
+`INCONCLUSIVE  load-sweep` (or `load-plan`) with one `inconclusive:` line per reason (the
+generator limit or the failed heartbeats, and for a sweep the step), the run's last line counts
+it (`FAILED: 0 passed, 0 failed, 0 skipped, 1 inconclusive`), and the report has
+`status: "inconclusive"` with `inconclusiveReasons`. It is not a pass: the command exits 1, as
+for a failure, because an inconclusive run is not a capacity number. Only a scenario declared
+report-only would let it through, and neither load scenario is. The details are in the report:
+`data.verdict.outcome` for `load-plan` (`judged` or `inconclusive`, with `limits` and `invalid`
+saying why) and `data.sweepSummary.outcome` for `load-sweep` (`completed`, `break` or
+`inconclusive`; each row's `status`, `generatorLimits` and `invalidReasons` say which step and
+why). The metric `load.inconclusive` or `sweep.inconclusive` is 1 in the same case. A sweep that
+found the break (`break`) is a result, not a failure: it passes unless the first step already
+broke.
 
 The sweep stops at the first step that breaks a target or where a generator was the limit. Its
 report (`$HARNESS_REPORT_DIR`) holds `data.sweep` (one row per step: streams, the source shape

@@ -66,7 +66,7 @@ describe("harness CLI", () => {
     expect(code).toBe(0);
     expect(stdout).toContain("SKIP  smoke");
     const latest = JSON.parse(readFileSync(join(dir, "latest.json"), "utf8")) as RunReport;
-    expect(latest.summary).toEqual({ passed: 0, failed: 0, skipped: 1 });
+    expect(latest.summary).toEqual({ passed: 0, failed: 0, skipped: 1, inconclusive: 0 });
   }, 30_000);
 
   test("e2e-basic skips cleanly when the web app is unreachable", async () => {

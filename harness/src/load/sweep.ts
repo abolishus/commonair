@@ -381,6 +381,18 @@ export function summarizeSweep(axis: SweepParams["axis"], rows: readonly SweepRo
   };
 }
 
+/**
+ * Why an `inconclusive` sweep is inconclusive, one line per reason, for the scenario status (empty
+ * for `completed` and `break`). Pure.
+ */
+export function sweepInconclusiveReasons(summary: Pick<SweepSummary, "outcome" | "firstFailing">): string[] {
+  const row = summary.firstFailing;
+  if (summary.outcome !== "inconclusive" || row === null) return [];
+  const at = `step ${row.step} (${row.streamers} streams, ${row.viewers} viewers)`;
+  const reasons = [...row.generatorLimits, ...row.invalidReasons];
+  return reasons.length > 0 ? reasons.map((r) => `${at}: ${r}`) : [`${at}: inconclusive`];
+}
+
 /** Video renditions that only a transcode ladder produces. */
 export const LADDER_RENDITIONS: readonly string[] = ["1080p", "720p", "480p"];
 

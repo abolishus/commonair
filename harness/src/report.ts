@@ -20,7 +20,7 @@ export interface RunReport {
   host: { platform: string; arch: string; bun: string; ffmpeg: string | null };
   targets: Record<string, string>;
   scenarios: ScenarioResult[];
-  summary: { passed: number; failed: number; skipped: number };
+  summary: { passed: number; failed: number; skipped: number; inconclusive: number };
   ok: boolean;
 }
 
@@ -29,10 +29,21 @@ export function summarizeResults(results: readonly ScenarioResult[]): RunReport[
     passed: results.filter((r) => r.status === "passed").length,
     failed: results.filter((r) => r.status === "failed").length,
     skipped: results.filter((r) => r.status === "skipped").length,
+    inconclusive: results.filter((r) => r.status === "inconclusive").length,
   };
 }
 
-const MARK = { passed: "PASS", failed: "FAIL", skipped: "SKIP" } as const;
+/**
+ * Whether the run succeeded (the CLI's exit code): no scenario failed, and none was inconclusive
+ * unless it is `reportOnly`. An unjudged measurement is not a pass, so by default it fails the run;
+ * skips do not. Pure.
+ */
+export function runOk(results: readonly ScenarioResult[]): boolean {
+  if (results.length === 0) return false;
+  return results.every((r) => r.status !== "failed" && (r.status !== "inconclusive" || r.reportOnly === true));
+}
+
+const MARK = { passed: "PASS", failed: "FAIL", skipped: "SKIP", inconclusive: "INCONCLUSIVE" } as const;
 
 function formatValue(value: number, unit?: string): string {
   if (unit === "ms") return formatDuration(value);
@@ -74,10 +85,14 @@ export function formatHuman(report: RunReport): string {
       }
     }
     if (s.error) lines.push(`        error: ${s.error}`);
+    for (const reason of s.inconclusiveReasons ?? [])
+      lines.push(`        inconclusive: ${reason}${s.reportOnly ? "  (report-only)" : ""}`);
   }
   lines.push("");
-  const { passed, failed, skipped } = report.summary;
-  lines.push(`${report.ok ? "OK" : "FAILED"}: ${passed} passed, ${failed} failed, ${skipped} skipped`);
+  const { passed, failed, skipped, inconclusive } = report.summary;
+  // The count appears only when there is one, so the usual summary line stays as it was.
+  const unjudged = inconclusive > 0 ? `, ${inconclusive} inconclusive` : "";
+  lines.push(`${report.ok ? "OK" : "FAILED"}: ${passed} passed, ${failed} failed, ${skipped} skipped${unjudged}`);
   return lines.join("\n");
 }
 

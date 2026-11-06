@@ -16,7 +16,7 @@ import {
   onlySelected,
   validateScenario,
 } from "../src/registry.ts";
-import { type RunReport, formatHuman, reportStem, summarizeResults, writeReport } from "../src/report.ts";
+import { type RunReport, formatHuman, reportStem, runOk, summarizeResults, writeReport } from "../src/report.ts";
 import { type Scenario, type ScenarioResult, defineScenario } from "../src/scenario.ts";
 
 const noop = async () => undefined;
@@ -267,7 +267,25 @@ describe("reports", () => {
   };
 
   test("summary counts", () => {
-    expect(report.summary).toEqual({ passed: 1, failed: 1, skipped: 1 });
+    expect(report.summary).toEqual({ passed: 1, failed: 1, skipped: 1, inconclusive: 0 });
+  });
+
+  test("an inconclusive scenario: its mark, its reasons and the count on the summary line", () => {
+    const unjudged = result("load-sweep", "inconclusive", {
+      inconclusiveReasons: ["step 2 (20 streams, 500 viewers): 3 failed heartbeats > 0"],
+    });
+    const measured = result("load-plan", "inconclusive", { inconclusiveReasons: ["local: CPU"], reportOnly: true });
+    const all = [scenarios[0] as ScenarioResult, unjudged, measured];
+    expect(summarizeResults(all)).toEqual({ passed: 1, failed: 0, skipped: 0, inconclusive: 2 });
+    expect(runOk(all)).toBe(false);
+    expect(runOk([scenarios[0] as ScenarioResult, measured])).toBe(true);
+    expect(runOk([scenarios[2] as ScenarioResult])).toBe(true);
+    expect(runOk([])).toBe(false);
+    const text = formatHuman({ ...report, scenarios: all, summary: summarizeResults(all), ok: runOk(all) });
+    expect(text).toContain("INCONCLUSIVE  load-sweep");
+    expect(text).toContain("inconclusive: step 2 (20 streams, 500 viewers): 3 failed heartbeats > 0");
+    expect(text).toContain("inconclusive: local: CPU  (report-only)");
+    expect(text).toContain("FAILED: 1 passed, 0 failed, 0 skipped, 2 inconclusive");
   });
 
   test("human format lists outcomes, failures, metrics and skips", () => {

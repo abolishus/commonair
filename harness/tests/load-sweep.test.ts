@@ -20,6 +20,7 @@ import {
   planSteps,
   stepShape,
   summarizeSweep,
+  sweepInconclusiveReasons,
   sweepRow,
 } from "../src/load/sweep.ts";
 
@@ -299,6 +300,41 @@ describe("the stop rule", () => {
     const s = summarizeSweep("viewers", [row(250, "pass"), row(500, "inconclusive")]);
     expect(s.outcome).toBe("inconclusive");
     expect(s.brokeBy).toEqual([]);
+  });
+});
+
+describe("sweepInconclusiveReasons (the scenario's inconclusive status)", () => {
+  const row = (status: SweepRow["status"], generatorLimits: string[] = [], invalidReasons: string[] = []) =>
+    ({
+      step: 2,
+      status,
+      streamers: 20,
+      viewers: 500,
+      breaches: [],
+      generatorLimits,
+      invalidReasons,
+    }) as unknown as SweepRow;
+
+  test("completed and break sweeps have none", () => {
+    expect(sweepInconclusiveReasons({ outcome: "completed", firstFailing: null })).toEqual([]);
+    expect(sweepInconclusiveReasons({ outcome: "break", firstFailing: row("break") })).toEqual([]);
+  });
+
+  test("heartbeat errors and generator limits at the stopping step, one reason each", () => {
+    const r = sweepInconclusiveReasons({
+      outcome: "inconclusive",
+      firstFailing: row("inconclusive", ["local: CPU p95 99.0 % > 80 %"], ["3 failed heartbeats > 0"]),
+    });
+    expect(r).toEqual([
+      "step 2 (20 streams, 500 viewers): local: CPU p95 99.0 % > 80 %",
+      "step 2 (20 streams, 500 viewers): 3 failed heartbeats > 0",
+    ]);
+  });
+
+  test("an inconclusive step with no recorded reason still gives one", () => {
+    expect(sweepInconclusiveReasons({ outcome: "inconclusive", firstFailing: row("inconclusive") })).toEqual([
+      "step 2 (20 streams, 500 viewers): inconclusive",
+    ]);
   });
 });
 

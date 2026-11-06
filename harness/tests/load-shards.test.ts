@@ -3,7 +3,7 @@
 
 import { describe, expect, test } from "vite-plus/test";
 import { allocateViewers, loadTopology, plannedShards, plannedShardsOn } from "../src/load.ts";
-import { loadLoadEnv } from "../src/load/env.ts";
+import { loadLoadEnv } from "../src/env.ts";
 import {
   FORWARDED_ENV_KEYS,
   LOCAL_HOST,

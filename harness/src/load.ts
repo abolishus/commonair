@@ -16,7 +16,7 @@
  */
 import { mapLimit } from "./load/async.ts";
 import { AccountStore, AuthPacer, provisionStreamers } from "./load/accounts.ts";
-import { type LoadEnv, loadLoadEnv, mbpsToBytesPerSecond } from "./load/env.ts";
+import { type LoadEnv, loadLoadEnv, mbpsToBytesPerSecond } from "./env.ts";
 import { type HostSummary, HostSampler, localSnapshot } from "./load/host.ts";
 import {
   type GeneratorThresholds,
@@ -478,7 +478,7 @@ export function judgeLoad(ctx: Pick<ScenarioContext, "assert" | "check">, rep: L
  * Local runs (no remote target) are always judged.
  */
 export function judgeLoadRun(
-  ctx: Pick<ScenarioContext, "assert" | "check" | "data" | "metric" | "log">,
+  ctx: Pick<ScenarioContext, "assert" | "check" | "data" | "metric" | "log" | "inconclusive">,
   result: Pick<LoadResult, "report" | "generatorVerdict" | "heartbeatErrors">,
   maxHeartbeatErrors = 0,
 ): "judged" | "inconclusive" {
@@ -490,6 +490,9 @@ export function judgeLoadRun(
     const reasons = invalid === null ? [] : [invalid];
     ctx.data("verdict", { outcome: "inconclusive", limits, invalid: reasons, notes: v?.notes ?? [] });
     ctx.metric("load.inconclusive", 1);
+    // The scenario status says so too (it fails the run: an unjudged run is not a capacity number).
+    for (const r of [...limits, ...reasons]) ctx.inconclusive(r);
+    if (limits.length + reasons.length === 0) ctx.inconclusive("the generator judge found the run inconclusive");
     ctx.log.warn("load run inconclusive: the generator was the limit or the measurement is invalid", {
       limits,
       invalid: reasons,

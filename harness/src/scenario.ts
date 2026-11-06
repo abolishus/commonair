@@ -71,6 +71,11 @@ export interface Scenario {
   timeoutMs?: number;
   /** Parameter-selected variants with extra needs (see `ParamNeed`). */
   paramNeeds?: readonly ParamNeed[];
+  /**
+   * A measurement whose `inconclusive` result is still a usable report, so it does not fail the run
+   * (default false: an inconclusive scenario fails the run, like a failed one).
+   */
+  reportOnly?: boolean;
   run(ctx: ScenarioContext): Promise<void>;
 }
 
@@ -104,12 +109,20 @@ export interface MetricValue {
   unit?: string;
 }
 
-export type ScenarioStatus = "passed" | "failed" | "skipped";
+/**
+ * `inconclusive`: the scenario ran without a failure but could not judge what it measured (a load
+ * run where the generator was the limit, or heartbeats failed). Neither a pass nor a failure.
+ */
+export type ScenarioStatus = "passed" | "failed" | "skipped" | "inconclusive";
 
 export interface ScenarioResult {
   name: string;
   description: string;
   status: ScenarioStatus;
+  /** Why the scenario is inconclusive (set with that status). */
+  inconclusiveReasons?: string[];
+  /** The scenario is `reportOnly`: an inconclusive result does not fail the run. */
+  reportOnly?: boolean;
   startedAt: string;
   durationMs: number;
   steps: StepResult[];
@@ -169,6 +182,11 @@ export interface ScenarioContext {
   assert(name: string, condition: boolean, details?: unknown): void;
   /** Soft check: records the outcome; a failure marks the scenario failed but it continues. */
   check(name: string, condition: boolean, details?: unknown): boolean;
+  /**
+   * The measurement cannot be judged: the scenario ends `inconclusive` (unless it also failed,
+   * which wins). It keeps running; call it once per reason.
+   */
+  inconclusive(reason: string): void;
   metric(name: string, value: number | null | undefined, unit?: string): void;
   data(key: string, value: unknown): void;
   /** Register cleanup; runs in reverse order after the scenario, pass or fail. */
@@ -182,10 +200,17 @@ export class ScenarioRecorder {
   readonly metrics: Record<string, MetricValue> = {};
   readonly extra: Record<string, unknown> = {};
   readonly skipped: StepSkip[] = [];
+  readonly inconclusive: string[] = [];
   readonly cleanups: (() => unknown)[] = [];
 
   get failedSoftly(): boolean {
     return this.assertions.some((a) => !a.passed);
+  }
+
+  /** The status once the run ended: a failure wins, then inconclusive, else passed. */
+  status(error: string | undefined): "passed" | "failed" | "inconclusive" {
+    if (error !== undefined || this.failedSoftly) return "failed";
+    return this.inconclusive.length > 0 ? "inconclusive" : "passed";
   }
 
   async step<T>(name: string, fn: () => Promise<T> | T, log?: Logger): Promise<T> {

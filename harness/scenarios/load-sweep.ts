@@ -27,8 +27,8 @@ import {
   runAudience,
   startStreamers,
 } from "../src/load.ts";
+import { mbpsToBytesPerSecond } from "../src/env.ts";
 import { mapLimit } from "../src/load/async.ts";
-import { mbpsToBytesPerSecond } from "../src/load/env.ts";
 import { LOCAL_HOST } from "../src/load/processes.ts";
 import {
   type SweepRow,
@@ -38,6 +38,7 @@ import {
   stepShape,
   stopsSweep,
   summarizeSweep,
+  sweepInconclusiveReasons,
   sweepRow,
 } from "../src/load/sweep.ts";
 import { type ScenarioContext, defineScenario } from "../src/scenario.ts";
@@ -184,6 +185,8 @@ export default defineScenario({
     });
     // A sweep is a measurement: finding the break is the point. It fails only when even the first
     // step broke on the target (the range is wrong, or the instance is broken).
+    // Not report-only: an inconclusive sweep found no capacity number, so it fails the run.
+    for (const reason of sweepInconclusiveReasons(summary)) ctx.inconclusive(reason);
     if (summary.outcome !== "inconclusive") {
       ctx.check("the first step met the targets", summary.lastPassing !== null, {
         firstFailing: summary.firstFailing?.step,

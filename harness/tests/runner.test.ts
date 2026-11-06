@@ -180,11 +180,64 @@ describe("running a scenario", () => {
     const p = fakePlatform();
     const good = await runScenarios([pass], opts(p));
     expect(good.ok).toBe(true);
-    expect(good.summary).toEqual({ passed: 1, failed: 0, skipped: 0 });
+    expect(good.summary).toEqual({ passed: 1, failed: 0, skipped: 0, inconclusive: 0 });
     const bad = await runScenarios([pass, fail], opts(p));
     expect(bad.ok).toBe(false);
     expect(bad.scenarios.map((s) => s.status)).toEqual(["passed", "failed"]);
     expect(bad.targets.api).toBe(env.HARNESS_API_URL);
+  });
+
+  test("inconclusive: its own status with the reasons; a failure wins over it", async () => {
+    const unjudged = defineScenario({
+      name: "unjudged",
+      description: "unjudged",
+      needs: [],
+      async run(ctx) {
+        ctx.check("measured", true);
+        ctx.inconclusive("generator CPU p95 99 %");
+        ctx.inconclusive("3 failed heartbeats");
+      },
+    });
+    const r = await runOne(unjudged, fakePlatform(), opts(fakePlatform()));
+    expect(r.status).toBe("inconclusive");
+    expect(r.inconclusiveReasons).toEqual(["generator CPU p95 99 %", "3 failed heartbeats"]);
+    expect(r.reportOnly).toBeUndefined();
+
+    const both = defineScenario({
+      name: "both",
+      description: "both",
+      needs: [],
+      async run(ctx) {
+        ctx.inconclusive("unjudged");
+        ctx.check("broke", false);
+      },
+    });
+    const b = await runOne(both, fakePlatform(), opts(fakePlatform()));
+    expect(b.status).toBe("failed");
+    expect(b.inconclusiveReasons).toBeUndefined();
+  });
+
+  test("an inconclusive scenario fails the run unless it is report-only; skips never do", async () => {
+    const pass = defineScenario({ name: "a", description: "a", needs: [], run: async () => undefined });
+    const unjudged = (reportOnly: boolean) =>
+      defineScenario({
+        name: reportOnly ? "measure" : "judge",
+        description: "x",
+        needs: [],
+        reportOnly,
+        run: async (ctx) => ctx.inconclusive("generator was the limit"),
+      });
+    const skipped = defineScenario({ name: "s", description: "s", needs: ["irc"], run: async () => undefined });
+    const p = fakePlatform({ irc: "down" });
+    const strict = await runScenarios([pass, unjudged(false)], opts(p));
+    expect(strict.ok).toBe(false);
+    expect(strict.summary).toEqual({ passed: 1, failed: 0, skipped: 0, inconclusive: 1 });
+    const lenient = await runScenarios([pass, unjudged(true)], opts(p));
+    expect(lenient.ok).toBe(true);
+    expect(lenient.scenarios[1]).toMatchObject({ status: "inconclusive", reportOnly: true });
+    const withSkip = await runScenarios([pass, skipped], { ...opts(p), skipUnavailable: true });
+    expect(withSkip.ok).toBe(true);
+    expect(withSkip.summary.skipped).toBe(1);
   });
 
   test("an aborted run stops before later scenarios", async () => {
