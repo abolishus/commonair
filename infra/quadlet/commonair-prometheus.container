@@ -16,7 +16,7 @@ RunInit=true
 Network=commonair.network
 NetworkAlias=prometheus
 # Only the keys of commonair.env this unit needs (SLO_TARGET, EGRESS_BUDGET_GIB,
-# LIVE_STREAMS_PER_HOST, MANAGED_DB_METRICS_*), copied at every start.
+# LIVE_STREAMS_PER_HOST, MANAGED_DB_METRICS_*, STATUS_PAGE_URL), copied at every start.
 EnvironmentFile=%h/.config/commonair/unit-env/commonair-prometheus.env
 # prometheus.yml, rules/ and start.sh, which renders those settings into rules (and the optional
 # managed-db-metrics job) before it execs Prometheus. The optional job's password is a Podman

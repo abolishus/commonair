@@ -294,6 +294,7 @@ export const STATIC_UNITS: Record<string, StaticList> = {
       "MANAGED_DB_METRICS_TARGETS",
       "MANAGED_DB_METRICS_USER",
       "SLO_TARGET",
+      "STATUS_PAGE_URL",
     ],
   },
   "irc-cert": {

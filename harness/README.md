@@ -292,7 +292,7 @@ An SSH failure mid-run marks the samples incomplete (`samples_incomplete` metric
 the summary); it never fails the scenario on its own.
 
 **Remote target.** Against an installed instance (`selfhost.sh`), the load test is configured by
-the `HARNESS_LOAD_*` variables (`src/load/env.ts`; all optional, unset = the local behaviour):
+the `HARNESS_LOAD_*` variables (`src/env.ts`, `loadEnvSchema`; all optional, unset = the local behaviour):
 
 | Variable                          | Meaning                                                                           |
 | --------------------------------- | --------------------------------------------------------------------------------- |

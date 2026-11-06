@@ -244,6 +244,8 @@ export const KEYS = {
   moderationScript: (channelId: string) => `moderation:script:${channelId}`,
   /** HASH `<dir>|<metric>` → integer, for the minute starting at epochMinute × 60 s. */
   issuanceProduction: (epochMinute: number) => `issuance:production:${epochMinute}`,
+  // ADR 0016 Amendment 2: the DVR objects relays pulled per recording, scored by pull time.
+  issuanceDvrPulls: (vodId: string) => `issuance:dvr:${vodId}`,
   /** Claim marking a media object as counted (`<dir>/<file>`). */
   issuanceSeen: (object: string) => `issuance:seen:${object}`,
   /** Leader lock: the replica holding it computes relay issuance. */

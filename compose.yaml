@@ -535,6 +535,7 @@ services:
       SLO_TARGET: ${SLO_TARGET:-}
       EGRESS_BUDGET_GIB: ${EGRESS_BUDGET_GIB:-}
       LIVE_STREAMS_PER_HOST: ${LIVE_STREAMS_PER_HOST:-}
+      STATUS_PAGE_URL: ${STATUS_PAGE_URL:-}
     ports: ["${BIND_ADDRESS:-127.0.0.1}:${PROMETHEUS_PORT:-9090}:9090"]
     volumes:
       - ./infra/prometheus:/etc/prometheus:ro,Z

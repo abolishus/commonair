@@ -22,6 +22,7 @@
  * it also holds for the short segments a stream restart leaves; for the recorder's uniform 4 s
  * segments it is the heaviest 31. The receipt verifier's tolerance applies on top.
  */
+import { KEYS } from "@commonair/contracts/internal";
 import type { Logger } from "@commonair/observability";
 import type { ValkeyClient } from "@commonair/service";
 import type { Allowance } from "./issuance.ts";
@@ -38,11 +39,8 @@ export const DVR_PULLS_GRACE_MS = 20 * 60_000;
  */
 export const DVR_PULLS_SLACK_MS = 60_000;
 
-/**
- * ZSET of the DVR objects relays pulled for one VOD. Contract request: move to
- * `KEYS.issuanceDvrPulls` in `@commonair/contracts/internal` beside `issuanceProduction`.
- */
-export const dvrPullsKey = (vodId: string) => `issuance:dvr:${vodId}`;
+/** ZSET of the DVR objects relays pulled for one VOD. */
+export const dvrPullsKey = KEYS.issuanceDvrPulls;
 
 export interface DvrObject {
   file: string;

@@ -31,15 +31,16 @@ with many users must spread its work; it cannot overload the instance by multipl
 Each API procedure names its bucket (most use `default`; writes use `write`). The defaults, per
 subject:
 
-| Bucket      | Limit             | Used by                                                                                |
-| ----------- | ----------------- | -------------------------------------------------------------------------------------- |
-| `default`   | 120 per minute    | Reads                                                                                  |
-| `write`     | 30 per minute     | Changes: creating apps, subscriptions, test events, redelivery, …                      |
-| `auth`      | 10 per minute     | Sign-in, the OAuth token, revoke and device endpoints (per address), device activation |
-| `chat`      | 20 per 30 seconds | Sending chat messages                                                                  |
-| `expensive` | 5 per hour        | A few heavy operations such as data exports                                            |
-| `app`       | 6,000 per minute  | Every request of one app, all tokens together                                          |
-| `eventsub`  | 60 per minute     | New EventSub WebSocket connections, per address                                        |
+| Bucket      | Limit             | Used by                                                                                      |
+| ----------- | ----------------- | -------------------------------------------------------------------------------------------- |
+| `default`   | 120 per minute    | Reads                                                                                        |
+| `write`     | 30 per minute     | Changes: creating apps, subscriptions, test events, redelivery, …                            |
+| `auth`      | 10 per minute     | Sign-in, the OAuth token, revoke and device endpoints (per address), device activation       |
+| `chat`      | 20 per 30 seconds | Sending chat messages                                                                        |
+| `expensive` | 5 per hour        | A few heavy operations such as data exports                                                  |
+| `app`       | 6,000 per minute  | Every request of one app, all tokens together                                                |
+| `eventsub`  | 60 per minute     | New EventSub WebSocket connections, per address                                              |
+| `readyz`    | 60 per minute     | The public readiness route `/readyz/api` (per address; the status stack probes far below it) |
 
 These defaults may change between versions: treat them as an order of magnitude and honour
 `retryAfterSeconds` rather than hard-coding them.
