@@ -64,5 +64,6 @@ describe("coverage", () => {
     expect(COVERAGE_ARGS).toContain("--coverage.include=src/**/*.{ts,tsx}");
     expect(COVERAGE_ARGS).toContain("--coverage.provider=istanbul");
     expect(COVERAGE_ARGS).toContain("--testTimeout=60000");
+    expect(COVERAGE_ARGS).toContain("--hookTimeout=60000");
   });
 });

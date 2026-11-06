@@ -16,10 +16,13 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 <br>
 <br>
 
+<!-- The Scorecard badge reads the API with a query string: the bare URL (which shields.io's
+     ossf-scorecard badge uses) is stuck on a CDN-cached 404 although results publish fine. -->
+
 [![CI](https://img.shields.io/github/actions/workflow/status/abolishus/commonair/ci.yml?branch=main&style=flat-square&label=ci&labelColor=18181b&logo=githubactions&logoColor=white)](https://github.com/abolishus/commonair/actions/workflows/ci.yml)
 [![Vulnerabilities](https://img.shields.io/github/actions/workflow/status/abolishus/commonair/vulnerabilities.yml?branch=main&style=flat-square&label=vulnerability%20scan&labelColor=18181b&logo=dependabot&logoColor=white)](https://github.com/abolishus/commonair/actions/workflows/vulnerabilities.yml)
 [![Unit coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fabolishus.github.io%2Fcommonair%2Fbadges%2Fcoverage.json&style=flat-square&labelColor=18181b&logo=vitest&logoColor=white)](https://github.com/abolishus/commonair/actions/workflows/storybook-pages.yml)
-[![OpenSSF Scorecard](https://img.shields.io/ossf-scorecard/github.com/abolishus/commonair?style=flat-square&label=openssf%20scorecard&labelColor=18181b&logo=openssf&logoColor=white)](https://scorecard.dev/viewer/?uri=github.com/abolishus/commonair)
+[![OpenSSF Scorecard](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.scorecard.dev%2Fprojects%2Fgithub.com%2Fabolishus%2Fcommonair%3Fv%3D1&query=%24.score&label=openssf%20scorecard&color=52525b&style=flat-square&labelColor=18181b&logo=openssf&logoColor=white)](https://scorecard.dev/viewer/?uri=github.com/abolishus/commonair)
 [![Release](https://img.shields.io/github/v/release/abolishus/commonair?include_prereleases&sort=semver&style=flat-square&labelColor=18181b&color=dc2626)](https://github.com/abolishus/commonair/releases)
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-dc2626?style=flat-square&labelColor=18181b)](LICENSE)
 [![REUSE compliant](https://img.shields.io/badge/REUSE-compliant-52525b?style=flat-square&labelColor=18181b)](https://reuse.software)
