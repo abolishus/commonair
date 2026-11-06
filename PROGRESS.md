@@ -24,8 +24,8 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
 
 **API-fields follow-up wave (2026-11-06).** The D1–D5 contract placeholders, on `main`: contracts
 and migration `0050` (`a9ac6ea3`), API (`ad9a6089`, `7132acf9`), chat (`a123e933`), web
-(`7b703e5d`, `6a7fa22f`, `949c4b19`, `09bbfc42`, `4a6ad6aa`), and coverage for every file touched
-(`ddb186fd`, `f3bf7498`, `470dcf76`).
+(`7b703e5d`, `6a7fa22f`, `949c4b19`, `d36af78f`, `aaf07401`), and coverage for every file touched
+(`3908d019`, `db905cae`, `08caf0b9`).
 
 - Built: `Vod.category` and `Clip.category` (watch pages link the category); `Channel.lastLiveAt`;
   `Channel.socials` (a `channels.socials` jsonb column, https only, at most 10; About tab links
