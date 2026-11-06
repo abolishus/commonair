@@ -160,10 +160,12 @@ export interface UiBudget {
 }
 
 const MONTH = new Intl.DateTimeFormat("en", { month: "long", timeZone: "UTC" });
+// The hour options are on the locale's own clock (packages/ui `formatHour`): "9 AM", "12 PM" in English.
+const HOUR = new Intl.DateTimeFormat("en", { hour: "numeric", timeZone: "UTC" });
 
 /**
  * D5-settings' date-time field: one Select per part (`<id>-year|month|day|hour|minute`), chosen by
- * option label. Year and month first, so the day list has the right length. `value` is
+ * option label (the hour as the English UI shows it, "3 PM"). Year and month first, so the day list has the right length. `value` is
  * `YYYY-MM-DDTHH:MM`, as the old `datetime-local` input took it.
  */
 async function setDateTimeField(page: Page, id: string, value: string, ui: { timeout: number }): Promise<void> {
@@ -174,7 +176,7 @@ async function setDateTimeField(page: Page, id: string, value: string, ui: { tim
     ["year", year],
     ["month", MONTH.format(new Date(Date.UTC(2020, Number(month) - 1, 1)))],
     ["day", String(Number(day))],
-    ["hour", hour],
+    ["hour", HOUR.format(new Date(Date.UTC(2020, 0, 1, Number(hour))))],
     ["minute", minute],
   ];
   for (const [part, name] of parts) {
