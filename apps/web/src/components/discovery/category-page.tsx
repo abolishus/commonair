@@ -12,7 +12,6 @@ import type { Category, StreamCard } from "@commonair/contracts/dto";
 import { EmptyState, formatCompactNumber, useLocale, ViewerCount } from "@commonair/ui";
 import { PageTabs } from "@commonair/ui/blocks/headers";
 import { CategoryArt } from "@commonair/ui/blocks/media";
-import { Badge } from "@commonair/ui/components/badge";
 import { Button } from "@commonair/ui/components/button";
 import { PageContainer } from "@commonair/ui/layouts";
 import { GridViewIcon, LiveStreaming02Icon, Scissor01Icon, Video01Icon } from "@hugeicons/core-free-icons";
@@ -152,22 +151,15 @@ export function CategoryPage({
             >
               {category.tags.map((tag) => (
                 <li key={tag} className="min-w-0">
-                  <Badge
-                    variant="outline"
-                    className="max-w-full"
-                    render={
-                      <Link
-                        {...tagLink(tag)}
-                        data-testid="category-tag"
-                        data-tag={tag}
-                        aria-label={t("discovery.card.tag", { tag })}
-                      />
-                    }
+                  <Link
+                    {...tagLink(tag)}
+                    data-testid="category-tag"
+                    data-tag={tag}
+                    aria-label={t("discovery.card.tag", { tag })}
+                    className="block max-w-full truncate border border-border px-1.5 py-0.5 text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
                   >
-                    <span dir="auto" className="truncate">
-                      {tag}
-                    </span>
-                  </Badge>
+                    <span dir="auto">{tag}</span>
+                  </Link>
                 </li>
               ))}
             </ul>

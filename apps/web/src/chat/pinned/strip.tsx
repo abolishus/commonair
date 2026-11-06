@@ -9,6 +9,7 @@
  */
 import { IconButton } from "@commonair/ui";
 import { Button } from "@commonair/ui/components/button";
+import { Progress } from "@commonair/ui/components/progress";
 import {
   ArrowDown01Icon,
   ArrowUp01Icon,
@@ -72,14 +73,13 @@ export function usePinnedAnnouncement(items: readonly PinnedItem[], ready: boole
 /** A goal's bar on the one line, only where the column has room (the label carries the numbers). */
 function MiniBar({ percent }: { percent: number }): React.JSX.Element {
   return (
-    <span
+    <Progress
+      value={percent}
       aria-hidden
       data-part="bar"
       data-percent={percent}
-      className="hidden h-1.5 w-12 shrink-0 bg-muted @xs/strip:block"
-    >
-      <span className="block h-full bg-primary" style={{ width: `${percent}%` }} />
-    </span>
+      className="hidden w-12 shrink-0 @xs/strip:flex"
+    />
   );
 }
 
