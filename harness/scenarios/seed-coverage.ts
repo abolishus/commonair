@@ -10,7 +10,9 @@
  * other database (an unsharded `full`, whose other scenarios made users) it reports every route as
  * skipped, with the reason: the seed needs a fresh database. During the walk streamer1 and
  * streamer2 stream with chat (`seed live`, stopped in the teardown), unless a separate `seed live`
- * already keeps streamer1 live.
+ * already keeps streamer1 live. Logins are crawled `CRAWL_CONCURRENCY` at a time
+ * (`--set crawlConcurrency=1` walks them one by one, as before), each paced under its own user's
+ * rate limit, and their sign-ins under the shared per-address `auth` limit.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -26,8 +28,12 @@ import { SEED_ROUTES, type SeedRoute } from "../src/seed/routes.ts";
 import { SEED_STORE_FILE, type SeedStoreFile, runSeedFull } from "../src/seed/run.ts";
 import type { SeedStore } from "../src/seed/types.ts";
 import {
+  CRAWL_CONCURRENCY,
   CRAWL_PACE,
+  SIGN_IN_PACE,
   type VisitObservation,
+  crawlConcurrency,
+  crawlQueue,
   crawlWaitMs,
   loginsOf,
   reportUrl,
@@ -188,13 +194,94 @@ async function visit(
   }
 }
 
+/** What the crawl's workers share. */
+interface Crawl {
+  store: SeedStore;
+  password: string;
+  /** Sign-in times across every worker (one per-address `auth` bucket). */
+  signIns: number[];
+  /** A worker failed hard: the others start nothing more. */
+  stopped: boolean;
+  failed: number;
+  loginMs: Record<string, number>;
+}
+
+/** Sign in as `as` (unless anonymous) and visit its routes, paced under its own rate limit. */
+async function crawlLogin(
+  ctx: ScenarioContext,
+  crawl: Crawl,
+  as: string,
+  routes: readonly [string, SeedRoute][],
+): Promise<void> {
+  const started = Date.now();
+  const session = await WebSession.open({
+    fleet: ctx.platform.fleet,
+    engine: "chromium",
+    webUrl: ctx.env.HARNESS_WEB_URL,
+    probeScript: "",
+    label: `seed-${as}`,
+    log: ctx.log,
+  });
+  ctx.defer(() => session.close());
+  const page = await session.page();
+  // This login's API calls (one user's rate-limit bucket), so the crawl can keep under it.
+  const calls: number[] = [];
+  page.on("request", (r) => {
+    if (new URL(r.url()).pathname.startsWith("/rpc/")) calls.push(Date.now());
+  });
+  if (as !== "anonymous") {
+    const user = crawl.store.users.find((u) => u.handle === as);
+    ctx.assert(`the seed made ${as}`, user !== undefined);
+    if (!user) return;
+    // Re-checked after every sleep, and recorded with no await in between, so two workers
+    // waking together cannot both take the last slot.
+    for (let wait = crawlWaitMs(crawl.signIns, Date.now(), SIGN_IN_PACE); wait > 0;) {
+      ctx.log.info("seed-coverage: pacing sign-ins under the auth limit", { as, waitMs: wait });
+      await sleep(wait, ctx.signal);
+      wait = crawlWaitMs(crawl.signIns, Date.now(), SIGN_IN_PACE);
+    }
+    crawl.signIns.push(Date.now());
+    await ctx.step(`${as}: sign in through the web UI`, async () => {
+      const page = await session.goto(ROUTES.signin);
+      await signInViaUi(page, { email: user.email, password: crawl.password }, UI_TIMEOUT_MS, ctx.signal);
+      await byTestId(page, T.navUser).first().waitFor({ timeout: UI_TIMEOUT_MS });
+    });
+  }
+  for (const [path, route] of routes) {
+    if (crawl.stopped) return;
+    const resolved = resolveSeedRoute(path, route, crawl.store);
+    if (!resolved.ok) {
+      // A route that should show data and has no value to visit with is a seed gap.
+      if (route.expectData) crawl.failed += ctx.check(`${path} as ${as}`, false, { missing: resolved.missing }) ? 0 : 1;
+      else ctx.skipStep(`${path} as ${as}`, `no ${resolved.missing}`);
+      continue;
+    }
+    const wait = crawlWaitMs(calls, Date.now());
+    if (wait > 0) {
+      ctx.log.info("seed-coverage: pacing under the API rate limit", { as, path, waitMs: wait });
+      await sleep(wait, ctx.signal);
+    }
+    const now = Date.now();
+    for (let i = 0; i < CRAWL_PACE.serverCallsPerPage; i++) calls.push(now);
+    const seen = await visit(page, resolved.url, ctx.env.HARNESS_API_URL, ctx.env.HARNESS_WEB_URL, route.expectData);
+    const problems = visitProblems(route, seen);
+    const ok = ctx.check(`${path} as ${as}`, problems.length === 0, {
+      url: reportUrl(new URL(resolved.url, ctx.env.HARNESS_WEB_URL).toString()),
+      expectData: route.expectData,
+      problems,
+    });
+    if (!ok) crawl.failed++;
+  }
+  crawl.loginMs[as] = Date.now() - started;
+}
+
 export default defineScenario({
   name: "seed-coverage",
   description: "after `seed full`: every web route as its role shows seeded data (no empty state, no error)",
   needs: ["api", "web", "worker", "media", "mail", "ffmpeg", "browser"],
   // Its own CI shard (`seed`, harness/src/shards.ts): `seed full` needs a database with no users.
   inFull: true,
-  // seed full at small (about 25 min with every unit's live work), then about 65 page loads.
+  // seed full at small (about 10 min on CI), then 72 page loads over 11 logins, three at a time.
   timeoutMs: 45 * 60_000,
   async run(ctx) {
     const s = await seeded(ctx);
@@ -204,71 +291,36 @@ export default defineScenario({
       return;
     }
     const { store, password } = s;
-    const p = ctx.platform;
     await keepLive(ctx, store, password);
-    const byLogin = new Map<string, [string, SeedRoute][]>();
-    for (const [path, route] of Object.entries(SEED_ROUTES))
-      byLogin.set(route.as, [...(byLogin.get(route.as) ?? []), [path, route]]);
+    const queue = crawlQueue(SEED_ROUTES);
     ctx.metric("seed-coverage.logins", loginsOf(SEED_ROUTES).length);
+    const workers = crawlConcurrency(ctx.intParam("crawlConcurrency", CRAWL_CONCURRENCY), queue.length);
+    ctx.metric("seed-coverage.crawl_concurrency", workers);
 
-    let failed = 0;
-    for (const [as, routes] of byLogin) {
-      const session = await WebSession.open({
-        fleet: p.fleet,
-        engine: "chromium",
-        webUrl: ctx.env.HARNESS_WEB_URL,
-        probeScript: "",
-        label: `seed-${as}`,
-        log: ctx.log,
-      });
-      ctx.defer(() => session.close());
-      const page = await session.page();
-      // This login's API calls (one user's rate-limit bucket), so the crawl can keep under it.
-      const calls: number[] = [];
-      page.on("request", (r) => {
-        if (new URL(r.url()).pathname.startsWith("/rpc/")) calls.push(Date.now());
-      });
-      if (as !== "anonymous") {
-        const user = store.users.find((u) => u.handle === as);
-        ctx.assert(`the seed made ${as}`, user !== undefined);
-        if (!user) continue;
-        await ctx.step(`${as}: sign in through the web UI`, async () => {
-          const page = await session.goto(ROUTES.signin);
-          await signInViaUi(page, { email: user.email, password }, UI_TIMEOUT_MS, ctx.signal);
-          await byTestId(page, T.navUser).first().waitFor({ timeout: UI_TIMEOUT_MS });
-        });
-      }
-      for (const [path, route] of routes) {
-        const resolved = resolveSeedRoute(path, route, store);
-        if (!resolved.ok) {
-          // A route that should show data and has no value to visit with is a seed gap.
-          if (route.expectData) failed += ctx.check(`${path} as ${as}`, false, { missing: resolved.missing }) ? 0 : 1;
-          else ctx.skipStep(`${path} as ${as}`, `no ${resolved.missing}`);
-          continue;
+    // Logins side by side, each in its own browser context and rate-limit bucket. After a hard
+    // failure no worker starts another route; the first error is rethrown once all have stopped.
+    const crawl: Crawl = { store, password, signIns: [], stopped: false, failed: 0, loginMs: {} };
+    const crawlStarted = Date.now();
+    let next = 0;
+    const settled = await Promise.allSettled(
+      Array.from({ length: workers }, async () => {
+        while (!crawl.stopped && !ctx.signal.aborted && next < queue.length) {
+          const [as, routes] = queue[next++] as (typeof queue)[number];
+          try {
+            await crawlLogin(ctx, crawl, as, routes);
+          } catch (err) {
+            crawl.stopped = true;
+            throw err;
+          }
         }
-        const wait = crawlWaitMs(calls, Date.now());
-        if (wait > 0) {
-          ctx.log.info("seed-coverage: pacing under the API rate limit", { as, path, waitMs: wait });
-          await sleep(wait, ctx.signal);
-        }
-        const now = Date.now();
-        for (let i = 0; i < CRAWL_PACE.serverCallsPerPage; i++) calls.push(now);
-        const seen = await visit(
-          page,
-          resolved.url,
-          ctx.env.HARNESS_API_URL,
-          ctx.env.HARNESS_WEB_URL,
-          route.expectData,
-        );
-        const problems = visitProblems(route, seen);
-        const ok = ctx.check(`${path} as ${as}`, problems.length === 0, {
-          url: reportUrl(new URL(resolved.url, ctx.env.HARNESS_WEB_URL).toString()),
-          expectData: route.expectData,
-          problems,
-        });
-        if (!ok) failed++;
-      }
-    }
+      }),
+    );
+    ctx.metric("seed-coverage.crawl", Date.now() - crawlStarted, "ms");
+    // Per login, so the next CI run says where the crawl's time went.
+    ctx.data("seed-coverage.loginMs", crawl.loginMs);
+    const rejected = settled.find((r): r is PromiseRejectedResult => r.status === "rejected");
+    if (rejected) throw rejected.reason;
+    const failed = crawl.failed;
     ctx.metric("seed-coverage.routes", Object.keys(SEED_ROUTES).length);
     ctx.metric("seed-coverage.failed", failed);
   },

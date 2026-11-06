@@ -17,7 +17,17 @@
  * multi-instance 1m32), notify 8m04s (live-dvr 4m11, notifications 2m55, rehearsal 58s),
  * relay-dvr 7m45s [6m27s], long 7m31s, bot 7m16s. The path-filtered shards on the push run of
  * b5f2bebf (41827726573): captions 3m45s, and seed 15m33s (12m19s on 656f658a, run
- * 41816121331), the one shard over the cap (PROGRESS, "Release follow-ups").
+ * 41816121331; 16m30s on the nightly of eeff9ecb, 42215129857).
+ *
+ * seed is one scenario, and most of it is the seed: `seed full --scale small` took 10m06s and
+ * 9m34s on those two runs (media 3m55, coop 2m40, safety 1m40, mostly waiting on recordings,
+ * proposal periods and suspensions), the crawl 5m27s and 6m56s. The crawl was the logins one by
+ * one, each waiting under its own user's API rate limit (about 4.5 min of the nightly's crawl was
+ * those waits). Splitting the crawl into two shards would run the 10 min seed twice, each shard
+ * still about 12 min, so instead the crawl runs three logins side by side (`CRAWL_CONCURRENCY`,
+ * harness/src/seed/visit.ts), every route still as its role: an estimate, until CI measures it,
+ * of about 2.5 min (viewer1's), so the shard is about 12 to 12.5 min. Under ~10 min needs a
+ * faster seed (a seed-unit change, outside this file).
  */
 export const FULL_SHARDS = {
   relay: ["e2e-relay"],

@@ -5,8 +5,12 @@ import { describe, expect, test } from "vite-plus/test";
 import { SEED_ROUTES, type SeedRoute } from "../../src/seed/routes.ts";
 import type { SeedStore } from "../../src/seed/types.ts";
 import {
+  CRAWL_CONCURRENCY,
   CRAWL_PACE,
+  SIGN_IN_PACE,
   type VisitObservation,
+  crawlConcurrency,
+  crawlQueue,
   crawlWaitMs,
   loginsOf,
   reportUrl,
@@ -179,5 +183,49 @@ describe("crawlWaitMs", () => {
     expect(crawlWaitMs(old, CRAWL_PACE.windowMs + 1)).toBe(0);
     const mixed = [...at(allowed - 1, 9_000), 3_000].reverse();
     expect(crawlWaitMs(mixed, 10_000)).toBe(3_000 + CRAWL_PACE.windowMs - 10_000);
+  });
+});
+
+describe("crawling logins side by side", () => {
+  const r = (as: string): SeedRoute => ({ as, expectData: false });
+
+  test("grouped by login, most routes first, ties in first-seen order", () => {
+    const q = crawlQueue({ "/a": r("x"), "/b": r("y"), "/c": r("y"), "/d": r("z"), "/e": r("w") });
+    expect(q.map(([as, routes]) => [as, routes.map(([p]) => p)])).toEqual([
+      ["y", ["/b", "/c"]],
+      ["x", ["/a"]],
+      ["z", ["/d"]],
+      ["w", ["/e"]],
+    ]);
+    expect(crawlQueue({})).toEqual([]);
+  });
+
+  test("the real routes: every route exactly once, under its own login, longest logins first", () => {
+    const q = crawlQueue(SEED_ROUTES);
+    const paths = q.flatMap(([, routes]) => routes.map(([p]) => p));
+    expect(paths.sort()).toEqual(Object.keys(SEED_ROUTES).sort());
+    for (const [as, routes] of q) for (const [, route] of routes) expect(route.as).toBe(as);
+    const sizes = q.map(([, routes]) => routes.length);
+    expect(sizes).toEqual([...sizes].sort((a, b) => b - a));
+    expect(q.map(([as]) => as).sort()).toEqual([...loginsOf(SEED_ROUTES), "anonymous"].sort());
+  });
+
+  test("concurrency: the default, capped at the logins, refused when not a positive integer", () => {
+    expect(crawlConcurrency(CRAWL_CONCURRENCY, 11)).toBe(3);
+    expect(crawlConcurrency(20, 11)).toBe(11);
+    expect(crawlConcurrency(1, 11)).toBe(1);
+    expect(crawlConcurrency(3, 0)).toBe(1);
+    expect(() => crawlConcurrency(0, 11)).toThrow(/positive integer/);
+    expect(() => crawlConcurrency(-2, 11)).toThrow(/positive integer/);
+  });
+
+  test("sign-ins: six in a window, the seventh waits for the oldest to leave it", () => {
+    const allowed = SIGN_IN_PACE.max - SIGN_IN_PACE.pageCalls;
+    expect(allowed).toBe(6);
+    const five = [1_000, 1_100, 1_200, 1_300, 1_400];
+    expect(crawlWaitMs(five, 2_000, SIGN_IN_PACE)).toBe(0);
+    const six = [...five, 1_500];
+    expect(crawlWaitMs(six, 2_000, SIGN_IN_PACE)).toBe(1_000 + SIGN_IN_PACE.windowMs - 2_000);
+    expect(crawlWaitMs(six, 1_000 + SIGN_IN_PACE.windowMs, SIGN_IN_PACE)).toBe(0);
   });
 });

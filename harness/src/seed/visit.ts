@@ -106,11 +106,48 @@ export const CRAWL_PACE = {
 } as const;
 
 /** How long to wait before the next page so its calls fit in the window, given the calls already made. Pure. */
-export function crawlWaitMs(calls: readonly number[], nowMs: number, pace = CRAWL_PACE): number {
+export function crawlWaitMs(
+  calls: readonly number[],
+  nowMs: number,
+  pace: { readonly max: number; readonly windowMs: number; readonly pageCalls: number } = CRAWL_PACE,
+): number {
   const live = calls.filter((t) => t > nowMs - pace.windowMs).sort((a, b) => a - b);
   const allowed = pace.max - pace.pageCalls;
   if (live.length < allowed) return 0;
   // The call whose expiry brings the count under `allowed`.
   const blocking = live[live.length - allowed] as number;
   return Math.max(0, blocking + pace.windowMs - nowMs);
+}
+
+/**
+ * Sign-ins through the web UI. Every login signs in from this one machine, so they share the
+ * API's per-address `auth` bucket (10 writes a minute); with logins crawled side by side, several
+ * can start within a second. Six a window leaves room for anything else signing in from here.
+ */
+export const SIGN_IN_PACE = { max: 10, windowMs: 61_000, pageCalls: 4 } as const;
+
+/**
+ * Logins crawled side by side. Each signed-in login spends its own user's rate-limit bucket, so a
+ * login's pacing never slows another; the crawl takes about as long as its slowest login. Three
+ * keeps browser pages on a CI runner (beside the stack and `seed live`) few enough to settle.
+ */
+export const CRAWL_CONCURRENCY = 3;
+
+/**
+ * The routes grouped by login, the logins with the most routes first (ties in first-seen order),
+ * so the long, rate-limit-bound ones start at once and the short ones fill in around them. Every
+ * route appears exactly once. Pure.
+ */
+export function crawlQueue(routes: Readonly<Record<string, SeedRoute>>): [string, [string, SeedRoute][]][] {
+  const byLogin = new Map<string, [string, SeedRoute][]>();
+  for (const [path, route] of Object.entries(routes))
+    byLogin.set(route.as, [...(byLogin.get(route.as) ?? []), [path, route]]);
+  // Array.prototype.sort is stable, so equal counts keep first-seen order.
+  return [...byLogin].sort((a, b) => b[1].length - a[1].length);
+}
+
+/** `--set crawlConcurrency=N`: a positive integer, at most the number of logins. Pure. */
+export function crawlConcurrency(raw: number, logins: number): number {
+  if (!Number.isInteger(raw) || raw < 1) throw new Error(`--set crawlConcurrency=${raw}: a positive integer`);
+  return Math.max(1, Math.min(raw, logins));
 }

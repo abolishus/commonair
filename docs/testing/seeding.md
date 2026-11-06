@@ -182,6 +182,15 @@ That fills `/`, the channel page and its chat, the embed and the dashboard. If s
 live, a separate `seed live` is running (staging's), and the scenario uses it. A route marked
 `expectData` gets up to 10 s for an empty state to fill before it is judged.
 
+The walk is paced, not throttled by errors. Every page's API calls count against that login's
+`default` limit (120 a minute per user), so each login waits for room before its next page, and
+the logins run three at a time in their own browser contexts, the ones with the most routes first.
+One login's pacing never slows another, so the walk takes about as long as its slowest login
+(viewer1). The sign-ins share one address, so they are paced under the `auth` limit (six a minute,
+of its ten). `--set crawlConcurrency=1` walks the logins one by one. The report has the walk's
+time (`seed-coverage.crawl`) and each login's (`data["seed-coverage.loginMs"]`); the
+`seed full` step's time is the seed's.
+
 To run the shard as CI does:
 
 ```bash
