@@ -270,8 +270,8 @@ primitives):
   notifications.
 - **Two date-time fields**, one per unit (`components/studio/date-time-field.tsx` 5-minute steps,
   `components/admin/date-time-field.tsx` every minute), both Selects in the locale's order. Merging
-  them is a follow-up. *Merged by fu-ui-polish (2026-11-06): one `components/forms/date-time-field.tsx`
-  with a `minuteStep`, hours through `formatHour`.*
+  them is a follow-up. _Merged by fu-ui-polish (2026-11-06): one `components/forms/date-time-field.tsx`
+  with a `minuteStep`, hours through `formatHour`._
 
 Left open, now follow-ups:
 
@@ -377,9 +377,9 @@ primitives):
   card. Scenarios that click cards expand it first.
 - **The settings menu is an in-player disclosure panel, not a portalled Popover.** Base UI's
   `Popover` and `DropdownMenu` portal to `<body>`, which is invisible in fullscreen. The captions
-  style menu and the tooltips still portal, so the `?` dialog leaves fullscreen first. *Since
+  style menu and the tooltips still portal, so the `?` dialog leaves fullscreen first. _Since
   fu-ui-polish, popups portal into the player's `player-portal` layer while fullscreen, and `?`
-  stays in fullscreen.*
+  stays in fullscreen._
 - **At the live edge only the LIVE badge marks the position.** "Back to live" appears once the
   viewer is behind. D2-player declined to add a pressed, inert "Live" control, and I accept that.
 - **DVR's `L` key stays in `DvrControls`' own listener**, so B8's DVR behaviour and tests stay
@@ -394,7 +394,7 @@ primitives):
 - **Clips have no 7d/30d/all filter.** `clips.list` takes no range, so clips are newest first.
 - **The About tab has no social links.** No API field holds them, and panels carry links today.
 - **Uptime uses its own one-second clock in `channel-meta.tsx`.** `RelativeTime` has no elapsed
-  mode. *Replaced by `<RelativeTime mode="elapsed">` in fu-ui-polish.*
+  mode. _Replaced by `<RelativeTime mode="elapsed">` in fu-ui-polish._
 
 Left open: contract requests, now follow-ups.
 
