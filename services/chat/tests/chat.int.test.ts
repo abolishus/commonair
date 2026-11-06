@@ -131,10 +131,92 @@ describe("fan-out across instances", () => {
         occurredAt: new Date().toISOString(),
       };
       await pub.publish(iso.busPrefix + BUS.events, JSON.stringify(tip));
-      await pub.publish(iso.busPrefix + BUS.events, JSON.stringify({ ...tip, type: "channel.follow" }));
+      await pub.publish(iso.busPrefix + BUS.events, JSON.stringify({ ...tip, type: "channel.points.change" }));
       const frame = await c.waitFor<"event">((f) => f.op === "event" && f.type === "channel.tip");
       expect(frame).toMatchObject({ channel: ch.slug, data: { amount: { value: 500 } } });
-      expect(await c.never((f) => f.op === "event" && f.type === "channel.follow")).toBe(true);
+      expect(await c.never((f) => f.op === "event" && f.type === "channel.points.change")).toBe(true);
+    } finally {
+      await pub.quit();
+    }
+  });
+
+  test("follows reach the broadcaster and moderators only; goals and giveaways reach everyone", async () => {
+    const { owner, mod, viewer, ch } = await room();
+    const host = await connect(a, owner.id);
+    const moderator = await connect(b, mod.id);
+    const watcher = await connect(a, viewer.id);
+    // A moderator role without the moderate scope (e.g. a read-only app token) is a viewer here.
+    const unscoped = await connect(b, mod.id, ["chat:read"]);
+    const anon = await connect(b, null);
+    const all = [host, moderator, watcher, unscoped, anon];
+    for (const c of all) await c.join(ch.slug);
+    const pub = createValkey(VALKEY_URL);
+    const now = new Date().toISOString();
+    const publish = (type: BusEvent["type"], payload: Record<string, unknown>) =>
+      pub.publish(
+        iso.busPrefix + BUS.events,
+        JSON.stringify({
+          id: crypto.randomUUID(),
+          type,
+          version: "1",
+          channelId: ch.id,
+          payload: { broadcaster_user_id: owner.id, ...payload },
+          occurredAt: now,
+        } satisfies BusEvent),
+      );
+    try {
+      await publish("channel.follow", {
+        user_id: viewer.id,
+        user_login: viewer.username,
+        followed_at: now,
+      });
+      const goal = {
+        id: uuidv7(),
+        type: "followers",
+        description: "d",
+        current_amount: 3,
+        target_amount: 10,
+      };
+      await publish("channel.goal.begin", { ...goal, started_at: now });
+      await publish("channel.goal.progress", { ...goal, current_amount: 4, started_at: now });
+      await publish("channel.goal.end", {
+        ...goal,
+        is_achieved: false,
+        started_at: now,
+        ended_at: now,
+      });
+      const giveaway = { id: uuidv7(), title: "g", started_at: now };
+      await publish("channel.giveaway.begin", {
+        ...giveaway,
+        winner_count: 1,
+        keyword: null,
+        seed_commitment: "c",
+        closes_at: null,
+      });
+      await publish("channel.giveaway.end", {
+        ...giveaway,
+        status: "drawn",
+        entries: 2,
+        winners: 1,
+        seed: "s",
+        ended_at: now,
+      });
+
+      const isEvent = (type: string) => (f: ServerFrame) => f.op === "event" && f.type === type;
+      for (const c of [host, moderator]) {
+        const follow = await c.waitFor<"event">(isEvent("channel.follow"));
+        expect(follow).toMatchObject({ channel: ch.slug, data: { user_id: viewer.id } });
+      }
+      for (const c of all) {
+        for (const type of ["channel.goal.begin", "channel.goal.progress", "channel.goal.end"] as const)
+          await c.waitFor(isEvent(type));
+        await c.waitFor(isEvent("channel.giveaway.begin"));
+        await c.waitFor(isEvent("channel.giveaway.end"));
+      }
+      // Every other frame has arrived by now, so a follow would have too.
+      for (const c of [watcher, unscoped, anon]) expect(await c.never(isEvent("channel.follow"))).toBe(true);
+      // One frame per event: the giveaway end is not delivered twice to moderators.
+      for (const c of all) expect(c.frames.filter(isEvent("channel.giveaway.end"))).toHaveLength(1);
     } finally {
       await pub.quit();
     }

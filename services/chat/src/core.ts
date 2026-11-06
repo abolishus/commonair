@@ -18,7 +18,7 @@ import type { Bus } from "./bus.ts";
 import { parseCommand } from "./commands.ts";
 import { ChatControlMessage, type ChatFanout, parseJson } from "./control.ts";
 import type { Directory } from "./directory.ts";
-import { chatMessageEvent, isInlineEvent } from "./events.ts";
+import { chatMessageEvent, eventAudience } from "./events.ts";
 import type { Limiter } from "./limiter.ts";
 import { type FilterRunner, inlineFilterRunner } from "@commonair/chat-filter";
 import type { Metrics } from "./metrics.ts";
@@ -479,7 +479,9 @@ export class ChatCore {
       return;
     }
     // Cheap filters first: most bus traffic is chat messages and rooms this instance does not host.
-    if (typeof loose.type !== "string" || !isInlineEvent(loose.type) || typeof loose.channelId !== "string") return;
+    if (typeof loose.type !== "string" || typeof loose.channelId !== "string") return;
+    const audience = eventAudience(loose.type);
+    if (!audience) return;
     const room = this.d.rooms.get(loose.channelId);
     if (!room) return;
     const evt = BusEvent.safeParse(loose);
@@ -492,6 +494,7 @@ export class ChatCore {
         type: evt.data.type,
         data: evt.data.payload,
       } satisfies ServerFrame),
+      audience,
     );
   }
 

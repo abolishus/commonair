@@ -3,12 +3,13 @@
 
 /**
  * Event-bus mapping. Accepted chat messages are published straight to BUS.events as
- * `channel.chat.message` (chat volume is too high for the outbox), and a whitelist of
- * platform events is surfaced inline in chat as `{op:"event"}` frames.
+ * `channel.chat.message` (chat volume is too high for the outbox), and a routing table of
+ * platform events is surfaced in chat as `{op:"event"}` frames.
  */
 import type { BusEvent, dto, EventType } from "@commonair/contracts";
 import { chatMessageEventPayload } from "@commonair/contracts/chat";
 import { uuidv7 } from "@commonair/db";
+import type { Audience } from "./rooms.ts";
 import type { ChannelState } from "./types.ts";
 
 export { fragmentsOf } from "@commonair/contracts/chat";
@@ -25,13 +26,35 @@ export function chatMessageEvent(channel: ChannelState, message: dto.ChatMessage
   };
 }
 
-const INLINE_EXACT = new Set<EventType>([
-  "channel.subscribe",
-  "channel.subscription.gift",
-  "channel.tip",
-  "channel.raid",
+/**
+ * Platform events surfaced in chat as `{op:"event"}` frames, and who receives each. Everyone sees
+ * subs, gifts, tips, raids, polls, predictions, giveaways and goals (the pinned strip and inline
+ * notices). Follows name the follower, so they go to the broadcaster and moderators only (the
+ * dashboard activity feed); a broadcaster's session token carries the moderate scope, so its
+ * socket counts as a moderator.
+ */
+const AUDIENCE_EXACT: ReadonlyMap<string, Audience> = new Map<EventType, Audience>([
+  ["channel.subscribe", "all"],
+  ["channel.subscription.gift", "all"],
+  ["channel.tip", "all"],
+  ["channel.raid", "all"],
+  ["channel.follow", "moderators"],
 ]);
 
-/** Events shown inline in chat (subs, gifts, tips, raids, polls, predictions). */
-export const isInlineEvent = (type: string): boolean =>
-  INLINE_EXACT.has(type as EventType) || type.startsWith("channel.poll.") || type.startsWith("channel.prediction.");
+const AUDIENCE_PREFIX: readonly (readonly [string, Audience])[] = [
+  ["channel.poll.", "all"],
+  ["channel.prediction.", "all"],
+  ["channel.giveaway.", "all"],
+  ["channel.goal.", "all"],
+];
+
+/** Who receives an event frame of this type, or null when the event is not shown in chat. */
+export function eventAudience(type: string): Audience | null {
+  const exact = AUDIENCE_EXACT.get(type);
+  if (exact) return exact;
+  for (const [prefix, audience] of AUDIENCE_PREFIX) if (type.startsWith(prefix)) return audience;
+  return null;
+}
+
+/** Events shown in chat to at least some members. */
+export const isInlineEvent = (type: string): boolean => eventAudience(type) !== null;

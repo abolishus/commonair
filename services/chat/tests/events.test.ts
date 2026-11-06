@@ -3,7 +3,7 @@
 
 import { describe, expect, test } from "vite-plus/test";
 import { EVENTS, type dto } from "@commonair/contracts";
-import { chatMessageEvent, fragmentsOf, isInlineEvent } from "../src/events.ts";
+import { chatMessageEvent, eventAudience, fragmentsOf, isInlineEvent } from "../src/events.ts";
 import { channel } from "./fixtures.ts";
 
 describe("fragmentsOf", () => {
@@ -58,6 +58,42 @@ describe("chatMessageEvent", () => {
   });
 });
 
+describe("eventAudience", () => {
+  test.each([
+    ["channel.subscribe", "all"],
+    ["channel.subscription.gift", "all"],
+    ["channel.tip", "all"],
+    ["channel.raid", "all"],
+    ["channel.poll.begin", "all"],
+    ["channel.poll.end", "all"],
+    ["channel.prediction.lock", "all"],
+    ["channel.giveaway.begin", "all"],
+    ["channel.giveaway.end", "all"],
+    ["channel.goal.begin", "all"],
+    ["channel.goal.progress", "all"],
+    ["channel.goal.end", "all"],
+    // Names the follower: the broadcaster's and moderators' activity feed only.
+    ["channel.follow", "moderators"],
+    ["channel.chat.message", null],
+    ["channel.subscription.end", null],
+    ["channel.points.change", null],
+    ["channel.ban", null],
+    ["stream.online", null],
+    ["", null],
+    // Prefixes match whole segments only.
+    ["channel.goals", null],
+    ["channel.followers", null],
+    ["channel.giveaway", null],
+  ])("%s → %s", (type, expected) => expect(eventAudience(type)).toBe(expected));
+
+  test("every event type in the contract is routed deliberately", () => {
+    const routed = Object.keys(EVENTS).filter((type) => eventAudience(type) !== null);
+    expect(routed.filter((type) => eventAudience(type) === "moderators")).toEqual(["channel.follow"]);
+    // Nothing that carries a viewer's points or bans reaches chat.
+    expect(routed.some((type) => type.startsWith("channel.points.") || type.startsWith("channel.ban"))).toBe(false);
+  });
+});
+
 describe("isInlineEvent", () => {
   test.each([
     ["channel.subscribe", true],
@@ -66,8 +102,10 @@ describe("isInlineEvent", () => {
     ["channel.raid", true],
     ["channel.poll.begin", true],
     ["channel.prediction.lock", true],
+    ["channel.giveaway.begin", true],
+    ["channel.goal.progress", true],
+    ["channel.follow", true],
     ["channel.chat.message", false],
-    ["channel.follow", false],
     ["channel.subscription.end", false],
   ])("%s → %s", (type, expected) => expect(isInlineEvent(type)).toBe(expected));
 });
