@@ -23,7 +23,7 @@ import {
 import { act, cleanup, configure, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type * as React from "react";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
-import { locale, uiMessages } from "../src/i18n/index.ts";
+import { locale, t, uiMessages } from "../src/i18n/index.ts";
 
 // The page renders through the router and its loader; on a busy CI runner the first paint can
 // take longer than testing-library's 1 s default.
@@ -46,10 +46,12 @@ vi.mock("../src/components/site-chrome.tsx", () => ({ AppHeader: () => null, App
 const { Route } = await import("../src/routes/_app/$channel.tsx");
 const data = await import("../src/components/channel/channel-data.ts");
 const { summarize } = await import("../src/lib/channel-summary.ts");
-const { ShareButton, Uptime, CategoryLink } = await import("../src/components/channel/channel-meta.tsx");
+const { ShareButton, Uptime, CategoryLink, ChannelOverflowMenu } =
+  await import("../src/components/channel/channel-meta.tsx");
 const { ChannelNotFoundPage } = await import("../src/components/channel/live-now-shelf.tsx");
 type ChannelPage = import("../src/components/channel/panels-loader.ts").ChannelPage;
 type StreamCard = import("@commonair/contracts/dto").StreamCard;
+type ReportClient = import("../src/components/safety/client.ts").ReportClient;
 
 afterEach(() => {
   cleanup();
@@ -310,6 +312,46 @@ describe("Share (F9)", () => {
     renderPage(livePage(10));
     expect((await screen.findByTestId("channel-share")).getAttribute("data-url")).toBe("https://air.example.test/fern");
     expect(data.channelUrl("https://a.test//", "x_y")).toBe("https://a.test/x_y");
+  });
+});
+
+describe("the phone overflow menu's report (F4)", () => {
+  it("files a report about the channel from the dialog, then closes it", async () => {
+    const report = vi.fn<ReportClient["report"]>(async () => ({ id: "0192f000-0000-7000-8000-0000000000r1" }) as never);
+    render(
+      providers(
+        <ChannelOverflowMenu
+          signedIn
+          subjectType="channel"
+          subjectId="0192f000-0000-7000-8000-000000000001"
+          client={{ report } as unknown as ReportClient}
+        />,
+      ),
+    );
+    act(() => {
+      fireEvent.click(screen.getByTestId("channel-overflow"));
+    });
+    const item = await screen.findByTestId("channel-overflow-report");
+    act(() => {
+      fireEvent.click(item);
+    });
+    await screen.findByTestId("report-dialog");
+    fireEvent.click(screen.getByTestId("report-reason"));
+    const spam = await screen.findByTestId("report-reason-spam");
+    fireEvent.pointerDown(spam, { pointerType: "mouse" });
+    fireEvent.click(spam);
+    fireEvent.change(screen.getByTestId("report-details"), { target: { value: "  bot spam  " } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("report-submit"));
+    });
+    expect(report).toHaveBeenCalledWith({
+      subjectType: "channel",
+      subjectId: "0192f000-0000-7000-8000-000000000001",
+      reason: "spam",
+      details: "bot spam",
+    });
+    await waitFor(() => expect(screen.queryByTestId("report-dialog")).toBeNull());
+    expect(toasts.success).toHaveBeenCalledWith(t("safety.report.done"));
   });
 });
 

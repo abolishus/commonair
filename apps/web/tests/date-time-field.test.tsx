@@ -28,7 +28,7 @@ import {
   withPart,
   type DateTimeParts,
 } from "../src/components/forms/date-time.ts";
-import { locale, uiMessages } from "../src/i18n/index.ts";
+import { locale, t, uiMessages } from "../src/i18n/index.ts";
 
 afterEach(cleanup);
 
@@ -70,6 +70,10 @@ describe("date-time rules", () => {
     const midnight = dateTimeIso({ day: 3, month: 1, year: 2027, hour: null, minute: null });
     expect("iso" in midnight && new Date(midnight.iso).getHours()).toBe(0);
     expect(dateTimeIso({ day: 29, month: 2, year: 2028, hour: 0, minute: 0 })).toHaveProperty("iso");
+  });
+
+  it("calls a date past the end of the Date range invalid", () => {
+    expect(dateTimeIso({ day: 1, month: 1, year: 300_000, hour: 0, minute: 0 })).toEqual({ error: "invalid" });
   });
 
   it("keeps the day inside the month when the month or year changes", () => {
@@ -286,6 +290,47 @@ describe("DateTimeField (parts)", () => {
   });
 });
 
+describe("DateTimeField without a test id or a hint", () => {
+  it("marks the selects invalid for a range error shown elsewhere, with nothing to describe it", () => {
+    wrap(
+      <DateTimeField
+        legend="From"
+        invalid
+        clearable
+        value={{ year: 2026, month: 1, day: 2, hour: 3, minute: 4 }}
+        onValueChange={() => undefined}
+        years={[2026]}
+      />,
+    );
+    const field = document.querySelector("fieldset") as HTMLFieldSetElement;
+    expect(field.getAttribute("aria-describedby")).toBeNull();
+    expect(field.getAttribute("data-testid")).toBeNull();
+    expect(field.getAttribute("data-value")).toBe("2026-01-02T03:04");
+    const selects = screen.getAllByRole("combobox");
+    expect(selects).toHaveLength(5);
+    for (const s of selects) {
+      expect(s.getAttribute("aria-invalid")).toBe("true");
+      expect(s.getAttribute("data-testid")).toBeNull();
+    }
+    expect(screen.queryByRole("alert")).toBeNull();
+    const clear = screen.getByRole("button", { name: t("time.field.clear") });
+    expect(clear.getAttribute("data-testid")).toBeNull();
+  });
+
+  it("is valid and has no Clear by default", () => {
+    wrap(
+      <DateTimeField
+        legend="From"
+        value={{ year: 2026, month: 1, day: 2, hour: 3, minute: 4 }}
+        onValueChange={() => undefined}
+        years={[2026]}
+      />,
+    );
+    for (const s of screen.getAllByRole("combobox")) expect(s.getAttribute("aria-invalid")).toBeNull();
+    expect(screen.queryByRole("button", { name: t("time.field.clear") })).toBeNull();
+  });
+});
+
 // ── The text field (egress, legal) ───────────────────────────────────────────────────────────
 
 describe("DateTimeTextField", () => {
@@ -364,5 +409,33 @@ describe("DateTimeTextField", () => {
     expect(screen.getByTestId("when").dataset.value).toBe("2025-01-02T03:04");
     expect(screen.getByTestId("when-year").textContent).toContain("2025");
     expect(screen.getByTestId("when-minute").textContent).toContain("04");
+  });
+
+  it("keeps its parts when the page passes back the same instant in other words", () => {
+    const view = wrap(
+      <DateTimeTextField
+        data-testid="when"
+        legend="From"
+        value="2026-10-01T06:30:45"
+        onValueChange={() => {}}
+        now={NOW}
+      />,
+    );
+    view.rerender(
+      <LocaleProvider locale={locale} messages={uiMessages}>
+        <TooltipProvider>
+          <DateTimeTextField
+            data-testid="when"
+            legend="From"
+            value="2026-10-01T06:30"
+            onValueChange={() => {}}
+            now={NOW}
+          />
+        </TooltipProvider>
+      </LocaleProvider>,
+    );
+    expect(screen.getByTestId("when").dataset.value).toBe("2026-10-01T06:30");
+    expect(screen.getByTestId("when-day").textContent).toContain("1");
+    expect(screen.getByTestId("when-minute").textContent).toContain("30");
   });
 });

@@ -16,7 +16,7 @@ import type {
   IntegrityFlagDto,
   StatusSummaryDto,
 } from "../src/components/admin/client.ts";
-import { EgressPage } from "../src/components/admin/egress.tsx";
+import { EGRESS_BROADCAST_CAP, EgressPage, EgressResult } from "../src/components/admin/egress.tsx";
 import {
   channelFilter,
   checkEgressRange,
@@ -28,7 +28,7 @@ import {
 } from "../src/components/admin/forms.ts";
 import { IncidentsPage, STATUS_STALE_MS, mergeIncidents } from "../src/components/admin/incidents.tsx";
 import { IntegrityPage, flagFilters } from "../src/components/admin/integrity.tsx";
-import { locale, uiMessages } from "../src/i18n/index.ts";
+import { locale, t, uiMessages } from "../src/i18n/index.ts";
 
 afterEach(cleanup);
 
@@ -173,6 +173,80 @@ describe("egress page", () => {
     fireEvent.click(error.querySelector("button") as HTMLButtonElement);
     await screen.findByTestId("egress-row");
     expect(reportFn).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("egress range and result states", () => {
+  it("refuses a range that ends before it starts, marks both fields, and clears once fixed", async () => {
+    const reportFn = vi.fn<EgressClient["report"]>(async () => report);
+    wrap(<EgressPage client={{ report: reportFn }} now={NOW} />);
+    await screen.findByTestId("egress-row");
+    expect(screen.getByText(t("admin.egress.rangeHint"))).toBeTruthy();
+    await setDateTime("egress-to", { day: "25" });
+    fireEvent.click(tid("egress-load"));
+    expect(await screen.findByText(t("admin.egress.rangeOrder"))).toBeTruthy();
+    expect(screen.queryByText(t("admin.egress.rangeHint"))).toBeNull();
+    expect(tid("egress-from-day").getAttribute("aria-invalid")).toBe("true");
+    expect(tid("egress-to-day").getAttribute("aria-invalid")).toBe("true");
+    expect(reportFn).toHaveBeenCalledTimes(1);
+    await setDateTime("egress-to", { day: "27" });
+    fireEvent.click(tid("egress-load"));
+    await waitFor(() => expect(screen.queryByText(t("admin.egress.rangeOrder"))).toBeNull());
+    expect(screen.getByText(t("admin.egress.rangeHint"))).toBeTruthy();
+    expect(tid("egress-to-day").getAttribute("aria-invalid")).toBeNull();
+  });
+
+  it("reloads the same range when it is submitted again", async () => {
+    const reportFn = vi.fn<EgressClient["report"]>(async () => report);
+    wrap(<EgressPage client={{ report: reportFn }} now={NOW} />);
+    await screen.findByTestId("egress-row");
+    await act(async () => {
+      fireEvent.click(tid("egress-load"));
+    });
+    await waitFor(() => expect(reportFn).toHaveBeenCalledTimes(2));
+    expect(reportFn.mock.calls[1]).toEqual(reportFn.mock.calls[0]);
+  });
+
+  it("shows a skeleton until the report arrives", () => {
+    wrap(<EgressPage client={{ report: () => new Promise(() => undefined) }} now={NOW} />);
+    expect(screen.getByText(t("admin.egress.loading"))).toBeTruthy();
+    expect(screen.queryByTestId("egress-total")).toBeNull();
+  });
+
+  it("notes the cap only when the listed broadcasts reach it", () => {
+    const rows = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({
+        broadcastId: `0192f000-0000-7000-8000-${String(i).padStart(12, "0")}`,
+        channelSlug: `chan${i}`,
+        bytes: { origin: i, relay: 0, p2p: 0, cdn: 0 },
+      }));
+    const capped = t("admin.egress.capped", { count: EGRESS_BROADCAST_CAP });
+    const view = wrap(
+      <EgressResult
+        report={{ ...report, byBroadcast: rows(EGRESS_BROADCAST_CAP - 1) }}
+        failed={false}
+        onRetry={() => undefined}
+      />,
+    );
+    expect(screen.queryByText(capped)).toBeNull();
+    view.unmount();
+    wrap(
+      <EgressResult
+        report={{ ...report, byBroadcast: rows(EGRESS_BROADCAST_CAP) }}
+        failed={false}
+        onRetry={() => undefined}
+      />,
+    );
+    expect(screen.getByText(capped)).toBeTruthy();
+    expect(screen.getAllByTestId("egress-row")).toHaveLength(EGRESS_BROADCAST_CAP);
+  });
+
+  it("puts the error before any stale report, with a retry", () => {
+    const onRetry = vi.fn<() => void>();
+    wrap(<EgressResult report={report} failed onRetry={onRetry} />);
+    expect(screen.queryByTestId("egress-row")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: t("admin.egress.retry") }));
+    expect(onRetry).toHaveBeenCalledOnce();
   });
 });
 
