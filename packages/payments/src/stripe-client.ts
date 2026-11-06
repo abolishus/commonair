@@ -91,6 +91,8 @@ export interface StripeClient {
   /** `POST /v1/transfers` (Connect): move platform balance to a connected account. */
   createTransfer(params: FormObject, idempotencyKey: string): Promise<StripeTransfer>;
   retrieveTransfer(transferId: string): Promise<StripeTransfer>;
+  /** Every transfer to one account in one transfer group, newest first (follows Stripe's pagination). */
+  listTransfers(params: { destination: string; transferGroup: string }): Promise<StripeTransfer[]>;
   retrieveRefund(refundId: string): Promise<StripeRefund>;
   /** Every refund of a PaymentIntent, newest first (follows Stripe's pagination). */
   listRefunds(params: { paymentIntent: string }): Promise<StripeRefund[]>;
@@ -102,7 +104,10 @@ const isObj = (v: unknown): v is Json => typeof v === "object" && v !== null && 
 /** An expandable field: the id string, or the expanded object's id. */
 const ref = (v: unknown): string | null => str(v) ?? (isObj(v) ? str(v.id) : null);
 const ID = /^[A-Za-z0-9_]{1,255}$/;
-/** Pages `listRefunds` follows at most (100 refunds each); a PaymentIntent has a handful. */
+/**
+ * Pages `listRefunds` and `listTransfers` follow at most (100 each): a PaymentIntent has a handful
+ * of refunds, and an account one transfer per payout run.
+ */
 const MAX_LIST_PAGES = 10;
 
 function pathId(id: string): string {
@@ -283,6 +288,29 @@ export function stripeClient(opts: StripeClientOptions): StripeClient {
     },
     async retrieveTransfer(transferId) {
       return transferOf(await request("GET", `/v1/transfers/${pathId(transferId)}`));
+    },
+    async listTransfers({ destination, transferGroup }) {
+      if (!transferGroup) throw new RangeError("a transfer listing names its transfer group");
+      const out: StripeTransfer[] = [];
+      let after: string | null = null;
+      for (let page = 0; page < MAX_LIST_PAGES; page++) {
+        const q = new URLSearchParams({
+          destination: pathId(destination),
+          transfer_group: transferGroup,
+          limit: "100",
+        });
+        if (after) q.set("starting_after", after);
+        const r = await request("GET", `/v1/transfers?${q.toString()}`);
+        const data: unknown[] | null = Array.isArray(r.data) ? (r.data as unknown[]) : null;
+        if (!data) throw malformed("a transfer list without data");
+        const transfers = data.map((d) => transferOf(isObj(d) ? d : {}));
+        out.push(...transfers);
+        const last = transfers.at(-1);
+        if (r.has_more !== true || !last) return out;
+        after = last.id;
+      }
+      // A cut-off list could read as "no such transfer" to a treasurer settling one as not sent.
+      throw malformed("more transfers than the client pages through");
     },
     async retrieveRefund(refundId) {
       return refundOf(await request("GET", `/v1/refunds/${pathId(refundId)}`));

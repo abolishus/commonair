@@ -11,8 +11,8 @@
  * free-text description (ADR 0004). Live keys never get this far: `stripeClient` refuses them
  * before it exists (`assertTestKey`).
  */
-import type { TransferRequest, TransferResult } from "./adapter.ts";
-import { StripeOutcomeUnknown } from "./errors.ts";
+import type { TransferRequest, TransferResult, TransferStatus } from "./adapter.ts";
+import { StripeOutcomeUnknown, StripeRequestError } from "./errors.ts";
 import type { FormObject } from "./stripe-form.ts";
 import type { StripeClient, StripeTransfer } from "./stripe-client.ts";
 
@@ -59,4 +59,37 @@ export function transferResultOf(r: TransferRequest, t: StripeTransfer): Transfe
 export async function stripeTransfer(client: StripeClient, request: TransferRequest): Promise<TransferResult> {
   const params = transferParams(request);
   return transferResultOf(request, await client.createTransfer(params, request.idempotencyKey));
+}
+
+/** Stripe's transfer as the adapter's `TransferStatus` (exported for tests). */
+export const transferStatusOf = (t: StripeTransfer): TransferStatus => ({
+  providerRef: t.id,
+  amountCents: t.amount,
+  currency: t.currency,
+  destination: t.destination,
+  reversedCents: t.amountReversed,
+  metadata: t.metadata,
+});
+
+const TRANSFER_ID = /^tr_[A-Za-z0-9]{1,250}$/;
+
+/** One transfer by id, or null when Stripe has none (a 404, or an id that is not a transfer's). */
+export async function stripeTransferStatus(client: StripeClient, transferRef: string): Promise<TransferStatus | null> {
+  if (!TRANSFER_ID.test(transferRef)) return null;
+  try {
+    return transferStatusOf(await client.retrieveTransfer(transferRef));
+  } catch (err) {
+    // A definite "no such transfer"; anything else is the caller's to retry.
+    if (err instanceof StripeRequestError && err.status === 404) return null;
+    throw err;
+  }
+}
+
+/** Every transfer to an account in one payout run (`PaymentAdapter.listTransfers`). */
+export async function stripeListTransfers(
+  client: StripeClient,
+  q: { destination: string; group: string },
+): Promise<TransferStatus[]> {
+  if (!ACCOUNT.test(q.destination)) throw new RangeError("the destination is not a Stripe connected account");
+  return (await client.listTransfers({ destination: q.destination, transferGroup: q.group })).map(transferStatusOf);
 }

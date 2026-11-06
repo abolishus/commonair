@@ -18,6 +18,7 @@ import { Button } from "@commonair/ui/components/button";
 import { Input } from "@commonair/ui/components/input";
 import { Label } from "@commonair/ui/components/label";
 import { PageContainer } from "@commonair/ui/layouts";
+import { toast } from "@commonair/ui/toast";
 import { MoneySend01Icon } from "@hugeicons/core-free-icons";
 import * as React from "react";
 import type { z } from "zod";
@@ -27,7 +28,10 @@ import { t, type MessageKey } from "../../i18n/index.ts";
  * The period page's payout section (batch 8, M1-coop-money; docs/testing/b8-selectors.md
  * `patronage-payouts`, `patronage-pay`): for treasurers, the period's payout rows and "Pay out",
  * which asks for or gives the second approval (`coop.patronage.pay`) behind a `ConfirmDialog`; a
- * manual row is marked paid with the treasurer's reference. A member sees only their own payout.
+ * manual row is marked paid with the treasurer's reference. A Connect row whose outcome at Stripe
+ * is unknown (`outcomeUnknown`; the worker will never send it again) is settled from what Stripe's
+ * dashboard shows: marked paid with its `tr_` id, or marked not sent (`coop.patronage.markUnsent`,
+ * which opens a manual row for what is still owed). A member sees only their own payout.
  */
 
 export type PatronagePayoutDto = z.infer<typeof PatronagePayoutView>;
@@ -55,12 +59,29 @@ const METHOD: Record<PatronagePayoutDto["provider"], MessageKey> = {
 
 export const payoutStatusLabel = (s: PatronagePayoutDto["status"]): string => t(STATUS[s].key);
 
-/** Whether a row can be marked paid by hand: pending, by bank transfer, the account not deleted (pure). */
+/** A pending Connect row the worker left for a person: what Stripe did is not known (pure). */
+export const isOutcomeUnknown = (r: PatronagePayoutDto): boolean =>
+  r.status === "pending" && r.provider === "stripe" && r.outcomeUnknown;
+
+/**
+ * Whether a row can be marked paid by hand (pure): pending, by bank transfer, the account not
+ * deleted; or a Connect row whose outcome is unknown (a transfer Stripe made stands whatever
+ * became of the account since).
+ */
 export const canMarkPaid = (r: PatronagePayoutDto): boolean =>
-  r.status === "pending" && r.provider === "manual" && !isDeletedMember(r);
+  r.status === "pending" && ((r.provider === "manual" && !isDeletedMember(r)) || isOutcomeUnknown(r));
+
+/** Whether a row can be settled as never sent: only a Connect row whose outcome is unknown (pure). */
+export const canMarkUnsent = (r: PatronagePayoutDto): boolean => isOutcomeUnknown(r);
 
 /** The treasurer's reference, as the API accepts it (`MANUAL_REFERENCE`). */
 export const REFERENCE = /^[A-Za-z0-9][A-Za-z0-9._:/#-]{0,63}$/;
+/** A Stripe transfer id, the only reference a Connect row takes (`STRIPE_TRANSFER_REFERENCE`). */
+export const STRIPE_TRANSFER = /^tr_[A-Za-z0-9]{1,60}$/;
+
+/** The reference rule for a row: a `tr_` id for a Connect row, a short code otherwise (pure). */
+export const referenceValid = (r: Pick<PatronagePayoutDto, "provider">, reference: string): boolean =>
+  (r.provider === "stripe" ? STRIPE_TRANSFER : REFERENCE).test(reference.trim());
 
 function MarkPaid({
   row,
@@ -73,7 +94,8 @@ function MarkPaid({
 }): React.JSX.Element {
   const [reference, setReference] = React.useState("");
   const id = React.useId();
-  const valid = REFERENCE.test(reference.trim());
+  const connect = row.provider === "stripe";
+  const valid = referenceValid(row, reference);
   return (
     <ConfirmDialog
       trigger={
@@ -82,14 +104,19 @@ function MarkPaid({
         </Button>
       }
       title={t("coopMoney.markPaid.title")}
-      description={t("coopMoney.markPaid.description")}
+      description={t(connect ? "coopMoney.markPaid.stripe.description" : "coopMoney.markPaid.description")}
       confirmLabel={t("coopMoney.markPaid.confirm")}
       confirmDisabled={!valid}
-      onConfirm={() => onMarkPaid(row.id, reference.trim())}
+      onConfirm={async () => {
+        await onMarkPaid(row.id, reference.trim());
+        toast.success(t("coopMoney.markPaid.done"));
+      }}
       {...(onError ? { onError } : {})}
     >
       <div className="flex flex-col gap-2">
-        <Label htmlFor={id}>{t("coopMoney.markPaid.reference")}</Label>
+        <Label htmlFor={id}>
+          {t(connect ? "coopMoney.markPaid.stripe.reference" : "coopMoney.markPaid.reference")}
+        </Label>
         <Input
           id={id}
           value={reference}
@@ -99,10 +126,38 @@ function MarkPaid({
           onChange={(e) => setReference(e.target.value)}
         />
         <p id={`${id}-hint`} className="text-xs text-muted-foreground">
-          {t("coopMoney.markPaid.referenceHint")}
+          {t(connect ? "coopMoney.markPaid.stripe.referenceHint" : "coopMoney.markPaid.referenceHint")}
         </p>
       </div>
     </ConfirmDialog>
+  );
+}
+
+function MarkUnsent({
+  row,
+  onMarkUnsent,
+  onError,
+}: {
+  row: PatronagePayoutDto;
+  onMarkUnsent: (payoutId: string) => Promise<void>;
+  onError?: ((err: unknown) => void) | undefined;
+}): React.JSX.Element {
+  return (
+    <ConfirmDialog
+      trigger={
+        <Button data-testid="patronage-payout-mark-unsent" data-payout-id={row.id} variant="outline" size="sm">
+          {t("coopMoney.markUnsent.button")}
+        </Button>
+      }
+      title={t("coopMoney.markUnsent.title")}
+      description={t("coopMoney.markUnsent.description")}
+      confirmLabel={t("coopMoney.markUnsent.confirm")}
+      onConfirm={async () => {
+        await onMarkUnsent(row.id);
+        toast.success(t("coopMoney.markUnsent.done"));
+      }}
+      {...(onError ? { onError } : {})}
+    />
   );
 }
 
@@ -114,9 +169,12 @@ export interface PatronagePayoutsPanelProps {
   onRetry?: () => void;
   onPay: () => Promise<void>;
   onPayError?: (err: unknown) => void;
-  /** Mark a manual row paid; omitted until the procedure exists (then no button shows). */
+  /** Mark a manual row (or an outcome-unknown Connect row) paid; omitted: no button shows. */
   onMarkPaid?: (payoutId: string, reference: string) => Promise<void>;
   onMarkPaidError?: (err: unknown) => void;
+  /** Settle an outcome-unknown Connect row as never sent (`coop.patronage.markUnsent`); omitted: no button. */
+  onMarkUnsent?: (payoutId: string) => Promise<void>;
+  onMarkUnsentError?: (err: unknown) => void;
 }
 
 /** The treasurer's payout section, from props (server-renderable with fixtures). */
@@ -129,6 +187,8 @@ export function PatronagePayoutsPanel({
   onPayError,
   onMarkPaid,
   onMarkPaidError,
+  onMarkUnsent,
+  onMarkUnsentError,
 }: PatronagePayoutsPanelProps): React.JSX.Element {
   const columns: DataTableColumn<PatronagePayoutDto>[] = [
     {
@@ -158,7 +218,19 @@ export function PatronagePayoutsPanel({
       cell: ({ row: { original: r } }) => (
         <div className="flex flex-col items-start gap-2">
           <StatusBadge tone={STATUS[r.status].tone}>{payoutStatusLabel(r.status)}</StatusBadge>
-          {onMarkPaid && canMarkPaid(r) && <MarkPaid row={r} onMarkPaid={onMarkPaid} onError={onMarkPaidError} />}
+          {isOutcomeUnknown(r) && (
+            <p data-testid="patronage-payout-outcome-unknown" className="text-xs text-muted-foreground">
+              {t("coopMoney.payouts.outcomeUnknown")}
+            </p>
+          )}
+          {(onMarkPaid && canMarkPaid(r)) || (onMarkUnsent && canMarkUnsent(r)) ? (
+            <div className="flex flex-wrap gap-2">
+              {onMarkPaid && canMarkPaid(r) && <MarkPaid row={r} onMarkPaid={onMarkPaid} onError={onMarkPaidError} />}
+              {onMarkUnsent && canMarkUnsent(r) && (
+                <MarkUnsent row={r} onMarkUnsent={onMarkUnsent} onError={onMarkUnsentError} />
+              )}
+            </div>
+          ) : null}
         </div>
       ),
     },
@@ -222,6 +294,7 @@ export function PatronagePayoutsPanel({
                 "data-status": r.status,
                 "data-amount-cents": r.amount.cents,
                 "data-provider": r.provider,
+                "data-outcome-unknown": isOutcomeUnknown(r) ? "true" : "false",
               })}
               empty={
                 <EmptyState

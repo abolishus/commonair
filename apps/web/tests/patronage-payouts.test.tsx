@@ -17,8 +17,12 @@ import {
   MemberPayoutStatus,
   PatronagePayoutsPanel,
   REFERENCE,
+  STRIPE_TRANSFER,
   canMarkPaid,
+  canMarkUnsent,
   isDeletedMember,
+  isOutcomeUnknown,
+  referenceValid,
   type PatronagePayoutDto,
 } from "../src/components/coop/patronage-payouts.tsx";
 import { SharePayByCard, cardSharesAllowed, openCardCheckout } from "../src/components/coop/shares-card.tsx";
@@ -28,7 +32,14 @@ import enCoop from "../src/i18n/locales/en/m1-coop.json" with { type: "json" };
 import esCoop from "../src/i18n/locales/es/m1-coop.json" with { type: "json" };
 import type { MembershipViewDto } from "../src/lib/coop.ts";
 
-afterEach(cleanup);
+const toasts = vi.hoisted(() => ({ success: vi.fn<(m: string) => void>(), error: vi.fn<(m: string) => void>() }));
+vi.mock("@commonair/ui/toast", () => ({ toast: toasts }));
+
+afterEach(() => {
+  cleanup();
+  toasts.success.mockClear();
+  toasts.error.mockClear();
+});
 
 const wrap = (node: React.ReactNode) =>
   render(
@@ -71,6 +82,7 @@ function payout(over: Partial<PatronagePayoutDto> = {}): PatronagePayoutDto {
     reference: null,
     createdAt: "2026-11-01T00:00:00.000Z",
     paidAt: null,
+    outcomeUnknown: false,
     ...over,
   };
 }
@@ -295,5 +307,124 @@ describe("the member's own payout", () => {
     }
     const none = wrap(<MemberPayoutStatus payout={null} />);
     expect(none.getByTestId("patronage-payout-mine").textContent).toContain(en["coopMoney.mine.none"]);
+  });
+});
+
+describe("a Connect payout whose outcome at Stripe is unknown", () => {
+  const unknown = (over: Partial<PatronagePayoutDto> = {}) =>
+    payout({ provider: "stripe", outcomeUnknown: true, ...over });
+  const confirmButton = () => document.querySelector<HTMLButtonElement>('[data-testid="confirm-dialog-confirm"]');
+  const off = () => confirmButton()?.disabled === true || confirmButton()?.getAttribute("aria-disabled") === "true";
+  const panelWith = (rows: PatronagePayoutDto[], over: Record<string, unknown> = {}) =>
+    wrap(<PatronagePayoutsPanel periodId="p1" rows={rows} onPay={async () => {}} {...over} />);
+
+  it("only a pending Connect row the API flags is unknown, and only it can be marked not sent", () => {
+    const rows = [
+      unknown(),
+      payout({ provider: "stripe" }),
+      unknown({ status: "paid", reference: "tr_1" }),
+      payout({ provider: "manual", outcomeUnknown: true }),
+      unknown({ user: { id: "0195f0c2-6a4b-7c3d-8e9d-0000000000fe", username: "deleted", displayName: "x" } }),
+    ];
+    expect(rows.map(isOutcomeUnknown)).toEqual([true, false, false, false, true]);
+    expect(rows.map(canMarkUnsent)).toEqual([true, false, false, false, true]);
+    // A deleted member's Connect transfer may exist at Stripe: it can still be recorded.
+    expect(rows.map(canMarkPaid)).toEqual([true, false, false, true, true]);
+  });
+
+  it("a Connect row takes a tr_ id only; a manual row a short code", () => {
+    expect(referenceValid({ provider: "stripe" }, " tr_1AbC ")).toBe(true);
+    for (const bad of ["BANK-1", "tr_", "tr_a-b", `tr_${"a".repeat(61)}`, ""])
+      expect(referenceValid({ provider: "stripe" }, bad)).toBe(false);
+    expect(referenceValid({ provider: "manual" }, "BANK-1")).toBe(true);
+    expect(STRIPE_TRANSFER.test(`tr_${"a".repeat(60)}`)).toBe(true);
+  });
+
+  it("says so on the row, and offers both settlements", () => {
+    const row = unknown();
+    const r = panelWith([row, payout({ provider: "stripe" })], {
+      onMarkPaid: vi.fn<() => Promise<void>>(async () => {}),
+      onMarkUnsent: vi.fn<() => Promise<void>>(async () => {}),
+    });
+    const flagged = r.container.querySelectorAll('tr[data-outcome-unknown="true"]');
+    expect([...flagged].map((tr) => tr.getAttribute("data-payout-id"))).toEqual([row.id]);
+    expect(r.getAllByTestId("patronage-payout-outcome-unknown")).toHaveLength(1);
+    expect(r.container.textContent).toContain(en["coopMoney.payouts.outcomeUnknown"]);
+    expect(r.getAllByTestId("patronage-payout-mark-paid").map((b) => b.getAttribute("data-payout-id"))).toEqual([
+      row.id,
+    ]);
+    expect(r.getAllByTestId("patronage-payout-mark-unsent").map((b) => b.getAttribute("data-payout-id"))).toEqual([
+      row.id,
+    ]);
+    expect(a11yViolations(r.container)).toEqual([]);
+  });
+
+  it("without the procedures, nothing is offered (the note still shows)", () => {
+    const r = panelWith([unknown()]);
+    expect(r.queryByTestId("patronage-payout-mark-paid")).toBeNull();
+    expect(r.queryByTestId("patronage-payout-mark-unsent")).toBeNull();
+    expect(r.getByTestId("patronage-payout-outcome-unknown")).toBeTruthy();
+  });
+
+  it("mark paid asks for Stripe's transfer id, then confirms with a toast", async () => {
+    const onMarkPaid = vi.fn<(payoutId: string, reference: string) => Promise<void>>(async () => {});
+    const row = unknown();
+    const r = panelWith([row], { onMarkPaid });
+    fireEvent.click(r.getByTestId("patronage-payout-mark-paid"));
+    const input = await waitFor(() => {
+      const el = document.querySelector("input");
+      if (!el) throw new Error("no input");
+      return el;
+    });
+    expect(document.body.textContent).toContain(en["coopMoney.markPaid.stripe.reference"]);
+    expect(document.body.textContent).toContain(en["coopMoney.markPaid.stripe.description"]);
+    fireEvent.change(input, { target: { value: "BANK-42" } });
+    expect(off()).toBe(true);
+    fireEvent.change(input, { target: { value: "tr_1Seen" } });
+    expect(off()).toBe(false);
+    expect(a11yViolations(document.body)).toEqual([]);
+    fireEvent.click(confirmButton() as HTMLButtonElement);
+    await waitFor(() => expect(onMarkPaid).toHaveBeenCalledWith(row.id, "tr_1Seen"));
+    await waitFor(() => expect(toasts.success).toHaveBeenCalledWith(en["coopMoney.markPaid.done"]));
+  });
+
+  it("not sent confirms first, then settles with a toast; a refusal goes to its handler, no toast", async () => {
+    const onMarkUnsent = vi.fn<(payoutId: string) => Promise<void>>(async () => {});
+    const row = unknown();
+    const r = panelWith([row], { onMarkUnsent });
+    fireEvent.click(r.getByTestId("patronage-payout-mark-unsent"));
+    await waitFor(() => {
+      if (!confirmButton()) throw new Error("no dialog");
+    });
+    expect(document.body.textContent).toContain(en["coopMoney.markUnsent.title"]);
+    expect(onMarkUnsent).not.toHaveBeenCalled();
+    fireEvent.click(confirmButton() as HTMLButtonElement);
+    await waitFor(() => expect(onMarkUnsent).toHaveBeenCalledWith(row.id));
+    await waitFor(() => expect(toasts.success).toHaveBeenCalledWith(en["coopMoney.markUnsent.done"]));
+    cleanup();
+    toasts.success.mockClear();
+
+    const refused = new Error("CONFLICT");
+    const onMarkUnsentError = vi.fn<(err: unknown) => void>();
+    const again = panelWith([row], { onMarkUnsent: async () => Promise.reject(refused), onMarkUnsentError });
+    fireEvent.click(again.getByTestId("patronage-payout-mark-unsent"));
+    await waitFor(() => {
+      if (!confirmButton()) throw new Error("no dialog");
+    });
+    fireEvent.click(confirmButton() as HTMLButtonElement);
+    await waitFor(() => expect(onMarkUnsentError).toHaveBeenCalledWith(refused));
+    expect(toasts.success).not.toHaveBeenCalled();
+  });
+
+  it("the es catalog carries every new key", () => {
+    for (const k of [
+      "coopMoney.payouts.outcomeUnknown",
+      "coopMoney.markPaid.stripe.reference",
+      "coopMoney.markUnsent.button",
+      "coopMoney.markUnsent.done",
+    ] as const) {
+      expect(k in esCoop).toBe(true);
+      expect(enCoop[k]).toBe(en[k]);
+    }
   });
 });

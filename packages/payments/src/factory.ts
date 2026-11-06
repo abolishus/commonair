@@ -71,6 +71,16 @@ function lazyStripeAdapter(env: PaymentsEnvLike): PaymentAdapter {
       if (!a.listRefunds) throw new AdapterUnavailableError("refund listing is not supported");
       return a.listRefunds(pi);
     },
+    transferStatus: async (ref) => {
+      const a = await get();
+      if (!a.transferStatus) throw new AdapterUnavailableError("transfer status is not supported");
+      return a.transferStatus(ref);
+    },
+    listTransfers: async (q) => {
+      const a = await get();
+      if (!a.listTransfers) throw new AdapterUnavailableError("transfer listing is not supported");
+      return a.listTransfers(q);
+    },
   };
 }
 

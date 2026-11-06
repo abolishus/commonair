@@ -39,6 +39,21 @@ export async function clearLapsedBans(ctx: WorkerContext, batch = 200): Promise<
     // "Before" is the last instant the ban was in force.
     const beforeAsOf = new Date(u.banExpires.getTime() - 1);
     cleared += await ctx.db.transaction(async (tx) => {
+      // The owner's channels first, in the order `withSuspensionState` locks them, then the ban
+      // read again in a statement of its own. A sweep that waited on another's lock must see that
+      // clear: `withSuspensionState`'s "before" read keeps the snapshot it started with, so it would
+      // still see the ban and write a second unsuspension.
+      await tx
+        .select({ id: channels.id })
+        .from(channels)
+        .where(eq(channels.ownerId, u.id))
+        .orderBy(asc(channels.id))
+        .for("update");
+      const [still] = await tx
+        .select({ id: users.id })
+        .from(users)
+        .where(and(eq(users.id, u.id), lapsed));
+      if (!still) return 0;
       const n = await withSuspensionState(
         tx,
         suspensionScope({ userId: u.id }),

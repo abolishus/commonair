@@ -46,5 +46,15 @@
   "coopMoney.mine.paid": "Tu pago de {amount} se ha pagado.",
   "coopMoney.mine.failed": "Tu pago de {amount} no se completó. Un tesorero lo pagará de otra forma.",
   "coopMoney.mine.reversed": "Tu pago de {amount} fue devuelto. Un tesorero lo pagará de nuevo.",
-  "coopMoney.mine.none": "Tu pago de este periodo aún no se ha enviado."
+  "coopMoney.mine.none": "Tu pago de este periodo aún no se ha enviado.",
+  "coopMoney.payouts.outcomeUnknown": "Stripe no confirmó esta transferencia. Búscala en el panel de Stripe y registra lo que muestre.",
+  "coopMoney.markPaid.stripe.description": "Registra la transferencia que el panel de Stripe muestra para este pago. Esto anota el pago en el libro contable y no se puede deshacer.",
+  "coopMoney.markPaid.stripe.reference": "ID de la transferencia de Stripe",
+  "coopMoney.markPaid.stripe.referenceHint": "El ID de la transferencia en el panel de Stripe, que empieza por tr_",
+  "coopMoney.markPaid.done": "Pago marcado como pagado.",
+  "coopMoney.markUnsent.button": "No enviado",
+  "coopMoney.markUnsent.title": "¿Registrar que Stripe no envió nada?",
+  "coopMoney.markUnsent.description": "Solo si el panel de Stripe no muestra ninguna transferencia para este pago. El pago falla y se abre un pago por transferencia bancaria por lo que aún se le debe a este miembro.",
+  "coopMoney.markUnsent.confirm": "Registrar como no enviado",
+  "coopMoney.markUnsent.done": "Registrado como no enviado. Le sigue un pago por transferencia bancaria."
 }

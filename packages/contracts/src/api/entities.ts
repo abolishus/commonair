@@ -783,6 +783,11 @@ export const PatronagePayoutView = z.object({
   reference: z.string().nullable(),
   createdAt: Timestamp,
   paidAt: Timestamp.nullable(),
+  /**
+   * Follow-ups (unit money): a pending Connect row the worker could not settle and will never send
+   * again; a treasurer looks it up at Stripe and marks it paid (`tr_` id) or not sent.
+   */
+  outcomeUnknown: z.boolean(),
 });
 export type PatronagePayoutView = z.infer<typeof PatronagePayoutView>;
 export const LedgerLine = z.object({

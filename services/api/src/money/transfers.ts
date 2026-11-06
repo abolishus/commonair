@@ -118,7 +118,7 @@ export async function startPayoutTransfers(deps: Deps): Promise<{ scheduled: num
 
 const money = (cents: number, currency: string) => ({ cents, currency });
 
-type TransferJoin = {
+export type TransferJoin = {
   t: typeof payoutTransfers.$inferSelect;
   periodStart: Date;
   u: { id: string; username: string; name: string };

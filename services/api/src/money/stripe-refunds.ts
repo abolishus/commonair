@@ -229,6 +229,47 @@ export async function refundHistory(
   return { markers, postings };
 }
 
+/**
+ * `refundHistory` of many payments at once: two queries whatever the count (the treasurer's
+ * outcome-unknown summary). Every id asked for is in the map, with empty lists when it has none.
+ */
+export async function refundHistories(
+  tx: Executor,
+  paymentIds: readonly string[],
+): Promise<Map<string, { markers: RefundMarker[]; postings: RefundPosting[] }>> {
+  const out = new Map<string, { markers: RefundMarker[]; postings: RefundPosting[] }>();
+  for (const id of paymentIds) out.set(id, { markers: [], postings: [] });
+  if (out.size === 0) return out;
+  const ids = [...out.keys()];
+  const markers = await tx
+    .select({
+      subjectId: auditLog.subjectId,
+      action: auditLog.action,
+      createdAt: auditLog.createdAt,
+      details: auditLog.details,
+    })
+    .from(auditLog)
+    .where(
+      and(
+        eq(auditLog.subjectType, "payment"),
+        inArray(auditLog.subjectId, ids),
+        inArray(auditLog.action, [...REFUND_MARKER_ACTIONS_READ]),
+      ),
+    );
+  for (const { subjectId, ...m } of markers) out.get(subjectId)?.markers.push(m);
+  const postings = await tx
+    .select({
+      paymentId: disputes.paymentId,
+      providerRef: disputes.providerRef,
+      amountCents: disputes.amountCents,
+      createdAt: disputes.createdAt,
+    })
+    .from(disputes)
+    .where(and(inArray(disputes.paymentId, ids), eq(disputes.kind, "refund")));
+  for (const { paymentId, ...p } of postings) out.get(paymentId)?.postings.push(p);
+  return out;
+}
+
 export async function paymentRefundStates(tx: Executor, paymentId: string, now: Date): Promise<RefundRequestStatus[]> {
   const h = await refundHistory(tx, paymentId);
   return refundRequestStates(h.markers, h.postings, now);

@@ -23,9 +23,18 @@ import {
   runPayoutBatch,
   schedulePayoutTransfers,
 } from "@commonair/ledger";
-import type { ListedRefund } from "@commonair/payments";
-import { decideRecheck, normalizeListed, setOutcomeAdapter, totalOf } from "../src/money/outcome-unknown.ts";
-import { REFUND_RESOLVE_GRACE_MS } from "../src/money/stripe-refunds.ts";
+import { type ListedRefund, type TransferStatus, loadStripe } from "@commonair/payments";
+import {
+  type OutcomeAdapter,
+  decideRecheck,
+  normalizeListed,
+  outcomeUnknownSummary,
+  setOutcomeAdapter,
+  totalOf,
+  transferMismatches,
+  transferOfPayout,
+} from "../src/money/outcome-unknown.ts";
+import { REFUND_RESOLVE_GRACE_MS, paymentRefundStates } from "../src/money/stripe-refunds.ts";
 import { signUpAndSignIn, startApi, type TestApi } from "./harness.ts";
 
 type Account = Awaited<ReturnType<typeof signUpAndSignIn>>;
@@ -109,6 +118,44 @@ describe("pure rules", () => {
   });
 });
 
+describe("transfer checks (pure)", () => {
+  const row = { id: "row-1", payoutId: "payout-1", amountCents: 4321, currency: "usd", destinationRef: "acct_1A" };
+  const at = (over: Partial<TransferStatus> = {}): TransferStatus => ({
+    providerRef: "tr_1",
+    amountCents: 4321,
+    currency: "usd",
+    destination: "acct_1A",
+    reversedCents: 0,
+    metadata: { payout_id: "payout-1", transfer_id: "row-1" },
+    ...over,
+  });
+  test("this payout's transfer matches; each field that differs is named", () => {
+    expect(transferMismatches(row, at())).toEqual([]);
+    // Stripe's currency case does not matter; a reversal since does not make it another transfer.
+    expect(transferMismatches(row, at({ currency: "USD", reversedCents: 4321 }))).toEqual([]);
+    expect(transferMismatches(row, at({ amountCents: 4320 }))).toEqual(["amount"]);
+    expect(transferMismatches(row, at({ currency: "eur" }))).toEqual(["currency"]);
+    expect(transferMismatches(row, at({ destination: "acct_2B" }))).toEqual(["destination"]);
+    expect(transferMismatches(row, at({ metadata: {} }))).toEqual(["payout_id"]);
+    expect(
+      transferMismatches(
+        row,
+        at({ amountCents: 1, currency: "eur", destination: "acct_x", metadata: { payout_id: "p2" } }),
+      ),
+    ).toEqual(["amount", "currency", "destination", "payout_id"]);
+  });
+  test("a listed transfer is this payout's by either of its metadata ids", () => {
+    expect(transferOfPayout(row, [])).toBeUndefined();
+    expect(transferOfPayout(row, [at({ providerRef: "tr_o", metadata: { payout_id: "other" } })])).toBeUndefined();
+    expect(transferOfPayout(row, [at({ providerRef: "tr_p", metadata: { payout_id: "payout-1" } })])?.providerRef).toBe(
+      "tr_p",
+    );
+    expect(transferOfPayout(row, [at({ providerRef: "tr_t", metadata: { transfer_id: "row-1" } })])?.providerRef).toBe(
+      "tr_t",
+    );
+  });
+});
+
 describe("outcome unknown", () => {
   let api: TestApi;
   let treasurer: Account;
@@ -119,6 +166,23 @@ describe("outcome unknown", () => {
   const app = () => api.db.app.db;
   const listedFor = new Map<string, ListedRefund[]>();
   let listFails = false;
+  // Mutable: a test gives it transfer lookups and takes them away again (`withLookups`).
+  const fake: OutcomeAdapter = {
+    provider: "stripe",
+    async listRefunds(pi) {
+      if (listFails) throw new Error("timeout");
+      return listedFor.get(pi) ?? [];
+    },
+  };
+  async function withLookups<T>(lookups: Omit<OutcomeAdapter, "provider" | "listRefunds">, run: () => Promise<T>) {
+    Object.assign(fake, lookups);
+    try {
+      return await run();
+    } finally {
+      delete fake.transferStatus;
+      delete fake.listTransfers;
+    }
+  }
 
   const summary = (as: Account) => as.client.call<Summary>("GET", "/api/treasurer/outcome-unknown");
   const recheck = (as: Account, requestId: string) =>
@@ -173,7 +237,9 @@ describe("outcome unknown", () => {
   }
 
   /** A creator's scheduled Stripe payout whose transfer the worker left `outcome_unknown`. */
-  async function unknownTransfer(payee: Account): Promise<{ transferId: string; payoutId: string; cents: number }> {
+  async function unknownTransfer(
+    payee: Account,
+  ): Promise<{ transferId: string; payoutId: string; cents: number; destination: string; group: string }> {
     years += 1;
     const cur = "usd";
     await app()
@@ -219,7 +285,13 @@ describe("outcome unknown", () => {
       code: PAYOUT_TRANSFER_CODES.outcomeUnknown,
       at: new Date(),
     });
-    return { transferId: opened.transfer.id, payoutId: p.id, cents: p.amountCents };
+    return {
+      transferId: opened.transfer.id,
+      payoutId: p.id,
+      cents: p.amountCents,
+      destination: opened.transfer.destinationRef,
+      group: periodStart.toISOString(),
+    };
   }
 
   beforeAll(async () => {
@@ -227,13 +299,7 @@ describe("outcome unknown", () => {
     [treasurer, other, viewer] = await Promise.all([signUpAndSignIn(api), signUpAndSignIn(api), signUpAndSignIn(api)]);
     for (const a of [treasurer, other])
       await owner().update(schema.users).set({ role: "treasurer" }).where(eq(schema.users.id, a.userId));
-    setOutcomeAdapter(api.deps, {
-      provider: "stripe",
-      async listRefunds(pi) {
-        if (listFails) throw new Error("timeout");
-        return listedFor.get(pi) ?? [];
-      },
-    });
+    setOutcomeAdapter(api.deps, fake);
   }, 180_000);
   afterAll(async () => {
     await api?.stop();
@@ -356,7 +422,13 @@ describe("outcome unknown", () => {
         .from(schema.auditLog)
         .where(and(eq(schema.auditLog.action, "payout_transfer.settle"), eq(schema.auditLog.subjectId, tr.transferId)));
       expect(a).toMatchObject({ actorId: treasurer.userId, reason: "seen in Stripe" });
-      expect(a?.details).toEqual({ transferId: tr.transferId, payoutId: tr.payoutId, outcome: "sent" });
+      // This adapter cannot look transfers up: the treasurer's finding is recorded as theirs.
+      expect(a?.details).toEqual({
+        transferId: tr.transferId,
+        payoutId: tr.payoutId,
+        outcome: "sent",
+        checkedAtProvider: false,
+      });
       // Settled: a second attempt is refused.
       expect((await settle(other, tr.transferId, { outcome: "not_sent" })).status).toBe(409);
     });
@@ -371,5 +443,307 @@ describe("outcome unknown", () => {
       expect(p?.status).not.toBe("paid");
       expect(p?.status).not.toBe("scheduled");
     });
+
+    const refusedOf = (transferId: string) =>
+      owner()
+        .select()
+        .from(schema.auditLog)
+        .where(
+          and(eq(schema.auditLog.action, "payout_transfer.settle_refused"), eq(schema.auditLog.subjectId, transferId)),
+        );
+    const stateOf = async (transferId: string) =>
+      (await owner().select().from(schema.payoutTransfers).where(eq(schema.payoutTransfers.id, transferId)))[0];
+
+    test("sent is checked at Stripe: this payout's transfer is recorded, checked", async () => {
+      const payee = await signUpAndSignIn(api);
+      const tr = await unknownTransfer(payee);
+      const asked: string[] = [];
+      const r = await withLookups(
+        {
+          async transferStatus(ref) {
+            asked.push(ref);
+            return {
+              providerRef: ref,
+              amountCents: tr.cents,
+              currency: "usd",
+              destination: tr.destination,
+              reversedCents: 0,
+              metadata: { payout_id: tr.payoutId, transfer_id: tr.transferId },
+            };
+          },
+        },
+        () => settle(treasurer, tr.transferId, { outcome: "sent", reference: "tr_1Checked" }),
+      );
+      expect(r.status).toBe(200);
+      expect(r.body).toMatchObject({ status: "created", providerRef: "tr_1Checked" });
+      expect(asked).toEqual(["tr_1Checked"]);
+      const [a] = await owner()
+        .select()
+        .from(schema.auditLog)
+        .where(and(eq(schema.auditLog.action, "payout_transfer.settle"), eq(schema.auditLog.subjectId, tr.transferId)));
+      expect(a?.details).toMatchObject({ outcome: "sent", checkedAtProvider: true });
+    });
+
+    test("sent is refused (CONFLICT, audited) for another payout's transfer or one Stripe does not have", async () => {
+      const payee = await signUpAndSignIn(api);
+      const tr = await unknownTransfer(payee);
+      const other: TransferStatus = {
+        providerRef: "tr_1Other",
+        amountCents: tr.cents + 1,
+        currency: "usd",
+        destination: "acct_1SomeoneElse",
+        reversedCents: 0,
+        metadata: { payout_id: uuidv7() },
+      };
+      const r = await withLookups({ transferStatus: async () => other }, () =>
+        settle(treasurer, tr.transferId, { outcome: "sent", reference: "tr_1Other", note: "dashboard" }),
+      );
+      expect(r.status).toBe(409);
+      const none = await withLookups({ transferStatus: async () => null }, () =>
+        settle(treasurer, tr.transferId, { outcome: "sent", reference: "tr_1Missing" }),
+      );
+      expect(none.status).toBe(409);
+      const refused = await refusedOf(tr.transferId);
+      expect(
+        refused.map((x) => x.details).toSorted((x, y) => JSON.stringify(x).localeCompare(JSON.stringify(y))),
+      ).toEqual(
+        [
+          {
+            transferId: tr.transferId,
+            payoutId: tr.payoutId,
+            outcome: "sent",
+            mismatch: ["amount", "destination", "payout_id"],
+            providerRef: "tr_1Other",
+          },
+          {
+            transferId: tr.transferId,
+            payoutId: tr.payoutId,
+            outcome: "sent",
+            mismatch: ["not_found"],
+            providerRef: "tr_1Missing",
+          },
+        ].toSorted((x, y) => JSON.stringify(x).localeCompare(JSON.stringify(y))),
+      );
+      expect(refused.every((x) => x.actorId === treasurer.userId)).toBe(true);
+      expect(
+        refused.find((x) => x.details && (x.details as { providerRef?: string }).providerRef === "tr_1Other")?.reason,
+      ).toBe("dashboard");
+      // Nothing was recorded: still pending, still unknown.
+      expect(await stateOf(tr.transferId)).toMatchObject({ status: "pending", failureCode: "outcome_unknown" });
+    });
+
+    test("not sent is refused while Stripe lists a transfer of this payout in its run", async () => {
+      const payee = await signUpAndSignIn(api);
+      const tr = await unknownTransfer(payee);
+      const queries: { destination: string; group: string }[] = [];
+      const r = await withLookups(
+        {
+          async listTransfers(q): Promise<TransferStatus[]> {
+            queries.push(q);
+            return [
+              {
+                providerRef: "tr_1Elsewhere",
+                amountCents: 5,
+                currency: "usd",
+                destination: tr.destination,
+                reversedCents: 0,
+                metadata: { payout_id: uuidv7() },
+              },
+              {
+                providerRef: "tr_1Exists",
+                amountCents: tr.cents,
+                currency: "usd",
+                destination: tr.destination,
+                reversedCents: 0,
+                metadata: { payout_id: tr.payoutId, transfer_id: tr.transferId },
+              },
+            ];
+          },
+        },
+        () => settle(treasurer, tr.transferId, { outcome: "not_sent" }),
+      );
+      expect(r.status).toBe(409);
+      expect(queries).toEqual([{ destination: tr.destination, group: tr.group }]);
+      const [refused] = await refusedOf(tr.transferId);
+      expect(refused?.details).toEqual({
+        transferId: tr.transferId,
+        payoutId: tr.payoutId,
+        outcome: "not_sent",
+        mismatch: ["exists"],
+        providerRef: "tr_1Exists",
+      });
+      expect(await stateOf(tr.transferId)).toMatchObject({ status: "pending" });
+      // Stripe lists only other payouts' transfers: settled as not sent, checked.
+      const ok = await withLookups({ listTransfers: async () => [] }, () =>
+        settle(treasurer, tr.transferId, { outcome: "not_sent" }),
+      );
+      expect(ok.status).toBe(200);
+      expect(ok.body).toMatchObject({ status: "failed", failureCode: "settled_unsent" });
+    });
+
+    test("Stripe not answering refuses with PRECONDITION_FAILED and writes nothing", async () => {
+      const payee = await signUpAndSignIn(api);
+      const tr = await unknownTransfer(payee);
+      const down = () => Promise.reject(new Error("timeout"));
+      const sent = await withLookups({ transferStatus: down }, () =>
+        settle(treasurer, tr.transferId, { outcome: "sent", reference: "tr_1Down" }),
+      );
+      const unsent = await withLookups({ listTransfers: down }, () =>
+        settle(treasurer, tr.transferId, { outcome: "not_sent" }),
+      );
+      for (const r of [sent, unsent]) {
+        expect(r.status).toBe(412);
+        expect(r.body.data).toEqual({ requirement: "payment_provider" });
+      }
+      expect(await refusedOf(tr.transferId)).toEqual([]);
+      expect(await stateOf(tr.transferId)).toMatchObject({ status: "pending", failureCode: "outcome_unknown" });
+    });
+
+    test("an instance whose adapter is not the transfer's provider records the treasurer's word", async () => {
+      const payee = await signUpAndSignIn(api);
+      const tr = await unknownTransfer(payee);
+      setOutcomeAdapter(api.deps, { provider: "manual" });
+      try {
+        const r = await settle(treasurer, tr.transferId, { outcome: "not_sent" });
+        expect(r.status).toBe(200);
+      } finally {
+        setOutcomeAdapter(api.deps, fake);
+      }
+      const [a] = await owner()
+        .select()
+        .from(schema.auditLog)
+        .where(and(eq(schema.auditLog.action, "payout_transfer.settle"), eq(schema.auditLog.subjectId, tr.transferId)));
+      expect(a?.details).toMatchObject({ outcome: "not_sent", checkedAtProvider: false });
+    });
+
+    test("against stripe-mock: its fixture transfer is not this payout's (refused); it lists none of ours", async () => {
+      const base = process.env.STRIPE_MOCK_URL ?? "http://127.0.0.1:12111";
+      const reachable = await fetch(`${base}/v1/customers`, {
+        headers: { authorization: "Bearer sk_test_123" },
+        signal: AbortSignal.timeout(1_000),
+      }).then(
+        (res) => res.ok,
+        () => false,
+      );
+      if (!reachable && process.env.CI) throw new Error(`stripe-mock is not reachable at ${base} (CI is set)`);
+      if (!reachable) return;
+      const payee = await signUpAndSignIn(api);
+      const tr = await unknownTransfer(payee);
+      const { stripeAdapter } = await loadStripe();
+      setOutcomeAdapter(api.deps, stripeAdapter({ client: { secretKey: "sk_test_123", apiBase: base, retries: 0 } }));
+      try {
+        // stripe-mock answers every id with its fixture: another account, amount and no metadata.
+        const sent = await settle(treasurer, tr.transferId, { outcome: "sent", reference: "tr_1MockFixture" });
+        expect(sent.status).toBe(409);
+        const [refused] = await refusedOf(tr.transferId);
+        expect(refused?.details).toMatchObject({ mismatch: expect.arrayContaining(["payout_id"]) });
+        const unsent = await settle(treasurer, tr.transferId, { outcome: "not_sent" });
+        expect(unsent.status).toBe(200);
+        expect(unsent.body).toMatchObject({ status: "failed", failureCode: "settled_unsent" });
+      } finally {
+        setOutcomeAdapter(api.deps, fake);
+      }
+    });
+  });
+
+  describe("refund request list and resolve edges", () => {
+    type Page = { items: { id: string; state: string }[]; nextCursor: string | null };
+    const listOf = (state: string) =>
+      treasurer.client.call<Page>("GET", `/api/treasurer/refund-requests?state=${state}&limit=100`);
+    const resolve = (requestId: string) =>
+      treasurer.client.call<Err>("POST", `/api/treasurer/refund-requests/${requestId}/resolve`, { outcome: "failed" });
+
+    test("an unknown request past the 24 h TTL is listed as unknown, not as outstanding", async () => {
+      const old = await unknownRequest(612, 25 * 60 * 60 * 1000);
+      const fresh = await unknownRequest(613);
+      const ids = async (state: string) => (await listOf(state)).body.items.map((i) => i.id);
+      expect(await ids("unknown")).toEqual(expect.arrayContaining([old.requestId, fresh.requestId]));
+      const outstanding = await ids("outstanding");
+      expect(outstanding).toContain(fresh.requestId);
+      expect(outstanding).not.toContain(old.requestId);
+    });
+
+    test("resolve refuses an unknown id, a settled request and one the provider answered", async () => {
+      expect((await resolve(uuidv7())).status).toBe(404);
+      const settled = await unknownRequest(614);
+      expect((await resolve(settled.requestId)).status).toBe(200);
+      expect((await resolve(settled.requestId)).status).toBe(409);
+      // Stripe answered (a submitted marker with its refund id): the refund's event settles it.
+      const answered = await unknownRequest(615);
+      await owner()
+        .insert(schema.auditLog)
+        .values({
+          actorType: "system",
+          action: "payment.refund_submitted",
+          subjectType: "payment",
+          subjectId: answered.paymentId,
+          reason: "",
+          details: { requestId: answered.requestId, refundRef: "re_answered" },
+        });
+      expect((await resolve(answered.requestId)).status).toBe(409);
+    });
+
+    test("recheck of a payment another provider took is unavailable and changes nothing", async () => {
+      const u = await unknownRequest(616);
+      await owner()
+        .update(schema.payments)
+        .set({ provider: "manual", providerRef: "CA-RECHECK1" })
+        .where(eq(schema.payments.id, u.paymentId));
+      const r = await recheck(treasurer, u.requestId);
+      expect(r.body).toMatchObject({ result: "unavailable", request: { state: "unknown" } });
+    });
+  });
+
+  test("the summary's batched refund states equal each payment's own (the N+1 it replaced)", async () => {
+    // A spread of states: unknown, released by a failed marker, resolved by hand, settled by a
+    // posting of its amount, a payment with one unknown and one released request, and an unknown
+    // marker without a request id (never a request).
+    const a = await unknownRequest(111);
+    const b = await unknownRequest(222);
+    const c = await unknownRequest(333);
+    const d = await unknownRequest(444);
+    const e = await unknownRequest(555);
+    const marker = (paymentId: string, action: string, details: Record<string, unknown>) =>
+      owner().insert(schema.auditLog).values({
+        actorType: "admin",
+        actorId: treasurer.userId,
+        action,
+        subjectType: "payment",
+        subjectId: paymentId,
+        reason: "",
+        details,
+      });
+    await marker(b.paymentId, "payment.refund_request_failed", { requestId: b.requestId, reason: "rechecked_none" });
+    await marker(c.paymentId, "payment.refund_resolved", { requestId: c.requestId });
+    await owner().insert(schema.disputes).values({
+      paymentId: d.paymentId,
+      kind: "refund",
+      providerRef: "re_posted_d",
+      amountCents: 444,
+      status: "closed",
+    });
+    // e: a second request on the same payment, released; the first stays unknown.
+    const second = uuidv7();
+    await marker(e.paymentId, "payment.refund_requested", { requestId: second, amountCents: 5 });
+    await marker(e.paymentId, "payment.refund_outcome_unknown", { requestId: second, idempotencyKey: "k" });
+    await marker(e.paymentId, "payment.refund_request_failed", { requestId: second });
+    await marker(a.paymentId, "payment.refund_outcome_unknown", { idempotencyKey: "no-request" });
+    const now = new Date();
+    const s = await outcomeUnknownSummary(owner(), now);
+    // The old path: every payment ever marked, one paymentRefundStates each.
+    const flagged = await owner()
+      .selectDistinct({ id: schema.auditLog.subjectId })
+      .from(schema.auditLog)
+      .where(eq(schema.auditLog.action, "payment.refund_outcome_unknown"));
+    const rows: { cents: number; currency: string }[] = [];
+    for (const f of flagged)
+      for (const st of await paymentRefundStates(owner(), f.id, now))
+        if (st.state === "unknown") rows.push({ cents: st.amountCents ?? 0, currency: "usd" });
+    expect(s.refunds).toEqual(totalOf(rows));
+    const unknownIds = new Set<string>();
+    for (const x of [a, b, c, d, e])
+      for (const st of await paymentRefundStates(owner(), x.paymentId, now))
+        if (st.state === "unknown") unknownIds.add(x.paymentId);
+    expect([...unknownIds].toSorted()).toEqual([a.paymentId, e.paymentId].toSorted());
   });
 });

@@ -203,3 +203,32 @@ describe("recoverLostUnsuspensions (decision (g) backstop)", () => {
     expect(await lapses(u.user.id)).toHaveLength(1);
   });
 });
+
+test("two sweeps at once clear a lapsed ban once: one unsuspension, one audit row", async () => {
+  const u = await banned(new Date(now.getTime() - 60_000));
+  const [a, b] = await Promise.all([clearLapsedBans(ctx()), clearLapsedBans(ctx())]);
+  expect(a.cleared + b.cleared).toBe(1);
+  expect(await suspensions(t.db, u.channel.id)).toEqual([false]);
+  expect(await lapses(u.user.id)).toEqual(["sweep"]);
+});
+
+test("a lapsed ban of an owner without a channel is cleared and audited without one", async () => {
+  const u = await banned(new Date(now.getTime() - 60_000));
+  await t.db.delete(schema.channels).where(eq(schema.channels.id, u.channel.id));
+  expect((await clearLapsedBans(ctx())).cleared).toBeGreaterThanOrEqual(1);
+  const [row] = await t.db
+    .select({ channelId: schema.auditLog.channelId, details: schema.auditLog.details })
+    .from(schema.auditLog)
+    .where(and(eq(schema.auditLog.action, "user.ban_lapsed"), eq(schema.auditLog.subjectId, u.user.id)));
+  expect(row).toEqual({ channelId: null, details: { userId: u.user.id, via: "sweep" } });
+});
+
+test("the batch size bounds one pass; the next pass takes the rest, oldest expiry first", async () => {
+  const older = await banned(new Date(now.getTime() - 3_600_000 * 24 * 365 * 5));
+  const newer = await banned(new Date(now.getTime() - 1_000));
+  expect(await clearLapsedBans(ctx(), 1)).toEqual({ cleared: 1 });
+  expect(await lapses(older.user.id)).toEqual(["sweep"]);
+  expect(await lapses(newer.user.id)).toEqual([]);
+  expect(await clearLapsedBans(ctx(), 1)).toEqual({ cleared: 1 });
+  expect(await lapses(newer.user.id)).toEqual(["sweep"]);
+});

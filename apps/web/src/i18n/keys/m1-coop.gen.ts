@@ -51,4 +51,14 @@ export type Key =
   | "coopMoney.mine.paid"
   | "coopMoney.mine.failed"
   | "coopMoney.mine.reversed"
-  | "coopMoney.mine.none";
+  | "coopMoney.mine.none"
+  | "coopMoney.payouts.outcomeUnknown"
+  | "coopMoney.markPaid.stripe.description"
+  | "coopMoney.markPaid.stripe.reference"
+  | "coopMoney.markPaid.stripe.referenceHint"
+  | "coopMoney.markPaid.done"
+  | "coopMoney.markUnsent.button"
+  | "coopMoney.markUnsent.title"
+  | "coopMoney.markUnsent.description"
+  | "coopMoney.markUnsent.confirm"
+  | "coopMoney.markUnsent.done";

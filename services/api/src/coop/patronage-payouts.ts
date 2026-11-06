@@ -395,7 +395,27 @@ async function peopleOf(db: Executor, ids: readonly string[]): Promise<Map<strin
   );
 }
 
-export function payoutView(r: PayoutRow, people: ReadonlyMap<string, Person>) {
+/**
+ * The rows among `rows` whose outcome at Stripe is unknown: pending Connect rows carrying the
+ * worker's marker (one query, whatever the count).
+ */
+export async function outcomeUnknownPayouts(db: Executor, rows: readonly PayoutRow[]): Promise<Set<string>> {
+  const ids = rows.filter((r) => r.status === "pending" && r.provider === "stripe").map((r) => r.id);
+  if (ids.length === 0) return new Set();
+  const marked = await db
+    .select({ id: auditLog.subjectId })
+    .from(auditLog)
+    .where(
+      and(
+        eq(auditLog.subjectType, "patronage_payout"),
+        inArray(auditLog.subjectId, ids),
+        eq(auditLog.action, PAYOUT_OUTCOME_UNKNOWN),
+      ),
+    );
+  return new Set(marked.map((m) => m.id));
+}
+
+export function payoutView(r: PayoutRow, people: ReadonlyMap<string, Person>, unknown: ReadonlySet<string>) {
   return {
     id: r.id,
     periodId: r.periodId,
@@ -406,6 +426,8 @@ export function payoutView(r: PayoutRow, people: ReadonlyMap<string, Person>) {
     reference: r.providerRef,
     createdAt: iso(r.createdAt),
     paidAt: isoOrNull(r.paidAt),
+    // Only a row still pending: once settled, what Stripe did is known.
+    outcomeUnknown: r.status === "pending" && r.provider === "stripe" && unknown.has(r.id),
   };
 }
 export type PatronagePayoutDto = ReturnType<typeof payoutView>;
@@ -425,7 +447,7 @@ export async function memberPatronagePayout(
     .where(and(eq(patronagePayouts.periodId, periodId), eq(patronagePayouts.userId, userId)))
     .orderBy(desc(patronagePayouts.createdAt), desc(patronagePayouts.id))
     .limit(1);
-  return row ? payoutView(row, await peopleOf(db, [userId])) : null;
+  return row ? payoutView(row, await peopleOf(db, [userId]), await outcomeUnknownPayouts(db, [row])) : null;
 }
 
 // ── Manual mark-paid ─────────────────────────────────────────────────────────────────────────
@@ -496,7 +518,8 @@ export async function markPatronagePayoutPaid(
       return done;
     }),
   );
-  return payoutView(paid, await peopleOf(deps.db, [paid.userId]));
+  // Paid: its outcome is known now.
+  return payoutView(paid, await peopleOf(deps.db, [paid.userId]), new Set());
 }
 
 /**
@@ -560,7 +583,12 @@ export async function markPatronagePayoutUnsent(
     }),
   );
   const people = await peopleOf(deps.db, [r.failed.userId]);
-  return { failed: payoutView(r.failed, people), followUp: r.followUp ? payoutView(r.followUp, people) : null };
+  // The failed row is settled and the follow-up is manual: neither is unknown.
+  const none = new Set<string>();
+  return {
+    failed: payoutView(r.failed, people, none),
+    followUp: r.followUp ? payoutView(r.followUp, people, none) : null,
+  };
 }
 
 // ── Connect transfer events ──────────────────────────────────────────────────────────────────
@@ -755,11 +783,14 @@ export const patronagePayoutHandlers = {
       .from(patronagePayouts)
       .where(eq(patronagePayouts.periodId, input.periodId))
       .orderBy(asc(patronagePayouts.createdAt), asc(patronagePayouts.id));
-    const people = await peopleOf(
-      db,
-      rows.map((r) => r.userId),
-    );
-    return rows.map((r) => payoutView(r, people));
+    const [people, unknown] = await Promise.all([
+      peopleOf(
+        db,
+        rows.map((r) => r.userId),
+      ),
+      outcomeUnknownPayouts(db, rows),
+    ]);
+    return rows.map((r) => payoutView(r, people, unknown));
   }),
 
   pay: os.coop.patronage.pay.handler(async ({ context, input }) => {

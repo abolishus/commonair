@@ -276,6 +276,47 @@ describe("the patronage-payout job", () => {
     await expectLedgerBalanced();
   });
 
+  test("a request the adapter refused to build never reached Stripe: failed, with a manual follow-up", async () => {
+    const m = await member();
+    const r = await approvedWithRow(m.id, 410);
+    const { adapter } = fakeAdapter(() => {
+      throw new RangeError("the destination is not a Stripe connected account");
+    });
+    const out = await runPatronagePayout(ctx(), { adapter }, r, LAST);
+    expect(out).toMatchObject({ outcome: "failed", payoutId: r.payoutId, code: "invalid_request" });
+    expect((out as { followUpId: string | null }).followUpId).not.toBeNull();
+    // Not an unknown outcome, even on the last attempt: nothing left the platform.
+    expect(await markers(r.payoutId)).not.toContain("patronage.payout_outcome_unknown");
+    expect(await owed(m.id)).toBe(410);
+    await expectLedgerBalanced();
+  });
+
+  test("the transfer webhook recorded the row first: the worker posts nothing more", async () => {
+    const m = await member();
+    const r = await approvedWithRow(m.id, 520);
+    const { adapter } = fakeAdapter(async (req) => {
+      // The webhook's settle lands while the transfer call is still answering.
+      await env.t.app.db
+        .update(schema.patronagePayouts)
+        .set({ status: "paid", providerRef: "tr_1ByWebhook", paidAt: new Date() })
+        .where(eq(schema.patronagePayouts.id, req.payoutId));
+      return ok(req);
+    });
+    expect(await runPatronagePayout(ctx(), { adapter }, r, NOT_LAST)).toEqual({
+      outcome: "paid",
+      payoutId: r.payoutId,
+    });
+    const [row] = await rowsOf(r.periodId);
+    expect(row).toMatchObject({ status: "paid", providerRef: "tr_1ByWebhook" });
+    // The worker wrote no posting or paid marker of its own.
+    const posted = await db()
+      .select()
+      .from(schema.ledgerTransactions)
+      .where(eq(schema.ledgerTransactions.idempotencyKey, `patronage-payout:${r.payoutId}`));
+    expect(posted).toEqual([]);
+    expect(await markers(r.payoutId)).not.toContain("patronage.payout_paid");
+  });
+
   test("a timeout keeps the row pending; the retry asks again under the same key", async () => {
     const m = await member();
     const r = await approvedWithRow(m.id, 600);

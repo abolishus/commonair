@@ -148,8 +148,23 @@ describe("entities", () => {
         reference: "BANK-1",
         createdAt: at,
         paidAt: at,
+        outcomeUnknown: false,
       }).success,
     ).toBe(true);
+    // Additive but required: a server that leaves it out is caught by its own output validation.
+    expect(
+      PatronagePayoutView.safeParse({
+        id: id(1),
+        periodId: id(2),
+        user,
+        amount: money,
+        provider: "stripe",
+        status: "pending",
+        reference: null,
+        createdAt: at,
+        paidAt: null,
+      }).success,
+    ).toBe(false);
   });
 
   test("staff-action statement facts cite no case", () => {

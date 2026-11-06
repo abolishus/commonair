@@ -25,7 +25,7 @@ import { StripeRequestError } from "./errors.ts";
 import { manualReference } from "./reference.ts";
 import type { FormObject } from "./stripe-form.ts";
 import { type StripeClient, type StripeClientOptions, stripeClient } from "./stripe-client.ts";
-import { stripeTransfer } from "./stripe-transfers.ts";
+import { stripeListTransfers, stripeTransfer, stripeTransferStatus } from "./stripe-transfers.ts";
 
 export interface StripeAdapterOptions {
   client: StripeClient | StripeClientOptions;
@@ -139,6 +139,12 @@ export function stripeAdapter(opts: StripeAdapterOptions): PaymentAdapter {
     },
     transfer(r: TransferRequest) {
       return stripeTransfer(client, r);
+    },
+    transferStatus(ref: string) {
+      return stripeTransferStatus(client, ref);
+    },
+    listTransfers(q) {
+      return stripeListTransfers(client, q);
     },
     async refundStatus(ref) {
       // `pyr_` refunds come from some payment methods; any other id is not a refund of ours.

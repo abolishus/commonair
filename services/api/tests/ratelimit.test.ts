@@ -62,3 +62,12 @@ test("default buckets match the documented limits", () => {
     readyz: { max: 60, windowMs: 60_000 },
   });
 });
+
+test("clear forgets every key: a limited key passes again", async () => {
+  const s = memoryRateLimitStore();
+  const rule = { max: 1, windowMs: 60_000 };
+  expect((await s.hit("k", rule, 1_000, "a")).allowed).toBe(true);
+  expect((await s.hit("k", rule, 1_001, "b")).allowed).toBe(false);
+  s.clear();
+  expect(await s.hit("k", rule, 1_002, "c")).toEqual({ allowed: true, count: 1, retryAfterSeconds: 0 });
+});

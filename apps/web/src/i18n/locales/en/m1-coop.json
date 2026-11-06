@@ -46,5 +46,15 @@
   "coopMoney.mine.paid": "Your payout of {amount} was paid.",
   "coopMoney.mine.failed": "Your payout of {amount} did not go through. A treasurer will pay it another way.",
   "coopMoney.mine.reversed": "Your payout of {amount} came back. A treasurer will pay it again.",
-  "coopMoney.mine.none": "Your payout for this period has not been sent yet."
+  "coopMoney.mine.none": "Your payout for this period has not been sent yet.",
+  "coopMoney.payouts.outcomeUnknown": "Stripe did not confirm this transfer. Look it up in Stripe's dashboard, then record what it shows.",
+  "coopMoney.markPaid.stripe.description": "Record the transfer Stripe's dashboard shows for this payout. This posts the payout to the ledger and cannot be undone.",
+  "coopMoney.markPaid.stripe.reference": "Stripe transfer ID",
+  "coopMoney.markPaid.stripe.referenceHint": "The transfer's ID from Stripe's dashboard, starting with tr_",
+  "coopMoney.markPaid.done": "Payout marked paid.",
+  "coopMoney.markUnsent.button": "Not sent",
+  "coopMoney.markUnsent.title": "Record that Stripe sent nothing?",
+  "coopMoney.markUnsent.description": "Only when Stripe's dashboard shows no transfer for this payout. The payout fails and a bank-transfer payout opens for what this member is still owed.",
+  "coopMoney.markUnsent.confirm": "Record not sent",
+  "coopMoney.markUnsent.done": "Recorded as not sent. A bank-transfer payout follows."
 }

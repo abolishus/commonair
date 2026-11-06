@@ -18,10 +18,14 @@
  * - `money.treasurer.settleTransfer`: a creator payout transfer left `outcome_unknown` is settled
  *   from what Stripe's dashboard shows. `sent` takes the `tr_` id and records the transfer created
  *   (the payout is paid, `payoutSent`); `not_sent` fails it and cancels the payout back to the
- *   payable, as a definite refusal would. A transfer that turns up at Stripe later is recorded as
- *   orphaned by the webhook, never paid twice. The adapter cannot look a transfer up by its id yet
- *   (a contract request on `@commonair/payments`), so this records the treasurer's finding. Nobody
- *   settles their own payout. Audited (`payout_transfer.settle`), ids only.
+ *   payable, as a definite refusal would. Both are checked at Stripe first (`checkAtProvider`):
+ *   `sent` only for a transfer of this payout's amount, currency, account and `payout_id`;
+ *   `not_sent` only while Stripe lists no transfer of this payout in its run. A disagreement is
+ *   refused (CONFLICT) and audited (`payout_transfer.settle_refused`). On an instance that cannot
+ *   ask the transfer's provider the treasurer's finding is recorded as theirs
+ *   (`checkedAtProvider: false`). A transfer that turns up at Stripe later is recorded as orphaned
+ *   by the webhook, never paid twice. Nobody settles their own payout. Audited
+ *   (`payout_transfer.settle`), ids only.
  */
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { RefundRequestView } from "@commonair/contracts/dto";
@@ -32,7 +36,7 @@ import {
   recordPayoutTransferCreated,
   recordPayoutTransferFailed,
 } from "@commonair/ledger";
-import { type ListedRefund, type PaymentAdapter, createAdapter } from "@commonair/payments";
+import { type ListedRefund, type PaymentAdapter, type TransferStatus, createAdapter } from "@commonair/payments";
 import { STRIPE_TRANSFER_REFERENCE } from "../coop/patronage-payouts.ts";
 import type { Deps } from "../deps.ts";
 import { audit } from "../events/audit.ts";
@@ -42,13 +46,16 @@ import { requestMarker, viewsFor } from "./refund-requests.ts";
 import {
   REFUND_OUTCOME_UNKNOWN,
   REFUND_REQUEST_FAILED,
+  REFUND_REQUEST_RESOLVED,
   REFUND_RESOLVE_GRACE_MS,
   type RefundMarker,
   type RefundPosting,
   paymentRefundStates,
+  refundHistories,
   refundHistory,
+  refundRequestStates,
 } from "./stripe-refunds.ts";
-import { transferRow, transferView } from "./transfers.ts";
+import { type TransferJoin, transferRow, transferView } from "./transfers.ts";
 
 const { auditLog, payments, payoutTransfers, patronagePayouts } = schema;
 
@@ -56,20 +63,24 @@ const ACTOR = "admin" as const;
 /** `payout_transfers.failure_code` of a transfer a treasurer settled as never sent. */
 export const SETTLED_UNSENT = "settled_unsent";
 export const TRANSFER_SETTLED = "payout_transfer.settle";
+/** A treasurer's finding Stripe disagreed with (nothing recorded). */
+export const TRANSFER_SETTLE_REFUSED = "payout_transfer.settle_refused";
 /** The worker's marker (`services/worker/src/coop/patronage-payout.ts`). */
 const PATRONAGE_OUTCOME_UNKNOWN = "patronage.payout_outcome_unknown";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
 
-// ── The adapter (injectable: stripe-mock lists one fixture for every PaymentIntent) ─────────────
+// ── The adapter (injectable: stripe-mock answers one fixture for every id) ──────────────────────
 
-const adapters = new WeakMap<Deps, Pick<PaymentAdapter, "provider" | "listRefunds">>();
+export type OutcomeAdapter = Pick<PaymentAdapter, "provider" | "listRefunds" | "transferStatus" | "listTransfers">;
 
-export function outcomeAdapter(deps: Deps): Pick<PaymentAdapter, "provider" | "listRefunds"> {
+const adapters = new WeakMap<Deps, OutcomeAdapter>();
+
+export function outcomeAdapter(deps: Deps): OutcomeAdapter {
   return adapters.get(deps) ?? createAdapter(deps.env);
 }
 
-export function setOutcomeAdapter(deps: Deps, adapter: Pick<PaymentAdapter, "provider" | "listRefunds"> | null): void {
+export function setOutcomeAdapter(deps: Deps, adapter: OutcomeAdapter | null): void {
   if (adapter) adapters.set(deps, adapter);
   else adapters.delete(deps);
 }
@@ -156,23 +167,50 @@ export function totalOf(rows: readonly { cents: number; currency: string }[]): {
 
 // ── The summary ─────────────────────────────────────────────────────────────────────────────
 
-export async function outcomeUnknownSummary(db: Executor, now: Date) {
-  // Refund requests: every payment with an unknown marker, then the request rules decide which
-  // are still unknown (a webhook, the reconciler or a treasurer may have settled them since).
-  const flagged = await db
+/**
+ * Payments that may hold a refund request whose outcome is unknown: an unknown marker whose request
+ * has no release marker (failed or resolved) yet. A released request is settled whatever else
+ * happened, so this never drops an unknown one; the request rules decide among what is left. It
+ * keeps the summary to the payments still open, not every payment ever marked.
+ */
+async function paymentsMaybeUnknown(db: Executor): Promise<string[]> {
+  const rows = await db
     .selectDistinct({ paymentId: auditLog.subjectId })
     .from(auditLog)
-    .where(and(eq(auditLog.action, REFUND_OUTCOME_UNKNOWN), eq(auditLog.subjectType, "payment")));
-  const ids = flagged.map((f) => f.paymentId).filter((id) => UUID.test(id));
+    .where(
+      and(
+        eq(auditLog.action, REFUND_OUTCOME_UNKNOWN),
+        eq(auditLog.subjectType, "payment"),
+        sql`not exists (select 1 from audit_log r where r.subject_type = 'payment'
+          and r.subject_id = ${auditLog.subjectId}
+          and r.action in (${REFUND_REQUEST_FAILED}, ${REFUND_REQUEST_RESOLVED})
+          and r.details->>'requestId' = ${auditLog.details}->>'requestId')`,
+      ),
+    );
+  return rows.map((f) => f.paymentId).filter((id) => UUID.test(id));
+}
+
+export async function outcomeUnknownSummary(db: Executor, now: Date) {
+  // Refund requests: the payments still open, their markers and postings in one go (a fixed number
+  // of queries, however many payments), then the request rules decide which are still unknown (a
+  // webhook, the reconciler or a treasurer may have settled them since).
+  const ids = await paymentsMaybeUnknown(db);
   const refundRows: { cents: number; currency: string }[] = [];
   if (ids.length > 0) {
     const ps = await db
       .select({ id: payments.id, currency: payments.currency })
       .from(payments)
-      .where(inArray(payments.id, ids));
-    for (const p of ps)
-      for (const s of await paymentRefundStates(db, p.id, now))
+      .where(inArray(payments.id, ids))
+      .orderBy(payments.id);
+    const histories = await refundHistories(
+      db,
+      ps.map((p) => p.id),
+    );
+    for (const p of ps) {
+      const h = histories.get(p.id) ?? { markers: [], postings: [] };
+      for (const s of refundRequestStates(h.markers, h.postings, now))
         if (s.state === "unknown") refundRows.push({ cents: s.amountCents ?? 0, currency: p.currency });
+    }
   }
   const transfers = await db
     .select({ cents: payoutTransfers.amountCents, currency: payoutTransfers.currency })
@@ -271,6 +309,109 @@ export async function recheckRefundRequest(
 
 // ── Settle a payout transfer ────────────────────────────────────────────────────────────────
 
+/** What about Stripe's transfer disagrees with the payout row (`transferMismatches`). */
+export type TransferMismatch = "not_found" | "amount" | "currency" | "destination" | "payout_id" | "exists";
+
+/**
+ * Where a transfer Stripe holds disagrees with the payout transfer row (pure): its amount,
+ * currency, connected account, or the `payout_id` metadata the worker sends. Empty: it is this
+ * payout's transfer.
+ */
+export function transferMismatches(
+  row: { payoutId: string; amountCents: number; currency: string; destinationRef: string },
+  s: TransferStatus,
+): TransferMismatch[] {
+  const out: TransferMismatch[] = [];
+  if (s.amountCents !== row.amountCents) out.push("amount");
+  if (s.currency.toLowerCase() !== row.currency) out.push("currency");
+  if (s.destination !== row.destinationRef) out.push("destination");
+  if (s.metadata.payout_id !== row.payoutId) out.push("payout_id");
+  return out;
+}
+
+/**
+ * The transfer of this payout among an account's transfers in its run, by the metadata the worker
+ * sends (`payout_id`, `transfer_id`), or undefined (pure).
+ */
+export function transferOfPayout(
+  row: { id: string; payoutId: string },
+  listed: readonly TransferStatus[],
+): TransferStatus | undefined {
+  return listed.find((t) => t.metadata.payout_id === row.payoutId || t.metadata.transfer_id === row.id);
+}
+
+type ProviderFinding =
+  | { kind: "checked" }
+  /** The instance cannot ask the transfer's provider: the treasurer's word is recorded as theirs. */
+  | { kind: "unchecked" }
+  | { kind: "refused"; mismatch: TransferMismatch[]; providerRef: string | null; message: string };
+
+/**
+ * Check a treasurer's finding at Stripe before it is recorded. `sent`: the `tr_` id must be a
+ * transfer Stripe holds for this payout's amount, currency and account, carrying its `payout_id`.
+ * `not_sent`: Stripe must list no transfer carrying this payout's ids among the account's transfers
+ * in the run (Stripe cannot look a transfer up by idempotency key, so this is the closest check it
+ * allows; a transfer it creates later anyway is recorded as orphaned by the webhook). Stripe not
+ * answering refuses with PRECONDITION_FAILED and writes nothing: the treasurer tries again.
+ */
+async function checkAtProvider(
+  deps: Deps,
+  row: TransferJoin,
+  outcome: "sent" | "not_sent",
+  reference: string,
+): Promise<ProviderFinding> {
+  const adapter = outcomeAdapter(deps);
+  if (adapter.provider !== row.t.provider) return { kind: "unchecked" };
+  const unavailable = (err: unknown) => {
+    deps.logger.warn("transfer settle: the provider did not answer", {
+      transferId: row.t.id,
+      errorName: err instanceof Error ? err.name : "UnknownError",
+    });
+    return precondition("payment_provider", "Stripe did not answer; nothing was recorded, try again in a minute");
+  };
+  if (outcome === "sent") {
+    const status = adapter.transferStatus?.bind(adapter);
+    if (!status) return { kind: "unchecked" };
+    let s: TransferStatus | null;
+    try {
+      s = await status(reference);
+    } catch (err) {
+      throw unavailable(err);
+    }
+    if (!s)
+      return {
+        kind: "refused",
+        mismatch: ["not_found"],
+        providerRef: reference,
+        message: "Stripe has no transfer with that id; nothing was recorded",
+      };
+    const mismatch = transferMismatches(row.t, s);
+    if (mismatch.length === 0) return { kind: "checked" };
+    return {
+      kind: "refused",
+      mismatch,
+      providerRef: s.providerRef,
+      message: `Stripe's transfer ${s.providerRef} is not this payout's (${mismatch.join(", ")}); nothing was recorded`,
+    };
+  }
+  const list = adapter.listTransfers?.bind(adapter);
+  if (!list) return { kind: "unchecked" };
+  let listed: TransferStatus[];
+  try {
+    listed = await list({ destination: row.t.destinationRef, group: row.periodStart.toISOString() });
+  } catch (err) {
+    throw unavailable(err);
+  }
+  const found = transferOfPayout(row.t, listed);
+  if (!found) return { kind: "checked" };
+  return {
+    kind: "refused",
+    mismatch: ["exists"],
+    providerRef: found.providerRef,
+    message: `Stripe has transfer ${found.providerRef} for this payout; settle it as sent with that id`,
+  };
+}
+
 export async function settlePayoutTransfer(
   deps: Deps,
   input: {
@@ -291,6 +432,26 @@ export async function settlePayoutTransfer(
   const reference = input.reference?.trim() ?? "";
   if (input.outcome === "sent" && !STRIPE_TRANSFER_REFERENCE.test(reference))
     throw badRequest("A transfer Stripe sent is recorded with its transfer id (tr_…)");
+  const finding = await checkAtProvider(deps, row, input.outcome, reference);
+  if (finding.kind === "refused") {
+    // Its own transaction: the refusal is the record a second look at Stripe starts from.
+    await audit(deps.db, {
+      actorType: ACTOR,
+      actorId: input.actorId,
+      action: TRANSFER_SETTLE_REFUSED,
+      subjectType: "payout_transfer",
+      subjectId: row.t.id,
+      reason: input.note.trim(),
+      details: {
+        transferId: row.t.id,
+        payoutId: row.t.payoutId,
+        outcome: input.outcome,
+        mismatch: finding.mismatch,
+        ...(finding.providerRef ? { providerRef: finding.providerRef } : {}),
+      },
+    });
+    throw conflict(finding.message);
+  }
   const now = deps.now();
   try {
     await deps.db.transaction(async (tx) => {
@@ -308,7 +469,12 @@ export async function settlePayoutTransfer(
         subjectType: "payout_transfer",
         subjectId: row.t.id,
         reason: input.note.trim(),
-        details: { transferId: row.t.id, payoutId: row.t.payoutId, outcome: input.outcome },
+        details: {
+          transferId: row.t.id,
+          payoutId: row.t.payoutId,
+          outcome: input.outcome,
+          checkedAtProvider: finding.kind === "checked",
+        },
       });
     });
   } catch (err) {

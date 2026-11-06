@@ -79,6 +79,21 @@ export interface TransferResult {
   currency: string;
 }
 
+/**
+ * A transfer as the provider holds it (follow-ups, unit money): what a treasurer's "Stripe sent
+ * it" is checked against before it is recorded. Metadata is ours (`payout_id`, `transfer_id`).
+ */
+export interface TransferStatus {
+  providerRef: string;
+  amountCents: number;
+  currency: string;
+  /** The connected account paid (Stripe `acct_…`). */
+  destination: string;
+  /** Every reversal so far (integer minor units). */
+  reversedCents: number;
+  metadata: Record<string, string>;
+}
+
 /** What the provider says became of a refund (batch 8, M1-gifts-refunds' reconciliation). */
 export interface RefundStatus {
   providerRef: string;
@@ -135,6 +150,17 @@ export interface PaymentAdapter {
    * it, with our metadata (`payment_id`, `refund_key`), to settle a refund whose outcome is unknown.
    */
   listRefunds?(paymentIntent: string): Promise<ListedRefund[]>;
+  /**
+   * Follow-ups (unit money): one transfer by the provider's id, or null when the provider has no
+   * such transfer (a definite answer; anything the provider did not answer throws).
+   */
+  transferStatus?(transferRef: string): Promise<TransferStatus | null>;
+  /**
+   * Follow-ups (unit money): every transfer to one connected account in one payout run. Stripe
+   * lists by `destination` and `transfer_group` and cannot search transfers by metadata or by
+   * idempotency key, so a caller looks through these for one carrying its payout's metadata.
+   */
+  listTransfers?(query: { destination: string; group: string }): Promise<TransferStatus[]>;
 }
 
 /** A refund as the provider lists it (`listRefunds`). */
