@@ -34,7 +34,8 @@ function hydrate(): void {
     window.location.reload();
     return;
   }
-  if (decision === "missing") console.warn("hydration bootstrap missing again; hydrating anyway");
+  // Not always "again": no storage or a one-time URL parameter also lands here without a reload.
+  if (decision === "missing") console.warn("hydration bootstrap missing; hydrating without a reload");
   startTransition(() => {
     hydrateRoot(
       document,

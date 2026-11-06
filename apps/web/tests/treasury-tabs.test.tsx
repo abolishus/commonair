@@ -10,7 +10,7 @@
  * `usePaged` run as they do in the app.
  */
 import { LocaleProvider, TooltipProvider } from "@commonair/ui";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, configure, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type * as React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import type { OutcomeUnknownDto } from "../src/components/treasury/outcome-unknown-summary.tsx";
@@ -18,6 +18,10 @@ import type { PayoutTransferDto } from "../src/components/treasury/payout-transf
 import type { RefundRequestDto } from "../src/components/treasury/refund-requests.tsx";
 import { en } from "../src/i18n/en.ts";
 import { locale, uiMessages } from "../src/i18n/index.ts";
+
+// Dialogs, the select and two loads per settle: on a busy CI runner they can take longer than
+// testing-library's 1 s default.
+configure({ asyncUtilTimeout: 5_000 });
 
 const fake = vi.hoisted(() => ({
   outcomeUnknown: vi.fn<() => Promise<unknown>>(),

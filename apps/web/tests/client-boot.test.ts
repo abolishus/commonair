@@ -120,6 +120,7 @@ describe("client entry", () => {
       expect(bootAttr(), search).toBe("missing");
       expect(mocks.hydrateRoot, search).toHaveBeenCalledTimes(1);
       expect(window.sessionStorage.getItem(BOOT_RELOAD_KEY), search).toBeNull();
+      expect(warn, search).toHaveBeenLastCalledWith("hydration bootstrap missing; hydrating without a reload");
     }
   });
 
