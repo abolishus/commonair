@@ -157,9 +157,10 @@ describe("control messages", () => {
     await control(ch.id, { op: "invalidate", scope: "user", userId: mod.id });
     const target = (await createUser(t.db)).id;
     await eventually(async () => {
+      const next = m.waitFor<"ban">((x) => x.op === "ban" && x.userId === target, 3000, { includePast: false });
       await control(ch.id, banFrame(ch.slug, target, "probe"));
-      const f = await m.waitFor<"ban">((x) => x.op === "ban" && x.userId === target, 3000, { includePast: false });
-      return f.reason === "";
+      const f = await next.catch(() => null);
+      return f?.reason === "";
     });
   });
 
@@ -180,9 +181,11 @@ describe("control messages", () => {
 async function expectModeratorView(c: Client, ch: { id: string; slug: string }, _uid: string) {
   const target = (await createUser(t.db)).id;
   await eventually(async () => {
+    // Listen before publishing: a frame that lands between the two would count as "past".
+    const next = c.waitFor<"ban">((x) => x.op === "ban" && x.userId === target, 3000, { includePast: false });
     await control(ch.id, banFrame(ch.slug, target, "probe"));
-    const f = await c.waitFor<"ban">((x) => x.op === "ban" && x.userId === target, 3000, { includePast: false });
-    return f.reason === "probe";
+    const f = await next.catch(() => null);
+    return f?.reason === "probe";
   }, 10_000);
 }
 
