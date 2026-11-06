@@ -24,8 +24,8 @@ vi.mock("../src/lib/api.ts", () => ({
   },
 }));
 
-const { DiscoveryStreamCard } = await import("../src/components/discovery/stream-cards.tsx");
-const { CategoryPage } = await import("../src/components/discovery/category-page.tsx");
+const { DiscoveryStreamCard, DiscoveryStreamGrid } = await import("../src/components/discovery/stream-cards.tsx");
+const { CategoryNotFound, CategoryPage } = await import("../src/components/discovery/category-page.tsx");
 const { Directory } = await import("../src/components/directory.tsx");
 const { homeLayout } = await import("../src/lib/directory-sections.ts");
 
@@ -121,5 +121,43 @@ describe("the category page header", () => {
       "/directory?tag=pixel",
     ]);
     expect(links.map((a) => a.textContent ?? "").sort((x, y) => x.localeCompare(y))).toEqual(["#cozy", "#pixel"]);
+  });
+});
+
+describe("the discovery grid", () => {
+  it("shows loadingCount skeletons and no cards while loading", async () => {
+    const { container } = await renderInRouter(
+      <DiscoveryStreamGrid cards={[live("fern")]} loading loadingCount={4} />,
+      "/directory",
+    );
+    expect(container.querySelectorAll('[data-slot="stream-card-skeleton"]')).toHaveLength(4);
+    expect(screen.queryByTestId("stream-card")).toBeNull();
+  });
+
+  it("loads the first `eager` thumbnails eagerly and the rest lazily; dense adds a column", async () => {
+    // happy-dom reports every <img> as complete with no size, which the card reads as broken.
+    const complete = vi.spyOn(HTMLImageElement.prototype, "complete", "get").mockReturnValue(false);
+    const withThumb = (slug: string) => {
+      const card = live(slug);
+      return { ...card, broadcast: { ...card.broadcast, thumbnailUrl: `/thumbs/${slug}.webp` } };
+    };
+    const { container } = await renderInRouter(
+      <DiscoveryStreamGrid cards={[withThumb("a"), withThumb("b"), withThumb("c")]} eager={1} dense />,
+      "/directory",
+    );
+    expect([...container.querySelectorAll("img[src^='/thumbs']")].map((img) => img.getAttribute("loading"))).toEqual([
+      "eager",
+      "lazy",
+      "lazy",
+    ]);
+    expect((container.querySelector(".grid") as HTMLElement).className).toContain("2xl:grid-cols-4");
+    complete.mockRestore();
+  });
+});
+
+describe("an unknown category", () => {
+  it("shows the not-found state", async () => {
+    await renderInRouter(<CategoryNotFound />, "/directory");
+    expect(screen.getByTestId("category-not-found").textContent).toContain("This category does not exist");
   });
 });

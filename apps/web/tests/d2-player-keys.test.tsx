@@ -289,6 +289,24 @@ describe("the live player's shortcuts", () => {
     expect(actions).toContain("fullscreen");
   });
 
+  it("keys whose control is unavailable are left alone (not playing yet, no fullscreen)", async () => {
+    Object.defineProperty(document, "fullscreenEnabled", { configurable: true, value: false });
+    Reflect.deleteProperty(HTMLElement.prototype, "requestFullscreen");
+    wrap(<Player channel="rivertide" live />);
+    await waitFor(() => expect(FakeController.instances).toHaveLength(1));
+    const video = screen.getByTestId("player-video") as HTMLVideoElement;
+    const pause = vi.spyOn(video, "pause");
+    // Still loading: space is not the player's yet, so the page keeps it (scrolling).
+    expect(press(" ")).toBe(true);
+    expect(pause).not.toHaveBeenCalled();
+    act(() => last().opts.onState("playing"));
+    expect(screen.queryByTestId("player-fullscreen")).toBeNull();
+    expect(press("f")).toBe(true);
+    expect(fullscreenSpy).not.toHaveBeenCalled();
+    // A handled key is taken from the page.
+    expect(press("k")).toBe(false);
+  });
+
   it("c presses the captions toggle", async () => {
     await playing();
     press("c");

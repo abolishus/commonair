@@ -521,6 +521,33 @@ describe("StreamCard", () => {
     expect(screen.getByRole("heading").getAttribute("dir")).toBe("auto");
   });
 
+  test("thumbnail loads lazily by default and eagerly with lazy={false}", () => {
+    imagesStillLoading();
+    const { container, rerender } = render(<StreamCard stream={stream} href="/x" />);
+    expect(container.querySelector("img")!.getAttribute("loading")).toBe("lazy");
+    rerender(<StreamCard stream={stream} href="/x" lazy={false} />);
+    expect(container.querySelector("img")!.getAttribute("loading")).toBe("eager");
+  });
+
+  test("a channel without an accent falls back to zinc", () => {
+    const { accent: _accent, ...channel } = stream.channel;
+    const plain = { ...stream, channel };
+    const { container } = render(<StreamCard stream={plain} href="/x" />);
+    expect(container.querySelector("article")!.getAttribute("data-accent")).toBe("zinc");
+  });
+
+  test("the heading carries the stream language, and none when it is empty", () => {
+    const { rerender } = render(<StreamCard stream={stream} href="/x" headingLevel={2} />);
+    expect(screen.getByRole("heading", { level: 2 }).getAttribute("lang")).toBe("en");
+    rerender(<StreamCard stream={{ ...stream, language: "" }} href="/x" headingLevel={4} />);
+    expect(screen.getByRole("heading", { level: 4 }).hasAttribute("lang")).toBe(false);
+  });
+
+  test("an uptime label shows over the thumbnail", () => {
+    const { container } = render(<StreamCard stream={stream} href="/x" uptimeLabel="3:41:09" />);
+    expect(container.querySelector('[data-slot="stream-card-uptime"]')!.textContent).toBe("3:41:09");
+  });
+
   test("skeleton is hidden from assistive tech", () => {
     const { container } = render(<StreamCardSkeleton />);
     expect(container.firstElementChild!.getAttribute("aria-hidden")).toBe("true");

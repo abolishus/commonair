@@ -332,6 +332,52 @@ describe("the home page directory (F8)", () => {
     expect(headings).toContain("More in Spotlight");
   });
 
+  it("titles every shelf; Following hides the reason chip; offline tiles show last live or never", async () => {
+    await renderInRouter(
+      <Directory
+        sections={[
+          { id: "spotlight", cards: [live("spot", { reason: "spotlight" })] },
+          { id: "new", cards: [live("fresh", { reason: "new" })] },
+          { id: "following", cards: [live("friend", { reason: "following" })] },
+          { id: "live", cards: [live("other")] },
+        ]}
+        offline={[
+          { id: "following-offline", cards: [offline("napper", null, { category: ART })] },
+          { id: "recent", cards: [offline("earlier")] },
+        ]}
+      />,
+    );
+    const headings = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
+    expect(headings).toEqual([
+      "Spotlight",
+      "New and live",
+      "Following",
+      "Live now",
+      "Offline channels you follow",
+      "Recently live",
+    ]);
+    const section = (id: string) => document.querySelector(`[data-section="${id}"]`) as HTMLElement;
+    expect(section("following").querySelector("[data-reason]")).toBeNull();
+    expect(section("live").querySelector("[data-reason]")).toBeTruthy();
+    // Only "Recently live" tiles carry the recent test id; a channel that never streamed says so.
+    const followingOffline = section("following-offline");
+    expect(followingOffline.querySelector('[data-testid="home-recent-tile"]')).toBeNull();
+    expect(followingOffline.textContent).toContain("Has not streamed yet");
+    expect(followingOffline.querySelector('[data-testid="card-category-link"]')?.getAttribute("href")).toBe(
+      "/directory/art",
+    );
+    const recent = screen.getByTestId("home-recent-tile");
+    expect(recent.textContent).toContain("Last live");
+    expect(recent.querySelector('[data-testid="card-category-link"]')).toBeNull();
+    expect(screen.queryByTestId("directory-empty")).toBeNull();
+  });
+
+  it("a failed load shows the error and no shelves, even with offline data", async () => {
+    await renderInRouter(<Directory sections={null} offline={[{ id: "recent", cards: [offline("earlier")] }]} />);
+    expect(screen.getByText("The directory could not be loaded. Reload to try again.")).toBeTruthy();
+    expect(screen.queryAllByTestId("directory-section")).toHaveLength(0);
+  });
+
   it("offers a way forward when nothing is live", async () => {
     await renderInRouter(<Directory sections={[]} emptyAction={<a href="/signup">Sign up</a>} />);
     expect(screen.getByTestId("directory-empty").textContent).toContain("Sign up");

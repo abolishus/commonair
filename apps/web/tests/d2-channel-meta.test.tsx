@@ -48,7 +48,7 @@ const data = await import("../src/components/channel/channel-data.ts");
 const { summarize } = await import("../src/lib/channel-summary.ts");
 const { ShareButton, Uptime, CategoryLink, ChannelOverflowMenu } =
   await import("../src/components/channel/channel-meta.tsx");
-const { ChannelNotFoundPage } = await import("../src/components/channel/live-now-shelf.tsx");
+const { ChannelNotFoundPage, LIVE_NOW_COUNT } = await import("../src/components/channel/live-now-shelf.tsx");
 type ChannelPage = import("../src/components/channel/panels-loader.ts").ChannelPage;
 type StreamCard = import("@commonair/contracts/dto").StreamCard;
 type ReportClient = import("../src/components/safety/client.ts").ReportClient;
@@ -411,6 +411,37 @@ describe("an unknown channel (F13)", () => {
     renderNotFound(() => Promise.reject(new Error("down")));
     await screen.findByTestId("channel-not-found");
     await waitFor(() => expect(screen.queryByTestId("channel-live-now")).toBeNull());
+  });
+
+  it("shows skeletons while loading, then at most LIVE_NOW_COUNT cards", async () => {
+    let resolve: (cards: StreamCard[]) => void = () => {};
+    renderNotFound(() => new Promise((r) => (resolve = r)));
+    const shelf = await screen.findByTestId("channel-live-now");
+    expect(shelf.querySelectorAll('[data-testid="stream-card"]')).toHaveLength(0);
+    expect(shelf.querySelectorAll('[data-slot="stream-card-skeleton"]')).toHaveLength(3);
+    const many = Array.from({ length: LIVE_NOW_COUNT + 3 }, (_, i) => card(`c${i}`));
+    await act(async () => resolve(many));
+    await waitFor(() => expect(shelf.querySelectorAll('[data-testid="stream-card"]')).toHaveLength(LIVE_NOW_COUNT));
+  });
+
+  it("ignores a load that settles after the page is gone", async () => {
+    const errors = vi.spyOn(console, "error");
+    for (const settle of ["resolve", "reject"] as const) {
+      let done: { resolve: (c: StreamCard[]) => void; reject: (e: Error) => void } | null = null;
+      const { unmount } = renderNotFound(
+        () => new Promise<StreamCard[]>((resolve, reject) => (done = { resolve, reject })),
+      );
+      await screen.findByTestId("channel-live-now");
+      unmount();
+      await act(async () => {
+        if (settle === "resolve") done?.resolve([card("late")]);
+        else done?.reject(new Error("late"));
+      });
+    }
+    expect(screen.queryByTestId("channel-live-now")).toBeNull();
+    // No state update on an unmounted component.
+    expect(errors).not.toHaveBeenCalled();
+    errors.mockRestore();
   });
 
   it("is the route's not-found page", () => {
