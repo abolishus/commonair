@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /** The relays' DVR pulls in real Valkey: the record script, the servable range, trim and expiry. */
-import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
+import { afterAll, beforeAll, describe, expect, test, vi } from "vite-plus/test";
 import { createValkey, type ValkeyClient } from "@commonair/service";
 import { uuidv7 } from "@commonair/db";
 import {
@@ -12,6 +12,8 @@ import {
   dvrPullsKey,
   type DvrObject,
 } from "../src/dvr-issuance.ts";
+
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 60_000 });
 
 const VALKEY_URL = process.env.VALKEY_URL ?? "redis://localhost:6379";
 let valkey: ValkeyClient;

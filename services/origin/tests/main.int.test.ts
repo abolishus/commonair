@@ -19,9 +19,18 @@ let mediamtx: ReturnType<typeof Bun.serve> | undefined;
 let mediamtxUrl = "";
 let base = "";
 
-/** MediaMTX's HLS listener answers 404 at its root; any answer is "up". */
-const startMediamtx = (port = 0) =>
-  Bun.serve({ port, hostname: "127.0.0.1", fetch: () => new Response("not found", { status: 404 }) });
+/**
+ * MediaMTX's HLS listener answers 404 at its root; any answer is "up". While `mediamtxDown` it
+ * never answers, so the readiness check times out: the same "fail" as a refused connection,
+ * without giving the port up and racing other test files to bind it again.
+ */
+let mediamtxDown = false;
+const startMediamtx = () =>
+  Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    fetch: () => (mediamtxDown ? new Promise<Response>(() => {}) : new Response("not found", { status: 404 })),
+  });
 
 beforeAll(async () => {
   const [db, generated] = await Promise.all([createTestDatabase(), generateSigningKey()]);
@@ -103,8 +112,8 @@ describe("serveOrigin", () => {
     expect(served.origin.routes.names).toEqual(["dvr", "captions:hls", "captions:relayPull", "captions:cdn"]);
   });
 
-  test("MediaMTX unreachable fails readiness, on both routes", async () => {
-    await mediamtx?.stop(true);
+  test("MediaMTX not answering fails readiness, on both routes", async () => {
+    mediamtxDown = true;
     try {
       const ready = await fetch(`${base}/readyz`);
       expect(ready.status).toBe(503);
@@ -113,7 +122,7 @@ describe("serveOrigin", () => {
       expect(pub.status).toBe(503);
       expect((await pub.json()).checks.mediamtx).toBe("fail");
     } finally {
-      mediamtx = startMediamtx(Number(new URL(mediamtxUrl).port));
+      mediamtxDown = false;
     }
     expect((await fetch(`${base}/readyz`)).status).toBe(200);
   });

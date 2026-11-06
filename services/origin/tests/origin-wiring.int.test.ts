@@ -217,6 +217,9 @@ describe("issuance", () => {
     origin.start();
     await vi.waitFor(async () => expect(await v.exists(ISSUANCE_KEYS.lock)).toBe(1), { timeout: 5_000 });
     const holder = await v.get(ISSUANCE_KEYS.lock);
+    // Let the timer's tick finish on the old clock (a call while it runs joins it; after, the held
+    // lock refuses a new one), so only the shutdown tick can see the session below.
+    await origin.issuanceTick();
     // A session that only the minute ending at the next boundary counts, appearing after the timer's tick.
     clock = boundary + 5_000;
     const { relayId, bucket } = await seedSession(clock);

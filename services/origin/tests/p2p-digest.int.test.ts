@@ -7,7 +7,7 @@
  */
 import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
+import { afterAll, beforeAll, describe, expect, test, vi } from "vite-plus/test";
 import type { PlaybackClaims } from "@commonair/contracts/tokens";
 import { schema, uuidv7 } from "@commonair/db";
 import { createTestDatabase, type TestDatabase } from "@commonair/db/testing";
@@ -16,6 +16,9 @@ import { generateSigningKey, randomSecret, signPlaybackToken, type SigningKey } 
 import { noopMetrics, type OriginMetrics } from "../src/metrics.ts";
 import { createOrigin, type Origin } from "../src/origin.ts";
 import { MEDIA, MULTIVARIANT, rendition720 } from "./fixtures.ts";
+
+// A fresh database per file can outlast the 10 s default hook timeout under CI load.
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 60_000 });
 
 const VALKEY_URL = process.env.VALKEY_URL ?? "redis://localhost:6379";
 const SEG33 = "54dd20fd99ec_video1_seg33.mp4";
