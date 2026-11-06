@@ -11,7 +11,6 @@ import {
   CATEGORY_SHELF_MIN,
   RAIL_LIVE_LIMIT,
   appendPage,
-  categoryStats,
   collidingNames,
   directorySections,
   displayLabel,
@@ -265,21 +264,15 @@ describe("railSections", () => {
 });
 
 describe("the category directory", () => {
-  const cats = [category(ART, 2), category(MUSIC, 2), category(GAMES, 5)];
-
-  it("sorts by live channels, then viewers where known, then name", () => {
-    const stats = categoryStats(
-      cats,
-      [
-        live("a1", { category: ART, viewers: 10 }),
-        live("a2", { category: ART, viewers: 10 }),
-        live("m1", { category: MUSIC, viewers: 30 }),
-        live("m2", { category: MUSIC, viewers: 1 }),
-      ],
-      true,
-    );
-    expect(sortCategories(cats, stats).map((c) => c.slug)).toEqual(["games", "music", "art"]);
-    expect(sortCategories(cats).map((c) => c.slug)).toEqual(["games", "art", "music"]);
+  it("sorts by live channels, then the API's viewer count, then name", () => {
+    const cats = [
+      category(ART, 2, { viewerCount: 20 }),
+      category(MUSIC, 2, { viewerCount: 31 }),
+      category(GAMES, 5, { viewerCount: 0 }),
+    ];
+    expect(sortCategories(cats).map((c) => c.slug)).toEqual(["games", "music", "art"]);
+    // Equal live channels and viewers: by name.
+    expect(sortCategories([category(MUSIC, 1), category(ART, 1)]).map((c) => c.slug)).toEqual(["art", "music"]);
     expect(sortCategories([])).toEqual([]);
   });
 
@@ -289,24 +282,12 @@ describe("the category directory", () => {
     expect(input.map((c) => c.slug)).toEqual(["art", "games"]);
   });
 
-  it("gives a viewer total only when it is exact", () => {
-    const cards = [live("a1", { category: ART, viewers: 4 }), live("a2", { category: ART, viewers: 6 })];
-    expect(categoryStats([category(ART, 2)], cards, true).get(ART.id)?.viewers).toBe(10);
-    // The live list was cut off: the total could be short.
-    expect(categoryStats([category(ART, 2)], cards, false).get(ART.id)?.viewers).toBeUndefined();
-    // A channel the list did not include (another filter): no total.
-    expect(categoryStats([category(ART, 3)], cards, true).get(ART.id)?.viewers).toBeUndefined();
-    // No live channels at all is an exact 0.
-    expect(categoryStats([category(MUSIC, 0)], cards, true).get(MUSIC.id)?.viewers).toBe(0);
-  });
-
-  it("ranks a category's tags by use, merging case", () => {
+  it("ranks the tag filter's options by use, merging case", () => {
     const cards = [
       live("a1", { category: ART, tags: ["Cozy", "pixel"] }),
       live("a2", { category: ART, tags: ["cozy"] }),
       live("m1", { category: MUSIC, tags: ["lofi"] }),
     ];
-    expect(categoryStats([category(ART, 2)], cards, true).get(ART.id)?.tags).toEqual(["Cozy", "pixel"]);
     expect(tagOptions(cards)).toEqual(["Cozy", "lofi", "pixel"]);
     expect(tagOptions([])).toEqual([]);
   });

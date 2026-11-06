@@ -20,8 +20,8 @@ export interface Page<T> {
 /** Categories per directory page; the seed has 15+, so the first page holds every live one. */
 export const CATEGORY_PAGE = 48;
 /**
- * Live channels loaded with the directory: enough that the per-category totals and the tag list
- * are usually complete (they are shown only when they are, see `categoryStats`).
+ * Live channels loaded with the directory: enough that the tag filter's options are usually
+ * complete (category totals and tags come from the API).
  */
 export const DIRECTORY_LIVE_PAGE = 100;
 /** Live channels per page on a category page and the Live channels view. */

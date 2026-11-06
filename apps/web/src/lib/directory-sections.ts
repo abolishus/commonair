@@ -233,13 +233,6 @@ export function railSections(home: DirectoryHome, signedIn: boolean): RailSectio
 
 // --- the category directory ---------------------------------------------------------------
 
-export interface CategoryStats {
-  /** Verified viewers, only when every live channel of the category is on the loaded page. */
-  viewers?: number;
-  /** The category's live channels' tags, most used first. */
-  tags: string[];
-}
-
 /** Counts by value, most frequent first, ties alphabetical (case-insensitive values merge). */
 function rankTags(tags: Iterable<string>): string[] {
   const counts = new Map<string, { tag: string; n: number }>();
@@ -253,45 +246,14 @@ function rankTags(tags: Iterable<string>): string[] {
 }
 
 /**
- * Viewer totals and tags per category, from the live channels loaded. The total is only given
- * when it is exact: the live list was complete and holds as many of the category's channels as its
- * `liveChannels` count. Otherwise the tile shows no total rather than a short one.
+ * The directory's order (F1): most live channels first, then most viewers (the API's
+ * `viewerCount`), then by name. Stable for equal keys, and does not touch the input.
  */
-export function categoryStats(
-  categories: readonly Pick<Category, "id" | "liveChannels">[],
-  live: readonly StreamCard[],
-  liveComplete: boolean,
-): Map<string, CategoryStats> {
-  const groups = new Map<string, StreamCard[]>();
-  for (const card of live) {
-    const id = card.broadcast.category?.id;
-    if (!id) continue;
-    groups.set(id, [...(groups.get(id) ?? []), card]);
-  }
-  const out = new Map<string, CategoryStats>();
-  for (const category of categories) {
-    const cards = groups.get(category.id) ?? [];
-    const exact = liveComplete && cards.length === category.liveChannels;
-    const stats: CategoryStats = { tags: rankTags(cards.flatMap((c) => c.tags)) };
-    if (exact) stats.viewers = cards.reduce((sum, c) => sum + c.broadcast.viewerCount, 0);
-    out.set(category.id, stats);
-  }
-  return out;
-}
-
-/**
- * The directory's order (F1): most live channels first, then most viewers (where the total is
- * known), then by name. Stable for equal keys, and does not touch the input.
- */
-export function sortCategories<T extends Pick<Category, "id" | "name" | "liveChannels">>(
+export function sortCategories<T extends Pick<Category, "name" | "liveChannels" | "viewerCount">>(
   categories: readonly T[],
-  stats: ReadonlyMap<string, CategoryStats> = new Map(),
 ): T[] {
   return [...categories].sort(
-    (a, b) =>
-      b.liveChannels - a.liveChannels ||
-      (stats.get(b.id)?.viewers ?? -1) - (stats.get(a.id)?.viewers ?? -1) ||
-      a.name.localeCompare(b.name),
+    (a, b) => b.liveChannels - a.liveChannels || b.viewerCount - a.viewerCount || a.name.localeCompare(b.name),
   );
 }
 

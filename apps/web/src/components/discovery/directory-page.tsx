@@ -25,7 +25,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import * as React from "react";
 import { t } from "../../i18n/index.ts";
 import { api } from "../../lib/api.ts";
-import { appendPage, categoryStats, collidingNames, sortCategories, tagOptions } from "../../lib/directory-sections.ts";
+import { appendPage, collidingNames, sortCategories, tagOptions } from "../../lib/directory-sections.ts";
 import { DiscoveryCategoryGrid } from "./category-tiles.tsx";
 import { CATEGORY_PAGE, LIVE_PAGE, type DirectoryPageData, type Page } from "./loaders.ts";
 import type { DirectoryView } from "./search-params.ts";
@@ -71,7 +71,7 @@ export function DirectoryPage({ data, view, tag }: DirectoryPageProps): React.JS
         <>
           <TagFilter options={tagOptions(data.live.items)} tag={tag} />
           {view === "categories" ? (
-            <CategoriesView key="categories" initial={data.categories} live={data.live} />
+            <CategoriesView key="categories" initial={data.categories} />
           ) : (
             <LiveView key={tag ?? ""} initial={(tag ? data.tagged : undefined) ?? data.live} tag={tag} />
           )}
@@ -136,19 +136,12 @@ function ShowMore({ onClick, busy }: { onClick: () => void; busy: boolean }): Re
   );
 }
 
-/** The category grid, sorted by live channels then viewers; totals and tags come from the live list. */
-export function CategoriesView({
-  initial,
-  live,
-}: {
-  initial: Page<Category>;
-  live: Page<StreamCard>;
-}): React.JSX.Element {
+/** The category grid, sorted by live channels then viewers; totals and tags are the API's. */
+export function CategoriesView({ initial }: { initial: Page<Category> }): React.JSX.Element {
   const [items, setItems] = React.useState(initial.items);
   const [cursor, setCursor] = React.useState(initial.nextCursor);
   const [busy, setBusy] = React.useState(false);
-  const stats = React.useMemo(() => categoryStats(items, live.items, live.nextCursor === null), [items, live]);
-  const sorted = React.useMemo(() => sortCategories(items, stats), [items, stats]);
+  const sorted = React.useMemo(() => sortCategories(items), [items]);
   const more = async () => {
     if (!cursor) return;
     setBusy(true);
@@ -167,7 +160,6 @@ export function CategoriesView({
       <DiscoveryCategoryGrid
         data-testid="directory-category-grid"
         categories={sorted}
-        stats={stats}
         columns={6}
         empty={<EmptyState icon={GridViewIcon} title={t("discovery.directory.noCategories")} />}
       />

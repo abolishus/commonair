@@ -7,24 +7,26 @@ import { Link } from "@tanstack/react-router";
 import type * as React from "react";
 import { t } from "../../i18n/index.ts";
 import { categoryHref, categoryLink } from "../../lib/category-route.ts";
-import type { CategoryStats } from "../../lib/directory-sections.ts";
 
 export const liveLabel = (formatted: string, count: number): string =>
   t("discovery.category.live", { count, formatted });
 export const viewerLabel = (formatted: string, count: number): string =>
   t("discovery.category.viewers", { count, formatted });
 
-/** A category as a tile: box art (or the generated fallback), live channels, and the totals when they are exact. */
-export function tileData(category: Category, stats?: CategoryStats): CategoryTileData {
+/**
+ * A category as a tile: box art (or the generated fallback), live channels, the verified viewers
+ * and the most used tags, all as the API counts them (`Category.viewerCount` / `tags`).
+ */
+export function tileData(category: Category): CategoryTileData {
   const tile: CategoryTileData = {
     id: category.id,
     slug: category.slug,
     name: category.name,
     liveCount: category.liveChannels,
+    viewers: category.viewerCount,
     imageUrl: category.boxArtUrl,
   };
-  if (stats?.viewers !== undefined) tile.viewers = stats.viewers;
-  if (stats?.tags.length) tile.tags = stats.tags;
+  if (category.tags.length > 0) tile.tags = [...category.tags];
   return tile;
 }
 
@@ -33,19 +35,14 @@ export interface DiscoveryCategoryGridProps extends Omit<
   "categories" | "liveLabel" | "viewerLabel" | "renderLink" | "hrefFor"
 > {
   categories: readonly Category[];
-  stats?: ReadonlyMap<string, CategoryStats>;
 }
 
 /** `CategoryGrid` with router links to each category page. */
-export function DiscoveryCategoryGrid({
-  categories,
-  stats,
-  ...props
-}: DiscoveryCategoryGridProps): React.JSX.Element | null {
+export function DiscoveryCategoryGrid({ categories, ...props }: DiscoveryCategoryGridProps): React.JSX.Element | null {
   return (
     <CategoryGrid
       {...props}
-      categories={categories.map((c) => tileData(c, stats?.get(c.id)))}
+      categories={categories.map((c) => tileData(c))}
       hrefFor={(tile) => categoryHref(tile.slug ?? tile.id)}
       renderLink={(tile) => <Link {...categoryLink(tile.slug ?? tile.id)} />}
       tileProps={(tile) => ({ "data-testid": "category-tile", "data-category": tile.slug })}

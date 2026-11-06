@@ -46,39 +46,29 @@ const tiles = () =>
 
 describe("the category grid", () => {
   it("sorts by live channels, then by exact viewers, then by name", async () => {
-    const page = { items: [category(ART, 2), category(GAMES, 0), category(MUSIC, 2)], nextCursor: null };
-    const liveList = {
-      items: [
-        live("a1", { category: ART, viewers: 3 }),
-        live("a2", { category: ART, viewers: 3 }),
-        live("m1", { category: MUSIC, viewers: 50 }),
-        live("m2", { category: MUSIC, viewers: 1 }),
-      ],
+    const page = {
+      items: [category(ART, 2, { viewerCount: 6 }), category(GAMES, 0), category(MUSIC, 2, { viewerCount: 51 })],
       nextCursor: null,
     };
-    await renderInRouter(<CategoriesView initial={page} live={liveList} />, "/directory");
+    await renderInRouter(<CategoriesView initial={page} />, "/directory");
     expect(tiles()).toEqual(["music", "art", "games"]);
-    // The exact total is on the tile; the tile with no live list match has none.
+    // The totals on the tiles are the API's (`Category.viewerCount`).
     expect(screen.getByText("51 viewers")).toBeTruthy();
     expect(screen.getByText("6 viewers")).toBeTruthy();
   });
 
-  it("shows no viewer total when the live list was cut off", async () => {
-    const page = { items: [category(ART, 1)], nextCursor: null };
-    const liveList = { items: [live("a1", { category: ART, viewers: 9 })], nextCursor: "more" };
-    await renderInRouter(<CategoriesView initial={page} live={liveList} />, "/directory");
-    expect(screen.queryByText(/viewers?$/)).toBeNull();
+  it("shows the API's viewer total and tags", async () => {
+    const page = { items: [category(ART, 1, { viewerCount: 1234, tags: ["cozy"] })], nextCursor: null };
+    await renderInRouter(<CategoriesView initial={page} />, "/directory");
+    expect(screen.getByText("1.2K viewers")).toBeTruthy();
+    expect(screen.queryByText("9 viewers")).toBeNull();
     expect(screen.getByText("1 channel live")).toBeTruthy();
+    expect(screen.getByText("cozy")).toBeTruthy();
+    expect(screen.queryByText("other")).toBeNull();
   });
 
   it("links each tile to its category page", async () => {
-    await renderInRouter(
-      <CategoriesView
-        initial={{ items: [category(ART, 1)], nextCursor: null }}
-        live={{ items: [], nextCursor: null }}
-      />,
-      "/directory",
-    );
+    await renderInRouter(<CategoriesView initial={{ items: [category(ART, 1)], nextCursor: null }} />, "/directory");
     expect(document.querySelector('[data-category="art"] a')?.getAttribute("href")).toBe("/directory/art");
   });
 
@@ -89,10 +79,7 @@ describe("the category grid", () => {
       return { items: [category(GAMES, 0), category(ART, 3)], nextCursor: null };
     };
     await renderInRouter(
-      <CategoriesView
-        initial={{ items: [category(ART, 3), category(MUSIC, 1)], nextCursor: "c2" }}
-        live={{ items: [], nextCursor: null }}
-      />,
+      <CategoriesView initial={{ items: [category(ART, 3), category(MUSIC, 1)], nextCursor: "c2" }} />,
       "/directory",
     );
     expect(tiles()).toEqual(["art", "music"]);
@@ -105,13 +92,7 @@ describe("the category grid", () => {
   });
 
   it("has no Show more on the last page", async () => {
-    await renderInRouter(
-      <CategoriesView
-        initial={{ items: [category(ART, 1)], nextCursor: null }}
-        live={{ items: [], nextCursor: null }}
-      />,
-      "/directory",
-    );
+    await renderInRouter(<CategoriesView initial={{ items: [category(ART, 1)], nextCursor: null }} />, "/directory");
     expect(screen.queryByTestId("directory-show-more")).toBeNull();
   });
 });
@@ -121,7 +102,6 @@ async function fallbacks(slugs: string[]): Promise<Map<string, [string | null, s
   const view = await renderInRouter(
     <CategoriesView
       initial={{ items: slugs.map((slug) => category({ id: `cat-${slug}`, slug, name: slug }, 1)), nextCursor: null }}
-      live={{ items: [], nextCursor: null }}
     />,
     "/directory",
   );
@@ -186,7 +166,6 @@ describe("the fallback tile (F10)", () => {
           items: [category(ART, 1), { ...category(MUSIC, 1), boxArtUrl: "/art/music.svg" }],
           nextCursor: null,
         }}
-        live={{ items: [], nextCursor: null }}
       />
     );
     const first = await renderInRouter(view(), "/directory");
