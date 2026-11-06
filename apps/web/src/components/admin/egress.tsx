@@ -13,7 +13,7 @@ import { useLoad } from "../money/use-load.ts";
 import { t } from "../../i18n/index.ts";
 import { egressClient, type EgressClient, type EgressReportDto } from "./client.ts";
 import { checkEgressRange, defaultEgressInputs } from "./forms.ts";
-import { DateTimeField } from "./date-time-field.tsx";
+import { DateTimeTextField } from "../forms/date-time-field.tsx";
 import { formatSize, sourceLabel } from "./labels.ts";
 
 /** Mirrors the API cap on listed broadcasts (`EGRESS_BROADCAST_CAP`). */
@@ -88,17 +88,17 @@ export function EgressPage({
       <form className="flex flex-col gap-3" onSubmit={submit} noValidate>
         {/* F33: design-system date and time fields; the values stay UTC (the hint below says so). */}
         <div className="grid min-w-0 gap-4 lg:grid-cols-2">
-          <DateTimeField
+          <DateTimeTextField
             data-testid="egress-from"
-            label={t("admin.egress.from")}
+            legend={t("admin.egress.from")}
             value={inputs.from}
             invalid={rangeError !== null}
             now={now}
             onValueChange={(from) => setInputs((p) => ({ ...p, from }))}
           />
-          <DateTimeField
+          <DateTimeTextField
             data-testid="egress-to"
-            label={t("admin.egress.to")}
+            legend={t("admin.egress.to")}
             value={inputs.to}
             invalid={rangeError !== null}
             now={now}

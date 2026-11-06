@@ -45,8 +45,8 @@ import type { z } from "zod";
 import { t, type MessageKey } from "../../i18n/index.ts";
 import { isSessionExpired, toastActionError } from "../../lib/action-error.ts";
 import { errorCode } from "../../lib/api.ts";
-import { DateTimeField } from "../studio/date-time-field.tsx";
-import { EMPTY_DATE_TIME, dateTimeIso, upcomingYears, type DateTimeParts } from "../studio/date-time.ts";
+import { DateTimeField } from "../forms/date-time-field.tsx";
+import { EMPTY_DATE_TIME, dateTimeIso, upcomingYears, type DateTimeParts } from "../forms/date-time.ts";
 
 export type SplitDto = z.infer<typeof dto.RevenueSplit>;
 export type SplitBasis = (typeof SPLIT_BASES)[number];
@@ -354,6 +354,8 @@ export function CrewProposeForm({
               onValueChange={setStartsAt}
               onBlur={() => setTouched((p) => ({ ...p, starts: true }))}
               years={years}
+              minuteStep={5}
+              clearable
               error={startsError}
             />
             <DateTimeField
@@ -364,6 +366,8 @@ export function CrewProposeForm({
               onValueChange={setEndsAt}
               onBlur={() => setTouched((p) => ({ ...p, ends: true }))}
               years={years}
+              minuteStep={5}
+              clearable
               error={endsError}
             />
           </div>

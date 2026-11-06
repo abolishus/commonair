@@ -9,20 +9,12 @@
  * are stacked rows at phone width, each with its amount, status and Confirm (F31).
  */
 import { LocaleProvider, NowProvider, TooltipProvider } from "@commonair/ui";
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import * as React from "react";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import type { IntegrityFlagDto } from "../src/components/admin/client.ts";
-import {
-  DateTimeField,
-  EMPTY_DATE_TIME,
-  dateTimeParts,
-  dateTimeValue,
-  dateTimeYears,
-  withYear,
-} from "../src/components/admin/date-time-field.tsx";
 import { EgressResult } from "../src/components/admin/egress.tsx";
 import { FlagList } from "../src/components/admin/integrity.tsx";
 import { detailLabel, formatSize, signalLabel } from "../src/components/admin/labels.ts";
@@ -46,14 +38,6 @@ function wrap(node: React.ReactNode) {
       </NowProvider>
     </LocaleProvider>,
   );
-}
-
-async function pick(trigger: string, name: string): Promise<void> {
-  fireEvent.click(screen.getByTestId(trigger));
-  const item = await screen.findByRole("option", { name });
-  fireEvent.pointerDown(item, { pointerType: "mouse" });
-  fireEvent.click(item);
-  await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull());
 }
 
 // ── F34: integrity labels ────────────────────────────────────────────────────────────────────
@@ -186,100 +170,14 @@ describe("formatSize (F34)", () => {
   });
 });
 
-// ── F33: the date and time field ─────────────────────────────────────────────────────────────
-
-describe("date-time parts", () => {
-  it("parses and writes the datetime-local shape", () => {
-    expect(dateTimeParts("2026-10-01T06:30")).toEqual({ year: 2026, month: 10, day: 1, hour: 6, minute: 30 });
-    expect(dateTimeParts("2026-10-01T06:30:15")).toEqual({ year: 2026, month: 10, day: 1, hour: 6, minute: 30 });
-    expect(dateTimeParts("")).toEqual(EMPTY_DATE_TIME);
-    expect(dateTimeParts("yesterday")).toEqual(EMPTY_DATE_TIME);
-    expect(dateTimeValue({ year: 2026, month: 3, day: 5, hour: 0, minute: 7 })).toBe("2026-03-05T00:07");
-    expect(dateTimeValue({ ...EMPTY_DATE_TIME, year: 2026 })).toBe("");
-    expect(dateTimeValue({ year: 2026, month: 1, day: 1, hour: 0, minute: null })).toBe("");
-  });
-
-  it("clamps the day to the month (leap years included)", () => {
-    expect(dateTimeValue({ year: 2026, month: 2, day: 31, hour: 1, minute: 0 })).toBe("2026-02-28T01:00");
-    expect(dateTimeValue({ year: 2028, month: 2, day: 31, hour: 1, minute: 0 })).toBe("2028-02-29T01:00");
-    expect(dateTimeValue({ year: 2026, month: 4, day: 31, hour: 23, minute: 59 })).toBe("2026-04-30T23:59");
-  });
-
-  it("offers recent years, newest first", () => {
-    const now = new Date("2026-01-01T00:00:00.000Z");
-    expect(dateTimeYears(now)).toEqual([2026, 2025, 2024]);
-    expect(dateTimeYears(now, 1, 1)).toEqual([2027, 2026, 2025]);
-  });
-
-  it("adds a value's year when it is outside the list, keeping newest first", () => {
-    expect(withYear([2026, 2025, 2024], 2020)).toEqual([2026, 2025, 2024, 2020]);
-    expect(withYear([2026, 2025, 2024], 2027)).toEqual([2027, 2026, 2025, 2024]);
-    expect(withYear([2026, 2025, 2024], 2025)).toEqual([2026, 2025, 2024]);
-    expect(withYear([2026, 2025, 2024], null)).toEqual([2026, 2025, 2024]);
-  });
-});
+// ── F33: the date and time field (its own tests are in date-time-field.test.tsx) ────────────
 
 describe("DateTimeField (F33)", () => {
-  function Harness({ initial, onValue }: { initial: string; onValue: (v: string) => void }) {
-    const [value, setValue] = React.useState(initial);
-    return (
-      <DateTimeField
-        data-testid="when"
-        label="Filed at"
-        description="In your own time zone."
-        value={value}
-        now={new Date("2026-11-04T12:00:00.000Z")}
-        onValueChange={(v) => {
-          setValue(v);
-          onValue(v);
-        }}
-      />
-    );
-  }
-
-  it("is design-system selects, not a native datetime input", () => {
-    wrap(<Harness initial="" onValue={() => {}} />);
-    expect(document.querySelector('input[type="datetime-local"]')).toBeNull();
-    const field = screen.getByTestId("when");
-    expect(field.tagName).toBe("FIELDSET");
-    for (const part of ["day", "month", "year", "hour", "minute"])
-      expect(screen.getByTestId(`when-${part}`).getAttribute("role")).toBe("combobox");
-    expect(field.textContent).toContain("In your own time zone.");
-  });
-
-  it("emits the value only once every part is chosen, and keeps a half-filled date", async () => {
-    const onValue = vi.fn<(v: string) => void>();
-    wrap(<Harness initial="" onValue={onValue} />);
-    await pick("when-year", "2026");
-    await pick("when-month", "February");
-    await pick("when-day", "28");
-    await pick("when-hour", "09");
-    expect(onValue).toHaveBeenLastCalledWith("");
-    expect(screen.getByTestId("when-month").textContent).toContain("February");
-    await pick("when-minute", "05");
-    expect(onValue).toHaveBeenLastCalledWith("2026-02-28T09:05");
-    expect(screen.getByTestId("when").dataset.value).toBe("2026-02-28T09:05");
-  });
-
-  it("shows the year of a value outside the offered years", () => {
-    wrap(<Harness initial="2019-06-15T08:30" onValue={() => {}} />);
-    expect(screen.getByTestId("when-year").textContent).toContain("2019");
-    expect(screen.getByTestId("when").dataset.value).toBe("2019-06-15T08:30");
-  });
-
-  it("shows a value from outside and pulls the day back when the month gets shorter", async () => {
-    const onValue = vi.fn<(v: string) => void>();
-    wrap(<Harness initial="2026-03-31T23:59" onValue={onValue} />);
-    expect(screen.getByTestId("when-day").textContent).toContain("31");
-    expect(screen.getByTestId("when-hour").textContent).toContain("23");
-    await pick("when-month", "April");
-    expect(onValue).toHaveBeenLastCalledWith("2026-04-30T23:59");
-  });
-
-  it("egress and the legal queue use it, with no native datetime-local left", () => {
+  it("egress and the legal queue use the shared text field, with no native datetime-local left", () => {
     for (const file of ["src/components/admin/egress.tsx", "src/components/safety/legal.tsx"]) {
       const text = readFileSync(join(WEB, file), "utf8");
-      expect(text, file).toContain("<DateTimeField");
+      expect(text, file).toContain("<DateTimeTextField");
+      expect(text, file).toContain('from "../forms/date-time-field.tsx"');
       expect(text, file).not.toContain('type="datetime-local"');
     }
     // The UTC note stays on egress.

@@ -32,8 +32,6 @@ export type Key =
   | "settings.coop.boardEmptyHint"
   | "settings.coop.discussionEmptyHint"
   | "settings.coop.discussionStart"
-  | "settings.dateTime.hour"
-  | "settings.dateTime.minute"
   | "settings.dateTime.localHint"
   | "settings.integrity.signal.datacenterIp"
   | "settings.integrity.signal.datacenterIp.hint"

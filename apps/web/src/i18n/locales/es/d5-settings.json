@@ -27,8 +27,6 @@
   "settings.coop.boardEmptyHint": "Los puestos se cubren cuando cierra una elección de la junta.",
   "settings.coop.discussionEmptyHint": "Abre el debate: las preguntas y dudas ayudan a quien propone antes de la votación.",
   "settings.coop.discussionStart": "Escribir el primer comentario",
-  "settings.dateTime.hour": "Hora",
-  "settings.dateTime.minute": "Minuto",
   "settings.dateTime.localHint": "En tu propia zona horaria.",
   "settings.integrity.signal.datacenterIp": "Red de centro de datos",
   "settings.integrity.signal.datacenterIp.hint": "La sesión vino de una red de alojamiento o centro de datos, donde casi no hay espectadores reales.",

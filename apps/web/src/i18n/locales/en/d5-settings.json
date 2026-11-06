@@ -27,8 +27,6 @@
   "settings.coop.boardEmptyHint": "Seats fill when a board election closes.",
   "settings.coop.discussionEmptyHint": "Start the discussion: questions and concerns help the author before the vote.",
   "settings.coop.discussionStart": "Write the first comment",
-  "settings.dateTime.hour": "Hour",
-  "settings.dateTime.minute": "Minute",
   "settings.dateTime.localHint": "In your own time zone.",
   "settings.integrity.signal.datacenterIp": "Data-centre network",
   "settings.integrity.signal.datacenterIp.hint": "The session came from a hosting or data-centre network, where real viewers are rare.",

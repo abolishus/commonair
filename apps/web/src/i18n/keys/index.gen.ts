@@ -24,6 +24,7 @@ import type { Key as E8Viewer } from "./e8-viewer.gen.ts";
 import type { Key as E9Consent } from "./e9-consent.gen.ts";
 import type { Key as E9Console } from "./e9-console.gen.ts";
 import type { Key as FuChannel } from "./fu-channel.gen.ts";
+import type { Key as FuTime } from "./fu-time.gen.ts";
 import type { Key as FuWatch } from "./fu-watch.gen.ts";
 import type { Key as M1Connect } from "./m1-connect.gen.ts";
 import type { Key as M1Coop } from "./m1-coop.gen.ts";
@@ -84,6 +85,7 @@ export type MessageKey =
   | E9Consent
   | E9Console
   | FuChannel
+  | FuTime
   | FuWatch
   | M1Connect
   | M1Coop
@@ -143,6 +145,7 @@ export const NAMESPACES = [
   "e9-consent",
   "e9-console",
   "fu-channel",
+  "fu-time",
   "fu-watch",
   "m1-connect",
   "m1-coop",
