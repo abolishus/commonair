@@ -191,6 +191,8 @@ function AdminAppRow({
               className="size-4 shrink-0 text-muted-foreground transition-transform group-aria-expanded/app:rotate-180 motion-reduce:transition-none"
             />
             <span className="text-sm font-medium break-words">{app.name}</span>
+            {/* The search matches client ids, so the row shows why it matched (the detail has it whole). */}
+            <code className="max-w-40 truncate text-xs text-muted-foreground">{app.clientId}</code>
             <StatusBadge tone="neutral">
               {app.confidential ? t("developer.app.kind.confidential") : t("developer.app.kind.public")}
             </StatusBadge>

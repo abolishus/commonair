@@ -930,7 +930,7 @@ describe("/admin/apps", () => {
     expect(within(b as HTMLElement).queryByTestId("adminapp-suspend")).toBeNull();
   });
 
-  it("rows are closed to the key facts and the action, and open to the client id (F36)", async () => {
+  it("rows are closed to the key facts (the searched client id among them) and the action, and open to the details (F36)", async () => {
     const { client } = fakeAdmin();
     wrap(<AdminAppsPage client={client} />);
     await waitFor(() => expect(screen.getAllByTestId("adminapp")).toHaveLength(2));
@@ -939,7 +939,8 @@ describe("/admin/apps", () => {
     expect(toggle.tagName).toBe("BUTTON");
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
     expect(within(a).queryByTestId("adminapp-detail")).toBeNull();
-    expect(a.textContent).not.toContain("ca_client_1");
+    // The search matches client ids, so a closed row shows it too.
+    expect(toggle.textContent).toContain("ca_client_1");
     // The action needs no opening (the e9 console scenario clicks it straight from the row).
     expect(within(a).getByTestId("adminapp-suspend")).toBeTruthy();
     expect(toggle.contains(within(a).getByTestId("adminapp-suspend"))).toBe(false);
