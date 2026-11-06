@@ -16,12 +16,13 @@
  * 18+-confirmed viewers, as for live playback.
  */
 import { and, eq, inArray, isNull, ne, notInArray, sql, type SQL } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { schema } from "@commonair/db";
 import type { Deps } from "../deps.ts";
 import type { Caller } from "../lib/access.ts";
 import { confirmedAdult } from "../routes/me.ts";
 
-const { broadcasts, categories, clips, subscriptions, vods } = schema;
+const { broadcasts, categories, channels, clips, subscriptions, vods } = schema;
 
 export type Audience = "owner" | "subscriber" | "public";
 
@@ -121,6 +122,24 @@ export function vodShown(
   );
 }
 
+/**
+ * The channel's own category, for listings across channels (`*.listByCategory`): left-join it on
+ * `channels.category_id` wherever `notMatureLabelled` is used.
+ */
+export const channelCategory = alias(categories, "channel_category");
+
+/**
+ * Media not labelled mature by its broadcast, its channel or the channel's category, over a query
+ * joining `broadcasts`, `channels` and (left) `channelCategory`. The broadcast's own category is the
+ * listing's, checked by the caller.
+ */
+export const notMatureLabelled = (): SQL =>
+  and(
+    eq(broadcasts.mature, false),
+    eq(channels.mature, false),
+    sql`coalesce(${channelCategory.mature}, false) = false`,
+  ) as SQL;
+
 type Labelled = { mature: boolean; categoryId: string | null };
 
 /**
@@ -134,8 +153,24 @@ export async function urlsWithheld(
   channel: Labelled & { ownerId: string },
   items: readonly (Labelled | null)[],
 ): Promise<boolean[]> {
-  if (audienceOf(caller, channel) === "owner") return items.map(() => false);
-  const ids = [channel.categoryId, ...items.map((b) => b?.categoryId ?? null)].filter((x): x is string => x !== null);
+  return urlsWithheldAcross(
+    deps,
+    caller,
+    items.map((broadcast) => ({ channel, broadcast })),
+  );
+}
+
+/** `urlsWithheld` for items of several channels (each with its own channel). */
+export async function urlsWithheldAcross(
+  deps: Deps,
+  caller: Caller | null,
+  items: readonly { channel: Labelled & { ownerId: string }; broadcast: Labelled | null }[],
+): Promise<boolean[]> {
+  const others = items.map((x) => audienceOf(caller, x.channel) !== "owner");
+  if (!others.some(Boolean)) return items.map(() => false);
+  const ids = items
+    .flatMap((x, i) => (others[i] ? [x.channel.categoryId, x.broadcast?.categoryId ?? null] : []))
+    .filter((x): x is string => x !== null);
   const mature = new Set(
     ids.length === 0
       ? []
@@ -148,7 +183,7 @@ export async function urlsWithheld(
   );
   const labelled = (x: Labelled | null) =>
     x !== null && (x.mature || (x.categoryId !== null && mature.has(x.categoryId)));
-  const gated = items.map((b) => labelled(channel) || labelled(b));
+  const gated = items.map((x, i) => (others[i] ?? true) && (labelled(x.channel) || labelled(x.broadcast)));
   if (!gated.some(Boolean)) return gated;
   if (await confirmedAdult(deps, caller?.user.id)) return items.map(() => false);
   return gated;

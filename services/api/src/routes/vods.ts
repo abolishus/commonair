@@ -37,14 +37,26 @@ import { channelAuthority, type Caller, type ChannelRole } from "../lib/access.t
 import { os, requireCaller } from "../lib/orpc.ts";
 import { audit } from "../events/audit.ts";
 import { withMediaState } from "../events/media-state.ts";
-import { urlsWithheld, viewerAudience, vodShown, vodVisible } from "../media/visibility.ts";
+import {
+  channelCategory,
+  notMatureLabelled,
+  urlsWithheld,
+  urlsWithheldAcross,
+  viewerAudience,
+  vodShown,
+  vodVisible,
+} from "../media/visibility.ts";
 import { requestVodPlacement } from "../media/vod-placement-queue.ts";
 import { vodChat } from "../chat-replay/handlers.ts";
 import { vodCaptions } from "../captions/handlers.ts";
 import { vodCaptionTracks } from "../captions/tracks.ts";
 
-const { broadcasts, channelRoles, channels, clips: clipsT, vods: vodsT } = schema;
+const { broadcasts, categories, channelRoles, channels, clips: clipsT, vods: vodsT } = schema;
 type VodRow = typeof vodsT.$inferSelect;
+type Vod = z.infer<typeof dto.Vod>;
+
+/** The broadcast's category as the DTO carries it (left-joined on `broadcasts.category_id`). */
+const categoryCols = { slug: categories.slug, name: categories.name };
 
 const failedReason = (r: string | null) =>
   (VOD_FAILED_REASONS as readonly string[]).includes(r ?? "") ? (r as (typeof VOD_FAILED_REASONS)[number]) : null;
@@ -99,7 +111,8 @@ async function toVod(
   channelSlug: string,
   withheld: boolean,
   around: VodSurroundings,
-): Promise<z.infer<typeof dto.Vod>> {
+  category: Vod["category"],
+): Promise<Vod> {
   const state = placementState(v, around);
   let thumbnailUrl: string | null = null;
   let playlistUrl: string | null = null;
@@ -129,6 +142,7 @@ async function toVod(
     createdAt: iso(v.createdAt),
     expiresAt: isoOrNull(v.expiresAt),
     failedReason: v.status === "failed" ? failedReason(v.failedReason) : null,
+    category,
     captions: withheld ? [] : await vodCaptionTracks(deps, v),
   };
 }
@@ -150,9 +164,11 @@ export const vods = {
       .select({
         v: vodsT,
         b: { mature: broadcasts.mature, categoryId: broadcasts.categoryId, restrictedAt: broadcasts.restrictedAt },
+        cat: categoryCols,
       })
       .from(vodsT)
       .innerJoin(broadcasts, eq(broadcasts.id, vodsT.broadcastId))
+      .leftJoin(categories, eq(categories.id, broadcasts.categoryId))
       .where(and(eq(vodsT.channelId, channel.id), vodVisible(audience), after))
       .orderBy(desc(vodsT.createdAt), desc(vodsT.id))
       .limit(input.limit + 1);
@@ -165,14 +181,21 @@ export const vods = {
     // DTOs (and VOD tokens) only for the page itself, not the look-ahead row.
     const items = await Promise.all(
       rows.slice(0, input.limit).map((r, i) =>
-        toVod(deps, r.v, channel.slug, withheld[i] ?? true, {
-          channelId: channel.id,
-          channelSuspended: channel.suspendedAt !== null,
-          broadcastRestricted: r.b.restrictedAt !== null,
-        }),
+        toVod(
+          deps,
+          r.v,
+          channel.slug,
+          withheld[i] ?? true,
+          {
+            channelId: channel.id,
+            channelSuspended: channel.suspendedAt !== null,
+            broadcastRestricted: r.b.restrictedAt !== null,
+          },
+          r.cat,
+        ),
       ),
     );
-    const indexed = rows.map((r, i) => ({ ...r, dto: items[i] as z.infer<typeof dto.Vod> }));
+    const indexed = rows.map((r, i) => ({ ...r, dto: items[i] as Vod }));
     return pageOf(
       indexed,
       input.limit,
@@ -181,13 +204,73 @@ export const vods = {
     );
   }),
 
-  get: os.vods.get.handler(async ({ context, input }) => {
+  /**
+   * What `vods.list` shows an anonymous caller (ready, public, nothing removed or restricted, the
+   * channel not suspended), across the channels whose broadcast was in the category. Even the
+   * owner or a subscriber sees only public VODs here.
+   */
+  listByCategory: os.vods.listByCategory.handler(async ({ context, input }) => {
     const { deps } = context;
-    const [row] = await deps.db
-      .select({ v: vodsT, channel: channels, b: broadcasts })
+    const [cat] = await deps.db
+      .select({ id: categories.id, mature: categories.mature })
+      .from(categories)
+      .where(eq(categories.slug, input.slug))
+      .limit(1);
+    if (!cat) throw notFound("Category not found");
+    if (cat.mature && !input.includeMature) return { items: [], nextCursor: null };
+    const cur = decodeCursor(input.cursor, isKeyCursor);
+    let after: SQL | undefined;
+    if (cur) {
+      const t = new Date(cur.t);
+      after = or(lt(vodsT.createdAt, t), and(eq(vodsT.createdAt, t), lt(vodsT.id, cur.id)));
+    }
+    const rows = await deps.db
+      .select({
+        v: vodsT,
+        channel: channels,
+        b: { mature: broadcasts.mature, categoryId: broadcasts.categoryId },
+        cat: categoryCols,
+      })
       .from(vodsT)
       .innerJoin(broadcasts, eq(broadcasts.id, vodsT.broadcastId))
       .innerJoin(channels, eq(channels.id, vodsT.channelId))
+      .innerJoin(categories, eq(categories.id, broadcasts.categoryId))
+      .leftJoin(channelCategory, eq(channelCategory.id, channels.categoryId))
+      .where(
+        and(
+          eq(broadcasts.categoryId, cat.id),
+          vodVisible("public"),
+          isNull(channels.suspendedAt),
+          input.includeMature ? undefined : notMatureLabelled(),
+          after,
+        ),
+      )
+      .orderBy(desc(vodsT.createdAt), desc(vodsT.id))
+      .limit(input.limit + 1);
+    const page = rows.slice(0, input.limit);
+    const withheld = await urlsWithheldAcross(
+      deps,
+      context.caller,
+      page.map((r) => ({ channel: r.channel, broadcast: r.b })),
+    );
+    const items = await Promise.all(
+      page.map((r, i) => toVod(deps, r.v, r.channel.slug, withheld[i] ?? true, surroundings(r.channel, null), r.cat)),
+    );
+    const last = page[page.length - 1];
+    return {
+      items,
+      nextCursor: rows.length > input.limit && last ? encodeCursor({ t: iso(last.v.createdAt), id: last.v.id }) : null,
+    };
+  }),
+
+  get: os.vods.get.handler(async ({ context, input }) => {
+    const { deps } = context;
+    const [row] = await deps.db
+      .select({ v: vodsT, channel: channels, b: broadcasts, cat: categoryCols })
+      .from(vodsT)
+      .innerJoin(broadcasts, eq(broadcasts.id, vodsT.broadcastId))
+      .innerJoin(channels, eq(channels.id, vodsT.channelId))
+      .leftJoin(categories, eq(categories.id, broadcasts.categoryId))
       .where(eq(vodsT.id, input.id))
       .limit(1);
     if (
@@ -196,7 +279,14 @@ export const vods = {
     )
       throw notFound("VOD not found");
     const [withheld] = await urlsWithheld(deps, context.caller, row.channel, [row.b]);
-    return toVod(deps, row.v, row.channel.slug, withheld ?? true, surroundings(row.channel, row.b.restrictedAt));
+    return toVod(
+      deps,
+      row.v,
+      row.channel.slug,
+      withheld ?? true,
+      surroundings(row.channel, row.b.restrictedAt),
+      row.cat,
+    );
   }),
 
   update: os.vods.update.handler(async ({ context, input }) => {
@@ -212,7 +302,7 @@ export const vods = {
       throw precondition("rehearsal", "A rehearsal recording stays private");
     if (input.visibility !== undefined) set.visibility = input.visibility;
     const around = surroundings(row.channel, row.restrictedAt);
-    if (Object.keys(set).length === 0) return toVod(deps, row.v, row.channel.slug, false, around);
+    if (Object.keys(set).length === 0) return toVod(deps, row.v, row.channel.slug, false, around, row.cat);
     const now = deps.now();
     const updated = await deps.db.transaction(async (tx) => {
       const [v] = await withMediaState(tx, { vods: eq(vodsT.id, row.v.id) }, "visibility", now, () =>
@@ -238,7 +328,7 @@ export const vods = {
     // After commit: the objects follow the new visibility now, not at the next sweep.
     if (input.visibility !== undefined && input.visibility !== row.v.visibility)
       await requestVodPlacement(deps, updated.id);
-    return toVod(deps, updated, row.channel.slug, false, around);
+    return toVod(deps, updated, row.channel.slug, false, around, row.cat);
   }),
 
   remove: os.vods.remove.handler(async ({ context, input }) => {
@@ -304,10 +394,17 @@ const surroundings = (channel: { id: string; suspendedAt: Date | null }, restric
  */
 async function managedVod(deps: Deps, caller: Caller, id: string) {
   const [row] = await deps.db
-    .select({ v: vodsT, channel: channels, restrictedAt: broadcasts.restrictedAt, kind: broadcasts.kind })
+    .select({
+      v: vodsT,
+      channel: channels,
+      restrictedAt: broadcasts.restrictedAt,
+      kind: broadcasts.kind,
+      cat: categoryCols,
+    })
     .from(vodsT)
     .innerJoin(broadcasts, eq(broadcasts.id, vodsT.broadcastId))
     .innerJoin(channels, eq(channels.id, vodsT.channelId))
+    .leftJoin(categories, eq(categories.id, broadcasts.categoryId))
     .where(eq(vodsT.id, id))
     .limit(1);
   if (!row) throw notFound("VOD not found");

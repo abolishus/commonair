@@ -14,7 +14,7 @@
  *   writes nothing. `move.clear` sends nothing. Subscriptions are untouched (decision (m)).
  */
 import { schema } from "@commonair/db";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import type { Deps } from "../deps.ts";
 import { audit } from "../events/audit.ts";
 import { emit } from "../events/outbox.ts";
@@ -51,6 +51,42 @@ export async function setGrant(
   if (!f) throw precondition("following", "Follow the channel first");
   await deps.db.insert(grants).values({ userId: input.userId, channelId: c.id }).onConflictDoNothing();
   return { enabled: true };
+}
+
+/**
+ * "All on / all off": `setGrant` for each listed channel in one transaction. Unknown slugs are
+ * skipped, and so (when enabling) are channels the caller does not follow, as `setGrant` refuses
+ * them. `updated` counts the grants actually added or removed, so a repeat reports 0.
+ */
+export async function setGrants(
+  deps: Deps,
+  input: { userId: string; slugs: readonly string[]; enabled: boolean },
+): Promise<{ enabled: boolean; updated: number }> {
+  const slugs = [...new Set(input.slugs)];
+  return deps.db.transaction(async (tx) => {
+    const ids = (await tx.select({ id: channels.id }).from(channels).where(inArray(channels.slug, slugs))).map(
+      (r) => r.id,
+    );
+    if (ids.length === 0) return { enabled: input.enabled, updated: 0 };
+    if (!input.enabled) {
+      const gone = await tx
+        .delete(grants)
+        .where(and(eq(grants.userId, input.userId), inArray(grants.channelId, ids)))
+        .returning({ channelId: grants.channelId });
+      return { enabled: false, updated: gone.length };
+    }
+    const followed = await tx
+      .select({ channelId: follows.channelId })
+      .from(follows)
+      .where(and(eq(follows.followerId, input.userId), inArray(follows.channelId, ids)));
+    if (followed.length === 0) return { enabled: true, updated: 0 };
+    const added = await tx
+      .insert(grants)
+      .values(followed.map((f) => ({ userId: input.userId, channelId: f.channelId })))
+      .onConflictDoNothing()
+      .returning({ channelId: grants.channelId });
+    return { enabled: true, updated: added.length };
+  });
 }
 
 export async function myGrants(deps: Deps, userId: string) {

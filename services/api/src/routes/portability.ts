@@ -13,7 +13,7 @@ import { schema } from "@commonair/db";
 import { channelAvatar, channelBySlug } from "../lib/dto.ts";
 import { forbidden } from "../lib/errors.ts";
 import { os, requireCaller, requireChannel, type Ctx } from "../lib/orpc.ts";
-import { clearMove, myGrants, setGrant, setMove } from "../portability/audience.ts";
+import { clearMove, myGrants, setGrant, setGrants, setMove } from "../portability/audience.ts";
 import { getImport, listImports, presignArchive, previewImport, startImport } from "../portability/imports.ts";
 import { createLink, findLink, linkState, listLinks, revokeLink } from "../portability/links.ts";
 import { createExport } from "../privacy/exports.ts";
@@ -69,6 +69,10 @@ export const portability = {
     set: os.portability.grants.set.handler(async ({ context, input }) => {
       const caller = requireCaller(context);
       return setGrant(context.deps, { userId: caller.user.id, slug: input.channel, enabled: input.enabled });
+    }),
+    setMany: os.portability.grants.setMany.handler(async ({ context, input }) => {
+      const caller = requireCaller(context);
+      return setGrants(context.deps, { userId: caller.user.id, slugs: input.channels, enabled: input.enabled });
     }),
     mine: os.portability.grants.mine.handler(async ({ context }) =>
       myGrants(context.deps, requireCaller(context).user.id),

@@ -3,13 +3,14 @@
 
 /** Queries and row → DTO mapping shared by the checkout and treasurer handlers. */
 import { type SQL, and, asc, desc, eq, inArray } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import type { z } from "zod";
 import type { dto } from "@commonair/contracts";
 import { type Executor, schema } from "@commonair/db";
 import type { Deps } from "../deps.ts";
 import { emit, broadcasterFields, userFields } from "../events/outbox.ts";
 import { publishControl } from "../lib/control.ts";
-import { iso, isoOrNull } from "../lib/dto.ts";
+import { channelAvatar, channelTheme, iso, isoOrNull } from "../lib/dto.ts";
 import { HOLDING_SUBSCRIPTION_STATUSES, type TierNumber, tierCode } from "./checkout-rules.ts";
 
 const { subscriptions, users, channels, channelSubTiers } = schema;
@@ -17,6 +18,8 @@ type SubscriptionRow = typeof subscriptions.$inferSelect;
 type ChannelRow = typeof channels.$inferSelect;
 
 export type SubscriptionDto = z.infer<typeof dto.Subscription>;
+export type SubscriptionChannel = SubscriptionDto["channel"];
+const owners = alias(users, "subscription_channel_owner");
 export type SubTierDto = z.infer<typeof dto.SubTierInfo>;
 
 /** The channel's tiers, or `[]` unless all three are set (subscriptions need all three). */
@@ -36,31 +39,56 @@ export async function loadTiers(db: Executor, channelId: string, currency: strin
   }));
 }
 
-/** Subscriptions joined with their subscriber and channel slug, as DTOs. */
+/** Subscriptions joined with their subscriber and channel (with its owner, for the avatar), as DTOs. */
 export async function subscriptionDtos(
-  db: Executor,
+  deps: Deps,
   where: SQL | undefined,
   opts: { limit: number },
 ): Promise<SubscriptionDto[]> {
-  const rows = await db
-    .select({ s: subscriptions, slug: channels.slug, uid: users.id, username: users.username, name: users.name })
+  const rows = await deps.db
+    .select({
+      s: subscriptions,
+      c: channels,
+      ownerImage: owners.image,
+      uid: users.id,
+      username: users.username,
+      name: users.name,
+    })
     .from(subscriptions)
     .innerJoin(channels, eq(channels.id, subscriptions.channelId))
     .innerJoin(users, eq(users.id, subscriptions.subscriberId))
+    .innerJoin(owners, eq(owners.id, channels.ownerId))
     .where(where)
     .orderBy(desc(subscriptions.id))
     .limit(opts.limit);
-  return rows.map((r) => toSubscriptionDto(r.s, r.slug, { id: r.uid, username: r.username, displayName: r.name }));
+  return rows.map((r) =>
+    toSubscriptionDto(r.s, subscriptionChannel(deps, r.c, r.ownerImage), {
+      id: r.uid,
+      username: r.username,
+      displayName: r.name,
+    }),
+  );
+}
+
+/** The channel as `StreamCard.channel` shows it (same avatar and accent), without its id. */
+export function subscriptionChannel(deps: Deps, c: ChannelRow, ownerImage: string | null): SubscriptionChannel {
+  return {
+    slug: c.slug,
+    displayName: c.displayName,
+    avatarUrl: channelAvatar(deps, c, ownerImage),
+    accent: channelTheme(c).accent,
+  };
 }
 
 export function toSubscriptionDto(
   s: SubscriptionRow,
-  channelSlug: string,
+  channel: SubscriptionChannel,
   subscriber: { id: string; username: string; displayName: string },
 ): SubscriptionDto {
   return {
     id: s.id,
-    channelSlug,
+    channelSlug: channel.slug,
+    channel,
     subscriber,
     tier: s.tier,
     status: s.status,
@@ -74,12 +102,12 @@ export function toSubscriptionDto(
 
 /** The caller's subscription that holds the channel slot (`active`, `past_due` or `incomplete`). */
 export async function holdingSubscription(
-  db: Executor,
+  deps: Deps,
   userId: string,
   channelId: string,
 ): Promise<SubscriptionDto | null> {
   const [s] = await subscriptionDtos(
-    db,
+    deps,
     and(
       eq(subscriptions.subscriberId, userId),
       eq(subscriptions.channelId, channelId),

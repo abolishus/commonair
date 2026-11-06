@@ -7,7 +7,7 @@
  * reading follow `media/visibility.ts`. The channel's owner (or an editor or moderator) and the clip's
  * creator may delete it: hidden at once, objects deleted by the worker's `vod-retention` (E6).
  */
-import { and, desc, eq, isNull, lt, ne, or, type SQL } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, lt, ne, or, sql, type SQL } from "drizzle-orm";
 import { ORPCError } from "@orpc/server";
 import type { z } from "zod";
 import type { dto } from "@commonair/contracts";
@@ -21,16 +21,86 @@ import { audit } from "../events/audit.ts";
 import { withMediaState } from "../events/media-state.ts";
 import { os, requireCaller } from "../lib/orpc.ts";
 import { clipQueue } from "../media/clip-queue.ts";
-import { clipVisible, urlsWithheld, viewerAudience, vodShown } from "../media/visibility.ts";
+import {
+  channelCategory,
+  clipVisible,
+  notMatureLabelled,
+  urlsWithheld,
+  urlsWithheldAcross,
+  viewerAudience,
+  vodShown,
+} from "../media/visibility.ts";
 import { matureGate } from "./playback.ts";
 import { clipChat } from "../chat-replay/handlers.ts";
 
-const { broadcasts, channelRoles, channels, clips: clipsT, vods } = schema;
+const { broadcasts, categories, channelRoles, channels, clips: clipsT, vods } = schema;
 type ClipRow = typeof clipsT.$inferSelect;
 type ChannelRow = typeof channels.$inferSelect;
 type Clip = z.infer<typeof dto.Clip>;
 /** The clip's broadcast as the 18+ gate and `windowStartedAt` need it. */
 type Labelled = { mature: boolean; categoryId: string | null; startedAt?: Date | null };
+/** One clip to render: its channel, its broadcast (null when gone) and that broadcast's category. */
+interface ClipItem {
+  c: ClipRow;
+  channel: ChannelRow;
+  labels: Labelled | null;
+  category: Clip["category"];
+}
+
+/** The broadcast's category as the DTO carries it (left-joined on `broadcasts.category_id`). */
+const categoryCols = { slug: categories.slug, name: categories.name };
+
+/** What every listing and read selects: the clip, its broadcast's labels and category. */
+const clipCols = {
+  c: clipsT,
+  mature: broadcasts.mature,
+  categoryId: broadcasts.categoryId,
+  bid: broadcasts.id,
+  startedAt: broadcasts.startedAt,
+  cat: categoryCols,
+};
+type ClipSelected = {
+  c: ClipRow;
+  mature: boolean | null;
+  categoryId: string | null;
+  bid: string | null;
+  startedAt: Date | null;
+  cat: Clip["category"];
+};
+const labelsOfRow = (r: ClipSelected): Labelled | null =>
+  r.bid === null ? null : { mature: r.mature ?? false, categoryId: r.categoryId, startedAt: r.startedAt };
+
+/** `clips.list` / `listByCategory` window, measured against the database clock. */
+const DAYS: Record<"7d" | "30d", number> = { "7d": 7, "30d": 30 };
+const inRange = (range: "7d" | "30d" | "all"): SQL | undefined =>
+  range === "all" ? undefined : gte(clipsT.createdAt, sql`now() - make_interval(days => ${DAYS[range]})`);
+
+/**
+ * Keyset ("recent") or offset ("top": views change between pages) paging; returns the extra
+ * condition, the offset and how to encode the next cursor.
+ */
+function clipPaging(input: { sort: "recent" | "top"; cursor?: string | undefined; limit: number }) {
+  const top = input.sort === "top";
+  let after: SQL | undefined;
+  let offset = 0;
+  if (top) {
+    offset = decodeCursor(input.cursor, isOffsetCursor)?.o ?? 0;
+  } else {
+    const cur = decodeCursor(input.cursor, isKeyCursor);
+    if (cur) {
+      const t = new Date(cur.t);
+      after = or(lt(clipsT.createdAt, t), and(eq(clipsT.createdAt, t), lt(clipsT.id, cur.id)));
+    }
+  }
+  const orderBy = [...(top ? [desc(clipsT.views)] : []), desc(clipsT.createdAt), desc(clipsT.id)];
+  const next = (more: boolean, last: ClipRow | undefined) =>
+    more && last
+      ? top
+        ? encodeCursor({ o: offset + input.limit })
+        : encodeCursor({ t: iso(last.createdAt), id: last.id })
+      : null;
+  return { after, offset, orderBy, next };
+}
 
 /**
  * A live clip ends this far behind the live edge: what viewers just saw (HLS plays seconds behind),
@@ -43,22 +113,20 @@ export const LIVE_CLIP_LAG_SECONDS = 10;
 const windowStart = (b: Labelled | null | undefined, startOffset: number): string | null =>
   b?.startedAt ? new Date(b.startedAt.getTime() + startOffset * 1000).toISOString() : null;
 
-/** `labels[i]` is clip i's broadcast (null when gone); mature media URLs follow the 18+ gate. */
-async function toClips(
-  deps: Deps,
-  caller: Caller | null,
-  channel: ChannelRow,
-  rows: readonly ClipRow[],
-  labels: readonly (Labelled | null)[],
-): Promise<Clip[]> {
+/** Mature media URLs follow the 18+ gate (per clip's channel and broadcast). */
+async function toClips(deps: Deps, caller: Caller | null, items: readonly ClipItem[]): Promise<Clip[]> {
   const [creators, withheld] = await Promise.all([
     loadUsersPublic(
       deps,
-      rows.map((r) => r.creatorId).filter((id): id is string => id !== null),
+      items.map((r) => r.c.creatorId).filter((id): id is string => id !== null),
     ),
-    urlsWithheld(deps, caller, channel, labels),
+    urlsWithheldAcross(
+      deps,
+      caller,
+      items.map((r) => ({ channel: r.channel, broadcast: r.labels })),
+    ),
   ]);
-  return rows.map((c, i) => {
+  return items.map(({ c, channel, labels, category }, i) => {
     const u = c.creatorId ? creators.get(c.creatorId) : undefined;
     const playable = c.status === "ready" && !(withheld[i] ?? true);
     return {
@@ -73,7 +141,8 @@ async function toClips(
       views: c.views,
       createdAt: iso(c.createdAt),
       // As `clips.chat` places the window (chat-replay/handlers.ts).
-      windowStartedAt: windowStart(labels[i], c.startOffset),
+      windowStartedAt: windowStart(labels, c.startOffset),
+      category,
     };
   });
 }
@@ -154,7 +223,12 @@ export const clips = {
         .catch((e: unknown) => deps.logger.error("clip fail-mark failed", { clipId: row.id, err: (e as Error).name }));
       throw new ORPCError("INTERNAL_SERVER_ERROR", { message: "Clipping is unavailable right now; try again" });
     }
-    const [out] = await toClips(deps, caller, channel, [row], [labelsOf(src.labels)]);
+    const [category] = src.labels.categoryId
+      ? await deps.db.select(categoryCols).from(categories).where(eq(categories.id, src.labels.categoryId)).limit(1)
+      : [];
+    const [out] = await toClips(deps, caller, [
+      { c: row, channel, labels: labelsOf(src.labels), category: category ?? null },
+    ]);
     return out as Clip;
   }),
 
@@ -164,51 +238,66 @@ export const clips = {
     if (!channel) throw notFound("Channel not found");
     const audience = await viewerAudience(deps, context.caller, channel);
     if (audience !== "owner" && channel.suspendedAt !== null) return { items: [], nextCursor: null };
-    const top = input.sort === "top";
-    // "top" pages by offset (views change between pages); "recent" by keyset.
-    let after: SQL | undefined;
-    let offset = 0;
-    if (top) {
-      offset = decodeCursor(input.cursor, isOffsetCursor)?.o ?? 0;
-    } else {
-      const cur = decodeCursor(input.cursor, isKeyCursor);
-      if (cur) {
-        const t = new Date(cur.t);
-        after = or(lt(clipsT.createdAt, t), and(eq(clipsT.createdAt, t), lt(clipsT.id, cur.id)));
-      }
-    }
+    const { after, offset, orderBy, next } = clipPaging(input);
     const rows = await deps.db
-      .select({
-        c: clipsT,
-        mature: broadcasts.mature,
-        categoryId: broadcasts.categoryId,
-        bid: broadcasts.id,
-        startedAt: broadcasts.startedAt,
-      })
+      .select(clipCols)
       .from(clipsT)
       .leftJoin(broadcasts, eq(broadcasts.id, clipsT.broadcastId))
-      .where(and(eq(clipsT.channelId, channel.id), clipVisible(audience), after))
-      .orderBy(...(top ? [desc(clipsT.views)] : []), desc(clipsT.createdAt), desc(clipsT.id))
+      .leftJoin(categories, eq(categories.id, broadcasts.categoryId))
+      .where(and(eq(clipsT.channelId, channel.id), clipVisible(audience), inRange(input.range), after))
+      .orderBy(...orderBy)
       .limit(input.limit + 1)
       .offset(offset);
     const page = rows.slice(0, input.limit);
     const items = await toClips(
       deps,
       context.caller,
-      channel,
-      page.map((r) => r.c),
-      page.map((r) =>
-        r.bid === null ? null : { mature: r.mature ?? false, categoryId: r.categoryId, startedAt: r.startedAt },
-      ),
+      page.map((r) => ({ c: r.c, channel, labels: labelsOfRow(r), category: r.cat })),
     );
-    const last = page[page.length - 1]?.c;
-    const nextCursor =
-      rows.length > input.limit && last
-        ? top
-          ? encodeCursor({ o: offset + input.limit })
-          : encodeCursor({ t: iso(last.createdAt), id: last.id })
-        : null;
-    return { items, nextCursor };
+    return { items, nextCursor: next(rows.length > input.limit, page[page.length - 1]?.c) };
+  }),
+
+  /**
+   * What `clips.list` shows an anonymous caller (ready, nothing removed or restricted, its source
+   * VOD public, the channel not suspended), across the channels whose broadcast was in the category.
+   */
+  listByCategory: os.clips.listByCategory.handler(async ({ context, input }) => {
+    const { deps } = context;
+    const [cat] = await deps.db
+      .select({ id: categories.id, mature: categories.mature })
+      .from(categories)
+      .where(eq(categories.slug, input.slug))
+      .limit(1);
+    if (!cat) throw notFound("Category not found");
+    if (cat.mature && !input.includeMature) return { items: [], nextCursor: null };
+    const { after, offset, orderBy, next } = clipPaging(input);
+    const rows = await deps.db
+      .select({ ...clipCols, channel: channels })
+      .from(clipsT)
+      .innerJoin(broadcasts, eq(broadcasts.id, clipsT.broadcastId))
+      .innerJoin(categories, eq(categories.id, broadcasts.categoryId))
+      .innerJoin(channels, eq(channels.id, clipsT.channelId))
+      .leftJoin(channelCategory, eq(channelCategory.id, channels.categoryId))
+      .where(
+        and(
+          eq(broadcasts.categoryId, cat.id),
+          clipVisible("public"),
+          isNull(channels.suspendedAt),
+          input.includeMature ? undefined : notMatureLabelled(),
+          inRange(input.range),
+          after,
+        ),
+      )
+      .orderBy(...orderBy)
+      .limit(input.limit + 1)
+      .offset(offset);
+    const page = rows.slice(0, input.limit);
+    const items = await toClips(
+      deps,
+      context.caller,
+      page.map((r) => ({ c: r.c, channel: r.channel, labels: labelsOfRow(r), category: r.cat })),
+    );
+    return { items, nextCursor: next(rows.length > input.limit, page[page.length - 1]?.c) };
   }),
 
   get: os.clips.get.handler(async ({ context, input }) => {
@@ -223,21 +312,16 @@ export const clips = {
     const audience = await viewerAudience(deps, context.caller, head.channel);
     if (audience !== "owner" && head.channel.suspendedAt !== null) throw notFound("Clip not found");
     const [row] = await deps.db
-      .select({
-        c: clipsT,
-        mature: broadcasts.mature,
-        categoryId: broadcasts.categoryId,
-        bid: broadcasts.id,
-        startedAt: broadcasts.startedAt,
-      })
+      .select(clipCols)
       .from(clipsT)
       .leftJoin(broadcasts, eq(broadcasts.id, clipsT.broadcastId))
+      .leftJoin(categories, eq(categories.id, broadcasts.categoryId))
       .where(and(eq(clipsT.id, input.id), clipVisible(audience)))
       .limit(1);
     if (!row) throw notFound("Clip not found");
-    const labels =
-      row.bid === null ? null : { mature: row.mature ?? false, categoryId: row.categoryId, startedAt: row.startedAt };
-    const [out] = await toClips(deps, context.caller, head.channel, [row.c], [labels]);
+    const [out] = await toClips(deps, context.caller, [
+      { c: row.c, channel: head.channel, labels: labelsOfRow(row), category: row.cat },
+    ]);
     return out as Clip;
   }),
 

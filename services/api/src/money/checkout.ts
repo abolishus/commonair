@@ -169,7 +169,7 @@ export const checkoutHandlers = {
       feeEstimate: PROCESSOR_FEE_ESTIMATE[deps.env.PAYMENTS_PROVIDER],
       viewer: caller
         ? {
-            subscription: await holdingSubscription(deps.db, caller.user.id, c.id),
+            subscription: await holdingSubscription(deps, caller.user.id, c.id),
             isOwner: c.ownerId === caller.user.id,
           }
         : null,
@@ -414,14 +414,14 @@ export const checkoutHandlers = {
   mySubscriptions: os.money.mySubscriptions.handler(async ({ context }) => {
     const { deps } = context;
     const caller = requireCaller(context);
-    return subscriptionDtos(deps.db, eq(subscriptions.subscriberId, caller.user.id), { limit: 200 });
+    return subscriptionDtos(deps, eq(subscriptions.subscriberId, caller.user.id), { limit: 200 });
   }),
 
   cancelSubscription: os.money.cancelSubscription.handler(async ({ context, input }) => {
     const { deps } = context;
     const caller = requireCaller(context);
     const [current] = await subscriptionDtos(
-      deps.db,
+      deps,
       and(eq(subscriptions.id, input.id), eq(subscriptions.subscriberId, caller.user.id)),
       { limit: 1 },
     );
@@ -477,7 +477,7 @@ export const checkoutHandlers = {
         return { row, channelId: c.id };
       });
       await invalidateSubscribers(deps, ended.channelId, [caller.user.id]);
-      return toSubscriptionDto(ended.row, current.channelSlug, current.subscriber);
+      return toSubscriptionDto(ended.row, current.channel, current.subscriber);
     }
     if (current.cancelAtPeriodEnd) return current;
     const [row] = await deps.db
@@ -492,7 +492,7 @@ export const checkoutHandlers = {
       )
       .returning();
     if (!row) throw conflict("This subscription changed; reload and try again");
-    return toSubscriptionDto(row, current.channelSlug, current.subscriber);
+    return toSubscriptionDto(row, current.channel, current.subscriber);
   }),
 
   tip: os.money.tip.handler(async ({ context, input }): Promise<CheckoutResult> => {
@@ -556,7 +556,7 @@ export const checkoutHandlers = {
     const c = requireChannel(context);
     const cur = decodeCursor(input.cursor, isKeyCursor);
     const rows = await subscriptionDtos(
-      deps.db,
+      deps,
       and(
         eq(subscriptions.channelId, c.id),
         inArray(subscriptions.status, ["active", "past_due"]),
