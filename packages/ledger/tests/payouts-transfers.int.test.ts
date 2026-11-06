@@ -16,6 +16,7 @@ import {
   PAYOUT_TRANSFER_CODES,
   PayoutStateError,
   accounts,
+  cancelPayout,
   cancelPayoutWithoutAccount,
   creatorBalances,
   holdPayoutsForFraud,
@@ -27,6 +28,7 @@ import {
   payoutTransferKey,
   paymentSucceeded,
   post,
+  postPayout,
   rawBalance,
   recordOrphanedPayoutTransfer,
   recordPayoutTransferCreated,
@@ -435,5 +437,127 @@ describe("account readiness", () => {
       .from(s.auditLog)
       .where(and(eq(s.auditLog.subjectId, f.userId), eq(s.auditLog.action, "payout_account.set")));
     expect(audits).toHaveLength(1);
+  });
+});
+
+describe("edges: unknown rows, wrong states, a rerun of the same period", () => {
+  test("every entry point refuses an unknown payout or transfer with PayoutStateError", async () => {
+    const nope = uuidv7();
+    await expect(postPayout(db, { payoutId: nope, paidAt: AT })).rejects.toThrow(/payout .* not found/);
+    await expect(cancelPayout(db, { payoutId: nope, at: AT })).rejects.toThrow(/payout .* not found/);
+    await expect(openPayoutTransfer(db, { payoutId: nope, at: AT })).rejects.toThrow(PayoutStateError);
+    await expect(cancelPayoutWithoutAccount(db, { payoutId: nope, at: AT })).rejects.toThrow(PayoutStateError);
+    for (const call of [
+      () => recordPayoutTransferCreated(db, { transferId: nope, providerRef: "tr_x", at: AT }),
+      () => recordPayoutTransferFailed(db, { transferId: nope, failureCode: "held", at: AT }),
+      () => recordPayoutTransferReversal(db, { transferId: nope, reversedTotalCents: 1, at: AT }),
+      () => markPayoutTransferUnsettled(db, { transferId: nope, code: PAYOUT_TRANSFER_CODES.outcomeUnknown, at: AT }),
+      () => recordOrphanedPayoutTransfer(db, { transferId: nope, providerRef: "tr_x", at: AT }),
+    ])
+      await expect(call()).rejects.toThrow(/payout transfer .* not found/);
+    expect(await findPayoutTransfer(db, { providerRef: "tr_none", transferId: nope })).toBeNull();
+    expect(await findPayoutTransfer(db, { providerRef: "tr_none", transferId: null })).toBeNull();
+  });
+
+  test("a held payout is never posted as sent; a paid one is never cancelled", async () => {
+    const held = await reservedPayout({ enabled: false });
+    expect((await payoutOf(held.payoutId)).status).toBe("held");
+    await expect(postPayout(db, { payoutId: held.payoutId, paidAt: AT })).rejects.toThrow(/is held/);
+    const f = await reservedPayout();
+    const tr = await scheduledTransfer(f);
+    await recordPayoutTransferCreated(db, { transferId: tr.id, providerRef: "tr_paid", at: AT });
+    await expect(cancelPayout(db, { payoutId: f.payoutId, at: AT })).rejects.toThrow(/was paid/);
+    // A paid payout's repeat post is a no-op returning the same transaction.
+    const again = await postPayout(db, { payoutId: f.payoutId, paidAt: AT });
+    expect(again.created).toBe(false);
+  });
+
+  test("a created transfer is never failed nor marked unsettled; a second reference is refused", async () => {
+    const f = await reservedPayout();
+    const tr = await scheduledTransfer(f);
+    await markPayoutTransferUnsettled(db, {
+      transferId: tr.id,
+      code: PAYOUT_TRANSFER_CODES.sentUnrecorded,
+      providerRef: "tr_first",
+      at: AT,
+    });
+    await expect(
+      markPayoutTransferUnsettled(db, {
+        transferId: tr.id,
+        code: PAYOUT_TRANSFER_CODES.sentUnrecorded,
+        providerRef: "tr_other",
+        at: AT,
+      }),
+    ).rejects.toThrow(/another provider reference/);
+    await expect(
+      recordPayoutTransferCreated(db, { transferId: tr.id, providerRef: "tr_other", at: AT }),
+    ).rejects.toThrow(/another provider reference/);
+    await recordPayoutTransferCreated(db, { transferId: tr.id, providerRef: "tr_first", at: AT });
+    await expect(recordPayoutTransferFailed(db, { transferId: tr.id, failureCode: "held", at: AT })).rejects.toThrow(
+      /is created/,
+    );
+    expect(
+      await markPayoutTransferUnsettled(db, { transferId: tr.id, code: PAYOUT_TRANSFER_CODES.outcomeUnknown, at: AT }),
+    ).toBe(false);
+    // A repeat of the same answer changes nothing.
+    const repeat = await recordPayoutTransferCreated(db, { transferId: tr.id, providerRef: "tr_first", at: AT });
+    expect(repeat.created).toBe(false);
+  });
+
+  test("a scheduled payout whose account went away opens no transfer; one with a transfer is not cancelled", async () => {
+    const gone = await reservedPayout();
+    await schedulePayoutTransfers(db);
+    await owner.delete(s.payoutAccounts).where(eq(s.payoutAccounts.userId, gone.userId));
+    expect(await openPayoutTransfer(db, { payoutId: gone.payoutId, at: AT })).toEqual({
+      transfer: null,
+      reason: "no_account",
+    });
+    const f = await reservedPayout();
+    const tr = await scheduledTransfer(f);
+    // Already opened: the existing row is returned, and the no-account cancel leaves it to the worker.
+    expect((await openPayoutTransfer(db, { payoutId: f.payoutId, at: AT })).transfer?.id).toBe(tr.id);
+    await owner.delete(s.payoutAccounts).where(eq(s.payoutAccounts.userId, f.userId));
+    expect(await cancelPayoutWithoutAccount(db, { payoutId: f.payoutId, at: AT })).toBe(false);
+    expect((await payoutOf(f.payoutId)).status).toBe("scheduled");
+  });
+
+  test("a period runs once per creator: money earned in it after its run waits for the next period", async () => {
+    const f = await reservedPayout({ provider: "manual" });
+    // Dated inside the period, posted after its run (a late webhook): available at its end.
+    await earn(f.userId, 5_000, f.cur);
+    const rerun = await runPayoutBatch(db, { ...PERIOD, currency: f.cur, minimumCents: 1_000 });
+    expect(rerun).toMatchObject({ created: 0, held: 0, totalCents: 0 });
+    expect(await db.select().from(s.payouts).where(eq(s.payouts.userId, f.userId))).toHaveLength(1);
+    const next = { periodStart: PERIOD.periodEnd, periodEnd: new Date(PERIOD.periodEnd.getTime() + 28 * DAY) };
+    expect(await runPayoutBatch(db, { ...next, currency: f.cur, minimumCents: 1_000 })).toMatchObject({
+      created: 1,
+      totalCents: 4_500,
+    });
+  });
+
+  test("a payout row the ledger never reserved is never sent; cancelling it posts nothing", async () => {
+    const userId = await makeUser();
+    const cur = freshCurrency();
+    const [row] = await db
+      .insert(s.payouts)
+      .values({ userId, ...PERIOD, amountCents: 1_000, currency: cur, status: "pending", provider: "manual" })
+      .returning({ id: s.payouts.id });
+    await expect(postPayout(db, { payoutId: row!.id, paidAt: AT })).rejects.toThrow(/never reserved/);
+    expect(await cancelPayout(db, { payoutId: row!.id, at: AT })).toBeNull();
+    expect((await payoutOf(row!.id)).status).toBe("failed");
+    // Failed already: a repeat cancel leaves it as it is.
+    expect(await cancelPayout(db, { payoutId: row!.id, at: AT })).toBeNull();
+  });
+
+  test("a run refuses an empty or inverted period, a bad currency or minimum", async () => {
+    const cur = freshCurrency();
+    for (const bad of [
+      { periodStart: PERIOD.periodEnd, periodEnd: PERIOD.periodEnd, currency: cur, minimumCents: 0 },
+      { periodStart: PERIOD.periodEnd, periodEnd: PERIOD.periodStart, currency: cur, minimumCents: 0 },
+      { ...PERIOD, currency: "USD", minimumCents: 0 },
+      { ...PERIOD, currency: cur, minimumCents: -1 },
+      { ...PERIOD, currency: cur, minimumCents: 0.5 },
+    ])
+      await expect(runPayoutBatch(db, bad), JSON.stringify(bad)).rejects.toThrow(RangeError);
   });
 });

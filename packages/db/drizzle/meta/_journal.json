@@ -365,6 +365,13 @@
       "when": 1793986209711,
       "tag": "0051_fu_money_protections",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1793990210912,
+      "tag": "0052_fu2_share_money_bounds",
+      "breakpoints": true
     }
   ]
 }

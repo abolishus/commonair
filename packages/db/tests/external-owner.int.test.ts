@@ -490,7 +490,27 @@ describe.runIf(HAVE_PODMAN)("migrations and the protections, applied by the owne
     },
   ];
 
-  test.each([...PROBES, ...B8_PROBES].map((p) => [p.family, p] as const))("%s", async (_name, p) => {
+  /** 0051_fu_money_protections.sql and 0052_fu2_share_money_bounds.sql: card share chargebacks. */
+  const FU_PROBES: Probe[] = [
+    {
+      family: "follow-ups (0051): a share chargeback references its member share",
+      as: "app",
+      run: (h) => h.sql`
+        insert into ledger_transactions (id, kind, description, occurred_at, idempotency_key)
+        values (gen_random_uuid(), 'share_chargeback', 's1d', now(), 'share-chargeback:' || gen_random_uuid())`,
+      refused: /references its member share/,
+    },
+    {
+      family: "follow-ups (0052): a share refund is keyed by its share",
+      as: "app",
+      run: (h) => h.sql`
+        insert into ledger_transactions (id, kind, description, occurred_at, idempotency_key)
+        values (gen_random_uuid(), 'share_refund', 's1d', now(), 's1d-probe-refund')`,
+      refused: /keyed share-refund/,
+    },
+  ];
+
+  test.each([...PROBES, ...B8_PROBES, ...FU_PROBES].map((p) => [p.family, p] as const))("%s", async (_name, p) => {
     expect(await refusal(p.run(p.as === "app" ? app : owner))).toMatch(p.refused);
   });
 
