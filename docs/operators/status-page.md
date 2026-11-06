@@ -298,6 +298,12 @@ Check the mount after a replacement: `ssh root@<monitoring> findmnt /var/lib/com
 shows the volume's device. With `nofail`, a volume that did not attach leaves the directory on
 the root disk, and the page starts again from "no data".
 
+**Turning the volume on for a droplet that already runs** (`monitoring_state_volume` from false
+to true) only attaches it: cloud-init has already run, so nothing mounts it, and the state stays
+on the root disk. The first replacement mounts the empty volume over that directory. Copy the
+state off with the `tar` commands above before that `apply -replace`, and back onto the new
+droplet after its first boot.
+
 **The replacement gets new IP addresses.** Update the A and AAAA records by hand to the new
 `monitoring_dns_records` output. The status page is unreachable until they resolve.
 

@@ -241,7 +241,7 @@ tests:
           - exp_labels:
               job: status-page
               severity: ticket
-              summary: The status page has not been updated for 15 minutes, so outside alerts may not be sent
+              summary: The status page is out of date or cannot be read, so outside alerts may not be sent
               runbook: docs/operators/monitoring.md#commonairstatuspagestale
 
   # The monitoring droplet is gone from 11 min: the scrape fails and the gauge goes stale.
@@ -261,7 +261,7 @@ tests:
           - exp_labels:
               job: status-page
               severity: ticket
-              summary: The status page has not been updated for 15 minutes, so outside alerts may not be sent
+              summary: The status page is out of date or cannot be read, so outside alerts may not be sent
               runbook: docs/operators/monitoring.md#commonairstatuspagestale
 
   # A page rendered every minute: quiet.

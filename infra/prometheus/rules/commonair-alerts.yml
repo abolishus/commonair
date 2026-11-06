@@ -186,5 +186,5 @@ groups:
         for: 10m
         labels:
           severity: ticket
-          summary: The status page has not been updated for 15 minutes, so outside alerts may not be sent
+          summary: The status page is out of date or cannot be read, so outside alerts may not be sent
           runbook: docs/operators/monitoring.md#commonairstatuspagestale

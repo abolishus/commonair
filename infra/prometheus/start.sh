@@ -103,8 +103,14 @@ fi
 
 status_url=${STATUS_PAGE_URL:-}
 if [ -n "$status_url" ]; then
-  # https://host or https://host:port, nothing after it: the job reads /metrics.txt there.
-  status_host=$(printf '%s' "$status_url" | sed -n -E 's#^https://([A-Za-z0-9.-]+(:[0-9]{1,5})?)/?$#\1#p')
+  # https://host or https://host:port, nothing after it: the job reads /metrics.txt there. sed
+  # matches per line, so a value with a newline is refused first (two targets in one quoted
+  # string would make Prometheus refuse its whole config).
+  case $status_url in
+    *"
+"*) status_host="" ;;
+    *) status_host=$(printf '%s' "$status_url" | sed -n -E 's#^https://([A-Za-z0-9.-]+(:[0-9]{1,5})?)/?$#\1#p') ;;
+  esac
   if [ -n "$status_host" ]; then
     {
       printf 'scrape_configs:\n  - job_name: status-page\n'

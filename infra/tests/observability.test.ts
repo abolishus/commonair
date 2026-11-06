@@ -653,6 +653,7 @@ describe("start.sh renders the operator's settings", () => {
       ["status.example.org"],
       ['https://status.example.org"]'],
       ["https://user@status.example.org"],
+      ["https://status.example.org\nhttps://other.example.org"],
     ])("%s: left out with a reason, not fatal", (url) => {
       const r = render({ STATUS_PAGE_URL: url });
       expect(r.code).toBe(0);
