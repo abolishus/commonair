@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, test } from "vite-plus/test";
@@ -103,5 +103,28 @@ describe("healthcheck", () => {
         init?.signal?.addEventListener("abort", () => reject(new Error("aborted"))),
       )) as typeof fetch;
     expect(await probe("http://x/readyz", 50, hang)).toBe(false);
+  });
+});
+
+// CI run 41764916744 (harness captions, platform up): the probe stage's `apk add --no-cache
+// busybox-static` got "TLS: unspecified error" from dl-cdn.alpinelinux.org and the stack never
+// came up. The build must need no package mirror, only the pinned images.
+describe("probe.Containerfile", () => {
+  const file = readFileSync(new URL("../containers/probe.Containerfile", import.meta.url), "utf8");
+  const instructions = file
+    .split("\n")
+    .filter((l) => l.trim() && !l.startsWith("#"))
+    .map((l) => l.split(/\s+/)[0]);
+
+  test("runs nothing in either stage: no step can reach a package mirror", () => {
+    expect(instructions).not.toContain("RUN");
+    expect(new Set(instructions)).toEqual(new Set(["ARG", "FROM", "COPY"]));
+  });
+
+  test("copies the pinned Alpine's BusyBox with musl, its only library", () => {
+    expect(file).toMatch(/^ARG PROBE_IMAGE=docker\.io\/library\/alpine:[\w.]+@sha256:[0-9a-f]{64}$/m);
+    expect(file).toContain("FROM ${PROBE_IMAGE} AS probe\n");
+    expect(file).toContain("COPY --from=probe /lib/ld-musl-*.so.1 /lib/libc.musl-*.so.1 /lib/\n");
+    expect(file).toContain("COPY --from=probe /bin/busybox /usr/local/bin/busybox\n");
   });
 });
