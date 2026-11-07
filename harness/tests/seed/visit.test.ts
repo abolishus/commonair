@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
 import { SEED_ROUTES, type SeedRoute } from "../../src/seed/routes.ts";
 import type { SeedStore } from "../../src/seed/types.ts";
@@ -303,4 +304,33 @@ describe("the crawl's API buckets", () => {
     ).rejects.toThrow("aborted");
     expect(bucket).toHaveLength(6);
   });
+});
+
+/**
+ * seed-coverage `/$channel` as viewer1 failed on "No messages yet" (CI run 41771305439 attempt 1):
+ * live chat sends no backlog on join (services/chat replays nothing), so a page that lands between
+ * two of `seed live`'s messages (about one every 15 s) shows the panel's empty state with the seed
+ * intact. Every route that renders the live chat panel must accept exactly the title the web app
+ * draws for it, read from the catalog so a copy change cannot silently bring the flake back.
+ */
+describe("routes with a live chat panel", () => {
+  const core = JSON.parse(
+    readFileSync(new URL("../../../apps/web/src/i18n/locales/en/core.json", import.meta.url), "utf8"),
+  ) as Record<string, unknown>;
+  const chatEmpty = String(core["chat.empty"]);
+
+  test("the chat panel's empty title is in the catalog", () => {
+    expect(typeof core["chat.empty"]).toBe("string");
+  });
+
+  for (const path of ["/$channel", "/dashboard", "/mod/$channel"]) {
+    test(`${path} between two live messages passes; another empty state still fails`, () => {
+      const route = SEED_ROUTES[path] as SeedRoute;
+      expect(route.expectData).toBe(true);
+      expect(visitProblems(route, { ...clean, emptyStates: [chatEmpty] })).toEqual([]);
+      expect(visitProblems(route, { ...clean, emptyStates: [chatEmpty, "No videos yet"] })).toEqual([
+        'empty state "No videos yet"',
+      ]);
+    });
+  }
 });

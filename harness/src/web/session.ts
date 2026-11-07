@@ -12,8 +12,9 @@ import { join } from "node:path";
 import type { BrowserContext, Locator, Page, Request, Response } from "playwright";
 import type { ProbeVideoStats } from "../../player/probe.ts";
 import { type BrowserEngine, type BrowserFleet, HUMANIZE_SCRIPT } from "../browser-viewer.ts";
-import { PendingCalls, apiPath } from "./api-calls.ts";
-import { documentScriptOrder, isHydrationBootError, readBootState } from "./hydration.ts";
+import { PendingCalls, RecentCalls, apiPath, rateLimitHeaders } from "./api-calls.ts";
+import { installBootTrace, isHydrationGuardMessage, readBootTrace } from "./boot-trace.ts";
+import { type DocumentScriptOrder, documentScriptOrder, isHydrationBootError, readBootState } from "./hydration.ts";
 import { type TestId, tid } from "./selectors.ts";
 
 export interface WebSessionOptions {
@@ -103,9 +104,21 @@ export function browserLocale(locale: WebSessionOptions["locale"]): string {
 /** An API call unanswered this long when a failure screenshot is taken is reported as pending. */
 const PENDING_REPORT_MS = 5_000;
 
+/** A document the main frame got, for the start-up diagnostics. */
+interface ServedDocument {
+  res: Response;
+  /** Request start (epoch ms): the document's `performance.timeOrigin` is a few ms before it. */
+  startedAt: number;
+  order: Promise<DocumentScriptOrder | { error: string }>;
+}
+/** Documents remembered per page: the one that missed, its reload, and a navigation either side. */
+const SERVED_DOCUMENTS_KEPT = 4;
+
 export class WebSession {
   private readonly pages = new Map<string, Page>();
   private readonly pending = new Map<string, PendingCalls<Request>>();
+  /** Every page's API calls and document loads, for a 429's log line: the API's buckets are per user, not per page. */
+  private readonly recent = new RecentCalls();
   private closed = false;
 
   private constructor(
@@ -133,6 +146,7 @@ export class WebSession {
       const cookie = localeCookie(opts.webUrl, opts.locale);
       if (cookie) await context.addCookies([cookie]);
       await context.addInitScript({ content: opts.probeScript });
+      await context.addInitScript(installBootTrace);
       if (opts.humanize !== false) await context.addInitScript({ content: HUMANIZE_SCRIPT });
     } catch (err) {
       await context.close().catch(() => undefined);
@@ -158,7 +172,9 @@ export class WebSession {
   /**
    * Log the API calls a page gets an error for (status >= 400), or none at all (network
    * failure), and remember the unanswered ones for `screenshotAll`: a page waiting on data it
-   * never gets otherwise shows up only as a selector timeout.
+   * never gets otherwise shows up only as a selector timeout. A 429 also logs its rate-limit
+   * headers and what this session sent in the last minute, so a refusal can be traced to the
+   * bucket that ran out instead of guessed at.
    */
   private trackApiCalls(page: Page, name: string): void {
     const pending = new PendingCalls<Request>();
@@ -166,7 +182,12 @@ export class WebSession {
     const fields = { session: this.label, page: name };
     page.on("request", (req) => {
       const path = apiPath(req.url(), this.webUrl);
-      if (path) pending.start(req, path, Date.now());
+      if (path) {
+        pending.start(req, path, Date.now());
+        this.recent.call(path, Date.now());
+      } else if (req.isNavigationRequest() && req.frame() === page.mainFrame()) {
+        this.recent.document(Date.now());
+      }
     });
     page.on("requestfinished", (req) => pending.finish(req));
     page.on("requestfailed", (req) => {
@@ -177,43 +198,100 @@ export class WebSession {
     page.on("response", (res) => {
       if (res.status() < 400) return;
       const path = apiPath(res.url(), this.webUrl);
-      if (path) this.log?.warn("web api error", { ...fields, path, status: res.status() });
+      if (!path) return;
+      const limited =
+        res.status() === 429
+          ? { rateLimit: rateLimitHeaders(res.headers()), sessionRecent: this.recent.counts(Date.now()) }
+          : {};
+      this.log?.warn("web api error", { ...fields, path, status: res.status(), ...limited });
     });
   }
 
   /**
-   * When TanStack's client hydration finds no bootstrap data (the page then stays inert), log
-   * what the window holds and where the served document put the bootstrap and the entry module,
-   * once per document.
+   * When a page finds no TanStack bootstrap, log what the window holds, where the served document
+   * put the bootstrap and the entry module, and the tab's bootstrap trace (`boot-trace.ts`), once
+   * per document: on the hydration error itself (the page then stays inert), and when the web
+   * app's hydration guard fires (its console line). The guard reloads the page, so the run passes
+   * and nothing else would show that the miss still happens.
    */
   private trackHydration(page: Page, name: string): void {
-    let lastDocument: Response | null = null;
+    /** The main frame's latest documents, newest last, their script order read as each arrives (a reloaded one's body is gone). */
+    const docs: ServedDocument[] = [];
     const reported = new WeakSet<Response>();
     page.on("response", (res) => {
       const req = res.request();
-      if (req.isNavigationRequest() && req.frame() === page.mainFrame()) lastDocument = res;
+      if (!req.isNavigationRequest() || req.frame() !== page.mainFrame()) return;
+      docs.push({
+        res,
+        startedAt: Math.round(req.timing().startTime),
+        order: res.text().then(documentScriptOrder, (e: unknown) => ({ error: String(e) })),
+      });
+      if (docs.length > SERVED_DOCUMENTS_KEPT) docs.shift();
     });
-    page.on("pageerror", (err) => {
-      const doc = lastDocument;
-      if (!isHydrationBootError(err.message) || (doc && reported.has(doc))) return;
-      if (doc) reported.add(doc);
+    const orderOf = (d: ServedDocument) =>
+      Promise.race([
+        d.order,
+        new Promise<{ error: string }>((resolve) =>
+          setTimeout(() => resolve({ error: "body not read in 5 s" }), 5_000),
+        ),
+      ]);
+    const report = (msg: string, extra: Record<string, unknown>, reloading: boolean) => {
+      const latest = docs.at(-1);
+      // Hydration errors come in pairs per document; the guard fires at most once per document.
+      if (!reloading && latest) {
+        if (reported.has(latest.res)) return;
+        reported.add(latest.res);
+      }
+      const recent = [...docs];
+      const path = new URL(page.url()).pathname;
       void (async () => {
-        const state = await page.evaluate(readBootState).catch((e: unknown) => ({ error: String(e) }));
-        const served = doc
-          ? await Promise.race([
-              doc.text().then(documentScriptOrder, (e: unknown) => ({ error: String(e) })),
-              new Promise((resolve) => setTimeout(() => resolve({ error: "body not read in 5 s" }), 5_000)),
-            ])
-          : null;
-        this.log?.warn("web hydration found no bootstrap", {
+        // A reloading page's window is about to be replaced: its state would be the next document's.
+        const state = reloading
+          ? null
+          : await page.evaluate(readBootState).catch((e: unknown) => ({ error: String(e) }));
+        // Reloading, the reload's response can land before this line is handled: list the recent
+        // documents with their request start, which matches the trace entry's `origin` (a few ms
+        // apart), rather than guess which one missed.
+        const served = reloading
+          ? await Promise.all(
+              recent.map(async (d) => ({
+                path: new URL(d.res.url()).pathname,
+                status: d.res.status(),
+                startedAt: d.startedAt,
+                order: await orderOf(d),
+              })),
+            )
+          : latest
+            ? await orderOf(latest)
+            : null;
+        // `sessionStorage` is the tab's: whichever document is there holds the entry of the one that
+        // missed. A read that races the guard's reload loses its context: read again once it lands.
+        let trace: unknown = null;
+        for (let attempt = 0; attempt < 4; attempt++) {
+          trace = await page.evaluate(readBootTrace).catch((e: unknown) => ({ error: String(e) }));
+          if (Array.isArray(trace) || trace === null || page.isClosed()) break;
+          await page.waitForLoadState("domcontentloaded", { timeout: 5_000 }).catch(() => undefined);
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+        this.log?.warn(msg, {
           session: this.label,
           page: name,
-          path: doc ? new URL(doc.url()).pathname : null,
-          status: doc?.status() ?? null,
-          state,
+          path,
+          ...(reloading ? {} : { status: latest?.res.status() ?? null }),
+          ...extra,
+          ...(state ? { state } : {}),
           served,
+          trace,
         });
       })();
+    };
+    page.on("pageerror", (err) => {
+      if (isHydrationBootError(err.message)) report("web hydration found no bootstrap", {}, false);
+    });
+    page.on("console", (m) => {
+      const text = m.text();
+      if (isHydrationGuardMessage(text))
+        report("web hydration guard fired", { guard: text }, text.includes("reloading"));
     });
   }
 
