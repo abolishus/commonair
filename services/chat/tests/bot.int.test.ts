@@ -19,6 +19,7 @@ import {
   createUser,
   eventually,
   isolation,
+  recordingLogger,
   startInstance,
   VALKEY_URL,
 } from "./helpers.ts";
@@ -34,6 +35,10 @@ let valkey: ValkeyClient;
 let pub: ValkeyClient;
 const iso = isolation();
 const clients: Client[] = [];
+// Warnings and errors from both instances (a hook failure, a held message, an event-loop stall),
+// reported when a wait times out.
+const logsA = recordingLogger("chat-a");
+const logsB = recordingLogger("chat-b");
 
 const connect = async (svc: ChatService, uid: string) => {
   const c = await Client.connect(svc, { token: await chatToken(uid) });
@@ -46,8 +51,8 @@ beforeAll(async () => {
   // Timers are driven by hand (tickTimers) so the test controls when instances look.
   botA = createBotMiddleware({ timerTickMs: 0 });
   botB = createBotMiddleware({ timerTickMs: 0 });
-  a = await startInstance(t.db, iso, { middlewares: [botA] });
-  b = await startInstance(t.db, iso, { middlewares: [botB] });
+  a = await startInstance(t.db, iso, { middlewares: [botA], logger: logsA.logger });
+  b = await startInstance(t.db, iso, { middlewares: [botB], logger: logsB.logger });
   valkey = createValkey(VALKEY_URL, { keyPrefix: iso.keyPrefix, name: "bot-int" });
   pub = createValkey(VALKEY_URL, { name: "bot-int-pub" });
 });
@@ -423,15 +428,30 @@ describe("timers", () => {
     await onA.join(room.ch.slug);
     await onB.join(room.ch.slug);
     const tick = () => Promise.all([botA.engine()?.tickTimers(), botB.engine()?.tickTimers()]);
+    // CI run 41826380133 attempt 2 timed out waiting for the line count to reach 6 (the test 4.3 s,
+    // so not a slow run: lines were lost). Every send and its ack is kept so a timeout says whether
+    // a send was refused or held (held messages are not counted), or a hook failed (the logs).
+    const sent: { body: string; at: number; id: string | null; held: boolean; notice: string | null }[] = [];
+    const started = Date.now();
+    const say = async (c: Client, body: string) => {
+      const { ack, notice } = await c.say(room.ch.slug, body);
+      sent.push({ body, at: Date.now() - started, id: ack.id, held: ack.held, notice: notice?.code ?? null });
+    };
+    const lines = async () => Number(await valkey.get(KEYS.botLines(room.ch.id)));
+    const state = async () => ({
+      lines: await lines(),
+      sent,
+      logs: [...logsA.entries, ...logsB.entries],
+    });
 
     await tick(); // first sight: the mark is set, nothing posts
-    await onA.say(room.ch.slug, "one");
-    await onB.say(room.ch.slug, "two");
+    await say(onA, "one");
+    await say(onB, "two");
     await tick();
     expect(await onA.never(fromBot(room), 300)).toBe(true);
 
-    await onA.say(room.ch.slug, "three");
-    await eventually(async () => Number(await valkey.get(KEYS.botLines(room.ch.id))) >= 3);
+    await say(onA, "three");
+    await eventually(async () => (await lines()) >= 3, 3000, state);
     await tick();
     const posted = await waitBot(onB, room, "Follow");
     expect(posted.message.body).toMatch(new RegExp(`^Follow ${room.ch.slug}! Live for \\d+s\\.$`));
@@ -444,8 +464,8 @@ describe("timers", () => {
 
     // Enough new lines, but the interval has not passed: still one post. The Valkey lock is cleared
     // first, so only the database claim can refuse it.
-    for (const n of ["four", "five", "six"]) await onA.say(room.ch.slug, n);
-    await eventually(async () => Number(await valkey.get(KEYS.botLines(room.ch.id))) >= 6);
+    for (const n of ["four", "five", "six"]) await say(onA, n);
+    await eventually(async () => (await lines()) >= 6, 3000, state);
     await valkey.del(KEYS.botTimerLock(timerId));
     await tick();
     await Bun.sleep(300);
