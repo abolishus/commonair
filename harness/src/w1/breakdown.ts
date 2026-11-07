@@ -19,7 +19,6 @@ import type { ApiClient } from "../api/client.ts";
 import { isNotFound } from "../safety.ts";
 import { stripeEvent, stripeId } from "../stripe.ts";
 import type { SignedInUser } from "../users.ts";
-import { waitFor } from "../wait.ts";
 import { signInViaUi } from "../web/flows.ts";
 import { ROUTES, TEST_IDS as T } from "../web/selectors.ts";
 import { WebSession, byTestId } from "../web/session.ts";
@@ -29,18 +28,14 @@ import { W1_ROUTES, W1_TEST_IDS as W, byW1Id } from "./selectors.ts";
 const UI_TIMEOUT_MS = 30_000;
 
 /**
- * "Your payments" shows a plain error and no retry when its first load fails, and the payer's
- * per-user `default` bucket (120 a minute) can be full right after the scenario's own API calls as
- * that user: one 429 then left the page dead for the whole wait (CI run 42294978314). The step
- * reloads a failed load once the bucket has had time to drain, within a longer wait.
+ * The payer's per-user `default` bucket (120 a minute) can be full right after the scenario's own
+ * API calls as that user (CI run 42294978314: one 429 on `money.paymentBreakdowns`). "Your payments"
+ * then retries by itself after the 429's `retryAfterSeconds`, which is at most the bucket's 60 s
+ * window, so the step waits out that window plus the usual wait for the page to recover on its
+ * own; it never reloads the page for it.
  */
-export const FAILED_LOAD_RELOAD_MS = 10_000;
-const PAYMENTS_TIMEOUT_MS = 75_000;
-
-/** Reload only a load that failed, and at most once per `FAILED_LOAD_RELOAD_MS` (pure). */
-export function shouldReloadFailedLoad(failedShown: boolean, loadedAt: number, now: number): boolean {
-  return failedShown && now - loadedAt >= FAILED_LOAD_RELOAD_MS;
-}
+export const DEFAULT_BUCKET_WINDOW_MS = 60_000;
+export const PAYMENTS_TIMEOUT_MS = DEFAULT_BUCKET_WINDOW_MS + 15_000;
 /** The won-dispute tip (above `MONEY_LIMITS.tipMinCents`). */
 const WON_TIP_CENTS = 700;
 const DISPUTE_FEE_CENTS = 1500;
@@ -251,25 +246,8 @@ export async function stepBreakdown(ext: MoneyExtension): Promise<void> {
   const payerSession = await openSession(ext, "payer A", payers.a);
   await ctx.step("payer A: /settings/subscriptions breakdown dialogs show the API's numbers", async () => {
     const p = await payerSession.goto(W1_ROUTES.subscriptions);
-    let loadedAt = Date.now();
-    await waitFor(
-      "breakdown-open on Your payments",
-      async () => {
-        if ((await byW1Id(p, W.breakdownOpen).count()) > 0) return true;
-        const failed = (await byTestId(p, T.formError).count()) > 0;
-        if (shouldReloadFailedLoad(failed, loadedAt, Date.now())) {
-          ctx.log.warn("Your payments failed to load; reloading", { session: "payer A" });
-          await p.reload();
-          loadedAt = Date.now();
-        }
-        return null;
-      },
-      {
-        timeoutMs: PAYMENTS_TIMEOUT_MS,
-        intervalMs: 250,
-        signal: ctx.signal,
-      },
-    );
+    // No reload: a busy first load must recover by itself (its 429s are logged by the session).
+    await byW1Id(p, W.breakdownOpen).first().waitFor({ timeout: PAYMENTS_TIMEOUT_MS });
     for (const [name, paymentId] of Object.entries(ids)) {
       const shown = await readDialog(p, paymentId);
       const api = seen.get(paymentId);

@@ -3,14 +3,16 @@
 
 import * as React from "react";
 import { withBackoff } from "../../lib/retry.ts";
-import { useRetryingLoad } from "../../lib/retrying-load.ts";
+import { type RetryStatus, useRetryingLoad } from "../../lib/retrying-load.ts";
 
-export interface Loaded<T> {
+/**
+ * A load and how it is retrying: `reload` loads again (after an action, or Retry), the current
+ * data staying until the answer arrives; `retryInMs` and `gaveUp` are what a `SectionLoadError`
+ * says next to its Retry.
+ */
+export interface Loaded<T> extends RetryStatus {
   /** null until the first successful load for the current key. */
   data: T | null;
-  failed: boolean;
-  /** Load again (after an action); the current data stays until the answer arrives. */
-  reload: () => void;
 }
 
 /**
@@ -31,6 +33,8 @@ export interface Paged<T> {
   /** null until the first page for the current key arrives. */
   items: T[] | null;
   failed: boolean;
+  /** How the first page is retrying, for the section's `SectionLoadError`. */
+  first: RetryStatus;
   hasMore: boolean;
   loadingMore: boolean;
   /** Appends the next page (retrying a busy API by itself); a failure is reported through `onMoreError`. */
@@ -83,6 +87,7 @@ export function usePaged<T>(
   return {
     items: first.data ? [...first.data.items, ...extra.items] : null,
     failed: first.failed,
+    first,
     hasMore: extra.cursor !== null,
     loadingMore,
     loadMore,

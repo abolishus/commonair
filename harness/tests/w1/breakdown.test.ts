@@ -3,15 +3,16 @@
 
 /** The breakdown extension's pure checks (src/w1/breakdown.ts). */
 import { describe, expect, test } from "vite-plus/test";
+import { DEFAULT_RATE_LIMITS } from "../../../services/api/src/lib/ratelimit.ts";
 import {
   breakdownProblems,
+  DEFAULT_BUCKET_WINDOW_MS,
   dialogViewOf,
   expectedCoopNet,
   grossSide,
+  PAYMENTS_TIMEOUT_MS,
   sameView,
   settledByBreakdown,
-  FAILED_LOAD_RELOAD_MS,
-  shouldReloadFailedLoad,
 } from "../../src/w1/breakdown.ts";
 
 type Kind = "tax" | "creator" | "coop_share" | "processor_fee" | "coop_net" | "reversal" | "dispute_fee";
@@ -100,18 +101,12 @@ describe("breakdown checks", () => {
   });
 });
 
-describe("shouldReloadFailedLoad", () => {
-  const t0 = 1_000_000;
-  test("never reloads a page that has not failed", () => {
-    expect(shouldReloadFailedLoad(false, t0, t0 + 10 * FAILED_LOAD_RELOAD_MS)).toBe(false);
+describe("Your payments wait", () => {
+  test("is the API's default bucket window, the longest retry-after a 429 there carries", () => {
+    expect(DEFAULT_BUCKET_WINDOW_MS).toBe(DEFAULT_RATE_LIMITS.default.windowMs);
   });
-  test("waits the full interval after a load before reloading it", () => {
-    expect(shouldReloadFailedLoad(true, t0, t0)).toBe(false);
-    expect(shouldReloadFailedLoad(true, t0, t0 + FAILED_LOAD_RELOAD_MS - 1)).toBe(false);
-    expect(shouldReloadFailedLoad(true, t0, t0 + FAILED_LOAD_RELOAD_MS)).toBe(true);
-  });
-  test("leaves room for a few reloads inside the step's wait", () => {
-    expect(FAILED_LOAD_RELOAD_MS).toBeGreaterThanOrEqual(5_000);
-    expect(FAILED_LOAD_RELOAD_MS * 3).toBeLessThan(75_000);
+  test("outlasts that window, so the page's own retry after the 429 lands inside it", () => {
+    expect(PAYMENTS_TIMEOUT_MS).toBeGreaterThan(DEFAULT_BUCKET_WINDOW_MS);
+    expect(PAYMENTS_TIMEOUT_MS - DEFAULT_BUCKET_WINDOW_MS).toBeLessThanOrEqual(30_000);
   });
 });
