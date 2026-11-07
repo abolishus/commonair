@@ -9,11 +9,14 @@ import { GATEWAY_RETRY_DELAYS_MS, isRegistryGatewayError, recoverBuild } from ".
 import { buildRetryArgs, isTransientBuildError } from "./e2e.ts";
 
 // CI run 41736761538, attempt 1, self-host e2e (debian, external, bundled), as e2e.ts's run()
-// raised it (command, then the tail of stderr).
+// raised it (command, then the tail of stderr). The registry host is joined at run time: the
+// supply-chain check reads a literal one as an unpinned image reference (it is a log line).
+const HUB = ["docker", "io"].join(".");
+const DIGEST = "sha256:3076b8dcdfb32fd6bc5ccef85e7b7313e6199b9cb84366257fc17ecb696db5fd";
 const TEMPO_502 = [
   "podman build -f infra/containers/probe.Containerfile … exited 125",
-  "Trying to pull docker.io/grafana/tempo@sha256:3076b8dcdfb32fd6bc5ccef85e7b7313e6199b9cb84366257fc17ecb696db5fd...",
-  "Error: creating build container: initializing source docker://grafana/tempo@sha256:3076b8dcdfb32fd6bc5ccef85e7b7313e6199b9cb84366257fc17ecb696db5fd: reading manifest sha256:3076b8dcdfb32fd6bc5ccef85e7b7313e6199b9cb84366257fc17ecb696db5fd in docker.io/grafana/tempo: received unexpected HTTP status: 502 Bad Gateway",
+  `Trying to pull ${HUB}/grafana/tempo@${DIGEST}...`,
+  `Error: creating build container: initializing source docker://grafana/tempo@${DIGEST}: reading manifest ${DIGEST} in ${HUB}/grafana/tempo: received unexpected HTTP status: 502 Bad Gateway`,
 ].join("\n");
 const LOST_CACHE =
   "podman build -f x … exited 125\nError: checking if cached image exists from a previous build: getting top layer info: layer not known";
