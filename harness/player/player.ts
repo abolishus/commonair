@@ -28,6 +28,7 @@ import { withToken } from "../src/hls.ts";
 import { PlaybackSession } from "../src/viewer.ts";
 import { collectFingerprint } from "./fingerprint.ts";
 import type { ProbeVideoStats } from "./probe.ts";
+import { type StartupTimeline, emptyStartup, recordMilestone, recordNonFatal } from "./startup.ts";
 
 type Api = ContractRouterClient<Contract>;
 
@@ -42,6 +43,8 @@ export interface PlayerInfo {
   heartbeatErrors: number;
   errors: string[];
   stopped: boolean;
+  /** Start-up milestones and non-fatal hls.js errors up to the first frame (see startup.ts). */
+  startup: StartupTimeline;
 }
 
 declare global {
@@ -118,6 +121,7 @@ class Player {
       heartbeatErrors: 0,
       errors: [],
       stopped: false,
+      startup: emptyStartup(),
     };
     const video = document.createElement("video");
     video.muted = true;
@@ -129,6 +133,10 @@ class Player {
     video.dataset.harnessId = id;
     container.append(video);
     this.video = video;
+    // As the probe marks it: the first presented frame, or "playing" where frame callbacks are missing.
+    const firstFrame = () => recordMilestone(this.info.startup, "first-frame", performance.now());
+    if ("requestVideoFrameCallback" in video) video.requestVideoFrameCallback(firstFrame);
+    video.addEventListener("playing", firstFrame, { once: true });
     window.__harnessBytes ??= {};
     window.__harnessBytes[id] = this.bytes;
   }
@@ -155,6 +163,7 @@ class Player {
         fingerprint: collectFingerprint(native),
       });
       const started = await this.session.start();
+      recordMilestone(this.info.startup, "session", performance.now());
       this.info.sessionId = started.sessionId;
       this.info.source = started.source;
       url = started.playlistUrl;
@@ -195,14 +204,33 @@ class Player {
         if (token) xhr.open("GET", withToken(requestUrl, token), true);
       },
     });
+    const startup = this.info.startup;
+    hls.on(Hls.Events.MANIFEST_LOADED, () => {
+      recordMilestone(startup, "manifest", performance.now());
+    });
     hls.on(Hls.Events.FRAG_LOADED, (_e, data) => {
       this.bytes.http += data.frag.stats.loaded;
+      const kind = data.frag.type === "audio" ? "frag-audio" : data.frag.type === "main" ? "frag-video" : null;
+      if (kind) recordMilestone(startup, kind, performance.now(), { sn: data.frag.sn, gap: data.frag.gap === true });
     });
     hls.on(Hls.Events.LEVEL_LOADED, (_e, data) => {
       this.bytes.http += data.stats.loaded;
+      recordMilestone(startup, "level-video", performance.now());
+    });
+    // MediaMTX serves audio as its own rendition playlist: hls.js loads it as an audio track.
+    hls.on(Hls.Events.AUDIO_TRACK_LOADED, () => {
+      recordMilestone(startup, "level-audio", performance.now());
     });
     hls.on(Hls.Events.ERROR, (_e, data) => {
-      if (!data.fatal) return;
+      if (!data.fatal) {
+        const code = data.response?.code;
+        recordNonFatal(startup, performance.now(), {
+          details: data.details,
+          code: typeof code === "number" ? code : null,
+          url: data.url ?? data.frag?.url ?? data.context?.url ?? null,
+        });
+        return;
+      }
       this.info.errors.push(`hls.js ${data.type}: ${data.details}`);
       if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad();
       else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError();

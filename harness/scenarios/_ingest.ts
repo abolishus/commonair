@@ -6,11 +6,12 @@
  * `channels.get` → playback through the origin in Chromium and WebKit with measured TTFF and
  * glass-to-glass latency → stop → offline.
  */
+import { formatStartup } from "../player/startup.ts";
 import type { HeartbeatTiming } from "../src/fingerprint.ts";
 import { STEADY_TIMING } from "../src/integrity-viewers.ts";
 import { summarize } from "../src/metrics.ts";
 import type { ScenarioContext } from "../src/scenario.ts";
-import type { Viewer } from "../src/viewer.ts";
+import type { Viewer, ViewerReport } from "../src/viewer.ts";
 import { waitFor } from "../src/wait.ts";
 
 export const MAX_TTFF_MS = 15_000;
@@ -31,6 +32,22 @@ export const MAX_GLASS_TO_GLASS_WHIP_WEBKIT_MS = 20_000;
 export const INGEST_VIEWER_TIMING: HeartbeatTiming = STEADY_TIMING;
 /** How long the scenario waits for every viewer's first accepted heartbeat. */
 export const FIRST_HEARTBEAT_WAIT_MS = 25_000;
+
+/**
+ * Details of the TTFF assertion: the viewer's report as start-up left it, so a slow first frame
+ * says where the time went (path, the start-up timeline, the last errors, bytes, stalls) and not
+ * only how long it was. Pure.
+ */
+export function ttffDetails(ttff: number, r: ViewerReport): Record<string, unknown> {
+  return {
+    ttff,
+    playbackPath: r.playbackPath,
+    startup: r.startup ? formatStartup(r.startup) : null,
+    lastErrors: r.errors.slice(-5),
+    bytesHttp: r.bytesHttp,
+    stalls: r.stalls,
+  };
+}
 
 /** The glass-to-glass budget (p50) for one ingest protocol and browser engine. */
 export function glassToGlassBudgetMs(protocol: "rtmp" | "whip", engine: string): number {
@@ -67,7 +84,7 @@ export async function ingestScenario(ctx: ScenarioContext, protocol: "rtmp" | "w
     const engine = v.id.split("-")[0] ?? v.id;
     const ttff = await ctx.step(`${engine}: first frame`, () => v.waitForFirstFrame(45_000));
     ctx.metric(`ttff.${engine}`, ttff, "ms");
-    ctx.assert(`${engine}: TTFF under ${MAX_TTFF_MS} ms`, ttff < MAX_TTFF_MS, { ttff });
+    ctx.assert(`${engine}: TTFF under ${MAX_TTFF_MS} ms`, ttff < MAX_TTFF_MS, ttffDetails(ttff, await v.report()));
     const samples = await ctx.step(`${engine}: glass-to-glass samples`, () =>
       waitFor(
         `latency samples from ${v.id}`,
