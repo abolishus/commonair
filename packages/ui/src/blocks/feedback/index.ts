@@ -6,3 +6,4 @@ export { QueueItemCard, type QueueItemCardProps, type QueueItemAction } from "./
 export { DeadlineCountdown, deadlineTone, type DeadlineCountdownProps } from "./deadline-countdown.tsx";
 export { IncidentCard, type IncidentCardProps } from "./incident-card.tsx";
 export { type LinkTarget } from "../../lib/link.tsx";
+export { LoadError, type LoadErrorProps } from "./load-error.tsx";
