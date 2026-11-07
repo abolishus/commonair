@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { and, count, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { and, count, desc, eq, isNull, lt, or, sql } from "drizzle-orm";
 import type { Scope } from "@commonair/contracts/scopes";
 import { schema, type Executor } from "@commonair/db";
 import { randomTokenSecret, sha256Hex } from "@commonair/tokens";
@@ -34,6 +34,7 @@ import { appUrl, sendNotice } from "../mail.ts";
 import { createExport, listExports } from "../privacy/exports.ts";
 import { meBlocks } from "./me-blocks.ts";
 import { meEnforcement } from "./me-enforcement.ts";
+import { deliveredNotification, markedByIds, withProposalTitles } from "../notifications/vote-open.ts";
 
 const { users, channels, follows, memberships, notifications, oauthTokens, botConfigs } = schema;
 
@@ -211,6 +212,7 @@ export const me = {
         and(
           eq(notifications.userId, caller.user.id),
           input.unreadOnly ? isNull(notifications.readAt) : undefined,
+          deliveredNotification(),
           cur
             ? or(
                 lt(notifications.createdAt, new Date(cur.t)),
@@ -222,7 +224,7 @@ export const me = {
       .orderBy(desc(notifications.createdAt), desc(notifications.id))
       .limit(input.limit + 1);
     return pageOf(
-      rows,
+      await withProposalTitles(context.deps.db, rows),
       input.limit,
       (n) => ({ id: n.id, type: n.type, payload: n.payload, readAt: isoOrNull(n.readAt), createdAt: iso(n.createdAt) }),
       (last) => encodeCursor({ t: iso(last.createdAt), id: last.id }),
@@ -239,7 +241,7 @@ export const me = {
         and(
           eq(notifications.userId, caller.user.id),
           isNull(notifications.readAt),
-          input.ids ? inArray(notifications.id, input.ids) : undefined,
+          input.ids ? markedByIds(context.deps.db, caller.user.id, input.ids) : undefined,
         ),
       );
     return { ok: true as const };
@@ -346,7 +348,10 @@ export const me = {
       const { deps } = context;
       if (caller.user.accountType !== "human") throw forbidden("Only members can own bots");
       const problem = usernameProblem(input.username);
-      if (problem) throw badRequest(problem === "reserved" ? "This username is reserved" : "Invalid username");
+      // A requirement the console maps to its own message (as with `bot_limit`), not a format error.
+      if (problem === "reserved")
+        throw precondition("username_reserved", "This username is reserved for a page on this site; choose another");
+      if (problem) throw badRequest("Invalid username");
       // A channel's built-in bot (E8) never takes one of the owner's slots.
       const [{ n } = { n: 0 }] = await deps.db
         .select({ n: count() })

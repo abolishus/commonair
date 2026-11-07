@@ -93,7 +93,7 @@ test("real sign-ups can never take a demo_ username", async () => {
       altcha: await solveAltcha(api),
     });
     expect(res.status, username).toBe(400);
-    expect(JSON.stringify(res.body)).toContain("INVALID_USERNAME");
+    expect(JSON.stringify(res.body)).toContain("USERNAME_RESERVED");
   }
 });
 

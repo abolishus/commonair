@@ -54,7 +54,11 @@ describe("signup gates", () => {
   });
 
   test("reserved and malformed usernames are refused", async () => {
-    for (const username of ["admin", "settings", "x"]) {
+    for (const [username, code] of [
+      ["admin", "USERNAME_RESERVED"],
+      ["settings", "USERNAME_RESERVED"],
+      ["x", "INVALID_USERNAME"],
+    ] as const) {
       const res = await signUp({
         ...base(uniqueName()),
         username,
@@ -62,6 +66,7 @@ describe("signup gates", () => {
         altcha: await solveAltcha(api),
       });
       expect(res.status, username).toBe(400);
+      expect(JSON.stringify(res.body), username).toContain(code);
     }
   });
 });

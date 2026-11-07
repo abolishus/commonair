@@ -52,6 +52,19 @@ export const GoLiveNotificationPayload = z.object({
 export type GoLiveNotificationPayload = z.infer<typeof GoLiveNotificationPayload>;
 
 /**
+ * `notifications.payload` of a `vote_open` row as `me.notifications` returns it (F8). The row
+ * stores the proposal id only; `title` is the proposal's title joined at read time (absent when
+ * the proposal is gone). The inbox shows one per proposal, and none once voting has closed.
+ */
+export const VoteOpenNotificationPayload = z.object({
+  proposalId: z.uuid(),
+  kind: z.string(),
+  votingEndsAt: z.iso.datetime({ offset: true }).nullable(),
+  title: z.string().optional(),
+});
+export type VoteOpenNotificationPayload = z.infer<typeof VoteOpenNotificationPayload>;
+
+/**
  * The plaintext of a push message, encrypted to the browser (RFC 8291) before it leaves the
  * worker. Nothing else goes in it: the vendor's push service relays it (ADR 0028 decision 1).
  * The service worker validates it by hand (it does not bundle zod).

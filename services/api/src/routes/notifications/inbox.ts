@@ -6,6 +6,7 @@ import { and, count, eq, isNull, sql } from "drizzle-orm";
 import { NOTIFY_RULES } from "@commonair/contracts/notify";
 import { schema } from "@commonair/db";
 import { os, requireCaller } from "../../lib/orpc.ts";
+import { deliveredNotification } from "../../notifications/vote-open.ts";
 
 const { notifications } = schema;
 
@@ -17,7 +18,8 @@ export const unreadCount = os.notifications.unreadCount.handler(async ({ context
   const unread = context.deps.db
     .select({ one: sql`1`.as("one") })
     .from(notifications)
-    .where(and(eq(notifications.userId, caller.user.id), isNull(notifications.readAt)))
+    // The list's own delivery rule (F8): a closed or repeated `vote_open` is not unread news.
+    .where(and(eq(notifications.userId, caller.user.id), isNull(notifications.readAt), deliveredNotification()))
     .limit(cap + 1)
     .as("unread");
   const [row] = await context.deps.db.select({ n: count() }).from(unread);

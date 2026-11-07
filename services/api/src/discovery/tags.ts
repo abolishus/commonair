@@ -16,3 +16,13 @@ export function topTags(tagLists: readonly (readonly string[])[], limit = CATEGO
     .slice(0, Math.max(0, limit))
     .map(([t]) => t);
 }
+
+/** The words of a search as tags are stored: lowercased, leading `#` dropped, each once (F9). */
+export function searchTags(q: string): string[] {
+  const words = q
+    .toLowerCase()
+    .split(/[\s,]+/)
+    .map((w) => w.replace(/^#+/, ""))
+    .filter((w) => w.length > 0);
+  return [...new Set(words)];
+}
