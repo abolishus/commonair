@@ -8,6 +8,7 @@
  */
 import type { dto } from "@commonair/contracts";
 import type { z } from "zod";
+import type { StartupTimeline } from "../player/startup.ts";
 import type { ApiClient } from "./api/client.ts";
 import { summarize, type Summary } from "./metrics.ts";
 
@@ -45,6 +46,11 @@ export interface ViewerReport {
   heartbeatsSent?: number;
   heartbeatErrors: number;
   errors: string[];
+  /**
+   * Harness player pages only: start-up milestones and non-fatal hls.js errors up to the first
+   * frame, in ms since the page started (harness/player/startup.ts).
+   */
+  startup?: StartupTimeline;
 }
 
 export interface Viewer {

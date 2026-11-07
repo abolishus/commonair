@@ -14,6 +14,7 @@ import type { Logger } from "@commonair/observability";
 import { type Browser, type BrowserContext, type Page, chromium, webkit } from "playwright";
 import type { PlayerInfo } from "../player/player.ts";
 import type { ProbeVideoStats } from "../player/probe.ts";
+import { formatStartup } from "../player/startup.ts";
 import { AddressPool, RESIDENTIAL_CIDRS_FILE, loadCidrList } from "./cidrs.ts";
 import { type HeartbeatTiming, timingParams } from "./fingerprint.ts";
 import type { PlayerServer } from "./player-server.ts";
@@ -42,10 +43,12 @@ export function playerState(r: ViewerReport, page?: WebPageState | null): string
   // The web page's own view: the player's data-state (missing = no player rendered, e.g. the
   // route's error page) and how many <video> elements the probe tracks (more than one = remounted).
   const web = page ? `; player=${page.player ?? "missing"} videos=${page.videos} connected=${page.connected}` : "";
-  if (seen.length > 0) return `player errors: ${seen.join(" | ").slice(0, 400)}${web}`;
+  // Harness pages: how far start-up got (manifest, playlists, first fragments) and what failed on the way.
+  const startup = r.startup ? `; startup: ${formatStartup(r.startup)}` : "";
+  if (seen.length > 0) return `player errors: ${seen.join(" | ").slice(0, 400)}${web}${startup}`;
   return (
     `no player errors; path=${r.playbackPath ?? "none"} session=${r.sessionId ? "yes" : "none"} ` +
-    `source=${r.source ?? "none"} bytes=${r.bytesHttp} stalls=${r.stalls} heartbeats=${r.heartbeats}${web}`
+    `source=${r.source ?? "none"} bytes=${r.bytesHttp} stalls=${r.stalls} heartbeats=${r.heartbeats}${web}${startup}`
   );
 }
 
@@ -380,6 +383,7 @@ class BrowserViewer implements Viewer {
       ...(info ? { heartbeatsSent: info.heartbeatsSent } : {}),
       heartbeatErrors: info?.heartbeatErrors ?? 0,
       errors: [...(info?.errors ?? []), ...(probe?.errors ?? [])],
+      ...(info?.startup ? { startup: info.startup } : {}),
     };
     return this.last;
   }
