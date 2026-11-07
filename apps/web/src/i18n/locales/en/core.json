@@ -82,6 +82,7 @@
   "error.altcha": "The anti-spam check failed. Wait for it to finish and try again.",
   "error.invalidUsername": "That username is not allowed. Use 3–25 lowercase letters, digits or underscores.",
   "error.usernameTaken": "That username is taken.",
+  "error.usernameReserved": "That name is reserved for a page on this site; choose another.",
   "error.userExists": "An account with this email already exists.",
   "error.invalidEmail": "Enter a valid email address.",
   "error.passwordTooShort": "The password is too short.",

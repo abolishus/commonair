@@ -52,6 +52,7 @@ const REQUIREMENT_KEYS: Record<string, MessageKey> = {
   not_replayable: "developer.error.notReplayable",
   bot_limit: "developer.error.botLimit",
   channel_bot: "developer.error.channelBot",
+  username_reserved: "developer.error.usernameReserved",
 };
 
 export type ErrorOverrides = Partial<Record<"CONFLICT" | "FORBIDDEN" | "NOT_FOUND" | "BAD_REQUEST", MessageKey>>;

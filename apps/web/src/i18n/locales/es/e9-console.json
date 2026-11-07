@@ -23,6 +23,7 @@
   "developer.error.notReplayable": "Los eventos de prueba no se pueden volver a entregar. Envía uno nuevo.",
   "developer.error.botLimit": "Ya tienes el máximo de cuentas de bot permitidas.",
   "developer.error.channelBot": "Este es el bot integrado de tu canal. Solo habla a través de la configuración del bot del canal, así que no puede tener tokens.",
+  "developer.error.usernameReserved": "Ese nombre está reservado para una página de este sitio; elige otro.",
   "developer.error.session": "Tu sesión terminó. Vuelve a iniciar sesión.",
   "developer.error.rateLimited": "Demasiadas solicitudes. Espera un momento e inténtalo de nuevo.",
   "developer.error.notFound": "Ya no existe: es posible que se haya eliminado.",

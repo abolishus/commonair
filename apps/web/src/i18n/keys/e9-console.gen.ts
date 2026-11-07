@@ -27,6 +27,7 @@ export type Key =
   | "developer.error.notReplayable"
   | "developer.error.botLimit"
   | "developer.error.channelBot"
+  | "developer.error.usernameReserved"
   | "developer.error.session"
   | "developer.error.rateLimited"
   | "developer.error.notFound"

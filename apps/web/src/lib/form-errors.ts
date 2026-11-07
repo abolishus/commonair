@@ -8,6 +8,7 @@ import { AuthRequestError } from "./auth.ts";
 const AUTH_ERRORS: Record<string, MessageKey> = {
   ALTCHA_FAILED: "error.altcha",
   INVALID_USERNAME: "error.invalidUsername",
+  USERNAME_RESERVED: "error.usernameReserved",
   TOO_YOUNG: "error.tooYoung",
   INVALID_BIRTH_DATE: "error.invalidBirthDate",
   LEGAL_ACCEPTANCE_REQUIRED: "error.legalRequired",

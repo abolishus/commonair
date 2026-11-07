@@ -82,6 +82,7 @@
   "error.altcha": "Falló la verificación antispam. Espera a que termine e inténtalo de nuevo.",
   "error.invalidUsername": "Ese nombre de usuario no está permitido. Usa de 3 a 25 letras minúsculas, dígitos o guiones bajos.",
   "error.usernameTaken": "Ese nombre de usuario ya está en uso.",
+  "error.usernameReserved": "Ese nombre está reservado para una página de este sitio; elige otro.",
   "error.userExists": "Ya existe una cuenta con este correo electrónico.",
   "error.invalidEmail": "Escribe una dirección de correo electrónico válida.",
   "error.passwordTooShort": "La contraseña es demasiado corta.",

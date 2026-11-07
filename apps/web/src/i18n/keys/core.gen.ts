@@ -87,6 +87,7 @@ export type Key =
   | "error.altcha"
   | "error.invalidUsername"
   | "error.usernameTaken"
+  | "error.usernameReserved"
   | "error.userExists"
   | "error.invalidEmail"
   | "error.passwordTooShort"

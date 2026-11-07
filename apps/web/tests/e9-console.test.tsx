@@ -429,6 +429,7 @@ describe("developer model", () => {
       ["not_enabled", "developer.error.notEnabled"],
       ["bot_limit", "developer.error.botLimit"],
       ["channel_bot", "developer.error.channelBot"],
+      ["username_reserved", "developer.error.usernameReserved"],
     ] as const)
       expect(developerError(pre(req), "developer.app.createFailed")).toBe(en[key]);
     expect(developerError(pre("unknown"), "developer.app.createFailed")).toBe(en["developer.app.createFailed"]);

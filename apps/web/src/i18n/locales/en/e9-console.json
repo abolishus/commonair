@@ -23,6 +23,7 @@
   "developer.error.notReplayable": "Test events cannot be delivered again. Send a new one instead.",
   "developer.error.botLimit": "You already own the most bot accounts allowed.",
   "developer.error.channelBot": "This is your channel's built-in bot. It speaks only through the channel bot settings, so it cannot have tokens.",
+  "developer.error.usernameReserved": "That name is reserved for a page on this site; choose another.",
   "developer.error.session": "Your session has ended. Sign in again.",
   "developer.error.rateLimited": "Too many requests. Wait a moment and try again.",
   "developer.error.notFound": "It is gone: it may have been deleted.",
