@@ -481,18 +481,19 @@ describe("media pipeline", () => {
     await valkey.del(KEYS.viewers(channelId));
     await waitFor("renditions withdrawn", async () => (await valkey.get(KEYS.renditions(channelId))) === null);
     await waitFor("720p path gone", async () => !(await mtxApi.getPath(`live/${SLUG}/720p`))?.ready);
-    const [b] = await tdb.db
-      .select({ t: schema.broadcasts.transcodeActive })
-      .from(schema.broadcasts)
-      .where(eq(schema.broadcasts.id, broadcastId));
-    expect(b?.t).toBe(false);
-    // The bus event follows the Valkey and database writes; wait for it rather than read it at once.
+    // The withdraw deletes the key, then clears the flag, then publishes: the key being gone says
+    // nothing about the flag yet (41780221766). Wait for the event, which follows both writes.
     const lastRenditions = () => {
       const last = busEvents.filter((e) => e.type === "renditions").pop();
       return last?.type === "renditions" ? last.renditions : null;
     };
     await waitFor("source-only renditions published", async () => lastRenditions()?.join() === "source");
     expect(lastRenditions()).toEqual(["source"]);
+    const [b] = await tdb.db
+      .select({ t: schema.broadcasts.transcodeActive })
+      .from(schema.broadcasts)
+      .where(eq(schema.broadcasts.id, broadcastId));
+    expect(b?.t).toBe(false);
   }, 90_000);
 
   test("VOD recording uploads segments and the playlist while live", async () => {
