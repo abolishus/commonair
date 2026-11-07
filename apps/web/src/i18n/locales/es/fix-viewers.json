@@ -1,0 +1,10 @@
+{
+  "fixViewers.health.watchingNow": "Viendo ahora",
+  "fixViewers.health.peakSoFar": "Máximo hasta ahora",
+  "fixViewers.health.catchingUp": "Poniéndose al día",
+  "fixViewers.health.hint": "«Viendo ahora» cuenta a los espectadores verificados en este momento. Las cifras finales se fijan después de la emisión.",
+  "fixViewers.analytics.live.heading": "En vivo ahora · empezó {time}",
+  "fixViewers.analytics.live.peak": "Máximo hasta ahora",
+  "fixViewers.analytics.live.body": "Las cifras finales aparecen 24 horas después de que termine la emisión.",
+  "fixViewers.analytics.broadcast.option": "{title} · {date} · {duration}"
+}

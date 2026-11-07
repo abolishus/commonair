@@ -19,12 +19,15 @@ import {
 } from "@commonair/contracts/internal";
 import { schema, uuidv7 } from "@commonair/db";
 import { REHEARSAL_RULES } from "@commonair/contracts/enums";
+import { setLiveGraceSettings } from "../src/media/live-grace.ts";
 import { afterBroadcastEnded, endLiveInTx } from "../src/moderation/live.ts";
 import { client, signUpAndSignIn, startApi, subscriber, type Client, type TestApi } from "./harness.ts";
 
 let api: TestApi;
 beforeAll(async () => {
   api = await startApi();
+  // A live drop ends at once here; live-grace.int.test.ts covers the reconnect grace.
+  setLiveGraceSettings(api.deps, { seconds: 0 });
 }, 120_000);
 afterAll(async () => {
   await api?.stop();

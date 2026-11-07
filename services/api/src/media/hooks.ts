@@ -24,6 +24,11 @@
  * that was disarmed before ready is kicked too, never live. After a rehearsal is ended by a kick,
  * `KEYS.rehearsalKicked` refuses the encoder's automatic reconnect for a while, so it neither
  * rehearses again nor goes publicly live.
+ *
+ * The live reconnect grace (overhaul decision 2, `live-grace.ts`): a live not-ready leaves the
+ * broadcast open for `LIVE_RULES.reconnectGraceSeconds`. A ready inside it continues the same
+ * broadcast; past it the broadcast ends at the drop (a timer, a sweep at every hook, or the next
+ * ready, whichever comes first).
  */
 import { and, asc, eq, gte, isNull, sql } from "drizzle-orm";
 import { KEYS, MediaMtxAuthRequest, MediaReadyHook, mediaPath, RehearsalArm } from "@commonair/contracts/internal";
@@ -37,6 +42,31 @@ import { publishLive } from "../lib/control.ts";
 import { canonicalIp } from "../lib/netrange.ts";
 import { kickPublisher } from "../moderation/live.ts";
 import { decidePublish, internalCredentialsOk, planMediaAuth } from "./auth.ts";
+import {
+  type EndedLive,
+  GRACE_RECORD_TTL_SECONDS,
+  type LiveGrace,
+  announceLiveEnded,
+  clearLiveGrace,
+  clearLiveGraceIf,
+  endLiveBroadcastInTx,
+  finalizeLiveGrace,
+  graceDeadline,
+  liveGraceSettings,
+  liveSourceKey,
+  openLiveGrace,
+  readLiveGrace,
+  sweepLiveGraces,
+} from "./live-grace.ts";
+
+/** A grace that ran out before its finalize, met by the next publish on the channel. */
+interface Expired {
+  channelId: string;
+  grace: LiveGrace;
+  ended: EndedLive | null;
+}
+/** The finalize timer fires this long after the deadline, so it never lands just before it. */
+const GRACE_TIMER_SLACK_MS = 250;
 
 const { channels, users, streamKeys, broadcasts, playbackSessions, rehearsalInvitees, events } = schema;
 const LIVE_PATH = /^live\/([a-z0-9_]{3,25})$/;
@@ -148,12 +178,27 @@ export async function mediaReady(deps: Deps, body: unknown): Promise<number> {
   const now = deps.now();
   const keyId = await deps.valkey.get(publishKey(slug));
   const authArm = await deps.valkey.get(publishRehearsal(slug));
+  await sweepQuietly(deps);
+  const graceSeconds = liveGraceSettings(deps).seconds;
+  /** A grace that ran out before its finalize: that broadcast ends at its drop, then this publish goes live. */
+  let expired: Expired | null = null;
   const started = await deps.db.transaction(async (tx) => {
     const [c] = await tx.select().from(channels).where(eq(channels.slug, slug)).for("update");
     if (!c) return null;
     if (c.liveBroadcastId) {
       const [current] = await tx.select().from(broadcasts).where(eq(broadcasts.id, c.liveBroadcastId));
-      if (current && !current.endedAt) return null; // duplicate ready: already live
+      if (current && !current.endedAt) {
+        const grace = await readLiveGrace(deps, c.id);
+        if (grace?.broadcastId !== current.id) return null; // duplicate ready: already live
+        if (now.getTime() < graceDeadline(grace, graceSeconds)) {
+          // The encoder is back inside the grace: the same broadcast continues. Cleared under the
+          // channel lock, so a finalize racing this one finds nothing to end.
+          await clearLiveGrace(deps, c.id);
+          return { resumed: true as const, channel: c, broadcast: current };
+        }
+        const ended = await endLiveBroadcastInTx(tx, c, current.id, new Date(grace.droppedAt), now);
+        expired = { channelId: c.id, grace, ended };
+      }
     }
     const authed = parseArm(authArm, c.ownerId);
     // A disarm between auth and ready deletes both keys and records the arm as disarmed; that
@@ -260,6 +305,31 @@ export async function mediaReady(deps: Deps, body: unknown): Promise<number> {
     );
     return { channel: c, broadcast: b, arm: null, sessionTtl: 0 };
   });
+  // `expired` is assigned inside the transaction callback; TypeScript cannot see that.
+  const ran = expired as Expired | null;
+  if (ran) {
+    await clearLiveGraceIf(deps, ran.channelId, ran.grace);
+    if (ran.ended) await announceLiveEnded(deps, ran.ended);
+  }
+  if (started?.resumed) {
+    if (hook.sourceId)
+      await deps.valkey.set(liveSourceKey(started.channel.id), hook.sourceId, "EX", GRACE_RECORD_TTL_SECONDS);
+    deps.logger.info("live broadcast resumed inside reconnect grace", {
+      channelId: started.channel.id,
+      broadcastId: started.broadcast.id,
+    });
+    // Media restarts its session if it stopped one meanwhile; it ignores this for a running one.
+    await publishLive(deps, {
+      type: "online",
+      channelId: started.channel.id,
+      broadcastId: started.broadcast.id,
+      slug,
+      path: started.broadcast.path,
+      protocol: started.broadcast.ingestProtocol,
+      at: now.toISOString(),
+    });
+    return 204;
+  }
   if (started && "refused" in started) {
     // The encoder's automatic reconnect is refused for the cooldown, as after any rehearsal kick.
     await deps.valkey.set(KEYS.rehearsalKicked(started.channel.id), "1", "EX", REHEARSAL_RULES.kickCooldownSeconds);
@@ -274,6 +344,8 @@ export async function mediaReady(deps: Deps, body: unknown): Promise<number> {
       "EX",
       started.sessionTtl,
     );
+  if (started && !started.arm && hook.sourceId)
+    await deps.valkey.set(liveSourceKey(started.channel.id), hook.sourceId, "EX", GRACE_RECORD_TTL_SECONDS);
   if (started)
     await publishLive(deps, {
       type: "online",
@@ -294,56 +366,85 @@ export async function mediaNotReady(deps: Deps, body: unknown): Promise<number> 
   const slug = LIVE_PATH.exec(hook.path)?.[1];
   if (!slug) return 204;
   if (hook.sourceId) await deps.valkey.set(endedSource(hook.path, hook.sourceId), "1", "EX", MARKER_TTL_SECONDS);
+  await sweepQuietly(deps);
   const now = deps.now();
+  const grace = liveGraceSettings(deps);
   const ended = await deps.db.transaction(async (tx) => {
     const [c] = await tx.select().from(channels).where(eq(channels.slug, slug)).for("update");
     if (!c) return null;
-    const [b] = c.liveBroadcastId
+    const [current] = c.liveBroadcastId
       ? await tx
-          .update(broadcasts)
-          .set({ endedAt: now })
+          .select({ id: broadcasts.id })
+          .from(broadcasts)
           .where(and(eq(broadcasts.id, c.liveBroadcastId), isNull(broadcasts.endedAt)))
-          .returning()
       : [];
-    if (c.liveBroadcastId) await tx.update(channels).set({ liveBroadcastId: null }).where(eq(channels.id, c.id));
-    if (!b) {
-      // Nothing live (or only a stale pointer): a rehearsal ends quietly, no stream.offline (decision (f)).
-      const [r] = await tx
-        .update(broadcasts)
-        .set({ endedAt: now })
-        .where(and(eq(broadcasts.channelId, c.id), eq(broadcasts.kind, "rehearsal"), isNull(broadcasts.endedAt)))
-        .returning();
-      if (!r) return null; // duplicate or out-of-order: nothing is live or rehearsing
-      await tx
-        .update(playbackSessions)
-        .set({ endedAt: now })
-        .where(and(eq(playbackSessions.broadcastId, r.id), isNull(playbackSessions.endedAt)));
-      return { channel: c, broadcast: r };
+    if (current) {
+      // A late not-ready of a source the broadcast has already moved past (a reconnect) is stale.
+      const source = hook.sourceId ? await deps.valkey.get(liveSourceKey(c.id)) : null;
+      if (source && source !== hook.sourceId) return { kind: "stale" as const, channelId: c.id };
+      if (grace.seconds > 0) {
+        const opened = await openLiveGrace(deps, c.id, current.id, now);
+        return { kind: "grace" as const, ...opened, channelId: c.id, broadcastId: current.id };
+      }
+      // A zero grace (tests) ends at once, as before the grace existed.
+      const live = await endLiveBroadcastInTx(tx, c, current.id, now, now);
+      return live ? { kind: "live" as const, live } : null;
     }
+    if (c.liveBroadcastId) await tx.update(channels).set({ liveBroadcastId: null }).where(eq(channels.id, c.id));
+    // Nothing live (or only a stale pointer): a rehearsal ends quietly, no stream.offline (decision (f)).
+    const [r] = await tx
+      .update(broadcasts)
+      .set({ endedAt: now })
+      .where(and(eq(broadcasts.channelId, c.id), eq(broadcasts.kind, "rehearsal"), isNull(broadcasts.endedAt)))
+      .returning();
+    if (!r) return null; // duplicate or out-of-order: nothing is live or rehearsing
     await tx
       .update(playbackSessions)
       .set({ endedAt: now })
-      .where(and(eq(playbackSessions.broadcastId, b.id), isNull(playbackSessions.endedAt)));
-    await emit(tx, "stream.offline", c.id, broadcasterFields(c), now);
-    return { channel: c, broadcast: b };
+      .where(and(eq(playbackSessions.broadcastId, r.id), isNull(playbackSessions.endedAt)));
+    return { kind: "rehearsal" as const, channel: c, broadcast: r };
   });
-  if (ended) {
-    await deps.valkey.del(
-      KEYS.viewers(ended.channel.id),
-      KEYS.viewerCount(ended.channel.id),
-      KEYS.catchingUpCount(ended.channel.id),
-      KEYS.renditions(ended.channel.id),
-    );
-    await publishLive(deps, {
-      type: "offline",
-      channelId: ended.channel.id,
-      broadcastId: ended.broadcast.id,
-      slug,
-      path: ended.broadcast.path,
-      at: now.toISOString(),
-    });
-    if (ended.broadcast.kind === "rehearsal")
-      await deps.valkey.expire(KEYS.rehearsalSession(ended.channel.id), REHEARSAL_RULES.sessionGraceSeconds);
+  if (!ended) return 204;
+  if (ended.kind === "stale") {
+    deps.logger.info("media not-ready ignored", { channelId: ended.channelId, reason: "stale_source" });
+    return 204;
   }
+  if (ended.kind === "grace") {
+    const { channelId, broadcastId } = ended;
+    if (ended.opened) {
+      deps.logger.info("live broadcast reconnect grace started", { channelId, broadcastId });
+      grace.schedule(graceDeadline(ended.grace, grace.seconds) - now.getTime() + GRACE_TIMER_SLACK_MS, () =>
+        finalizeLiveGrace(deps, channelId).then(() => undefined),
+      );
+    }
+    return 204;
+  }
+  if (ended.kind === "live") {
+    await announceLiveEnded(deps, ended.live);
+    return 204;
+  }
+  const { channel, broadcast } = ended;
+  await deps.valkey.del(
+    KEYS.viewers(channel.id),
+    KEYS.viewerCount(channel.id),
+    KEYS.catchingUpCount(channel.id),
+    KEYS.renditions(channel.id),
+  );
+  await publishLive(deps, {
+    type: "offline",
+    channelId: channel.id,
+    broadcastId: broadcast.id,
+    slug,
+    path: broadcast.path,
+    at: now.toISOString(),
+  });
+  await deps.valkey.expire(KEYS.rehearsalSession(channel.id), REHEARSAL_RULES.sessionGraceSeconds);
   return 204;
+}
+
+/** Finalize graces whose timer was lost; a failure never blocks a hook (the next one retries). */
+async function sweepQuietly(deps: Deps): Promise<void> {
+  await sweepLiveGraces(deps).catch((err: unknown) =>
+    deps.logger.warn("live grace sweep failed", { err: (err as Error).name }),
+  );
 }

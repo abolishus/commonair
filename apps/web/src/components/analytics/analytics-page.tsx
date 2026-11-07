@@ -19,6 +19,7 @@ import {
   ViewerCount,
   formatBytes,
   formatDateTime,
+  formatDuration,
   formatNumber,
   formatPercent,
   useLocale,
@@ -52,6 +53,7 @@ import {
   rangeFor,
 } from "./data.ts";
 import { GroupAppealAction } from "./group-appeal.tsx";
+import { LiveNowEntry } from "./live-now.tsx";
 import { audienceTrend, formatDayLabel, periodDelta, previousPeriod } from "../studio/trends.ts";
 
 export interface AnalyticsViewProps {
@@ -92,6 +94,7 @@ export function AnalyticsView({
   return (
     <div data-testid="analytics-page" className="flex flex-col gap-6">
       {header ? header(picker) : picker}
+      {range.data?.live ? <LiveNowEntry live={range.data.live} /> : null}
       {range.failed ? (
         <div className="flex flex-col items-start gap-3">
           <FormError>{t("analytics.loadFailed")}</FormError>
@@ -302,9 +305,11 @@ function BroadcastPicker({
   const items = Object.fromEntries(
     broadcasts.map((b) => [
       b.broadcastId,
-      t("analytics.broadcast.option", {
+      // Same-titled broadcasts (a restart, a short test) tell apart by their length (overhaul decision 2).
+      t("fixViewers.analytics.broadcast.option", {
         title: b.title.trim() || t("analytics.broadcast.untitled"),
         date: formatDateTime(new Date(b.startedAt), locale),
+        duration: formatDuration(b.durationSeconds),
       }),
     ]),
   );

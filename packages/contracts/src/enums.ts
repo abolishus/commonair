@@ -531,6 +531,14 @@ export const REHEARSAL_RULES = {
    */
   kickCooldownSeconds: 120,
 } as const;
+/**
+ * Live broadcast rules (overhaul decision 2, F6). An encoder that drops and publishes again within
+ * `reconnectGraceSeconds` continues the same broadcast: no new row, no `stream.offline` /
+ * `stream.online`, one analytics entry. Past it the broadcast ends at the moment it dropped.
+ */
+export const LIVE_RULES = {
+  reconnectGraceSeconds: 30,
+} as const;
 /** Which revenue a split version covers (ADR 0013 decision 8). `all` covers both. */
 export const SPLIT_BASES = ["tips", "subs", "all"] as const;
 export type SplitBasis = (typeof SPLIT_BASES)[number];

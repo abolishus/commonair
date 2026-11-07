@@ -5,7 +5,7 @@
  * Public viewer counts: sessions with a heartbeat in the last 30 s whose verdict is
  * `verified`. Pending and excluded sessions never count. Cached 5 s in Valkey.
  */
-import { and, eq, gt, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, ne, sql, type SQL } from "drizzle-orm";
 import { KEYS } from "@commonair/contracts/internal";
 import { schema } from "@commonair/db";
 import type { Deps } from "../deps.ts";
@@ -14,6 +14,20 @@ export const VIEWER_STALE_MS = 30_000;
 export const VIEWER_COUNT_TTL_SECONDS = 5;
 
 const { playbackSessions } = schema;
+
+/**
+ * The public live filter: open sessions on these channels, watching live (DVR viewers are catching
+ * up, ADR 0016 decision 6; worker counters.ts), with a heartbeat since `since`. The public count and
+ * the dashboard's health card both read through it, so they cannot disagree (overhaul decision 2).
+ */
+export function liveSessionsWhere(channelIds: readonly string[], since: Date): SQL | undefined {
+  return and(
+    inArray(playbackSessions.channelId, [...channelIds]),
+    isNull(playbackSessions.endedAt),
+    eq(playbackSessions.playbackMode, "live"),
+    gt(playbackSessions.lastHeartbeatAt, since),
+  );
+}
 
 export async function viewerCounts(deps: Deps, channelIds: readonly string[]): Promise<Map<string, number>> {
   const out = new Map<string, number>();
@@ -31,16 +45,7 @@ export async function viewerCounts(deps: Deps, channelIds: readonly string[]): P
   const rows = await deps.db
     .select({ channelId: playbackSessions.channelId, n: sql<number>`count(*)::int` })
     .from(playbackSessions)
-    .where(
-      and(
-        inArray(playbackSessions.channelId, misses),
-        isNull(playbackSessions.endedAt),
-        eq(playbackSessions.verdict, "verified"),
-        // DVR viewers are catching up, not watching live (ADR 0016 decision 6; worker counters.ts).
-        eq(playbackSessions.playbackMode, "live"),
-        gt(playbackSessions.lastHeartbeatAt, since),
-      ),
-    )
+    .where(and(liveSessionsWhere(misses, since), eq(playbackSessions.verdict, "verified")))
     .groupBy(playbackSessions.channelId);
   const counted = new Map(rows.map((r) => [r.channelId, Number(r.n)]));
   const pipe = deps.valkey.pipeline();
@@ -74,20 +79,27 @@ export async function viewerCount(deps: Deps, channelId: string): Promise<number
   return (await viewerCounts(deps, [channelId])).get(channelId) ?? 0;
 }
 
-/** Verified / pending / excluded among currently active sessions (dashboard health). */
+/**
+ * The dashboard's health numbers (overhaul decision 2): `verified` is `viewerCount()`, the worker's
+ * count that the public `<ViewerCount>` shows; `pending` and `excluded` use the same live filter;
+ * `catchingUp` is the public DVR count beside it.
+ */
 export async function viewerBreakdown(deps: Deps, channelId: string) {
   const since = new Date(deps.now().getTime() - VIEWER_STALE_MS);
-  const rows = await deps.db
-    .select({ verdict: playbackSessions.verdict, n: sql<number>`count(*)::int` })
-    .from(playbackSessions)
-    .where(
-      and(
-        eq(playbackSessions.channelId, channelId),
-        isNull(playbackSessions.endedAt),
-        gt(playbackSessions.lastHeartbeatAt, since),
-      ),
-    )
-    .groupBy(playbackSessions.verdict);
+  const [verified, catchingUp, rows] = await Promise.all([
+    viewerCount(deps, channelId),
+    catchingUpCounts(deps, [channelId]),
+    deps.db
+      .select({ verdict: playbackSessions.verdict, n: sql<number>`count(*)::int` })
+      .from(playbackSessions)
+      .where(and(liveSessionsWhere([channelId], since), ne(playbackSessions.verdict, "verified")))
+      .groupBy(playbackSessions.verdict),
+  ]);
   const by = Object.fromEntries(rows.map((r) => [r.verdict, Number(r.n)]));
-  return { verified: by.verified ?? 0, pending: by.pending ?? 0, excluded: by.excluded ?? 0 };
+  return {
+    verified,
+    pending: by.pending ?? 0,
+    excluded: by.excluded ?? 0,
+    catchingUp: catchingUp.get(channelId) ?? 0,
+  };
 }

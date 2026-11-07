@@ -218,6 +218,8 @@ export const stream = {
         return { targetId: t.id, name: t.name, status: s?.status ?? "idle", lastError: s?.lastError ?? null };
       }),
       viewers,
+      // The worker raises the running peak every tick; between ticks the live count may be ahead of it.
+      peakSoFar: live && b ? Math.max(b.peakVerifiedViewers, viewers.verified) : 0,
     };
   }),
 
