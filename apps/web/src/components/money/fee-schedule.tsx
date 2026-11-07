@@ -10,7 +10,7 @@ import type * as React from "react";
 import type { z } from "zod";
 import { t } from "../../i18n/index.ts";
 import { api } from "../../lib/api.ts";
-import { FormError } from "../form-error.tsx";
+import { SectionLoadError } from "../../lib/section-load-error.tsx";
 import { useLoad } from "./use-load.ts";
 
 export type FeeScheduleEntryDto = z.infer<typeof FeeScheduleEntry>;
@@ -96,7 +96,10 @@ export function FeeScheduleTable({ entries }: FeeScheduleTableProps): React.JSX.
   );
 }
 
-/** The public fee schedule on `/transparency` (`coop.feeSchedule`), anchored at `#fee-schedule`. */
+/**
+ * The public fee schedule on `/transparency` (`coop.feeSchedule`), anchored at `#fee-schedule`. A
+ * busy or unreachable load retries by itself and says so, then leaves Retry.
+ */
 export function FeeSchedule({
   load = loadSchedule,
 }: { load?: () => Promise<FeeScheduleEntryDto[]> } = {}): React.JSX.Element | null {
@@ -109,8 +112,13 @@ export function FeeSchedule({
       description={t("feeSchedule.intro")}
       className="scroll-mt-20"
     >
-      {loaded.failed ? (
-        <FormError>{t("feeSchedule.loadFailed")}</FormError>
+      {loaded.data === null && loaded.failed ? (
+        <SectionLoadError
+          section={t("feeSchedule.title")}
+          load={loaded}
+          headingLevel={3}
+          data-testid="fee-schedule-load-error"
+        />
       ) : (
         <FeeScheduleTable entries={loaded.data} />
       )}

@@ -114,9 +114,12 @@ async function readDialog(page: Page, paymentId: string): Promise<DialogView> {
   await byW1Id(page, W.breakdownOpen, { "payment-id": paymentId }).first().click(ui);
   const dialog = byW1Id(page, W.breakdownDialog);
   await dialog.waitFor(ui);
+  // The breakdown loads as the same user, from the same per-user bucket as "Your payments", so a
+  // 429 here can carry the same up-to-60 s retry-after.
+  const loaded = { timeout: PAYMENTS_TIMEOUT_MS };
   const gross = byW1Id(dialog, W.breakdownGross);
-  await gross.waitFor(ui);
-  await byW1Id(dialog, W.breakdownLine).first().waitFor(ui);
+  await gross.waitFor(loaded);
+  await byW1Id(dialog, W.breakdownLine).first().waitFor(loaded);
   const grossCents = Number(await gross.getAttribute("data-cents"));
   const lines = await byW1Id(dialog, W.breakdownLine).evaluateAll((els) =>
     els.map((el) => ({
