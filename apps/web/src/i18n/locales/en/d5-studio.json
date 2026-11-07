@@ -22,7 +22,6 @@
   "studio.preview.loading": "Loading the preview",
   "studio.preview.loadFailed": "The preview didn't load. Refresh the page to retry.",
   "studio.chatPanel.label": "Your chat",
-  "studio.health.viewers": "Verified viewers",
   "studio.health.uptime": "Uptime",
   "studio.health.bitrate": "Bitrate",
   "studio.health.fps": "Frames per second",

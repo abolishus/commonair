@@ -4,7 +4,6 @@
   "analytics.range.label": "Period",
   "analytics.range.option": "{days, plural, one {Last day} other {Last # days}}",
   "analytics.broadcast.label": "Stream",
-  "analytics.broadcast.option": "{title} · {date}",
   "analytics.broadcast.untitled": "Untitled stream",
   "analytics.loading": "Loading analytics",
   "analytics.loadFailed": "Analytics didn't load.",

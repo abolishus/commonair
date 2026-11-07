@@ -9,7 +9,6 @@ export type Key =
   | "analytics.range.label"
   | "analytics.range.option"
   | "analytics.broadcast.label"
-  | "analytics.broadcast.option"
   | "analytics.broadcast.untitled"
   | "analytics.loading"
   | "analytics.loadFailed"

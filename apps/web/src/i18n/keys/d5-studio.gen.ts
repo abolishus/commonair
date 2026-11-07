@@ -27,7 +27,6 @@ export type Key =
   | "studio.preview.loading"
   | "studio.preview.loadFailed"
   | "studio.chatPanel.label"
-  | "studio.health.viewers"
   | "studio.health.uptime"
   | "studio.health.bitrate"
   | "studio.health.fps"

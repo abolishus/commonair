@@ -22,7 +22,6 @@
   "studio.preview.loading": "Cargando la vista previa",
   "studio.preview.loadFailed": "No se pudo cargar la vista previa. Actualiza la página para reintentar.",
   "studio.chatPanel.label": "Tu chat",
-  "studio.health.viewers": "Espectadores verificados",
   "studio.health.uptime": "Tiempo en directo",
   "studio.health.bitrate": "Tasa de bits",
   "studio.health.fps": "Fotogramas por segundo",

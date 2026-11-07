@@ -4,7 +4,6 @@
   "analytics.range.label": "Periodo",
   "analytics.range.option": "{days, plural, one {Último día} other {Últimos # días}}",
   "analytics.broadcast.label": "Transmisión",
-  "analytics.broadcast.option": "{title} · {date}",
   "analytics.broadcast.untitled": "Transmisión sin título",
   "analytics.loading": "Cargando estadísticas",
   "analytics.loadFailed": "No se pudieron cargar las estadísticas.",
