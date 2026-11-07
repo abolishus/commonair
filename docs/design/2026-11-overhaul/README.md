@@ -304,13 +304,13 @@ through D7 can then run side by side; overlapping files are noted.
   - an audited admin email reveal;
   - a viewer avatar upload.
 
-## Decisions: round 2 recommendations
+## Decisions (accepted 2026-11-06)
 
 A second team of seven investigated the four open decisions and pushed the design further (full
-reports in `round2/`). Each decision below is a recommendation for the maintainer to accept or
-reject.
+reports in `round2/`). The maintainer accepted all four recommendations below on 2026-11-06; they
+are now part of the plan.
 
-### 1. The direction: approve "Open Broadcast" with five changes (direction-check)
+### 1. The direction (accepted): approve "Open Broadcast" with five changes (direction-check)
 
 **Contrast passes WCAG AA** for every proposed pair once the usage rules apply, so no colour
 value changes:
@@ -339,7 +339,7 @@ The five changes:
 5. **Extend `tokens.test.ts`** to cover these pairs, plus a guard that no channel, chat or chart
    colour sits within reach of the brand.
 
-### 2. The viewer count: both numbers were right; one live number, one settled number (viewer-count)
+### 2. The viewer count (accepted): both numbers were right; one live number, one settled number (viewer-count)
 
 The seed restarts a dead publisher, and every restart opens a new broadcast:
 
@@ -371,7 +371,7 @@ the live stream.
   the root cause.
 - **Separately (S–M):** seeded broadcasts get rollup rows.
 
-### 3. The interest list: later, and tied to accounts (scope-calls)
+### 3. The interest list (accepted): later, and tied to accounts (scope-calls)
 
 - **No audience yet:** there are no real users, and `/creators` doesn't exist.
 - **It costs M, not S.** Every list today belongs to an account. A list for people without
@@ -388,7 +388,7 @@ the live stream.
 - **Do not cite** the seeded "members rejected a newsletter" proposal anywhere. It is random seed
   filler (`harness/src/seed/coop/plan.ts:266`).
 
-### 4. Points redemption: later; explain the points we have now (scope-calls)
+### 4. Points redemption (accepted): later; explain the points we have now (scope-calls)
 
 **Why keep the chip:**
 
