@@ -198,3 +198,102 @@ test("with no delays the retrying mailer sends once", async () => {
   await expect(verify(retryingMailer(mailer, { logger: quietLogger(), delaysMs: [] }))).rejects.toBe(dns);
   expect(mailer.calls).toBe(1);
 });
+
+test("by default a transient failure is retried after 1 s, 3 s and 10 s", async () => {
+  const dns = smtpError({ code: "EDNS", command: "CONN" });
+  const mailer = flaky(new MemoryMailer({ site }), [dns, dns, dns, dns]);
+  const slept: number[] = [];
+  const retrying = retryingMailer(mailer, { logger: quietLogger(), sleep: async (ms) => void slept.push(ms) });
+  await expect(verify(retrying)).rejects.toBe(dns);
+  expect(slept).toEqual([1_000, 3_000, 10_000]);
+  expect(mailer.calls).toBe(4);
+});
+
+/** A mailer whose sends wait until `release` is called; records whether it was closed. */
+function gated(inner: Mailer) {
+  const waiting: (() => void)[] = [];
+  const m = {
+    closed: false,
+    release: () => {
+      for (const go of waiting.splice(0)) go();
+    },
+    async send(...args: Parameters<Mailer["send"]>) {
+      await new Promise<void>((go) => waiting.push(go));
+      return inner.send(...args);
+    },
+    async close() {
+      m.closed = true;
+    },
+  };
+  return m;
+}
+
+test("close waits for a send in flight before closing the transport", async () => {
+  const inner = new MemoryMailer({ site });
+  const mailer = gated(inner);
+  const retrying = retryingMailer(mailer as Mailer, { logger: quietLogger(), drainMs: 60_000 });
+  const sent = verify(retrying);
+  let closed = false;
+  const closing = retrying.close().then(() => (closed = true));
+  await Bun.sleep(5);
+  expect(closed).toBe(false);
+  expect(mailer.closed).toBe(false);
+  mailer.release();
+  await sent;
+  await closing;
+  expect(mailer.closed).toBe(true);
+  expect(inner.to("new@test.invalid")).toHaveLength(1);
+});
+
+test("close waits for a retry that is still sleeping", async () => {
+  const inner = new MemoryMailer({ site });
+  const mailer = flaky(inner, [smtpError({ code: "EDNS", command: "CONN" })]);
+  let wake: () => void = () => {};
+  const asleep = Promise.withResolvers<void>();
+  const retrying = retryingMailer(mailer, {
+    logger: quietLogger(),
+    delaysMs: [1_000],
+    drainMs: 60_000,
+    sleep: () =>
+      new Promise<void>((go) => {
+        wake = go;
+        asleep.resolve();
+      }),
+  });
+  const sent = verify(retrying);
+  await asleep.promise;
+  const closing = retrying.close();
+  wake();
+  await closing;
+  await sent;
+  expect(inner.to("new@test.invalid")).toHaveLength(1);
+});
+
+test("close gives up after drainMs and logs how many sends it cut off, never the address", async () => {
+  const mailer = gated(new MemoryMailer({ site }));
+  const lines: string[] = [];
+  const retrying = retryingMailer(mailer as Mailer, {
+    logger: createLogger({ service: "t", write: (l) => lines.push(l) }),
+    drainMs: 10,
+  });
+  void verify(retrying);
+  await retrying.close();
+  expect(mailer.closed).toBe(true);
+  const line = lines.find((l) => l.includes("mail sends abandoned at shutdown"));
+  expect(JSON.parse(line ?? "{}")).toMatchObject({ pending: 1 });
+  expect(lines.join("")).not.toContain("new@test.invalid");
+});
+
+test("close with nothing in flight, or after a failed send, closes at once", async () => {
+  const rejected = smtpError({ code: "EENVELOPE", responseCode: 550 });
+  const inner = flaky(new MemoryMailer({ site }), [rejected]);
+  let closes = 0;
+  const retrying = retryingMailer(
+    { send: (...a) => inner.send(...a), close: async () => void closes++ },
+    { logger: quietLogger(), drainMs: 60_000 },
+  );
+  await retrying.close();
+  await expect(verify(retrying)).rejects.toBe(rejected);
+  await retrying.close();
+  expect(closes).toBe(2);
+});

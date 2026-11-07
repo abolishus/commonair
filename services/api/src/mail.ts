@@ -40,35 +40,66 @@ export interface RetryOptions {
   /** Waits before each retry, in ms; their count is the number of retries. */
   delaysMs?: readonly number[];
   sleep?: (ms: number) => Promise<void>;
+  /** How long `close` waits for sends still in flight before closing the transport, in ms. */
+  drainMs?: number;
 }
 
 /**
  * Sends again after a transient failure. Better Auth sends verification, reset and magic-link mail
- * once, in the background, and drops it on error: a DNS or SMTP blip (a relay restarting, the
- * container network settling) would otherwise lose the only link a new member gets.
+ * once and drops it on error: a DNS or SMTP blip (a relay restarting, the container network
+ * settling) would otherwise lose the only link a new member gets. Those sends run after the
+ * response only because auth/background.ts sets better-auth's background-task handler; without it
+ * better-auth awaits them, retries included.
+ *
+ * `close` lets sends in flight (a retry waiting included) finish for up to `drainMs`, so a
+ * shutdown right after a sign-up does not drop its verification mail.
  */
 export function retryingMailer(inner: Mailer, opts: RetryOptions): Mailer {
   const delays = opts.delaysMs ?? [1_000, 3_000, 10_000];
   const sleep = opts.sleep ?? ((ms: number) => Bun.sleep(ms));
-  return {
-    async send(template, props, to) {
-      for (let attempt = 0; ; attempt++) {
-        try {
-          return await inner.send(template, props, to);
-        } catch (err) {
-          const delay = delays[attempt];
-          if (delay === undefined || !isTransientMailError(err)) throw err;
-          // Never log the address; the template id identifies the message.
-          opts.logger.warn("mail send failed; retrying", {
-            template,
-            attempt: attempt + 1,
-            code: (err as { code?: unknown }).code,
-          });
-          await sleep(delay);
-        }
+  const drainMs = opts.drainMs ?? 5_000;
+  const inFlight = new Set<Promise<unknown>>();
+  const track = (sent: Promise<string>): Promise<string> => {
+    const settled: Promise<unknown> = sent.then(
+      () => inFlight.delete(settled),
+      () => inFlight.delete(settled),
+    );
+    inFlight.add(settled);
+    return sent;
+  };
+  const retrying: Mailer["send"] = async (template, props, to) => {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await inner.send(template, props, to);
+      } catch (err) {
+        const delay = delays[attempt];
+        if (delay === undefined || !isTransientMailError(err)) throw err;
+        // Never log the address; the template id identifies the message.
+        opts.logger.warn("mail send failed; retrying", {
+          template,
+          attempt: attempt + 1,
+          code: (err as { code?: unknown }).code,
+        });
+        await sleep(delay);
       }
+    }
+  };
+  return {
+    send: (template, props, to) => track(retrying(template, props, to)),
+    async close() {
+      if (inFlight.size > 0) {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const drained = await Promise.race([
+          Promise.all(inFlight).then(() => true),
+          new Promise<false>((resolve) => (timer = setTimeout(() => resolve(false), drainMs))),
+        ]);
+        // A pending timer would hold the process open after a clean drain.
+        clearTimeout(timer);
+        // Never the addresses: only how many were cut off.
+        if (!drained) opts.logger.warn("mail sends abandoned at shutdown", { pending: inFlight.size });
+      }
+      await inner.close();
     },
-    close: () => inner.close(),
   };
 }
 
