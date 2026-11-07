@@ -4,7 +4,7 @@
   "chat.strip.kind.giveaway": "Sorteo",
   "chat.strip.state.open": "En curso",
   "chat.strip.state.openLeft": "En curso · quedan {time}",
-  "chat.strip.state.locked": "Apuestas cerradas",
+  "chat.strip.state.locked": "Predicciones cerradas",
   "chat.strip.state.won": "Ganó {name}",
   "chat.strip.state.ended": "Terminó",
   "chat.strip.state.canceled": "Se canceló",

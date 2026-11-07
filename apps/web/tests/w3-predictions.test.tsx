@@ -145,7 +145,7 @@ describe("the viewer card", () => {
     });
   }
 
-  it("shows the result card after a resolve: pool, winners, payouts that add up to the pool", () => {
+  it("shows the result card after a resolve: pool, winners, shares that add up to the total", () => {
     card(
       view({
         status: "resolved",
@@ -161,16 +161,16 @@ describe("the viewer card", () => {
       result.getAttribute("data-winners"),
       result.getAttribute("data-payout-sum"),
     ]).toEqual(["600", "2", "600"]);
-    expect(result.textContent).toContain("600 acorns in the pool");
+    expect(result.textContent).toContain("600 acorns predicted");
     expect(result.textContent).toContain("2 winners");
-    expect(result.textContent).toContain("600 acorns paid out: the payouts add up to the pool.");
+    expect(result.textContent).toContain("600 acorns went to the winners: every point that was predicted.");
   });
 
   it("a cancel's card returns every stake; an open prediction has none", () => {
     card(view({ status: "canceled", result: { pool: 75, winners: 0, payoutSum: 75 } }));
     const result = screen.getByTestId("chat-prediction-result");
     expect(result.textContent).toContain("no winners");
-    expect(result.textContent).toContain("75 acorns returned: every bet was refunded.");
+    expect(result.textContent).toContain("75 acorns returned to everyone who predicted.");
     cleanup();
     card(view());
     expect(screen.queryByTestId("chat-prediction-result")).toBeNull();

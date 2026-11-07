@@ -156,7 +156,7 @@ describe("BreakdownView", () => {
   it("labels each kind", () => {
     const l = (kind: PaymentBreakdownDto["lines"][number]["kind"], cents: number, component = null as never) =>
       breakdownLineLabel({ kind, amount: usd(cents), recipientUserId: null, component, transactionId: null });
-    expect(l("processor_fee", 30)).toMatch(/processing fee/);
+    expect(l("processor_fee", 30)).toMatch(/Card fees/);
     expect(l("dispute_fee", 1500)).toMatch(/Dispute fee \(paid/);
     expect(l("coop_net", -1)).toBe("What the co-op kept");
     expect(l("reversal", -10, "creator" as never)).toBe("Creator share reversed");
@@ -182,7 +182,7 @@ describe("BreakdownOpenButton", () => {
     });
     wrap(<BreakdownOpenButton paymentId={PAY} client={{ paymentBreakdown }} />);
     fireEvent.click(ids("breakdown-open")[0] as HTMLElement);
-    await waitFor(() => expect(screen.getByText(/could not be loaded/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/didn't load/)).toBeTruthy());
   });
 });
 
@@ -311,6 +311,6 @@ describe("FeeSchedule", () => {
         }}
       />,
     );
-    await waitFor(() => expect(screen.getByText(/could not be loaded/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/didn't load/)).toBeTruthy());
   });
 });

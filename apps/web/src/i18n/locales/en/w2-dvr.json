@@ -5,16 +5,16 @@
   "dvr.backToLive": "Back to live",
   "dvr.sourceOnly": "Source quality only",
   "dvr.settings.title": "Live rewind",
-  "dvr.settings.description": "Viewers can drag back while you are live and catch up, then jump back to live. Free for everyone who may watch your recordings.",
+  "dvr.settings.description": "Viewers can drag back while you are live and catch up, then jump back to live. Free for everyone who may watch your videos.",
   "dvr.settings.enabled": "Let viewers rewind",
   "dvr.settings.window": "How far back",
   "dvr.settings.windowHint": "Up to {max} on this instance.",
-  "dvr.settings.needsVods": "Rewind plays your stream's recording, so it works only while VODs are on. Turning VODs on turns rewind on.",
+  "dvr.settings.needsVods": "Rewind plays the saved video of your stream, so it works only while your streams are saved as videos. Saving videos turns rewind on.",
   "dvr.settings.sourceOnly": "Rewound video plays at source quality only, with no lower qualities and no data saver.",
   "dvr.settings.originOnly": "Rewind is served by this instance itself, not by relays, so viewers who rewind cost it more to serve.",
   "dvr.settings.instanceOff": "Rewind is turned off on this instance.",
   "dvr.settings.save": "Save rewind settings",
   "dvr.settings.saved": "Rewind settings saved",
   "dvr.settings.saveFailed": "Could not save the rewind settings. Try again.",
-  "dvr.settings.loadFailed": "Could not load the rewind settings."
+  "dvr.settings.loadFailed": "The rewind settings didn't load. Refresh the page to retry."
 }

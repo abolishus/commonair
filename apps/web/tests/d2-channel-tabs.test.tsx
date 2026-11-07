@@ -332,7 +332,7 @@ describe("the Videos and Clips grids", () => {
     expect(screen.queryByTestId("channel-video-grid-more")).toBeNull();
   });
 
-  it("a list that failed on the server is asked again in the browser, with Try again on failure", async () => {
+  it("a list that failed on the server is asked again in the browser, with Retry on failure", async () => {
     let fail = true;
     const vods = vi.fn<MediaClient["vods"]>(async () => {
       if (fail) throw new Error("down");
@@ -340,10 +340,10 @@ describe("the Videos and Clips grids", () => {
     });
     renderPage(page({ vods: null }), "/fern?tab=videos", { ...neverClient, vods });
     await waitFor(() => expect(screen.getByTestId("channel-video-grid").getAttribute("data-state")).toBe("error"));
-    expect(screen.getByText("This list did not load")).toBeTruthy();
+    expect(screen.getByText("This list didn't load")).toBeTruthy();
     fail = false;
     act(() => {
-      fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+      fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     });
     await waitFor(() => expect(screen.getAllByTestId("channel-video-card")).toHaveLength(1));
     expect(vods).toHaveBeenCalledTimes(2);
@@ -370,7 +370,7 @@ describe("each grid's empty state", () => {
     expect(state.getAttribute("data-own")).toBe("true");
     expect(state.textContent).toContain(
       tab === "videos"
-        ? "Go live and your broadcast is saved here."
+        ? "Go live and your stream is saved here as a video."
         : "Clips your viewers cut from your streams show up here.",
     );
     const action = state.querySelector('[data-testid="empty-state-action"]');

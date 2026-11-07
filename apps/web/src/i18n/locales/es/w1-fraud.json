@@ -8,7 +8,7 @@
   "fraud.empty": "No hay alertas aquí",
   "fraud.emptyHint": "Aquí aparecen las alertas que generan el análisis de pagos, la ejecución de liquidaciones o una persona de tesorería.",
   "fraud.loadMore": "Cargar más alertas",
-  "fraud.loadFailed": "No se pudieron cargar las alertas de fraude.",
+  "fraud.loadFailed": "No se pudieron cargar las alertas de fraude. Actualiza la página para reintentar.",
   "fraud.kind.payer_velocity": "Ráfaga de pagos",
   "fraud.kind.payer_concentration": "Pocos pagadores",
   "fraud.kind.new_payee": "Primera liquidación grande",

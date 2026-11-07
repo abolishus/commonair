@@ -24,8 +24,8 @@
   "payoutTransfers.note.partlyReversed": "Revertida en parte. El importe revertido volvió a las ganancias de la persona creadora.",
   "payoutTransfers.none": "Nada",
   "payoutTransfers.loadMore": "Cargar más",
-  "payoutTransfers.loadMoreFailed": "No se pudieron cargar más transferencias. Vuelve a intentarlo en un momento.",
+  "payoutTransfers.loadMoreFailed": "No se pudieron cargar más transferencias. Inténtalo de nuevo.",
   "payoutTransfers.loadFailed.title": "Las transferencias no se cargaron",
-  "payoutTransfers.loadFailed.body": "Comprueba tu conexión y vuelve a intentarlo.",
+  "payoutTransfers.loadFailed.body": "Comprueba tu conexión y reintenta.",
   "payoutTransfers.retry": "Reintentar"
 }

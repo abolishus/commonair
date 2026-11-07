@@ -4,7 +4,7 @@
   "calmChat.toggleOff": "El chat en calma está desactivado: se muestran todas las líneas",
   "calmChat.settings.open": "Configuración de Chat en calma",
   "calmChat.settings.title": "Chat en calma",
-  "calmChat.settings.intro": "Agrupa los mensajes repetidos y limita cuántas líneas nuevas aparecen por segundo. Las menciones a ti, a quien transmite y al equipo de moderación siempre se muestran. Se guarda en este dispositivo.",
+  "calmChat.settings.intro": "Agrupa los mensajes repetidos y limita cuántas líneas nuevas aparecen por segundo. Las menciones a ti, a quien es dueño del canal y al equipo de moderación siempre se muestran. Se guarda en este dispositivo.",
   "calmChat.settings.rate": "Líneas nuevas por segundo",
   "calmChat.settings.rateValue": "{count, plural, one {# línea por segundo} other {# líneas por segundo}}",
   "calmChat.settings.subscriberPriority": "Mostrar primero los mensajes de suscriptores",

@@ -1,11 +1,11 @@
 {
   "chatGate.pageTitle": "Chat safety",
   "chatGate.pageIntro": "Keep hate raids out of your chat by asking for a little real watching first.",
-  "chatGate.loadFailed": "Chat safety settings could not be loaded.",
+  "chatGate.loadFailed": "Chat safety settings didn't load.",
   "chatGate.offTitle": "Not available on this instance",
   "chatGate.offDescription": "The operator of this instance has not enabled the verified-watch gate or the surge guard yet.",
   "chatGate.gate.title": "Verified-watch gate",
-  "chatGate.gate.intro": "Only signed-in viewers who have actually been watching this broadcast for a while can chat. It never tells anyone how close they are.",
+  "chatGate.gate.intro": "Only signed-in viewers who have actually been watching this stream for a while can chat. It never tells anyone how close they are.",
   "chatGate.gate.offTitle": "Verified-watch gate not enabled",
   "chatGate.gate.offDescription": "The operator of this instance has not enabled the verified-watch gate.",
   "chatGate.gate.seconds": "Watching required (seconds)",

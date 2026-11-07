@@ -60,7 +60,7 @@ describe("en-XA", () => {
     const xa = uiMessagesFor("en-XA");
     expect(xa.close).toMatch(/^\[Çļöšé~+\]$/);
     expect(xa.theme.dark).toMatch(/^\[Ðåŕķ~+\]$/);
-    expect(xa.discoveryReason.new).toMatch(/^\[Ñéŵ šţŕéåɱéŕ~+\]$/);
+    expect(xa.discoveryReason.new).toMatch(/^\[Ñéŵ çĥåññéļ~+\]$/);
     expect(xa.viewerCount("1,234", 1234)).toMatch(/^\[1,234 ṽéŕîƒîéð ṽîéŵéŕš~+\]$/);
     expect(xa.viewerCount("1", 1)).toMatch(/^\[1 ṽéŕîƒîéð ṽîéŵéŕ~+\]$/);
     expect(uiMessagesFor("en-XA")).toBe(xa);
@@ -80,7 +80,7 @@ describe("UiMessages per locale", () => {
     await loadLocale("es");
     const es = uiMessagesFor("es");
     expect(es.close).toBe("Cerrar");
-    expect(es.discoveryReason.new).toBe("Streamer nuevo");
+    expect(es.discoveryReason.new).toBe("Canal nuevo");
     expect(es.viewerCount("1", 1)).toBe("1 espectador verificado");
     expect(es.viewerCount("1.234", 1234)).toBe("1.234 espectadores verificados");
     // Built once per catalog.

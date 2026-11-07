@@ -345,7 +345,7 @@ describe("incidents page", () => {
       .mockRejectedValueOnce(new Error("x"))
       .mockResolvedValue(statusOf([]));
     wrap(<IncidentsPage client={{ status, write: vi.fn<IncidentsClient["write"]>() }} />);
-    fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
     expect(await screen.findByTestId("incidents-empty")).toBeTruthy();
     expect(status).toHaveBeenCalledTimes(2);
   });
@@ -461,7 +461,7 @@ describe("integrity page", () => {
       .mockRejectedValueOnce(new Error("x"))
       .mockResolvedValue({ items: [flag], nextCursor: null });
     wrap(<IntegrityPage client={{ flags, decide: vi.fn<IntegrityClient["decide"]>() }} />);
-    fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
     expect(await screen.findByTestId("integrityq-item")).toBeTruthy();
     expect(flags).toHaveBeenCalledTimes(2);
   });

@@ -1,8 +1,8 @@
 {
   "rehearsal.pageTitle": "Ensayar",
-  "rehearsal.pageIntro": "Prueba tu configuración en privado antes de emitir en directo. Un ensayo usa tu clave de transmisión normal y pasa por la ingesta, la transcodificación, las comprobaciones de salud y los filtros del chat reales, pero solo tú y hasta cinco seguidores que invites podéis verlo. Nada de él cuenta como una emisión.",
+  "rehearsal.pageIntro": "Prueba tu configuración en privado antes de emitir en directo. Un ensayo usa tu clave de transmisión normal y pasa por la ingesta, la transcodificación, las comprobaciones de salud y los filtros del chat reales, pero solo tú y hasta cinco seguidores que invites podéis verlo. Nada de él cuenta como una transmisión pública.",
   "rehearsal.loading": "Cargando el ensayo",
-  "rehearsal.loadFailed": "No se pudo cargar el ensayo.",
+  "rehearsal.loadFailed": "No se pudo cargar el ensayo. Actualiza la página para reintentar.",
   "rehearsal.status.title": "Ensayo",
   "rehearsal.status.idle": "Sin armar",
   "rehearsal.status.armed": "Armado: empieza a transmitir antes de {time}",
@@ -27,7 +27,7 @@
   "rehearsal.key.title": "Clave de transmisión",
   "rehearsal.key.reminder": "Transmite con tu clave normal (la que empieza por {prefix}). Aquí nunca se muestra completa.",
   "rehearsal.key.none": "Todavía no tienes una clave de transmisión.",
-  "rehearsal.key.dashboard": "Crea una en el panel",
+  "rehearsal.key.dashboard": "Crea una en el Estudio de creador",
   "rehearsal.invitees.title": "Invitados",
   "rehearsal.invitees.hint": "Hasta {max} de tus seguidores pueden verlo con la sesión iniciada. Cada cambio queda registrado.",
   "rehearsal.invitees.label": "Nombre de usuario del seguidor",
@@ -91,7 +91,7 @@
   "rehearsal.report.watched.title": "Invitados que lo vieron",
   "rehearsal.report.watched.none": "Ningún invitado lo vio.",
   "rehearsal.watch.title": "Ensayo privado",
-  "rehearsal.watch.intro": "{channel} te invitó a un ensayo privado. No es una emisión: solo los invitados pueden verlo.",
+  "rehearsal.watch.intro": "{channel} te invitó a un ensayo privado. No es una transmisión pública: solo los invitados pueden verlo.",
   "rehearsal.watch.unavailable": "No hay ningún ensayo que ver",
   "rehearsal.watch.unavailableHint": "Ahora mismo no hay ningún ensayo de este canal al que te hayan invitado."
 }

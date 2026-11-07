@@ -276,7 +276,7 @@ describe("the tag filter and the Live channels view", () => {
 
   it("says when the directory could not be loaded", async () => {
     await renderInRouter(<DirectoryPage data={null} view="categories" />, "/directory");
-    expect(screen.getByText("The directory could not be loaded. Reload to try again.")).toBeTruthy();
+    expect(screen.getByText("The directory didn't load. Refresh the page to retry.")).toBeTruthy();
   });
 });
 
@@ -374,7 +374,7 @@ describe("the home page directory (F8)", () => {
 
   it("a failed load shows the error and no shelves, even with offline data", async () => {
     await renderInRouter(<Directory sections={null} offline={[{ id: "recent", cards: [offline("earlier")] }]} />);
-    expect(screen.getByText("The directory could not be loaded. Reload to try again.")).toBeTruthy();
+    expect(screen.getByText("The directory didn't load. Refresh the page to retry.")).toBeTruthy();
     expect(screen.queryAllByTestId("directory-section")).toHaveLength(0);
   });
 

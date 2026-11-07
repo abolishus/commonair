@@ -119,7 +119,7 @@ describe("uiMessagesFromCatalog", () => {
     const m = built.es as UiMessages;
     expect(m.close).toBe("Cerrar");
     expect(m.theme.dark).toBe("Oscuro");
-    expect(m.discoveryReason.new).toBe("Streamer nuevo");
+    expect(m.discoveryReason.new).toBe("Canal nuevo");
     expect(m.live).toBe("En vivo");
   });
 

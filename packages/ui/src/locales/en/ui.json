@@ -19,7 +19,7 @@
   "ui.viewerCount": "{formatted} verified {count, plural, one {viewer} other {viewers}}",
   "ui.discoveryReason.popular": "Popular",
   "ui.discoveryReason.spotlight": "Spotlight",
-  "ui.discoveryReason.new": "New streamer",
+  "ui.discoveryReason.new": "New channel",
   "ui.discoveryReason.following": "Following",
   "ui.discoveryReason.random": "Random pick",
   "ui.discoveryReason.category": "In this category",

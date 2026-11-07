@@ -24,8 +24,8 @@
   "payoutTransfers.note.partlyReversed": "Partly reversed. The reversed amount went back to the creator's earnings.",
   "payoutTransfers.none": "None",
   "payoutTransfers.loadMore": "Load more",
-  "payoutTransfers.loadMoreFailed": "Could not load more transfers. Try again in a moment.",
-  "payoutTransfers.loadFailed.title": "Transfers did not load",
-  "payoutTransfers.loadFailed.body": "Check your connection and try again.",
-  "payoutTransfers.retry": "Try again"
+  "payoutTransfers.loadMoreFailed": "More transfers didn't load. Try again.",
+  "payoutTransfers.loadFailed.title": "Transfers didn't load",
+  "payoutTransfers.loadFailed.body": "Check your connection, then retry.",
+  "payoutTransfers.retry": "Retry"
 }

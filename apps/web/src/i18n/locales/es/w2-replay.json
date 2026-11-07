@@ -5,7 +5,7 @@
   "replay.panel.footer": "El chat tal como fue en directo. Los mensajes eliminados y las personas que bloqueas siguen ocultos.",
   "replay.loading": "Cargando el chat…",
   "replay.waiting": "El chat aparece aquí mientras se reproduce el video.",
-  "replay.error": "No se pudo cargar el chat. Volviendo a intentarlo…",
+  "replay.error": "No se pudo cargar el chat. Reintentando…",
   "replay.retry": "Reintentar",
   "replay.empty.title": "Nadie escribió en el chat durante este video",
   "replay.notRetained.title": "El chat de este video ya no se conserva",
