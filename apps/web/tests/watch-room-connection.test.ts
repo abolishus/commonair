@@ -28,7 +28,7 @@ class FakeSocket implements SocketLike {
   }
 }
 
-function setup(playhead: { at: Date | null; mode: "live" | "dvr" }) {
+function setup(playhead: { at: Date | null; mode: "live" | "dvr"; edge?: Date | null; buffered?: Date | null }) {
   const sockets: FakeSocket[] = [];
   const timers: { fn: () => void; ms: number }[] = [];
   const repeats: { fn: () => void; ms: number }[] = [];
@@ -84,6 +84,28 @@ describe("RoomConnection", () => {
     expect(s.notices).toEqual(["room_blocked"]);
     expect(s.conn.send("hi")).toBe(true);
     expect(sock.sent.at(-1)).toMatchObject({ op: "room.send", roomId: ROOM, body: "hi" });
+  });
+
+  it("reports the edge and where the buffered media ends in live mode, null for both in DVR", async () => {
+    const at = new Date("2026-11-01T10:00:00.000Z");
+    const edge = new Date(at.getTime() + 6600);
+    const buffered = new Date(at.getTime() + 1200);
+    const live = setup({ at, mode: "live", edge, buffered });
+    live.conn.start();
+    await tick();
+    live.sockets[0]!.emit("message", { op: "welcome", sessionId: "x", user: null, heartbeatMs: 30_000 });
+    live.repeats.find((r) => r.ms === 2000)!.fn();
+    expect(live.sockets[0]!.sent.at(-1)).toMatchObject({
+      op: "room.sync",
+      edgeWallclock: edge.toISOString(),
+      bufferedWallclock: buffered.toISOString(),
+    });
+    const dvr = setup({ at, mode: "dvr", edge, buffered });
+    dvr.conn.start();
+    await tick();
+    dvr.sockets[0]!.emit("message", { op: "welcome", sessionId: "x", user: null, heartbeatMs: 30_000 });
+    dvr.repeats.find((r) => r.ms === 2000)!.fn();
+    expect(dvr.sockets[0]!.sent.at(-1)).toMatchObject({ edgeWallclock: null, bufferedWallclock: null });
   });
 
   it("no playhead, no report; a closed room stops the connection", async () => {

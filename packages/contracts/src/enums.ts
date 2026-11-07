@@ -613,10 +613,17 @@ export const ROOM_AGE_BANDS = ["minor", "adult"] as const;
 export type RoomAgeBand = (typeof ROOM_AGE_BANDS)[number];
 /**
  * Watch-room limits (decision (q)): members at once (the database refuses a 9th active member),
- * minutes a room may stay empty before it ends, days a room's data is kept after it ends, and how far
- * behind the live edge the sync target may sit.
+ * minutes a room may stay empty before it ends, days a room's data is kept after it ends, how far
+ * behind the live edge the sync target may sit, and how much buffered media a member needs ahead of
+ * the target to play faster toward it (the target never sits later than a member's buffer minus this).
  */
-export const ROOM_LIMITS = { maxMembers: 8, emptyEndMinutes: 10, retentionDays: 30, edgeCapSeconds: 5 } as const;
+export const ROOM_LIMITS = {
+  maxMembers: 8,
+  emptyEndMinutes: 10,
+  retentionDays: 30,
+  edgeCapSeconds: 5,
+  syncSpareMs: 1_500,
+} as const;
 /** Why a watch room ended (`watch_rooms.end_reason`). */
 export const ROOM_END_REASONS = [
   "host_closed",

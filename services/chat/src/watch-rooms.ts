@@ -222,6 +222,9 @@ export class WatchRooms implements WatchRoomHandler {
       ...(frame.edgeWallclock !== undefined
         ? { edgeWallclock: frame.mode === "live" ? frame.edgeWallclock : null }
         : {}),
+      ...(frame.bufferedWallclock !== undefined
+        ? { bufferedWallclock: frame.mode === "live" ? frame.bufferedWallclock : null }
+        : {}),
     };
     const key = KEYS.roomSync(frame.roomId);
     await this.d.valkey.multi().hset(key, userId, JSON.stringify(report)).expire(key, ROOM_PRESENCE_TTL_SECONDS).exec();

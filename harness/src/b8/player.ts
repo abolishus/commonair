@@ -112,6 +112,65 @@ export function edgeSyncTrajectory(
   return { t0, frames, targets: received };
 }
 
+/** One look at a member's video element: what the room driver's rate gate reads (`bufferAheadMs`). */
+export interface PlayerSample {
+  t: number;
+  /** `currentTime`, playback rate and ready state. */
+  ct: number;
+  rate: number;
+  rs: number;
+  /** Buffered ranges (count) and, of the one under the playhead, how far it runs ahead (ms; 0 outside every range). */
+  ranges: number;
+  aheadMs: number;
+  /** From the playhead to the end of the last range (ms): what is buffered at all, gaps included. */
+  toEndMs: number;
+  /** The widest gap between two ranges ahead of the playhead (ms). */
+  gapMs: number;
+}
+
+const SAMPLE_PLAYER = `(() => {
+  const v = document.querySelector('[data-testid="player-video"]');
+  if (!v) return null;
+  const t = v.currentTime, b = v.buffered;
+  let ahead = 0, gap = 0, prevEnd = null;
+  for (let i = 0; i < b.length; i++) {
+    const s = b.start(i), e = b.end(i);
+    if (s <= t + 0.1 && e >= t) ahead = Math.round((e - t) * 1000);
+    if (prevEnd !== null && e > t) gap = Math.max(gap, Math.round((s - prevEnd) * 1000));
+    prevEnd = e;
+  }
+  const end = b.length ? b.end(b.length - 1) : t;
+  return { ct: Math.round(t * 1000) / 1000, rate: v.playbackRate, rs: v.readyState, ranges: b.length, aheadMs: ahead,
+    toEndMs: Math.round((end - t) * 1000), gapMs: gap };
+})()`;
+
+/** Sample every member's video element every 2 s until `stop()` (diagnostics only: no user data). */
+function samplePlayers(members: () => readonly { label: string; page: Page }[]): {
+  samples: Record<string, PlayerSample[]>;
+  stop(): void;
+} {
+  const samples: Record<string, PlayerSample[]> = {};
+  let stopped = false;
+  const t0 = Date.now();
+  void (async () => {
+    while (!stopped) {
+      await Promise.all(
+        members().map(async (m) => {
+          const s = (await m.page.evaluate(SAMPLE_PLAYER).catch(() => null)) as Omit<PlayerSample, "t"> | null;
+          if (s) (samples[m.label] ??= []).push({ t: Date.now() - t0, ...s });
+        }),
+      );
+      await sleep(2_000).catch(() => undefined);
+    }
+  })();
+  return {
+    samples,
+    stop: () => {
+      stopped = true;
+    },
+  };
+}
+
 export async function stepEdgeSync(run: WatchRoomB8Extension): Promise<void> {
   const { ctx } = run;
   const t = (what: string) => b8ExtensionTitle("edge-sync", what);
@@ -144,6 +203,13 @@ export async function stepEdgeSync(run: WatchRoomB8Extension): Promise<void> {
       await Promise.all([near, far].map((m) => watchInRoom(m, ch.channel, room.roomId)));
     },
   );
+  // What each player's rate gate sees (buffered ahead under the playhead, the rate it plays at).
+  const players: { label: string; page: Page }[] = [
+    { label: "near", page: near.page },
+    { label: "far", page: far.page },
+  ];
+  const sampler = samplePlayers(() => players);
+  ctx.defer(() => sampler.stop());
   await ctx.step(t(`play together for ${SYNC_SETTLE_MS / 1000} s`), () => sleep(SYNC_SETTLE_MS, ctx.signal));
   const settledAt = Date.now();
 
@@ -185,7 +251,10 @@ export async function stepEdgeSync(run: WatchRoomB8Extension): Promise<void> {
     return m;
   });
   await ctx.step(t("the WebKit member plays live in the room"), () => watchInRoom(webkit, ch.channel, room.roomId));
+  players.push({ label: "webkit", page: webkit.page });
   await ctx.step(t(`play together for ${SYNC_SETTLE_MS / 1000} s`), () => sleep(SYNC_SETTLE_MS, ctx.signal));
+  sampler.stop();
+  ctx.data("edgeSyncPlayers", sampler.samples);
   // Diagnostics again, now with the WebKit member's frames (and the Chromium ones since).
   ctx.data("edgeSyncWebkitTrajectory", edgeSyncTrajectory(samples, targets));
   const webkitEdges = edgeSummary(samples.webkit ?? []);

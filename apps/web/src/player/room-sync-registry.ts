@@ -154,8 +154,9 @@ export function roomPlayer(channel: string, doc: Document | null = globalThis.do
 }
 
 /**
- * What this member reports with every `room.sync` (batch 8): the playhead, the mode and the live
- * edge (null in DVR). Without a mounted player, the media clock alone and no edge.
+ * What this member reports with every `room.sync` (batch 8): the playhead, the mode, the live
+ * edge and the end of its buffered media (null in DVR). Without a mounted player, the media clock
+ * alone, with no edge and no buffer.
  */
 export function roomSyncReport(channel: string, doc: Document | null = globalThis.document ?? null): RoomReport {
   return (
@@ -163,6 +164,7 @@ export function roomSyncReport(channel: string, doc: Document | null = globalThi
       at: playheadWallclock(channel),
       mode: playbackMode(channel),
       edge: null,
+      buffered: null,
     }
   );
 }

@@ -372,6 +372,33 @@ describe("sync", () => {
     expect(held).toBeGreaterThan(10_000);
     for (const c of [h, g]) c.close();
   });
+
+  test("the target stays where every live member has buffered to (watch-room CI run 42333642371)", async () => {
+    const r = await room();
+    const m = await member(r);
+    const h = await joined(a, r.host.id, r.id);
+    const g = await joined(b, m.id, r.id);
+    const report = (c: Client, headAgo: number, bufferedAgo: number | undefined) =>
+      c.send({
+        op: "room.sync",
+        roomId: r.id,
+        playheadWallclock: new Date(Date.now() - headAgo).toISOString(),
+        mode: "live",
+        edgeWallclock: new Date(Date.now() - 50).toISOString(),
+        ...(bufferedAgo === undefined ? {} : { bufferedWallclock: new Date(Date.now() - bufferedAgo).toISOString() }),
+      });
+    // The host on the cap point with plenty buffered; the member 6.66 s behind with 1.2 s buffered.
+    report(h, 5000, 400);
+    report(g, 6660, 5460);
+    const lag = await eventually(async () => {
+      const f = await g.waitFor<"room.sync">((x) => x.op === "room.sync", 3000, { includePast: false });
+      const behind = Date.now() - Date.parse(f.target);
+      // Its buffer's end less the 1.5 s spare (6.96 s), not the capped 5.05 s.
+      return behind > 6700 && behind < 7700 ? behind : null;
+    }, 6000);
+    expect(lag).toBeGreaterThan(6700);
+    for (const c of [h, g]) c.close();
+  });
 });
 
 describe("empty rooms", () => {

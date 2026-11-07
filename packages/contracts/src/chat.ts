@@ -75,6 +75,12 @@ export const ClientFrame = z.discriminatedUnion("op", [
     mode: z.enum(PLAYBACK_MODES),
     /** Batch 8 (B8-player): the player's live edge as a wall-clock instant; null in `dvr` mode. */
     edgeWallclock: Timestamp.nullable().optional(),
+    /**
+     * The PDT at the end of the media this player has buffered under its playhead, as a wall-clock
+     * instant; null in `dvr` mode or while unknown. Chat keeps the target where every live member
+     * can play to (`ROOM_LIMITS.syncSpareMs` short of it).
+     */
+    bufferedWallclock: Timestamp.nullable().optional(),
     nonce,
   }),
 ]);

@@ -368,6 +368,8 @@ export const RoomSyncReport = z.object({
    * wall-clock instant, null in `dvr` mode. Absent in reports from players before batch 8.
    */
   edgeWallclock: z.iso.datetime({ offset: true }).nullable().optional(),
+  /** The end of the reporting player's buffered media as a wall-clock instant; null in `dvr` or while unknown. */
+  bufferedWallclock: z.iso.datetime({ offset: true }).nullable().optional(),
 });
 export type RoomSyncReport = z.infer<typeof RoomSyncReport>;
 

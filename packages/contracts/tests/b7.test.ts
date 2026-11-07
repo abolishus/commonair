@@ -61,7 +61,13 @@ describe("enums", () => {
   test("rules and new values", () => {
     expect(REPORT_SUBJECTS).toContain("watch_room");
     expect(ROOM_AGE_BANDS).toEqual(["minor", "adult"]);
-    expect(ROOM_LIMITS).toEqual({ maxMembers: 8, emptyEndMinutes: 10, retentionDays: 30, edgeCapSeconds: 5 });
+    expect(ROOM_LIMITS).toEqual({
+      maxMembers: 8,
+      emptyEndMinutes: 10,
+      retentionDays: 30,
+      edgeCapSeconds: 5,
+      syncSpareMs: 1_500,
+    });
     expect(FOLLOW_SOURCES).toEqual(["direct", "move_link", "import"]);
     expect(MOVE_LINK_RULES).toEqual({ maxActive: 10, perDay: 20 });
     expect(UNSUBSCRIBE_LISTS).toContain("moved");

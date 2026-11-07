@@ -30,6 +30,16 @@
  * is bounded at `edgeCapMs + EDGE_SLACK_MS` ahead of the most advanced member, so a stalled stream
  * cannot push the target past what players can reach for long. A reported edge is remembered the
  * same way, so the fallback carries on from the last edge a newer client reported.
+ *
+ * **Reachable by every member.** A member closes a drift behind the target by playing faster,
+ * which needs media buffered ahead (`ROOM_LIMITS.syncSpareMs`; apps/web `RATE.minAheadMs`), and a
+ * drift under 3 s is never a seek. So a target later than what a member has buffered, less that
+ * spare, is one that member never reaches: watch-room CI run 42333642371 had a WebKit member held
+ * 1.63 s behind the capped target for 30 s at normal speed while the Chromium members sat on it.
+ * Members report the end of their buffered media (`bufferedWallclock`), and the target is never
+ * later than the earliest of those less the spare: the others come back to the member that cannot
+ * go forward, as they would to the slowest one. It stays within `REACH_SLACK_MS` of the cap, so one
+ * member whose buffer has run dry (a stall) cannot drag the room far behind live.
  */
 import { ROOM_LIMITS } from "@commonair/contracts/enums";
 import type { RoomSyncReport } from "@commonair/contracts/internal";
@@ -40,6 +50,8 @@ export const SYNC_STALE_MS = 10_000;
 export const SYNC_TICK_MS = 2_000;
 /** How far the remembered edge may run ahead of the cap point of the most advanced member. */
 export const EDGE_SLACK_MS = 2_000;
+/** How far below the cap point a member's reach may still pull the target. */
+export const REACH_SLACK_MS = 2_000;
 /** A remembered edge older than this is dropped (the room had no live reports for a while). */
 export const EDGE_MEMORY_MS = 60_000;
 /** The `KEYS.roomSync` field the shared edge estimate is kept in (never a user id). */
@@ -62,6 +74,8 @@ export interface SyncInput {
   now: number;
   edgeCapMs?: number;
   staleMs?: number;
+  /** Media a member needs buffered ahead of the target (ms). */
+  spareMs?: number;
   /** The previous tick's estimate, from any instance. */
   prevEdge?: EdgeEstimate | null;
 }
@@ -84,10 +98,12 @@ export function syncState({
   now,
   edgeCapMs = ROOM_LIMITS.edgeCapSeconds * 1000,
   staleMs = SYNC_STALE_MS,
+  spareMs = ROOM_LIMITS.syncSpareMs,
   prevEdge = null,
 }: SyncInput): SyncResult | null {
   const heads: number[] = [];
   const edges: number[] = [];
+  const reaches: number[] = [];
   const ceiling = now + EDGE_SKEW_MS;
   for (const r of reports) {
     if (r.mode !== "live") continue;
@@ -99,6 +115,12 @@ export function syncState({
     if (r.edgeWallclock) {
       const edge = Date.parse(r.edgeWallclock) + age;
       if (Number.isFinite(edge) && edge <= ceiling) edges.push(edge);
+    }
+    if (r.bufferedWallclock) {
+      // A member keeping pace buffers as fast as it plays, so its buffer's end moves with real time too.
+      const buffered = Date.parse(r.bufferedWallclock) + age;
+      // Never behind its own playhead (a report read across a seek) and never in the future.
+      if (Number.isFinite(buffered)) reaches.push(Math.min(Math.max(buffered, head), ceiling) - spareMs);
     }
   }
   if (heads.length === 0) return null;
@@ -112,7 +134,10 @@ export function syncState({
     edge = Math.max(leader, Math.min(carried, leader + edgeCapMs + EDGE_SLACK_MS, ceiling));
   }
   // `edge >= leader >= slowest`, so the target is never past the edge (nor past `ceiling`).
-  return { target: Math.max(slowest, edge - edgeCapMs), edge: { edge, at: now } };
+  const capped = Math.max(slowest, edge - edgeCapMs);
+  if (reaches.length === 0) return { target: capped, edge: { edge, at: now } };
+  const reach = Math.max(Math.min(...reaches), edge - edgeCapMs - REACH_SLACK_MS);
+  return { target: Math.min(capped, reach), edge: { edge, at: now } };
 }
 
 /** Parse the shared edge estimate field, or null. */

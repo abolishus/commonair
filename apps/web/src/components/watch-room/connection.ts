@@ -25,9 +25,10 @@ export interface RoomConnectionDeps {
   createSocket: (url: string) => SocketLike;
   /**
    * This member's playhead, mode and (batch 8) live edge; defaults to the channel's player
-   * (`roomSyncReport`). Without `edge` the frame carries no `edgeWallclock`.
+   * (`roomSyncReport`). Without `edge` the frame carries no `edgeWallclock`, without `buffered` no
+   * `bufferedWallclock`.
    */
-  playhead?: () => { at: Date | null; mode: "live" | "dvr"; edge?: Date | null };
+  playhead?: () => { at: Date | null; mode: "live" | "dvr"; edge?: Date | null; buffered?: Date | null };
   setTimer?: (fn: () => void, ms: number) => unknown;
   clearTimer?: (handle: unknown) => void;
   setRepeat?: (fn: () => void, ms: number) => unknown;
@@ -190,6 +191,10 @@ export class RoomConnection {
       mode: p.mode,
       // The live edge chat caps the room from (null in DVR or while unknown).
       ...(p.edge === undefined ? {} : { edgeWallclock: p.mode === "live" && p.edge ? p.edge.toISOString() : null }),
+      // Where its buffered media ends: chat keeps the target where this member can play to.
+      ...(p.buffered === undefined
+        ? {}
+        : { bufferedWallclock: p.mode === "live" && p.buffered ? p.buffered.toISOString() : null }),
     });
   }
 }

@@ -37,9 +37,17 @@
  *   Its seeks land short by about the same amount each time (a keyframe snap, a flushing seek that
  *   resumes late; CI run 41768120276: ~1.3 s, so it re-seeked to the same miss every tick), so the
  *   driver learns that miss from where each seek ended up and aims the next one ahead by it.
+ * - **Rate steering that makes no headway** (the rate is set, the drift does not close: a decoder
+ *   that cannot play faster than real time on a starved machine) is one seek to the target, when
+ *   the media is buffered there, within the seek cooldown.
+ * - **Reachable targets.** Every member reports where its buffered media ends, and chat keeps the
+ *   target `ROOM_LIMITS.syncSpareMs` short of the earliest (`RATE.minAheadMs` is that spare): a
+ *   member behind the target with too little buffered never plays faster and, under 3 s, never
+ *   seeks, so it sat 1.63 s behind for the whole of watch-room CI run 42333642371 (WebKit).
  * - **Reduced motion** widens both bands so the picture jumps less often.
  * - **DVR** members are left alone (the server leaves them out of the target too).
  */
+import { ROOM_LIMITS } from "@commonair/contracts/enums";
 import { TARGET_LATENCY_RANGE } from "./controller.ts";
 import type { PlaybackMode } from "./media-clock.ts";
 
@@ -85,8 +93,14 @@ export const RATE = {
    * busy CI runner (exp/sync-diag-2, run 41909793712) members playing 1.25x toward it drained
    * their buffers to nothing and waited, which put them further behind than staying put.
    */
-  minAheadMs: 1500,
+  minAheadMs: ROOM_LIMITS.syncSpareMs,
   seekSpareMs: 1000,
+  /**
+   * Rate steering judged as making no headway once it should have closed this much (ms of drift,
+   * `|rate - 1| x time`) and closed under `noHeadwayShare` of it.
+   */
+  noHeadwayAfterMs: 1000,
+  noHeadwayShare: 0.25,
 } as const;
 
 /** How many of the latest targets the median takes. */
@@ -118,6 +132,8 @@ export interface DriftInput {
   sinceSeekMs?: number | null;
   /** Media buffered ahead of the playhead (ms), null when unknown (no limit then). */
   aheadMs?: number | null;
+  /** Rate players: the rate set so far has not closed the drift (`RATE.noHeadwayAfterMs`). */
+  noHeadway?: boolean;
 }
 
 export type Correction =
@@ -139,7 +155,8 @@ export function nextCorrection(i: DriftInput): Correction {
     const ahead = i.aheadMs ?? null;
     // Behind: forward only as far as the media that has arrived.
     const reachable = driftMs > 0 || ahead === null || ahead >= abs + RATE.seekSpareMs;
-    if (abs > RATE.seekOverMs && reachable && (sinceSeek === null || sinceSeek >= RATE.seekCooldownMs))
+    const cooled = sinceSeek === null || sinceSeek >= RATE.seekCooldownMs;
+    if ((abs > RATE.seekOverMs || (i.noHeadway && abs > RATE.deadbandMs)) && reachable && cooled)
       return { kind: "seek", toMs: i.targetMs, driftMs };
     const deadband = i.reducedMotion ? RATE.reducedDeadbandMs : RATE.deadbandMs;
     if (abs <= deadband) return { kind: "rate", rate: 1, driftMs };
@@ -238,21 +255,30 @@ export function liveEdgeMs(i: EdgeInput): number | null {
   return null;
 }
 
-/** What a member reports with every `room.sync`: its playhead, its mode and its live edge. */
+/** What a member reports with every `room.sync`: its playhead, its mode, its live edge and how far it has buffered. */
 export interface RoomReport {
   at: Date | null;
   mode: PlaybackMode;
   /** Null in DVR or while unknown. */
   edge: Date | null;
+  /** The PDT where the media buffered under the playhead ends; null in DVR or while unknown. */
+  buffered: Date | null;
 }
 
-/** This member's report, from its player. A DVR member reports no edge. */
+/** This member's report, from its player. A DVR member reports no edge and no buffer. */
 export function roomReport(p: RoomPlayer | null): RoomReport | null {
   if (!p) return null;
   const mode = p.playbackMode();
   const at = p.playheadWallclock();
   const edge = mode === "live" ? (p.edgeWallclock?.() ?? null) : null;
-  return { at, mode, edge: edge && Number.isFinite(edge.getTime()) ? edge : null };
+  const ahead = mode === "live" && at ? (p.bufferAheadMs?.() ?? null) : null;
+  const buffered = at && ahead !== null && Number.isFinite(ahead) && ahead >= 0 ? new Date(at.getTime() + ahead) : null;
+  return {
+    at,
+    mode,
+    edge: edge && Number.isFinite(edge.getTime()) ? edge : null,
+    buffered: buffered && Number.isFinite(buffered.getTime()) ? buffered : null,
+  };
 }
 
 /**
@@ -281,6 +307,11 @@ export class RoomSyncDriver {
   private rate = 1;
   /** When the last seek of a rate player went out. */
   private seekAt: number | null = null;
+  /**
+   * Rate steering in one direction: the drift it started from, the drift it should have closed by
+   * now (`|rate - 1|` x time at each rate), and when that was last added to. Null at normal speed.
+   */
+  private steer: { fromMs: number; owedMs: number; at: number } | null = null;
   private applied: number | null = null;
   private lastAt: number | null = null;
   /** Seek-only players: how far ahead of the target a seek aims (ms), learnt from where seeks landed. */
@@ -327,6 +358,8 @@ export class RoomSyncDriver {
     const rate = p.setPlaybackRate !== undefined && !p.native;
     const targetMs = this.targetNow(rate);
     const measured = measuredLatency(p, head, now, this.applied);
+    const drift = head !== null && targetMs !== null ? head - targetMs : null;
+    const noHeadway = rate && drift !== null && this.noHeadway(drift, now);
     const c = nextCorrection({
       playheadMs: head,
       targetMs,
@@ -340,6 +373,7 @@ export class RoomSyncDriver {
       rate,
       sinceSeekMs: this.seekAt === null ? null : now - this.seekAt,
       aheadMs: p.bufferAheadMs?.() ?? null,
+      noHeadway,
     });
     this.lastDriftMs = c.driftMs;
     // Normal speed whenever the room does not steer this player now (DVR, no playhead or target).
@@ -347,7 +381,7 @@ export class RoomSyncDriver {
     // `nextCorrection` only corrects with a playhead and a target.
     if (head === null || targetMs === null) return c;
     if (c.kind === "rate") {
-      if (!this.setRate(p, c.rate)) return c;
+      if (!this.setRate(p, c.rate, c.driftMs)) return c;
       // The hold-back follows the playhead without moving it, so hls.js keeps the distance the
       // rate is reaching (a reload or a stall then resumes there, not at the old one).
       const base = measured ?? this.applied;
@@ -359,6 +393,7 @@ export class RoomSyncDriver {
     }
     if (c.kind === "seek" && p.setPlaybackRate && !p.native) {
       this.setRate(p, 1);
+      this.steer = null;
       this.seekAt = now;
     }
     const seekOnly = !p.setTargetLatency;
@@ -391,10 +426,33 @@ export class RoomSyncDriver {
     return c;
   }
 
+  /**
+   * Whether the rate steering so far has failed to close the drift: it has owed at least
+   * `RATE.noHeadwayAfterMs` and closed under `RATE.noHeadwayShare` of that. Books the time since
+   * the last step at the rate that was playing.
+   */
+  private noHeadway(driftMs: number, now: number): boolean {
+    const s = this.steer;
+    if (!s) return false;
+    // A drift that changed side was closed (and overshot): steering starts over from it.
+    if (Math.sign(driftMs) !== Math.sign(s.fromMs)) {
+      this.steer = this.rate === 1 ? null : { fromMs: driftMs, owedMs: 0, at: now };
+      return false;
+    }
+    s.owedMs += Math.abs(this.rate - 1) * Math.max(0, now - s.at);
+    s.at = now;
+    const closed = Math.abs(s.fromMs) - Math.abs(driftMs);
+    return s.owedMs >= RATE.noHeadwayAfterMs && closed < RATE.noHeadwayShare * s.owedMs;
+  }
+
   /** Set the playback rate if it changes; true when the player now plays at `rate`. */
-  private setRate(p: RoomPlayer, rate: number): boolean {
+  private setRate(p: RoomPlayer, rate: number, driftMs: number | null = null): boolean {
     if (this.rate === rate) return true;
     if (!p.setPlaybackRate?.(rate)) return false;
+    // Steering starts (or turns around) from this drift; back at normal speed it ends.
+    if (rate === 1) this.steer = null;
+    else if (!this.steer || this.rate === 1 || Math.sign(rate - 1) !== Math.sign(this.rate - 1))
+      this.steer = { fromMs: driftMs ?? 0, owedMs: 0, at: this.now() };
     this.rate = rate;
     return true;
   }
@@ -418,6 +476,7 @@ export class RoomSyncDriver {
   reset(): void {
     this.offsets = [];
     this.seekAt = null;
+    this.steer = null;
     // Out of the room, the player plays at normal speed.
     const p = this.deps.player();
     if (p) this.setRate(p, 1);

@@ -63,6 +63,7 @@ describe("roomReport", () => {
       at: new Date(NOW - 8000),
       mode: "live",
       edge: new Date(NOW - 3000),
+      buffered: null,
     });
   });
 
@@ -115,6 +116,8 @@ describe("the registry's edge", () => {
       at: new Date(NOW - 8000),
       mode: "live",
       edge: new Date(NOW - 4000),
+      // No page, so no video element to read a buffer from.
+      buffered: null,
     });
   });
 
@@ -148,6 +151,11 @@ describe("the registry's edge", () => {
     offs.push(
       registerMediaClock("edge-none", { playheadWallclock: () => new Date(NOW - 8000), playbackMode: () => "live" }),
     );
-    expect(roomSyncReport("edge-none", null)).toEqual({ at: new Date(NOW - 8000), mode: "live", edge: null });
+    expect(roomSyncReport("edge-none", null)).toEqual({
+      at: new Date(NOW - 8000),
+      mode: "live",
+      edge: null,
+      buffered: null,
+    });
   });
 });
