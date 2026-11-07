@@ -71,6 +71,13 @@ export const STRETCHED_LINK =
   "outline-none after:absolute after:inset-0 after:z-0 focus-visible:after:ring-2 focus-visible:after:ring-ring focus-visible:after:ring-offset-2 focus-visible:after:ring-offset-background";
 
 /**
+ * The chip's stretched link draws its ring inset with no offset: the chip row scrolls below
+ * 768 px, and a scroller clips anything drawn outside the chip's box.
+ */
+const CHIP_LINK =
+  "outline-none after:absolute after:inset-0 after:z-0 focus-visible:after:ring-2 focus-visible:after:ring-ring focus-visible:after:ring-inset";
+
+/**
  * A link that sits above the card's stretched primary link (z-10), so it is a sibling of that
  * link rather than nested in it, and takes its own clicks.
  */
@@ -401,7 +408,7 @@ export function ChannelChip({
     props: {
       href,
       "data-slot": "channel-chip-link",
-      className: cn(STRETCHED_LINK, "block truncate"),
+      className: cn(CHIP_LINK, "block truncate"),
       children: (
         <span dir="auto" className="truncate">
           {name}

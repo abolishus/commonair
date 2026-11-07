@@ -232,6 +232,9 @@ describe("ChannelChip", () => {
     const link = screen.getByRole("link", { name: "Mika Draws" });
     expect(link.getAttribute("href")).toBe("/mika");
     expect(link.className).toContain("after:inset-0");
+    // Inset, no offset: the row scrolls below 768 px and would clip a ring drawn outside the chip.
+    expect(link.className).toContain("focus-visible:after:ring-inset");
+    expect(link.className).not.toContain("ring-offset");
     expect(screen.getAllByRole("link")).toHaveLength(1);
     expect(screen.getByText("Art · 3 hours ago")).toBeTruthy();
     expect(container.querySelector('[data-slot="avatar"]')!.getAttribute("aria-hidden")).toBe("true");
