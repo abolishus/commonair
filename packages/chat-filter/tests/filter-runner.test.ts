@@ -46,6 +46,9 @@ function make(opts: WorkerFilterRunnerOptions = {}) {
   let zombies = 0;
   let maxZombies = 0;
   const r = new WorkerFilterRunner({
+    // The 25 ms soft budget is applyFilters' own (filter.test.ts covers it). Here one scheduling
+    // stall on a loaded runner would hold a clean message and look like a runner bug.
+    budgetMs: 2_000,
     ...opts,
     hooks: {
       held: (reason) => reasons.push(reason),
@@ -111,6 +114,19 @@ describe("WorkerFilterRunner", () => {
     });
   });
 
+  test("the worker's warm-up exec on a new set leaves its regexes' state clean", async () => {
+    // Built directly (the validator refuses patterns that match the empty warm-up string), as
+    // anything that slips past it would arrive: global, and sticky, on a cold worker.
+    const set: CompiledFilter[] = [
+      { def: def({ id: "e1", pattern: "z*", action: "replace", replacement: "" }), re: /z*/gu },
+      { def: def({ id: "e2", pattern: "^(?:)", action: "hold" }), re: /^(?:)/gu },
+    ];
+    const { r } = make({ workers: 1, ...UNHURRIED });
+    expect(await r.run("hello", set)).toEqual({ action: "hold", body: "hello", filterId: "e2" });
+    const sticky: CompiledFilter[] = [{ def: def({ id: "s", pattern: "a" }), re: /a/y }];
+    expect(await r.run("abc", sticky)).toEqual({ action: "block", filterId: "s" });
+  });
+
   test("a regex call past the hard timeout holds the message and the worker is replaced", async () => {
     const { r, reasons } = make({ workers: 1, hardTimeoutMs: 50 });
     const started = performance.now();
@@ -170,13 +186,16 @@ describe("WorkerFilterRunner", () => {
   });
 
   test("other workers keep serving while one is stuck", async () => {
-    const { r } = make({ workers: 2, hardTimeoutMs: 300 });
+    const { r, reasons } = make({ workers: 2, hardTimeoutMs: 300, maxQueueWaitMs: 2_000 });
     await r.run("warm", typical);
-    const stuck = r.run(evilBody, evil());
-    const started = performance.now();
-    expect(await r.run("hello", typical)).toMatchObject({ action: "pass" });
-    expect(performance.now() - started).toBeLessThan(250);
+    const order: string[] = [];
+    const stuck = r.run(evilBody, evil()).then((o) => (order.push("stuck"), o));
+    const hello = r.run("hello", typical).then((o) => (order.push("hello"), o));
+    expect(await hello).toMatchObject({ action: "pass" });
     expect(await stuck).toMatchObject(HELD);
+    // Waiting on the stuck worker would only finish after its hard timeout replaced it.
+    expect(order).toEqual(["hello", "stuck"]);
+    expect(reasons).toEqual(["timeout"]);
   });
 
   test("a message waits at most maxQueueWaitMs for a worker", async () => {

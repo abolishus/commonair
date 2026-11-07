@@ -20,6 +20,14 @@ self.addEventListener("message", (event: MessageEvent<RunRequest>) => {
   let filters = sets.get(req.key);
   if (req.filters) {
     filters = req.filters.map((f) => ({ def: f.def, re: new RegExp(f.source, f.flags) }));
+    // JavaScriptCore compiles a regex on its first exec, not in the constructor. Do it here, before
+    // `started`, so the compile counts against neither the hard timeout nor the soft budget: a cold
+    // worker held a clean message for running past 25 ms (nightly 42366550306). An empty string
+    // cannot backtrack.
+    for (const f of filters) {
+      f.re.test("");
+      f.re.lastIndex = 0;
+    }
     if (sets.size >= MAX_SETS) {
       const oldest = sets.keys().next().value;
       if (oldest !== undefined) sets.delete(oldest);
