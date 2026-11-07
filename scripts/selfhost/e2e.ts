@@ -76,6 +76,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSyn
 import { join } from "node:path";
 import { DEFAULT_REGISTRY, RELEASE_IMAGES, type ReleaseImage, bundleAssetName } from "../release/manifest.ts";
 import { REPO_ROOT, buildBundle } from "./bundle.ts";
+import { recoverBuild } from "./e2e-build.ts";
 import { checkIrcClientAddresses } from "./e2e-irc.ts";
 import {
   MIRROR_CONF_PATH,
@@ -335,7 +336,8 @@ export function buildSpecs(): Record<ReleaseImage, BuildSpec> {
  * lookup fails right after pulling a base ("checking if cached image exists from a previous build:
  * getting top layer info: layer not known"), or a step reuses a cached image that is gone a moment
  * later ("creating build container: <id>: image not known"). The same build passes when run
- * again. Nothing else is retried.
+ * again. Besides this, only a registry's gateway error while pulling a base is retried
+ * (e2e-build.ts).
  */
 export function isTransientBuildError(message: string): boolean {
   return (
@@ -362,9 +364,14 @@ function build(args: string[]): void {
   try {
     podman(["build", ...args]);
   } catch (e) {
-    if (!(e instanceof StepError) || !isTransientBuildError(e.message)) throw e;
-    log(`podman build hit a lost build-cache entry; retrying once without the cache`);
-    podman(buildRetryArgs(args));
+    if (!(e instanceof StepError)) throw e;
+    recoverBuild(e, args, {
+      run: (argv) => void podman(argv),
+      sleep: (ms) => Bun.sleepSync(ms),
+      log,
+      isLostCacheEntry: isTransientBuildError,
+      withoutCache: buildRetryArgs,
+    });
   }
 }
 
