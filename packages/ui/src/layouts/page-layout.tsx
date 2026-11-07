@@ -5,10 +5,17 @@ import type * as React from "react";
 import { cn } from "@commonair/ui/lib/utils";
 
 export interface PageContainerProps extends React.ComponentProps<"div"> {
-  width?: "default" | "narrow" | "wide" | "form";
+  /** `page`: grids and boards, capped at 1600 px (`CONTENT_MAX`). */
+  width?: "default" | "narrow" | "wide" | "form" | "page";
 }
 export function PageContainer({ width = "default", className, ...props }: PageContainerProps): React.JSX.Element {
-  const widths = { default: "max-w-6xl", narrow: "max-w-3xl", wide: "max-w-7xl", form: "max-w-md" };
+  const widths = {
+    default: "max-w-6xl",
+    narrow: "max-w-3xl",
+    wide: "max-w-7xl",
+    form: "max-w-md",
+    page: "max-w-400",
+  };
   return <div className={cn("mx-auto w-full px-4", widths[width], className)} {...props} />;
 }
 export interface SplitLayoutProps extends React.ComponentProps<"div"> {

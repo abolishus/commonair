@@ -57,6 +57,8 @@ describe("the account avatar (F38)", () => {
   });
 });
 
+// The phone sheet is on pages without the bottom tab bar (here a channel page); on browsing pages
+// the tab bar carries the sections instead, so there is no menu button.
 describe("the phone sheet", () => {
   async function openSheet() {
     await act(async () => {
@@ -66,7 +68,7 @@ describe("the phone sheet", () => {
   }
 
   it("has the search first, above the nav", async () => {
-    await renderInRouter(header, "/");
+    await renderInRouter(header, "/rivertide");
     const dialog = await openSheet();
     const search = dialog.querySelector('[data-testid="header-search"]');
     const nav = dialog.querySelector("nav");
@@ -76,7 +78,7 @@ describe("the phone sheet", () => {
   });
 
   it("closes when a link in it navigates", async () => {
-    const { router } = await renderInRouter(header, "/");
+    const { router } = await renderInRouter(header, "/rivertide");
     const dialog = await openSheet();
     const browse = dialog.querySelector('[data-testid="nav-directory"]') as HTMLElement;
     await act(async () => {
@@ -87,26 +89,32 @@ describe("the phone sheet", () => {
   });
 
   it("closes when the route changes some other way", async () => {
-    const { router } = await renderInRouter(header, "/");
+    const { router } = await renderInRouter(header, "/rivertide");
     await openSheet();
     await act(async () => {
-      await router.navigate({ to: "/search" });
+      await router.navigate({ to: "/signin" });
     });
+    expect(screen.getByRole("button", { name: "Menu" })).toBeTruthy();
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
-  it("closes when a search is submitted from it on /search (only the query changes)", async () => {
-    const { router } = await renderInRouter(header, "/search?q=a");
-    const dialog = await openSheet();
-    const form = dialog.querySelector('[data-testid="header-search"]')?.closest("form") ?? dialog.querySelector("form");
-    const input = form?.querySelector("input") as HTMLInputElement;
-    await act(async () => {
-      fireEvent.change(input, { target: { value: "b" } });
-      fireEvent.submit(form as HTMLFormElement);
-    });
-    await waitFor(() => expect(router.state.location.search).toEqual({ q: "b" }));
-    expect(router.state.location.pathname).toBe("/search");
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  it.each(["/", "/directory", "/directory/art", "/search?q=a"])(
+    "is not offered on %s (the tab bar's page)",
+    async (path) => {
+      // As the `_app` layout renders it there: told the page has the tab bar.
+      await renderInRouter(
+        <ThemeContext.Provider value={{ theme: "dark", setTheme: () => {} }}>
+          <AppHeader tabBar />
+        </ThemeContext.Provider>,
+        path,
+      );
+      expect(screen.queryByRole("button", { name: "Menu" })).toBeNull();
+    },
+  );
+
+  it.each(["/rivertide", "/signin", "/signup"])("is offered on %s", async (path) => {
+    await renderInRouter(header, path);
+    expect(screen.getByRole("button", { name: "Menu" })).toBeTruthy();
   });
 });
 

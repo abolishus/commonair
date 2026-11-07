@@ -4,38 +4,16 @@
 import { ThemeToggle } from "@commonair/ui";
 import { Button } from "@commonair/ui/components/button";
 import { SidebarTrigger } from "@commonair/ui/components/sidebar";
-import { SiteFooter, SiteHeader, type NavItem, type UserMenuItem } from "@commonair/ui/layouts";
-import { toast } from "@commonair/ui/toast";
-import {
-  BankIcon,
-  CopyrightIcon,
-  CreditCardIcon,
-  UserGroupIcon,
-  DashboardSquare01Icon,
-  JusticeScale01Icon,
-  LegalDocument01Icon,
-  LiveStreaming02Icon,
-  Logout03Icon,
-  Notification03Icon,
-  Plug01Icon,
-  ServerStack01Icon,
-  Settings02Icon,
-  Shield01Icon,
-  SquareLock01Icon,
-} from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
+import { SiteFooter, SiteHeader, type FooterLink, type NavItem } from "@commonair/ui/layouts";
 import { Link, useLocation } from "@tanstack/react-router";
 import * as React from "react";
 import { t } from "../i18n/index.ts";
-import { signOut } from "../lib/auth.ts";
 import { useBootstrap } from "../lib/bootstrap.ts";
-import { isAdmin } from "../lib/coop.ts";
-import { isTreasurer } from "../lib/money.ts";
 import {
   accountMenu,
-  footerNav,
+  footerColumns,
   siteNav,
-  type AccountEntry,
+  type FooterColumnEntry,
   type FooterEntry,
   type SignedOutEntry,
 } from "../lib/nav.ts";
@@ -47,168 +25,75 @@ import { DiscoveryPalette, HeaderSearchField, MobileSearchSheet } from "./discov
 import { SheetDiscovery, SideRail } from "./discovery/rail.tsx";
 import { FooterLocaleSwitcher } from "./locale/footer-locale-switcher.tsx";
 import { NotificationBell } from "./notifications/bell.tsx";
-import { forgetPushSubscription } from "./pwa/push-client.ts";
-import { isLegal, isSafetyStaff } from "./safety/access.ts";
+import { useAccountItems } from "./shell/account-items.tsx";
+import { useAuthRedirect } from "./shell/auth-redirect.ts";
+import { BrandMark } from "./shell/brand-mark.tsx";
+import { useFilledCtaInView } from "./shell/use-filled-cta.ts";
 
-async function onSignOut(): Promise<void> {
-  try {
-    // Sign-out removes this browser's push subscription (ADR 0028 decision 6).
-    await forgetPushSubscription().catch(() => undefined);
-    await signOut();
-    // Full load: nothing rendered for the old session survives.
-    window.location.assign("/");
-  } catch {
-    toast.error(t("auth.signOutFailed"));
-  }
-}
-
-function accountItem(entry: AccountEntry): UserMenuItem {
-  const icon = (glyph: typeof Logout03Icon) => <HugeiconsIcon icon={glyph} strokeWidth={2} aria-hidden />;
-  switch (entry.id) {
-    case "dashboard":
-      return {
-        id: entry.id,
-        label: t("nav.dashboard"),
-        icon: icon(DashboardSquare01Icon),
-        render: <Link to="/dashboard" />,
-      };
-    case "relays":
-      return { id: entry.id, label: t("nav.relays"), icon: icon(ServerStack01Icon), render: <Link to="/relays" /> };
-    case "subscriptions":
-      return {
-        id: entry.id,
-        label: t("nav.subscriptions"),
-        icon: icon(CreditCardIcon),
-        render: <Link data-testid="account-subscriptions-link" to="/settings/subscriptions" />,
-      };
-    case "notifications":
-      return {
-        id: entry.id,
-        label: t("nav.notifications"),
-        icon: icon(Notification03Icon),
-        render: <Link data-testid="account-notifications-link" to="/settings/notifications" />,
-      };
-    case "appeals":
-      return {
-        id: entry.id,
-        label: t("nav.appeals"),
-        icon: icon(JusticeScale01Icon),
-        render: <Link data-testid="account-appeals-link" to="/settings/appeals" />,
-      };
-    case "copyright":
-      return {
-        id: entry.id,
-        label: t("nav.copyright"),
-        icon: icon(CopyrightIcon),
-        render: <Link data-testid="account-copyright-link" to="/settings/copyright" />,
-      };
-    case "privacy":
-      return {
-        id: entry.id,
-        label: t("nav.privacy"),
-        icon: icon(SquareLock01Icon),
-        render: <Link data-testid="account-privacy-link" to="/settings/privacy" />,
-      };
-    case "connections":
-      return {
-        id: entry.id,
-        label: t("nav.connections"),
-        icon: icon(Plug01Icon),
-        render: <Link data-testid="account-connections-link" to="/settings/connections" />,
-      };
-    case "preferences":
-      return {
-        id: entry.id,
-        label: t("nav.preferences"),
-        icon: icon(Settings02Icon),
-        render: <Link data-testid="account-preferences-link" to="/settings/preferences" />,
-      };
-    case "coop":
-      return {
-        id: entry.id,
-        label: t("nav.coopMembership"),
-        icon: icon(UserGroupIcon),
-        render: <Link data-testid="account-coop-link" to="/coop/membership" />,
-      };
-    case "adminCoop":
-      return {
-        id: entry.id,
-        label: t("nav.adminCoop"),
-        icon: icon(UserGroupIcon),
-        render: <Link data-testid="account-admin-coop-link" to="/admin/coop" />,
-      };
-    case "treasury":
-      return {
-        id: entry.id,
-        label: t("nav.treasury"),
-        icon: icon(BankIcon),
-        render: <Link data-testid="account-treasury-link" to="/treasury" />,
-      };
-    case "moderation":
-      return {
-        id: entry.id,
-        label: t("nav.moderation"),
-        icon: icon(Shield01Icon),
-        render: <Link data-testid="account-moderation-link" to="/admin/moderation" />,
-      };
-    case "legal":
-      return {
-        id: entry.id,
-        label: t("nav.legal"),
-        icon: icon(LegalDocument01Icon),
-        render: <Link data-testid="account-legal-link" to="/admin/legal" />,
-      };
-    case "signOut":
-      return {
-        id: entry.id,
-        label: t("nav.signOut"),
-        icon: icon(Logout03Icon),
-        testId: "nav-signout",
-        onSelect: () => void onSignOut(),
-        destructive: entry.destructive,
-        separatorBefore: entry.separatorBefore,
-      };
-  }
-}
-
-/** Where Sign in / Sign up send the visitor back to (F17): this page, unless it is one of them. */
-function useAuthRedirect(): string | undefined {
-  const href = useLocation({ select: (location) => location.href });
-  const path = href.split("#")[0] ?? "/";
-  if (path === "/" || path.startsWith("/signin") || path.startsWith("/signup")) return undefined;
-  return path;
-}
-
-function AccountLink({ entry }: { entry: SignedOutEntry }): React.JSX.Element {
+/**
+ * Sign in and Sign up for visitors, at every width (decisions log): compact, both carrying
+ * `?redirect`. Sign up is the zinc fill, or an outline while another filled CTA is on screen;
+ * never the brand colour. Below md on pages with the bottom tab bar, Sign in moves into its You tab.
+ */
+function SignedOutActions({
+  entries,
+  signInInTabBar,
+  outline,
+}: {
+  entries: SignedOutEntry[];
+  signInInTabBar: boolean;
+  outline: boolean;
+}): React.JSX.Element {
   const redirect = useAuthRedirect();
   return (
-    <Button
-      variant={entry.id === "signUp" ? "default" : "ghost"}
-      size="sm"
-      nativeButton={false}
-      render={
-        <Link to={entry.to} search={redirect ? { redirect } : {}} aria-current={entry.current ? "page" : undefined} />
-      }
-    >
-      {entry.id === "signIn" ? t("nav.signIn") : t("nav.signUp")}
-    </Button>
+    <>
+      {entries.map((entry) => {
+        const signUp = entry.id === "signUp";
+        return (
+          <Button
+            key={entry.id}
+            variant={signUp ? (outline ? "outline" : "default") : "ghost"}
+            size="sm"
+            nativeButton={false}
+            data-auth-link={entry.id}
+            data-cta-style={signUp ? (outline ? "outline" : "fill") : undefined}
+            // 40 px tall below md, a comfortable tap target in the 56 px bar.
+            className={signUp ? "max-md:h-10" : signInInTabBar ? "max-md:hidden" : "max-md:h-10"}
+            render={
+              <Link
+                to={entry.to}
+                search={redirect ? { redirect } : {}}
+                aria-current={entry.current ? "page" : undefined}
+              />
+            }
+          >
+            {signUp ? t("nav.signUp") : t("nav.signIn")}
+          </Button>
+        );
+      })}
+    </>
   );
 }
 
 /**
- * The site header for every page with chrome (F14, F18): the logo, Browse, search and the account
- * controls. The theme is in the account menu for members and at the bottom of the mobile sheet for
- * visitors. `studio` adds the sidebar toggle; it must then be rendered inside the StudioShell (the
- * toggle needs its SidebarProvider).
+ * The site header for every page with chrome (F14, F18): the mark and name, Browse and Co-op,
+ * search and the account controls; the same in every area, so the logo never moves. `studio`
+ * adds the sidebar toggle; it must then be rendered inside a shell with a sidebar (the toggle
+ * needs its SidebarProvider). `tabBar`: the layout renders the bottom tab bar on this page (only
+ * the layout knows; a fallback shell without one leaves it off).
  *
- * Width at a 288 px content box (320 px minus the 16 px gutters), below md where the nav, the
- * search field and the desktop group collapse into the sheet: search 32 + menu 32 + three 12 px
- * gaps, plus
- * - signed out: Sign in 65 → the brand keeps ~123 px;
- * - signed in: bell 32 + avatar-only menu ~36 → ~120 px;
- * - studio: sidebar toggle 28 + 8 + the above → ~84 px.
+ * Below md: the mark (the name too while it fits and no signed-in cluster is shown), the search
+ * button, then Sign in + Sign up, or the bell and avatar. On browsing pages the bottom tab bar
+ * carries the sections and Sign in, so there is no menu button; elsewhere (watch, auth, studio)
+ * the phone sheet keeps the nav, the rail's lists and, for visitors, the theme and language.
  */
-export function AppHeader({ studio = false }: { studio?: boolean }): React.JSX.Element {
+export function AppHeader({
+  studio = false,
+  tabBar = false,
+}: {
+  studio?: boolean;
+  tabBar?: boolean;
+}): React.JSX.Element {
   const { me, instance } = useBootstrap();
   const { theme, setTheme } = React.useContext(ThemeContext);
   const pathname = useLocation({ select: (location) => location.pathname });
@@ -216,6 +101,8 @@ export function AppHeader({ studio = false }: { studio?: boolean }): React.JSX.E
   const locationKey = useLocation({ select: (location) => location.href });
   const [searchOpen, setSearchOpen] = React.useState(false);
   const [paletteOpen, setPaletteOpen] = React.useState(false);
+  const filledCtaInView = useFilledCtaInView(me === null);
+  const accountItems = useAccountItems();
 
   const nav: NavItem[] = siteNav(pathname).map((entry) =>
     entry.id === "coop"
@@ -233,19 +120,18 @@ export function AppHeader({ studio = false }: { studio?: boolean }): React.JSX.E
         },
   );
 
-  const signedOut = me ? [] : accountMenu(false, pathname);
-  const signIn = signedOut.filter((entry) => entry.id === "signIn");
-  const signUp = signedOut.filter((entry) => entry.id === "signUp");
-
   return (
     <>
       <SiteHeader
         brand={{
           name: instance.name,
+          label: t("shell.brand.home", { name: instance.name }),
           href: "/",
           render: <Link to="/" />,
-          mark: <HugeiconsIcon icon={LiveStreaming02Icon} strokeWidth={2} aria-hidden />,
+          mark: <BrandMark />,
         }}
+        compactBrand={me !== null}
+        mobileMenu={!tabBar}
         nav={nav}
         navLabel={t("nav.main")}
         menuLabel={t("nav.menu")}
@@ -253,18 +139,8 @@ export function AppHeader({ studio = false }: { studio?: boolean }): React.JSX.E
         search={<HeaderSearchField />}
         searchLabel={t("discovery.search.open")}
         onOpenPalette={() => setSearchOpen(true)}
-        actions={studio ? <SidebarTrigger /> : undefined}
-        // Sign up (65) does not fit next to the brand at 288 px: from md it sits in the bar,
-        // below md in the phone sheet.
-        desktopActions={
-          signUp.length ? (
-            <>
-              {signUp.map((entry) => (
-                <AccountLink key={entry.id} entry={entry} />
-              ))}
-            </>
-          ) : undefined
-        }
+        // A 44 px hit area below md, as for every icon button in the bar.
+        actions={studio ? <SidebarTrigger className="max-md:size-11" /> : undefined}
         user={
           me ? (
             <>
@@ -277,25 +153,21 @@ export function AppHeader({ studio = false }: { studio?: boolean }): React.JSX.E
                 menuLabel={t("nav.accountMenu", { name: me.displayName })}
                 theme={theme}
                 onThemeChange={setTheme}
-                items={accountMenu(true, {
-                  treasurer: isTreasurer(me),
-                  safetyStaff: isSafetyStaff(me),
-                  legal: isLegal(me),
-                  admin: isAdmin(me),
-                }).map(accountItem)}
+                items={accountItems}
               />
             </>
           ) : (
-            signIn.map((entry) => <AccountLink key={entry.id} entry={entry} />)
+            <SignedOutActions
+              entries={accountMenu(false, pathname)}
+              signInInTabBar={tabBar}
+              outline={filledCtaInView}
+            />
           )
         }
         mobileActions={
           <>
             <SheetDiscovery />
             <div className="flex w-full flex-wrap items-center gap-2 border-t pt-4">
-              {signUp.map((entry) => (
-                <AccountLink key={entry.id} entry={entry} />
-              ))}
               {!me && (
                 <span data-testid="sheet-theme-switcher">
                   <ThemeToggle value={theme} onValueChange={setTheme} />
@@ -312,13 +184,41 @@ export function AppHeader({ studio = false }: { studio?: boolean }): React.JSX.E
   );
 }
 
-/** The public pages' left rail (F7), for AppShell's `sidebar` with `sidebarPlacement="below"`. */
+/** The public pages' left rail (F7), for AppShell's `sidebar`. */
 export function AppRail(): React.JSX.Element {
   return <SideRail />;
 }
 
-function footerLink(entry: FooterEntry): { label: string; render: React.ReactElement } {
+const FOOTER_HEADING: Record<
+  FooterColumnEntry["id"],
+  "shell.footer.create" | "shell.footer.coop" | "shell.footer.legal"
+> = {
+  create: "shell.footer.create",
+  coop: "shell.footer.coop",
+  legal: "shell.footer.legal",
+};
+
+/** `/creators` is not a route yet (the acquisition batch adds it): a plain link until then. */
+function footerLink(entry: FooterEntry, instanceName: string): FooterLink {
   switch (entry.id) {
+    case "creators":
+      return { label: t("shell.footer.creators", { name: instanceName }), href: "/creators" };
+    case "studio":
+      return { label: t("studio.nav"), render: <Link data-testid="footer-studio-link" to="/dashboard" /> };
+    case "import":
+      return { label: t("shell.footer.import"), render: <Link data-testid="footer-import-link" to="/import" /> };
+    case "coopOverview":
+      return { label: t("shell.footer.coopOverview"), render: <Link data-testid="footer-coop-link" to="/coop" /> };
+    case "membership":
+      return {
+        label: t("shell.footer.membership"),
+        render: <Link data-testid="footer-membership-link" to="/coop/membership" />,
+      };
+    case "proposals":
+      return {
+        label: t("shell.footer.proposals"),
+        render: <Link data-testid="footer-proposals-link" to="/coop/proposals" />,
+      };
     case "transparency":
       return {
         label: t("footer.transparency"),
@@ -338,17 +238,36 @@ function footerLink(entry: FooterEntry): { label: string; render: React.ReactEle
 
 export type Instance = ReturnType<typeof useBootstrap>["instance"];
 
-/** Instance name, the public pages, license and the AGPL §13 source link (from `instance.info`). */
-export function InstanceFooter({ instance }: { instance: Instance }): React.JSX.Element {
+/**
+ * The footer: the instance and its one-line promise, the Create, Co-op and Legal columns, then
+ * the AGPL §13 source link (from `instance.info`), the license, cookie settings, the language
+ * and, for visitors (members have it in the account menu), the theme.
+ */
+export function InstanceFooter({ instance, signedIn = false }: { instance: Instance; signedIn?: boolean }) {
   const sourceUrl = safeHttpUrl(instance.sourceUrl);
+  const { theme, setTheme } = React.useContext(ThemeContext);
   return (
     <SiteFooter
       instanceName={instance.name}
+      mark={<BrandMark className="size-5" />}
+      tagline={t("shell.footer.tagline")}
+      columns={footerColumns({ twitchImport: instance.twitchImport }).map((column) => ({
+        id: column.id,
+        heading: t(FOOTER_HEADING[column.id]),
+        links: column.links.map((entry) => footerLink(entry, instance.name)),
+      }))}
+      baseLabel={t("shell.footer.base")}
       links={[
-        ...footerNav().map(footerLink),
         { label: t("consent.footer.settings"), render: <CookieSettingsButton /> },
         { label: t("preferences.footerLanguage"), render: <FooterLocaleSwitcher /> },
       ]}
+      extra={
+        signedIn ? undefined : (
+          <span data-testid="footer-theme-switcher">
+            <ThemeToggle value={theme} onValueChange={setTheme} />
+          </span>
+        )
+      }
       license={t("footer.license")}
       sourceLink={
         sourceUrl ? { label: t("footer.source"), href: sourceUrl, "data-testid": "footer-source-link" } : undefined
@@ -358,6 +277,6 @@ export function InstanceFooter({ instance }: { instance: Instance }): React.JSX.
 }
 
 export function AppFooter(): React.JSX.Element {
-  const { instance } = useBootstrap();
-  return <InstanceFooter instance={instance} />;
+  const { instance, me } = useBootstrap();
+  return <InstanceFooter instance={instance} signedIn={me !== null} />;
 }
