@@ -116,6 +116,7 @@ async function addSession(
 describe("live reconnect grace", () => {
   test("the default grace is 30 s, and a drop schedules its finalize just past it", async () => {
     expect(LIVE_RULES.reconnectGraceSeconds).toBe(30);
+    expect(api.deps.env.LIVE_RECONNECT_GRACE_SECONDS).toBe(30);
     expect(liveGraceSettings(api.deps).seconds).toBe(30);
     const st = await streamer();
     const source = await ready(st.username);

@@ -497,6 +497,7 @@ the tables by hand. Columns:
 | `MEDIA_WORK_DIR_MAX_BYTES`      | no       | `21474836480`                | —                | Most bytes the work dir may hold before new recordings and clips are refused (default 20 GiB).                                                                                                                                                    |
 | `MEDIA_WORK_DIR_MIN_FREE_BYTES` | no       | `2147483648`                 | —                | Free space the work dir's filesystem must keep (default 2 GiB).                                                                                                                                                                                   |
 | `TRANSCODE_MAX_LADDERS`         | no       | —                            | —                | Concurrent adaptive ladders per host; unset picks 2 with NVENC or one per 4 CPU cores.                                                                                                                                                            |
+| `LIVE_RECONNECT_GRACE_SECONDS`  | no       | `30`                         | —                | Seconds a live broadcast stays open after its encoder drops (`LIVE_RULES.reconnectGraceSeconds` is the product default): a publish inside it continues the same broadcast. The harness and test stacks set 2 so their offline waits stay short.   |
 
 ### `moderationEnv`
 

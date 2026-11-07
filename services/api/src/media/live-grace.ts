@@ -3,7 +3,8 @@
 
 /**
  * The live reconnect grace (overhaul decision 2, F6). When a live publisher goes not-ready the
- * broadcast stays open for `LIVE_RULES.reconnectGraceSeconds`: a publish inside that window
+ * broadcast stays open for `LIVE_RECONNECT_GRACE_SECONDS` (default `LIVE_RULES.reconnectGraceSeconds`,
+ * 30): a publish inside that window
  * continues it (same row, no `stream.offline` / `stream.online`, no second go-live notification,
  * one analytics entry). Past the window the broadcast ends at the moment it dropped, with the usual
  * `stream.offline` and live-bus `offline`.
@@ -14,7 +15,6 @@
  */
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
-import { LIVE_RULES } from "@commonair/contracts/enums";
 import { KEYS } from "@commonair/contracts/internal";
 import { schema, type Executor } from "@commonair/db";
 import type { Deps } from "../deps.ts";
@@ -43,7 +43,7 @@ export interface LiveGraceSettings {
 }
 
 const defaultSettings = (deps: Deps): LiveGraceSettings => ({
-  seconds: LIVE_RULES.reconnectGraceSeconds,
+  seconds: deps.env.LIVE_RECONNECT_GRACE_SECONDS,
   schedule: (delayMs, finalize) => {
     const t = setTimeout(() => {
       finalize().catch((err: unknown) => deps.logger.warn("live grace finalize failed", { err: (err as Error).name }));

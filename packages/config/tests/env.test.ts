@@ -21,6 +21,7 @@ import {
   infraEnv,
   instanceSite,
   loadEnv,
+  mediaEnv,
   moderationEnv,
   paymentsEnv,
   playbackEnv,
@@ -188,6 +189,17 @@ describe("env", () => {
     expect(() => loadEnv(paymentsEnv, { STRIPE_SECRET_KEY: "sk_live_abc" })).toThrow(EnvError);
     expect(loadEnv(paymentsEnv, { STRIPE_SECRET_KEY: "sk_test_abc" }).STRIPE_SECRET_KEY).toBe("sk_test_abc");
     expect(loadEnv(paymentsEnv, {}).PAYMENTS_PROVIDER).toBe("manual");
+  });
+
+  test("LIVE_RECONNECT_GRACE_SECONDS: whole seconds from 0 to 300, default 30 (the shipped grace)", () => {
+    const grace = mediaEnv.pick({ LIVE_RECONNECT_GRACE_SECONDS: true });
+    expect(loadEnv(grace, {}).LIVE_RECONNECT_GRACE_SECONDS).toBe(30);
+    expect(loadEnv(grace, { LIVE_RECONNECT_GRACE_SECONDS: "2" }).LIVE_RECONNECT_GRACE_SECONDS).toBe(2);
+    expect(loadEnv(grace, { LIVE_RECONNECT_GRACE_SECONDS: "0" }).LIVE_RECONNECT_GRACE_SECONDS).toBe(0);
+    expect(loadEnv(grace, { LIVE_RECONNECT_GRACE_SECONDS: "300" }).LIVE_RECONNECT_GRACE_SECONDS).toBe(300);
+    for (const bad of ["-1", "301", "1.5", "soon"]) {
+      expect(() => loadEnv(grace, { LIVE_RECONNECT_GRACE_SECONDS: bad }), bad).toThrow(EnvError);
+    }
   });
 
   test("GIFT_PAYMENT_HOURS: whole hours from 1 to 168, default 24", () => {

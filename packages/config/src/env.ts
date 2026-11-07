@@ -278,6 +278,12 @@ export const mediaEnv = z.object({
   MEDIA_WORK_DIR_MIN_FREE_BYTES: z.coerce.number().int().nonnegative().default(2_147_483_648),
   /** Concurrent adaptive ladders per host; unset picks 2 with NVENC or one per 4 CPU cores. */
   TRANSCODE_MAX_LADDERS: z.preprocess((v) => (v === "" ? undefined : v), z.coerce.number().int().positive().optional()),
+  /**
+   * Seconds a live broadcast stays open after its encoder drops (`LIVE_RULES.reconnectGraceSeconds`
+   * is the product default): a publish inside it continues the same broadcast. The harness and test
+   * stacks set 2 so their offline waits stay short.
+   */
+  LIVE_RECONNECT_GRACE_SECONDS: z.coerce.number().int().min(0).max(300).default(30),
 });
 
 /** X25519 PKCS#8 DER prefix: SEQUENCE, version 0, AlgorithmIdentifier 1.3.101.110, OCTET STRING(OCTET STRING(32)). */

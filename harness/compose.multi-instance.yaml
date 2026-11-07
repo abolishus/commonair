@@ -112,6 +112,8 @@ services:
       # harness/compose.n1.yaml
       WEB_PUSH_ENABLED: "true"
       WEB_PUSH_ALLOW_INSECURE_ENDPOINTS: "true"
+      # harness/compose.live-grace.yaml
+      LIVE_RECONNECT_GRACE_SECONDS: "2"
     volumes:
       - ${MODERATION_HASHLIST_CSAM:-./infra/moderation/empty-hashlist}:/var/lib/commonair/moderation/csam.pdq:ro,Z
       - ${MODERATION_HASHLIST_NCII:-./infra/moderation/empty-hashlist}:/var/lib/commonair/moderation/ncii.pdq:ro,Z

@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# Compose override for the harness: a 2 s live reconnect grace (overhaul decision 2, F6) in place
+# of the shipped 30 s, so the scenarios that stop an encoder and wait for the broadcast to go
+# offline keep their short waits. A republish inside the 2 s still continues the broadcast, which
+# is what live-grace.int.test.ts covers; the scenarios restart encoders well after it.
+#
+# Part of the harness stack, which layers every harness override:
+#
+#   bun scripts/infra.ts stack --harness
+
+services:
+  api:
+    environment:
+      LIVE_RECONNECT_GRACE_SECONDS: "2"

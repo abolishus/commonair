@@ -12,6 +12,7 @@ import { moderationHealth, startModeration } from "./moderation/index.ts";
 import { startOverlayHub } from "./overlay/stream.ts";
 import { EVENTSUB_WS_PATH } from "@commonair/contracts/eventsub";
 import { startEventSub, type EventSubSocketData } from "./eventsub/index.ts";
+import { startLiveGraceSweeper } from "./media/live-grace.ts";
 
 const env = loadApiEnv();
 const logger = createLogger({ service: "api", level: env.LOG_LEVEL });
@@ -28,6 +29,8 @@ const app = createApp(built.deps, {
 const overlay = startOverlayHub(built.deps);
 // Before runService: E9-ws registers its SIGTERM drain here, so it runs before the server stops.
 const eventsub = startEventSub(built.deps);
+// Ends broadcasts whose reconnect grace ran out while no in-process timer held them (a restart).
+const stopLiveGraceSweeper = startLiveGraceSweeper(built.deps);
 
 runService<EventSubSocketData>({
   name: "api",
@@ -57,6 +60,7 @@ runService<EventSubSocketData>({
   // runService bounds onShutdown by this; the reconnect grace plus room to close pools.
   shutdownTimeoutMs: (built.deps.env.EVENTSUB_WS_RECONNECT_GRACE_SECONDS + 10) * 1000,
   onShutdown: async () => {
+    stopLiveGraceSweeper();
     await built.close();
     await telemetry.shutdown();
   },
