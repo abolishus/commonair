@@ -329,6 +329,21 @@ describe("the startup check's state and its stop", () => {
     return c;
   }
   const exists = (c: string, path: string) => podman(["exec", c, "test", "-e", path]).code === 0;
+  /**
+   * The startup check, timed inside the container, and whether PID `watch` still runs right
+   * after it returns (also inside, before the watcher's grace can have run out). A host-side
+   * clock around `podman exec` measures Podman too: on a loaded runner that round trip alone
+   * took 5.85 s (run 41768120276) while the check takes well under a second.
+   */
+  function timedStartupCheck(c: string, extraEnv: string[], watch: string) {
+    const script =
+      's=$(date +%s%N); commonair-pg-health --startup; e=$?; t=$(date +%s%N); a=0; [ -d "/proc/$1" ] && a=1; ' +
+      'echo "timed: code=$e elapsed_ms=$(( (t - s) / 1000000 )) alive=$a"';
+    const r = podman(["exec", ...extraEnv, c, "sh", "-c", script, "sh", watch], 30_000);
+    const m = /timed: code=(\d+) elapsed_ms=(\d+) alive=([01])/.exec(r.out);
+    if (!m) throw new Error(`the timed startup check printed no result (exec ${r.code}):\n${r.out}`);
+    return { code: Number(m[1]), elapsedMs: Number(m[2]), watchedAlive: m[3] === "1" };
+  }
 
   test("the state lives in /run, not the world-writable /tmp", () => {
     const c = idle("state");
@@ -382,11 +397,11 @@ describe("the startup check's state and its stop", () => {
       "COMMONAIR_PG_KILL_GRACE_SECONDS=3",
     ];
     const started = Date.now();
-    const r = health(c, ["--startup"], run);
+    const r = timedStartupCheck(c, run, pid);
     // The check returns at once with its usual code; the watcher does the waiting.
     expect(r.code).toBe(2);
-    expect(Date.now() - started).toBeLessThan(3000);
-    expect(alive()).toBe(true);
+    expect(r.elapsedMs).toBeLessThan(3000);
+    expect(r.watchedAlive).toBe(true);
     await until("SIGKILL", 20_000, () => (alive() ? undefined : true));
     expect(Date.now() - started).toBeGreaterThanOrEqual(3000);
     expect(podman(["logs", c]).out).toMatch(/postmaster \d+ still running 3s after SIGQUIT; sending SIGKILL/);
@@ -397,10 +412,15 @@ describe("the startup check's state and its stop", () => {
   test("an entrypoint that ignores SIGTERM is killed after the grace period, so the container exits", async () => {
     const c = idle("noterm", ["sh", "-c", 'trap "" TERM; while :; do sleep 1; done']);
     const run = ["-e", "COMMONAIR_PG_START_SECONDS=0", "-e", "COMMONAIR_PG_KILL_GRACE_SECONDS=3"];
+    // catatonit's child: the shell that ignores SIGTERM.
+    const entry = ok(["exec", c, "cat", "/proc/1/task/1/children"]).trim();
+    expect(entry).toMatch(/^\d+$/);
     const started = Date.now();
-    expect(health(c, ["--startup"], run).code).toBe(2);
-    expect(Date.now() - started).toBeLessThan(3000);
-    expect(running(c)).toBe(true);
+    const r = timedStartupCheck(c, run, entry);
+    expect(r.code).toBe(2);
+    expect(r.elapsedMs).toBeLessThan(3000);
+    // Still up when the check returned: the SIGTERM did not take, so the SIGKILL must.
+    expect(r.watchedAlive).toBe(true);
     await until("container to exit", 30_000, () => (running(c) ? undefined : true));
     expect(Date.now() - started).toBeGreaterThanOrEqual(3000);
     expect(podman(["logs", c]).out).toMatch(/container still running 3s after SIGTERM; sending SIGKILL/);
