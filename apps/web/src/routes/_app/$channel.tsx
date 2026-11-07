@@ -60,6 +60,7 @@ import { ReportButton } from "../../components/safety/report-dialog.tsx";
 import { t } from "../../i18n/index.ts";
 import { useBootstrap } from "../../lib/bootstrap.ts";
 import { titleHead } from "../../lib/page-title.ts";
+import { seoHead, siteFromMatches, withSeo } from "../../lib/seo.ts";
 import { useChannel } from "../../lib/use-channel.ts";
 import { Player } from "../../player/player.tsx";
 import { TheatreProvider, useTheatre, useTheatreChat } from "../../player/theatre.ts";
@@ -77,10 +78,22 @@ export const Route = createFileRoute("/_app/$channel")({
   },
   // A tab switch stays on the page: the summary is polled, so it does not ask the server again.
   shouldReload: ({ cause }) => cause !== "stay",
-  head: ({ loaderData, params }) => {
+  head: ({ loaderData, params, matches }) => {
     const name = loaderData?.summary.displayName ?? params.channel;
-    return titleHead(
-      loaderData?.summary.live ? t("pageTitle.channelLive", { name }) : t("channelPage.title", { name }),
+    const title = loaderData?.summary.live ? t("pageTitle.channelLive", { name }) : t("channelPage.title", { name });
+    if (!loaderData || loaderData.extras.suspended) return titleHead(title);
+    // F13: link previews from what the loader has. A mature channel's preview carries no image.
+    const { summary, about, extras } = loaderData;
+    const mature = summary.mature || summary.live?.mature === true;
+    return withSeo(
+      titleHead(title),
+      seoHead(siteFromMatches(matches), {
+        title,
+        description: summary.live?.title || about.bio || summary.title,
+        path: `/${summary.slug}`,
+        image: mature ? null : (extras.bannerUrl ?? summary.avatarUrl),
+        type: summary.live ? "video.other" : "website",
+      }),
     );
   },
   component: ChannelPage,

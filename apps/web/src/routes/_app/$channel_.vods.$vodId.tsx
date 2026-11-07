@@ -7,7 +7,9 @@ import { getWatchHead, TITLE_STALE_MS, watchPageTitle } from "../../components/v
 import { VodWatchPage } from "../../components/vod-watch/watch-page.tsx";
 import { parseWatchSearch } from "../../components/watch/share.ts";
 import { useBootstrap } from "../../lib/bootstrap.ts";
+import { t } from "../../i18n/index.ts";
 import { titleHead } from "../../lib/page-title.ts";
+import { seoHead, siteFromMatches, withSeo } from "../../lib/seo.ts";
 
 /**
  * `/$channel/vods/$vodId`: the public VOD watch page with the chat replay panel (decision (e)).
@@ -23,7 +25,20 @@ export const Route = createFileRoute("/_app/$channel_/vods/$vodId")({
   // Only a title: reuse it for a minute, so hovering tiles (preload "intent") and going back do not refetch.
   staleTime: TITLE_STALE_MS,
   preloadStaleTime: TITLE_STALE_MS,
-  head: ({ loaderData, params }) => titleHead(watchPageTitle(loaderData, "vod", params.channel)),
+  head: ({ loaderData, params, matches }) => {
+    const title = watchPageTitle(loaderData, "vod", params.channel);
+    if (loaderData?.kind !== "ok") return titleHead(title);
+    // F13: only the title and channel name reach the head (the VOD's URLs are per viewer).
+    return withSeo(
+      titleHead(title),
+      seoHead(siteFromMatches(matches), {
+        title,
+        description: t("fixWeb.seo.vod", { channel: loaderData.channelName }),
+        path: `/${params.channel}/vods/${params.vodId}`,
+        type: "video.other",
+      }),
+    );
+  },
   component: VodRoute,
 });
 

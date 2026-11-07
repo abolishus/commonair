@@ -43,11 +43,17 @@ async function post(path: string, body: unknown): Promise<void> {
 }
 
 /**
- * `callbackURL` is where the verification link lands: the dashboard, or the page that sent the
- * visitor to sign up (`returnTo`, already checked by `safeReturnTo`; better-auth also checks it
+ * Where a verification link lands without a target (F11): home. A new account has never streamed,
+ * so the studio is only ever the landing when the visitor asked for it (`?redirect=/dashboard…`).
+ */
+export const DEFAULT_LANDING = "/";
+
+/**
+ * `callbackURL` is where the verification link lands: home, or the page that sent the visitor to
+ * sign up (`returnTo`/`redirect`, already checked by `safeRedirect`; better-auth also checks it
  * against its trusted origins).
  */
-export function signUp(input: SignUpInput, callbackURL = "/dashboard"): Promise<void> {
+export function signUp(input: SignUpInput, callbackURL = DEFAULT_LANDING): Promise<void> {
   // The display name starts as the username.
   return post(AUTH_ROUTES.signUp, { ...input, name: input.username, callbackURL });
 }
@@ -57,7 +63,7 @@ export function signUp(input: SignUpInput, callbackURL = "/dashboard"): Promise<
  * delay) whether or not the address exists or is already verified, so callers show one neutral
  * confirmation and only treat a rate limit differently.
  */
-export function resendVerificationEmail(email: string, callbackURL = "/dashboard"): Promise<void> {
+export function resendVerificationEmail(email: string, callbackURL = DEFAULT_LANDING): Promise<void> {
   return post(AUTH_ROUTES.sendVerificationEmail, { email, callbackURL });
 }
 

@@ -5,7 +5,8 @@
 /**
  * Sign-in and sign-up return to the page that sent the visitor (`?returnTo=`, E9 contract step
  * §7.2): only a relative path is followed; protocol-relative, absolute and backslash values fall
- * back to the dashboard. The verification link of a sign-up lands on the same page.
+ * back to home, or the studio for an account with a stream key (F11). The verification link of a
+ * sign-up lands on the same page, else home.
  */
 import { LocaleProvider, TooltipProvider } from "@commonair/ui";
 import { AUTH_ROUTES } from "@commonair/contracts/auth";
@@ -91,7 +92,7 @@ describe("verification callbacks", () => {
     await signUp(input);
     expect(fetchMock.mock.calls[0]?.[0]).toBe(AUTH_ROUTES.signUp);
     expect(bodyOf(fetchMock.mock.calls[0]?.[1])).toMatchObject({ callbackURL: CONSENT });
-    expect(bodyOf(fetchMock.mock.calls[1]?.[1])).toMatchObject({ callbackURL: "/dashboard" });
+    expect(bodyOf(fetchMock.mock.calls[1]?.[1])).toMatchObject({ callbackURL: "/" });
   });
   it("a resent link lands on the return path too", async () => {
     const fetchMock = vi.fn<FetchFn>(async () => Response.json({ status: true }));
@@ -118,7 +119,14 @@ describe("route search", () => {
 });
 
 describe("sign-in page", () => {
-  async function signInAt(url: string): Promise<string | undefined> {
+  /**
+   * Who signs in, read by the fetch stub at call time: the browser API client keeps the `fetch` it
+   * first saw, so a stub that closed over one test's account would answer every later test.
+   */
+  let account: { channel: string | null; keys: number } | undefined;
+
+  async function signInAt(url: string, as?: { channel: string | null; keys: number }): Promise<string | undefined> {
+    account = as;
     const router = createRouter({
       routeTree: createRootRoute(),
       history: createMemoryHistory({ initialEntries: [url] }),
@@ -126,7 +134,14 @@ describe("sign-in page", () => {
     await router.load();
     vi.stubGlobal(
       "fetch",
-      vi.fn<FetchFn>(async () => Response.json({})),
+      vi.fn<FetchFn>(async (input) => {
+        const href = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        // oRPC's RPC protocol: the body is `{ json }`.
+        if (account && href.includes("/rpc/me/get")) return Response.json({ json: { channelSlug: account.channel } });
+        if (account && href.includes("/rpc/stream/keys"))
+          return Response.json({ json: Array.from({ length: account.keys }, (_, i) => ({ id: `k${i}` })) });
+        return Response.json({});
+      }),
     );
     const assign = vi.fn<(url: string | URL) => void>();
     vi.spyOn(window.location, "assign").mockImplementation(assign);
@@ -151,10 +166,22 @@ describe("sign-in page", () => {
   it("returns to a relative returnTo", async () => {
     expect(await signInAt(`/signin?returnTo=${encodeURIComponent(CONSENT)}`)).toBe(CONSENT);
   });
-  it.each(["//evil.example/x", "https://evil.example/x"])("falls back to /dashboard for %s", async (bad) => {
-    expect(await signInAt(`/signin?returnTo=${encodeURIComponent(bad)}`)).toBe("/dashboard");
+  it("returns to a relative ?redirect= too (F11: never dropped)", async () => {
+    expect(await signInAt(`/signin?redirect=${encodeURIComponent("/fern?tab=clips")}`)).toBe("/fern?tab=clips");
   });
-  it("goes to /dashboard without one", async () => {
-    expect(await signInAt("/signin")).toBe("/dashboard");
+  it.each(["//evil.example/x", "https://evil.example/x"])("falls back to home for %s", async (bad) => {
+    expect(await signInAt(`/signin?returnTo=${encodeURIComponent(bad)}`)).toBe("/");
+  });
+  it("goes home without one when the account cannot be checked", async () => {
+    expect(await signInAt("/signin")).toBe("/");
+  });
+  it("F11: an account with a stream key goes to the studio", async () => {
+    expect(await signInAt("/signin", { channel: "streamer1", keys: 1 })).toBe("/dashboard");
+  });
+  it("F11: a viewer without a stream key goes home", async () => {
+    expect(await signInAt("/signin", { channel: "viewer1", keys: 0 })).toBe("/");
+  });
+  it("F11: an account without a channel goes home", async () => {
+    expect(await signInAt("/signin", { channel: null, keys: 3 })).toBe("/");
   });
 });

@@ -32,6 +32,7 @@ import {
   type RailSection,
 } from "../../lib/directory-sections.ts";
 import { feedViewer, useHomeFeed } from "./feed.ts";
+import { ownChannelSlug, withoutOwnChannel } from "./own-channel.ts";
 import { RAIL_KEY, readRail, writeTab } from "./tab-storage.ts";
 
 /** Expanded by default from here (Tailwind's `lg`); collapsed to avatars below it. */
@@ -54,7 +55,8 @@ function useRail(): { status: "loading" | "ready" | "error"; sections: RailSecti
   const { me } = useBootstrap();
   const feed = useHomeFeed({ viewer: feedViewer(me) });
   return React.useMemo(() => {
-    const sections = feed.home ? railSections(feed.home, me !== null) : [];
+    // F7: never the viewer's own channel (a streamer who follows nobody saw only themselves).
+    const sections = feed.home ? railSections(withoutOwnChannel(feed.home, ownChannelSlug(me)).home, me !== null) : [];
     const collisions = collidingNames(sections.flatMap((s) => s.entries.map(entryChannel)));
     return { status: feed.status, sections, collisions };
   }, [feed, me]);
@@ -265,8 +267,9 @@ export function SheetDiscovery(): React.JSX.Element | null {
   const feed = useHomeFeed({ viewer: feedViewer(me) });
   if (!feed.home) return null;
   const signedIn = me !== null;
-  const followed = signedIn ? railSections(feed.home, true).find((s) => s.id === "followed") : undefined;
-  const live = railSections(feed.home, false)
+  const home = withoutOwnChannel(feed.home, ownChannelSlug(me)).home;
+  const followed = signedIn ? railSections(home, true).find((s) => s.id === "followed") : undefined;
+  const live = railSections(home, false)
     .find((s) => s.id === "live")
     ?.entries.filter((e) => !followed?.entries.some((f) => f.card.channel.id === e.card.channel.id))
     .slice(0, SHEET_LIVE_LIMIT);

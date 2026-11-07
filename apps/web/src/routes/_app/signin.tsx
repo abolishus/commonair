@@ -12,7 +12,7 @@ import { ResetPasswordField, SignInPasswordField } from "../../components/passwo
 import { ResendVerification } from "../../components/resend-verification.tsx";
 import { t } from "../../i18n/index.ts";
 import { AuthRequestError, signIn } from "../../lib/auth.ts";
-import { authSearch, authTarget, carriedSearch, type AuthSearch } from "../../lib/auth-return.ts";
+import { authSearch, authTarget, carriedSearch, signInLanding, type AuthSearch } from "../../lib/auth-return.ts";
 import { authErrorMessage } from "../../lib/form-errors.ts";
 import { field } from "../../lib/form.ts";
 import { titleHead } from "../../lib/page-title.ts";
@@ -90,9 +90,10 @@ function SignInForm({
     setUnverified(null);
     try {
       await signIn(email, field(form, "password"));
-      // A full load renders the dashboard on the server with the new session cookie
-      // (stays pending until the page goes away).
-      window.location.assign(target ?? "/dashboard");
+      // F11: the target, else the studio for an account that streams and home for everyone else.
+      // A full load renders it on the server with the new session cookie (stays pending until the
+      // page goes away).
+      window.location.assign(await signInLanding(target));
     } catch (err) {
       setError(authErrorMessage(err));
       if (err instanceof AuthRequestError && err.code === "EMAIL_NOT_VERIFIED") setUnverified(email);

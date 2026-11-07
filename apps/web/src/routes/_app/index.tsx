@@ -9,6 +9,8 @@ import * as React from "react";
 import { Directory } from "../../components/directory.tsx";
 import { feedViewer, primeHomeFeed } from "../../components/discovery/feed.ts";
 import { getHomeCategories } from "../../components/discovery/loaders.ts";
+import { ownChannelSlug, withoutOwnChannel } from "../../components/discovery/own-channel.ts";
+import { OwnLiveStatus } from "../../components/discovery/own-live-status.tsx";
 import { WelcomeStrip } from "../../components/discovery/welcome-strip.tsx";
 import { t } from "../../i18n/index.ts";
 import { useBootstrap } from "../../lib/bootstrap.ts";
@@ -39,11 +41,16 @@ function Home(): React.JSX.Element {
   React.useLayoutEffect(() => {
     if (home) primeHomeFeed(home, viewer);
   }, [home, viewer]);
-  const layout = React.useMemo(() => (home ? homeLayout(home, signedIn) : null), [home, signedIn]);
+  // F7: the viewer's own channel never fills a shelf; when it is live, one status row says so. The
+  // rail gets the whole feed and filters it the same way.
+  const slug = ownChannelSlug(me);
+  const own = React.useMemo(() => (home ? withoutOwnChannel(home, slug) : null), [home, slug]);
+  const layout = React.useMemo(() => (own ? homeLayout(own.home, signedIn) : null), [own, signedIn]);
   return (
     <PageContainer width="wide" className="flex flex-col gap-8 py-6">
       <h1 className="sr-only">{t("pageTitle.home")}</h1>
       <Intro />
+      {own?.ownLive && <OwnLiveStatus card={own.ownLive} />}
       <Directory
         sections={layout ? layout.sections : null}
         hero={layout?.hero ?? null}
