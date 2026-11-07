@@ -5,7 +5,7 @@
  * Relay issuance against real Postgres and Valkey: which sessions a minute counts, the live and
  * DVR allowances it multiplies, the idempotent upsert, and the leader lock.
  */
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vite-plus/test";
 import { vodPrefix } from "@commonair/contracts/storage";
 import { schema, uuidv7 } from "@commonair/db";
@@ -22,6 +22,7 @@ import {
   upsertIssuance,
 } from "../src/issuance.ts";
 import { ISSUANCE_KEYS, ProductionStore } from "../src/production.ts";
+import { probeProductionMinute } from "./production-probe.ts";
 
 vi.setConfig({ testTimeout: 30_000, hookTimeout: 60_000 });
 
@@ -261,6 +262,47 @@ describe("runIssuance", () => {
       .where(eq(schema.playbackSessions.id, s1!.id));
     expect(await runIssuance(t.db, production, S, pulls)).toMatchObject([
       { relayId: ids.r1, sessions: 2, bytesIssued: 2_000 },
+    ]);
+  });
+
+  test("the origin.int probe: a minute boundary during the pull still issues for the stamped sessions", async () => {
+    // origin.int CI run 41834516797: the heartbeat was stamped at the end of one minute and the
+    // pull's production landed in the next, which the probe chose; the issuance came out empty.
+    const S = nextMinute();
+    const b = await broadcast();
+    const rows = await t.db
+      .insert(schema.playbackSessions)
+      .values([
+        session({ relayId: ids.r1, broadcastId: b.id, startedAt: new Date(S - MINUTE_MS) }),
+        session({ relayId: ids.r1, broadcastId: b.id, startedAt: new Date(S - MINUTE_MS) }),
+      ])
+      .returning({ id: schema.playbackSessions.id });
+    const mine = inArray(
+      schema.playbackSessions.id,
+      rows.map((r) => r.id),
+    );
+    // Every attempt starts 20 ms before a boundary and pulls 30 ms after it.
+    let now = S - 20;
+    let n = 0;
+    let bucket: number | undefined;
+    for (let attempt = 0; attempt < 3 && bucket === undefined; attempt++) {
+      bucket = await probeProductionMinute({
+        now: () => now,
+        stamp: async (at) => {
+          await t.db.update(schema.playbackSessions).set({ lastHeartbeatAt: at }).where(mine);
+        },
+        pull: async () => {
+          now += 50;
+          production.record(b.path, `seg-${S}-${++n}.mp4`, "segment", 1_000, now);
+          await production.flush();
+        },
+        produced: async (m) => sessionAllowance((await production.read(m)).get(b.path)).segments > 0,
+      });
+      if (bucket === undefined) now = S + MINUTE_MS * (attempt + 1) - 20;
+    }
+    expect(bucket).toBe(S);
+    expect(await runIssuance(t.db, production, S, pulls)).toEqual([
+      { relayId: ids.r1, bucketStart: new Date(S), sessions: 2, segmentTokens: 2, bytesIssued: 2_000 },
     ]);
   });
 
