@@ -9,6 +9,6 @@
   "lists.captions.unsaved": "{count, plural, one {# unsaved correction} other {# unsaved corrections}}",
   "lists.captions.pagerBottom": "Caption pages, end of list",
   "lists.captions.emptyTrack": "This track has no captions",
-  "lists.captions.emptyTrackHint": "Nothing was said in this VOD that the captions picked up, so there is nothing to correct.",
+  "lists.captions.emptyTrackHint": "Nothing was said in this video that the captions picked up, so there is nothing to correct.",
   "lists.captions.clearSearch": "Clear search"
 }

@@ -5,7 +5,7 @@
   "held.empty": "No hay mensajes retenidos",
   "held.emptyBody": "Aquí aparecen los mensajes que tus filtros de palabras retienen para revisión.",
   "held.loading": "Cargando los mensajes retenidos",
-  "held.loadFailed": "No se pudieron cargar los mensajes retenidos.",
+  "held.loadFailed": "No se pudieron cargar los mensajes retenidos. Actualiza la página para reintentar.",
   "held.allow": "Permitir el mensaje de {name}",
   "held.deny": "Rechazar el mensaje de {name}",
   "held.failed": "No se pudo actualizar ese mensaje. Inténtalo de nuevo.",

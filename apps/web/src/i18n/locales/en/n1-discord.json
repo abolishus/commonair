@@ -4,7 +4,7 @@
   "discord.terms": "Discord is a third-party service and its terms apply to what is posted there. You can skip this: the guide also covers open alternatives.",
   "discord.guide": "Setup guide and open alternatives",
   "discord.loading": "Loading the Discord webhook",
-  "discord.loadFailed": "Could not load the Discord webhook settings.",
+  "discord.loadFailed": "The Discord webhook settings didn't load.",
   "discord.status.off": "Not set up.",
   "discord.status.on": "Set up: go-live posts go to your Discord channel.",
   "discord.status.lastPost": "Last post {time}.",

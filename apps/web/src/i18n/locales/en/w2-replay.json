@@ -1,15 +1,15 @@
 {
   "replay.panel.title": "Chat replay",
-  "replay.panel.log": "Chat messages from the broadcast, shown as the video reaches them",
+  "replay.panel.log": "Chat messages from the stream, shown as the video reaches them",
   "replay.panel.jumpToLatest": "Jump to latest",
   "replay.panel.footer": "Chat as it was live. Removed messages and people you block stay hidden.",
   "replay.loading": "Loading chat…",
   "replay.waiting": "Chat appears here as the video plays.",
-  "replay.error": "Chat could not be loaded. Trying again…",
-  "replay.retry": "Try again",
+  "replay.error": "Chat didn't load. Retrying…",
+  "replay.retry": "Retry",
   "replay.empty.title": "No one chatted during this video",
   "replay.notRetained.title": "Chat for this video is no longer kept",
-  "replay.notRetained.description": "Chat messages are deleted some time after a broadcast, and this video's have been.",
+  "replay.notRetained.description": "Chat messages are deleted some time after a stream, and this video's have been.",
   "replay.row.seek": "Go to {time} in the video",
   "replay.row.catchingUp": "Said while catching up",
   "replay.row.replyTo": "Replying to {name}",
@@ -26,7 +26,7 @@
   "replay.watch.notFound": "This video is not available",
   "replay.watch.notReady.title": "This video is not ready yet",
   "replay.watch.notReady.description": "It is still being recorded or processed. Check back in a few minutes.",
-  "replay.watch.loadFailed": "This page could not be loaded",
+  "replay.watch.loadFailed": "This page didn't load",
   "replay.watch.duration": "Length {duration}",
   "replay.watch.clippedBy": "Clipped by {name}"
 }

@@ -209,14 +209,14 @@ describe("the category tabs", () => {
     expect(categoryVods).toHaveBeenLastCalledWith("art", "c1");
   });
 
-  it("Videos: an empty category says so; a failure offers Try again", async () => {
+  it("Videos: an empty category says so; a failure offers Retry", async () => {
     let fail = true;
     const categoryVods = vi.fn<MediaClient["categoryVods"]>(async () => {
       if (fail) throw new Error("down");
       return EMPTY;
     });
     await renderCategory(<Harness initialTab="videos" />, client({ categoryVods }));
-    const retry = await screen.findByText("Try again");
+    const retry = await screen.findByText("Retry");
     fail = false;
     act(() => {
       fireEvent.click(retry);

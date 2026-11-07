@@ -4,7 +4,7 @@
   "enforcement.window.label": "Report period",
   "enforcement.window.rolling": "Last 30 days",
   "enforcement.loading": "Loading the enforcement report",
-  "enforcement.loadFailed": "The enforcement report could not be loaded. Try again later.",
+  "enforcement.loadFailed": "The enforcement report didn't load. Refresh the page to retry.",
   "enforcement.empty": "No platform actions in this period",
   "enforcement.emptyHint": "Nothing was restricted, labelled, removed or suspended under the rules in the period you picked.",
   "enforcement.total": "Platform actions in this period",

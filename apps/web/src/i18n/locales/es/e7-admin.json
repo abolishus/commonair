@@ -9,7 +9,7 @@
   "admin.egress.rangeOrder": "El intervalo debe terminar después de empezar.",
   "admin.egress.rangeTooLong": "Un informe abarca como máximo 31 días.",
   "admin.egress.loadFailed": "No se pudo cargar el informe de tráfico de salida.",
-  "admin.egress.retry": "Intentar de nuevo",
+  "admin.egress.retry": "Reintentar",
   "admin.egress.loading": "Cargando el informe de tráfico de salida",
   "admin.egress.empty": "No hay tráfico de salida en este intervalo",
   "admin.egress.emptyHint": "No se entregó nada entre estas horas.",
@@ -27,7 +27,7 @@
   "admin.incidents.new": "Nuevo incidente",
   "admin.incidents.edit": "Editar",
   "admin.incidents.loadFailed": "No se pudieron cargar los incidentes.",
-  "admin.incidents.retry": "Intentar de nuevo",
+  "admin.incidents.retry": "Reintentar",
   "admin.incidents.loading": "Cargando incidentes",
   "admin.incidents.empty": "No hay incidentes abiertos ni recientes",
   "admin.incidents.emptyHint": "Los incidentes resueltos hace más de 7 días ya no aparecen.",
@@ -73,8 +73,8 @@
   "admin.integrity.decision.excluded": "Excluida",
   "admin.integrity.decision.allowed": "Permitida",
   "admin.integrity.loadFailed": "No se pudieron cargar las marcas.",
-  "admin.integrity.loadMoreFailed": "No se pudieron cargar más marcas.",
-  "admin.integrity.retry": "Intentar de nuevo",
+  "admin.integrity.loadMoreFailed": "No se pudieron cargar más marcas. Inténtalo de nuevo.",
+  "admin.integrity.retry": "Reintentar",
   "admin.integrity.loading": "Cargando marcas",
   "admin.integrity.empty": "Ninguna marca coincide",
   "admin.integrity.loadMore": "Cargar más",
@@ -86,5 +86,5 @@
   "admin.integrity.submit": "Decidir",
   "admin.integrity.decided": "Marca decidida",
   "admin.integrity.failed": "No se pudo decidir la marca.",
-  "admin.integrity.conflict": "Alguien decidió esta marca antes. Recarga la página para ver la decisión actual."
+  "admin.integrity.conflict": "Alguien decidió esta marca antes. Actualiza para ver la decisión actual."
 }

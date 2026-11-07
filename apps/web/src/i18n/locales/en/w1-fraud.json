@@ -8,7 +8,7 @@
   "fraud.empty": "No flags here",
   "fraud.emptyHint": "Flags raised by the payment scan, the payout run or a treasurer appear here.",
   "fraud.loadMore": "Load more flags",
-  "fraud.loadFailed": "Could not load the fraud flags.",
+  "fraud.loadFailed": "The fraud flags didn't load. Refresh the page to retry.",
   "fraud.kind.payer_velocity": "Payment burst",
   "fraud.kind.payer_concentration": "Few payers",
   "fraud.kind.new_payee": "Large first payout",

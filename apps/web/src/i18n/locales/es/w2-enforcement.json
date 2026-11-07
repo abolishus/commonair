@@ -4,7 +4,7 @@
   "enforcement.window.label": "Periodo del informe",
   "enforcement.window.rolling": "Últimos 30 días",
   "enforcement.loading": "Cargando el informe de medidas",
-  "enforcement.loadFailed": "No se pudo cargar el informe de medidas. Inténtalo de nuevo más tarde.",
+  "enforcement.loadFailed": "No se pudo cargar el informe de medidas. Actualiza la página para reintentar.",
   "enforcement.empty": "No hubo medidas de la plataforma en este periodo",
   "enforcement.emptyHint": "No se restringió, etiquetó, retiró ni suspendió nada según las normas en el periodo que elegiste.",
   "enforcement.total": "Medidas de la plataforma en este periodo",

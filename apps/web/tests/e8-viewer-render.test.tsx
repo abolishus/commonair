@@ -351,7 +351,7 @@ describe("ChatPredictionCard", () => {
       }),
     });
     expect(screen.getByTestId("chat-prediction-my-bet").getAttribute("data-payout")).toBe("150");
-    expect(screen.getByText("You bet 100 acorns on Alpha and got 150 acorns.")).toBeTruthy();
+    expect(screen.getByText("You predicted Alpha with 100 acorns and got 150 acorns.")).toBeTruthy();
   });
 
   it("locked: no betting", () => {
@@ -383,7 +383,7 @@ describe("ChatPredictionCard", () => {
     fireEvent.change(screen.getByTestId("chat-prediction-amount"), { target: { value: "10" } });
     fireEvent.click(screen.getByTestId("chat-prediction-bet-o2"));
     await waitFor(() => expect(screen.queryByTestId("chat-prediction-amount")).toBeNull());
-    expect(screen.getByRole("alert").textContent).toContain("cannot bet");
+    expect(screen.getByRole("alert").textContent).toContain("can't join");
   });
 
   it("a banned or timed-out viewer gets a neutral refusal and keeps the controls", async () => {
@@ -405,7 +405,7 @@ describe("ChatPredictionCard", () => {
     fireEvent.change(screen.getByTestId("chat-prediction-amount"), { target: { value: "10" } });
     fireEvent.click(screen.getByTestId("chat-prediction-bet-o2"));
     await waitFor(() =>
-      expect(screen.getByRole("alert").textContent).toBe("You can't bet on this channel's predictions right now."),
+      expect(screen.getByRole("alert").textContent).toBe("You can't join this channel's predictions right now."),
     );
     expect(screen.getByTestId("chat-prediction-amount")).toBeTruthy();
   });

@@ -416,7 +416,7 @@ describe("commands", () => {
   it("pluralizes point counts in the studio strings", () => {
     expect(t("bot.points.adjusted", { username: "ann", points: 1 })).toBe("ann now has 1 point.");
     expect(t("bot.points.adjusted", { username: "ann", points: 1200 })).toBe("ann now has 1,200 points.");
-    expect(t("interact.prediction.payout.refunded", { points: 1 })).toBe("Refunded 1 point");
+    expect(t("interact.prediction.payout.refunded", { points: 1 })).toBe("Returned 1 point");
   });
 
   it("refuses a new command whose name is already taken, so a save never overwrites it", () => {

@@ -13,5 +13,5 @@
   "unsubscribe.settings": "Notification settings",
   "unsubscribe.invalid.title": "This unsubscribe link does not work",
   "unsubscribe.invalid.body": "The link may be incomplete or out of date. Open it again from the email, or choose your emails in your notification settings.",
-  "unsubscribe.failed": "Could not unsubscribe. Please try again."
+  "unsubscribe.failed": "You weren't unsubscribed. Try again."
 }

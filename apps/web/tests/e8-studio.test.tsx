@@ -412,7 +412,7 @@ describe("/interact: predictions", () => {
     m.interact.predictions.current.mockResolvedValue(prediction({ status: "resolved", winningOutcomeId: "oa" }));
     await waitFor(() => expect(screen.getByTestId("prediction-live").dataset.status).toBe("resolved"));
     const [won, lost] = screen.getAllByTestId("prediction-live-outcome");
-    expect(won?.textContent).toContain("Paid out 600 points to 2 viewers");
+    expect(won?.textContent).toContain("Shared 600 points among 2 viewers");
     expect(lost?.textContent).toContain(en["interact.prediction.payout.lost"]);
     expect(screen.queryByTestId("prediction-cancel")).toBeNull();
     expect(screen.getByTestId("prediction-form")).toBeTruthy();
@@ -429,7 +429,7 @@ describe("/interact: predictions", () => {
     await waitFor(() => expect(m.interact.predictions.cancel).toHaveBeenCalledWith({ id: prediction().id }));
     m.interact.predictions.current.mockResolvedValue(prediction({ status: "canceled" }));
     await waitFor(() => expect(screen.getByTestId("prediction-live").dataset.status).toBe("canceled"));
-    expect(screen.getAllByTestId("prediction-live-outcome")[0]?.textContent).toContain("Refunded 400 points");
+    expect(screen.getAllByTestId("prediction-live-outcome")[0]?.textContent).toContain("Returned 400 points");
   });
 });
 

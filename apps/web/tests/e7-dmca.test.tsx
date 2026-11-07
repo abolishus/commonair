@@ -438,7 +438,7 @@ describe("DMCA queue", () => {
       }),
     };
     wrap(<DmcaQueue client={failing} />);
-    const retry = await screen.findByRole("button", { name: /try again/i });
+    const retry = await screen.findByRole("button", { name: /retry/i });
     fail = false;
     fireEvent.click(retry);
     expect(await screen.findByTestId("dmcaq-empty")).toBeTruthy();

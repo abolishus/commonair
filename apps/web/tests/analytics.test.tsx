@@ -181,11 +181,11 @@ describe("AnalyticsView", () => {
         client={fakeClient({ range: vi.fn<C["range"]>(async () => ({ ...range, broadcasts: [] })) })}
       />,
     );
-    await waitFor(() => expect(screen.getByText("No broadcasts to show yet")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("No streams to show yet")).toBeTruthy());
     cleanup();
     const failing = fakeClient({ range: vi.fn<C["range"]>(async () => Promise.reject(new Error("down"))) });
     wrap(<AnalyticsView channel="me" now={NOW} client={failing} />);
-    await waitFor(() => expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy());
   });
 
   it("creates a share link and shows it once; retention leaves only totals", async () => {

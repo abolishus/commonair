@@ -78,7 +78,7 @@ describe("what the rail lists", () => {
     await renderInRouter(shell());
     expect(rail().querySelector('[data-slot="skeleton"]')).not.toBeNull();
     await act(async () => fail(new Error("down")));
-    expect(await screen.findByText("The channel list could not be loaded.")).toBeTruthy();
+    expect(await screen.findByText("The channel list didn't load. Refresh the page to retry.")).toBeTruthy();
   });
 
   it("signed out: Live now, busiest first, with the live badge and verified viewers", async () => {

@@ -5,7 +5,7 @@
   "held.empty": "No held messages",
   "held.emptyBody": "Messages your word filters hold for review show up here.",
   "held.loading": "Loading held messages",
-  "held.loadFailed": "Could not load the held messages.",
+  "held.loadFailed": "The held messages didn't load. Refresh the page to retry.",
   "held.allow": "Allow {name}'s message",
   "held.deny": "Deny {name}'s message",
   "held.failed": "Could not update that message. Try again.",

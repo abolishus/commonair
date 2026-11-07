@@ -141,7 +141,7 @@ describe("the offline page with VODs", () => {
     expect(hero.getAttribute("data-vod")).toBe(uuid(101));
     const link = hero.querySelector("a");
     expect(link?.getAttribute("href")).toBe(`/fern/vods/${uuid(101)}`);
-    expect(hero.textContent).toContain("Latest broadcast");
+    expect(hero.textContent).toContain("Latest video");
     expect(hero.textContent).toContain("Stream 1");
     expect(hero.querySelector("img")?.getAttribute("src")).toBe("https://media.example.test/vods/1.jpg");
     // The hero replaces the offline card: no player.
@@ -253,7 +253,7 @@ describe("OfflineHero", () => {
       const hero = screen.getByTestId("channel-offline-hero");
       expect(hero.querySelectorAll("a")).toHaveLength(1);
       expect(hero.querySelector("img")).toBeNull();
-      expect(hero.textContent).toContain("Untitled broadcast");
+      expect(hero.textContent).toContain("Untitled video");
       expect(hero.textContent).toContain("1:00:00");
       expect(hero.getAttribute("aria-labelledby")).toBe(hero.querySelector("h2")?.id);
     });

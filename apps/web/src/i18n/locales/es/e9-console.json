@@ -3,7 +3,7 @@
   "developer.pageIntro": "Registra aplicaciones OAuth para bots, overlays e integraciones, y supervisa sus suscripciones a eventos.",
   "developer.loading": "Cargando",
   "developer.loadMore": "Cargar más",
-  "developer.retry": "Intentar de nuevo",
+  "developer.retry": "Reintentar",
   "developer.cancel": "Cancelar",
   "developer.copied": "Copiado",
   "developer.copyFailed": "No se pudo copiar. Selecciona el texto y cópialo tú.",
@@ -255,5 +255,5 @@
   "developer.admin.unsuspendConfirm": "Levantar suspensión",
   "developer.admin.unsuspended": "{name} ya no está suspendida.",
   "developer.admin.unsuspendFailed": "No se pudo levantar la suspensión.",
-  "developer.admin.conflict": "Alguien modificó esta aplicación mientras tanto. Recarga la lista."
+  "developer.admin.conflict": "Alguien modificó esta aplicación mientras tanto. Actualiza la lista."
 }

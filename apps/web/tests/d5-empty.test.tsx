@@ -149,7 +149,7 @@ describe("the empties newbie sees (rendered)", () => {
     );
     const links = screen.getAllByTestId("empty-state-action");
     expect(links.map((l) => [l.textContent, l.getAttribute("href")])).toEqual([
-      ["Turn on recording", "/dashboard/settings"],
+      ["Save videos of my streams", "/dashboard/settings"],
       ["Open stream manager", "/dashboard"],
     ]);
   });

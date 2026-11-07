@@ -134,8 +134,8 @@ describe.each(LAYOUTS)("the $id layout", (layout) => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     renderAt("/broken", layout);
     await expectAction();
-    expect(screen.getByTestId("error-state").textContent).toContain("Something went wrong");
-    expect(screen.getByTestId("error-state-retry").textContent).toBe("Try again");
+    expect(screen.getByTestId("error-state").textContent).toContain("This page didn't load");
+    expect(screen.getByTestId("error-state-retry").textContent).toBe("Retry");
     expect(document.body.textContent).not.toContain(SECRET);
     expect(document.body.textContent).not.toMatch(/at line|stack|Error:/);
     // The boundary replaced the layout: the page brings the site chrome back.
