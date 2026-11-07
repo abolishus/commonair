@@ -30,6 +30,7 @@ import { iso, isoOrNull } from "../lib/dto.ts";
 import { badRequest, conflict, forbidden, notFound, precondition } from "../lib/errors.ts";
 import { os, requireCaller } from "../lib/orpc.ts";
 import { withCoopErrors, withCoopErrorsRetrying } from "./errors.ts";
+import { deletionScheduledAmong } from "../moderation/deletion.ts";
 import { MEMBER, STAFF, money, unknownUser, userPicks } from "./shared.ts";
 import {
   activateMembership as activate,
@@ -170,6 +171,12 @@ export const membershipHandlers = {
   buyShare: os.coop.buyShare.handler(async ({ context }) => {
     const { deps } = context;
     const caller = requireCaller(context);
+    // The deletion would exit the membership and send the share back for a refund (worker `deletion/money.ts`).
+    if ((await deletionScheduledAmong(deps.db, [caller.user.id])).size > 0)
+      throw precondition(
+        "account_active",
+        "Your account is scheduled for deletion; cancel the deletion to buy a share",
+      );
     const settings = await loadSettings(deps.db);
     // By card only when the instance runs Stripe and the co-op voted `shares.cardPayments` on;
     // otherwise by bank transfer (COOP_TEST_HOOKS keeps a seeded stripe-mock stack on transfers).

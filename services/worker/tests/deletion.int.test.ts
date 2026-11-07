@@ -277,9 +277,14 @@ describe.skipIf(!storage)("account deletion (E6)", () => {
       .where(
         sql`${schema.auditLog.action} = 'account.deletion.complete' and ${schema.auditLog.subjectId} = ${U.user.id}`,
       );
+    // U's viewer membership exits on deletion (`deletion/money.ts`); its `coop.membership.update`
+    // names U, so it is scrubbed with the rest: one more than the events seeded above.
+    const [membership] = await db().select().from(schema.memberships).where(eq(schema.memberships.userId, U.user.id));
+    expect(membership?.status).toBe("exited");
     expect(completeAudit?.details).toMatchObject({
       deleted: {
-        events: theirs.length,
+        events: theirs.length + 1,
+        memberships_exited: 1,
         events_redacted: 1,
         webhook_deliveries: 1,
         tip_messages: 2,

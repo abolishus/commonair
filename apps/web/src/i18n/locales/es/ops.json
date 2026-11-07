@@ -184,7 +184,7 @@
   "privacy.deletion.intro": "Tu perfil, tus mensajes y tu contenido multimedia se eliminan tras un periodo de gracia.",
   "privacy.deletion.request": "Eliminar mi cuenta…",
   "privacy.deletion.confirmTitle": "¿Eliminar tu cuenta?",
-  "privacy.deletion.confirmBody": "Se eliminan tu perfil, tus métodos de inicio de sesión, tus mensajes de chat y tu contenido multimedia. Los pagos, el libro contable, los votos y el historial de auditoría se conservan, sin tu nombre ni tu correo.",
+  "privacy.deletion.confirmBody": "Se eliminan tu perfil, tus métodos de inicio de sesión, tus mensajes de chat y tu contenido multimedia. Todas las suscripciones que pagas, y todas las que se pagan a tu canal, terminan sin más cobros, y dejas la cooperativa: una participación de socio reembolsable pasa a la tesorería para su reembolso. Los pagos, el libro contable, los votos y el historial de auditoría se conservan, sin tu nombre ni tu correo.",
   "privacy.deletion.confirm": "Programar eliminación",
   "privacy.deletion.confirmUsername": "Escribe tu nombre de usuario para confirmar",
   "privacy.deletion.confirmUsernameHint": "Tu nombre de usuario es {username}.",

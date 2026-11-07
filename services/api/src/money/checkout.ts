@@ -33,6 +33,7 @@ import {
   toSubscriptionDto,
   violatesConstraint,
 } from "./checkout-shared.ts";
+import { deletionScheduledAmong } from "../moderation/deletion.ts";
 import { treasurerCheckoutHandlers } from "./checkout-treasurer.ts";
 
 export { treasurerCheckoutHandlers };
@@ -98,6 +99,14 @@ function payable(c: ChannelRow | null, callerId: string): ChannelRow {
   if (c.ownerId === callerId) throw forbidden("You cannot pay your own channel");
   if (c.suspendedAt) throw precondition("channel_active", "This channel cannot take payments right now");
   return c;
+}
+
+/** No new payment from an account being deleted, or to a channel whose owner's account is. */
+async function refuseWhileDeleting(deps: Deps, payerId: string, c: ChannelRow): Promise<void> {
+  const deleting = await deletionScheduledAmong(deps.db, [payerId, c.ownerId]);
+  if (deleting.has(payerId))
+    throw precondition("account_active", "Your account is scheduled for deletion; cancel the deletion to pay");
+  if (deleting.has(c.ownerId)) throw precondition("channel_active", "This channel cannot take payments right now");
 }
 
 function returnUrls(deps: Deps, returnPath: string | undefined, c: ChannelRow) {
@@ -210,6 +219,7 @@ export const checkoutHandlers = {
     const { deps } = context;
     const caller = requireCaller(context);
     const c = payable(await channelBySlug(deps, input.channel), caller.user.id);
+    await refuseWhileDeleting(deps, caller.user.id, c);
     if (input.gift) {
       const problem = giftInputProblem(input.gift, caller.user.username);
       if (problem) throw badRequest(problem);
@@ -499,6 +509,7 @@ export const checkoutHandlers = {
     const { deps } = context;
     const caller = requireCaller(context);
     const c = payable(await channelBySlug(deps, input.channel), caller.user.id);
+    await refuseWhileDeleting(deps, caller.user.id, c);
     const message = input.message.trim();
     if (message.length > MONEY_LIMITS.tipMessageMaxLength) throw badRequest("The tip message is too long");
     const adapter = createAdapter(deps.env);

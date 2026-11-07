@@ -184,7 +184,7 @@
   "privacy.deletion.intro": "Your profile, messages and media are removed after a grace period.",
   "privacy.deletion.request": "Delete my account…",
   "privacy.deletion.confirmTitle": "Delete your account?",
-  "privacy.deletion.confirmBody": "Your profile, sign-in methods, chat messages and media are removed. Payments, the ledger, votes and audit history stay, with your name and email removed.",
+  "privacy.deletion.confirmBody": "Your profile, sign-in methods, chat messages and media are removed. Every subscription you pay, and every subscription paid to your channel, ends with no further charges, and you leave the co-op: a refundable member share goes to the treasurer to refund. Payments, the ledger, votes and audit history stay, with your name and email removed.",
   "privacy.deletion.confirm": "Schedule deletion",
   "privacy.deletion.confirmUsername": "Type your username to confirm",
   "privacy.deletion.confirmUsernameHint": "Your username is {username}.",

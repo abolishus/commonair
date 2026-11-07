@@ -152,6 +152,36 @@ describe("subscribe and tip refusals", () => {
     expect((await subscribe(fan, bare.username, { tier: 1 })).status).toBe(412);
   });
 
+  test("no new payment from an account being deleted, or to a channel whose owner's is (F0)", async () => {
+    const [leaving, owner] = await Promise.all([signUpAndSignIn(api), signUpAndSignIn(api)]);
+    const schedule = (userId: string) =>
+      db()
+        .insert(schema.accountDeletions)
+        .values({ userId, scheduledFor: new Date(Date.now() + 86_400_000) });
+    const requirement = (r: { body: unknown }) => (r.body as { data?: { requirement?: string } }).data?.requirement;
+
+    await schedule(leaving.userId);
+    const sub = await subscribe(leaving, streamer.username, { tier: 1 });
+    expect(sub.status).toBe(412);
+    expect(requirement(sub)).toBe("account_active");
+    const tip = await leaving.client.call("POST", `/api/channels/${streamer.username}/tips`, {
+      amountCents: 500,
+      returnPath: "/",
+    });
+    expect(tip.status).toBe(412);
+    expect(requirement(tip)).toBe("account_active");
+    const share = await leaving.client.call("POST", "/api/coop/shares", { returnPath: "/coop" });
+    expect(share.status).toBe(412);
+    expect(requirement(share)).toBe("account_active");
+
+    // A channel whose owner is leaving: its subscriptions would end at the deletion.
+    await owner.client.call("PUT", `/api/channels/${owner.username}/subscription-tiers`, { tiers: TIERS });
+    await schedule(owner.userId);
+    const toLeaving = await subscribe(fan, owner.username, { tier: 1 });
+    expect(toLeaving.status).toBe(412);
+    expect(requirement(toLeaving)).toBe("channel_active");
+  });
+
   test("the same pending checkout resumes with the same payment and reference", async () => {
     const buyer = await signUpAndSignIn(api);
     const first = await subscribe(buyer, streamer.username, { tier: 1 });

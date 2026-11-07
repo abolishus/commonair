@@ -22,6 +22,20 @@ export const toDeletion = (d: DeletionRow) => ({
   retained: d.retained,
 });
 
+/**
+ * Which of these users have a deletion scheduled. Checkout refuses them (as payer, or as the
+ * channel's owner): the deletion ends every subscription they pay or are paid (worker
+ * `deletion/money.ts`), so new money would only be refunded.
+ */
+export async function deletionScheduledAmong(db: Executor, userIds: readonly string[]): Promise<Set<string>> {
+  if (userIds.length === 0) return new Set();
+  const rows = await db
+    .select({ userId: accountDeletions.userId })
+    .from(accountDeletions)
+    .where(and(inArray(accountDeletions.userId, [...userIds]), eq(accountDeletions.status, "scheduled")));
+  return new Set(rows.map((r) => r.userId));
+}
+
 /** Lock the user row so concurrent requests for one account cannot both insert. */
 export async function lockUser(tx: Executor, userId: string): Promise<void> {
   await tx.select({ id: users.id }).from(users).where(eq(users.id, userId)).for("update");

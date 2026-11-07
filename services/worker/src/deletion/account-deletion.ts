@@ -28,6 +28,8 @@ import { dmcaHiddenKey } from "../dmca/objects.ts";
 import { thumbnailPrefix } from "../moderation/objects.ts";
 import { vodObjectPrefixes } from "../vod/prefixes.ts";
 import { deleteRoomData } from "./watch-rooms.ts";
+import { endMoneyAndMembership, RenewalCancelError, type RenewalPort, stopProviderRenewals } from "./money.ts";
+import { publishBadgeInvalidations, type EndedSubscription } from "../money/ends.ts";
 import { captureRetiredActor, deleteFederationData, type RetiredActor, sendRetiredActorDelete } from "./federation.ts";
 import { federationConfig } from "../federation/config.ts";
 import { withMediaState } from "../media-state.ts";
@@ -197,6 +199,8 @@ interface Completed {
   deletedAppIds: string[];
   /** Actor `Delete`s to send after commit (federation, ADR 0030); never before, so a rollback sends nothing. */
   retiredActors: RetiredActor[];
+  /** Subscriptions the deletion ended; their chat badges are dropped after commit. */
+  endedSubscriptions: EndedSubscription[];
 }
 
 /** Complete one due deletion. Returns null if it is not due or someone else took it. */
@@ -216,7 +220,9 @@ export async function completeDeletion(ctx: WorkerContext, deletionId: string): 
       .for("update", { skipLocked: true });
     if (!d) return null;
     const userId = d.userId;
-    const [user] = await tx.select().from(s.users).where(eq(s.users.id, userId)).for("update");
+    // NO KEY UPDATE: the pseudonymization never changes the key, so inserts that reference the
+    // user (a renewal's payment, a webhook's booking) are not blocked into a deadlock with it.
+    const [user] = await tx.select().from(s.users).where(eq(s.users.id, userId)).for("no key update");
     const pseudonym = d.pseudonym ?? newPseudonym();
     const counts: Record<string, number> = {};
     const del = async (name: string, q: Promise<unknown[]>) => {
@@ -230,8 +236,19 @@ export async function completeDeletion(ctx: WorkerContext, deletionId: string): 
     const deletedAppIds: string[] = [];
     const retiredActors: RetiredActor[] = [];
     let notice: Notice | null = null;
+    const endedSubscriptions: EndedSubscription[] = [];
     let identity: DeletedIdentity | null = null;
     if (user) {
+      // No subscription the user pays, or that is paid on their channel, outlives the account,
+      // and the user leaves the co-op (`deletion/money.ts`). Their end events name the user (as
+      // subscriber or broadcaster), so the outbox scrub below removes them with the rest.
+      const money = await endMoneyAndMembership(tx, userId, now);
+      endedSubscriptions.push(...money.ended);
+      counts.subscriptions_ended = money.ended.length;
+      counts.subscriptions_incomplete_expired = money.incompleteExpired;
+      counts.subscription_payments_failed = money.paymentsFailed;
+      counts.memberships_exited = money.membershipsExited;
+      counts.shares_refund_pending = money.sharesRefundPending;
       // Credentials and sessions.
       await del(
         "sessions",
@@ -701,6 +718,7 @@ export async function completeDeletion(ctx: WorkerContext, deletionId: string): 
       notice,
       deletedAppIds,
       retiredActors,
+      endedSubscriptions,
     };
   });
 }
@@ -708,6 +726,7 @@ export async function completeDeletion(ctx: WorkerContext, deletionId: string): 
 /** After commit: media objects (skipped entirely under an active hold), live and user-control messages. */
 async function afterCommit(ctx: WorkerContext, c: Completed) {
   if (c.ended) await publishLiveEnded(ctx, c.ended, ctx.now());
+  await publishBadgeInvalidations(ctx, c.endedSubscriptions);
   // A crash between the commit and this loop loses the `Delete` (accepted: deletion/federation.ts).
   for (const r of c.retiredActors) {
     try {
@@ -822,18 +841,41 @@ async function sweepPendingObjects(ctx: WorkerContext, batch: number) {
   return counts;
 }
 
-export async function runAccountDeletions(ctx: WorkerContext, batch = 20) {
+/** How long a deletion blocked by its payment provider waits before it is tried again. */
+export const BLOCKED_BACKOFF_MS = 30 * 60_000;
+const blockedKey = (deletionId: string) => `worker:deletions:blocked:${deletionId}`;
+
+/**
+ * Complete due deletions. `renewals` is the payment provider: the provider-managed subscriptions
+ * a deletion ends are cancelled there first. A deletion the provider blocks backs off for
+ * `blockedBackoffMs` (0: retried on the next run), so a few stuck ones never hold up the queue.
+ */
+export async function runAccountDeletions(
+  ctx: WorkerContext,
+  batch = 20,
+  renewals: RenewalPort | null = null,
+  blockedBackoffMs = BLOCKED_BACKOFF_MS,
+) {
   const swept = await sweepPendingObjects(ctx, batch);
-  const due = await ctx.db
-    .select({ id: s.accountDeletions.id })
+  const candidates = await ctx.db
+    .select({ id: s.accountDeletions.id, userId: s.accountDeletions.userId })
     .from(s.accountDeletions)
     .where(and(eq(s.accountDeletions.status, "scheduled"), lte(s.accountDeletions.scheduledFor, ctx.now())))
     .orderBy(asc(s.accountDeletions.scheduledFor))
-    .limit(batch);
+    .limit(batch * 5);
+  const due: typeof candidates = [];
+  for (const d of candidates) {
+    if (due.length >= batch) break;
+    if (blockedBackoffMs > 0 && (await ctx.valkey.exists(blockedKey(d.id)))) continue;
+    due.push(d);
+  }
   let completed = 0;
   let failed = 0;
+  let blocked = 0;
   for (const d of due) {
     try {
+      // Due deletions can no longer be cancelled (`me.deletion.cancel`), so this is never undone.
+      await stopProviderRenewals(ctx.db, renewals, d.userId, ctx.logger);
       const c = await completeDeletion(ctx, d.id);
       if (!c) continue;
       completed++;
@@ -847,12 +889,18 @@ export async function runAccountDeletions(ctx: WorkerContext, batch = 20) {
       });
     } catch (err) {
       failed++;
-      moderationMetrics.deletions.add(1, { outcome: "failed" });
+      if (err instanceof RenewalCancelError) {
+        // Logged with the subscription and provider answer by `stopProviderRenewals`.
+        blocked++;
+        moderationMetrics.deletions.add(1, { outcome: "blocked" });
+        if (blockedBackoffMs > 0)
+          await ctx.valkey.set(blockedKey(d.id), "1", "PX", blockedBackoffMs).catch(() => undefined);
+      } else moderationMetrics.deletions.add(1, { outcome: "failed" });
       ctx.logger.error("account deletion failed; retried next run", {
         deletionId: d.id,
         errorCode: safeErrorCode(err),
       });
     }
   }
-  return { completed, failed, ...swept };
+  return { completed, failed, blocked, ...swept };
 }
