@@ -425,8 +425,9 @@ describe("focus rings in components", () => {
     "%s: one focus rule, ring-2 at a 2px offset in the surface color",
     (file, classes) => {
       const required = focusWidths(classes).flatMap(([prefix, width]): string[][] => {
-        // A reset must drop the offset too, or a 2px halo in the offset color stays behind.
-        if (width === "0") return /focus-(visible|within)/.test(prefix) ? [[`${prefix}ring-offset-0`]] : [];
+        // A reset (any focus variant, plain `focus:` included) must drop the offset too, or a
+        // 2px halo in the offset color stays behind.
+        if (width === "0") return [[`${prefix}ring-offset-0`]];
         if (INSET_FOCUS.has(file)) return [[`${prefix}ring-inset`]];
         return [[`${prefix}ring-offset-2`], [`${prefix}ring-offset-background`, `${prefix}ring-offset-sidebar`]];
       });
