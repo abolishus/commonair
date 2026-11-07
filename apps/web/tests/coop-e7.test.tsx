@@ -26,14 +26,19 @@ import {
 import { CoopPatronageTab, CoopSharesTab } from "../src/components/coop/treasury-tabs.tsx";
 import { coopLoads, type CoopRetryable } from "../src/components/coop/use-coop.ts";
 import { en } from "../src/i18n/en.ts";
-import { locale, uiMessages } from "../src/i18n/index.ts";
+import { locale, t, uiMessages } from "../src/i18n/index.ts";
 import type { SessionUser } from "../src/lib/bootstrap-types.ts";
 import type { ElectionDto, MembershipViewDto } from "../src/lib/coop.ts";
 import { ME, OTHER, PERIOD_ID, PROPOSAL_ID, board, council, elections, membershipView } from "./coop-fixtures.ts";
 
 const session = vi.hoisted(() => ({ me: null as SessionUser | null }));
 /** API methods that reject (once per name, or every call while `always` has it). */
-const failing = vi.hoisted(() => ({ names: new Set<string>(), code: "INTERNAL_SERVER_ERROR" }));
+const failing = vi.hoisted(() => ({
+  names: new Set<string>(),
+  code: "INTERNAL_SERVER_ERROR",
+  /** More fields on the thrown error (`status`, `data`), as an oRPC client error carries them. */
+  extra: {} as Record<string, unknown>,
+}));
 const calls = vi.hoisted(() => ({ counts: new Map<string, number>() }));
 /** The status `coop.proposals.get` answers with. */
 const fixture = vi.hoisted(() => ({ proposalStatus: "discussion" as "discussion" | "council_review" }));
@@ -57,7 +62,7 @@ vi.mock("../src/lib/api.ts", async (importOriginal) => {
     <T,>(name: string, value: () => T) =>
     async () => {
       calls.counts.set(name, (calls.counts.get(name) ?? 0) + 1);
-      if (failing.names.has(name)) throw Object.assign(new Error(name), { code: failing.code });
+      if (failing.names.has(name)) throw Object.assign(new Error(name), { code: failing.code, ...failing.extra });
       return value();
     };
   const client = {
@@ -132,6 +137,7 @@ beforeEach(() => {
   session.me = me;
   failing.names.clear();
   failing.code = "INTERNAL_SERVER_ERROR";
+  failing.extra = {};
   calls.counts.clear();
   fixture.proposalStatus = "discussion";
 });
@@ -139,17 +145,12 @@ afterEach(cleanup);
 
 describe("a failed load shows coop-load-error; coop-retry loads it again in place", () => {
   const cases: [keyof typeof routes, string, string][] = [
-    ["overview", "transparency", "coop"],
     ["membership", "membership", "membership"],
     ["membership", "settings", "membership"],
     ["proposals", "proposals", "proposals"],
     ["newProposal", "settings", "proposal-form"],
     ["proposal", "proposal", "proposal"],
     ["edit", "proposal", "proposal-form"],
-    ["council", "council", "council"],
-    ["council", "elections", "council"],
-    ["council", "board", "council"],
-    ["settings", "settings", "settings"],
     ["patronage", "statements", "patronage"],
     ["statement", "statement", "statement"],
   ];
@@ -169,9 +170,16 @@ describe("a failed load shows coop-load-error; coop-retry loads it again in plac
     expect(calls.counts.get(failingCall)).toBe(before + 1);
   });
 
-  // Loads that feed only part of a public page: the page renders and the retry sits inline.
+  // Loads that feed only part of a public page: the page renders and the retry sits inline. On
+  // /coop, /coop/council and /coop/settings every section fails on its own (F3).
   const inline: [keyof typeof routes, string, string][] = [
     ["overview", "membership", "coop"],
+    ["overview", "transparency", "coop"],
+    ["overview", "council", "coop"],
+    ["council", "council", "council"],
+    ["council", "elections", "council"],
+    ["council", "board", "council"],
+    ["settings", "settings", "settings"],
     ["proposal", "comments", "proposal"],
     ["proposal", "membership", "proposal"],
     ["proposal", "council", "proposal"],
@@ -183,7 +191,9 @@ describe("a failed load shows coop-load-error; coop-retry loads it again in plac
     failing.names.add(failingCall);
     const Page = component(routes[route]);
     wrap(<Page />);
-    const error = await screen.findByTestId("coop-load-error");
+    // One load can feed two sections (the months: recent decisions and members by class).
+    const [error] = await screen.findAllByTestId("coop-load-error");
+    if (!error) throw new Error("no coop-load-error");
     const page = await screen.findByTestId(pageId);
     expect(page.contains(error)).toBe(true);
     const before = calls.counts.get(failingCall) ?? 0;
@@ -224,6 +234,117 @@ describe("a failed load shows coop-load-error; coop-retry loads it again in plac
     await waitFor(() => expect(screen.queryAllByTestId("coop-load-error")).toHaveLength(0));
     expect(calls.counts.get("shares")).toBe(2);
     expect(calls.counts.get("periods")).toBe(2);
+  });
+});
+
+describe("F3: /coop, /coop/council and /coop/settings fail per section", () => {
+  it("/coop keeps its header, intro and loaded sections when the months fail", async () => {
+    failing.names.add("transparency");
+    wrap(React.createElement(component(routes.overview)));
+    const errors = await screen.findAllByTestId("coop-load-error");
+    expect(errors).toHaveLength(2);
+    const titles = errors.map((e) => e.querySelector("h3")?.textContent);
+    expect(titles).toEqual([
+      t("fixSession.load.title", { section: en["coop.decisions.title"] }),
+      t("fixSession.load.title", { section: en["coop.byClass.title"] }),
+    ]);
+    for (const e of errors) {
+      expect(e.getAttribute("aria-live")).toBe("polite");
+      expect(e.textContent).toContain(en["fixSession.load.sectionBody"]);
+    }
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(en["coop.title"]);
+    expect(screen.getByText(en["coop.intro"])).toBeTruthy();
+    expect((await screen.findAllByTestId("coop-open-proposal")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByTestId("coop-council-member")).length).toBeGreaterThan(0);
+  });
+
+  it("says to check the connection when nothing on the page loaded", async () => {
+    for (const name of ["proposals", "council", "transparency"]) failing.names.add(name);
+    wrap(React.createElement(component(routes.overview)));
+    await waitFor(() => expect(screen.getAllByTestId("coop-load-error")).toHaveLength(4));
+    for (const e of screen.getAllByTestId("coop-load-error"))
+      expect(e.textContent).toContain(en["fixSession.load.pageBody"]);
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(en["coop.title"]);
+  });
+
+  it("/coop/council: a failed board leaves the council and elections", async () => {
+    failing.names.add("board");
+    wrap(React.createElement(component(routes.council)));
+    const error = await screen.findByTestId("coop-load-error");
+    expect(error.textContent).toContain(t("fixSession.load.title", { section: en["coop.board.title"] }));
+    expect((await screen.findAllByTestId("council-member")).length).toBeGreaterThan(0);
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(en["coop.councilPage.title"]);
+  });
+
+  it("/coop/settings keeps the header and the protected note; the list error is an h2", async () => {
+    failing.names.add("settings");
+    wrap(React.createElement(component(routes.settings)));
+    const error = await screen.findByTestId("coop-load-error");
+    expect(error.querySelector("h2")?.textContent).toBe(
+      t("fixSession.load.title", { section: en["coop.settings.title"] }),
+    );
+    expect(screen.getByText(en["coop.settings.protectedTitle"])).toBeTruthy();
+    expect(screen.getByTestId("settings").contains(error)).toBe(true);
+  });
+
+  it("a 429 retries by itself after retryAfterSeconds and says so meanwhile", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      failing.code = "RATE_LIMITED";
+      failing.extra = { status: 429, data: { retryAfterSeconds: 4 } };
+      failing.names.add("settings");
+      wrap(React.createElement(component(routes.settings)));
+      const error = await screen.findByTestId("coop-load-error");
+      expect(error.textContent).toContain(t("fixSession.load.busy", { seconds: 4 }));
+      expect(within(error).getByTestId("coop-retry").textContent).toBe(en["fixSession.retryNow"]);
+      expect(error.getAttribute("data-busy")).toBe("true");
+      expect(calls.counts.get("settings")).toBe(1);
+      failing.names.clear();
+      await vi.advanceTimersByTimeAsync(4_000);
+      await waitFor(() => expect(screen.queryByTestId("coop-load-error")).toBeNull());
+      expect(calls.counts.get("settings")).toBe(2);
+      expect((await screen.findAllByTestId("setting-row")).length).toBeGreaterThan(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops retrying by itself after three attempts and says it is still failing", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      failing.code = "RATE_LIMITED";
+      failing.extra = { status: 429, data: { retryAfterSeconds: 1 } };
+      failing.names.add("settings");
+      wrap(React.createElement(component(routes.settings)));
+      await screen.findByTestId("coop-load-error");
+      for (let i = 0; i < 3; i++) await vi.advanceTimersByTimeAsync(1_000);
+      await waitFor(() =>
+        expect(screen.getByTestId("coop-load-error").textContent).toContain(en["fixSession.load.stillFailing"]),
+      );
+      expect(calls.counts.get("settings")).toBe(4);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(calls.counts.get("settings")).toBe(4);
+      // Retry still works by hand, and starts the automatic retries over.
+      fireEvent.click(screen.getByTestId("coop-retry"));
+      await waitFor(() => expect(calls.counts.get("settings")).toBe(5));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a 500 is not retried by itself", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      failing.extra = { status: 500 };
+      failing.names.add("settings");
+      wrap(React.createElement(component(routes.settings)));
+      const error = await screen.findByTestId("coop-load-error");
+      expect(error.getAttribute("data-busy")).toBeNull();
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(calls.counts.get("settings")).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

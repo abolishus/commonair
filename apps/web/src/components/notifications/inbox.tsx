@@ -9,10 +9,16 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { Link } from "@tanstack/react-router";
 import * as React from "react";
 import { t } from "../../i18n/index.ts";
-import { type InboxClient, type NotificationDto, appendPage, markItemsRead } from "../../lib/notifications.ts";
+import {
+  type InboxClient,
+  type NotificationDto,
+  type NotificationPage,
+  appendPage,
+  markItemsRead,
+} from "../../lib/notifications.ts";
+import { objectKey, useRetryingLoad, type LoadState } from "../../lib/retrying-load.ts";
+import { SectionLoadError } from "../../lib/section-load-error.tsx";
 import { NotificationItem } from "./item.tsx";
-
-type Load = "loading" | "loaded" | "failed";
 
 export interface NotificationInboxProps {
   client: InboxClient;
@@ -34,29 +40,21 @@ export function NotificationInbox({
   onRefreshCount,
   onNavigate,
 }: NotificationInboxProps): React.JSX.Element {
+  // The first page retries by itself on a busy API and has its own Retry (F3).
+  const first = useRetryingLoad(`inbox|${objectKey(client)}`, () => client.list(null));
   const [items, setItems] = React.useState<NotificationDto[]>([]);
   const [cursor, setCursor] = React.useState<string | null>(null);
-  const [load, setLoad] = React.useState<Load>("loading");
+  const [shown, setShown] = React.useState<NotificationPage | null>(null);
   const [more, setMore] = React.useState(false);
   const [marking, setMarking] = React.useState(false);
-
-  React.useEffect(() => {
-    let live = true;
-    client.list(null).then(
-      (page) => {
-        if (!live) return;
-        setItems(page.items);
-        setCursor(page.nextCursor);
-        setLoad("loaded");
-      },
-      () => {
-        if (live) setLoad("failed");
-      },
-    );
-    return () => {
-      live = false;
-    };
-  }, [client]);
+  // A new first page replaces the list during render, so it never flashes the empty state.
+  if (first.data !== null && first.data !== shown) {
+    setShown(first.data);
+    setItems(first.data.items);
+    setCursor(first.data.nextCursor);
+  }
+  const load: LoadState =
+    first.data !== null && first.data === shown ? "loaded" : first.state === "failed" ? "failed" : "loading";
 
   const loadMore = async () => {
     if (cursor === null || more) return;
@@ -101,9 +99,16 @@ export function NotificationInbox({
           <SkeletonText lines={3} />
         </SkeletonGroup>
       ) : load === "failed" ? (
-        <p role="alert" className="px-3 pb-3 text-muted-foreground">
-          {t("notifications.loadFailed")}
-        </p>
+        <div className="px-3 pb-3">
+          <SectionLoadError
+            data-testid="notification-load-error"
+            retryTestId="notification-retry"
+            section={t("notifications.title")}
+            load={first}
+            alone
+            headingLevel={3}
+          />
+        </div>
       ) : items.length === 0 ? (
         <EmptyState
           data-testid="notification-empty"

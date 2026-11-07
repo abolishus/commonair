@@ -7,8 +7,9 @@ import { Button } from "@commonair/ui/components/button";
 import { PageContainer } from "@commonair/ui/layouts";
 import type * as React from "react";
 import { t } from "../../i18n/index.ts";
+import { SectionLoadError } from "../../lib/section-load-error.tsx";
 import { CoopTabs, type CoopTab } from "./nav.tsx";
-import type { CoopLoadsStatus } from "./use-coop.ts";
+import type { CoopLoadsStatus, CoopRetryable } from "./use-coop.ts";
 
 /** `coop-load-error`: a co-op load failed; `coop-retry` runs it again in place. */
 export function CoopLoadError({ onRetry }: { onRetry: () => void }): React.JSX.Element {
@@ -28,6 +29,36 @@ export function CoopLoadError({ onRetry }: { onRetry: () => void }): React.JSX.E
   );
 }
 
+/**
+ * One section's failed load (F3), in place of the section's content: "{section} didn't load."
+ * with Retry, and "Retrying in N seconds" while a busy API is retried by itself. Keeps the
+ * `coop-load-error` and `coop-retry` test ids.
+ */
+export function CoopSectionError({
+  section,
+  load,
+  alone,
+  headingLevel = 3,
+}: {
+  /** The section's own heading ("Open proposals"). */
+  section: string;
+  load: CoopRetryable;
+  /** Nothing else on the page has data. */
+  alone?: boolean;
+  headingLevel?: 2 | 3 | 4;
+}): React.JSX.Element {
+  return (
+    <SectionLoadError
+      data-testid="coop-load-error"
+      retryTestId="coop-retry"
+      section={section}
+      load={{ retryInMs: load.retryInMs ?? null, gaveUp: load.gaveUp ?? false, reload: load.reload }}
+      alone={alone}
+      headingLevel={headingLevel}
+    />
+  );
+}
+
 /** A whole co-op page whose load failed: the section tabs stay, the content is the retry block. */
 export function CoopLoadFailedPage({ tab, onRetry }: { tab: CoopTab | null; onRetry: () => void }): React.JSX.Element {
   return (
@@ -40,7 +71,8 @@ export function CoopLoadFailedPage({ tab, onRetry }: { tab: CoopTab | null; onRe
 
 /**
  * The page when its loads allow it: the retry page when something has nothing to show, the page
- * with the retry block above it when a reload failed, else the page.
+ * with the retry block above it when a reload failed, else the page. Pages whose sections fail on
+ * their own (`/coop`, `/coop/council`, `/coop/settings`) use `CoopSectionError` instead.
  */
 export function CoopLoadGate({
   status,
