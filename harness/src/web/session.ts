@@ -12,7 +12,7 @@ import { join } from "node:path";
 import type { BrowserContext, Locator, Page, Request, Response } from "playwright";
 import type { ProbeVideoStats } from "../../player/probe.ts";
 import { type BrowserEngine, type BrowserFleet, HUMANIZE_SCRIPT } from "../browser-viewer.ts";
-import { PendingCalls, apiPath } from "./api-calls.ts";
+import { PendingCalls, RecentCalls, apiPath, rateLimitHeaders } from "./api-calls.ts";
 import { installBootTrace, isHydrationGuardMessage, readBootTrace } from "./boot-trace.ts";
 import { type DocumentScriptOrder, documentScriptOrder, isHydrationBootError, readBootState } from "./hydration.ts";
 import { type TestId, tid } from "./selectors.ts";
@@ -117,6 +117,8 @@ const SERVED_DOCUMENTS_KEPT = 4;
 export class WebSession {
   private readonly pages = new Map<string, Page>();
   private readonly pending = new Map<string, PendingCalls<Request>>();
+  /** Every page's API calls and document loads, for a 429's log line: the API's buckets are per user, not per page. */
+  private readonly recent = new RecentCalls();
   private closed = false;
 
   private constructor(
@@ -170,7 +172,9 @@ export class WebSession {
   /**
    * Log the API calls a page gets an error for (status >= 400), or none at all (network
    * failure), and remember the unanswered ones for `screenshotAll`: a page waiting on data it
-   * never gets otherwise shows up only as a selector timeout.
+   * never gets otherwise shows up only as a selector timeout. A 429 also logs its rate-limit
+   * headers and what this session sent in the last minute, so a refusal can be traced to the
+   * bucket that ran out instead of guessed at.
    */
   private trackApiCalls(page: Page, name: string): void {
     const pending = new PendingCalls<Request>();
@@ -178,7 +182,12 @@ export class WebSession {
     const fields = { session: this.label, page: name };
     page.on("request", (req) => {
       const path = apiPath(req.url(), this.webUrl);
-      if (path) pending.start(req, path, Date.now());
+      if (path) {
+        pending.start(req, path, Date.now());
+        this.recent.call(path, Date.now());
+      } else if (req.isNavigationRequest() && req.frame() === page.mainFrame()) {
+        this.recent.document(Date.now());
+      }
     });
     page.on("requestfinished", (req) => pending.finish(req));
     page.on("requestfailed", (req) => {
@@ -189,7 +198,12 @@ export class WebSession {
     page.on("response", (res) => {
       if (res.status() < 400) return;
       const path = apiPath(res.url(), this.webUrl);
-      if (path) this.log?.warn("web api error", { ...fields, path, status: res.status() });
+      if (!path) return;
+      const limited =
+        res.status() === 429
+          ? { rateLimit: rateLimitHeaders(res.headers()), sessionRecent: this.recent.counts(Date.now()) }
+          : {};
+      this.log?.warn("web api error", { ...fields, path, status: res.status(), ...limited });
     });
   }
 
