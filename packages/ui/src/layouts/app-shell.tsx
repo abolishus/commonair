@@ -8,85 +8,115 @@ import { cn } from "@commonair/ui/lib/utils";
 export interface AppShellProps extends React.ComponentProps<"div"> {
   header: React.ReactNode;
   /**
-   * The left rail (F7): collapsible to icons from `md`, hidden below it (put its content in the
-   * header's mobile sheet instead). Rendered inside the `SidebarProvider`, so it may call `useSidebar`;
-   * it brings its own landmark (a labelled `<nav>`).
+   * The left rail or section nav: collapsible to icons from `md`, a sheet below it. Rendered inside
+   * the `SidebarProvider`, so it may call `useSidebar`; it brings its own landmark (a labelled `<nav>`).
    */
   sidebar?: React.ReactNode;
   /**
-   * `beside` (default; the studio and admin shells): the sidebar runs the full height, the header
-   * sits to its right. `below` (the public rail): the header spans the page and stays put, and the
-   * rail starts under it, as on Twitch.
+   * `below` (default, every area): the header spans the page and stays put, the sidebar starts
+   * under it, so the logo sits in the same place on public, studio and admin pages. `beside` (the
+   * sidebar the full height, the header to its right) is kept for embedders only.
    */
   sidebarPlacement?: "beside" | "below";
   footer?: React.ReactNode;
+  /**
+   * The phone's bottom tab bar (`BottomTabBar`), after the footer. Below `md` the page is padded by
+   * its height (56 px plus the safe-area inset) so the footer never hides under it.
+   */
+  bottomBar?: React.ReactNode;
   children: React.ReactNode;
   skipLabel: string;
   mainId?: string;
 }
+
+/**
+ * The padding that keeps the page clear of a fixed bottom tab bar, below `md` only: its 56 px plus
+ * the bottom safe-area inset the bar pads itself by.
+ */
+const BOTTOM_BAR_CLEARANCE = "max-md:pb-[calc(3.5rem_+_env(safe-area-inset-bottom))]";
+
+/**
+ * The root's `viewport-fit=cover` lets the page run under a landscape phone's notch: the shell pads
+ * that side by its inset (0 everywhere else). A fixed sidebar is not padded by it.
+ */
+const SAFE_AREA_X = "pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]"; // rtl-physical: safe-area insets are physical edges
+
 export function AppShell({
   header,
   sidebar,
-  sidebarPlacement = "beside",
+  sidebarPlacement = "below",
   footer,
+  bottomBar,
   children,
   skipLabel,
   mainId = "main-content",
   className,
   ...props
 }: AppShellProps): React.JSX.Element {
-  // First in the tab order in both variants (WCAG 2.4.1): before the sidebar and the header.
+  // First in the tab order in every variant (WCAG 2.4.1): before the sidebar and the header.
   const skip = (
     <a
       href={`#${mainId}`}
       data-testid="skip-link"
-      className="sr-only z-50 bg-background p-2 text-foreground focus:not-sr-only focus:fixed focus:top-2 focus:start-2 focus:ring-2 focus:ring-ring"
+      className="sr-only z-50 bg-background p-2 text-foreground focus:not-sr-only focus:fixed focus:top-2 focus:start-2 focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
     >
       {skipLabel}
     </a>
   );
-  if (sidebar && sidebarPlacement === "below")
+  const main = (
+    <main id={mainId} tabIndex={-1} className="min-w-0 flex-1 outline-none">
+      {children}
+    </main>
+  );
+  const shellProps = { "data-bottom-bar": bottomBar ? "" : undefined, ...props };
+  const clearance = bottomBar ? BOTTOM_BAR_CLEARANCE : undefined;
+  if (sidebar && sidebarPlacement === "beside")
     return (
-      <SidebarProvider className={cn("flex-col", className)} {...props}>
+      <SidebarProvider>
+        <div className={cn("flex min-h-svh w-full", SAFE_AREA_X, clearance, className)} {...shellProps}>
+          {skip}
+          <Sidebar collapsible="icon">
+            <SidebarContent>{sidebar}</SidebarContent>
+          </Sidebar>
+          <div className="flex min-h-svh min-w-0 flex-1 flex-col">
+            {header}
+            {main}
+            {footer}
+          </div>
+        </div>
+        {bottomBar}
+      </SidebarProvider>
+    );
+  const top = (
+    <div data-slot="app-shell-header" className="sticky top-0 z-20 w-full">
+      {header}
+    </div>
+  );
+  if (sidebar)
+    return (
+      <SidebarProvider className={cn("flex-col", SAFE_AREA_X, clearance, className)} {...shellProps}>
         {skip}
-        <div className="sticky top-0 z-20 w-full">{header}</div>
+        {top}
         <div className="flex min-w-0 flex-1">
+          {/* Starts under the 56 px header, which stays put above it. */}
           <Sidebar collapsible="icon" className="top-14 h-auto">
             <SidebarContent>{sidebar}</SidebarContent>
           </Sidebar>
           <div className="flex min-w-0 flex-1 flex-col">
-            <main id={mainId} tabIndex={-1} className="min-w-0 flex-1 outline-none">
-              {children}
-            </main>
+            {main}
             {footer}
           </div>
         </div>
+        {bottomBar}
       </SidebarProvider>
     );
-  return sidebar ? (
-    <SidebarProvider>
-      <div className={cn("flex min-h-svh w-full", className)} {...props}>
-        {skip}
-        <Sidebar collapsible="icon">
-          <SidebarContent>{sidebar}</SidebarContent>
-        </Sidebar>
-        <div className="flex min-h-svh min-w-0 flex-1 flex-col">
-          {header}
-          <main id={mainId} tabIndex={-1} className="min-w-0 flex-1 outline-none">
-            {children}
-          </main>
-          {footer}
-        </div>
-      </div>
-    </SidebarProvider>
-  ) : (
-    <div className={cn("flex min-h-svh w-full flex-col", className)} {...props}>
+  return (
+    <div className={cn("flex min-h-svh w-full flex-col", SAFE_AREA_X, clearance, className)} {...shellProps}>
       {skip}
-      {header}
-      <main id={mainId} tabIndex={-1} className="min-w-0 flex-1 outline-none">
-        {children}
-      </main>
+      {top}
+      {main}
       {footer}
+      {bottomBar}
     </div>
   );
 }

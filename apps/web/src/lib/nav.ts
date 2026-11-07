@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * What the site chrome links to, as data: the header nav, the account menu, the creator studio
- * sidebar and the footer. Only pages that exist are listed (no dead UI); `current` is derived from
- * the pathname here so the components stay router-agnostic.
+ * What the site chrome links to, as data: the header nav, the account menu, the phone's bottom
+ * tab bar, the creator studio sidebar and the footer. `current` is derived from the pathname here
+ * so the components stay router-agnostic, and so is where the tab bar shows (`shellArea`).
  */
 
 export interface SiteNavEntry {
@@ -15,15 +15,10 @@ export interface SiteNavEntry {
 
 export interface AccountEntry {
   id:
-    | "dashboard"
-    | "relays"
-    | "subscriptions"
-    | "notifications"
-    | "appeals"
-    | "copyright"
-    | "privacy"
-    | "connections"
-    | "preferences"
+    | "channel"
+    | "studio"
+    | "following"
+    | "settings"
     | "coop"
     | "treasury"
     | "moderation"
@@ -32,22 +27,35 @@ export interface AccountEntry {
     | "signOut";
   /** Absent for actions (sign out). */
   to?:
+    | "/$channel"
     | "/dashboard"
-    | "/relays"
-    | "/settings/subscriptions"
-    | "/settings/notifications"
-    | "/settings/appeals"
-    | "/settings/copyright"
-    | "/settings/privacy"
-    | "/settings/connections"
-    | "/settings/preferences"
+    | "/following"
+    | "/settings"
     | "/coop/membership"
     | "/treasury"
     | "/admin/moderation"
     | "/admin/legal"
     | "/admin/coop";
+  /** `channel` only: the member's own channel. */
+  params?: { channel: string };
   separatorBefore?: boolean;
   destructive?: boolean;
+}
+
+/**
+ * Where a page sits in the shell, from its path: `browse` pages get the phone's bottom tab bar;
+ * `watch` (a channel, its videos, clips and giveaways, the mod-share view), `auth`, `settings`,
+ * `studio` and `admin` pages never do, nor does any other `page` (forms such as DMCA).
+ */
+export type ShellArea = "browse" | "watch" | "auth" | "settings" | "studio" | "admin" | "page";
+
+/** A section of the phone's bottom tab bar (below md, browsing pages only). */
+export interface TabEntry {
+  /** `following` signed in, `coop` signed out, in the third slot. */
+  id: "home" | "browse" | "following" | "coop" | "you";
+  /** Absent for the member's You tab, which opens the account sheet. */
+  to?: "/" | "/directory" | "/following" | "/coop" | "/signin";
+  current: boolean;
 }
 
 export interface SignedOutEntry {
@@ -129,8 +137,39 @@ export interface CoopEntry {
 }
 
 export interface FooterEntry {
-  id: "transparency" | "attestations" | "takedown" | "dmca";
-  to: "/transparency" | "/attestations/verify" | "/takedown" | "/dmca";
+  id:
+    | "creators"
+    | "studio"
+    | "import"
+    | "coopOverview"
+    | "membership"
+    | "proposals"
+    | "transparency"
+    | "attestations"
+    | "takedown"
+    | "dmca";
+  to:
+    | "/creators"
+    | "/dashboard"
+    | "/import"
+    | "/coop"
+    | "/coop/membership"
+    | "/coop/proposals"
+    | "/transparency"
+    | "/attestations/verify"
+    | "/takedown"
+    | "/dmca";
+}
+
+/** The footer's three link columns, in order. */
+export interface FooterColumnEntry {
+  id: "create" | "coop" | "legal";
+  links: FooterEntry[];
+}
+
+export interface FooterOptions {
+  /** Twitch import is available (`features.twitchImport`). */
+  twitchImport?: boolean;
 }
 
 /** A VOD's or a clip's public watch page (W2-vod-watch), as a typed router link. */
@@ -139,6 +178,8 @@ export type WatchLink =
   | { to: "/$channel/clips/$clipId"; params: { channel: string; clipId: string } };
 
 export interface AccountMenuOptions {
+  /** The member's channel slug, for "Your channel"; without one the entry is left out. */
+  channel?: string | null;
   /** Platform treasurers also get the treasury. */
   treasurer?: boolean;
   /** Platform moderators, admins and `legal` also get the mod queue. */
@@ -224,16 +265,15 @@ export function accountMenu(
       ...(options.legal === true ? [{ id: "legal", to: "/admin/legal" } as const] : []),
       ...(options.admin === true ? [{ id: "adminCoop", to: "/admin/coop" } as const] : []),
     ];
+    // The decisions log's order: Your channel, Creator studio, Following, Settings (one entry; its
+    // pages have their own nav), Co-op membership, staff tools, then (the menu adds the theme)
+    // Sign out after a separator. Relays moved into the studio.
+    const channel = options.channel ? options.channel : null;
     return [
-      { id: "dashboard", to: "/dashboard" },
-      { id: "relays", to: "/relays" },
-      { id: "subscriptions", to: "/settings/subscriptions" },
-      { id: "notifications", to: "/settings/notifications" },
-      { id: "appeals", to: "/settings/appeals" },
-      { id: "copyright", to: "/settings/copyright" },
-      { id: "privacy", to: "/settings/privacy" },
-      { id: "connections", to: "/settings/connections" },
-      { id: "preferences", to: "/settings/preferences" },
+      ...(channel ? [{ id: "channel", to: "/$channel", params: { channel } } as const] : []),
+      { id: "studio", to: "/dashboard" },
+      { id: "following", to: "/following" },
+      { id: "settings", to: "/settings" },
       { id: "coop", to: "/coop/membership" },
       ...staff,
       { id: "signOut", separatorBefore: true, destructive: true },
@@ -348,13 +388,103 @@ export function coopNav(): CoopEntry[] {
   ];
 }
 
-/** Public pages linked from every footer. */
-export function footerNav(): FooterEntry[] {
+/**
+ * The footer's columns: Create (the creators pitch, the studio, Twitch import where offered),
+ * Co-op (how it works, membership, proposals, transparency) and Legal (the public legal pages
+ * that exist: copyright, intimate-image takedown, the viewer count proof verifier).
+ */
+export function footerColumns(options: FooterOptions = {}): FooterColumnEntry[] {
   return [
-    { id: "transparency", to: "/transparency" },
-    { id: "attestations", to: "/attestations/verify" },
-    { id: "takedown", to: "/takedown" },
-    { id: "dmca", to: "/dmca" },
+    {
+      id: "create",
+      links: [
+        { id: "creators", to: "/creators" },
+        { id: "studio", to: "/dashboard" },
+        ...(options.twitchImport === true ? [{ id: "import", to: "/import" } as const] : []),
+      ],
+    },
+    {
+      id: "coop",
+      links: [
+        { id: "coopOverview", to: "/coop" },
+        { id: "membership", to: "/coop/membership" },
+        { id: "proposals", to: "/coop/proposals" },
+        { id: "transparency", to: "/transparency" },
+      ],
+    },
+    {
+      id: "legal",
+      links: [
+        { id: "dmca", to: "/dmca" },
+        { id: "takedown", to: "/takedown" },
+        { id: "attestations", to: "/attestations/verify" },
+      ],
+    },
+  ];
+}
+
+/** Static first segments that are not a channel name (`/<channel>` is a watch page). */
+const BROWSE_ROOTS = new Set(["directory", "search", "following", "coop", "transparency", "creators"]);
+const AUTH_ROOTS = new Set(["signin", "signup", "activate", "oauth2"]);
+const STUDIO_ROOTS = new Set([
+  "dashboard",
+  "rehearse",
+  "overlays",
+  "interact",
+  "bot",
+  "chat",
+  "captions",
+  "content",
+  "analytics",
+  "revenue",
+  "crew",
+  "relays",
+  "move",
+  "import",
+  "developer",
+  "mod",
+]);
+const ADMIN_ROOTS = new Set(["admin", "treasury"]);
+const PAGE_ROOTS = new Set(["dmca", "takedown", "attestations", "embed", "overlay"]);
+/** A channel's sub-pages that are watch pages too. */
+const WATCH_CHILDREN = new Set(["vods", "clips", "giveaways"]);
+
+export function shellArea(pathname: string): ShellArea {
+  const path = normalize(pathname);
+  if (path === "/") return "browse";
+  const [root = "", ...rest] = path.slice(1).split("/");
+  if (BROWSE_ROOTS.has(root)) return "browse";
+  if (AUTH_ROOTS.has(root)) return "auth";
+  if (root === "settings") return "settings";
+  if (STUDIO_ROOTS.has(root)) return "studio";
+  if (ADMIN_ROOTS.has(root)) return "admin";
+  if (PAGE_ROOTS.has(root)) return "page";
+  // The mod-share view (`/m/<channel>/<nonce>`) watches a channel too.
+  if (root === "m") return "watch";
+  if (rest.length === 0) return "watch";
+  if (WATCH_CHILDREN.has(rest[0] ?? "")) return "watch";
+  return "page";
+}
+
+/** The bottom tab bar shows on browsing pages only (below md; the component hides it from md). */
+export function tabBarVisible(pathname: string): boolean {
+  return shellArea(pathname) === "browse";
+}
+
+/**
+ * The bottom tab bar's sections: Home, Browse, then Following (signed in) or Co-op (signed out),
+ * then You, which is Sign in for a visitor (below md Sign in leaves the header for it).
+ */
+export function tabBarNav(pathname: string, signedIn: boolean): TabEntry[] {
+  const path = normalize(pathname);
+  const under = (root: string) => path === root || path.startsWith(`${root}/`);
+  return [
+    { id: "home", to: "/", current: path === "/" },
+    { id: "browse", to: "/directory", current: under("/directory") || path === "/search" },
+    signedIn
+      ? { id: "following", to: "/following", current: under("/following") }
+      : { id: "coop", to: "/coop", current: under("/coop") },
+    signedIn ? { id: "you", current: false } : { id: "you", to: "/signin", current: path === "/signin" },
   ];
 }
 

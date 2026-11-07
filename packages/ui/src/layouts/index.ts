@@ -3,6 +3,8 @@
 
 export { AppShell, type AppShellProps } from "./app-shell.tsx";
 export { AdminShell, type AdminShellProps } from "./admin-shell.tsx";
+export { BottomTabBar, type BottomTabBarProps, type TabBarItem } from "./bottom-tab-bar.tsx";
+export { BREAKPOINTS, CONTENT_MAX, TAB_BAR_HEIGHT, WORDMARK_MIN, below } from "./breakpoints.ts";
 export {
   ChannelSidebar,
   type ChannelGroupLink,
@@ -22,7 +24,13 @@ export {
   type ResponsiveGridProps,
 } from "./page-layout.tsx";
 export { SectionNav, type SectionNavProps } from "./section-nav.tsx";
-export { SiteFooter, type FooterLink, type SourceLink, type SiteFooterProps } from "./site-footer.tsx";
+export {
+  SiteFooter,
+  type FooterColumn,
+  type FooterLink,
+  type SourceLink,
+  type SiteFooterProps,
+} from "./site-footer.tsx";
 export { SiteHeader, type Brand, type HeaderContext, type SiteHeaderProps } from "./site-header.tsx";
 export { StudioShell, type StudioShellProps } from "./studio-shell.tsx";
 export { UserMenu, type UserMenuItem, type UserMenuProps } from "./user-menu.tsx";

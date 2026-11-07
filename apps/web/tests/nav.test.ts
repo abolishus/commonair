@@ -11,7 +11,7 @@ import {
   adminNav,
   clipWatchLink,
   coopNav,
-  footerNav,
+  footerColumns,
   siteNav,
   studioNav,
   vodWatchLink,
@@ -47,36 +47,30 @@ describe("site nav", () => {
 });
 
 describe("account menu", () => {
-  it("signed in: dashboard, relays, subscriptions, notifications, appeals, copyright, privacy, connected apps, co-op, then sign out after a separator", () => {
-    const items = accountMenu(true);
-    expect(items.map((i) => i.id)).toEqual([
-      "dashboard",
-      "relays",
-      "subscriptions",
-      "notifications",
-      "appeals",
-      "copyright",
-      "privacy",
-      "connections",
-      "preferences",
-      "coop",
-      "signOut",
-    ]);
+  it("signed in: your channel, creator studio, following, settings, co-op membership, then sign out after a separator", () => {
+    const items = accountMenu(true, { channel: "rivertide" });
+    expect(items.map((i) => i.id)).toEqual(["channel", "studio", "following", "settings", "coop", "signOut"]);
     expect(items.map((i) => i.to)).toEqual([
+      "/$channel",
       "/dashboard",
-      "/relays",
-      "/settings/subscriptions",
-      "/settings/notifications",
-      "/settings/appeals",
-      "/settings/copyright",
-      "/settings/privacy",
-      "/settings/connections",
-      "/settings/preferences",
+      "/following",
+      "/settings",
       "/coop/membership",
       undefined,
     ]);
-    expect(items[10]).toMatchObject({ separatorBefore: true, destructive: true });
-    expect(items.slice(0, 10).every((i) => !i.destructive && !i.separatorBefore)).toBe(true);
+    expect(items[0]?.params).toEqual({ channel: "rivertide" });
+    expect(items.at(-1)).toMatchObject({ separatorBefore: true, destructive: true });
+    expect(items.slice(0, -1).every((i) => !i.destructive && !i.separatorBefore)).toBe(true);
+  });
+
+  it("leaves out Your channel without a channel; relays and the settings pages are not in it", () => {
+    for (const channel of [undefined, null, ""]) {
+      const ids = accountMenu(true, { channel }).map((i) => i.id);
+      expect(ids).toEqual(["studio", "following", "settings", "coop", "signOut"]);
+    }
+    const ids: string[] = accountMenu(true, { channel: "x", treasurer: true, admin: true }).map((i) => i.id);
+    for (const gone of ["relays", "dashboard", "subscriptions", "notifications", "privacy", "preferences"])
+      expect(ids).not.toContain(gone);
   });
 
   it("adds co-op administration for admins only, before sign out", () => {
@@ -84,15 +78,9 @@ describe("account menu", () => {
     expect(accountMenu(true).some((i) => i.id === "adminCoop")).toBe(false);
     const items = accountMenu(true, { admin: true, safetyStaff: true });
     expect(items.map((i) => i.id)).toEqual([
-      "dashboard",
-      "relays",
-      "subscriptions",
-      "notifications",
-      "appeals",
-      "copyright",
-      "privacy",
-      "connections",
-      "preferences",
+      "studio",
+      "following",
+      "settings",
       "coop",
       "moderation",
       "adminCoop",
@@ -104,20 +92,7 @@ describe("account menu", () => {
   it("adds the treasury for treasurers only, before sign out", () => {
     expect(accountMenu(true, { treasurer: false }).some((i) => i.id === "treasury")).toBe(false);
     const items = accountMenu(true, { treasurer: true });
-    expect(items.map((i) => i.id)).toEqual([
-      "dashboard",
-      "relays",
-      "subscriptions",
-      "notifications",
-      "appeals",
-      "copyright",
-      "privacy",
-      "connections",
-      "preferences",
-      "coop",
-      "treasury",
-      "signOut",
-    ]);
+    expect(items.map((i) => i.id)).toEqual(["studio", "following", "settings", "coop", "treasury", "signOut"]);
     expect(items.find((i) => i.id === "treasury")?.to).toBe("/treasury");
   });
 
@@ -141,21 +116,17 @@ describe("account menu", () => {
     expect(accountMenu(false, "/signup/").map((i) => i.current)).toEqual([false, true]);
   });
 
-  it("only links pages that exist", () => {
-    const targets = [...accountMenu(true, { treasurer: true, admin: true }), ...accountMenu(false, "/")].flatMap((i) =>
-      i.to ? [i.to] : [],
-    );
+  it("links only these pages (/following comes with the discovery batch)", () => {
+    const targets = [
+      ...accountMenu(true, { channel: "x", treasurer: true, admin: true }),
+      ...accountMenu(false, "/"),
+    ].flatMap((i) => (i.to ? [i.to] : []));
     expect(new Set(targets)).toEqual(
       new Set([
+        "/$channel",
         "/dashboard",
-        "/relays",
-        "/settings/subscriptions",
-        "/settings/notifications",
-        "/settings/appeals",
-        "/settings/copyright",
-        "/settings/privacy",
-        "/settings/connections",
-        "/settings/preferences",
+        "/following",
+        "/settings",
         "/coop/membership",
         "/treasury",
         "/admin/coop",
@@ -301,14 +272,23 @@ describe("watch links (W2-vod-watch)", () => {
   });
 });
 
-describe("footer nav", () => {
-  it("links public transparency, the attestation verifier, takedown and DMCA pages", () => {
-    expect(footerNav()).toEqual([
-      { id: "transparency", to: "/transparency" },
-      { id: "attestations", to: "/attestations/verify" },
-      { id: "takedown", to: "/takedown" },
-      { id: "dmca", to: "/dmca" },
+describe("footer columns", () => {
+  it("Create, Co-op and Legal, in that order, with their pages", () => {
+    expect(footerColumns().map((c) => [c.id, c.links.map((l) => l.to)])).toEqual([
+      ["create", ["/creators", "/dashboard"]],
+      ["coop", ["/coop", "/coop/membership", "/coop/proposals", "/transparency"]],
+      ["legal", ["/dmca", "/takedown", "/attestations/verify"]],
     ]);
+  });
+
+  it("adds Import from Twitch to Create only where the instance offers it", () => {
+    expect(footerColumns({ twitchImport: false })[0]?.links.map((l) => l.id)).toEqual(["creators", "studio"]);
+    expect(footerColumns({ twitchImport: true })[0]?.links.map((l) => l.id)).toEqual(["creators", "studio", "import"]);
+  });
+
+  it("keeps the public transparency, attestation, takedown and DMCA pages", () => {
+    const ids = footerColumns().flatMap((c) => c.links.map((l) => l.id));
+    for (const id of ["transparency", "attestations", "takedown", "dmca"] as const) expect(ids).toContain(id);
   });
 });
 

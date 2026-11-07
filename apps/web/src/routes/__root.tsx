@@ -35,7 +35,9 @@ export const Route = createRootRoute({
   head: () => ({
     meta: [
       { charSet: "utf-8" },
-      { name: "viewport", content: "width=device-width, initial-scale=1" },
+      // `cover`: the page runs under the home indicator and notches, so the safe-area insets are real
+      // numbers the shell and its tab bar pad by (without it they are 0 and the bar sits on the indicator).
+      { name: "viewport", content: "width=device-width, initial-scale=1, viewport-fit=cover" },
       { name: "color-scheme", content: "dark light" },
       { name: "theme-color", content: PWA_THEME_COLORS.dark, media: "(prefers-color-scheme: dark)" },
       { name: "theme-color", content: PWA_THEME_COLORS.light, media: "(prefers-color-scheme: light)" },

@@ -2,14 +2,20 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { AppShell } from "@commonair/ui/layouts";
-import { Outlet, createFileRoute, type ErrorComponentProps } from "@tanstack/react-router";
+import { Outlet, createFileRoute, useLocation, type ErrorComponentProps } from "@tanstack/react-router";
 import type * as React from "react";
 import { LegalPending } from "../components/legal-pending.tsx";
 import { ErrorState, NotFoundState, ShellFallback } from "../components/not-found.tsx";
+import { AppTabBar } from "../components/shell/tab-bar.tsx";
 import { AppFooter, AppHeader, AppRail } from "../components/site-chrome.tsx";
 import { t } from "../i18n/index.ts";
+import { tabBarVisible } from "../lib/nav.ts";
 
-/** Site chrome (header + footer) for every public page; creator tools use `_studio`, embeds none. */
+/**
+ * Site chrome for every public page: the header, the rail under it, the footer and, on browsing
+ * pages below md, the bottom tab bar. Creator tools use `_studio` and platform tools `_admin`, on
+ * the same geometry; embeds and overlays have none.
+ */
 export const Route = createFileRoute("/_app")({
   component: AppLayout,
   errorComponent: AppError,
@@ -36,12 +42,15 @@ function AppNotFound(): React.JSX.Element {
 }
 
 function AppLayout(): React.JSX.Element {
+  const pathname = useLocation({ select: (location) => location.pathname });
+  const tabBar = tabBarVisible(pathname);
   return (
     <AppShell
-      header={<AppHeader />}
+      header={<AppHeader tabBar={tabBar} />}
       sidebar={<AppRail />}
       sidebarPlacement="below"
       footer={<AppFooter />}
+      bottomBar={tabBar ? <AppTabBar /> : undefined}
       skipLabel={t("nav.skipToContent")}
     >
       <LegalPending />

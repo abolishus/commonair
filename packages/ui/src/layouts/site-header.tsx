@@ -14,6 +14,11 @@ import { TargetLink, type LinkTarget } from "../lib/link.tsx";
 export interface Brand {
   mark: React.ReactNode;
   name: string;
+  /**
+   * The link's accessible name ("CommonAir, home"): the same whether the name shows or the link
+   * has collapsed to the mark. Defaults to `name`.
+   */
+  label?: string;
   href: string;
   /** Router link element (Base UI `render` convention); `href` stays the fallback. */
   render?: React.ReactElement;
@@ -46,6 +51,16 @@ export interface SiteHeaderProps extends React.ComponentProps<"header"> {
   mobileActions?: React.ReactNode;
   /** Shown in the bar from `md` up only; pair with `mobileActions` for the same controls on phones. */
   desktopActions?: React.ReactNode;
+  /**
+   * The signed-in cluster (bell, avatar) is in the bar: below `md` the brand collapses to the mark
+   * so the cluster and the search keep their room. Below 400 px it always does.
+   */
+  compactBrand?: boolean;
+  /**
+   * The phone sheet (nav, search, `mobileActions`) behind a menu button below `md`. Off where the
+   * bottom tab bar carries the sections instead.
+   */
+  mobileMenu?: boolean;
 }
 export function SiteHeader({
   brand,
@@ -63,6 +78,8 @@ export function SiteHeader({
   locationKey,
   mobileActions,
   desktopActions,
+  compactBrand = false,
+  mobileMenu = true,
   className,
   ...props
 }: SiteHeaderProps): React.JSX.Element {
@@ -99,8 +116,11 @@ export function SiteHeader({
   return (
     <header
       aria-label={brand.name}
+      data-compact-brand={compactBrand ? "" : undefined}
       className={cn(
-        "flex min-h-14 w-full items-center gap-3 border-b bg-background px-4",
+        // Gutter 16 / 24 (md) / 32 (xl), as on the page below it.
+        // A size container: the wordmark collapses on the header's own width (decisions log).
+        "@container/site-header flex min-h-14 w-full items-center gap-2 border-b bg-background px-4 sm:gap-3 md:px-6 xl:px-8",
         // From lg three equal columns: the search owns the middle one, centred whatever the nav's width.
         search && "lg:grid lg:grid-cols-3",
         className,
@@ -108,7 +128,7 @@ export function SiteHeader({
       {...props}
     >
       <div data-slot="site-header-start" className="flex min-w-0 flex-1 items-center gap-3">
-        <BrandLink brand={brand} />
+        <BrandLink brand={brand} compact={compactBrand} />
         {context ? (
           <>
             <Separator orientation="vertical" className="hidden h-4 self-center sm:block" />
@@ -133,50 +153,70 @@ export function SiteHeader({
       ) : null}
       <div
         data-slot="site-header-end"
-        className="ms-auto flex shrink-0 items-center gap-3 lg:col-start-3 lg:justify-self-end"
+        // 4 px apart below sm: the 44 px hit areas carry the spacing, and a visitor's mark, search,
+        // Sign in, Sign up and menu then fit 320 px in Spanish too.
+        className="ms-auto flex shrink-0 items-center gap-1 sm:gap-3 lg:col-start-3 lg:justify-self-end"
       >
         {onOpenPalette ? (
-          <Button aria-label={searchLabel} variant="ghost" size="icon" className="md:hidden" onClick={onOpenPalette}>
+          <Button
+            aria-label={searchLabel}
+            variant="ghost"
+            size="icon"
+            className="max-md:size-11 md:hidden"
+            onClick={onOpenPalette}
+          >
             <HugeiconsIcon icon={Search01Icon} />
           </Button>
         ) : null}
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 items-center gap-1 sm:gap-2">
           {desktopActions ? <div className="hidden items-center gap-2 md:flex">{desktopActions}</div> : null}
           {actions}
-          {user}
+          {user ? (
+            // The signed-in cluster's buttons (a bell, an avatar trigger) bring their own 28-32 px
+            // sizes; below md each becomes a 44 px hit area like the bar's other icon buttons
+            // (min-w, so a name beside the avatar still fits from sm).
+            <div
+              data-slot="site-header-user"
+              className="flex items-center gap-1 sm:gap-2 max-md:[&_button]:h-11 max-md:[&_button]:min-w-11"
+            >
+              {user}
+            </div>
+          ) : null}
         </div>
-        <Sheet open={open} onOpenChange={(next) => setOpen(next)}>
-          <SheetTrigger
-            className={buttonVariants({ variant: "ghost", size: "icon", className: "md:hidden" })}
-            aria-label={menuLabel}
-          >
-            <HugeiconsIcon icon={Menu01Icon} />
-          </SheetTrigger>
-          <SheetContent side="left" className="md:hidden" onClick={onSheetClick}>
-            <SheetHeader>
-              <SheetTitle>{brand.name}</SheetTitle>
-            </SheetHeader>
-            {search ? (
-              <div data-slot="site-header-sheet-search" className="px-4 pb-2">
-                {search}
-              </div>
-            ) : null}
-            {context ? (
-              <ContextLink
-                context={context}
-                className="mx-4 flex min-h-10 items-center px-2 py-2 text-sm font-medium hover:bg-muted"
-              />
-            ) : null}
-            {nav.length ? (
-              <nav aria-label={navLabel} className="flex flex-col gap-2 px-4">
-                {nav.map((item) => (
-                  <NavLink key={item.id} item={item} className="min-h-10 rounded-none px-2 py-2 hover:bg-muted" />
-                ))}
-              </nav>
-            ) : null}
-            {mobileActions ? <div className="flex flex-wrap items-center gap-2 p-4">{mobileActions}</div> : null}
-          </SheetContent>
-        </Sheet>
+        {mobileMenu ? (
+          <Sheet open={open} onOpenChange={(next) => setOpen(next)}>
+            <SheetTrigger
+              className={buttonVariants({ variant: "ghost", size: "icon", className: "max-md:size-11 md:hidden" })}
+              aria-label={menuLabel}
+            >
+              <HugeiconsIcon icon={Menu01Icon} />
+            </SheetTrigger>
+            <SheetContent side="left" className="md:hidden" onClick={onSheetClick}>
+              <SheetHeader>
+                <SheetTitle>{brand.name}</SheetTitle>
+              </SheetHeader>
+              {search ? (
+                <div data-slot="site-header-sheet-search" className="px-4 pb-2">
+                  {search}
+                </div>
+              ) : null}
+              {context ? (
+                <ContextLink
+                  context={context}
+                  className="mx-4 flex min-h-10 items-center px-2 py-2 text-sm font-medium hover:bg-muted"
+                />
+              ) : null}
+              {nav.length ? (
+                <nav aria-label={navLabel} className="flex flex-col gap-2 px-4">
+                  {nav.map((item) => (
+                    <NavLink key={item.id} item={item} className="min-h-10 rounded-none px-2 py-2 hover:bg-muted" />
+                  ))}
+                </nav>
+              ) : null}
+              {mobileActions ? <div className="flex flex-wrap items-center gap-2 p-4">{mobileActions}</div> : null}
+            </SheetContent>
+          </Sheet>
+        ) : null}
       </div>
     </header>
   );
@@ -190,18 +230,28 @@ function ContextLink({ context, className }: { context: HeaderContext; className
   );
 }
 
-function BrandLink({ brand }: { brand: Brand }): React.JSX.Element {
-  const className = "flex min-w-0 shrink items-center gap-2 font-semibold";
+function BrandLink({ brand, compact }: { brand: Brand; compact: boolean }): React.JSX.Element {
+  const className =
+    "flex min-h-10 min-w-0 shrink items-center gap-2 font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
+  // The name is visual only: the link's name is `label`, whichever of the two shows.
   const content = (
     <>
       {brand.mark}
-      <span className="truncate">{brand.name}</span>
+      <span
+        data-slot="site-header-wordmark"
+        aria-hidden="true"
+        // Below 24rem (384 px, the container size nearest the decisions log's 400) the mark stands alone.
+        className={cn("truncate @max-sm/site-header:hidden", compact && "max-md:hidden")}
+      >
+        {brand.name}
+      </span>
     </>
   );
+  const linkProps = { className, "aria-label": brand.label ?? brand.name, "data-slot": "site-header-brand" };
   if (brand.render)
-    return React.cloneElement(brand.render as React.ReactElement<{ className?: string }>, { className }, content);
+    return React.cloneElement(brand.render as React.ReactElement<{ className?: string }>, linkProps, content);
   return (
-    <a href={brand.href} className={className}>
+    <a href={brand.href} {...linkProps}>
       {content}
     </a>
   );

@@ -74,7 +74,8 @@ describe("the header bar", () => {
 describe("visitors: the theme is at the bottom of the mobile sheet", () => {
   it("opens the sheet with Live now, then the theme and language", async () => {
     primeHomeFeed(home({ live: [live("demo_streamer1")] }));
-    await renderInRouter(header(), "/");
+    // A page without the bottom tab bar (a channel): browsing pages have no menu button.
+    await renderInRouter(header(), "/rivertide");
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Menu" }));
     });
@@ -114,7 +115,7 @@ describe("members: the theme is in the account menu", () => {
 
   it("keeps the theme out of the member's mobile sheet", async () => {
     fake.boot = boot({ me: MEMBER });
-    await renderInRouter(header(), "/");
+    await renderInRouter(header(), "/rivertide");
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Menu" }));
     });
