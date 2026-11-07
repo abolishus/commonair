@@ -63,19 +63,22 @@ Lead with the money and the ownership, and be precise about both:
 
 ## Fix first (bugs the team found; small, and some block the rest)
 
-| #   | Bug                                                                                                                                                                | Where                                                     | Found by                  |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------- | ------------------------- |
-| F1  | Any error from `/me`, a 429 included, counts as signed out, so signed-in users are sent to `/signin`. Only a 401 should; otherwise keep the page and show a Retry. | `apps/web/src/server/bootstrap.ts:80`                     | 5 agents                  |
-| F2  | A rate-limited server-side page load renders "Something went wrong" as a 500; shelves vanish silently.                                                             | SSR loaders                                               | watch, discovery          |
-| F3  | One failed request blanks the whole page. Make each section fail on its own with a Retry.                                                                          | `/coop`, `/coop/council`, `/coop/settings`, notifications | coop-trust, account-admin |
-| F4  | The transparency "Where every dollar went" bar adds creator earnings and co-op costs together, so it shows "Creators 27%" instead of 90%.                          | `transparency.tsx`                                        | coop-trust                |
-| F5  | The "two-factor enabled" email links to `/settings/security`, which returns 404.                                                                                   | live mail                                                 | account-admin             |
-| F6  | The dashboard says 16 verified viewers; analytics for the same broadcast says a peak of 4. Decide which is right.                                                  | studio                                                    | creator-studio            |
-| F7  | Home recommends the signed-in streamer's own channel to them.                                                                                                      | home, rail                                                | discovery                 |
-| F8  | streamer1's inbox has 58 unread "vote open" items created within a minute, some already closed, none naming its proposal.                                          | notifications                                             | account-admin             |
-| F9  | Cooking says "Nobody is live" while Cooking channels were live in the last hour. Tags and stream titles aren't searched (`lofi` returns nothing).                  | category, search                                          | discovery                 |
-| F10 | Reserve marketing usernames (`creators`, `fees`, `faq`, `join`, …) now, while there are no users. `/creators` currently says "This channel does not exist".        | signup                                                    | growth-funnels            |
-| F11 | Login always lands on `/dashboard`, viewers included. The page guards drop the return path.                                                                        | auth                                                      | growth-funnels            |
+| #   | Bug                                                                                                                                                                                                                                                                             | Where                                                                                       | Found by                         |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- | -------------------------------- |
+| F0  | **Deleting an account doesn't cancel paid subscriptions or end co-op membership**, so renewals most likely keep charging. Neither the request nor the deletion job touches them. Cancel at the payment provider, end membership and refund the share before deletion completes. | `services/api/src/routes/me.ts:280-310`, `services/worker/src/deletion/account-deletion.ts` | ux-journeys (round 2)            |
+| F1  | Any error from `/me`, a 429 included, counts as signed out, so signed-in users are sent to `/signin`. Only a 401 should; otherwise keep the page and show a Retry.                                                                                                              | `apps/web/src/server/bootstrap.ts:80`                                                       | 5 agents                         |
+| F2  | A rate-limited server-side page load renders "Something went wrong" as a 500; shelves vanish silently.                                                                                                                                                                          | SSR loaders                                                                                 | watch, discovery                 |
+| F3  | One failed request blanks the whole page. Make each section fail on its own with a Retry.                                                                                                                                                                                       | `/coop`, `/coop/council`, `/coop/settings`, notifications                                   | coop-trust, account-admin        |
+| F4  | The transparency "Where every dollar went" bar adds creator earnings and co-op costs together, so it shows "Creators 27%" instead of 90%.                                                                                                                                       | `transparency.tsx`                                                                          | coop-trust                       |
+| F5  | The "two-factor enabled" email links to `/settings/security`, which returns 404.                                                                                                                                                                                                | live mail                                                                                   | account-admin                    |
+| F6  | Not a counting bug: 16 and 4 came from two broadcasts with the same title (see decision 2). The real fixes: the health card skips the live-mode filter, the owner's own viewing counts, and a 4-second encoder drop splits a broadcast.                                         | `services/api/src/lib/viewers.ts`, `services/api/src/media/hooks.ts`                        | creator-studio, viewer-count     |
+| F7  | Home recommends the signed-in streamer's own channel to them.                                                                                                                                                                                                                   | home, rail                                                                                  | discovery                        |
+| F8  | streamer1's inbox has 58 unread "vote open" items created within a minute, some already closed, none naming its proposal.                                                                                                                                                       | notifications                                                                               | account-admin                    |
+| F9  | Cooking says "Nobody is live" while Cooking channels were live in the last hour. Tags and stream titles aren't searched (`lofi` returns nothing).                                                                                                                               | category, search                                                                            | discovery                        |
+| F10 | Reserve marketing usernames (`creators`, `fees`, `faq`, `join`, …) now, while there are no users. `/creators` currently says "This channel does not exist".                                                                                                                     | signup                                                                                      | growth-funnels                   |
+| F11 | Sign-in and the email verification link both land on `/dashboard`, viewers included. The page guards drop the return path.                                                                                                                                                      | auth, `lib/auth.ts:50`                                                                      | growth-funnels, ux-journeys      |
+| F12 | After checkout, the payment provider returns the payer to the same page whether they paid or cancelled, so nothing confirms the payment.                                                                                                                                        | `services/api/src/money/checkout.ts:103-106`                                                | ux-journeys                      |
+| F13 | No page serves link-preview tags, so every shared clip, channel and proposal shows as a bare URL.                                                                                                                                                                               | all public routes                                                                           | ux-journeys, mockups-acquisition |
 
 ## Batches
 
@@ -301,22 +304,228 @@ through D7 can then run side by side; overlapping files are noted.
   - an audited admin email reveal;
   - a viewer avatar upload.
 
-## Open decisions (yours)
+## Decisions: round 2 recommendations
 
-1. **Approve the direction:** marigold `--brand`, square corners, 14 px body text. These touch
-   every screen.
-2. **The viewer count (F6):** which number is right, 16 on the dashboard or 4 in analytics?
-3. **The optional interest list (D2.9):** build now, or after `/creators` ships?
-4. **Points redemption (D4.5):** is it in scope at all?
+A second team of seven investigated the four open decisions and pushed the design further (full
+reports in `round2/`). Each decision below is a recommendation for the maintainer to accept or
+reject.
 
-## What this pass did not cover
+### 1. The direction: approve "Open Broadcast" with five changes (direction-check)
 
-- **Light theme live:** once signed in, the account's saved dark theme overrode the emulation.
-  It was checked on its colour values only.
-- **768 and 320 px:** spot-checked on the signed-in pages.
-- **The admin consoles:** reviewed from source only. `streamer1` is not an admin.
-- **Contrast sign-off:** responsive-a11y did not sign off contrast for the new brand colours or
-  the 14 px body text. That check belongs at the start of D1.
+**Contrast passes WCAG AA** for every proposed pair once the usage rules apply, so no colour
+value changes:
+
+- brand button text on the marigold, 11.7:1;
+- light-theme brand text, 5.1 to 5.6:1;
+- 14 px body text, 14 to 20:1;
+- every channel accent, with the lowest at 4.99:1.
+
+A side-by-side prototype in both themes is in `round2/direction-check/`. It also covers the
+light-theme check round 1 could not do.
+
+The five changes:
+
+1. **Brand button rules:**
+   - 14 px semibold labels.
+   - A 1 px `--brand-text` ring in light theme. Without it the button is 1.71:1 on white.
+   - The focus ring always at a 2 px offset (`button.tsx:10` has none today).
+   - Never directly beside another filled button.
+2. **Move the dark-theme amber channel accent** (and its chat and chart uses) from #fbbf24 to
+   lemon #fde047. Today it is 1.02:1 against the brand, so amber channels read as the brand.
+3. **14 px for reading text only:** paragraphs, help text, card bodies and form hints. Table
+   cells, key-value lists and metadata stay at 12 px. A full sweep would push about 14 studio,
+   admin and money tables into horizontal scrolling. Square corners cost no space.
+4. **Optional:** dark muted text from oklch 0.705 to 0.74, for APCA.
+5. **Extend `tokens.test.ts`** to cover these pairs, plus a guard that no channel, chat or chart
+   colour sits within reach of the brand.
+
+### 2. The viewer count: both numbers were right; one live number, one settled number (viewer-count)
+
+The seed restarts a dead publisher, and every restart opens a new broadcast:
+
+- **16** was the broadcast live at the time.
+- **4** was the settled peak of an earlier 59-second one.
+
+Analytics lists only ended broadcasts, and its picker shows no duration, so the stub looked like
+the live stream.
+
+**Recommendation (S–M):**
+
+- **While live,** every surface shows the worker's count (`viewerCount()`):
+  - Cards and the channel page say "{n} watching", with "Verified viewers · How we count" on the
+    channel page.
+  - The dashboard shows "Watching now" and "Peak so far", with "final numbers settle after the
+    stream".
+- **After the stream,** the settled rollup (`broadcast_audience_totals`) is the truth for
+  analytics, the recap and attestations.
+
+**Fixes:**
+
+- The health card uses the live-mode filter.
+- The owner is excluded from the live count and the rollup. This changes attested figures, so it
+  needs an amendment to ADR 0014.
+- `stream.health` gains a "peak so far" field (the data is already in
+  `broadcasts.peak_verified_viewers`, unread).
+- Analytics gets a "Live now" row, and the picker shows each broadcast's duration.
+- **Separately (M):** a reconnect grace for live broadcasts in `media/hooks.ts`, which removes
+  the root cause.
+- **Separately (S–M):** seeded broadcasts get rollup rows.
+
+### 3. The interest list: later, and tied to accounts (scope-calls)
+
+- **No audience yet:** there are no real users, and `/creators` doesn't exist.
+- **It costs M, not S.** Every list today belongs to an account. A list for people without
+  accounts needs:
+  - a new unsubscribe token subject and a confirm flow;
+  - bot protection (an open form can be used to mail a victim);
+  - export and deletion for non-users, which ADR 0004 doesn't cover;
+  - an age check and a privacy-policy section;
+  - care for the sender reputation that go-live and password-reset mail depend on.
+- **Accounts already cover most of it:** creator interest is sign-up with `intent=stream`.
+- **Later, the cheap version:** an account-bound "email me once when X ships" preference with a
+  fixed topic list (S), once `/creators` is live and a named gap exists.
+- **D2.9 is dropped from this overhaul.**
+- **Do not cite** the seeded "members rejected a newsletter" proposal anywhere. It is random seed
+  filler (`harness/src/seed/coop/plan.ts:266`).
+
+### 4. Points redemption: later; explain the points we have now (scope-calls)
+
+**Why keep the chip:**
+
+- **Points can already be spent** on predictions, extra poll votes and paid bot commands. The bot
+  commands spend points in one transaction that refuses overdrafts.
+- **Hiding the chip** would hide the balance people bet with.
+- **The counting is trustworthy:** points come only from verified watch time, and the owner's own
+  viewing is excluded. viewer-count confirmed both.
+
+**Now (S, in D4.5):**
+
+- The chip opens a popover with the balance, "earned only from verified live watch time", the
+  daily cap, and today's ways to spend.
+- It is hidden at zero when there's nothing to spend, and on your own channel.
+- The coin icon goes, because it reads as money.
+- Round 1's line that "follows and chat earn points" was wrong.
+
+**Redemption:**
+
+- **When to build it:**
+  - 60 days after launch with at least 10 channels using points;
+  - and viewers spending under 10% of what they earn, or three streamer requests, or a member
+    proposal.
+- **It needs** moderation assignment (D7.5) first.
+- **Start with fixed rewards that take no free text.** Custom-text rewards only after the reward
+  rules in the terms are signed off.
+
+## Round 2 design additions
+
+### High-fidelity mockups
+
+Working HTML, in both themes, with real seeded content. They are built on the corrected tokens,
+voice-copy's copy and real Hugeicons.
+
+- **Acquisition** (mockups-acquisition, 8 pages):
+  - the home page at 9, 2 and 0 channels live;
+  - `/creators` with a working, sourced fee calculator;
+  - `/import`, the membership pitch and `/coop` with the join band;
+  - sign-up for all 10 intents;
+  - the sign-up prompt in place for every action, plus a clip page as a first visit.
+- **Product** (mockups-product, 8 pages, 37 states):
+  - the live channel on desktop and mobile, the offline channel, and the mod view with a raid;
+  - the studio checklist, the live state and the recap;
+  - settings (Account, Security, Privacy and the delete flow) and an admin queue.
+
+Design decisions they made beyond round 1:
+
+- Below 768 px, Sign in moves into the bottom tab bar.
+- While a sign-up prompt is open, the page's own Follow button drops to an outline.
+- The "Live now" row backfills with labelled videos when fewer than four channels are live.
+  Categories never show "0 live".
+- The hero shows a poster with Play, never autoplay.
+- On iOS before the app is installed, the first-follow prompt never offers Push; it offers email
+  and an Add to Home Screen hint.
+- The Following button is split into a bell and a menu.
+- On the offline page, the next stream is a date block with "Add to calendar".
+- Checklist steps that are done keep an Edit action, so nothing becomes a dead end.
+- The delete dialog shows what changes, offers a download first, then asks for the username. Its
+  button reads "Delete in 30 days".
+- Sessions show browser and system, never an IP.
+
+Corrections the mockups surfaced, now applied:
+
+- Streamer membership also needs 10 streaming hours.
+- The membership FAQ uses the real vote thresholds.
+- The Twitch import ships switched off (ADR 0031) and never brings followers, past videos or a
+  schedule.
+
+### Six user journeys, and the gaps between screens (ux-journeys)
+
+Six journeys, today and after the plan, each with a table, a flow diagram and links to the
+mockups:
+
+- a clip visitor who becomes a follower;
+- a Twitch streamer switching;
+- a returning follower on mobile;
+- a $3 sub that becomes membership and a first vote;
+- a moderator during a raid;
+- an account deletion.
+
+The plan fixes the first screen of almost every journey but left the moments between screens
+unowned. Each gap fix folds into the batch that creates the promise:
+
+| Gap                                                                                                                                         | Fix                                                                                                                                                                                                         | Batch      |
+| ------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| No checkout success signal                                                                                                                  | Separate success and cancel return URLs, and a "confirming…" state (F12)                                                                                                                                    | D2         |
+| New members can't vote on open proposals (electorate frozen at open, `policy.ts:75`); sub membership waits for the hourly sync, unannounced | Pick "Your first vote" from the data; start membership in the payment webhook; add a `membership` notification                                                                                              | D2, D6     |
+| No link previews                                                                                                                            | Link-preview tags and a 1200×630 still on clip, video, channel and proposal pages (F13)                                                                                                                     | D3         |
+| Verification lands viewers in the studio                                                                                                    | Extend F11 to the verification link                                                                                                                                                                         | Fix first  |
+| Moderation barely planned                                                                                                                   | A chat-mode menu (slow, followers-only, emote-only, clear); a mod-view link for non-owner mods; an incoming-raid alert; "Delete message"; timeout lengths; outcomes for reporters; notice to new moderators | D4, D5, D7 |
+| iPhone push needs the app on the Home Screen                                                                                                | First-follow prompt offers email and an install hint there                                                                                                                                                  | D4         |
+| Follow links read as "leaving"                                                                                                              | "Bring your audience" step in the first-run checklist and a studio Grow item                                                                                                                                | D5         |
+| Deletion keeps billing                                                                                                                      | F0                                                                                                                                                                                                          | Fix first  |
+
+### Voice, glossary and copy (voice-copy)
+
+**The catalog audit** covered 5,114 English strings:
+
+- "Member" means three things. "Already a member?" means having an account, and watch rooms have
+  "members" too.
+- Saved streams have four names (VOD, video, past broadcast, recording); the glossary picks
+  "video".
+- 33 strings use gambling words ("bet") for predictions; they should say "predict".
+- Errors are dead ends: 50 of 100 load-failure strings give no next step, and "Try again" is
+  worded 10 different ways.
+- Members are asked to type JSON.
+
+**Recommendation: a words pass in D1** (about 250 strings, plus their `es` translations; S–M). It
+covers:
+
+- the voice and tone guide, with round 1's honesty rules made binding;
+- a glossary of about 35 terms;
+- one error pattern: "{section} didn't load" plus Retry, under one shared Retry key.
+
+Every later batch uses the report's ready-made i18n keys for each key moment.
+
+### Open questions left by round 2 (answer or accept the default)
+
+1. **ADR 0031 leaves naming Twitch on our pages for post-launch review.** Default: `/creators`
+   hides its import section while the import is off, and says "Tools other platforms don't have".
+2. **The co-op proof number:** "earned by creators" ($4,294.80 on staging), labelled as such,
+   rather than "paid out" ($297). Default: earned.
+3. **The calculator's assumptions** need market-research's sign-off before `/creators` ships:
+   - Patreon and Ko-fi card processing at 2.9% + 30¢;
+   - a $10 average tip;
+   - Twitch Bits left out.
+4. **The deficit note's claim** that creators' 90% never covers the gap needs coop-trust and the
+   treasurer to confirm it.
+5. **The username claim field** needs a rate-limited "is this name free?" endpoint (a contract
+   request).
+
+## What these passes did not cover
+
+- **The admin consoles:** reviewed from source and mocked, never walked live; `streamer1` is not an
+  admin.
+- **The mod view of another channel:** journey 5 is from source.
+- **768 and 320 px on the live signed-in pages:** spot-checked. The mockups cover 320.
 - **Staging under load:** nine agents on one IP tripped the rate limit, which is how F1 to F3
   surfaced. Some screenshots show error states for that reason.
 
@@ -326,3 +535,7 @@ through D7 can then run side by side; overlapping files are noted.
   `coop-trust.md`, `account-admin.md`, `responsive-a11y.md`, `market-research.md`. Each has full
   findings, ASCII wireframes, the components it uses, copy direction, and its references.
 - `art-direction-v1.md` is the visual spec. `decisions-log.md` holds all 66 cross-team agreements.
+- `round2/`:
+  - Reports: `direction-check.md`, `viewer-count.md`, `scope-calls.md`, `ux-journeys.md`,
+    `voice-copy.md`, `mockups-acquisition.md` and `mockups-product.md`.
+  - `direction-check/contrast-out.md`: every contrast pair and its result. The contrast script, the prototype and both mockup sets stay outside the repo for now.
