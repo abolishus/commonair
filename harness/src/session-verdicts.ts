@@ -56,14 +56,24 @@ export interface VerdictReport {
   /** `<label>:<kind>:<verdict>` for every session, in viewer order. */
   verdicts: string[];
   /**
-   * Unexpected sessions whose first flag came within `startupSeconds` of their start: what a
-   * scorer judging start-up looks like (see the module comment).
+   * Unexpected sessions with a start-up flag (`isStartupFlag`): what a scorer judging start-up
+   * looks like (see the module comment). `afterS` is the earliest such flag's time, if known.
    */
-  flaggedAtStartup: { viewer: string; id: string; afterS: number; signals: string[] }[];
+  flaggedAtStartup: { viewer: string; id: string; afterS: number | null; signals: string[] }[];
 }
 
 /** A flag this early in a session is start-up: the first heartbeat is due about 10 s in. */
 export const STARTUP_SECONDS = 10;
+
+/**
+ * A flag raised at start-up: within `startupSeconds` of the session's start, or, whenever it was
+ * raised, judged with nothing expected yet (`expectedSegments: 0`, no watch time credited). The
+ * clock alone misses a player whose first heartbeat is late, so the scorer's own measure counts too.
+ */
+export function isStartupFlag(flag: SessionFlag, startupSeconds = STARTUP_SECONDS): boolean {
+  if (flag.after_s !== null && flag.after_s <= startupSeconds) return true;
+  return flag.details["expectedSegments"] === 0;
+}
 
 /** Pure: lines the rows up with the viewers that opened them. */
 export function verdictReport(
@@ -83,15 +93,14 @@ export function verdictReport(
   const flaggedAtStartup: VerdictReport["flaggedAtStartup"] = [];
   for (const s of unexpected) {
     if (!("flags" in s) || s.id === null) continue;
-    const times = s.flags.map((f) => f.after_s).filter((t): t is number => t !== null);
-    if (times.length === 0) continue;
-    const first = Math.min(...times);
-    if (first > startupSeconds) continue;
+    const early = s.flags.filter((f) => isStartupFlag(f, startupSeconds));
+    if (early.length === 0) continue;
+    const times = early.map((f) => f.after_s).filter((t): t is number => t !== null);
     flaggedAtStartup.push({
       viewer: s.viewer,
       id: s.id,
-      afterS: first,
-      signals: s.flags.filter((f) => f.after_s !== null && f.after_s <= startupSeconds).map((f) => f.signal),
+      afterS: times.length > 0 ? Math.min(...times) : null,
+      signals: early.map((f) => f.signal),
     });
   }
   return {

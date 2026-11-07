@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { describe, expect, test } from "vite-plus/test";
-import { STARTUP_SECONDS, type SessionVerdictRow, verdictReport } from "../src/session-verdicts.ts";
+import { STARTUP_SECONDS, type SessionVerdictRow, isStartupFlag, verdictReport } from "../src/session-verdicts.ts";
 
 function row(id: string, verdict: string, flags: SessionVerdictRow["flags"] = []): SessionVerdictRow {
   return {
@@ -69,6 +69,49 @@ describe("verdictReport", () => {
     expect(r.flaggedAtStartup).toEqual([
       { viewer: "a", id: "s0", afterS: STARTUP_SECONDS, signals: ["fetch_pattern"] },
     ]);
+  });
+
+  test("a flag after the clock bound still counts when nothing was expected yet", () => {
+    // A player whose first heartbeat is late: judged 14 s in, before any watch time was credited.
+    const slow = row("s0", "excluded", [
+      {
+        signal: "fetch_pattern",
+        score: 0.8,
+        details: { checks: ["playlists_without_segments"], segments: 0, playlists: 30, expectedSegments: 0 },
+        after_s: 14,
+      },
+      { signal: "headless", score: 0.6, details: {}, after_s: 14 },
+    ]);
+    const r = verdictReport([{ label: "a", kind: "browser", sessionId: "s0" }], [slow]);
+    expect(r.flaggedAtStartup).toEqual([{ viewer: "a", id: "s0", afterS: 14, signals: ["fetch_pattern"] }]);
+  });
+
+  test("a flag with no time but nothing expected is start-up, with no time reported", () => {
+    const r = verdictReport(
+      [{ label: "a", kind: "http", sessionId: "s0" }],
+      [
+        row("s0", "excluded", [
+          { signal: "fetch_pattern", score: 0.8, details: { expectedSegments: 0 }, after_s: null },
+        ]),
+      ],
+    );
+    expect(r.flaggedAtStartup).toEqual([{ viewer: "a", id: "s0", afterS: null, signals: ["fetch_pattern"] }]);
+  });
+
+  test("isStartupFlag: the clock bound, the scorer's measure, and neither", () => {
+    const flag = (after_s: number | null, details: Record<string, unknown> = {}) => ({
+      signal: "fetch_pattern",
+      score: 0.8,
+      details,
+      after_s,
+    });
+    expect(isStartupFlag(flag(0))).toBe(true);
+    expect(isStartupFlag(flag(STARTUP_SECONDS))).toBe(true);
+    expect(isStartupFlag(flag(STARTUP_SECONDS + 0.1))).toBe(false);
+    expect(isStartupFlag(flag(60, { expectedSegments: 0 }))).toBe(true);
+    expect(isStartupFlag(flag(60, { expectedSegments: 3 }))).toBe(false);
+    expect(isStartupFlag(flag(null))).toBe(false);
+    expect(isStartupFlag(flag(5), 2)).toBe(false);
   });
 
   test("a viewer without a session, a session missing from Postgres and a flag without a time", () => {
