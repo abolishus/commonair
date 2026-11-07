@@ -150,35 +150,91 @@ export async function proxy(
 // ------------------------------------------------------------------ the render's own API calls
 
 /**
- * The forwarding chain of the request being rendered. Server rendering and server functions call
- * the API themselves (`serverApi`, in the SSR bundle); without the chain every anonymous visitor's
- * render would share the web server's own address as one rate-limit subject.
+ * The API answering the render's own calls with "busy" or "unavailable" (F2): 429, 502, 503, 504,
+ * or no answer at all. `retryAfterSeconds` is the longest `retry-after` any of them gave.
  */
-const renderChain = new AsyncLocalStorage<string | null>();
+export interface UpstreamTrouble {
+  /** The last troubled status, or null when the API did not answer. */
+  status: number | null;
+  retryAfterSeconds: number | null;
+}
+
+/**
+ * One request being rendered: the visitor's forwarding chain and what the API answered it.
+ * Server rendering and server functions call the API themselves (`serverApi`, in the SSR bundle);
+ * without the chain every anonymous visitor's render would share the web server's own address as
+ * one rate-limit subject.
+ */
+export interface RenderContext {
+  readonly chain: string | null;
+  trouble: UpstreamTrouble | null;
+}
+
+const rendering = new AsyncLocalStorage<RenderContext>();
+
+export function renderContext(chain: string | null): RenderContext {
+  return { chain, trouble: null };
+}
+
+/** Run `fn` (an SSR render) in `context`, for `forwardingFetch`. */
+export function runInRender<T>(context: RenderContext, fn: () => T): T {
+  return rendering.run(context, fn);
+}
 
 /** Run `fn` (an SSR render) with the visitor's `x-forwarded-for` chain, for `forwardingFetch`. */
 export function withForwardedFor<T>(chain: string | null, fn: () => T): T {
-  return renderChain.run(chain, fn);
+  return runInRender(renderContext(chain), fn);
+}
+
+const TROUBLED = new Set([429, 502, 503, 504]);
+
+/** `retry-after` in whole seconds (an HTTP date counts from `now`), or null. */
+export function parseRetryAfter(value: string | null, now = Date.now()): number | null {
+  const text = value?.trim() ?? "";
+  if (text === "") return null;
+  if (/^\d+$/.test(text)) return Number(text);
+  const at = Date.parse(text);
+  return Number.isNaN(at) ? null : Math.max(0, Math.ceil((at - now) / 1000));
+}
+
+function noteTrouble(context: RenderContext, status: number | null, retryAfter: number | null): void {
+  const before = context.trouble?.retryAfterSeconds ?? null;
+  const longest = retryAfter === null ? before : Math.max(retryAfter, before ?? 0);
+  context.trouble = { status, retryAfterSeconds: longest };
 }
 
 /**
  * `base`, plus the rendering request's chain on requests to the API that set no
- * `x-forwarded-for` of their own. Any other request, and every request outside a render, passes
- * through untouched. The chain is what `forwardedFor` built from the request this server accepted,
- * exactly as for proxied calls, so the API still believes only the hops it trusts. Bun's own fetch
- * options (`decompress`, `proxy`, …) are not carried over on the requests it changes.
+ * `x-forwarded-for` of their own; the render's API answers are watched for trouble. Any other
+ * request, and every request outside a render, passes through untouched. The chain is what
+ * `forwardedFor` built from the request this server accepted, exactly as for proxied calls, so the
+ * API still believes only the hops it trusts. Bun's own fetch options (`decompress`, `proxy`, …)
+ * are not carried over on the requests it changes.
  */
 export function forwardingFetch(base: typeof fetch, apiUrl: string): typeof fetch {
   const apiOrigin = new URL(apiUrl).origin;
-  const wrapped = (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
-    const chain = renderChain.getStore();
-    const url = input instanceof Request ? input.url : String(input);
-    if (!chain || URL.parse(url)?.origin !== apiOrigin) return base(input, init);
+  const send = (chain: string | null, input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    if (!chain) return base(input, init);
     const req = new Request(input, init);
     if (req.headers.has("x-forwarded-for")) return base(req);
     const headers = new Headers(req.headers);
     headers.set("x-forwarded-for", chain);
     return base(new Request(req, { headers }));
+  };
+  const wrapped = (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    const context = rendering.getStore();
+    const url = input instanceof Request ? input.url : String(input);
+    if (!context || URL.parse(url)?.origin !== apiOrigin) return base(input, init);
+    return send(context.chain, input, init).then(
+      (res) => {
+        if (TROUBLED.has(res.status)) noteTrouble(context, res.status, parseRetryAfter(res.headers.get("retry-after")));
+        return res;
+      },
+      (err: unknown) => {
+        noteTrouble(context, null, null);
+        throw err;
+      },
+    );
   };
   return Object.assign(wrapped, { preconnect: base.preconnect });
 }

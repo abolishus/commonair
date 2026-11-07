@@ -1,12 +1,12 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import * as React from "react";
 import { t } from "../../i18n/index.ts";
 import { toastActionError } from "../../lib/action-error.ts";
 import type { SessionUser } from "../../lib/bootstrap-types.ts";
 import { api, errorCode } from "../../lib/api.ts";
 import type { MembershipViewDto } from "../../lib/coop.ts";
+import { useRetryingLoad } from "../../lib/retrying-load.ts";
 import type { Paged } from "../money/use-load.ts";
 
 /**
@@ -23,6 +23,12 @@ export interface CoopRetryable {
   failed: boolean;
   /** Load again, keeping what is shown until the answer arrives. */
   reload: () => void;
+  /** An automatic retry runs in this many ms (absent or null: none scheduled). */
+  retryInMs?: number | null;
+  /** The automatic retries ran out. */
+  gaveUp?: boolean;
+  /** A retry is under way without a known wait. */
+  busy?: boolean;
 }
 
 export interface CoopLoad<T> extends CoopRetryable {
@@ -30,76 +36,17 @@ export interface CoopLoad<T> extends CoopRetryable {
   data: T | null;
   /** The last failure, for pages that tell NOT_FOUND from a failed load. */
   error: unknown;
-}
-
-interface Answer<T> {
-  key: string;
-  loaded: boolean;
-  data: T | null;
-  failed: boolean;
-  error: unknown;
+  retryInMs: number | null;
+  gaveUp: boolean;
 }
 
 /**
- * `useLoad` with an explicit state and the error: loads `load()` whenever `key` changes; an answer
- * for an older key or request is dropped, so a slow response cannot overwrite a newer one.
+ * `useRetryingLoad` for co-op pages: loads `load()` whenever `key` changes, retries a busy (429) or
+ * unreachable answer by itself with backoff, and drops an answer for an older key or request, so a
+ * slow response cannot overwrite a newer one.
  */
 export function useCoopLoad<T>(key: string, load: () => Promise<T>): CoopLoad<T> {
-  const [answer, setAnswer] = React.useState<Answer<T>>({
-    key,
-    loaded: false,
-    data: null,
-    failed: false,
-    error: null,
-  });
-  const seq = React.useRef(0);
-  const loadRef = React.useRef(load);
-  // Declared before the loading effect, so it runs first and the load sees the latest closure.
-  React.useEffect(() => {
-    loadRef.current = load;
-  });
-
-  const run = React.useCallback(() => {
-    const id = ++seq.current;
-    loadRef
-      .current()
-      .then((data) => {
-        if (id === seq.current) setAnswer({ key, loaded: true, data, failed: false, error: null });
-      })
-      .catch((error: unknown) => {
-        if (id === seq.current)
-          setAnswer((prev) =>
-            prev.key === key
-              ? { ...prev, failed: true, error }
-              : { key, loaded: false, data: null, failed: true, error },
-          );
-      });
-  }, [key]);
-
-  React.useEffect(() => {
-    run();
-    // The counter object itself, not a DOM ref: bumping it is how in-flight answers get dropped.
-    const counter = seq;
-    return () => {
-      counter.current++;
-    };
-  }, [run]);
-
-  const reload = React.useCallback(() => {
-    // A retry after a failure shows the skeleton again rather than the stale error.
-    setAnswer((prev) => (prev.key === key && !prev.loaded && prev.failed ? { ...prev, failed: false } : prev));
-    run();
-  }, [key, run]);
-
-  const current: Answer<T> =
-    answer.key === key ? answer : { key, loaded: false, data: null, failed: false, error: null };
-  return {
-    state: current.loaded ? "loaded" : current.failed ? "failed" : "loading",
-    data: current.data,
-    failed: current.failed,
-    error: current.error,
-    reload,
-  };
+  return useRetryingLoad(key, load);
 }
 
 /** A paged list as a retryable load (its first page decides the state). */

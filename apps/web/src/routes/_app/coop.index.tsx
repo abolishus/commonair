@@ -3,11 +3,11 @@
 
 import { createFileRoute } from "@tanstack/react-router";
 import type * as React from "react";
-import { CoopLoadError, CoopLoadGate } from "../../components/coop/load-error.tsx";
+import { CoopSectionError } from "../../components/coop/load-error.tsx";
 import { CoopOverview } from "../../components/coop/overview.tsx";
-import { coopLoads, useCoopLoad, useMyMembership } from "../../components/coop/use-coop.ts";
+import { useCoopLoad, useMyMembership, type CoopRetryable } from "../../components/coop/use-coop.ts";
 import { api } from "../../lib/api.ts";
-import { useBootstrap } from "../../lib/bootstrap.ts";
+import { useBootstrap, useSessionRetry } from "../../lib/bootstrap.ts";
 import { t } from "../../i18n/index.ts";
 import { titleHead } from "../../lib/page-title.ts";
 
@@ -20,7 +20,8 @@ export const Route = createFileRoute("/_app/coop/")({
 const OPEN_LIMIT = 20;
 
 function CoopPage(): React.JSX.Element {
-  const { me } = useBootstrap();
+  const { me, sessionUnresolved } = useBootstrap();
+  const session = useSessionRetry();
   const membership = useMyMembership(me);
   const open = useCoopLoad("open", async () => {
     const pages = await Promise.all(
@@ -32,17 +33,42 @@ function CoopPage(): React.JSX.Element {
   });
   const council = useCoopLoad("council", () => api().coop.council());
   const months = useCoopLoad("months", () => api().coop.transparency({ months: 3 }));
+  // F3: each section fails on its own; the header, intro and every loaded section stay.
+  const alone = [open, council, months].every((l) => l.state === "failed");
+  const error = (load: CoopRetryable, section: string) =>
+    load.state === "failed" ? <CoopSectionError section={section} load={load} alone={alone} /> : null;
   return (
-    // The caller's membership only feeds the card: its failure shows there, not over the public page.
-    <CoopLoadGate status={coopLoads([open, council, months])} tab="overview">
-      <CoopOverview
-        signedIn={me !== null}
-        membership={membership.data}
-        openProposals={open.data}
-        council={council.data}
-        months={months.data}
-        membershipError={membership.failed ? <CoopLoadError onRetry={membership.reload} /> : null}
-      />
-    </CoopLoadGate>
+    <CoopOverview
+      // F1: a member whose session the API could not confirm is not shown the join view.
+      signedIn={me !== null || sessionUnresolved}
+      membership={membership.data}
+      openProposals={open.data}
+      council={council.data}
+      months={months.data}
+      membershipError={
+        // The card has no heading of its own on the page, so the error is a section heading.
+        sessionUnresolved ? (
+          <CoopSectionError
+            section={t("coop.card.title")}
+            load={{
+              state: "failed",
+              failed: true,
+              busy: session.retrying,
+              gaveUp: session.gaveUp,
+              reload: session.retry,
+            }}
+            headingLevel={2}
+          />
+        ) : membership.failed ? (
+          <CoopSectionError section={t("coop.card.title")} load={membership} headingLevel={2} />
+        ) : null
+      }
+      sectionErrors={{
+        open: error(open, t("coop.open.title")),
+        decisions: error(months, t("coop.decisions.title")),
+        council: error(council, t("coop.council.title")),
+        byClass: error(months, t("coop.byClass.title")),
+      }}
+    />
   );
 }

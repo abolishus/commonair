@@ -26,6 +26,8 @@ import {
   overrideChoice,
   settingsClient,
 } from "../../lib/notifications.ts";
+import { objectKey, useRetryingLoad, type LoadState } from "../../lib/retrying-load.ts";
+import { SectionLoadError } from "../../lib/section-load-error.tsx";
 import { PushToggle } from "../pwa/push-toggle.tsx";
 import { ListLoadMore, ListSearch, NoMatch, useListWindow } from "../settings/list-window.tsx";
 
@@ -34,8 +36,6 @@ function saveFailed(err: unknown): void {
   if (isSessionExpired(err)) toastActionError(err, t("notifySettings.saveFailed"));
   else toast.error(<span data-testid="notify-save-error">{t("notifySettings.saveFailed")}</span>);
 }
-
-type Load = "loading" | "loaded" | "failed";
 
 export interface NotificationSettingsProps {
   /** Tests pass a fixture client; the app uses the API. */
@@ -48,8 +48,17 @@ export interface NotificationSettingsProps {
  */
 export function NotificationSettings({ client: given }: NotificationSettingsProps = {}): React.JSX.Element {
   const client = React.useMemo(() => given ?? settingsClient(), [given]);
+  // The defaults retry by itself on a busy API and have their own Retry (F3); the rest of the page stays.
+  const loaded = useRetryingLoad(`prefs|${objectKey(client)}`, () => client.preferences());
   const [prefs, setPrefs] = React.useState<NotificationPreferencesDto | null>(null);
-  const [load, setLoad] = React.useState<Load>("loading");
+  const [shown, setShown] = React.useState<NotificationPreferencesDto | null>(null);
+  // A new answer replaces the edited copy during render, so the switches never flash empty.
+  if (loaded.data !== null && loaded.data !== shown) {
+    setShown(loaded.data);
+    setPrefs(loaded.data);
+  }
+  const load: LoadState =
+    loaded.data !== null && loaded.data === shown ? "loaded" : loaded.state === "failed" ? "failed" : "loading";
   // The latest request per cell: an older answer never overwrites a newer choice.
   const seq = React.useRef(new Map<string, number>());
   // What a failed change rolls its cell back to: the state the member saw when they made it.
@@ -57,23 +66,6 @@ export function NotificationSettings({ client: given }: NotificationSettingsProp
   React.useEffect(() => {
     prefsRef.current = prefs;
   }, [prefs]);
-
-  React.useEffect(() => {
-    let live = true;
-    client.preferences().then(
-      (p) => {
-        if (!live) return;
-        setPrefs(p);
-        setLoad("loaded");
-      },
-      () => {
-        if (live) setLoad("failed");
-      },
-    );
-    return () => {
-      live = false;
-    };
-  }, [client]);
 
   // Turning browser push on may also have turned the go-live push default on, outside this page.
   const adoptPushDefault = React.useCallback(async () => {
@@ -116,9 +108,15 @@ export function NotificationSettings({ client: given }: NotificationSettingsProp
           <SkeletonText lines={4} />
         </SkeletonGroup>
       ) : load === "failed" || prefs === null ? (
-        <p role="alert" className="text-sm text-muted-foreground">
-          {t("notifySettings.loadFailed")}
-        </p>
+        <DefaultsFrame>
+          <SectionLoadError
+            data-testid="notify-defaults-load-error"
+            retryTestId="notify-defaults-retry"
+            section={t("notifySettings.defaults.title")}
+            load={loaded}
+            headingLevel={3}
+          />
+        </DefaultsFrame>
       ) : (
         <DefaultsSection
           prefs={prefs}
@@ -189,6 +187,19 @@ function DefaultSwitch({
   );
 }
 
+/** The defaults' heading and intro, with the switches or their load error. */
+function DefaultsFrame({ children }: { children: React.ReactNode }): React.JSX.Element {
+  return (
+    <section aria-labelledby="notify-defaults-title" className="flex flex-col gap-2">
+      <h2 id="notify-defaults-title" className="text-base font-medium">
+        {t("notifySettings.defaults.title")}
+      </h2>
+      <p className="text-sm text-muted-foreground">{t("notifySettings.defaults.intro")}</p>
+      {children}
+    </section>
+  );
+}
+
 function DefaultsSection({
   prefs,
   onChange,
@@ -197,11 +208,7 @@ function DefaultsSection({
   onChange: (medium: "in_app" | "email" | "push", enabled: boolean) => void;
 }): React.JSX.Element {
   return (
-    <section aria-labelledby="notify-defaults-title" className="flex flex-col gap-2">
-      <h2 id="notify-defaults-title" className="text-base font-medium">
-        {t("notifySettings.defaults.title")}
-      </h2>
-      <p className="text-sm text-muted-foreground">{t("notifySettings.defaults.intro")}</p>
+    <DefaultsFrame>
       <div className="flex flex-col divide-y divide-border">
         <DefaultSwitch medium="in_app" prefs={prefs} onChange={onChange} />
         <DefaultSwitch medium="email" prefs={prefs} onChange={onChange} />
@@ -213,7 +220,7 @@ function DefaultsSection({
           <AlertDescription>{t("notifySettings.emailUnverified")}</AlertDescription>
         </Alert>
       )}
-    </section>
+    </DefaultsFrame>
   );
 }
 
@@ -375,28 +382,18 @@ function ChannelsSection({
   prefs: NotificationPreferencesDto | null;
   onChange: (input: SetPreferenceInput, channel: { id: string; slug: string; displayName: string }) => void;
 }): React.JSX.Element {
+  const first = useRetryingLoad(`follows|${objectKey(client)}`, () => client.follows(null));
   const [follows, setFollows] = React.useState<FollowDto[]>([]);
   const [cursor, setCursor] = React.useState<string | null>(null);
-  const [load, setLoad] = React.useState<Load>("loading");
+  const [shown, setShown] = React.useState<typeof first.data>(null);
   const [more, setMore] = React.useState(false);
-
-  React.useEffect(() => {
-    let live = true;
-    client.follows(null).then(
-      (page) => {
-        if (!live) return;
-        setFollows(page.items);
-        setCursor(page.nextCursor);
-        setLoad("loaded");
-      },
-      () => {
-        if (live) setLoad("failed");
-      },
-    );
-    return () => {
-      live = false;
-    };
-  }, [client]);
+  if (first.data !== null && first.data !== shown) {
+    setShown(first.data);
+    setFollows(first.data.items);
+    setCursor(first.data.nextCursor);
+  }
+  const load: LoadState =
+    first.data !== null && first.data === shown ? "loaded" : first.state === "failed" ? "failed" : "loading";
 
   const loadMore = async () => {
     if (cursor === null || more) return;
@@ -451,9 +448,13 @@ function ChannelsSection({
           <SkeletonText lines={3} />
         </SkeletonGroup>
       ) : load === "failed" ? (
-        <p role="alert" className="text-sm text-muted-foreground">
-          {t("notifySettings.loadFailed")}
-        </p>
+        <SectionLoadError
+          data-testid="notify-channels-load-error"
+          retryTestId="notify-channels-retry"
+          section={t("notifySettings.channels.title")}
+          load={first}
+          headingLevel={3}
+        />
       ) : follows.length === 0 ? (
         <EmptyState
           icon={UserGroupIcon}

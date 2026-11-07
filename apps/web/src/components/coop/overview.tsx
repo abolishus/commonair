@@ -47,7 +47,15 @@ export interface CoopOverviewProps {
   months: CoopMonthDto[] | null;
   /** Shown in place of the membership card when the caller's membership failed to load. */
   membershipError?: React.ReactNode;
+  /**
+   * Shown in place of a section's content when its load failed (F3); the rest of the page renders.
+   * `decisions` and `byClass` both come from the months load.
+   */
+  sectionErrors?: Partial<Record<OverviewSection, React.ReactNode>>;
 }
+
+/** The overview's sections that load on their own. */
+export type OverviewSection = "open" | "decisions" | "council" | "byClass";
 
 function Loading(): React.JSX.Element {
   return (
@@ -96,6 +104,7 @@ export function CoopOverview({
   council,
   months,
   membershipError = null,
+  sectionErrors = {},
 }: CoopOverviewProps): React.JSX.Element {
   const { locale } = useLocale();
   const counts = membersByClass(months);
@@ -158,7 +167,7 @@ export function CoopOverview({
               }
             >
               {openProposals === null ? (
-                <Loading />
+                (sectionErrors.open ?? <Loading />)
               ) : openProposals.length === 0 ? (
                 <EmptyState
                   icon={File01Icon}
@@ -174,7 +183,7 @@ export function CoopOverview({
                 </div>
               )}
             </Section>
-            {decisions.length > 0 && (
+            {(sectionErrors.decisions || decisions.length > 0) && (
               <Section
                 heading={t("coop.decisions.title")}
                 action={
@@ -190,11 +199,13 @@ export function CoopOverview({
                   </Button>
                 }
               >
-                <GovernanceOutcomeList
-                  data-testid="coop-recent-decisions"
-                  label={t("coop.decisions.title")}
-                  items={decisions.map(outcomeItem)}
-                />
+                {sectionErrors.decisions ?? (
+                  <GovernanceOutcomeList
+                    data-testid="coop-recent-decisions"
+                    label={t("coop.decisions.title")}
+                    items={decisions.map(outcomeItem)}
+                  />
+                )}
               </Section>
             )}
           </div>
@@ -206,24 +217,26 @@ export function CoopOverview({
                 <CardTitle>{t("coop.byClass.title")}</CardTitle>
               </CardHeader>
               <CardContent className="flex flex-col gap-3">
-                <BreakdownBar
-                  data-testid="coop-members-by-class"
-                  data-streamer={counts.streamer}
-                  data-viewer={counts.viewer}
-                  data-worker={counts.worker}
-                  label={t("coop.byClass.title")}
-                  segments={[
-                    { id: "streamer", label: classLabel("streamer"), value: counts.streamer },
-                    { id: "viewer", label: classLabel("viewer"), value: counts.viewer },
-                    { id: "worker", label: classLabel("worker"), value: counts.worker },
-                  ]}
-                  formatValue={(value) => formatNumber(value, locale)}
-                  formatLabel={(segments, shares) =>
-                    segments
-                      .map((segment, i) => t("money.shareLabel", { label: segment.label, share: shares[i] ?? 0 }))
-                      .join(t("common.listSeparator"))
-                  }
-                />
+                {sectionErrors.byClass ?? (
+                  <BreakdownBar
+                    data-testid="coop-members-by-class"
+                    data-streamer={counts.streamer}
+                    data-viewer={counts.viewer}
+                    data-worker={counts.worker}
+                    label={t("coop.byClass.title")}
+                    segments={[
+                      { id: "streamer", label: classLabel("streamer"), value: counts.streamer },
+                      { id: "viewer", label: classLabel("viewer"), value: counts.viewer },
+                      { id: "worker", label: classLabel("worker"), value: counts.worker },
+                    ]}
+                    formatValue={(value) => formatNumber(value, locale)}
+                    formatLabel={(segments, shares) =>
+                      segments
+                        .map((segment, i) => t("money.shareLabel", { label: segment.label, share: shares[i] ?? 0 }))
+                        .join(t("common.listSeparator"))
+                    }
+                  />
+                )}
                 <p>{t("coop.byClass.protectedNote")}</p>
               </CardContent>
             </Card>
@@ -239,8 +252,8 @@ export function CoopOverview({
                   {t("coop.council.more")}
                 </Button>
               }
-              aria-busy={council ? undefined : true}
-              empty={council ? <p>{t("coop.council.empty")}</p> : <CouncilLoading />}
+              aria-busy={council || sectionErrors.council ? undefined : true}
+              empty={council ? <p>{t("coop.council.empty")}</p> : (sectionErrors.council ?? <CouncilLoading />)}
               items={(council?.members ?? []).map((m) => ({
                 id: m.user.id,
                 attributes: { "data-testid": "coop-council-member", "data-user-id": m.user.id, "data-rank": m.rank },

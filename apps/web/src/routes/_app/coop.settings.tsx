@@ -4,8 +4,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import type * as React from "react";
 import { SettingsPage } from "../../components/coop/council.tsx";
-import { CoopLoadGate } from "../../components/coop/load-error.tsx";
-import { coopLoads, useCoopLoad } from "../../components/coop/use-coop.ts";
+import { CoopSectionError } from "../../components/coop/load-error.tsx";
+import { useCoopLoad } from "../../components/coop/use-coop.ts";
 import { api } from "../../lib/api.ts";
 import { t } from "../../i18n/index.ts";
 import { titleHead } from "../../lib/page-title.ts";
@@ -19,8 +19,14 @@ export const Route = createFileRoute("/_app/coop/settings")({
 function SettingsRoute(): React.JSX.Element {
   const settings = useCoopLoad("settings", () => api().coop.settings());
   return (
-    <CoopLoadGate status={coopLoads([settings])} tab="settings">
-      <SettingsPage settings={settings.data} />
-    </CoopLoadGate>
+    // F3: the header and the protected-settings note stay; the list fails in place.
+    <SettingsPage
+      settings={settings.data}
+      error={
+        settings.state === "failed" ? (
+          <CoopSectionError section={t("coop.settings.title")} load={settings} alone headingLevel={2} />
+        ) : null
+      }
+    />
   );
 }

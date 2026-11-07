@@ -17,6 +17,16 @@ export interface SessionUser {
   role: Me["role"];
 }
 
+/**
+ * Who the session cookie belongs to (F1). Only a definitive answer from the API (401, or another
+ * 4xx that is not a 429) means signed out; a busy, failing or unreachable API is `unavailable`,
+ * and the page keeps its place with a Retry instead of sending a member to /signin.
+ */
+export type SessionLookup =
+  | { status: "signedIn"; user: SessionUser }
+  | { status: "signedOut" }
+  | { status: "unavailable"; retryAfterSeconds: number | null };
+
 /** Root loader data: everything the shell needs before any page renders. */
 export interface Bootstrap {
   config: PublicConfig;
@@ -35,6 +45,12 @@ export interface Bootstrap {
     federation?: boolean;
   };
   me: SessionUser | null;
+  /**
+   * Set (true) when the request carried a session cookie but the API could not say whose it is
+   * (429, 5xx, unreachable): `me` is null for now, not because the visitor is signed out. Absent
+   * otherwise. `useBootstrap` fills `me` in once a later lookup answers.
+   */
+  sessionUnavailable?: true;
   theme: Theme;
   /** Server time of the request, so relative times hydrate identically. */
   now: number;

@@ -8,9 +8,11 @@ import {
   forwardingFetch,
   isProxied,
   proxy,
-  withForwardedFor,
+  renderContext,
+  runInRender,
   type Fetcher,
   type ProxyFailureLog,
+  type UpstreamTrouble,
 } from "./proxy.ts";
 import { securityHeaders } from "./security.ts";
 
@@ -59,6 +61,25 @@ function withHeaders(res: Response, headers: Record<string, string>): Response {
   return out;
 }
 
+/** `Retry-After` on a page the API was too busy for, when it gave no hint (seconds). */
+export const UNAVAILABLE_RETRY_AFTER = 5;
+/** A hint is capped here: a browser or crawler should not stay away for an hour. */
+export const UNAVAILABLE_RETRY_AFTER_MAX = 120;
+
+/**
+ * An error page rendered because the API was busy or unreachable (F2) is a 503 with
+ * `Retry-After`, not a 500: nothing broke, and crawlers and monitors should come back. Only a
+ * whole-page failure (the render answered 500) changes; a page that rendered with a section in its
+ * error state stays a 200. Server-function results (not HTML) keep their status for the client.
+ */
+export function unavailablePage(res: Response, trouble: UpstreamTrouble | null): Response {
+  if (!trouble || res.status !== 500 || !(res.headers.get("content-type") ?? "").includes("text/html")) return res;
+  const after = Math.min(UNAVAILABLE_RETRY_AFTER_MAX, trouble.retryAfterSeconds ?? UNAVAILABLE_RETRY_AFTER);
+  const out = new Response(res.body, { status: 503, statusText: "Service Unavailable", headers: res.headers });
+  out.headers.set("retry-after", String(Math.max(1, after)));
+  return out;
+}
+
 export function createHandler(opts: Omit<WebServerOptions, "port" | "hostname">) {
   const target = { api: opts.apiUrl, publicUrl: opts.publicUrl };
   return async (req: Request, clientAddress: string | null): Promise<Response> => {
@@ -89,8 +110,8 @@ export function createHandler(opts: Omit<WebServerOptions, "port" | "hostname">)
       }
     }
     // The render's own API calls carry the visitor's chain, as proxied calls do (`forwardingFetch`).
-    const chain = forwardedFor(req.headers.get("x-forwarded-for"), clientAddress);
-    const res = await withForwardedFor(chain, () => opts.ssr(req));
+    const render = renderContext(forwardedFor(req.headers.get("x-forwarded-for"), clientAddress));
+    const res = unavailablePage(await runInRender(render, () => opts.ssr(req)), render.trouble);
     // Rendered pages and server-function results carry the visitor's session: never cache them shared.
     return withHeaders(res, { "cache-control": "private, no-store", ...security });
   };

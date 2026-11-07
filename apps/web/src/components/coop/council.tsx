@@ -48,7 +48,12 @@ export interface CouncilPageProps extends Partial<ElectionActions> {
   classes?: readonly MemberClass[] | null;
   /** Shown above the elections when the caller's membership failed to load. */
   membershipError?: React.ReactNode;
+  /** Shown in place of a section's content when its load failed (F3); `method` comes from the council load. */
+  sectionErrors?: Partial<Record<CouncilSection, React.ReactNode>>;
 }
+
+/** The council page's sections that load on their own. */
+export type CouncilSection = "council" | "method" | "board" | "elections";
 
 /** Only reachable signed in, where the route passes the real actions. */
 const refuse = async (): Promise<void> => {
@@ -63,6 +68,7 @@ export function CouncilPage({
   meId = null,
   classes = [],
   membershipError = null,
+  sectionErrors = {},
   onNominate = refuse,
   onVote = refuse,
 }: CouncilPageProps): React.JSX.Element {
@@ -91,7 +97,7 @@ export function CouncilPage({
           <div className="flex flex-col gap-6">
             <Section heading={t("coop.council.title")}>
               {council === null ? (
-                <Loading />
+                (sectionErrors.council ?? <Loading />)
               ) : (
                 <SeatList
                   label={t("coop.council.title")}
@@ -125,7 +131,7 @@ export function CouncilPage({
             <Section heading={t("coop.elections.title")} description={t("coop.elections.intro")}>
               {membershipError}
               {elections === null ? (
-                <Loading />
+                (sectionErrors.elections ?? <Loading />)
               ) : elections.length === 0 ? (
                 // F25: nobody on this page can schedule one (the board does), so no action.
                 <EmptyState
@@ -160,7 +166,7 @@ export function CouncilPage({
                 <CardDescription>{t("coop.council.methodHint")}</CardDescription>
               </CardHeader>
               <CardContent>
-                <KeyValueList data-testid="council-method" rows={method} />
+                {sectionErrors.method ?? <KeyValueList data-testid="council-method" rows={method} />}
               </CardContent>
             </Card>
             <Card size="sm">
@@ -170,7 +176,7 @@ export function CouncilPage({
               </CardHeader>
               <CardContent>
                 {board === null ? (
-                  <Loading />
+                  (sectionErrors.board ?? <Loading />)
                 ) : (
                   <SeatList
                     label={t("coop.board.title")}
@@ -202,7 +208,14 @@ export function CouncilPage({
 }
 
 /** `/coop/settings`: every governance setting, protected flags and the decision that last set it. */
-export function SettingsPage({ settings }: { settings: SettingDto[] | null }): React.JSX.Element {
+export function SettingsPage({
+  settings,
+  error = null,
+}: {
+  settings: SettingDto[] | null;
+  /** Shown in place of the list when it failed to load (F3); the header and the note stay. */
+  error?: React.ReactNode;
+}): React.JSX.Element {
   return (
     <PageContainer data-testid="settings" width="default" className="flex flex-col gap-6 py-8">
       <PageHeader
@@ -216,7 +229,7 @@ export function SettingsPage({ settings }: { settings: SettingDto[] | null }): R
         description={t("coop.settings.protectedHint")}
       />
       {settings === null ? (
-        <Loading />
+        (error ?? <Loading />)
       ) : (
         <GovernanceSettingsList
           itemProps={{ "data-testid": "setting-row" }}

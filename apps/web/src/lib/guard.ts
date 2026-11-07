@@ -25,6 +25,10 @@ export function returnToSearch(search: Record<string, unknown>): { returnTo?: st
  * to /signin without rendering anything when there is none. With `returnTo` (a route passes
  * `location.href` from `beforeLoad`'s argument: the guard cannot see the location), sign-in comes
  * back to it, e.g. to an OAuth consent page (ADR 0027).
+ *
+ * Only a definitive "signed out" redirects (F1). When the API could not say (429, 5xx,
+ * unreachable), `load` throws `SessionUnavailableError` and so does the guard: the route renders
+ * its error page with Retry and the member keeps their place.
  */
 export async function requireSession(
   load: () => Promise<SessionUser | null>,
