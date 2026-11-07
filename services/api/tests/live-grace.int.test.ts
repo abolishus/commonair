@@ -17,6 +17,7 @@ import {
   liveGraceSettings,
   readLiveGrace,
   setLiveGraceSettings,
+  startLiveGraceSweeper,
   sweepLiveGraces,
 } from "../src/media/live-grace.ts";
 import { endLiveInTx } from "../src/moderation/live.ts";
@@ -218,6 +219,26 @@ describe("live reconnect grace", () => {
     });
     expect(await streamEvents(st.channelId)).toEqual(["stream.offline", "stream.online"]);
     expect(events).toEqual(["online", "offline"]);
+  });
+
+  test("the sweeper ends a grace whose timer was lost, with no further hook", async () => {
+    // The scheduler records but never runs: the same as an API restart dropping the timer.
+    const st = await streamer();
+    const first = await ready(st.username);
+    const droppedAt = clock;
+    await notReady(st.username, first);
+    clock += GRACE_MS + 1000;
+    const stop = startLiveGraceSweeper(api.deps, 50);
+    try {
+      const deadline = Date.now() + 5000;
+      while (!(await broadcastsOf(st.channelId))[0]?.endedAt && Date.now() < deadline) await Bun.sleep(25);
+    } finally {
+      stop();
+    }
+    expect((await broadcastsOf(st.channelId))[0]?.endedAt?.getTime()).toBe(droppedAt);
+    expect((await channelOf(st.username)).liveBroadcastId).toBeNull();
+    expect(await readLiveGrace(api.deps, st.channelId)).toBeNull();
+    expect(await streamEvents(st.channelId)).toEqual(["stream.offline", "stream.online"]);
   });
 
   test("a late not-ready of the source a reconnect replaced is ignored", async () => {

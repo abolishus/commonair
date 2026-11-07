@@ -218,12 +218,13 @@ export async function sweepLiveGraces(deps: Deps): Promise<number> {
 }
 
 /**
- * Run `sweepLiveGraces` every `intervalMs` (the API's main starts it; one per process is enough,
- * finalizing is idempotent). Returns the stop function.
+ * Run `sweepLiveGraces` now and every `intervalMs`, so a grace whose in-memory timer an API
+ * restart or crash dropped still ends with no further media hook. The API's main must start it
+ * (one per process is enough, finalizing is idempotent) and call the returned stop on shutdown.
  */
 export function startLiveGraceSweeper(deps: Deps, intervalMs = 10_000): () => void {
   let running = false;
-  const timer = setInterval(() => {
+  const tick = () => {
     if (running) return;
     running = true;
     sweepLiveGraces(deps)
@@ -231,7 +232,9 @@ export function startLiveGraceSweeper(deps: Deps, intervalMs = 10_000): () => vo
       .finally(() => {
         running = false;
       });
-  }, intervalMs);
+  };
+  const timer = setInterval(tick, intervalMs);
   timer.unref?.();
+  tick();
   return () => clearInterval(timer);
 }

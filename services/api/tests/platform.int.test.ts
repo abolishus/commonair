@@ -8,7 +8,6 @@ import { INTERNAL_ROUTES, INTERNAL_SECRET_HEADER, MEDIA_INTERNAL_USER, mediaPath
 import { BotConfig } from "@commonair/contracts/shapes";
 import { schema } from "@commonair/db";
 import { insertBotAccount } from "../src/auth/bot-account.ts";
-import { setLiveGraceSettings } from "../src/media/live-grace.ts";
 import { client, signUpAndSignIn, startApi, subscriber, type Client, type TestApi } from "./harness.ts";
 
 let api: TestApi;
@@ -17,8 +16,6 @@ let bob: Awaited<ReturnType<typeof signUpAndSignIn>>;
 
 beforeAll(async () => {
   api = await startApi();
-  // A live drop ends at once here; live-grace.int.test.ts covers the reconnect grace.
-  setLiveGraceSettings(api.deps, { seconds: 0 });
   alice = await signUpAndSignIn(api);
   bob = await signUpAndSignIn(api);
 }, 120_000);
