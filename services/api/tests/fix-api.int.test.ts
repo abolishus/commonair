@@ -252,20 +252,22 @@ describe("F9: categories and search", () => {
     await ended(liveTitle, cooking, 1, { mature: true });
     await ended(liveTag, cooking, 2, { restricted: true });
     await ended(offlineStreamer, cooking, 3, { kind: "rehearsal" });
-    await ended(viewerAccount, mature, 4);
+    await ended(streamerA, mature, 4);
 
-    // Search fixtures: two live streams that match only on stream title / tag, one offline streamer
-    // and one viewer account that match on their display name.
+    // Search fixtures: two live streams that match only on stream title / tag, then an offline
+    // streamer and a viewer account (no broadcasts at all) that match on their channel text. Both
+    // have 0 followers and the viewer account outranks the streamer on ts_rank, so the streamer
+    // sorts first only because viewer accounts are demoted.
     await goLive(liveTitle, "chill lofi beats to study to");
     await goLive(liveTag, "study session", ["lofi", "study"]);
     await owner()
       .update(schema.channels)
-      .set({ displayName: "Lofi Radio", followerCount: 5 })
+      .set({ displayName: "Lofi Radio", followerCount: 0 })
       .where(eq(schema.channels.ownerId, offlineStreamer.userId));
     await ended(offlineStreamer, null, 60);
     await owner()
       .update(schema.channels)
-      .set({ displayName: "Lofi Lover" })
+      .set({ displayName: "Lofi Lover", description: "lofi lofi lofi, all day" })
       .where(eq(schema.channels.ownerId, viewerAccount.userId));
   }, 120_000);
 
@@ -311,6 +313,9 @@ describe("F9: categories and search", () => {
     expect(new Set(slugs.slice(0, 2))).toEqual(new Set([slugOf(liveTitle), slugOf(liveTag)]));
     expect(r.body.channels.slice(0, 2).every((c) => c.live !== null)).toBe(true);
     expect(slugs.slice(2)).toEqual([slugOf(offlineStreamer), slugOf(viewerAccount)]);
+    // The demotion, not the tiebreaks, puts the streamer first: equal followers, and the viewer
+    // account's channel text ranks higher.
+    expect(r.body.channels.slice(2).map((c) => c.followerCount)).toEqual([0, 0]);
   });
 
   test("a # tag query matches the tag; an unrelated word matches nothing", async () => {
@@ -342,7 +347,7 @@ describe("F10: reserved usernames", () => {
     for (const username of ["creators", "Fees", "FAQ", "join", "pricing", "studio"]) {
       const r = await signUp(username);
       expect(r.status, username).toBe(400);
-      expect(r.body.code).toBe("INVALID_USERNAME");
+      expect(r.body.code).toBe("USERNAME_RESERVED");
       expect(r.body.message).toMatch(/reserved/i);
       const rows = await owner()
         .select({ id: schema.users.id })
@@ -354,12 +359,16 @@ describe("F10: reserved usernames", () => {
 
   test("a bot cannot take one either", async () => {
     const owner1 = await signUpAndSignIn(api);
-    const r = await owner1.client.call<{ message?: string }>("POST", "/api/me/bots", {
+    const r = await owner1.client.call<{ message?: string; data?: { requirement?: string } }>("POST", "/api/me/bots", {
       username: "inbox",
       displayName: "Inbox",
     });
-    expect(r.status).toBe(400);
+    expect(r.status).toBe(412);
+    expect(r.body.data?.requirement).toBe("username_reserved");
     expect(r.body.message).toMatch(/reserved/i);
+    // A malformed name is still a plain bad request.
+    const bad = await owner1.client.call("POST", "/api/me/bots", { username: "No Spaces", displayName: "X" });
+    expect(bad.status).toBe(400);
   });
 
   test("a username cannot be renamed into one", async () => {

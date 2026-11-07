@@ -216,13 +216,10 @@ export function createAuth(deps: Deps) {
         const altcha = await verifyAltcha(body[ALTCHA_FIELD], { hmacKey: env.ALTCHA_HMAC_KEY, valkey: deps.valkey });
         if (altcha) throw bad("ALTCHA_FAILED", `Proof-of-work check failed (${altcha})`);
         const nameProblem = usernameProblem(typeof body.username === "string" ? body.username : "");
-        if (nameProblem)
-          throw bad(
-            "INVALID_USERNAME",
-            nameProblem === "reserved"
-              ? "This username is reserved for a page on this site; choose another"
-              : "Usernames are 3–25 lowercase letters, digits or underscores",
-          );
+        // A separate code, because the web maps errors by code and a format hint would mislead.
+        if (nameProblem === "reserved")
+          throw bad("USERNAME_RESERVED", "This username is reserved for a page on this site; choose another");
+        if (nameProblem) throw bad("INVALID_USERNAME", "Usernames are 3–25 lowercase letters, digits or underscores");
         const age = ageProblem(body.birthDate, minAge, deps.now());
         if (age === "too_young") throw bad("TOO_YOUNG", `You must be at least ${minAge} to join`);
         if (age) throw bad("INVALID_BIRTH_DATE", "A valid birth date (YYYY-MM-DD) is required");
@@ -239,7 +236,9 @@ export function createAuth(deps: Deps) {
           // Applies to every creation path (email signup, OAuth, admin), not only the HTTP gate above.
           before: async (user) => {
             const name = typeof user.username === "string" ? user.username : "";
-            if (usernameProblem(name)) throw bad("INVALID_USERNAME", "A valid username is required");
+            const problem = usernameProblem(name);
+            if (problem === "reserved") throw bad("USERNAME_RESERVED", "This username is reserved; choose another");
+            if (problem) throw bad("INVALID_USERNAME", "A valid username is required");
             const age = ageProblem(user.birthDate, minAge, deps.now());
             if (age === "too_young") throw bad("TOO_YOUNG", `You must be at least ${minAge} to join`);
             if (age) throw bad("INVALID_BIRTH_DATE", "A valid birth date is required");

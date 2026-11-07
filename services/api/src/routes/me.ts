@@ -348,12 +348,10 @@ export const me = {
       const { deps } = context;
       if (caller.user.accountType !== "human") throw forbidden("Only members can own bots");
       const problem = usernameProblem(input.username);
-      if (problem)
-        throw badRequest(
-          problem === "reserved"
-            ? "This username is reserved for a page on this site; choose another"
-            : "Invalid username",
-        );
+      // A requirement the console maps to its own message (as with `bot_limit`), not a format error.
+      if (problem === "reserved")
+        throw precondition("username_reserved", "This username is reserved for a page on this site; choose another");
+      if (problem) throw badRequest("Invalid username");
       // A channel's built-in bot (E8) never takes one of the owner's slots.
       const [{ n } = { n: 0 }] = await deps.db
         .select({ n: count() })
