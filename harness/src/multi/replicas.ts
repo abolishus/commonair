@@ -99,13 +99,18 @@ export interface ReplicaContainer {
 /**
  * Containers of the replicated services from `podman ps -a --format '{{.Names}}\t{{.State}}'`,
  * named as compose names them (`commonair_chat-2_1`, `commonair-chat-2-1`; see `safety.ts`).
+ * `services` widens the set (the settle probes also look for `media`).
  */
-export function parseReplicaContainers(stdout: string, prefix: string): ReplicaContainer[] {
+export function parseReplicaContainers(
+  stdout: string,
+  prefix: string,
+  services: readonly string[] = MULTI_SERVICES,
+): ReplicaContainer[] {
   const out: ReplicaContainer[] = [];
   for (const line of stdout.split("\n")) {
     const [name = "", state = ""] = line.trim().split(/\t|\s+/);
     if (!name) continue;
-    const service = serviceOfContainer(name, prefix, MULTI_SERVICES);
+    const service = serviceOfContainer(name, prefix, services);
     if (service) out.push({ service, name, running: state.toLowerCase() === "running" });
   }
   return out;
