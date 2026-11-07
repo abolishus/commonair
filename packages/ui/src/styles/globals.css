@@ -2,18 +2,28 @@
  * SPDX-FileCopyrightText: 2026 CommonAir contributors
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
- * CommonAir design tokens (Tailwind v4). Import once at the app root:
+ * CommonAir design tokens (Tailwind v4), "Open Broadcast" (docs/design/2026-11-overhaul/
+ * art-direction-v1.md). Import once at the app root:
  *   @import "@commonair/ui/globals.css";
  *
  * Dark is the default (:root). The light theme applies with `.light` or
  * `data-theme="light"` on <html>, or with `data-theme="system"` when the OS
- * prefers light. Colors live only here, as CSS variables; components use the
- * Tailwind color utilities generated from them (bg-primary, text-live, ...).
- * Accent and chat-name pairs are AA-checked by tests/tokens.test.ts.
+ * prefers light. It is written once, in the `@variant light-theme` block below;
+ * Tailwind emits it for both cases. Colors live only here, as CSS variables;
+ * components use the Tailwind utilities generated from them (bg-primary,
+ * text-live, bg-brand, bg-surface-sunken, shadow-raised, duration-fast, ...).
+ * Every text, ring and accent pair is checked by tests/tokens.test.ts.
  *
  * `.dark` re-applies the dark tokens to a subtree: the preset's inverted menus
  * (components.json `menuColor: "inverted"`) put it on dropdown, context-menu,
  * select and combobox popups, so menus stay dark in the light theme.
+ *
+ * Brand (marigold `--brand`): ONE filled call to action per screen, through
+ * `<Button variant="brand">` (Sign up, Join the co-op, Go live). Never white text
+ * on it, never beside another filled button (primary or channel accent: the
+ * second action is outline or ghost), never for live, status, links, Sign in,
+ * Report, settings, admin, destructive actions or channel-owned surfaces (those
+ * use `--channel-accent`). `--brand-text` is the brand as text on any surface.
  */
 @import "tailwindcss";
 @import "tw-animate-css";
@@ -38,14 +48,49 @@
   }
 }
 
+/*
+ * The light token block's two selectors: an explicit choice, and "system" on a
+ * light OS. `:is()` keeps the specificity of a class, so it beats `:root`.
+ * For the token block below, not for utilities (use `dark:` there).
+ */
+@custom-variant light-theme {
+  &:is(.light, [data-theme="light"]) {
+    @slot;
+  }
+  @media (prefers-color-scheme: light) {
+    &:is([data-theme="system"]) {
+      @slot;
+    }
+  }
+}
+
 @theme {
   --font-sans: "Rubik Variable", ui-sans-serif, system-ui, sans-serif;
   --font-display: "Rubik Variable", ui-sans-serif, system-ui, sans-serif;
   /* Rubik is the only face: codes, IDs and timestamps use `tabular-nums`, not a monospace font. */
   --font-mono: "Rubik Variable", ui-sans-serif, system-ui, sans-serif;
-  /* The one step below text-xs (overlay badges, compact counters); the mockups' `t-2xs`. */
+  /* The one step below text-xs (overlay badges over video only); the mockups' `t-2xs`. */
   --text-2xs: 0.625rem;
   --text-2xs--line-height: calc(0.875 / 0.625);
+  /* Marketing and home hero headline only (`text-display`). */
+  --text-display: clamp(2rem, 4vw + 1rem, 3.5rem);
+  --text-display--line-height: 1.05;
+  --text-display--letter-spacing: -0.02em;
+  --text-display--font-weight: 650;
+
+  /* Easing (`ease-out`, `ease-in-out`); durations are the --duration-* tokens below. */
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --default-transition-duration: var(--duration-fast);
+  --default-transition-timing-function: var(--ease-out);
+
+  /* Page widths (`max-w-page`, `max-w-form`, ...): grids and boards, settings/studio pages, forms, reading
+     text. `max-w-reading` (640px), not Tailwind's own `max-w-prose` (65ch), is the prose width. */
+  --container-page: 100rem;
+  --container-board: 100rem;
+  --container-form-page: 70rem;
+  --container-form: 48rem;
+  --container-reading: 40rem;
 }
 
 @theme inline {
@@ -56,6 +101,16 @@
   --color-card-foreground: var(--card-foreground);
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-surface-raised: var(--surface-raised);
+  --color-scrim: var(--scrim);
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-brand-text: var(--brand-text);
+  --color-brand-subtle: var(--brand-subtle);
+  --color-brand-ring: var(--brand-ring);
+  /* Hover surface: 12 % toward --foreground, as for channel accents (dark: lighter, light: deeper). */
+  --color-brand-hover: color-mix(in oklab, var(--brand) 88%, var(--foreground));
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
   --color-secondary: var(--secondary);
@@ -107,6 +162,14 @@
   --color-chat-10: var(--chat-10);
   --color-chat-11: var(--chat-11);
   --color-chat-12: var(--chat-12);
+  /* Raised surfaces (popovers, menus, sheets): a shadow in light, nothing in dark (the ring does it). */
+  --shadow-raised: var(--surface-raised-shadow);
+  /* Motion: `duration-fast` (hover, press), `duration-base` (popover, menu, tabs), `duration-slow` (sheet, drawer, hero). */
+  --transition-duration-fast: var(--duration-fast);
+  --transition-duration-base: var(--duration-base);
+  --transition-duration-slow: var(--duration-slow);
+  /* Square (base-lyra): every step is a multiple of --radius, which is 0, Tailwind's own `rounded-xs` included. */
+  --radius-xs: calc(var(--radius) * 0.4);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -116,43 +179,74 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-/* Dark theme (default; `.dark` re-applies it to a subtree, e.g. inverted menus). */
+/* Theme-independent tokens. */
+:root {
+  /* Square corners everywhere; only avatars, status dots and the live dot are round (`rounded-full`). */
+  --radius: 0;
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 320ms;
+  /* Text and badges drawn over video thumbnails, identical in both themes. */
+  --overlay: oklch(0 0 0 / 75%);
+  --overlay-foreground: #ffffff;
+  /* Behind dialogs, sheets and drawers (the "overlay" surface level: scrim plus a raised panel). */
+  --scrim: oklch(0 0 0 / 60%);
+}
+
+/*
+ * Dark theme (default; `.dark` re-applies it to a subtree, e.g. inverted menus).
+ * Surfaces step up with a lighter fill plus a 1px ring (`ring-foreground/10`):
+ * page (--background) < sunken < card < raised (popover); overlay = --scrim + raised.
+ */
 :root,
 .dark {
   color-scheme: dark;
-  --radius: 0.625rem;
   --background: oklch(0.141 0.005 285.823);
   --foreground: oklch(0.985 0 0);
+  /* Rails, sidebars, studio/settings/admin nav, table header bands. */
+  --surface-sunken: oklch(0.17 0.005 286);
   --card: oklch(0.21 0.006 285.885);
   --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.21 0.006 285.885);
+  /* Hover cards, popovers, menus, sticky and bulk-action bars. */
+  --surface-raised: oklch(0.25 0.006 286);
+  --surface-raised-shadow: 0 0 #0000;
+  --popover: var(--surface-raised);
   --popover-foreground: oklch(0.985 0 0);
   --primary: oklch(0.92 0.004 286.32);
   --primary-foreground: oklch(0.21 0.006 285.885);
   --secondary: oklch(0.274 0.006 286.033);
   --secondary-foreground: oklch(0.985 0 0);
   --muted: oklch(0.274 0.006 286.033);
-  --muted-foreground: oklch(0.705 0.015 286.067);
+  /* 0.74 rather than shadcn's 0.705: 14 px help text reaches APCA Lc ~56 (round2/direction-check.md change 4). */
+  --muted-foreground: oklch(0.74 0.015 286.067);
   --accent: oklch(0.274 0.006 286.033);
   --accent-foreground: oklch(0.985 0 0);
   --destructive: #f87171;
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.705 0.015 286.067);
+  /* Brand: the same marigold fill in both themes, zinc-950 text on it (11.7:1); never white text (1.7:1). */
+  --brand: oklch(0.83 0.155 84);
+  --brand-foreground: oklch(0.141 0.005 285.823);
+  --brand-text: var(--brand);
+  --brand-subtle: color-mix(in oklab, var(--brand) 14%, var(--card));
+  /* The brand fill's 1px edge: invisible in dark (the fill is 9:1 on every surface). */
+  --brand-ring: var(--brand);
   --chart-1: #60a5fa;
   --chart-2: #4ade80;
-  --chart-3: #fbbf24;
+  /* Lemon, not amber: amber-400 is the brand's twin (OKLab dE 0.012); tokens.test.ts keeps every series >= 0.07 away. */
+  --chart-3: #fde047;
   --chart-4: #a78bfa;
   --chart-5: #f472b6;
   /* Chart series: each is >= 3:1 on --background and --card (graphics); in the dark theme all eight are also >= 4.5:1 (text-safe). */
   --chart-6: #2dd4bf;
   --chart-7: #fb923c;
   --chart-8: #a1a1aa;
-  /* Status tones (StatusBadge, stat deltas): AA as text on --background, --card and their own 15 % tint over --card. */
+  /* Status tones (StatusBadge, stat deltas): AA as text on --background, --card and their own 15 % tint over --card. Warning is orange so it never reads as the brand; pair every tone with an icon and a word. */
   --success: #4ade80;
-  --warning: #fbbf24;
+  --warning: #fb923c;
   --info: #60a5fa;
-  --sidebar: oklch(0.21 0.006 285.885);
+  --sidebar: var(--surface-sunken);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.92 0.004 286.32);
   --sidebar-primary-foreground: oklch(0.21 0.006 285.885);
@@ -162,9 +256,6 @@
   --sidebar-ring: oklch(0.705 0.015 286.067);
   --live: #dc2626;
   --live-foreground: #ffffff;
-  /* Text and badges drawn over video thumbnails, identical in both themes. */
-  --overlay: oklch(0 0 0 / 75%);
-  --overlay-foreground: #ffffff;
 
   --channel-zinc: #d4d4d8;
   --channel-zinc-foreground: #09090b;
@@ -172,7 +263,8 @@
   --channel-red-foreground: #09090b;
   --channel-orange: #fb923c;
   --channel-orange-foreground: #09090b;
-  --channel-amber: #fbbf24;
+  /* The "amber" accent is lemon (yellow-300) in dark so an amber channel never reads as the brand. */
+  --channel-amber: #fde047;
   --channel-amber-foreground: #09090b;
   --channel-lime: #a3e635;
   --channel-lime-foreground: #09090b;
@@ -194,7 +286,7 @@
   /* Chat name colors: readable on --background and --card. */
   --chat-1: #f87171;
   --chat-2: #fb923c;
-  --chat-3: #fbbf24;
+  --chat-3: #fde047;
   --chat-4: #a3e635;
   --chat-5: #4ade80;
   --chat-6: #2dd4bf;
@@ -206,99 +298,23 @@
   --chat-12: #e879f9;
 }
 
-/* Light theme, explicit choice. Keep identical to the "system" block below. */
-.light,
-[data-theme="light"] {
-  color-scheme: light;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.141 0.005 285.823);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.141 0.005 285.823);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.141 0.005 285.823);
-  --primary: oklch(0.21 0.006 285.885);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.967 0.001 286.375);
-  --secondary-foreground: oklch(0.21 0.006 285.885);
-  --muted: oklch(0.967 0.001 286.375);
-  --muted-foreground: oklch(0.5 0.016 285.938);
-  --accent: oklch(0.967 0.001 286.375);
-  --accent-foreground: oklch(0.21 0.006 285.885);
-  --destructive: #b91c1c;
-  --border: oklch(0.92 0.004 286.32);
-  --input: oklch(0.92 0.004 286.32);
-  --ring: oklch(0.552 0.016 285.938);
-  --chart-1: #1d4ed8;
-  --chart-2: #15803d;
-  --chart-3: #b45309;
-  --chart-4: #6d28d9;
-  --chart-5: #be185d;
-  /* Text-safe (>= 4.5:1) in the light theme: chart-1..6 and chart-8; chart-7 is graphics-only (3:1). */
-  --chart-6: #0f766e;
-  --chart-7: #ea580c;
-  --chart-8: #71717a;
-  --success: #166534;
-  --warning: #92400e;
-  --info: #1d4ed8;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.141 0.005 285.823);
-  --sidebar-primary: oklch(0.21 0.006 285.885);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.967 0.001 286.375);
-  --sidebar-accent-foreground: oklch(0.21 0.006 285.885);
-  --sidebar-border: oklch(0.92 0.004 286.32);
-  --sidebar-ring: oklch(0.552 0.016 285.938);
-  --live: #dc2626;
-  --live-foreground: #ffffff;
-
-  --channel-zinc: #3f3f46;
-  --channel-zinc-foreground: #ffffff;
-  --channel-red: #b91c1c;
-  --channel-red-foreground: #ffffff;
-  --channel-orange: #c2410c;
-  --channel-orange-foreground: #ffffff;
-  --channel-amber: #b45309;
-  --channel-amber-foreground: #ffffff;
-  --channel-lime: #4d7c0f;
-  --channel-lime-foreground: #ffffff;
-  --channel-green: #15803d;
-  --channel-green-foreground: #ffffff;
-  --channel-teal: #0f766e;
-  --channel-teal-foreground: #ffffff;
-  --channel-sky: #0369a1;
-  --channel-sky-foreground: #ffffff;
-  --channel-blue: #1d4ed8;
-  --channel-blue-foreground: #ffffff;
-  --channel-indigo: #4338ca;
-  --channel-indigo-foreground: #ffffff;
-  --channel-violet: #6d28d9;
-  --channel-violet-foreground: #ffffff;
-  --channel-pink: #be185d;
-  --channel-pink-foreground: #ffffff;
-
-  --chat-1: #b91c1c;
-  --chat-2: #c2410c;
-  --chat-3: #b45309;
-  --chat-4: #4d7c0f;
-  --chat-5: #15803d;
-  --chat-6: #0f766e;
-  --chat-7: #0369a1;
-  --chat-8: #1d4ed8;
-  --chat-9: #4338ca;
-  --chat-10: #6d28d9;
-  --chat-11: #be185d;
-  --chat-12: #a21caf;
-}
-
-/* Light theme when the user chose "system" and the OS prefers light. */
-@media (prefers-color-scheme: light) {
-  [data-theme="system"] {
+/*
+ * Light theme, the single source for both `.light` / [data-theme="light"] and
+ * [data-theme="system"] on a light OS (see `light-theme` above). Surfaces step
+ * up with a shadow instead of a lighter fill: sunken is zinc-50, card and
+ * raised are white, raised adds --surface-raised-shadow.
+ */
+* {
+  @variant light-theme {
     color-scheme: light;
     --background: oklch(1 0 0);
     --foreground: oklch(0.141 0.005 285.823);
+    --surface-sunken: oklch(0.985 0 0);
     --card: oklch(1 0 0);
     --card-foreground: oklch(0.141 0.005 285.823);
-    --popover: oklch(1 0 0);
+    --surface-raised: oklch(1 0 0);
+    --surface-raised-shadow: 0 1px 2px oklch(0 0 0 / 6%), 0 4px 12px oklch(0 0 0 / 8%);
+    --popover: var(--surface-raised);
     --popover-foreground: oklch(0.141 0.005 285.823);
     --primary: oklch(0.21 0.006 285.885);
     --primary-foreground: oklch(0.985 0 0);
@@ -312,6 +328,13 @@
     --border: oklch(0.92 0.004 286.32);
     --input: oklch(0.92 0.004 286.32);
     --ring: oklch(0.552 0.016 285.938);
+    --brand: oklch(0.83 0.155 84);
+    --brand-foreground: oklch(0.141 0.005 285.823);
+    /* #8f5d00: 5.6:1 on white. */
+    --brand-text: oklch(0.52 0.115 75);
+    --brand-subtle: color-mix(in oklab, var(--brand) 14%, var(--card));
+    /* The fill is only 1.7:1 on white, so it carries a 1px --brand-text edge (3.3:1 on the fill, 5.6:1 on white). */
+    --brand-ring: var(--brand-text);
     --chart-1: #1d4ed8;
     --chart-2: #15803d;
     --chart-3: #b45309;
@@ -322,9 +345,9 @@
     --chart-7: #ea580c;
     --chart-8: #71717a;
     --success: #166534;
-    --warning: #92400e;
+    --warning: #9a3412;
     --info: #1d4ed8;
-    --sidebar: oklch(0.985 0 0);
+    --sidebar: var(--surface-sunken);
     --sidebar-foreground: oklch(0.141 0.005 285.823);
     --sidebar-primary: oklch(0.21 0.006 285.885);
     --sidebar-primary-foreground: oklch(0.985 0 0);
@@ -453,8 +476,16 @@
   }
 }
 
-/* Respect reduced motion: animations and transitions finish instantly (Base UI still gets its end events). */
+/*
+ * Respect reduced motion: animations and transitions finish instantly (Base UI still gets its end
+ * events), and the motion tokens say so too, for code that reads them (inline styles, JS timers).
+ */
 @media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 0.01ms;
+    --duration-base: 0.01ms;
+    --duration-slow: 0.01ms;
+  }
   *,
   ::before,
   ::after {
