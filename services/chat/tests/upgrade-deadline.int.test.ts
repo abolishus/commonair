@@ -5,23 +5,45 @@
  * A WebSocket upgrade whose profile read cannot finish (the users table is locked, as a stalled
  * Postgres connection would leave it) is answered 503 within the deadline instead of hanging,
  * and upgrades succeed again once the database answers.
+ *
+ * The instance warms its whole pool, as production does (`main.ts`: `chatWarmConnections`). With
+ * a lazy pool the recovery upgrade found the pool's one connection still finishing the stalled read
+ * and opened a second one on the request path; CI run 41764916744 opened it during a 2 s
+ * immediate checkpoint (a parallel test file's CREATE/DROP DATABASE) and the upgrade hit the 500 ms
+ * deadline: 503, "websocket connection failed", the test 500 ms slower than a passing run.
  */
 import { afterAll, beforeAll, expect, test, vi } from "vite-plus/test";
 import { schema, uuidv7 } from "@commonair/db";
-import { createTestDatabase, type TestDatabase } from "@commonair/db/testing";
+import { createTestDatabase, TEST_APP_ROLE, type TestDatabase } from "@commonair/db/testing";
 import { Directory } from "../src/directory.ts";
 import type { ChatService } from "../src/server.ts";
-import { chatToken, Client, createUser, isolation, startInstance } from "./helpers.ts";
+import { chatToken, Client, createUser, eventually, isolation, startInstance } from "./helpers.ts";
 
 vi.setConfig({ testTimeout: 30_000, hookTimeout: 60_000 });
 
 let t: TestDatabase;
 let svc: ChatService;
+/** `createTestDatabase` opens the app role's pool with `max: 5`. */
+const APP_POOL_MAX = 5;
 
 beforeAll(async () => {
   t = await createTestDatabase();
-  svc = await startInstance(t.app.db, isolation(), { upgradeTimeoutMs: 500, filterWorkers: 0 });
+  svc = await startInstance(t.app.db, isolation(), {
+    upgradeTimeoutMs: 500,
+    filterWorkers: 0,
+    warmConnections: APP_POOL_MAX,
+  });
+  // /readyz fails its postgres check until the pool is warm.
+  await eventually(async () => (await fetch(new URL("/readyz", svc.url))).ok, 10_000);
 });
+
+/** The app role's open connections to this test database, by backend pid. */
+async function appBackends(): Promise<number[]> {
+  const rows = await t.sql<{ pid: number }[]>`
+    select pid from pg_stat_activity
+    where datname = current_database() and usename = ${TEST_APP_ROLE}`;
+  return rows.map((r) => r.pid).sort((x, y) => x - y);
+}
 afterAll(async () => {
   await svc?.stop();
   await t?.drop();
@@ -46,6 +68,8 @@ async function upgradeStatus(token: string): Promise<{ status: number; body: unk
 
 test("a stalled profile read answers 503 within the deadline, then upgrades recover", async () => {
   const user = await createUser(t.db);
+  const warm = await appBackends();
+  expect(warm).toHaveLength(APP_POOL_MAX);
   let release: () => void = () => {};
   const held = new Promise<void>((r) => {
     release = r;
@@ -78,6 +102,8 @@ test("a stalled profile read answers 503 within the deadline, then upgrades reco
   } finally {
     client.close();
   }
+  // Recovery reused a warm connection: none was opened on the request path.
+  expect(await appBackends()).toEqual(warm);
 });
 
 test("the profile read (one statement) reports active membership only", async () => {
