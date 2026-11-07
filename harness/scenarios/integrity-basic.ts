@@ -51,7 +51,8 @@ import {
   STEADY_TIMING,
 } from "../src/integrity-viewers.ts";
 import { internalSecret } from "../src/safety-io.ts";
-import { defineScenario, excludedNeeds } from "../src/scenario.ts";
+import { defineScenario, excludedNeeds, type ScenarioContext } from "../src/scenario.ts";
+import { sessionVerdicts } from "../src/session-verdicts.ts";
 import { stepThrottledViewer } from "../src/w1/data-mode.ts";
 import type { IntegrityExtension } from "../src/w1/kit.ts";
 import { type W1Extension, extensionTitle, w1Extensions } from "../src/w1/steps.ts";
@@ -118,6 +119,45 @@ async function heartbeatAges(
   } finally {
     await sql.close();
   }
+}
+
+/**
+ * Diagnostics for a count that did not converge (soft checks, so the text report prints them):
+ * each honest session that is not verified, with its reasons, counters and flags, and each bot
+ * session that is not excluded. A historic "count converges to 7" timeout left only the count.
+ */
+async function reportConvergence(
+  ctx: ScenarioContext,
+  honest: readonly Viewer[],
+  botIds: readonly (string | null)[],
+): Promise<void> {
+  const url = process.env.DATABASE_URL;
+  if (!url) return;
+  const people = await sessionVerdicts(
+    url,
+    await Promise.all(
+      honest.map(async (v) => ({ label: v.id, kind: v.kind, sessionId: (await v.report()).sessionId })),
+    ),
+  );
+  ctx.data("sessions.honest", people.sessions);
+  ctx.check("every honest session is verified (diagnostics)", people.unexpected.length === 0, {
+    notVerified: people.unexpected,
+    verdicts: people.verdicts,
+    ...(people.flaggedAtStartup.length > 0 ? { flaggedAtStartup: people.flaggedAtStartup } : {}),
+  });
+  const bots = await sessionVerdicts(
+    url,
+    botIds.map((id, i) => ({ label: `bot-${i}`, kind: "bot", sessionId: id })),
+    "excluded",
+  );
+  ctx.check("every bot session is excluded (diagnostics)", bots.unexpected.length === 0, {
+    notExcluded: bots.unexpected.map((s) => ({
+      viewer: s.viewer,
+      id: s.id,
+      verdict: s.verdict,
+      ...("reasons" in s ? { reasons: s.reasons, heartbeats: s.heartbeats, flags: s.flags.map((f) => f.signal) } : {}),
+    })),
+  });
 }
 
 interface HourCounts {
@@ -300,7 +340,7 @@ export default defineScenario({
 
     let maxSeen = 0;
     let last = { verified: 0, pending: 0, excluded: 0 };
-    const converged = await ctx.step(`count converges to ${expected} with the bots excluded`, async () => {
+    const converging = ctx.step(`count converges to ${expected} with the bots excluded`, async () => {
       const t0 = Date.now();
       await waitFor(
         `count ${expected}, ${bots} excluded`,
@@ -313,6 +353,17 @@ export default defineScenario({
         { timeoutMs: convergeMs, intervalMs: 2_000, signal: ctx.signal },
       );
       return Date.now() - t0;
+    });
+    const converged = await converging.catch(async (err: unknown) => {
+      // Name the session that held the count back: an honest one not verified (with its flags and
+      // when they were raised) or a bot not excluded.
+      ctx.metric("viewer_count.max_seen", maxSeen);
+      ctx.data("viewers.breakdown", last);
+      await reportConvergence(ctx, honest, [...swarm.sessionIds, ...fetchless.map((f) => f.sessionId)]).catch(
+        (e: unknown) =>
+          ctx.log.warn("could not read the sessions' verdicts", { error: e instanceof Error ? e.message : String(e) }),
+      );
+      throw err;
     });
     ctx.metric("viewer_count.converge", converged, "ms");
     ctx.metric("sessions.excluded", last.excluded);
