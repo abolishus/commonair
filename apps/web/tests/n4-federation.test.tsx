@@ -393,8 +393,10 @@ describe("the remote followers", () => {
     const { container } = await mountSettings(fakeClient({ followers: [] }));
     const intro = q(container, "federation-followers-intro");
     expect(intro?.textContent).toBe(t("federation.followers.intro"));
-    expect(intro?.className).toMatch(/\btext-xs\b/);
-    expect(intro?.className).not.toMatch(/\btext-sm\b/);
+    // The field hint style (14 px reading text since D1), the same size as the card's other notes.
+    expect(intro?.dataset.slot).toBe("field-description");
+    expect(intro?.className).toMatch(/(^|\s)text-sm\/relaxed(\s|$)/);
+    expect(intro?.className).not.toMatch(/\btext-(xs|base|lg)\b/);
   });
 
   it("empty: an empty state naming the handle", async () => {

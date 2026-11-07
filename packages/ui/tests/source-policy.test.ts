@@ -254,6 +254,27 @@ const ALLOW: AllowEntry[] = [
       reason: "useRender gives the tile a router-agnostic link (`render`), as the shadcn parts do.",
     }),
   ),
+  ...(
+    [
+      ["src/layouts/bottom-tab-bar.tsx", 3],
+      ["src/layouts/app-shell.tsx", 3],
+    ] as const
+  ).map(([file, count]): AllowEntry => ({
+    file,
+    rule: "arbitrary-value",
+    match: "env(safe-area-inset-",
+    count,
+    reason:
+      "Safe-area insets (viewport-fit=cover) have no Tailwind utility; env() keeps the bar and page clear of the notch.",
+  })),
+  {
+    file: "src/layouts/site-header.tsx",
+    rule: "arbitrary-value",
+    match: "[&_button]:",
+    count: 2,
+    reason:
+      "44 px hit areas below md for the app-supplied buttons in the header's user slot, which it cannot size otherwise.",
+  },
   {
     file: "stories/fixtures.ts",
     rule: "color-literal",

@@ -92,7 +92,9 @@ describe("DvrSettings", () => {
     for (const key of ["dvr.settings.needsVods", "dvr.settings.sourceOnly", "dvr.settings.originOnly"] as const) {
       const note = [...document.querySelectorAll("p")].find((p) => p.textContent === t(key));
       expect(note?.dataset.slot).toBe("field-description");
-      expect(note?.className).not.toMatch(/\btext-sm\b/);
+      // The field hint size (14 px reading text since D1), never a larger body size.
+      expect(note?.className).toMatch(/(^|\s)text-sm\/relaxed(\s|$)/);
+      expect(note?.className).not.toMatch(/\btext-(base|lg)\b/);
     }
   });
 
