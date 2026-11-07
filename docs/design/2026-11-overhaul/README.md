@@ -520,6 +520,115 @@ Every later batch uses the report's ready-made i18n keys for each key moment.
 5. **The username claim field** needs a rate-limited "is this name free?" endpoint (a contract
    request).
 
+## Remaining waves
+
+Wave 1 shipped D1 (tokens, art and the card set, the shell, the words pass), the fix-first list
+F0 to F13 and their integration glue. The mockups now live outside the repo (font and icon
+licensing) at `~/CommonAir-design/round2-mockups/` (`acquisition/` and `product/`); serve them
+with `python3 -m http.server 4174 --bind 127.0.0.1` from that folder.
+
+### How every wave runs
+
+1. **Contracts and schema first.** The orchestrator lands the wave's contract and schema requests
+   (the "Contract and schema requests" section above) on `main` before any unit starts, so units
+   build against fixed contracts.
+2. **Units in parallel worktrees.** A Workflow runs one unit per git worktree with strict file
+   ownership: implement, then an independent diff review, then a fix pass for the confirmed
+   findings. Adapt the wave-1 script
+   (`~/.claude/projects/-Users-joshe-Repos-bcon/0dc0e617-c75a-41c7-9572-9538f0d60d50/workflows/scripts/overhaul-wave-1-wf_02804aca-05d.js`),
+   pointing its mockup path at the folder above.
+3. **One integration agent** merges the branches and applies the cross-unit contract requests.
+4. **Push `main`; CI must be green before the next wave starts.**
+
+Lessons from wave 1, for every brief and the integration step:
+
+- Each unit creates its own new i18n namespace files (`apps/web/src/i18n/locales/{en,es}/<unit>.json`)
+  instead of editing shared catalogs; integration runs `bun run --filter @commonair/web i18n:gen`.
+- When env vars change, regenerate the self-host env key lists (`bun scripts/selfhost/unit-env.ts`)
+  and check the selfhost seed-mode parity test.
+- Before pushing, run the unit tests of every touched package (targeted, never the full gate).
+
+### Wave 2: acquisition and content (D2 + D3)
+
+- **Sign-up and the gate:**
+  - the AuthGatePrompt for every signed-out action (follow, chat, support, predict, clip, 18+,
+    report);
+  - intent-aware sign-up.
+- **Acquisition pages:**
+  - the home hero, its CTA marked `data-filled-cta`;
+  - `/creators` with the sourced fee calculator;
+  - the public membership pitch and the `/coop` join band;
+  - the support dialog's money breakdown and its "$3+ makes you a member" line;
+  - public Terms, Privacy and Guidelines pages;
+  - first-party funnel counters and `/admin/growth`.
+- **Content and discovery:**
+  - home v2, the category Overview, directory and search v2, rail v2 and `/following`;
+  - Continue watching and the viewer Clip button;
+  - the offline channel as a content page;
+  - video and clip next-up shelves.
+- **The journey gaps:**
+  - the post-checkout welcome;
+  - membership started from the payment webhook, with a `membership` notification;
+  - "first vote" messaging from the real electorate.
+- **The cookie banner redesign:**
+  - Move it from the top to a floating bottom-corner card: bottom-right on desktop, a bottom
+    sheet inside the 16 px gutter on phones.
+  - Keep it above the bottom tab bar and never over the player.
+  - Use a raised D1 surface and copy from the voice guide, with a privacy link.
+  - "Accept" and "Decline non-essential" carry equal weight, and neither uses the brand fill.
+    "Choose" opens a per-category dialog.
+  - It is non-modal and needs no scroll lock. It is reachable by keyboard without stealing focus
+    on load, and Escape means no choice.
+  - Respect reduced motion, and keep the existing consent records (`apps/web/src/components/consent/`).
+  - Tests at 320, 375, 768 and 1440 px.
+- **Wave 1 leftovers:**
+  - The home hero and AuthGatePrompt CTAs carry `data-filled-cta`, with a test that the header's
+    Sign up turns to an outline next to the AuthGatePrompt.
+  - The `/following` tab link points at the page this wave builds.
+
+### Wave 3: watching and creating (D4 + D5)
+
+- **D4, the watch page:**
+  - the mobile watch layout (a sticky player, Chat | About);
+  - the Following split-button menu, and the one-time first-follow alert prompt (on iPhone before
+    install: email and an install hint, no Push);
+  - a calmer chat column;
+  - the points popover;
+  - owner shortcuts and trust badges;
+  - moderator tools: the chat-mode menu, Delete message, timeout lengths, the incoming-raid alert.
+- **D5, the studio:**
+  - the "Ready to go live" checklist, including "Bring your audience";
+  - the LiveStatusBar and a rebalanced dashboard;
+  - the stream recap;
+  - all three overlay links;
+  - the content library, analytics as bars, revenue tiles that add up;
+  - the studio nav regroup, and a mod-view link for moderators who do not own the channel.
+
+### Wave 4: the co-op, account and staff (D6 + D7)
+
+- **D6, the co-op:**
+  - transparency v2;
+  - plain-language governance (no JSON, "90% → 85%", proposal cards, vote bars, timelines);
+  - council pages;
+  - the studio co-op card.
+- **D7, account and admin:**
+  - the settings shell and `/settings/account`;
+  - `/settings/security` (two-factor, passkeys, sessions; this also closes the dead email link);
+  - the notifications grid, `/inbox` and the weekly digest;
+  - the deletion preview;
+  - the admin home, QueueLayout, `/admin/audit` and `/admin/users/$username`;
+  - the installable app: the manifest, the offline page and the install offer;
+  - report outcomes and the made-moderator notice.
+
+### Wave 5: cleanup and the deferred decisions
+
+- the app-wide 14 px reading-text sweep;
+- the ADR 0014 amendment, plus leaving the owner out of viewer counts;
+- the `ChannelSchedule` contract (next stream, Add to calendar);
+- a proration policy for unused paid time at deletion;
+- how treasurers reach deleted members to refund bank-transfer shares;
+- the interest list and points redemption stay parked until their triggers (decisions 3 and 4).
+
 ## What these passes did not cover
 
 - **The admin consoles:** reviewed from source and mocked, never walked live; `streamer1` is not an
