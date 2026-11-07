@@ -190,7 +190,13 @@ describe("checkout", () => {
     expect(call?.body.get("line_items[0][price_data][unit_amount]")).toBe("999");
     expect(call?.body.get("line_items[0][price_data][recurring][interval]")).toBe("month");
     expect(call?.body.get("subscription_data[metadata][payment_id]")).toBe(r.body.paymentId);
-    expect(call?.body.get("success_url")).toBe(`${api.url}/${streamer.username}`);
+    // F12: success and cancel differ, and both name the payment so the page can confirm it.
+    expect(call?.body.get("success_url")).toBe(
+      `${api.url}/${streamer.username}?checkout=success&payment=${r.body.paymentId}`,
+    );
+    expect(call?.body.get("cancel_url")).toBe(
+      `${api.url}/${streamer.username}?checkout=canceled&payment=${r.body.paymentId}`,
+    );
     const p = await paymentRow(r.body.paymentId);
     expect(p).toMatchObject({ provider: "stripe", status: "pending", amountCents: 999 });
     expect(p.providerRef).toMatch(/^CA-/);
@@ -202,6 +208,10 @@ describe("checkout", () => {
     expect(r.status).toBe(200);
     expect(r.body.paymentId).toBe(subPay.paymentId);
     expect(stripeCalls.slice(before).map((c) => c.key)).toEqual([`checkout-${subPay.paymentId}`]);
+    // The same payment, so the same return URLs: the idempotent create sees identical parameters.
+    expect(stripeCalls.at(-1)?.body.get("success_url")).toBe(
+      `${api.url}/${streamer.username}?checkout=success&payment=${subPay.paymentId}`,
+    );
   });
 });
 

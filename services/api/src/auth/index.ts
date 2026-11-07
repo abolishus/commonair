@@ -25,6 +25,7 @@ import { isCommittedUpload, keyOfRef } from "../moderation/committed.ts";
 import { recordAcceptances, currentRequiredDocuments } from "../lib/legal.ts";
 import { appUrl, publicLink, sendNotice } from "../mail.ts";
 import { verifyAltcha } from "./altcha.ts";
+import { withVerificationCallback } from "./callback.ts";
 import { ageProblem, usernameProblem } from "./identity.ts";
 
 type Tx = Parameters<Parameters<Database["transaction"]>[0]>[0];
@@ -170,7 +171,7 @@ export function createAuth(deps: Deps) {
           "verifyEmail",
           {
             displayName: user.name,
-            verifyUrl: publicLink(site, url),
+            verifyUrl: publicLink(site, withVerificationCallback(url, site.publicUrl)),
             expiresInMinutes: VERIFY_MINUTES,
             locale: localeOf(user),
           },
@@ -219,7 +220,7 @@ export function createAuth(deps: Deps) {
           throw bad(
             "INVALID_USERNAME",
             nameProblem === "reserved"
-              ? "This username is reserved"
+              ? "This username is reserved for a page on this site; choose another"
               : "Usernames are 3–25 lowercase letters, digits or underscores",
           );
         const age = ageProblem(body.birthDate, minAge, deps.now());

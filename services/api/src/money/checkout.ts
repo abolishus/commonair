@@ -35,6 +35,7 @@ import {
 } from "./checkout-shared.ts";
 import { deletionScheduledAmong } from "../moderation/deletion.ts";
 import { treasurerCheckoutHandlers } from "./checkout-treasurer.ts";
+import { checkoutReturnUrls } from "./return-urls.ts";
 
 export { treasurerCheckoutHandlers };
 
@@ -109,10 +110,10 @@ async function refuseWhileDeleting(deps: Deps, payerId: string, c: ChannelRow): 
   if (deleting.has(c.ownerId)) throw precondition("channel_active", "This channel cannot take payments right now");
 }
 
+/** The provider's return URLs for one payment: separate success and cancel pages (F12). */
 function returnUrls(deps: Deps, returnPath: string | undefined, c: ChannelRow) {
-  const base = deps.env.PUBLIC_URL.replace(/\/+$/, "");
-  const url = `${base}${returnPath ?? `/${c.slug}`}`;
-  return { successUrl: url, cancelUrl: url };
+  const path = returnPath ?? `/${c.slug}`;
+  return (paymentId: string) => checkoutReturnUrls(deps.env.PUBLIC_URL, path, paymentId);
 }
 
 /**
@@ -275,7 +276,7 @@ export const checkoutHandlers = {
                 creatorUserId: c.ownerId,
                 subscriptionId: held.id,
                 reference: p.providerRef,
-                ...urls,
+                ...urls(p.id),
               });
               return result(again, p.id, p.amountCents, p.currency);
             }
@@ -305,7 +306,7 @@ export const checkoutHandlers = {
             payerUserId: caller.user.id,
             creatorUserId: c.ownerId,
             subscriptionId,
-            ...urls,
+            ...urls(paymentId),
           });
           await tx.insert(subscriptions).values({
             id: subscriptionId,
@@ -384,7 +385,7 @@ export const checkoutHandlers = {
           recurring: false,
           payerUserId: caller.user.id,
           creatorUserId: c.ownerId,
-          ...urls,
+          ...urls(paymentId),
         });
         // Gift payments carry no subscription_id; their subscriptions point back via gift_payment_id.
         await tx.insert(payments).values({
@@ -529,7 +530,7 @@ export const checkoutHandlers = {
           recurring: false,
           payerUserId: caller.user.id,
           creatorUserId: c.ownerId,
-          ...urls,
+          ...urls(paymentId),
         });
         // Anonymous tips keep from_user_id (refunds need it); the channel never sees it.
         await tx.insert(tips).values({

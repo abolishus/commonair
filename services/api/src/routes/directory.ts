@@ -2,7 +2,21 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /** `directory.*` (fair discovery, see ../discovery/README.md) and `categories.*`. */
-import { and, desc, eq, gt, ilike, inArray, isNotNull, isNull, not, or, sql, type SQL } from "drizzle-orm";
+import {
+  and,
+  arrayOverlaps,
+  desc,
+  eq,
+  gt,
+  ilike,
+  inArray,
+  isNotNull,
+  isNull,
+  not,
+  or,
+  sql,
+  type SQL,
+} from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { vodPrefix } from "@commonair/contracts/storage";
 import { schema } from "@commonair/db";
@@ -25,7 +39,7 @@ import {
   type ChannelCard,
   type StreamCard,
 } from "../lib/dto.ts";
-import { topTags } from "../discovery/tags.ts";
+import { searchTags, topTags } from "../discovery/tags.ts";
 import { vodVisible } from "../media/visibility.ts";
 import { decodeCursor, encodeCursor, isOffsetCursor } from "../lib/cursor.ts";
 import { notFound } from "../lib/errors.ts";
@@ -129,10 +143,19 @@ function cardsFor(rows: LiveRow[], ordered: LiveEntry[], reason: Reason, limit =
 /**
  * Offline, unsuspended channels with their last ended broadcast, most recently live first.
  * `followerId` restricts to that user's follows and keeps channels that never broadcast.
+ * `categoryId` takes each channel's last broadcast in that category instead (F9), so a category
+ * page lists who streamed there lately even if they have since streamed something else.
  */
 async function loadOffline(
   deps: Deps,
-  opts: { allowMature: boolean; adult: boolean; language?: string | undefined; followerId?: string },
+  opts: {
+    allowMature: boolean;
+    adult: boolean;
+    language?: string | undefined;
+    followerId?: string;
+    categoryId?: string;
+    limit?: number;
+  },
 ): Promise<ChannelCard[]> {
   const last = deps.db
     .selectDistinctOn([broadcasts.channelId], {
@@ -144,7 +167,14 @@ async function loadOffline(
     })
     .from(broadcasts)
     // A rehearsal is private (decision (f)): it never makes a channel look recently live.
-    .where(and(isNotNull(broadcasts.endedAt), eq(broadcasts.kind, "live")))
+    .where(
+      and(
+        isNotNull(broadcasts.endedAt),
+        eq(broadcasts.kind, "live"),
+        // A T1-restricted broadcast is in no list; it never stands for its category either.
+        opts.categoryId ? and(eq(broadcasts.categoryId, opts.categoryId), isNull(broadcasts.restrictedAt)) : undefined,
+      ),
+    )
     .orderBy(broadcasts.channelId, desc(broadcasts.endedAt))
     .as("last");
   const followed = opts.followerId !== undefined;
@@ -178,7 +208,7 @@ async function loadOffline(
   const rows = await query
     .where(and(...conditions))
     .orderBy(sql`${last.endedAt} desc nulls last`, channels.slug)
-    .limit(HOME_SECTION);
+    .limit(opts.limit ?? HOME_SECTION);
   const latest = await latestVods(
     deps,
     rows.map((r) => r.c.id),
@@ -253,7 +283,6 @@ function latestVodRef(deps: Deps, v: LatestVodRow | undefined, cardMature: boole
 }
 
 const lowerTag = (tags: string[], tag: string) => tags.some((t) => t.toLowerCase() === tag.toLowerCase());
-
 export const directory = {
   home: os.directory.home.handler(async ({ context, input }) => {
     const { deps, caller } = context;
@@ -352,8 +381,34 @@ export const directory = {
     const doc = sql`to_tsvector('simple', ${channels.displayName} || ' ' || ${channels.title} || ' ' || ${channels.description})`;
     const query = sql`plainto_tsquery('simple', ${q})`;
     const like = `${q.toLowerCase().replace(/[\\%_]/g, (m) => `\\${m}`)}%`;
-    const rows = await deps.db
-      .select({ c: channels, ownerImage: users.image, rank: sql<number>`ts_rank(${doc}, ${query})` })
+    // F9: live streams also match on their stream title and tags, and come first. Searched on the
+    // live set only (at most MAX_LIVE rows), so the channel query below keeps its GIN index.
+    const streamDoc = sql`to_tsvector('simple', ${broadcasts.title})`;
+    const words = searchTags(q);
+    const liveRank = sql<number>`(ts_rank(${doc}, ${query}) + ts_rank(${streamDoc}, ${query}))`;
+    const liveRows = await deps.db
+      .select({ c: channels, ownerImage: users.image })
+      .from(channels)
+      .innerJoin(broadcasts, eq(broadcasts.id, channels.liveBroadcastId))
+      .innerJoin(users, eq(users.id, channels.ownerId))
+      .where(
+        and(
+          inLiveDirectory(),
+          adult ? undefined : and(eq(channels.mature, false), eq(broadcasts.mature, false)),
+          or(
+            sql`${doc} @@ ${query}`,
+            sql`${streamDoc} @@ ${query}`,
+            ilike(channels.slug, like),
+            words.length > 0 ? arrayOverlaps(channels.tags, words) : undefined,
+          ),
+        ),
+      )
+      .orderBy(desc(liveRank), desc(channels.followerCount), channels.slug)
+      .limit(input.limit);
+    // A viewer account (no followers, never broadcast) sinks below every channel that streams.
+    const viewerAccount = sql<boolean>`(${channels.followerCount} = 0 and not exists (select 1 from broadcasts vb where vb.channel_id = ${channels.id} and vb.kind = 'live'))`;
+    const channelRows = await deps.db
+      .select({ c: channels, ownerImage: users.image })
       .from(channels)
       .innerJoin(users, eq(users.id, channels.ownerId))
       .where(
@@ -365,8 +420,10 @@ export const directory = {
           adult ? undefined : eq(channels.mature, false),
         ),
       )
-      .orderBy(desc(sql`ts_rank(${doc}, ${query})`), desc(channels.followerCount))
+      .orderBy(viewerAccount, desc(sql`ts_rank(${doc}, ${query})`), desc(channels.followerCount), channels.slug)
       .limit(input.limit);
+    const seen = new Set(liveRows.map((r) => r.c.id));
+    const rows = [...liveRows, ...channelRows.filter((r) => !seen.has(r.c.id))].slice(0, input.limit);
     const live = await liveSummaries(
       deps,
       rows.map((r) => r.c),
@@ -528,6 +585,24 @@ export const categoriesRoutes = {
       items: await categoryDtos(deps, rows.slice(0, input.limit)),
       nextCursor: rows.length > input.limit ? encodeCursor({ o: offset + input.limit }) : null,
     };
+  }),
+  recentlyLive: os.categories.recentlyLive.handler(async ({ context, input }) => {
+    const { deps, caller } = context;
+    const [[category], adult] = await Promise.all([
+      deps.db.select().from(categories).where(eq(categories.slug, input.slug)).limit(1),
+      confirmedAdult(deps, caller?.user.id),
+    ]);
+    if (!category) throw notFound("Category not found");
+    const allowMature = input.includeMature && adult;
+    // A mature category has nothing for anyone who has not opted in, as in `directory.live`.
+    if (category.mature && !allowMature) return [];
+    return loadOffline(deps, {
+      allowMature,
+      adult,
+      language: input.language,
+      categoryId: category.id,
+      limit: input.limit,
+    });
   }),
   get: os.categories.get.handler(async ({ context: { deps }, input }) => {
     const [row] = await categoriesWithCounts(deps).query.where(eq(categories.slug, input.slug)).limit(1);

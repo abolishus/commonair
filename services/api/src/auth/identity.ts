@@ -98,6 +98,20 @@ export const RESERVED_USERNAMES: ReadonlySet<string> = new Set([
   "videos",
   "vods",
   "www",
+  // Marketing and help pages (design overhaul F10): reserved before anyone can take them.
+  "creators",
+  "fees",
+  "faq",
+  "join",
+  "pricing",
+  "membership",
+  "press",
+  "guidelines",
+  "inbox",
+  "studio",
+  "activate",
+  "revenue",
+  "treasury",
 ]);
 /**
  * `tracker`: Caddy's `handle_path /tracker*` matches any path that merely starts with it

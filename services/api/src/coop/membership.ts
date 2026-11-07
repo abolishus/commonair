@@ -31,6 +31,7 @@ import { badRequest, conflict, forbidden, notFound, precondition } from "../lib/
 import { os, requireCaller } from "../lib/orpc.ts";
 import { withCoopErrors, withCoopErrorsRetrying } from "./errors.ts";
 import { deletionScheduledAmong } from "../moderation/deletion.ts";
+import { checkoutReturnUrls } from "../money/return-urls.ts";
 import { MEMBER, STAFF, money, unknownUser, userPicks } from "./shared.ts";
 import {
   activateMembership as activate,
@@ -188,8 +189,8 @@ export const membershipHandlers = {
     const { payoutRules } = await loadMoneySettings(deps.db);
     const currency = payoutRules.currency;
     const adapter = mode === "card" ? shareAdapter(deps) : createAdapter({ ...deps.env, PAYMENTS_PROVIDER: "manual" });
-    const base = deps.env.PUBLIC_URL.replace(/\/+$/, "");
-    const urls = { successUrl: `${base}/coop/membership`, cancelUrl: `${base}/coop/membership` };
+    // Separate success and cancel returns naming the payment (F12); bank transfers never redirect.
+    const urls = (paymentId: string) => checkoutReturnUrls(deps.env.PUBLIC_URL, "/coop/membership", paymentId);
     // A manual reference collision (`payments_provider_ref_uq`) mints a new one.
     return withCoopErrorsRetrying("payments_provider_ref_uq", () =>
       deps.db.transaction(async (tx) => {
@@ -215,7 +216,7 @@ export const membershipHandlers = {
               payerUserId: caller.user.id,
               creatorUserId: null,
               reference: p.providerRef,
-              ...urls,
+              ...urls(p.id),
             });
             if (again.kind === "redirect") return { kind: "redirect" as const, url: again.url, paymentId: p.id };
             throw conflict("You already have a member share");
@@ -244,7 +245,7 @@ export const membershipHandlers = {
           recurring: false,
           payerUserId: caller.user.id,
           creatorUserId: null,
-          ...urls,
+          ...urls(paymentId),
         });
         await tx.insert(payments).values({
           id: paymentId,

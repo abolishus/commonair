@@ -402,6 +402,26 @@ export const contract = {
       })
       .input(z.object({ slug: ShortText }))
       .output(D.Category),
+    /**
+     * Offline channels whose latest broadcast in this category ended most recently, newest first:
+     * what a category page shows when nobody is live in it (F9). Unranked, like `recentlyLive`.
+     */
+    recentlyLive: base
+      .route({
+        method: "GET",
+        path: "/categories/{slug}/recently-live",
+        summary: "Channels recently live in one category",
+        ...tag("Directory"),
+      })
+      .input(
+        z.object({
+          slug: ShortText,
+          language: ShortText.optional(),
+          includeMature: z.boolean().default(false),
+          limit: z.number().int().min(1).max(48).default(24),
+        }),
+      )
+      .output(z.array(D.ChannelCard)),
   },
 
   directory: {
