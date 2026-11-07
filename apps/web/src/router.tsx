@@ -12,7 +12,7 @@ export function getRouter() {
     defaultPreload: "intent",
     // Every route without its own (embeds, overlays, leaf pages) gets the shared states with an
     // action, never TanStack's default page with its "Show Error" details (F13).
-    defaultErrorComponent: ({ reset }) => <ErrorState reset={reset} />,
+    defaultErrorComponent: ({ error, reset }) => <ErrorState error={error} reset={reset} />,
     defaultNotFoundComponent: () => <NotFoundState />,
   });
 }

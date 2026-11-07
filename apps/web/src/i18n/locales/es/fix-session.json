@@ -1,0 +1,12 @@
+{
+  "fixSession.load.title": "No se pudo cargar: {section}.",
+  "fixSession.load.pageTitle": "No se pudo cargar la página.",
+  "fixSession.load.sectionBody": "El resto de la página funciona.",
+  "fixSession.load.pageBody": "Revisa tu conexión y vuelve a intentarlo.",
+  "fixSession.load.busy": "Hay mucha actividad ahora. Reintentando en {seconds, plural, one {# segundo} other {# segundos}}…",
+  "fixSession.load.stillFailing": "Sigue sin cargar. Vuelve a intentarlo en unos minutos.",
+  "fixSession.retry": "Reintentar",
+  "fixSession.retryNow": "Reintentar ahora",
+  "fixSession.session.checking": "Comprobando tu cuenta…",
+  "fixSession.session.retry": "Comprobar tu cuenta otra vez"
+}

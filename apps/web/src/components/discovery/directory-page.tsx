@@ -20,10 +20,11 @@ import {
 import { Label } from "@commonair/ui/components/label";
 import { toast } from "@commonair/ui/toast";
 import { PageContainer } from "@commonair/ui/layouts";
-import { AlertCircleIcon, GridViewIcon, LiveStreaming02Icon } from "@hugeicons/core-free-icons";
+import { GridViewIcon, LiveStreaming02Icon } from "@hugeicons/core-free-icons";
 import { Link, useNavigate } from "@tanstack/react-router";
 import * as React from "react";
 import { t } from "../../i18n/index.ts";
+import { RouteSectionLoadError } from "../../lib/section-load-error.tsx";
 import { api } from "../../lib/api.ts";
 import { appendPage, collidingNames, sortCategories, tagOptions } from "../../lib/directory-sections.ts";
 import { DiscoveryCategoryGrid } from "./category-tiles.tsx";
@@ -66,7 +67,11 @@ export function DirectoryPage({ data, view, tag }: DirectoryPageProps): React.JS
         }
       />
       {data === null ? (
-        <EmptyState icon={AlertCircleIcon} title={t("discovery.directory.loadFailed")} />
+        <RouteSectionLoadError
+          data-testid="directory-load-error"
+          section={view === "categories" ? t("discovery.directory.categories") : t("discovery.directory.live")}
+          alone
+        />
       ) : (
         <>
           <TagFilter options={tagOptions(data.live.items)} tag={tag} />

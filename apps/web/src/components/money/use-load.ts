@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import * as React from "react";
+import { withBackoff } from "../../lib/retry.ts";
+import { useRetryingLoad } from "../../lib/retrying-load.ts";
 
 export interface Loaded<T> {
   /** null until the first successful load for the current key. */
@@ -12,46 +14,12 @@ export interface Loaded<T> {
 }
 
 /**
- * Loads `load()` whenever `key` changes, client-side. An answer for an older key or an older
+ * Loads `load()` whenever `key` changes, client-side, through `useRetryingLoad`: a busy or
+ * unreachable API retries by itself with backoff (F2). An answer for an older key or an older
  * request is dropped, so a slow response cannot overwrite a newer one.
  */
 export function useLoad<T>(key: string, load: () => Promise<T>): Loaded<T> {
-  const [state, setState] = React.useState<{ key: string; data: T | null; failed: boolean }>({
-    key,
-    data: null,
-    failed: false,
-  });
-  const seq = React.useRef(0);
-  const loadRef = React.useRef(load);
-  // Declared before the loading effect, so it runs first and the load sees the latest closure.
-  React.useEffect(() => {
-    loadRef.current = load;
-  });
-
-  const run = React.useCallback(() => {
-    const id = ++seq.current;
-    loadRef
-      .current()
-      .then((data) => {
-        if (id === seq.current) setState({ key, data, failed: false });
-      })
-      .catch(() => {
-        if (id === seq.current) setState((prev) => ({ key, data: prev.key === key ? prev.data : null, failed: true }));
-      });
-  }, [key]);
-
-  React.useEffect(() => {
-    run();
-    // The counter object itself, not a DOM ref: bumping it is how in-flight answers get dropped.
-    const counter = seq;
-    return () => {
-      // Unmount or key change: drop whatever is still in flight.
-      counter.current++;
-    };
-  }, [run]);
-
-  const current = state.key === key ? state : { data: null, failed: false };
-  return { data: current.data, failed: current.failed, reload: run };
+  return useRetryingLoad(key, load);
 }
 
 export interface Page<T> {
@@ -65,7 +33,7 @@ export interface Paged<T> {
   failed: boolean;
   hasMore: boolean;
   loadingMore: boolean;
-  /** Appends the next page; a failure is reported through `onMoreError`. */
+  /** Appends the next page (retrying a busy API by itself); a failure is reported through `onMoreError`. */
   loadMore: () => void;
   /** Loads the first page again (after an action); the current rows stay until it arrives. */
   reload: () => void;
@@ -100,8 +68,8 @@ export function usePaged<T>(
     const base = first.data;
     if (!cursor || !base || loadingMore) return;
     setLoadingMore(true);
-    loadRef
-      .current(cursor)
+    // A busy or unreachable API gets the same automatic retries as the first page.
+    withBackoff(() => loadRef.current(cursor))
       .then((page) =>
         setMore((prev) => {
           const current = prev.base === base ? prev : { base, items: [], cursor };

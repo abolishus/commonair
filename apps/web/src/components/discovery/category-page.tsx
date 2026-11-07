@@ -18,6 +18,7 @@ import { GridViewIcon, LiveStreaming02Icon, Scissor01Icon, Video01Icon } from "@
 import { Link } from "@tanstack/react-router";
 import type * as React from "react";
 import { t } from "../../i18n/index.ts";
+import { RouteSectionLoadError } from "../../lib/section-load-error.tsx";
 import { tagLink } from "../../lib/category-route.ts";
 import {
   ClipFilters,
@@ -237,6 +238,15 @@ function CategoryClips({
         }
       />
     </div>
+  );
+}
+
+/** The category's channels did not load (busy or unreachable API): say so, with Retry. */
+export function CategoryLoadFailed(): React.JSX.Element {
+  return (
+    <PageContainer width="wide" className="py-6">
+      <RouteSectionLoadError data-testid="category-load-error" section={t("discovery.category.tabLive")} alone />
+    </PageContainer>
   );
 }
 

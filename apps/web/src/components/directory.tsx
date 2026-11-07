@@ -11,6 +11,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { Link } from "@tanstack/react-router";
 import type * as React from "react";
 import { t } from "../i18n/index.ts";
+import { RouteSectionLoadError } from "../lib/section-load-error.tsx";
 import { categoryLink } from "../lib/category-route.ts";
 import {
   collidingNames,
@@ -55,6 +56,8 @@ export interface DirectoryProps {
   hero?: StreamCard | null;
   /** The busiest categories, for the Categories shelf. */
   categories?: Category[];
+  /** The categories did not load: the shelf says so, with Retry, instead of hiding. */
+  categoriesFailed?: boolean;
   /** Categories with enough live channels for a shelf of their own. */
   categoryShelves?: CategoryShelf[];
   /** The way forward when nothing is live (start streaming, sign up). */
@@ -74,6 +77,7 @@ export function Directory({
   offline = [],
   hero = null,
   categories = [],
+  categoriesFailed = false,
   categoryShelves = [],
   emptyAction,
 }: DirectoryProps): React.JSX.Element {
@@ -126,7 +130,10 @@ export function Directory({
           <DiscoveryStreamGrid cards={section.cards} collisions={collisions} showReason={section.id !== "following"} />
         </Section>
       ))}
-      {sections !== null && liveCategories.length > 0 && (
+      {sections !== null && categoriesFailed && (
+        <RouteSectionLoadError data-testid="home-categories-load-error" section={t("discovery.home.categories")} />
+      )}
+      {sections !== null && !categoriesFailed && liveCategories.length > 0 && (
         <Section
           data-testid="home-categories-shelf"
           heading={t("discovery.home.categories")}

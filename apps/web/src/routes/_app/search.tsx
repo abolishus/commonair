@@ -21,7 +21,8 @@ export const Route = createFileRoute("/_app/search")({
 });
 
 function Search(): React.JSX.Element {
-  const results = Route.useLoaderData();
+  const result = Route.useLoaderData();
+  const results = result.status === "ok" ? result.data : null;
   const { q } = Route.useSearch();
   return <SearchPage q={q ?? ""} results={results} />;
 }

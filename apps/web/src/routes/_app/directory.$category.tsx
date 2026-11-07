@@ -5,13 +5,14 @@ import { createFileRoute, notFound } from "@tanstack/react-router";
 import * as React from "react";
 import { clipFilterFrom, type ClipFilter } from "../../components/channel/clip-filters.tsx";
 import {
+  CategoryLoadFailed,
   CategoryNotFound,
   CategoryPage,
   categoryTabSearch,
   parseCategorySearch,
   type CategoryTab,
 } from "../../components/discovery/category-page.tsx";
-import { getCategoryPage } from "../../components/discovery/loaders.ts";
+import { getCategoryPage, type CategoryPageData } from "../../components/discovery/loaders.ts";
 import { DiscoveryPending } from "../../components/discovery/pending.tsx";
 import { t } from "../../i18n/index.ts";
 import { titleHead } from "../../lib/page-title.ts";
@@ -27,7 +28,11 @@ export const Route = createFileRoute("/_app/directory/$category")({
   // A tab or filter switch stays on the page: Videos and Clips load their own lists.
   shouldReload: ({ cause }) => cause !== "stay",
   head: ({ loaderData }) =>
-    titleHead(loaderData ? t("pageTitle.category", { category: loaderData.category.name }) : t("pageTitle.directory")),
+    titleHead(
+      loaderData?.status === "ok"
+        ? t("pageTitle.category", { category: loaderData.data.category.name })
+        : t("pageTitle.directory"),
+    ),
   staleTime: 0,
   pendingMs: 150,
   pendingComponent: DiscoveryPending,
@@ -36,7 +41,12 @@ export const Route = createFileRoute("/_app/directory/$category")({
 });
 
 function Category(): React.JSX.Element {
-  const { category, live } = Route.useLoaderData();
+  const page = Route.useLoaderData();
+  if (page.status === "failed") return <CategoryLoadFailed />;
+  return <CategoryLoaded {...page.data} />;
+}
+
+function CategoryLoaded({ category, live }: CategoryPageData): React.JSX.Element {
   // Parsed again: unvalidated keys from the raw URL reach `useSearch` beside the validated ones.
   const search = parseCategorySearch(Route.useSearch());
   const { tab: picked } = search;

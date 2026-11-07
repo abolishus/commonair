@@ -24,7 +24,8 @@ export const Route = createFileRoute("/_app/directory/")({
 });
 
 function Directory(): React.JSX.Element {
-  const data = Route.useLoaderData();
+  const result = Route.useLoaderData();
+  const data = result.status === "ok" ? result.data : null;
   const search = Route.useSearch();
   return <DirectoryPage data={data} view={directoryView(search)} tag={search.tag} />;
 }

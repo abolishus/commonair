@@ -70,7 +70,7 @@ function RootNotFound(): React.JSX.Element {
  * The root itself failed (its loader, or a page outside every layout): a whole document, since the
  * root's own `<html>` is gone. No bootstrap here, so no header, and the default theme.
  */
-function RootError({ reset }: ErrorComponentProps): React.JSX.Element {
+function RootError({ error, reset }: ErrorComponentProps): React.JSX.Element {
   const pathname = useLocation({ select: (location) => location.pathname });
   const locale = activeLocale();
   const chrome = rootChrome(pathname, "dark");
@@ -83,7 +83,7 @@ function RootError({ reset }: ErrorComponentProps): React.JSX.Element {
         <LocaleProvider locale={locale} messages={uiMessagesFor(locale)}>
           <TooltipProvider>
             <main id="main-content">
-              <ErrorState reset={reset} />
+              <ErrorState error={error} reset={reset} />
             </main>
           </TooltipProvider>
         </LocaleProvider>

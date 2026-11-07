@@ -10,11 +10,12 @@ import { Section } from "@commonair/ui/blocks/headers";
 import { CategoryTile } from "@commonair/ui/blocks/media";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@commonair/ui/components/input-group";
 import { PageContainer } from "@commonair/ui/layouts";
-import { AlertCircleIcon, Search01Icon } from "@hugeicons/core-free-icons";
+import { Search01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import * as React from "react";
 import { t } from "../../i18n/index.ts";
+import { RouteSectionLoadError } from "../../lib/section-load-error.tsx";
 import { categoryHref, categoryLink } from "../../lib/category-route.ts";
 import { collidingNames, displayLabel } from "../../lib/directory-sections.ts";
 import { liveLabel, tileData, viewerLabel } from "./category-tiles.tsx";
@@ -123,7 +124,7 @@ export function SearchResults({ q, results }: { q: string; results: SearchData |
       {!q ? (
         <EmptyState icon={Search01Icon} title={t("discovery.search.prompt")} />
       ) : results === null ? (
-        <EmptyState icon={AlertCircleIcon} title={t("discovery.search.failed")} />
+        <RouteSectionLoadError data-testid="search-load-error" section={t("discovery.search.title")} alone />
       ) : total === 0 ? (
         <EmptyState
           data-testid="search-empty"

@@ -17,7 +17,7 @@ import {
   type CostInput,
   type PayoutAccountInput,
 } from "../src/components/money/treasury.tsx";
-import { usePaged, type Page } from "../src/components/money/use-load.ts";
+import { useLoad, usePaged, type Page } from "../src/components/money/use-load.ts";
 import { en } from "../src/i18n/en.ts";
 import { locale, uiMessages } from "../src/i18n/index.ts";
 import type { SubTierDto, TreasurerPaymentDto } from "../src/lib/money.ts";
@@ -90,6 +90,59 @@ describe("usePaged", () => {
     rerender({ k: "b" });
     expect(result.current.items).toBeNull();
     await waitFor(() => expect(result.current.items).toEqual([1]));
+  });
+});
+
+describe("useLoad and load more on a busy API (F2)", () => {
+  const busy = () =>
+    Object.assign(new Error("busy"), { code: "RATE_LIMITED", status: 429, data: { retryAfterSeconds: 1 } });
+
+  afterEach(() => vi.useRealTimers());
+
+  it("useLoad retries a 429 by itself after retryAfterSeconds", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let calls = 0;
+    const load = vi.fn<() => Promise<string>>(async () => {
+      calls++;
+      if (calls === 1) throw busy();
+      return "ok";
+    });
+    const { result } = renderHook(() => useLoad("k", load));
+    await waitFor(() => expect(result.current.failed).toBe(true));
+    await act(() => vi.advanceTimersByTimeAsync(1_000));
+    await waitFor(() => expect(result.current.data).toBe("ok"));
+    expect(result.current.failed).toBe(false);
+    expect(load).toHaveBeenCalledTimes(2);
+  });
+
+  it("useLoad does not retry a 500 by itself", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const load = vi.fn<() => Promise<string>>(async () => {
+      throw Object.assign(new Error("bug"), { status: 500 });
+    });
+    const { result } = renderHook(() => useLoad("k", load));
+    await waitFor(() => expect(result.current.failed).toBe(true));
+    await act(() => vi.advanceTimersByTimeAsync(10_000));
+    expect(load).toHaveBeenCalledOnce();
+  });
+
+  it("load more retries a 429 page by itself; the error is reported only if the retries run out", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const onMoreError = vi.fn<(err: unknown) => void>();
+    let more = 0;
+    const load = vi.fn<(cursor: string | undefined) => Promise<Page<number>>>(async (cursor: string | undefined) => {
+      if (!cursor) return { items: [1], nextCursor: "c1" };
+      more++;
+      if (more === 1) throw busy();
+      return { items: [2], nextCursor: null };
+    });
+    const { result } = renderHook(() => usePaged("k", load, onMoreError));
+    await waitFor(() => expect(result.current.items).toEqual([1]));
+    act(() => result.current.loadMore());
+    await act(() => vi.advanceTimersByTimeAsync(1_000));
+    await waitFor(() => expect(result.current.items).toEqual([1, 2]));
+    expect(onMoreError).not.toHaveBeenCalled();
+    expect(load.mock.calls.map((c) => c[0])).toEqual([undefined, "c1", "c1"]);
   });
 });
 

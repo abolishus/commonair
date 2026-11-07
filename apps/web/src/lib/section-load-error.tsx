@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { LoadError } from "@commonair/ui/blocks/feedback";
+import { useRouter } from "@tanstack/react-router";
 import type * as React from "react";
 import { loadErrorNote, loadErrorTitle, loadRetryLabel } from "./load-copy.ts";
 import type { RetryStatus } from "./retrying-load.ts";
@@ -53,4 +54,13 @@ export function SectionLoadError({
       onRetry={load.reload}
     />
   );
+}
+
+/**
+ * `SectionLoadError` for a section that came from a route loader (a discovery page's server
+ * render): Retry reloads the route's data.
+ */
+export function RouteSectionLoadError(props: Omit<SectionLoadErrorProps, "load">): React.JSX.Element {
+  const router = useRouter();
+  return <SectionLoadError {...props} load={{ reload: () => void router.invalidate() }} />;
 }

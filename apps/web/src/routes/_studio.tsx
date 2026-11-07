@@ -43,10 +43,10 @@ export const Route = createFileRoute("/_studio")({
 });
 
 /** The boundary replaced the studio layout: the public chrome, not a sidebar that may have failed. */
-function StudioError({ reset }: ErrorComponentProps): React.JSX.Element {
+function StudioError({ error, reset }: ErrorComponentProps): React.JSX.Element {
   return (
     <ShellFallback wrap>
-      <ErrorState reset={reset} />
+      <ErrorState error={error} reset={reset} />
     </ShellFallback>
   );
 }

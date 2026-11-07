@@ -9,8 +9,25 @@
 import type { Category, StreamCard } from "@commonair/contracts/dto";
 import { createServerFn } from "@tanstack/react-start";
 import { getRequestHeader } from "@tanstack/react-start/server";
-import { errorCode, serverApi } from "../../lib/api.ts";
+import { serverApi } from "../../lib/api.ts";
+import { loadFailureKind, retryAfterSeconds } from "../../lib/load-failure.ts";
 import { loadWebEnv } from "../../server/env.ts";
+
+/**
+ * A discovery loader's answer (F2): the data, or that the API did not answer it (busy, down, or
+ * broken), so the page shows the section that did not load with a Retry instead of hiding it or
+ * claiming there is nothing.
+ */
+export type LoaderResult<T> = { status: "ok"; data: T } | { status: "failed"; retryAfterSeconds: number | null };
+
+export function loaderOk<T>(data: T): LoaderResult<T> {
+  return { status: "ok", data };
+}
+
+/** A failed load as a result, with the server's retry hint when it gave one. */
+export function loaderFailed(err: unknown): { status: "failed"; retryAfterSeconds: number | null } {
+  return { status: "failed", retryAfterSeconds: retryAfterSeconds(err) };
+}
 
 export interface Page<T> {
   items: T[];
@@ -61,10 +78,10 @@ const TEXT = (value: unknown, max = 80): string | undefined => {
   return text === "" ? undefined : text.slice(0, max);
 };
 
-/** `/directory`: the category grid and the live channels (optionally one tag), or null when the API is down. */
+/** `/directory`: the category grid and the live channels (optionally one tag). */
 export const getDirectoryPage = createServerFn({ method: "GET" })
   .validator((input: { tag?: string }) => ({ tag: TEXT(input.tag) }))
-  .handler(async ({ data }): Promise<DirectoryPageData | null> => {
+  .handler(async ({ data }): Promise<LoaderResult<DirectoryPageData>> => {
     try {
       const api = serverApi(loadWebEnv().API_INTERNAL_URL, cookieHeaders(getRequestHeader("cookie")));
       // The tag list comes from the unfiltered page, so a picked tag does not narrow the choices.
@@ -73,52 +90,50 @@ export const getDirectoryPage = createServerFn({ method: "GET" })
         api.directory.live({ limit: DIRECTORY_LIVE_PAGE, sort: "viewers_desc" }),
         data.tag ? api.directory.live({ limit: LIVE_PAGE, sort: "viewers_desc", tag: data.tag }) : undefined,
       ]);
-      return tagged ? { categories, live, tagged } : { categories, live };
-    } catch {
-      return null;
+      return loaderOk(tagged ? { categories, live, tagged } : { categories, live });
+    } catch (err) {
+      return loaderFailed(err);
     }
   });
 
-/** The home page's Categories shelf: the busiest few. Empty when the API is down (the shelf hides). */
-export const getHomeCategories = createServerFn({ method: "GET" }).handler(async (): Promise<Category[]> => {
-  try {
-    return (
-      await serverApi(loadWebEnv().API_INTERNAL_URL, cookieHeaders(getRequestHeader("cookie"))).categories.list({
-        limit: 8,
-      })
-    ).items;
-  } catch {
-    return [];
-  }
-});
+/** The home page's Categories shelf: the busiest few. */
+export const getHomeCategories = createServerFn({ method: "GET" }).handler(
+  async (): Promise<LoaderResult<Category[]>> => {
+    try {
+      const api = serverApi(loadWebEnv().API_INTERNAL_URL, cookieHeaders(getRequestHeader("cookie")));
+      return loaderOk((await api.categories.list({ limit: 8 })).items);
+    } catch (err) {
+      return loaderFailed(err);
+    }
+  },
+);
 
 /** `/directory/$category`: the category and its live channels; `undefined` when it does not exist. */
 export const getCategoryPage = createServerFn({ method: "GET" })
   .validator((input: { slug: string }) => ({ slug: String(input.slug).slice(0, 80) }))
-  .handler(async ({ data }): Promise<CategoryPageData | undefined> => {
+  .handler(async ({ data }): Promise<LoaderResult<CategoryPageData> | undefined> => {
     const api = serverApi(loadWebEnv().API_INTERNAL_URL, cookieHeaders(getRequestHeader("cookie")));
     try {
       const [category, live] = await Promise.all([
         api.categories.get({ slug: data.slug }),
         api.directory.live({ category: data.slug, limit: LIVE_PAGE, sort: "viewers_desc" }),
       ]);
-      return { category, live };
+      return loaderOk({ category, live });
     } catch (err) {
-      if (errorCode(err) === "NOT_FOUND") return undefined;
-      throw err;
+      if (loadFailureKind(err) === "notFound") return undefined;
+      return loaderFailed(err);
     }
   });
 
-/** `/search?q=`: channels and categories. An empty query asks nothing. Null when the API is down. */
+/** `/search?q=`: channels and categories. An empty query asks nothing. */
 export const getSearch = createServerFn({ method: "GET" })
   .validator((input: { q?: string }) => ({ q: TEXT(input.q) }))
-  .handler(async ({ data }): Promise<SearchData | null> => {
-    if (!data.q) return { channels: [], categories: [] };
+  .handler(async ({ data }): Promise<LoaderResult<SearchData>> => {
+    if (!data.q) return loaderOk({ channels: [], categories: [] });
     try {
-      return await serverApi(loadWebEnv().API_INTERNAL_URL, cookieHeaders(getRequestHeader("cookie"))).directory.search(
-        { q: data.q, limit: 20 },
-      );
-    } catch {
-      return null;
+      const api = serverApi(loadWebEnv().API_INTERNAL_URL, cookieHeaders(getRequestHeader("cookie")));
+      return loaderOk(await api.directory.search({ q: data.q, limit: 20 }));
+    } catch (err) {
+      return loaderFailed(err);
     }
   });

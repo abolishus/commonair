@@ -170,6 +170,7 @@ describe("the results", () => {
   it("says when search is down instead of claiming no results", async () => {
     await renderInRouter(<SearchResults q="demo" results={null} />);
     expect(screen.queryByTestId("search-empty")).toBeNull();
+    expect(screen.getByTestId("search-load-error").textContent).toContain("Search didn't load.");
     expect(screen.getByTestId("search-announcement").textContent).toBe("");
   });
 });

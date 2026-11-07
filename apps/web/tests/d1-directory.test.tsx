@@ -6,7 +6,7 @@
  * D1-web (F1, F10): `/directory`. Categories sorted by live channels then viewers, the tag filter,
  * the generated fallback tile (the same for the same slug, every time), and "Show more".
  */
-import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { ART, GAMES, MUSIC, boot, category, home, live, offline, renderInRouter } from "./d1-fixtures.tsx";
 
@@ -274,9 +274,12 @@ describe("the tag filter and the Live channels view", () => {
     expect(card.querySelector("a a")).toBeNull();
   });
 
-  it("says when the directory could not be loaded", async () => {
+  it("says which view did not load, with Retry, when the directory could not be loaded", async () => {
     await renderInRouter(<DirectoryPage data={null} view="categories" />, "/directory");
-    expect(screen.getByText("The directory didn't load. Refresh the page to retry.")).toBeTruthy();
+    const error = screen.getByTestId("directory-load-error");
+    expect(error.textContent).toContain("Categories didn't load.");
+    expect(error.textContent).toContain("Check your connection, then retry.");
+    expect(within(error).getByRole("button", { name: "Retry" })).toBeTruthy();
   });
 });
 

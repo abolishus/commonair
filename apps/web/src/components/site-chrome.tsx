@@ -1,14 +1,16 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { ThemeToggle } from "@commonair/ui";
+import { IconButton, ThemeToggle } from "@commonair/ui";
 import { Button } from "@commonair/ui/components/button";
 import { SidebarTrigger } from "@commonair/ui/components/sidebar";
 import { SiteFooter, SiteHeader, type FooterLink, type NavItem } from "@commonair/ui/layouts";
+import { Loading03Icon, UserCircleIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { Link, useLocation } from "@tanstack/react-router";
 import * as React from "react";
 import { t } from "../i18n/index.ts";
-import { useBootstrap } from "../lib/bootstrap.ts";
+import { useBootstrap, useSessionRetry } from "../lib/bootstrap.ts";
 import {
   accountMenu,
   footerColumns,
@@ -29,6 +31,29 @@ import { useAccountItems } from "./shell/account-items.tsx";
 import { useAuthRedirect } from "./shell/auth-redirect.ts";
 import { BrandMark } from "./shell/brand-mark.tsx";
 import { useFilledCtaInView } from "./shell/use-filled-cta.ts";
+
+/**
+ * The account slot while the session is unresolved (F1): the visitor may well be signed in, so a
+ * neutral account icon that asks again, spinning while a lookup is under way.
+ */
+function SessionPlaceholder(): React.JSX.Element {
+  const session = useSessionRetry();
+  return (
+    <IconButton
+      data-testid="session-retry"
+      label={session.retrying ? t("fixSession.session.checking") : t("fixSession.session.retry")}
+      aria-busy={session.retrying || undefined}
+      onClick={session.retry}
+    >
+      <HugeiconsIcon
+        icon={session.retrying ? Loading03Icon : UserCircleIcon}
+        strokeWidth={2}
+        aria-hidden
+        className={session.retrying ? "motion-safe:animate-spin" : undefined}
+      />
+    </IconButton>
+  );
+}
 
 /**
  * Sign in and Sign up for visitors, at every width (decisions log): compact, both carrying
@@ -95,14 +120,16 @@ export function AppHeader({
   studio?: boolean;
   tabBar?: boolean;
 }): React.JSX.Element {
-  const { me, instance } = useBootstrap();
+  const { me, instance, sessionUnresolved } = useBootstrap();
   const { theme, setTheme } = React.useContext(ThemeContext);
   const pathname = useLocation({ select: (location) => location.pathname });
   // The whole href, so a new search submitted on /search also closes the phone sheet.
   const locationKey = useLocation({ select: (location) => location.href });
   const [searchOpen, setSearchOpen] = React.useState(false);
   const [paletteOpen, setPaletteOpen] = React.useState(false);
-  const filledCtaInView = useFilledCtaInView(me === null);
+  // While the session is unresolved the visitor may be signed in: no Sign in / Sign up (F1).
+  const signedOut = me || sessionUnresolved ? [] : accountMenu(false, pathname);
+  const filledCtaInView = useFilledCtaInView(signedOut.length > 0);
   const accountItems = useAccountItems();
 
   const nav: NavItem[] = siteNav(pathname).map((entry) =>
@@ -158,12 +185,10 @@ export function AppHeader({
                 items={accountItems}
               />
             </>
+          ) : sessionUnresolved ? (
+            <SessionPlaceholder />
           ) : (
-            <SignedOutActions
-              entries={accountMenu(false, pathname)}
-              signInInTabBar={tabBar}
-              outline={filledCtaInView}
-            />
+            <SignedOutActions entries={signedOut} signInInTabBar={tabBar} outline={filledCtaInView} />
           )
         }
         mobileActions={

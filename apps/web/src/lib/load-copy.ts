@@ -2,10 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * The words of a load failure (F3), in one place. For now they come from keys the catalogs
- * already have: the section's own heading names what did not load, and the note says to try
- * again. The voice-copy wording ("{section} didn't load.", "Retrying in N seconds…", "Retry now")
- * waits for its catalog keys; when they land, only this file changes.
+ * The words of a load failure (F3, voice-copy 4.10), in one place: "{section} didn't load." plus
+ * what happens next, and Retry (Retry now while an automatic retry is scheduled).
  */
 import { t } from "../i18n/index.ts";
 
@@ -22,27 +20,30 @@ export type LoadNote =
 
 /** The heading: the section's own name, already translated ("Open proposals"). */
 export function loadErrorTitle(section: string): string {
-  return section;
+  return t("fixSession.load.title", { section });
 }
 
 /** The heading when the whole page did not load (an error boundary's busy page). */
 export function loadErrorPageTitle(): string {
-  return t("coop.loadFailedTitle");
+  return t("fixSession.load.pageTitle");
 }
 
 /** `seconds`: the wait before the scheduled retry, when one is known (for the "busy" note). */
-export function loadErrorNote(note: LoadNote, _seconds?: number): string {
+export function loadErrorNote(note: LoadNote, seconds?: number): string {
   switch (note) {
-    case "page":
-    case "stillFailing":
-      return t("refundRequests.retryHint");
     case "section":
+      return t("fixSession.load.sectionBody");
+    case "page":
+      return t("fixSession.load.pageBody");
     case "busy":
-      return t("coop.loadFailed");
+      // No known wait: only the session recovery retries that way, so say what it is doing.
+      return seconds === undefined ? t("fixSession.session.checking") : t("fixSession.load.busy", { seconds });
+    case "stillFailing":
+      return t("fixSession.load.stillFailing");
   }
 }
 
 /** The button: `waiting` while an automatic retry is scheduled. */
-export function loadRetryLabel(_waiting: boolean): string {
-  return t("polish.error.retry");
+export function loadRetryLabel(waiting: boolean): string {
+  return waiting ? t("fixSession.retryNow") : t("fixSession.retry");
 }

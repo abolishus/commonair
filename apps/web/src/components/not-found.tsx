@@ -16,6 +16,7 @@ import { Link, useRouter } from "@tanstack/react-router";
 import type * as React from "react";
 import { t } from "../i18n/index.ts";
 import { BROWSE_LIVE_ROUTE } from "../lib/browse-route.ts";
+import { PageLoadError, isBusyPageError } from "../lib/page-load-error.tsx";
 import { AppFooter, AppHeader } from "./site-chrome.tsx";
 
 /** "Browse live channels": the primary way out of a dead end (`empty-state-action`). */
@@ -78,12 +79,23 @@ export function ChannelNotFoundState(): React.JSX.Element {
 }
 
 export interface ErrorStateProps {
+  /** The error the boundary caught: only used to tell a busy API from anything else. */
+  error?: unknown;
   /** The error boundary's `reset`; "Try again" reloads the route's data, then resets. */
   reset?: () => void;
 }
 
-/** An error boundary's page: never the error's message or stack. */
-export function ErrorState({ reset }: ErrorStateProps): React.JSX.Element {
+/**
+ * An error boundary's page: never the error's message or stack. A busy or unreachable API (a
+ * guard's `SessionUnavailableError`, a loader's 429 or 503) gets `PageLoadError` instead, which
+ * retries by itself (F1, F2).
+ */
+export function ErrorState({ error, reset }: ErrorStateProps): React.JSX.Element {
+  if (isBusyPageError(error)) return <PageLoadError error={error} reset={reset} />;
+  return <GenericErrorState reset={reset} />;
+}
+
+function GenericErrorState({ reset }: { reset?: () => void }): React.JSX.Element {
   const router = useRouter();
   return (
     <NotFoundState

@@ -23,10 +23,10 @@ export const Route = createFileRoute("/_app")({
 });
 
 /** The boundary replaced the layout, so the page brings the chrome back. */
-function AppError({ reset }: ErrorComponentProps): React.JSX.Element {
+function AppError({ error, reset }: ErrorComponentProps): React.JSX.Element {
   return (
     <ShellFallback wrap>
-      <ErrorState reset={reset} />
+      <ErrorState error={error} reset={reset} />
     </ShellFallback>
   );
 }

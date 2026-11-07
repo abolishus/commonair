@@ -114,7 +114,8 @@ describe("useBootstrapView and useSessionRetryWith (F1)", () => {
     wrap(<Shell />, router);
     const retry = screen.getByTestId("shell-retry");
     await waitFor(() => expect(retry.getAttribute("data-retrying")).toBe("true"));
-    for (let i = 0; i < 3; i++) await act(() => vi.advanceTimersByTimeAsync(1_000));
+    // The first wait has no server hint yet (2 s ± 25 %); the next two use the lookup's 1 s.
+    for (let i = 0; i < 5; i++) await act(() => vi.advanceTimersByTimeAsync(1_000));
     await waitFor(() => expect(screen.getByTestId("shell-retry").getAttribute("data-gave-up")).toBe("true"));
     expect(fake.lookup).toHaveBeenCalledTimes(3);
     expect(screen.queryByTestId("shell-signed-out")).toBeNull();
@@ -157,7 +158,7 @@ describe("PageLoadError (an error boundary's page for a busy API)", () => {
     const page = screen.getByTestId("page-load-error");
     expect(page.querySelector("h1")?.textContent).toBe(loadErrorPageTitle());
     expect(page.textContent).toContain(loadErrorNote("busy", 3));
-    expect(page.textContent).not.toContain(en["polish.error.title"]);
+    expect(page.textContent).not.toContain(en["polish.error.description"]);
     expect(page.getAttribute("data-busy")).toBe("true");
     await act(() => vi.advanceTimersByTimeAsync(2_900));
     expect(invalidate).not.toHaveBeenCalled();

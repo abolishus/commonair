@@ -25,6 +25,13 @@ function messages(lang: string): Array<readonly [key: string, message: string]> 
 const en = messages("en");
 const es = messages("es");
 
+/**
+ * `.retry` keys that are not a Retry button: the header's session placeholder is an icon button,
+ * and its accessible name says in full what it retries.
+ */
+const NOT_A_RETRY_BUTTON = new Set(["fixSession.session.retry"]);
+const retryButtons = (list: typeof en) => list.filter(([k]) => k.endsWith(".retry") && !NOT_A_RETRY_BUTTON.has(k));
+
 /** The keys whose message matches `re`, so a failure names every offender at once. */
 function offenders(list: typeof en, re: RegExp): string[] {
   return list.filter(([, m]) => re.test(m)).map(([k, m]) => `${k}: ${m}`);
@@ -53,7 +60,11 @@ describe("the voice guide (English)", () => {
   });
 
   it("labels every retry button Retry, never Try again", () => {
-    expect(en.filter(([k, m]) => k.endsWith(".retry") && m !== "Retry").map(([k]) => k)).toEqual([]);
+    expect(
+      retryButtons(en)
+        .filter(([, m]) => m !== "Retry")
+        .map(([k]) => k),
+    ).toEqual([]);
     expect(offenders(en, /^try again\.?$/i)).toEqual([]);
   });
 
@@ -89,6 +100,10 @@ describe("the voice guide (Spanish follows English)", () => {
   });
 
   it("labels every retry button Reintentar", () => {
-    expect(es.filter(([k, m]) => k.endsWith(".retry") && m !== "Reintentar").map(([k]) => k)).toEqual([]);
+    expect(
+      retryButtons(es)
+        .filter(([, m]) => m !== "Reintentar")
+        .map(([k]) => k),
+    ).toEqual([]);
   });
 });

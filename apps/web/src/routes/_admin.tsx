@@ -185,10 +185,10 @@ function AdminNotFound(): React.JSX.Element {
   );
 }
 
-function AdminError({ reset }: ErrorComponentProps): React.JSX.Element {
+function AdminError({ error, reset }: ErrorComponentProps): React.JSX.Element {
   return (
     <ShellFallback wrap>
-      <ErrorState reset={reset} />
+      <ErrorState error={error} reset={reset} />
     </ShellFallback>
   );
 }

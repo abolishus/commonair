@@ -32,7 +32,8 @@ export const Route = createFileRoute("/_app/")({
 });
 
 function Home(): React.JSX.Element {
-  const { home, categories } = Route.useLoaderData();
+  const { home, categories: shelf } = Route.useLoaderData();
+  const categories = shelf.status === "ok" ? shelf.data : null;
   const { me } = useBootstrap();
   const signedIn = me !== null;
   // The rail and the sheet read the same `directory.home`: hand them this copy. A layout effect,
@@ -56,7 +57,8 @@ function Home(): React.JSX.Element {
         hero={layout?.hero ?? null}
         categoryShelves={layout?.categoryShelves ?? []}
         offline={layout?.offline ?? []}
-        categories={categories}
+        categories={categories ?? []}
+        categoriesFailed={categories === null}
         emptyAction={
           signedIn ? (
             <Button nativeButton={false} render={<Link to="/dashboard" />}>
