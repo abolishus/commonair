@@ -7,7 +7,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { Link, useLocation } from "@tanstack/react-router";
 import * as React from "react";
 import { t } from "../../i18n/index.ts";
-import { useBootstrap } from "../../lib/bootstrap.ts";
+import { useBootstrap, useSessionRetry } from "../../lib/bootstrap.ts";
 import { tabBarNav, type TabEntry } from "../../lib/nav.ts";
 import { useAccountItems } from "./account-items.tsx";
 import { useAuthRedirect } from "./auth-redirect.ts";
@@ -19,17 +19,26 @@ const icon = (glyph: typeof Home01Icon) => <HugeiconsIcon icon={glyph} size={22}
 /**
  * The phone's bottom tab bar for browsing pages (the `_app` layout renders it only where
  * `tabBarVisible` says so): Home, Browse, Following or Co-op, and You, which is Sign in for a
- * visitor and the account sheet for a member. Hidden while the on-screen keyboard is open.
+ * visitor and the account sheet for a member. Hidden while the on-screen keyboard is open. While
+ * the session could not be checked (the API was busy), You retries the check and never offers
+ * Sign in, as the header does: the visitor may well be signed in.
  */
 export function AppTabBar(): React.JSX.Element {
-  const { me } = useBootstrap();
+  const { me, sessionUnresolved } = useBootstrap();
+  const session = useSessionRetry();
   const pathname = useLocation({ select: (location) => location.pathname });
   const keyboardOpen = useKeyboardOpen();
   const redirect = useAuthRedirect();
   const [youOpen, setYouOpen] = React.useState(false);
   const accountItems = useAccountItems();
   const items = tabBarNav(pathname, me !== null).map((entry): TabBarItem =>
-    tabItem(entry, { redirect, youOpen, openYou: () => setYouOpen(true) }),
+    tabItem(entry, {
+      redirect,
+      youOpen,
+      openYou: () => setYouOpen(true),
+      unresolved: sessionUnresolved === true,
+      retry: session.retry,
+    }),
   );
   return (
     <>
@@ -41,7 +50,13 @@ export function AppTabBar(): React.JSX.Element {
 
 function tabItem(
   entry: TabEntry,
-  context: { redirect: string | undefined; youOpen: boolean; openYou: () => void },
+  context: {
+    redirect: string | undefined;
+    youOpen: boolean;
+    openYou: () => void;
+    unresolved: boolean;
+    retry: () => void;
+  },
 ): TabBarItem {
   const base = { id: entry.id, current: entry.current, testId: `tab-${entry.id}` };
   switch (entry.id) {
@@ -55,6 +70,13 @@ function tabItem(
     case "coop":
       return { ...base, label: t("shell.tab.coop"), icon: icon(UserGroupIcon), render: <Link to="/coop" /> };
     case "you":
+      if (context.unresolved)
+        return {
+          ...base,
+          label: t("fixSession.session.retry"),
+          icon: icon(UserCircleIcon),
+          onSelect: context.retry,
+        };
       return entry.to
         ? {
             ...base,

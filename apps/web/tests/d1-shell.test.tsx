@@ -10,6 +10,7 @@
  * the three-column footer.
  */
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { t } from "../src/i18n/index.ts";
 import { useLocation } from "@tanstack/react-router";
 import type * as React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
@@ -18,8 +19,11 @@ import { tabBarVisible } from "../src/lib/nav.ts";
 import { ThemeContext } from "../src/lib/theme-context.ts";
 import { MEMBER, boot, renderInRouter } from "./d1-fixtures.tsx";
 
-const fake = vi.hoisted(() => ({ boot: null as unknown }));
-vi.mock("../src/lib/bootstrap.ts", () => ({ useBootstrap: () => fake.boot }));
+const fake = vi.hoisted(() => ({ boot: null as unknown, retry: (() => {}) as () => void }));
+vi.mock("../src/lib/bootstrap.ts", () => ({
+  useBootstrap: () => fake.boot,
+  useSessionRetry: () => ({ retry: fake.retry, retrying: false }),
+}));
 vi.mock("../src/lib/api.ts", () => ({
   api: () => ({ directory: { home: () => new Promise(() => {}) } }),
   errorCode: () => null,
@@ -316,6 +320,21 @@ describe("the bottom tab bar", () => {
     await renderInRouter(themed(<AppTabBar />), "/directory/art");
     expect(screen.getByTestId("tab-you").getAttribute("href")).toBe("/signin?redirect=%2Fdirectory%2Fart");
     expect(screen.getByTestId("tab-browse").getAttribute("aria-current")).toBe("page");
+  });
+
+  it("session unresolved: You retries the check and never offers Sign in", async () => {
+    let retried = 0;
+    fake.retry = () => {
+      retried++;
+    };
+    fake.boot = { ...boot(), sessionUnresolved: true };
+    await renderInRouter(themed(<AppTabBar />), "/directory/art");
+    const you = screen.getByTestId("tab-you");
+    expect(you.getAttribute("href")).toBeNull();
+    expect(you.textContent).toContain(t("fixSession.session.retry"));
+    expect(you.textContent).not.toContain(t("shell.signIn"));
+    fireEvent.click(you);
+    expect(retried).toBe(1);
   });
 
   it("signed in: Home, Browse, Following and You; You opens the account sheet in the menu's order", async () => {
