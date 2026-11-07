@@ -7,7 +7,6 @@ import type { Key as B8Channel } from "./b8-channel.gen.ts";
 import type { Key as Coop } from "./coop.gen.ts";
 import type { Key as Core } from "./core.gen.ts";
 import type { Key as D1Discovery } from "./d1-discovery.gen.ts";
-import type { Key as D1Shell } from "./d1-shell.gen.ts";
 import type { Key as D2Channel } from "./d2-channel.gen.ts";
 import type { Key as D2Chat } from "./d2-chat.gen.ts";
 import type { Key as D2Player } from "./d2-player.gen.ts";
@@ -70,7 +69,6 @@ export type MessageKey =
   | Coop
   | Core
   | D1Discovery
-  | D1Shell
   | D2Channel
   | D2Chat
   | D2Player
@@ -132,7 +130,6 @@ export const NAMESPACES = [
   "coop",
   "core",
   "d1-discovery",
-  "d1-shell",
   "d2-channel",
   "d2-chat",
   "d2-player",

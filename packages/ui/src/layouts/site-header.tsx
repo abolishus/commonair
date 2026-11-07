@@ -153,7 +153,9 @@ export function SiteHeader({
       ) : null}
       <div
         data-slot="site-header-end"
-        className="ms-auto flex shrink-0 items-center gap-2 sm:gap-3 lg:col-start-3 lg:justify-self-end"
+        // 4 px apart below sm: the 44 px hit areas carry the spacing, and a visitor's mark, search,
+        // Sign in, Sign up and menu then fit 320 px in Spanish too.
+        className="ms-auto flex shrink-0 items-center gap-1 sm:gap-3 lg:col-start-3 lg:justify-self-end"
       >
         {onOpenPalette ? (
           <Button
@@ -166,10 +168,20 @@ export function SiteHeader({
             <HugeiconsIcon icon={Search01Icon} />
           </Button>
         ) : null}
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 items-center gap-1 sm:gap-2">
           {desktopActions ? <div className="hidden items-center gap-2 md:flex">{desktopActions}</div> : null}
           {actions}
-          {user}
+          {user ? (
+            // The signed-in cluster's buttons (a bell, an avatar trigger) bring their own 28-32 px
+            // sizes; below md each becomes a 44 px hit area like the bar's other icon buttons
+            // (min-w, so a name beside the avatar still fits from sm).
+            <div
+              data-slot="site-header-user"
+              className="flex items-center gap-1 sm:gap-2 max-md:[&_button]:h-11 max-md:[&_button]:min-w-11"
+            >
+              {user}
+            </div>
+          ) : null}
         </div>
         {mobileMenu ? (
           <Sheet open={open} onOpenChange={(next) => setOpen(next)}>

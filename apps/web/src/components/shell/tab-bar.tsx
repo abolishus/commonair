@@ -58,7 +58,7 @@ function tabItem(
       return entry.to
         ? {
             ...base,
-            label: t("shell.tab.signIn"),
+            label: t("shell.signIn"),
             icon: icon(UserCircleIcon),
             render: <Link to="/signin" search={context.redirect ? { redirect: context.redirect } : {}} />,
           }

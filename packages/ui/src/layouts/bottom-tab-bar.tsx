@@ -36,10 +36,15 @@ const ITEM =
   "transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset " +
   "aria-[current=page]:border-foreground aria-[current=page]:text-foreground aria-expanded:text-foreground";
 
+/** The bar's padding for the device's safe area, so no tab sits under the home indicator or a notch. */
+const SAFE_AREA_PADDING =
+  "pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]"; // rtl-physical: safe-area insets are physical edges
+
 const COLUMNS = ["grid-cols-1", "grid-cols-2", "grid-cols-3", "grid-cols-4", "grid-cols-5"] as const;
 
 /**
- * The phone's section bar (below `md`, browsing pages only): fixed to the bottom, 56 px, on the
+ * The phone's section bar (below `md`, browsing pages only): fixed to the bottom, 56 px plus the
+ * safe-area inset (the home indicator; the root's `viewport-fit=cover` makes it non-zero), on the
  * raised surface, with labels always shown and the current section marked `aria-current="page"`.
  * The shell pads the page by the same height so nothing hides under it.
  */
@@ -59,6 +64,8 @@ export function BottomTabBar({
       className={cn(
         // The popover surface until the art direction's raised surface token lands.
         "fixed inset-x-0 bottom-0 z-30 border-t bg-popover text-popover-foreground md:hidden",
+        // The tabs stay 56 px; the inset below them (and beside them, in landscape) is bar colour.
+        SAFE_AREA_PADDING,
         hidden && "hidden",
         className,
       )}

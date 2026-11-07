@@ -67,7 +67,8 @@ function SignedOutActions({
               />
             }
           >
-            {signUp ? t("nav.signUp") : t("nav.signIn")}
+            {/* The short Sign in ("Entrar" in es, as in the tab bar), so both fit a 320 px bar. */}
+            {signUp ? t("nav.signUp") : t("shell.signIn")}
           </Button>
         );
       })}
@@ -143,6 +144,7 @@ export function AppHeader({
         actions={studio ? <SidebarTrigger className="max-md:size-11" /> : undefined}
         user={
           me ? (
+            // SiteHeader makes each button here a 44 px hit area below md.
             <>
               <NotificationBell />
               <AccountMenu

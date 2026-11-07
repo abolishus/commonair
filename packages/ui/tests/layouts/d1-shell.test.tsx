@@ -79,6 +79,17 @@ describe("the bottom tab bar", () => {
     for (const label of ["Home", "Browse", "Co-op", "You"]) expect(within(nav).getByText(label)).toBeTruthy();
   });
 
+  test("pads itself by the safe-area insets, so the 56 px of tabs clear the home indicator", () => {
+    render(<BottomTabBar label="Sections" items={tabs} />);
+    const nav = screen.getByRole("navigation", { name: "Sections" });
+    const classes = nav.className.split(" ");
+    expect(classes).toContain("pb-[env(safe-area-inset-bottom)]");
+    expect(classes).toContain("pl-[env(safe-area-inset-left)]");
+    expect(classes).toContain("pr-[env(safe-area-inset-right)]");
+    // The inset is outside the tabs: they keep their own 56 px.
+    expect(nav.querySelector("ul")?.className).toMatch(/\bh-14\b/);
+  });
+
   test("marks the current section with aria-current=page, and no other", () => {
     render(<BottomTabBar label="Sections" items={tabs} />);
     const home = screen.getByRole("link", { name: "Home" });
@@ -164,6 +175,36 @@ describe("the header's phone controls", () => {
     expect(screen.getByRole("button", { name: "Menu" }).className).toMatch(/\bmax-md:size-11\b/);
   });
 
+  test("the signed-in cluster's buttons get a 44 px hit area below md, and nothing else in it does", () => {
+    render(
+      header({
+        user: (
+          <>
+            <button type="button" className="size-8">
+              Bell
+            </button>
+            <button type="button" className="h-7">
+              Avatar
+            </button>
+          </>
+        ),
+      }),
+    );
+    const bell = screen.getByRole("button", { name: "Bell" });
+    const slot = bell.closest('[data-slot="site-header-user"]') as HTMLElement;
+    expect(slot).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Avatar" }).closest('[data-slot="site-header-user"]')).toBe(slot);
+    const classes = slot.className.split(" ");
+    expect(classes).toContain("max-md:[&_button]:h-11");
+    expect(classes).toContain("max-md:[&_button]:min-w-11");
+  });
+
+  test("4 px between the bar's controls below sm, so a visitor's five fit 320 px", () => {
+    render(header({ onOpenPalette: () => {}, searchLabel: "Search", user: <a href="/signup">Sign up</a> }));
+    const end = document.querySelector('[data-slot="site-header-end"]') as HTMLElement;
+    expect(end.className.split(" ")).toEqual(expect.arrayContaining(["gap-1", "sm:gap-3"]));
+  });
+
   test("mobileMenu off leaves out the menu button and its sheet", () => {
     render(header({ mobileMenu: false, nav: [{ id: "b", label: "Browse", href: "/directory" }] }));
     expect(screen.queryByRole("button", { name: "Menu" })).toBeNull();
@@ -243,7 +284,8 @@ describe("one shell geometry", () => {
     );
     const shell = screen.getByTestId("shell");
     expect(shell.hasAttribute("data-bottom-bar")).toBe(true);
-    expect(shell.className).toMatch(/\bmax-md:pb-14\b/);
+    // The bar's 56 px plus the home indicator's inset, which the bar pads itself by.
+    expect(shell.className.split(" ")).toContain("max-md:pb-[calc(3.5rem_+_env(safe-area-inset-bottom))]");
     expect(
       screen.getByTestId("foot").compareDocumentPosition(screen.getByTestId("bar")) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
@@ -255,6 +297,21 @@ describe("one shell geometry", () => {
     );
     expect(screen.getByTestId("shell").hasAttribute("data-bottom-bar")).toBe(false);
     expect(screen.getByTestId("shell").className).not.toContain("max-md:pb-");
+  });
+
+  test.each([
+    ["no sidebar", undefined, undefined],
+    ["a sidebar below the header", <nav key="r" aria-label="Rail" />, "below" as const],
+    ["a sidebar beside the header", <nav key="r" aria-label="Rail" />, "beside" as const],
+  ])("with %s, the shell pads a landscape notch's side by its safe-area inset", (_, sidebar, placement) => {
+    render(
+      <AppShell header={top} sidebar={sidebar} sidebarPlacement={placement} skipLabel="Skip" data-testid="shell">
+        <p>Page</p>
+      </AppShell>,
+    );
+    const classes = screen.getByTestId("shell").className.split(" ");
+    expect(classes).toContain("pl-[env(safe-area-inset-left)]");
+    expect(classes).toContain("pr-[env(safe-area-inset-right)]");
   });
 });
 

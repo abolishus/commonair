@@ -27,7 +27,12 @@ vi.mock("../src/lib/api.ts", () => ({
     throw new Error("no server api in tests");
   },
 }));
-vi.mock("../src/components/notifications/bell.tsx", () => ({ NotificationBell: () => null }));
+// The bell's own 32 px icon button, without its API.
+vi.mock("../src/components/notifications/bell.tsx", () => ({
+  NotificationBell: () => (
+    <button type="button" aria-label="Notifications" data-testid="notification-bell" className="size-8" />
+  ),
+}));
 
 const { AppFooter, AppHeader } = await import("../src/components/site-chrome.tsx");
 const { AppTabBar } = await import("../src/components/shell/tab-bar.tsx");
@@ -196,6 +201,23 @@ describe("the header, signed in", () => {
     expect(authButton("signIn")).toBeNull();
     expect(authButton("signUp")).toBeNull();
     expect(screen.getByTestId("nav-user")).toBeTruthy();
+  });
+
+  it("makes the bell and the avatar trigger 44 px hit areas below md", async () => {
+    fake.boot = boot({ me: STREAMER });
+    await renderInRouter(themed(<LayoutHeader />), "/");
+    const bell = screen.getByTestId("notification-bell");
+    const avatar = screen.getByRole("button", { name: "Account menu for Rivertide" });
+    const cluster = bell.closest('[data-slot="site-header-user"]') as HTMLElement;
+    expect(cluster).toBeTruthy();
+    expect(avatar.closest('[data-slot="site-header-user"]')).toBe(cluster);
+    // The rule reaches every button in the cluster: 44 px tall, at least 44 px wide (the
+    // username still shows beside the avatar from sm).
+    const classes = cluster.className.split(" ");
+    expect(classes).toContain("max-md:[&_button]:h-11");
+    expect(classes).toContain("max-md:[&_button]:min-w-11");
+    expect(bell.tagName).toBe("BUTTON");
+    expect(avatar.tagName).toBe("BUTTON");
   });
 });
 

@@ -6,7 +6,8 @@ import * as React from "react";
 /**
  * Marks a page's one filled call to action (the brand "Create free account", a channel-accent
  * Follow, `AuthGatePrompt`'s "Create account"). While one is on screen the header's Sign up drops
- * to an outline, so a viewport never has two filled CTAs (art direction: one per screen).
+ * to an outline, so a viewport never has two filled CTAs (art direction: one per screen). The
+ * units that build those CTAs put the attribute on them; until one does, Sign up stays filled.
  */
 export const FILLED_CTA_ATTRIBUTE = "data-filled-cta";
 const SELECTOR = `[${FILLED_CTA_ATTRIBUTE}]`;

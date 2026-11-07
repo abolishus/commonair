@@ -21,7 +21,7 @@ export interface AppShellProps extends React.ComponentProps<"div"> {
   footer?: React.ReactNode;
   /**
    * The phone's bottom tab bar (`BottomTabBar`), after the footer. Below `md` the page is padded by
-   * its height (56 px) so the footer never hides under it.
+   * its height (56 px plus the safe-area inset) so the footer never hides under it.
    */
   bottomBar?: React.ReactNode;
   children: React.ReactNode;
@@ -30,10 +30,16 @@ export interface AppShellProps extends React.ComponentProps<"div"> {
 }
 
 /**
- * The padding that keeps the page clear of a fixed bottom tab bar, below `md` only: its 56 px.
- * The safe-area inset joins it once the shell utilities land in globals.css (contract request).
+ * The padding that keeps the page clear of a fixed bottom tab bar, below `md` only: its 56 px plus
+ * the bottom safe-area inset the bar pads itself by.
  */
-const BOTTOM_BAR_CLEARANCE = "max-md:pb-14";
+const BOTTOM_BAR_CLEARANCE = "max-md:pb-[calc(3.5rem_+_env(safe-area-inset-bottom))]";
+
+/**
+ * The root's `viewport-fit=cover` lets the page run under a landscape phone's notch: the shell pads
+ * that side by its inset (0 everywhere else). A fixed sidebar is not padded by it.
+ */
+const SAFE_AREA_X = "pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]"; // rtl-physical: safe-area insets are physical edges
 
 export function AppShell({
   header,
@@ -67,7 +73,7 @@ export function AppShell({
   if (sidebar && sidebarPlacement === "beside")
     return (
       <SidebarProvider>
-        <div className={cn("flex min-h-svh w-full", clearance, className)} {...shellProps}>
+        <div className={cn("flex min-h-svh w-full", SAFE_AREA_X, clearance, className)} {...shellProps}>
           {skip}
           <Sidebar collapsible="icon">
             <SidebarContent>{sidebar}</SidebarContent>
@@ -88,7 +94,7 @@ export function AppShell({
   );
   if (sidebar)
     return (
-      <SidebarProvider className={cn("flex-col", clearance, className)} {...shellProps}>
+      <SidebarProvider className={cn("flex-col", SAFE_AREA_X, clearance, className)} {...shellProps}>
         {skip}
         {top}
         <div className="flex min-w-0 flex-1">
@@ -105,7 +111,7 @@ export function AppShell({
       </SidebarProvider>
     );
   return (
-    <div className={cn("flex min-h-svh w-full flex-col", clearance, className)} {...shellProps}>
+    <div className={cn("flex min-h-svh w-full flex-col", SAFE_AREA_X, clearance, className)} {...shellProps}>
       {skip}
       {top}
       {main}
