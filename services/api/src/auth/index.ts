@@ -25,6 +25,7 @@ import { isCommittedUpload, keyOfRef } from "../moderation/committed.ts";
 import { recordAcceptances, currentRequiredDocuments } from "../lib/legal.ts";
 import { appUrl, publicLink, sendNotice } from "../mail.ts";
 import { verifyAltcha } from "./altcha.ts";
+import { authBackground, type AuthBackground } from "./background.ts";
 import { withVerificationCallback } from "./callback.ts";
 import { ageProblem, usernameProblem } from "./identity.ts";
 
@@ -79,8 +80,9 @@ export function withoutProviderTokens<T extends Record<string, unknown>>(account
 /** better-auth endpoints that return or use stored provider tokens; with none stored, they are closed. */
 export const PROVIDER_TOKEN_PATHS = new Set(["/get-access-token", "/refresh-token", "/account-info"]);
 
-export function createAuth(deps: Deps) {
+export function createAuth(deps: Deps, opts: { background?: AuthBackground } = {}) {
   const { env, db, site, mailer, logger } = deps;
+  const background = opts.background ?? authBackground(logger);
   const minAge = env.AUTH_MIN_AGE;
   const twoFactorEnabling = new WeakSet<object>();
   const banClearing = new WeakSet<object>();
@@ -136,6 +138,8 @@ export function createAuth(deps: Deps) {
       database: { generateId: () => uuidv7() },
       cookiePrefix: "commonair",
       ipAddress: { disableIpTracking: true },
+      // Anything better-auth defers runs after the response; see background.ts.
+      backgroundTasks: { handler: (task) => background.handler(task) },
     },
     user: {
       additionalFields: {
@@ -154,11 +158,14 @@ export function createAuth(deps: Deps) {
       maxPasswordLength: 256,
       revokeSessionsOnPasswordReset: true,
       resetPasswordTokenExpiresIn: RESET_MINUTES * 60,
+      // Each auth mail returns before SMTP answers; see background.ts.
       sendResetPassword: async ({ user, url }) => {
-        await mailer.send(
-          "passwordReset",
-          { resetUrl: publicLink(site, url), expiresInMinutes: RESET_MINUTES, locale: localeOf(user) },
-          user.email,
+        background.mail("passwordReset", () =>
+          mailer.send(
+            "passwordReset",
+            { resetUrl: publicLink(site, url), expiresInMinutes: RESET_MINUTES, locale: localeOf(user) },
+            user.email,
+          ),
         );
       },
     },
@@ -167,15 +174,17 @@ export function createAuth(deps: Deps) {
       autoSignInAfterVerification: true,
       expiresIn: VERIFY_MINUTES * 60,
       sendVerificationEmail: async ({ user, url }) => {
-        await mailer.send(
-          "verifyEmail",
-          {
-            displayName: user.name,
-            verifyUrl: publicLink(site, withVerificationCallback(url, site.publicUrl)),
-            expiresInMinutes: VERIFY_MINUTES,
-            locale: localeOf(user),
-          },
-          user.email,
+        background.mail("verifyEmail", () =>
+          mailer.send(
+            "verifyEmail",
+            {
+              displayName: user.name,
+              verifyUrl: publicLink(site, withVerificationCallback(url, site.publicUrl)),
+              expiresInMinutes: VERIFY_MINUTES,
+              locale: localeOf(user),
+            },
+            user.email,
+          ),
         );
       },
     },
@@ -199,7 +208,9 @@ export function createAuth(deps: Deps) {
         disableSignUp: true,
         expiresIn: MAGIC_MINUTES * 60,
         sendMagicLink: async ({ email, url }) => {
-          await mailer.send("magicLink", { signInUrl: publicLink(site, url), expiresInMinutes: MAGIC_MINUTES }, email);
+          background.mail("magicLink", () =>
+            mailer.send("magicLink", { signInUrl: publicLink(site, url), expiresInMinutes: MAGIC_MINUTES }, email),
+          );
         },
       }),
       passkey({ rpID: publicUrl.hostname, rpName: site.name, origin: site.publicUrl }),
