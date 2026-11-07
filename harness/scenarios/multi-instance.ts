@@ -24,7 +24,9 @@
  * case cannot push the rest past the scenario timeout. Without the replicas running, every step
  * is skipped with the reason (start the stack with
  * the override and `--profile multi`; see harness/README.md). Killed replicas are restored and
- * health-checked before the scenario ends.
+ * health-checked, and the scenario ends only once connections between the stack's containers
+ * work again (`settle.ts`): on CI run 42244605154 they timed out for 15 s after the restores, and
+ * the next scenario's signup timed out on its verification mail.
  */
 import type { Api } from "../src/api/client.ts";
 import { createApi } from "../src/api/client.ts";
@@ -47,9 +49,16 @@ import {
   startMonitor,
 } from "../src/multi/monitor.ts";
 import { insertOutboxBacklog, unpublishedCount } from "../src/multi/outbox-db.ts";
-import { healthy, killContainer, listReplicaContainers, restoreContainer } from "../src/multi/podman-ops.ts";
+import {
+  healthy,
+  killContainer,
+  listReplicaContainers,
+  listStackProbes,
+  restoreContainer,
+} from "../src/multi/podman-ops.ts";
 import { ReconnectingChat } from "../src/multi/reconnecting-chat.ts";
 import { type ReplicaContainer, containerOf, missingReplicas, replicaUrls } from "../src/multi/replicas.ts";
+import { waitForNetwork } from "../src/multi/settle.ts";
 import { completedSchedulerRuns, listenToBus, oldestCompleted } from "../src/multi/valkey.ts";
 import { startForwardingProxy } from "../src/proxy.ts";
 import { errorMessage } from "../src/redact.ts";
@@ -88,6 +97,11 @@ export const SCENARIO_TIMEOUT_MS = 10 * 60_000;
 export const TEARDOWN_RESERVE_MS = 45_000;
 /** In-claim restore of a killed replica; the defer retries with longer if it is still down. */
 const RESTORE_MS = 30_000;
+/**
+ * The longest wait for the network between containers after a restore, and at the end. Within
+ * the teardown reserve; a claim's settle wait is also capped to what is left of the claim.
+ */
+export const SETTLE_MS = 40_000;
 /**
  * Chat's MessageWriter flushes every 250 ms (services/chat/src/persistence.ts); a message acked
  * this long before a SIGKILL has been through at least one flush and its insert.
@@ -142,6 +156,17 @@ interface Kit {
   budget: ClaimBudget;
 }
 
+/** Wait until the containers reach each other again, probing the restored replicas too. */
+async function settleNetwork(
+  ctx: ScenarioContext,
+  restored: readonly string[],
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<number> {
+  const probes = await listStackProbes(ctx.env.HARNESS_CONTAINER_PREFIX, restored);
+  return waitForNetwork(probes, { timeoutMs, ...(signal ? { signal } : {}) });
+}
+
 export default defineScenario({
   name: "multi-instance",
   description:
@@ -163,6 +188,12 @@ export default defineScenario({
       for (const claim of CLAIMS) ctx.skipStep(claim, reason);
       return;
     }
+    // Registered first, so it runs after every other defer (the restores among them). Only when
+    // the run ended before the final settle step; a failure here is logged by the runner.
+    let settleStepRan = false;
+    ctx.defer(async () => {
+      if (!settleStepRan) await settleNetwork(ctx, ["worker-2", "chat-2"], SETTLE_MS);
+    });
 
     const proxy2 = startForwardingProxy({ target: urls.api2 });
     ctx.defer(() => proxy2.stop());
@@ -238,6 +269,14 @@ export default defineScenario({
     await claim(kit, 7, () => reconnectOnLoss(kit, channel, streamer, alice));
     await claim(kit, 8, () => workerLoss(kit, channel, streamer));
     ctx.metric("multi.bus.invalid_messages", listener.invalid);
+    // The next scenario must find a whole stack, not just replicas answering the host.
+    await ctx.step("the network between containers settles", async () => {
+      settleStepRan = true;
+      const left = startedAt + SCENARIO_TIMEOUT_MS - Date.now();
+      const timeoutMs = Math.max(5_000, Math.min(SETTLE_MS, left - 5_000));
+      const ms = await settleNetwork(ctx, ["worker-2", "chat-2"], timeoutMs, ctx.signal);
+      ctx.metric("multi.settle_ms.end", ms, "ms");
+    });
   },
 });
 
@@ -667,8 +706,16 @@ async function workerLoss(kit: Kit, channel: string, streamer: SignedInUser): Pr
     withinOneBatch(s, OUTBOX_BATCH),
     { duplicates: s.extra, sample: s.duplicated.slice(0, 5) },
   );
-  const back = await restoreContainer(worker2.name, kit.urls.worker2Health, kit.budget.cap(RESTORE_MS, 15_000));
-  ctx.metric("multi.restore_ms.worker", back, "ms");
+  const back = await restoreContainer(worker2.name, kit.urls.worker2Health, {
+    timeoutMs: kit.budget.cap(RESTORE_MS, 15_000),
+    settle: {
+      probes: await listStackProbes(ctx.env.HARNESS_CONTAINER_PREFIX, ["worker-2"]),
+      timeoutMs: kit.budget.cap(SETTLE_MS, 10_000),
+      signal: ctx.signal,
+    },
+  });
+  ctx.metric("multi.restore_ms.worker", back.backMs, "ms");
+  ctx.metric("multi.settle_ms.worker", back.settledMs, "ms");
 }
 
 // ---------------------------------------------------------------- viewer counts
@@ -900,6 +947,14 @@ async function reconnectOnLoss(kit: Kit, channel: string, streamer: SignedInUser
     },
   );
 
-  const restored = await restoreContainer(chat2.name, urls.chat2Health, kit.budget.cap(RESTORE_MS, 15_000));
-  ctx.metric("multi.restore_ms.chat", restored, "ms");
+  const restored = await restoreContainer(chat2.name, urls.chat2Health, {
+    timeoutMs: kit.budget.cap(RESTORE_MS, 15_000),
+    settle: {
+      probes: await listStackProbes(ctx.env.HARNESS_CONTAINER_PREFIX, ["chat-2"]),
+      timeoutMs: kit.budget.cap(SETTLE_MS, 10_000),
+      signal: ctx.signal,
+    },
+  });
+  ctx.metric("multi.restore_ms.chat", restored.backMs, "ms");
+  ctx.metric("multi.settle_ms.chat", restored.settledMs, "ms");
 }
