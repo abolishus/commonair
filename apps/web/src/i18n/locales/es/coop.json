@@ -16,7 +16,7 @@
   "coop.breadcrumb": "Ruta de navegación",
   "coop.loading": "Cargando",
   "coop.loadFailed": "Comprueba tu conexión y reintenta.",
-  "coop.loadFailedTitle": "Parte de esta página no se cargó",
+  "coop.loadFailedTitle": "No se pudo cargar la información de la cooperativa",
   "coop.retry": "Reintentar",
   "coop.loadMore": "Cargar más",
   "coop.actionFailed": "Eso no se registró. Inténtalo de nuevo.",

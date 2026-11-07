@@ -202,7 +202,7 @@
   "safety.modq.nciiFailed": "No se pudo decidir la solicitud. Inténtalo de nuevo.",
   "safety.appealq.title": "Cola de apelaciones",
   "safety.appealq.loading": "Cargando apelaciones…",
-  "safety.appealq.loadFailed": "No se pudieron cargar las apelaciones.",
+  "safety.appealq.loadFailed": "No se pudieron cargar las apelaciones. Actualiza la página para reintentar.",
   "safety.appealq.loadMoreFailed": "No se pudieron cargar más apelaciones. Inténtalo de nuevo.",
   "safety.appealq.empty": "No hay apelaciones abiertas",
   "safety.appealq.decision": "Decisión",

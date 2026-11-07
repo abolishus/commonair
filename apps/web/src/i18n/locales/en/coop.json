@@ -16,7 +16,7 @@
   "coop.breadcrumb": "Breadcrumb",
   "coop.loading": "Loading",
   "coop.loadFailed": "Check your connection, then retry.",
-  "coop.loadFailedTitle": "Part of this page didn't load",
+  "coop.loadFailedTitle": "The co-op's information didn't load",
   "coop.retry": "Retry",
   "coop.loadMore": "Load more",
   "coop.actionFailed": "That didn't go through. Try again.",

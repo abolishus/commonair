@@ -202,7 +202,7 @@
   "safety.modq.nciiFailed": "The request could not be decided. Try again.",
   "safety.appealq.title": "Appeals queue",
   "safety.appealq.loading": "Loading appeals…",
-  "safety.appealq.loadFailed": "The appeals didn't load.",
+  "safety.appealq.loadFailed": "The appeals didn't load. Refresh the page to retry.",
   "safety.appealq.loadMoreFailed": "More appeals didn't load. Try again.",
   "safety.appealq.empty": "No open appeals",
   "safety.appealq.decision": "Decision",

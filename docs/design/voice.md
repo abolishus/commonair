@@ -11,8 +11,9 @@ marketing pages, docs shown in the app. It comes from the round 2 voice-copy rep
 ([`2026-11-overhaul/round2/voice-copy.md`](2026-11-overhaul/round2/voice-copy.md)), which has the
 audit, the counts and the copy for each key overhaul moment.
 
-`apps/web/tests/i18n-voice.test.ts` checks the rules a regex can check, over every English and
-Spanish catalog string. A string that breaks one fails the unit tests.
+Review checks these rules for now. Many of them (banned words, the load-failure and retry
+wordings) are regex-checkable, and a unit test over every English and Spanish catalog string is
+the planned way to enforce them.
 
 ## What we are, in one breath
 
@@ -196,7 +197,7 @@ Before a string ships:
 - [ ] Numbers, money and time come from placeholders formatted by the house primitives.
 - [ ] It is one whole sentence per key, with ICU plurals where a noun follows a number.
 - [ ] Spanish is updated in the same change.
-- [ ] `apps/web/tests/i18n-voice.test.ts` and `apps/web/tests/i18n.test.ts` pass.
+- [ ] `apps/web/tests/i18n.test.ts` passes.
 
 ## References
 
