@@ -255,7 +255,7 @@ headless signals. Honest viewers behind one large NAT above the cap lose only th
 | Check                        | Weight | Fires when                                                                       |
 | ---------------------------- | ------ | -------------------------------------------------------------------------------- |
 | `no_media_fetched`           | 0.9    | Accounting shows no media at all (counters or receipts known)                    |
-| `playlists_without_segments` | 0.8    | ≥ 10 playlist requests and no segment or part                                    |
+| `playlists_without_segments` | 0.8    | ≥ 10 playlist requests and no segment or part, with playback claimed             |
 | `segments_without_playlists` | 0.6    | ≥ 10 segments and no playlist request                                            |
 | `too_few_segments`           | 0.6    | < 25 % of the media expected                                                     |
 | `too_many_segments`          | 0.4    | > 4 × the segments expected + 40 s of media (origin with known part counts only) |
@@ -264,6 +264,8 @@ Independently of the score, these hold the session at **pending** (`media_unconf
 verified:
 
 - `no_media_fetched`, `playlists_without_segments` or `too_few_segments`;
+- ≥ 10 playlist requests and no segment or part **before any playback is claimed** (a player
+  starting up): held, not scored, since an exclusion is sticky and the player fetches media next;
 - **database counter only**: fewer full segments than max(1, 10 % of watched seconds / segment
   duration). That counter does not see LL-HLS parts, so the bar is tolerant and a shortfall only
   holds the session (it never scores); one segment followed by hours of heartbeats stays pending;

@@ -50,6 +50,23 @@ const beats = (n: number): HeartbeatSample[] =>
   }));
 
 describe("scoreSession verdicts", () => {
+  test("a headless player at start-up (playlists only, no watch time) is pending, not excluded", () => {
+    // CI run 41812379909: excluded at 0.92 (playlists_without_segments 0.8 + headless 0.6), sticky.
+    const startUp: FetchSummary = { playlists: 12, segments: 0, parts: 0 };
+    const headless = CHROME.replace("Chrome/", "HeadlessChrome/");
+    const early = scoreSession(session({ userAgent: headless, heartbeats: 0, watchSeconds: 0 }), [], startUp, ctx());
+    expect(early.verdict).toBe("pending");
+    expect(early.reasons).toEqual(["headless", "insufficient_heartbeats"]);
+    expect(early.score).toBeCloseTo(0.6, 6);
+    // Enough beats but still no watch time and no media: held on the media, never verified.
+    const idle = scoreSession(session({ userAgent: headless, heartbeats: 3, watchSeconds: 0 }), [], startUp, ctx());
+    expect(idle).toMatchObject({ verdict: "pending", reasons: ["headless", "media_unconfirmed"] });
+    // A poller that claims watch time is still scored and excluded.
+    const poller = scoreSession(session({ userAgent: headless, heartbeats: 3, watchSeconds: 30 }), [], startUp, ctx());
+    expect(poller.verdict).toBe("excluded");
+    expect(poller.reasons).toEqual(["fetch_pattern", "headless"]);
+  });
+
   test("a clean session with ≥ 3 heartbeats is verified with no reasons", () => {
     expect(scoreSession(session(), beats(6), fetches, ctx())).toEqual({
       verdict: "verified",
