@@ -108,7 +108,21 @@ const bullConn = new Valkey(process.env.VALKEY_URL ?? "redis://localhost:6379", 
 let modQueue: Queue;
 let finalizeQueue: Queue;
 
-const logger = createLogger({ service: "media-int", level: (process.env.TEST_LOG_LEVEL as "info") ?? "fatal" });
+/**
+ * The service's log, the last LOG_KEEP lines kept in memory for failure reports (a job that
+ * failed and is retrying only says so here); printed as it comes with TEST_LOG_LEVEL.
+ */
+const LOG_KEEP = 2_000;
+const logLines: string[] = [];
+const logger = createLogger({
+  service: "media-int",
+  level: (process.env.TEST_LOG_LEVEL as "info" | undefined) ?? "info",
+  write: (line) => {
+    logLines.push(line);
+    if (logLines.length > LOG_KEEP) logLines.splice(0, logLines.length - LOG_KEEP);
+    if (process.env.TEST_LOG_LEVEL) process.stdout.write(`${line}\n`);
+  },
+});
 let tdb: TestDatabase;
 let mtx: Container;
 let target: Container;
@@ -134,7 +148,13 @@ const hookCalls: {
   final?: boolean;
 }[] = [];
 
-async function waitFor<T>(what: string, fn: () => Promise<T | null | undefined | false>, ms = 60_000): Promise<T> {
+/** `explain`, if given, adds the state the wait depended on to the timeout's message. */
+async function waitFor<T>(
+  what: string,
+  fn: () => Promise<T | null | undefined | false>,
+  ms = 60_000,
+  explain?: () => Promise<string>,
+): Promise<T> {
   const deadline = Date.now() + ms;
   let lastErr: unknown;
   while (Date.now() < deadline) {
@@ -146,7 +166,46 @@ async function waitFor<T>(what: string, fn: () => Promise<T | null | undefined |
     }
     await Bun.sleep(250);
   }
-  throw new Error(`timed out waiting for ${what}${lastErr instanceof Error ? `: ${lastErr.message}` : ""}`);
+  const why = explain ? await explain().catch((err: unknown) => `(no report: ${String(err)})`) : "";
+  throw new Error(
+    `timed out waiting for ${what}${lastErr instanceof Error ? `: ${lastErr.message}` : ""}${why ? `\n${why}` : ""}`,
+  );
+}
+
+/**
+ * Why a VOD's finalize has not finished: its job (state, attempts, last failure, timings), the
+ * row, the queue, the live sessions, and the service's log lines about it. A finalize that
+ * failed and is backing off (5, 10, 20 s…) and one that never ran look the same from the row.
+ */
+async function finalizeReport(id: string): Promise<string> {
+  const job = await finalizeQueue.getJob(id);
+  const [row] = await tdb.db
+    .select({ status: schema.vods.status, failedReason: schema.vods.failedReason, updatedAt: schema.vods.updatedAt })
+    .from(schema.vods)
+    .where(eq(schema.vods.id, id));
+  const now = Date.now();
+  const ago = (t: number | undefined) => (t ? now - t : null);
+  const report = {
+    job: job
+      ? {
+          state: await job.getState(),
+          attemptsMade: job.attemptsMade,
+          failedReason: job.failedReason,
+          lastStack: job.stacktrace?.at(-1)?.split("\n").slice(0, 4),
+          queuedMsAgo: ago(job.timestamp),
+          processedMsAgo: ago(job.processedOn),
+          finishedMsAgo: ago(job.finishedOn),
+        }
+      : null,
+    vod: row ?? null,
+    queue: await finalizeQueue.getJobCounts("active", "waiting", "delayed", "failed", "completed"),
+    active: (await finalizeQueue.getActive()).map((j) => ({ id: j.id, processedMsAgo: ago(j.processedOn) })),
+    live: media.coordinator.liveBroadcasts,
+  };
+  const related = logLines.filter(
+    (l) => l.includes(id) || l.includes('"component":"jobs"') || l.includes("vod-finalize") || l.includes("disk"),
+  );
+  return [JSON.stringify(report), ...related.slice(-40)].join("\n");
 }
 
 const publish = (event: LiveEvent) => valkey.publish(busChannel, JSON.stringify(event));
@@ -784,10 +843,15 @@ describe("media pipeline", () => {
   test("T0 VOD: a recording of the synthetic pattern is not published; t0 is enqueued for the VOD", async () => {
     const { vodId: id } = await uploadPatternVod();
     await media.jobs.enqueueVodFinalize(id);
-    const vod = await waitFor("VOD removed", async () => {
-      const [v] = await tdb.db.select().from(schema.vods).where(eq(schema.vods.id, id));
-      return v?.status === "deleted" ? v : null;
-    });
+    const vod = await waitFor(
+      "VOD removed",
+      async () => {
+        const [v] = await tdb.db.select().from(schema.vods).where(eq(schema.vods.id, id));
+        return v?.status === "deleted" ? v : null;
+      },
+      60_000,
+      () => finalizeReport(id),
+    );
     expect(vod.removedReason).toBe("t0_hash_match");
     const job = await modQueue.getJob(t0JobId("vod", id));
     const t0 = ModerationT0Job.parse(job?.data);
