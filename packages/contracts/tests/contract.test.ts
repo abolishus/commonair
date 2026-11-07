@@ -150,6 +150,7 @@ describe("events", () => {
       [
         "account.action.recorded",
         "account.action.reversed",
+        "account.created",
         "analytics.rollup.ready",
         "channel.split.update",
         "chat.surge.begin",

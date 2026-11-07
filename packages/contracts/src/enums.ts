@@ -304,6 +304,8 @@ export const NOTIFICATION_TYPES = [
   "payout",
   "moderation",
   "system",
+  /** Overhaul wave 2: co-op membership started (from the payment webhook) or ended. */
+  "membership",
 ] as const;
 /** Where a notification can reach someone (`notification_preferences.medium`, ADR 0028 decision 4). */
 export const NOTIFY_MEDIA = ["in_app", "email", "push"] as const;
@@ -777,3 +779,107 @@ export type TransferSettleOutcome = (typeof TRANSFER_SETTLE_OUTCOMES)[number];
  * applied by staff with no moderation case behind them, so the statement cites no case.
  */
 export const STAFF_ACTION_SOURCE_ACTIONS = ["report.resolve", "user.suspend", "channel.suspend"] as const;
+
+// Growth and acquisition (design overhaul wave 2, D2.1 and D2.8; growth-funnels.md P7) -----------
+
+/**
+ * Why a visitor came to sign up (`?intent=`, `users.signup_intent`). `vote` and `report` gates map
+ * to `join` and `none`. No PII: an enum, never free text.
+ */
+export const SIGNUP_INTENTS = [
+  "none",
+  "follow",
+  "chat",
+  "support",
+  "predict",
+  "clip",
+  "watch",
+  "stream",
+  "import",
+  "join",
+] as const;
+export type SignupIntent = (typeof SIGNUP_INTENTS)[number];
+
+/** `POST /metrics/ui` surfaces: the closed list of on-screen places the web may count (P7 B). */
+export const UI_METRIC_SURFACES = [
+  "home.hero",
+  "home.coopBand",
+  "home.streamBand",
+  "home.empty",
+  "home.shelf",
+  "rail.followNudge",
+  "search.empty",
+  "authGate",
+  "signup",
+  "verify",
+  "intent",
+  "creators.hero",
+  "creators.calc",
+  "creators.import",
+  "creators.claim",
+  "coop.band",
+  "coop.membership",
+  "support.subMemberNotice",
+  "coop.welcome",
+  "following",
+  "clip.viewer",
+  "consent.banner",
+] as const;
+/** What happened on a surface. */
+export const UI_METRIC_ACTIONS = [
+  "view",
+  "click",
+  "create",
+  "signin",
+  "submit",
+  "error",
+  "confirm",
+  "dismiss",
+  "used",
+] as const;
+/**
+ * The optional qualifier: a sign-up intent (auth gate, sign-up), a home shelf id, or an error
+ * code. "none" when the surface has no qualifier.
+ */
+export const UI_METRIC_STEPS = [
+  ...SIGNUP_INTENTS,
+  "vote",
+  "report",
+  "live",
+  "continue",
+  "videos",
+  "clips",
+  "categories",
+  "recent",
+  "rate_limited",
+  "username_taken",
+  "email_taken",
+  "invalid",
+  "accept",
+  "decline",
+  "choose",
+] as const;
+
+/**
+ * Nightly server-side funnel counts (`growth_daily.metric`), from existing rows only. Viewer
+ * funnel then creator funnel (growth-funnels.md P7 A).
+ */
+export const GROWTH_METRICS = [
+  "accounts_created",
+  "accounts_verified",
+  "first_follow_within_7d",
+  "first_chat_within_7d",
+  "first_support_within_30d",
+  "became_member",
+  "notify_optin",
+  "first_live",
+  "second_live_within_14d",
+  "imports_finished",
+  "active_streamers",
+  "members_total",
+] as const;
+export type GrowthMetric = (typeof GROWTH_METRICS)[number];
+/** Aggregates below this are shown as null (k-anonymity floor, growth-funnels.md P7 C). */
+export const GROWTH_K_FLOOR = 5;
+/** Why a username can't be claimed (`users.usernameAvailable`). */
+export const USERNAME_UNAVAILABLE_REASONS = ["taken", "reserved", "invalid"] as const;

@@ -443,6 +443,9 @@ export const directory = {
           followerCount: r.c.followerCount,
         })),
       categories: await categoryDtos(deps, catRows),
+      // Contract step placeholders: d3-browse searches video and clip titles.
+      videos: [],
+      clips: [],
     };
   }),
 
@@ -468,6 +471,8 @@ export function toCategory(deps: Deps, c: CategoryRow, liveChannels: number, sta
     liveChannels,
     viewerCount: stats.viewerCount,
     tags: stats.tags,
+    // Contract step placeholder: d3-browse counts public, ready videos per category.
+    videoCount: 0,
   };
 }
 

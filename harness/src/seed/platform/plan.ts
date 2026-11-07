@@ -287,6 +287,7 @@ const PAYLOAD_KINDS: Record<Exclude<NotificationType, "go_live" | "proposal" | "
   payout: ["payout_paid", "payout_held"],
   moderation: ["enforcement_statement", "report_received"],
   system: ["stream_key_leaked", "discord_webhook_removed", "giveaway_won", "notice"],
+  membership: ["membership_started"],
 };
 
 function need<T>(v: T | undefined, what: string): T {
@@ -480,6 +481,8 @@ export function planPlatform(rng: Rng, scale: SeedScale, world: PlatformWorld, n
       }
       case "raid":
         return { kind: r.pick(PAYLOAD_KINDS.raid), channel: s1.slug };
+      case "membership":
+        return { kind: r.pick(PAYLOAD_KINDS.membership), basis: "subscription" };
       default:
         return { kind: r.pick(PAYLOAD_KINDS[type]) };
     }

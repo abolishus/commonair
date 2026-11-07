@@ -62,6 +62,8 @@ const clip = (n: number): Clip => ({
   views: n,
   createdAt: new Date(Date.UTC(2026, 9, 30 - n)).toISOString(),
   windowStartedAt: null,
+  vodId: null,
+  vodOffsetSeconds: null,
   category: { slug: "art", name: "Art" },
 });
 

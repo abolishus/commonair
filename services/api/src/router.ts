@@ -35,19 +35,22 @@ import { twitchImport } from "./routes/twitch-import.ts";
 import { users } from "./routes/users.ts";
 import { vods } from "./routes/vods.ts";
 import { watchRooms } from "./routes/watch-rooms.ts";
+import { adminGrowth, metrics, transparencyNumbers } from "./routes/growth.ts";
+import { clipsRecent, vodsRecent } from "./routes/recent.ts";
+import { usernameRoutes } from "./routes/username.ts";
 
 export const router = base.router({
   instance,
   me,
-  users,
+  users: { ...users, ...usernameRoutes },
   categories: categoriesRoutes,
   directory,
   channels: channelsRoutes,
   stream,
   playback,
   p2p,
-  vods,
-  clips,
+  vods: { ...vods, ...vodsRecent },
+  clips: { ...clips, ...clipsRecent },
   chat,
   money,
   developer,
@@ -56,12 +59,13 @@ export const router = base.router({
   coop,
   integrity,
   analytics,
-  transparency,
+  transparency: { ...transparency, ...transparencyNumbers },
   appeals,
   safety,
   legal,
   relays,
-  admin,
+  admin: { ...admin, ...adminGrowth },
+  metrics,
   moderation,
   ncii,
   notifications,

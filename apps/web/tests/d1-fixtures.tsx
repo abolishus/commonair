@@ -70,7 +70,7 @@ export function category(
   liveChannels: number,
   over: Partial<Pick<Category, "viewerCount" | "tags">> = {},
 ): Category {
-  return { ...ref, boxArtUrl: null, mature: false, liveChannels, viewerCount: 0, tags: [], ...over };
+  return { ...ref, boxArtUrl: null, mature: false, liveChannels, viewerCount: 0, tags: [], videoCount: 0, ...over };
 }
 
 export function home(over: Partial<DirectoryHome> = {}): DirectoryHome {

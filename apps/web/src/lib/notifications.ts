@@ -84,7 +84,8 @@ export type NotificationTarget =
   | { kind: "proposal"; id: string }
   | { kind: "appeals" }
   | { kind: "privacy" }
-  | { kind: "dashboard" };
+  | { kind: "dashboard" }
+  | { kind: "membership" };
 
 export type NotificationView =
   | { kind: "go_live"; slug: string; title: string; target: NotificationTarget }
@@ -100,6 +101,7 @@ const TYPE_LABEL: Record<NotificationType, MessageKey> = {
   payout: "notifications.type.payout",
   moderation: "notifications.type.moderation",
   system: "notifications.type.system",
+  membership: "notifications.type.membership",
 };
 
 /**
@@ -160,6 +162,8 @@ export function describeNotification(n: Pick<NotificationDto, "type" | "payload"
         };
       }
       return { kind: "generic", label: TYPE_LABEL.system, target: null };
+    case "membership":
+      return { kind: "generic", label: TYPE_LABEL.membership, target: { kind: "membership" } };
     case "raid":
     case "payout":
       return { kind: "generic", label: TYPE_LABEL[n.type], target: null };
@@ -179,6 +183,8 @@ export function targetPath(target: NotificationTarget): string {
       return "/settings/privacy";
     case "dashboard":
       return "/dashboard";
+    case "membership":
+      return "/coop/membership";
   }
 }
 

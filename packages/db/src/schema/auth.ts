@@ -19,7 +19,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
-import { accountType, createdAt, id, platformRole, ts, updatedAt } from "./_shared.ts";
+import { accountType, createdAt, id, platformRole, signupIntent, ts, updatedAt } from "./_shared.ts";
 
 export const users = pgTable(
   "users",
@@ -51,6 +51,8 @@ export const users = pgTable(
     matureConfirmedAt: ts(),
     /** Chosen language (BCP 47); null = never chosen: the web negotiates, mail uses INSTANCE_DEFAULT_LOCALE (ADR 0029). */
     locale: text(),
+    /** Wave 2 (D2.8): why the account was made (`?intent=` at sign-up); null when unknown. Not PII. */
+    signupIntent: signupIntent(),
     /** Set when deletion completes; the row is pseudonymized, not dropped, if retention requires it. */
     deletedAt: ts(),
     pseudonymizedAt: ts(),

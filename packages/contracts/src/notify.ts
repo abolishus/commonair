@@ -4,7 +4,7 @@
 /** Go-live notifications, web push and the Discord adapter (N1, ADR 0028): shared rules and payloads. */
 import { z } from "zod";
 import { Slug } from "./api/common.ts";
-import type { NotifyMedium, PREFERENCE_TYPES } from "./enums.ts";
+import { MEMBERSHIP_BASES, type NotifyMedium, type PREFERENCE_TYPES } from "./enums.ts";
 
 export const NOTIFY_RULES = {
   /** Followers per fan-out job (one transaction each); the job enqueues the next page. */
@@ -63,6 +63,16 @@ export const VoteOpenNotificationPayload = z.object({
   title: z.string().optional(),
 });
 export type VoteOpenNotificationPayload = z.infer<typeof VoteOpenNotificationPayload>;
+
+/**
+ * `notifications.payload` of a `membership` row (overhaul wave 2 journey gap): membership started
+ * (from the payment webhook or a share) or ended. Enums only; the inbox links to the membership page.
+ */
+export const MembershipNotificationPayload = z.object({
+  kind: z.enum(["membership_started", "membership_ended"]),
+  basis: z.enum(MEMBERSHIP_BASES),
+});
+export type MembershipNotificationPayload = z.infer<typeof MembershipNotificationPayload>;
 
 /**
  * The plaintext of a push message, encrypted to the browser (RFC 8291) before it leaves the

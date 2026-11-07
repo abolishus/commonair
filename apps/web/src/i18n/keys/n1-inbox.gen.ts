@@ -26,6 +26,7 @@ export type Key =
   | "notifications.type.payout"
   | "notifications.type.moderation"
   | "notifications.type.system"
+  | "notifications.type.membership"
   | "notifications.kind.statement"
   | "notifications.kind.discordWebhookRemoved"
   | "notifications.kind.streamKeyLeaked"

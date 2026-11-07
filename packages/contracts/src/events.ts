@@ -36,6 +36,7 @@ import {
   SPLIT_BASES,
   SPLIT_STATUSES,
   MEDIA_STATE_REASONS,
+  SIGNUP_INTENTS,
 } from "./enums.ts";
 
 const id = z.string();
@@ -846,6 +847,15 @@ export const EVENTS = {
     internal: true,
     description: "Internal: countered content was restored after the waiting period",
     payload: { notice_id: id, counter_notice_id: id, restored_items: z.number().int() },
+  }),
+  /** Overhaul wave 2 (D2.8): a new account. Id and sign-up intent only (no PII), for future webhooks. */
+  "account.created": def({
+    version: "1",
+    condition: [],
+    scopes: [],
+    internal: true,
+    description: "Internal: a new account was created",
+    payload: { user_id: id, intent: z.enum(SIGNUP_INTENTS).nullable() },
   }),
   "account.action.recorded": def({
     version: "1",

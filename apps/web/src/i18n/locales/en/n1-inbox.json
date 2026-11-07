@@ -21,6 +21,7 @@
   "notifications.type.payout": "There is news about a payout",
   "notifications.type.moderation": "There is a moderation update",
   "notifications.type.system": "There is a notice about your account",
+  "notifications.type.membership": "Your co-op membership changed",
   "notifications.kind.statement": "There is a statement of reasons about a decision on your account or content",
   "notifications.kind.discordWebhookRemoved": "Your Discord webhook stopped working and was removed",
   "notifications.kind.streamKeyLeaked": "One of your stream keys may have leaked: rotate it",

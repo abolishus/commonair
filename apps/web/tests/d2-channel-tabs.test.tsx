@@ -120,6 +120,8 @@ function clip(n: number, over: Partial<Clip> = {}): Clip {
     views: n,
     createdAt: new Date(Date.UTC(2026, 9, 30 - n)).toISOString(),
     windowStartedAt: null,
+    vodId: null,
+    vodOffsetSeconds: null,
     category: null,
     ...over,
   };

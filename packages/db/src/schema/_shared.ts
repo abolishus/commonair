@@ -23,6 +23,7 @@ export const bytea = customType<{ data: Uint8Array; driverData: Uint8Array }>({ 
 export const cents = () => bigint({ mode: "number" });
 
 export const accountType = pgEnum("account_type", E.ACCOUNT_TYPES);
+export const signupIntent = pgEnum("signup_intent", E.SIGNUP_INTENTS);
 export const platformRole = pgEnum("platform_role", E.PLATFORM_ROLES);
 export const channelRole = pgEnum("channel_role", E.CHANNEL_ROLES);
 export const userLevel = pgEnum("user_level", E.USER_LEVELS);

@@ -143,6 +143,9 @@ async function toClips(deps: Deps, caller: Caller | null, items: readonly ClipIt
       // As `clips.chat` places the window (chat-replay/handlers.ts).
       windowStartedAt: windowStart(labels, c.startOffset),
       category,
+      // Contract step placeholders: d3-watch links the clip to its broadcast's playable video.
+      vodId: null,
+      vodOffsetSeconds: null,
     };
   });
 }

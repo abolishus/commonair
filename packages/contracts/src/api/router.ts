@@ -381,6 +381,41 @@ export const contract = {
       })
       .input(z.object({ username: Slug }))
       .output(D.UserPublic),
+    /**
+     * Wave 2 (D2.4 "claim your channel", round-2 open question 5): is this username free to sign up
+     * with? Rate-limited; answers only taken / reserved / invalid, never who holds it.
+     */
+    usernameAvailable: base
+      .meta({ access: "public", rateLimit: "auth" })
+      .route({
+        method: "GET",
+        path: "/usernames/available",
+        summary: "Whether a username can be claimed at sign-up",
+        ...tag("Users"),
+      })
+      .input(z.object({ username: z.string().min(1).max(40) }))
+      .output(
+        z.object({
+          /** The normalized (lowercase) form that was checked. */
+          username: z.string(),
+          available: z.boolean(),
+          reason: z.enum(E.USERNAME_UNAVAILABLE_REASONS).nullable(),
+        }),
+      ),
+  },
+
+  /** Wave 2 (D2.8): first-party UI counters. No cookie, no user id; daily totals only. */
+  metrics: {
+    ui: base
+      .meta({ access: "public", rateLimit: "write" })
+      .route({
+        method: "POST",
+        path: "/metrics/ui",
+        summary: "Count one UI view or click (closed list, no identifiers)",
+        ...tag("Metrics"),
+      })
+      .input(D.UiMetricEvent)
+      .output(Ok),
   },
 
   categories: {
@@ -498,6 +533,10 @@ export const contract = {
             }),
           ),
           categories: z.array(D.Category),
+          /** Wave 2 (D3.4): public, ready videos whose title matches, newest first. */
+          videos: z.array(D.VodCard),
+          /** Wave 2 (D3.4): ready clips whose title matches, most viewed first. */
+          clips: z.array(D.ClipCard),
         }),
       ),
     ranking: base
@@ -966,6 +1005,21 @@ export const contract = {
       })
       .input(PageInput.extend({ slug: ShortText, includeMature: z.boolean().default(false) }))
       .output(page(D.Vod)),
+    /** Wave 2 (D3.1 "Catch up"): public, ready videos across every channel, newest first. */
+    listRecent: base
+      .route({
+        method: "GET",
+        path: "/vods",
+        summary: "Recent videos across all channels",
+        ...tag("VODs"),
+      })
+      .input(
+        PageInput.extend({
+          language: ShortText.optional(),
+          includeMature: z.boolean().default(false),
+        }),
+      )
+      .output(page(D.VodCard)),
     get: base
       .route({ method: "GET", path: "/vods/{id}", summary: "One VOD", ...tag("VODs") })
       .input(z.object({ id: Id }))
@@ -1067,6 +1121,21 @@ export const contract = {
         PageInput.extend(ClipListFilter.shape).extend({ slug: ShortText, includeMature: z.boolean().default(false) }),
       )
       .output(page(D.Clip)),
+    /** Wave 2 (D3.1 "Fresh clips"): ready clips of public broadcasts across every channel. */
+    listRecent: base
+      .route({
+        method: "GET",
+        path: "/clips",
+        summary: "Recent clips across all channels",
+        ...tag("Clips"),
+      })
+      .input(
+        PageInput.extend(ClipListFilter.shape).extend({
+          language: ShortText.optional(),
+          includeMature: z.boolean().default(false),
+        }),
+      )
+      .output(page(D.ClipCard)),
     get: base
       .route({ method: "GET", path: "/clips/{id}", summary: "One clip", ...tag("Clips") })
       .input(z.object({ id: Id }))
@@ -3478,6 +3547,15 @@ export const contract = {
         }),
       )
       .output(D.EnforcementReport),
+    /** Wave 2 (D2.8): "By the numbers", the last 12 UTC months, k-floored. */
+    numbers: base
+      .route({
+        method: "GET",
+        path: "/transparency/numbers",
+        summary: "Accounts, members and active streamers by month",
+        ...tag("Transparency"),
+      })
+      .output(D.GrowthNumbers),
   },
 
   appeals: {
@@ -3936,6 +4014,16 @@ export const contract = {
   },
 
   admin: {
+    /** Wave 2 (D2.8): the growth funnels from `growth_daily` and `ui_counters`. */
+    growth: admin
+      .route({
+        method: "GET",
+        path: "/admin/growth",
+        summary: "Growth funnels and UI counters (aggregates only)",
+        ...tag("Admin"),
+      })
+      .input(z.object({ days: z.number().int().min(7).max(180).default(30) }))
+      .output(D.GrowthReport),
     egress: admin
       .route({
         method: "GET",

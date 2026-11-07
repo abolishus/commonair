@@ -124,6 +124,8 @@ const clip = (over: Partial<ClipDto> = {}): ClipDto => ({
   views: 0,
   createdAt: "2026-11-01T12:00:00.000Z",
   windowStartedAt: "2026-11-01T12:01:40.000Z",
+  vodId: null,
+  vodOffsetSeconds: null,
   category: null,
   ...over,
 });

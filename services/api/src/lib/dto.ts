@@ -211,6 +211,7 @@ export async function toChannelDto(deps: Deps, c: ChannelRow): Promise<z.infer<t
     })),
     suspended: c.suspendedAt !== null,
     movedTo: c.movedTo && c.movedAt ? { url: c.movedTo, at: c.movedAt.toISOString() } : null,
+    createdAt: iso(c.createdAt),
   };
 }
 

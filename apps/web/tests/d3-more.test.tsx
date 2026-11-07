@@ -83,6 +83,8 @@ const clipItem = (n: number): ClipItem => ({
   views: n,
   createdAt: "2026-11-01T12:00:00.000Z",
   windowStartedAt: null,
+  vodId: null,
+  vodOffsetSeconds: null,
 });
 const page = <T,>(items: T[]): MediaPage<T> => ({ items, nextCursor: null });
 

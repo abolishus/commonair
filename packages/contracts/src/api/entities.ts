@@ -64,6 +64,8 @@ export const Category = z.object({
   viewerCount: z.number().int().nonnegative(),
   /** The most used tags on the category's listed live streams, most used first (at most 10). */
   tags: z.array(z.string()),
+  /** Wave 2 (D3.2): public, ready videos recorded in the category (the Overview tab's videos count). */
+  videoCount: z.number().int().nonnegative(),
 });
 export type Category = z.infer<typeof Category>;
 
@@ -137,6 +139,8 @@ export const Channel = z.object({
    * as a "moved to" notice. Null when it has not moved (W3-portability fills it).
    */
   movedTo: z.object({ url: z.string(), at: Timestamp }).nullable().optional(),
+  /** Wave 2 (discovery): when the channel was created ("Streaming here since"). */
+  createdAt: Timestamp,
 });
 export type Channel = z.infer<typeof Channel>;
 
@@ -286,6 +290,13 @@ export const Clip = z.object({
   windowStartedAt: Timestamp.nullable(),
   /** The category of the broadcast the clip was cut from; null when it had none (or no broadcast). */
   category: Category.pick({ slug: true, name: true }).nullable(),
+  /**
+   * Wave 2 (D3.9, "Watch from this moment"): the video of the clip's broadcast when the caller may
+   * watch it (ready and playable to them), and the clip's start offset into it in seconds. Both
+   * null otherwise.
+   */
+  vodId: Id.nullable(),
+  vodOffsetSeconds: z.number().nonnegative().nullable(),
 });
 export const SimulcastTarget = z.object({
   id: Id,
@@ -2557,3 +2568,64 @@ export const RelayPurgeFeed = z.object({
   signature: z.string().regex(/^[A-Za-z0-9_-]{86}$/),
 });
 export type RelayPurgeFeed = z.infer<typeof RelayPurgeFeed>;
+
+// Design overhaul wave 2 ----------------------------------------------------------------------
+
+/** A video with its channel, for cross-channel shelves (home Catch up, search). */
+export const VodCard = Vod.extend({ channel: StreamCard.shape.channel });
+export type VodCard = z.infer<typeof VodCard>;
+/** A clip with its channel, for cross-channel shelves (home Fresh clips, search). */
+export const ClipCard = Clip.extend({ channel: StreamCard.shape.channel });
+export type ClipCard = z.infer<typeof ClipCard>;
+
+/** `POST /metrics/ui` body: one count, closed lists only; no ids, no free text (growth-funnels.md P7 B). */
+export const UiMetricEvent = z.object({
+  surface: z.enum(E.UI_METRIC_SURFACES),
+  action: z.enum(E.UI_METRIC_ACTIONS),
+  step: z.enum(E.UI_METRIC_STEPS).default("none"),
+});
+export type UiMetricEvent = z.infer<typeof UiMetricEvent>;
+
+/** A daily count that is null when below `GROWTH_K_FLOOR`. */
+const FlooredCount = z.number().int().nonnegative().nullable();
+
+/** `/admin/growth`: aggregates only, every cell below the k floor null. */
+export const GrowthReport = z.object({
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  /** Totals over the window, one per metric in `GROWTH_METRICS` order. */
+  totals: z.array(z.object({ metric: z.enum(E.GROWTH_METRICS), value: FlooredCount })),
+  /** One series per metric, a point per UTC day in the window (oldest first). */
+  series: z.array(
+    z.object({
+      metric: z.enum(E.GROWTH_METRICS),
+      points: z.array(z.object({ day: z.string(), value: FlooredCount })),
+    }),
+  ),
+  /** Sign-ups by intent over the window. */
+  signupsByIntent: z.array(z.object({ intent: z.enum(E.SIGNUP_INTENTS), value: FlooredCount })),
+  /** UI counters summed over the window, busiest first. */
+  ui: z.array(
+    z.object({
+      surface: z.enum(E.UI_METRIC_SURFACES),
+      action: z.enum(E.UI_METRIC_ACTIONS),
+      step: z.enum(E.UI_METRIC_STEPS),
+      value: FlooredCount,
+    }),
+  ),
+});
+export type GrowthReport = z.infer<typeof GrowthReport>;
+
+/** `/transparency` "By the numbers": monthly, public, aggregates with the k floor (P7 C). */
+export const GrowthNumbers = z.object({
+  months: z.array(
+    z.object({
+      /** `YYYY-MM` (UTC). */
+      month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
+      accountsCreated: FlooredCount,
+      membersTotal: FlooredCount,
+      activeStreamers: FlooredCount,
+    }),
+  ),
+});
+export type GrowthNumbers = z.infer<typeof GrowthNumbers>;

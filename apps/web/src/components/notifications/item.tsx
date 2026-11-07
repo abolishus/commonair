@@ -59,6 +59,12 @@ function TargetLink({
           {children}
         </Link>
       );
+    case "membership":
+      return (
+        <Link data-testid="notification-item-link" to="/coop/membership" className={LINK} onClick={onOpen}>
+          {children}
+        </Link>
+      );
     case "dashboard":
       return (
         <Link data-testid="notification-item-link" to="/dashboard" className={LINK} onClick={onOpen}>
