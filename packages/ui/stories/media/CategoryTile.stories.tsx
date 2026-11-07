@@ -103,3 +103,34 @@ export const GridEmpty: Story = {
     />
   ),
 };
+
+/** 0 live: the art goes muted and no "0 live" badge shows. */
+export const Muted: Story = { args: { category: CATEGORIES[6] as CategoryTileData } };
+export const MutedLight: Story = { args: { category: CATEGORIES[6] as CategoryTileData }, globals: { theme: "light" } };
+/** The compact home shelf: 16:9 art. */
+export const Landscape: Story = { args: { shape: "landscape", category: CATEGORIES[1] as CategoryTileData } };
+export const LandscapeGrid: Story = {
+  parameters: { fullWidth: true },
+  render: () => (
+    <CategoryGrid
+      categories={CATEGORIES}
+      columns={4}
+      shape="landscape"
+      liveLabel={liveLabel}
+      viewerLabel={viewerLabel}
+    />
+  ),
+};
+export const LandscapeGridLoading: Story = {
+  parameters: { fullWidth: true },
+  render: () => (
+    <CategoryGrid
+      categories={[]}
+      loading
+      columns={4}
+      shape="landscape"
+      liveLabel={liveLabel}
+      viewerLabel={viewerLabel}
+    />
+  ),
+};

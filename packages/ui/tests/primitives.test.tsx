@@ -503,7 +503,7 @@ describe("StreamCard", () => {
     const { container } = render(<StreamCard stream={stream} href="/x" />);
     fireEvent.error(container.querySelector("img")!);
     expect(container.querySelector("img")).toBeNull();
-    expect(container.querySelector(".bg-channel-accent\\/15")).toBeTruthy();
+    expect(container.querySelector('[data-slot="media-fallback"][data-kind="nothumb"]')).toBeTruthy();
   });
 
   test("a thumbnail that already failed before hydration (complete, no size) falls back too", () => {
