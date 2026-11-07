@@ -535,7 +535,14 @@ export const playback = {
     // drained, timed-out, suspended and retired relays are all removed from it). The new token
     // and playlist point at the origin, and the session is re-recorded as origin-delivered:
     // integrity then judges it on origin fetches. That fails safe: an honest viewer's relay
-    // segments are missing from the origin count, but no watch time goes unproven.
+    // segments are missing from the origin count, but no watch time goes unproven. The relay id
+    // stays, with the moment it left: issuance for the minutes the session spent on the relay is
+    // recomputed for 5 minutes after, and losing the session there made the relay's receipts for
+    // those minutes over-reports (e2e-relay CI run 42333642371: the drained relay was suspended).
+    const toOrigin = {
+      assignedSource: "origin" as const,
+      relayLeftAt: sql`coalesce(${playbackSessions.relayLeftAt}, ${now.toISOString()}::timestamptz)`,
+    };
     let assignment: Assignment | null = null;
     // Turning data mode on moves a relay or CDN session to the origin the same way (ADR 0018
     // decision 4); turning it off leaves the session where it is.
@@ -544,16 +551,13 @@ export const playback = {
       if (claims.src === "relay") await deps.valkey.set(dvrSwitchOwedKey(s.id), "1", "EX", VERIFY_STATE_TTL_SECONDS);
       await deps.db
         .update(playbackSessions)
-        .set({ assignedSource: "origin", relayId: null })
+        .set(claims.src === "relay" ? toOrigin : { assignedSource: "origin" })
         .where(eq(playbackSessions.id, s.id));
     } else if (claims.src === "relay" && claims.rid) {
       const relays = await activeRelays(deps);
       if (!relays.some((r) => r.id === claims.rid && r.status === "active")) {
         assignment = { source: "origin" };
-        await deps.db
-          .update(playbackSessions)
-          .set({ assignedSource: "origin", relayId: null })
-          .where(eq(playbackSessions.id, s.id));
+        await deps.db.update(playbackSessions).set(toOrigin).where(eq(playbackSessions.id, s.id));
       }
     }
     const nowSeconds = Math.floor(now.getTime() / 1000);

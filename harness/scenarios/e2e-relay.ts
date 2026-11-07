@@ -341,15 +341,22 @@ export async function setUpRelay(ctx: ScenarioContext, plan: RelayPlan, run: Rel
   }
   ctx.assert("registration token looks like a relay token", /^relay_[A-Za-z0-9_-]{43}$/.test(relayToken));
   const view: RelayView = relayPage ? new WebRelayView(relayPage) : new ApiRelayView(member.api.client);
-  const waitRelay = (id: string, what: string, ok: (r: RelayRead) => boolean, timeoutMs: number) =>
-    poll(
+  // A timeout says where the relay stood (a suspension for a rejected receipt reads very
+  // differently from a relay that never heartbeat).
+  const waitRelay = (id: string, what: string, ok: (r: RelayRead) => boolean, timeoutMs: number) => {
+    let last: RelayRead | null = null;
+    return poll(
       `relay ${what}`,
       async () => {
         const r = await view.read(id);
+        last = r ?? last;
         return r && ok(r) ? r : null;
       },
       timeoutMs,
-    );
+    ).catch((err: unknown) => {
+      throw new Error(`${(err as Error).message}; last ${JSON.stringify(last)}`);
+    });
+  };
 
   const host = relayHost(plan.relayHost);
   const port = plan.relayPort ?? (await freePort());

@@ -226,7 +226,12 @@ test("draining removes the relay at once; its viewers get switchTo the origin; i
     .select()
     .from(schema.playbackSessions)
     .where(eq(schema.playbackSessions.id, s.sessionId));
-  expect(after).toMatchObject({ assignedSource: "origin", relayId: null });
+  // The relay id stays, with when it left: issuance recomputed for the minutes the session spent
+  // on the relay must still count it there (e2e-relay CI run 42333642371).
+  expect(after).toMatchObject({ assignedSource: "origin", relayId: r.id });
+  const left = after?.relayLeftAt?.getTime() ?? 0;
+  expect(left).toBeGreaterThan(api.deps.now().getTime() - 10_000);
+  expect(left).toBeLessThanOrEqual(api.deps.now().getTime());
   // With the origin token there is nothing more to move.
   offset += 11_000;
   expect((await beat(s, moved.body.token ?? "")).body.switchTo).toBeUndefined();

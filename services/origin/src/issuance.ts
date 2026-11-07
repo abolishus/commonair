@@ -10,9 +10,11 @@
  *
  * For relay R and the minute bucket B = [start, start + 60 s):
  *
- *   S(R, b, B)  = playback sessions with relayId = R, assignedSource = relay, watching
- *                 broadcast b, alive in B: startedAt < end, lastHeartbeatAt ≥ start,
- *                 and not ended before start.
+ *   S(R, b, B)  = playback sessions with relayId = R, watching broadcast b, alive in B
+ *                 (startedAt < end, lastHeartbeatAt ≥ start, not ended before start) and on
+ *                 the relay in B: still assigned to it, or moved to the origin at or after
+ *                 start (`relayLeftAt`). A session that moved keeps its relay id, so the
+ *                 minutes it spent there do not lose it when they are recomputed.
  *
  *   For every directory d of b's channel (the source path and each rendition path),
  *   from the production all origin replicas recorded for B (production.ts; each media
@@ -149,7 +151,7 @@ export async function relaySessionCounts(db: Executor, start: Date, end: Date): 
     .where(
       and(
         isNotNull(ps.relayId),
-        eq(ps.assignedSource, "relay"),
+        or(and(eq(ps.assignedSource, "relay"), isNull(ps.relayLeftAt)), gte(ps.relayLeftAt, start)),
         lt(ps.startedAt, end),
         gte(ps.lastHeartbeatAt, start),
         or(isNull(ps.endedAt), gte(ps.endedAt, start)),

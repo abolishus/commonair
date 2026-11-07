@@ -255,7 +255,7 @@ describe("heartbeat with dataMode", () => {
     expect(on.switchTo?.startsWith(`${origin}/hls/${mediaPath(st.username)}/index.m3u8?t=`)).toBe(true);
     expect(on.switchTo).toContain(encodeURIComponent(on.token ?? ""));
     expect(await claimsOf(on.token ?? "")).toMatchObject({ src: "origin", dm: AUDIO });
-    expect(await sessionRow(s.sessionId)).toMatchObject({ assignedSource: "origin", relayId: null });
+    expect(await sessionRow(s.sessionId)).toMatchObject({ assignedSource: "origin", relayId: null, relayLeftAt: null });
 
     const off = await beat(viewer, s.sessionId, on.token ?? "", { dataMode: null });
     expect(off.switchTo).toBeUndefined();
@@ -263,7 +263,7 @@ describe("heartbeat with dataMode", () => {
     expect((await sessionRow(s.sessionId)).assignedSource).toBe("origin");
   });
 
-  test("turning it on moves a relay session to the origin and clears relay_id", async () => {
+  test("turning it on moves a relay session to the origin, keeping relay_id with when it left", async () => {
     const st = await liveStreamer();
     const relayId = await addRelay(st.userId);
     const viewer = client(api);
@@ -274,7 +274,10 @@ describe("heartbeat with dataMode", () => {
     const claims = await claimsOf(on.token ?? "");
     expect(claims).toMatchObject({ src: "origin", dm: LOW });
     expect(claims.rid).toBeUndefined();
-    expect(await sessionRow(s.sessionId)).toMatchObject({ assignedSource: "origin", relayId: null });
+    // Issuance for the minutes it spent on the relay still counts it (e2e-relay CI run 42333642371).
+    const row = await sessionRow(s.sessionId);
+    expect(row).toMatchObject({ assignedSource: "origin", relayId });
+    expect(row.relayLeftAt).toBeInstanceOf(Date);
   });
 
   test("turning it off on a relay session that never had it keeps the relay", async () => {

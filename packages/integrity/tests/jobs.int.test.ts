@@ -935,6 +935,26 @@ describe("verifyReceipts", () => {
     expect(unknownFlags[0]).toMatchObject({ decision: "pending_review" });
   });
 
+  test("a session that moved to the origin still covers the minutes it spent on the relay", async () => {
+    // e2e-relay CI run 42333642371: the relay drained and its sessions moved to the origin; a
+    // missing issuance minute from before the move is a gap, not bytes nobody was issued.
+    const r = await relay();
+    const { channelId } = await channel();
+    await session(channelId, {
+      assignedSource: "origin",
+      relayId: r,
+      relayLeftAt: minute(36),
+      startedAt: new Date(NOW.getTime() - 60 * 60_000),
+      lastHeartbeatAt: new Date(NOW.getTime() - 5_000),
+    });
+    const before = await period(r, 37, null, 5000);
+    // After it left, a minute without issuance is real again.
+    const after = await period(r, 35, null, 5000);
+    await verifyReceipts(app, NOW);
+    expect(await receipt(before)).toMatchObject({ status: "verified", overReportRatio: null });
+    expect(await receipt(after)).toMatchObject({ status: "rejected", rejectionReason: "no_issuance" });
+  });
+
   test("bytes reported for a minute without live sessions on the relay and without issuance are real", async () => {
     const r = await relay();
     // Other relays had issuance in this minute, but r had no live session: nothing was issued to r.

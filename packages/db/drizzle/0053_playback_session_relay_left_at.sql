@@ -1,0 +1,1 @@
+ALTER TABLE "playback_sessions" ADD COLUMN "relay_left_at" timestamp with time zone;

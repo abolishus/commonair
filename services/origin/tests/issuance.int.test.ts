@@ -144,6 +144,54 @@ describe("relaySessionCounts", () => {
     // A minute nobody watched.
     expect(await relaySessionCounts(t.db, at(-10 * MINUTE_MS), at(-9 * MINUTE_MS))).toEqual([]);
   });
+
+  test("a session moved to the origin counts for the minutes it was on the relay, not after", async () => {
+    const S = nextMinute();
+    const at = (ms: number) => new Date(S + ms);
+    const b = await broadcast();
+    // Moved off r1 during the minute (the relay drained): counted in it and before, not after.
+    // Moved in the minute before: not counted. Moved at the minute's first instant: counted.
+    await t.db.insert(schema.playbackSessions).values([
+      session({
+        assignedSource: "origin",
+        relayId: ids.r1,
+        relayLeftAt: at(20_000),
+        broadcastId: b.id,
+        startedAt: at(-5 * MINUTE_MS),
+        lastHeartbeatAt: at(MINUTE_MS + 30_000),
+      }),
+      session({
+        assignedSource: "origin",
+        relayId: ids.r1,
+        relayLeftAt: at(-1),
+        broadcastId: b.id,
+        startedAt: at(-5 * MINUTE_MS),
+        lastHeartbeatAt: at(30_000),
+      }),
+      session({
+        assignedSource: "origin",
+        relayId: ids.r2,
+        relayLeftAt: at(0),
+        broadcastId: b.id,
+        startedAt: at(-5 * MINUTE_MS),
+        lastHeartbeatAt: at(30_000),
+      }),
+    ]);
+    const counts = await relaySessionCounts(t.db, at(0), at(MINUTE_MS));
+    expect(counts.sort((x, y) => x.relayId.localeCompare(y.relayId))).toEqual(
+      [
+        { relayId: ids.r1, broadcastId: b.id, path: b.path, sessions: 1, dvrSessions: 0 },
+        { relayId: ids.r2, broadcastId: b.id, path: b.path, sessions: 1, dvrSessions: 0 },
+      ].sort((x, y) => x.relayId.localeCompare(y.relayId)),
+    );
+    expect(await relaySessionCounts(t.db, at(-MINUTE_MS), at(0))).toMatchObject(
+      [
+        { relayId: ids.r1, sessions: 2 },
+        { relayId: ids.r2, sessions: 1 },
+      ].sort((x, y) => x.relayId.localeCompare(y.relayId)),
+    );
+    expect(await relaySessionCounts(t.db, at(MINUTE_MS), at(2 * MINUTE_MS))).toEqual([]);
+  });
 });
 
 describe("runIssuance", () => {
@@ -185,6 +233,35 @@ describe("runIssuance", () => {
       .where(eq(schema.playbackSessions.id, s1!.id));
     expect(await runIssuance(t.db, production, S, pulls)).toMatchObject([{ sessions: 1, segmentTokens: 3 }]);
     expect(await stored()).toMatchObject([{ sessions: 1, segmentTokens: 3, bytesIssued: 3_050 }]);
+  });
+
+  test("a recompute after the relay's sessions moved to the origin keeps the minutes they spent on it", async () => {
+    // e2e-relay CI run 42333642371: the relay drained, some of its sessions had moved when the
+    // tick recomputed the last 5 minutes, and those minutes' issuance shrank under its receipts.
+    const S = nextMinute();
+    const b = await broadcast();
+    const [s1] = await t.db
+      .insert(schema.playbackSessions)
+      .values([
+        session({ relayId: ids.r1, broadcastId: b.id, startedAt: new Date(S), lastHeartbeatAt: new Date(S + 5_000) }),
+        session({ relayId: ids.r1, broadcastId: b.id, startedAt: new Date(S), lastHeartbeatAt: new Date(S + 5_000) }),
+      ])
+      .returning({ id: schema.playbackSessions.id });
+    production.record(b.path, `seg-${S}-1.mp4`, "segment", 1_000, S + 1_000);
+    await production.flush();
+    expect(await runIssuance(t.db, production, S, pulls)).toMatchObject([{ relayId: ids.r1, sessions: 2 }]);
+    // Two minutes later the relay leaves the active set and one session's heartbeat moves it.
+    await t.db
+      .update(schema.playbackSessions)
+      .set({
+        assignedSource: "origin",
+        relayLeftAt: new Date(S + 2 * MINUTE_MS),
+        lastHeartbeatAt: new Date(S + 2 * MINUTE_MS),
+      })
+      .where(eq(schema.playbackSessions.id, s1!.id));
+    expect(await runIssuance(t.db, production, S, pulls)).toMatchObject([
+      { relayId: ids.r1, sessions: 2, bytesIssued: 2_000 },
+    ]);
   });
 
   test("a minute without relay sessions writes nothing", async () => {

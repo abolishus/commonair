@@ -83,7 +83,13 @@ export const playbackSessions = pgTable(
     userAgent: text(),
     fingerprint: jsonb().$type<Record<string, unknown>>().notNull().default({}),
     assignedSource: deliverySource().notNull().default("origin"),
+    /**
+     * The relay this session was assigned at start. Kept when the session moves to the origin
+     * (`relayLeftAt` set), so issuance recomputed for minutes it spent on the relay still counts it.
+     */
     relayId: uuid().references(() => relayNodes.id, { onDelete: "set null" }),
+    /** When the session moved off its relay to the origin (the relay left the active set, data mode); null while on it. */
+    relayLeftAt: ts(),
     startedAt: ts().notNull().defaultNow(),
     lastHeartbeatAt: ts(),
     endedAt: ts(),

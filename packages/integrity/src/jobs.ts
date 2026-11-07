@@ -544,7 +544,9 @@ export async function verifyReceipts(
                                                      r.period_end - interval '1 microsecond',
                                                      interval '1 minute') m
                  where exists (select 1 from playback_sessions ps
-                                where ps.relay_id = r.relay_id and ps.assigned_source = 'relay'
+                                where ps.relay_id = r.relay_id
+                                  and ((ps.assigned_source = 'relay' and ps.relay_left_at is null)
+                                       or ps.relay_left_at >= m)
                                   and ps.started_at < m + interval '1 minute' and ps.last_heartbeat_at >= m
                                   and (ps.ended_at is null or ps.ended_at >= m))
                    and not exists (select 1 from relay_issuance i
