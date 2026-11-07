@@ -257,6 +257,35 @@ describe("fetch_pattern", () => {
     );
   });
 
+  test("playlists before any claimed playback hold the session; claimed playback is judged", () => {
+    const startUp = { playlists: 12, segments: 0, parts: 0 };
+    // A player at start-up (CI run 41812379909): playlists loaded, no segment yet, no watch time.
+    expect(fetchChecks({ ...base, watchSeconds: 0 }, startUp, ctx)).toEqual({
+      checks: [],
+      measures: { segments: 0, playlists: 12, expectedSegments: 0 },
+      mediaUnconfirmed: true,
+      skipped: null,
+    });
+    expect(fetchSignal({ ...base, watchSeconds: 0 }, startUp, ctx)).toBeNull();
+    // Negative watch time is no claimed playback either.
+    expect(fetchChecks({ ...base, watchSeconds: -5 }, startUp, ctx).checks).toEqual([]);
+    // Under the request floor nothing holds it on this check (no media expected either).
+    expect(fetchChecks({ ...base, watchSeconds: 0 }, { ...startUp, playlists: 9 }, ctx)).toMatchObject({
+      checks: [],
+      mediaUnconfirmed: false,
+    });
+    // One segment's worth of claimed playback with the same counts is a poller.
+    expect(fetchChecks({ ...base, watchSeconds: ctx.segmentDurationSeconds }, startUp, ctx)).toMatchObject({
+      checks: ["playlists_without_segments"],
+      mediaUnconfirmed: true,
+    });
+    expect(fetchSignal({ ...base, watchSeconds: 2 }, startUp, { ...ctx, segmentDurationSeconds: 2 })!.score).toBe(0.8);
+    // 10+ expected segments and no media at all still fires no_media_fetched without playlists.
+    expect(fetchChecks({ ...base, watchSeconds: 10 }, { playlists: 0, segments: 0, parts: 0 }, ctx).checks).toEqual([
+      "no_media_fetched",
+    ]);
+  });
+
   test("segments without playlists", () => {
     expect(fetchChecks(base, { playlists: 0, segments: 60, parts: 0 }, ctx).checks).toEqual([
       "segments_without_playlists",

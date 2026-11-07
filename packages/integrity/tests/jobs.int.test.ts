@@ -286,6 +286,47 @@ describe("scoreActiveSessions", () => {
     expect(r.newlyExcluded).not.toContain(dbZero);
   });
 
+  test("a headless player scored at start-up (playlists only) stays pending, then verifies on its media", async () => {
+    // CI run 41812379909: this state was excluded at 0.92, and exclusions are sticky.
+    const { channelId } = await channel();
+    const id = await session(channelId, {
+      userAgent:
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/140.0.0.0 Safari/537.36",
+      startedAt: new Date(NOW.getTime() - 2_000),
+      lastHeartbeatAt: null,
+      heartbeats: 0,
+      watchSeconds: 0,
+      segmentsFetched: 0,
+      bytesHttp: 0,
+    });
+    await recordFetches(
+      valkey,
+      Array.from({ length: 12 }, () => ({ sid: id, kind: "playlist" as const })),
+    );
+
+    const first = await scoreActiveSessions(app, valkey, NOW);
+    expect(first.newlyExcluded).not.toContain(id);
+    expect(await sessionRow(id)).toMatchObject({
+      verdict: "pending",
+      verdictReasons: ["headless", "insufficient_heartbeats"],
+    });
+    expect(await flagsFor(id)).toEqual([]);
+
+    // The player then fetches its media and claims playback over three beats.
+    await recordFetches(valkey, [
+      ...Array.from({ length: 30 }, () => ({ sid: id, kind: "playlist" as const })),
+      ...Array.from({ length: 140 }, (_, i) => ({ sid: id, kind: "part" as const, object: `src/part${i}.mp4` })),
+    ]);
+    await humanHistory(id, 3);
+    await app
+      .update(s.playbackSessions)
+      .set({ heartbeats: 3, watchSeconds: 30, lastHeartbeatAt: new Date(NOW.getTime() - 5_000) })
+      .where(eq(s.playbackSessions.id, id));
+
+    await scoreActiveSessions(app, valkey, NOW);
+    expect(await sessionRow(id)).toMatchObject({ verdict: "verified", verdictReasons: ["headless"] });
+  });
+
   test("relay sessions verify only on receipts verified with complete issuance", async () => {
     const { channelId } = await channel();
     const relayId = await relayNode();

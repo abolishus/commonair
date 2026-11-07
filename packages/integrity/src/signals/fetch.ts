@@ -15,7 +15,9 @@
  * Checks (combined as a noisy-OR):
  *
  *   no_media_fetched            claims ≥ 10 segments' worth of playback, accounting shows no media at all
- *   playlists_without_segments  ≥ 10 playlist requests and no segment/part at all (playlist pollers)
+ *   playlists_without_segments  ≥ 10 playlist requests and no segment/part at all while claiming
+ *                               playback (playlist pollers); with no playback claimed yet it only
+ *                               holds the session (`mediaUnconfirmed`): a player starting up
  *   segments_without_playlists  ≥ 10 segments and zero playlist requests (direct segment scraping)
  *   too_few_segments            < 25 % of the media expected for the watch time (≥ 10 expected)
  *   too_many_segments           > 4 × the segments expected + 40 s of media (origin with known part
@@ -228,10 +230,16 @@ function modeChecks(
   const parts = fetches.parts ?? 0;
   const effectiveSegments = fetches.segments + parts / Math.max(1, ctx.partsPerSegment);
   measures.segments = round(effectiveSegments);
+  // Playlists alone before any claimed playback is a player starting up (it loads the
+  // multivariant and media playlists and reloads them before its first segment request), not a
+  // poller: it is held, not scored, since exclusions are sticky. Claimed playback is judged.
+  let startingUp = false;
   if (fetches.playlists !== null) {
     measures.playlists = fetches.playlists;
-    if (fetches.playlists >= FETCH_MIN_REQUESTS && fetches.segments + parts === 0)
-      checks.push("playlists_without_segments");
+    if (fetches.playlists >= FETCH_MIN_REQUESTS && fetches.segments + parts === 0) {
+      if (session.watchSeconds > 0) checks.push("playlists_without_segments");
+      else startingUp = true;
+    }
     if (fetches.playlists === 0 && fetches.segments >= FETCH_MIN_REQUESTS) checks.push("segments_without_playlists");
   }
   // "Too few" uses the (possibly reduced) HTTP share; "too many" always the full expectation.
@@ -239,7 +247,7 @@ function modeChecks(
   const expected = full * share;
   measures.expectedSegments = round(expected);
   p2pMeasures(measures, ctx.p2p);
-  let mediaUnconfirmed = checks.includes("playlists_without_segments");
+  let mediaUnconfirmed = startingUp || checks.includes("playlists_without_segments");
   if (!mediaUnconfirmed) {
     if (!partsKnown) {
       // Database counter only (full segments): cannot be told apart from a part-heavy
