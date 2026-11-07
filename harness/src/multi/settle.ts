@@ -21,7 +21,7 @@ export interface NetworkProbe {
 
 export interface SettleOptions {
   timeoutMs: number;
-  /** How long every probe must keep passing (default 3 s): one passing round can be a lull. */
+  /** How long every probe must keep passing (default `DEFAULT_STABLE_MS`): a passing round can be a lull. */
   stableMs?: number;
   intervalMs?: number;
   signal?: AbortSignal;
@@ -29,7 +29,12 @@ export interface SettleOptions {
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
 }
 
-export const DEFAULT_STABLE_MS = 3_000;
+/**
+ * On run 42244605154 the bad period (16:08:21 to 16:08:35) was intermittent: media's /readyz
+ * healthcheck (every 5 s) passed at about 16:08:26 and 16:08:31 while api -> mailpit still timed
+ * out. A clean streak must outlast such lulls, so two healthcheck intervals.
+ */
+export const DEFAULT_STABLE_MS = 10_000;
 export const DEFAULT_SETTLE_INTERVAL_MS = 1_000;
 
 export class NetworkNotSettledError extends Error {

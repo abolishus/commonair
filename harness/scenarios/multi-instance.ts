@@ -58,7 +58,7 @@ import {
 } from "../src/multi/podman-ops.ts";
 import { ReconnectingChat } from "../src/multi/reconnecting-chat.ts";
 import { type ReplicaContainer, containerOf, missingReplicas, replicaUrls } from "../src/multi/replicas.ts";
-import { waitForNetwork } from "../src/multi/settle.ts";
+import { DEFAULT_STABLE_MS, waitForNetwork } from "../src/multi/settle.ts";
 import { completedSchedulerRuns, listenToBus, oldestCompleted } from "../src/multi/valkey.ts";
 import { startForwardingProxy } from "../src/proxy.ts";
 import { errorMessage } from "../src/redact.ts";
@@ -102,6 +102,11 @@ const RESTORE_MS = 30_000;
  * the teardown reserve; a claim's settle wait is also capped to what is left of the claim.
  */
 export const SETTLE_MS = 40_000;
+/**
+ * The least time any settle wait gets, even when the claim or the run is nearly out: the stable
+ * window plus room for the probes to recover first. Below the stable window it could never pass.
+ */
+export const SETTLE_FLOOR_MS = DEFAULT_STABLE_MS + 10_000;
 /**
  * Chat's MessageWriter flushes every 250 ms (services/chat/src/persistence.ts); a message acked
  * this long before a SIGKILL has been through at least one flush and its insert.
@@ -273,7 +278,7 @@ export default defineScenario({
     await ctx.step("the network between containers settles", async () => {
       settleStepRan = true;
       const left = startedAt + SCENARIO_TIMEOUT_MS - Date.now();
-      const timeoutMs = Math.max(5_000, Math.min(SETTLE_MS, left - 5_000));
+      const timeoutMs = Math.max(SETTLE_FLOOR_MS, Math.min(SETTLE_MS, left - 5_000));
       const ms = await settleNetwork(ctx, ["worker-2", "chat-2"], timeoutMs, ctx.signal);
       ctx.metric("multi.settle_ms.end", ms, "ms");
     });
@@ -710,7 +715,7 @@ async function workerLoss(kit: Kit, channel: string, streamer: SignedInUser): Pr
     timeoutMs: kit.budget.cap(RESTORE_MS, 15_000),
     settle: {
       probes: await listStackProbes(ctx.env.HARNESS_CONTAINER_PREFIX, ["worker-2"]),
-      timeoutMs: kit.budget.cap(SETTLE_MS, 10_000),
+      timeoutMs: kit.budget.cap(SETTLE_MS, SETTLE_FLOOR_MS),
       signal: ctx.signal,
     },
   });
@@ -951,7 +956,7 @@ async function reconnectOnLoss(kit: Kit, channel: string, streamer: SignedInUser
     timeoutMs: kit.budget.cap(RESTORE_MS, 15_000),
     settle: {
       probes: await listStackProbes(ctx.env.HARNESS_CONTAINER_PREFIX, ["chat-2"]),
-      timeoutMs: kit.budget.cap(SETTLE_MS, 10_000),
+      timeoutMs: kit.budget.cap(SETTLE_MS, SETTLE_FLOOR_MS),
       signal: ctx.signal,
     },
   });

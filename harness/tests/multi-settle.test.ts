@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { describe, expect, test } from "vite-plus/test";
-import { SCENARIO_TIMEOUT_MS, SETTLE_MS, TEARDOWN_RESERVE_MS } from "../scenarios/multi-instance.ts";
+import { SCENARIO_TIMEOUT_MS, SETTLE_FLOOR_MS, SETTLE_MS, TEARDOWN_RESERVE_MS } from "../scenarios/multi-instance.ts";
 import type { PodmanResult } from "../src/drill/podman.ts";
 import {
   type Exec,
@@ -15,7 +15,13 @@ import {
   stackProbes,
 } from "../src/multi/podman-ops.ts";
 import { parseReplicaContainers } from "../src/multi/replicas.ts";
-import { type NetworkProbe, NetworkNotSettledError, failingProbes, waitForNetwork } from "../src/multi/settle.ts";
+import {
+  DEFAULT_STABLE_MS,
+  type NetworkProbe,
+  NetworkNotSettledError,
+  failingProbes,
+  waitForNetwork,
+} from "../src/multi/settle.ts";
 
 /** A clock that only moves when the code under test sleeps. */
 function fakeClock(onSleep: (t: number) => void = () => undefined) {
@@ -155,6 +161,21 @@ describe("waitForNetwork", () => {
     const ms = await waitForNetwork([flappy], { timeoutMs: 60_000, stableMs: 3_000, intervalMs: 1_000, ...clock });
     // The failure is at +2 s; passing again from +3 s, stable at +6 s.
     expect(ms).toBe(6_000);
+  });
+
+  test("the default window does not end in a 5 s lull between failures (run 42244605154)", async () => {
+    // Failing 3 s, passing 5 s (a healthcheck gap), failing 3 s again, then passing for good.
+    const clock = fakeClock();
+    const start = clock.t;
+    const failingAt = (ms: number) => ms < 3_000 || (ms >= 8_000 && ms < 11_000);
+    const p = probe("api -> mailpit", () => (failingAt(clock.t - start) ? "exit 1: ETIMEDOUT" : null));
+    const ms = await waitForNetwork([p], { timeoutMs: 60_000, intervalMs: 1_000, now: clock.now, sleep: clock.sleep });
+    // Not in the lull (3 s to 8 s): only after a full default window from 11 s.
+    expect(ms).toBe(11_000 + DEFAULT_STABLE_MS);
+  });
+
+  test("the default window outlasts two 5 s healthcheck intervals", () => {
+    expect(DEFAULT_STABLE_MS).toBeGreaterThanOrEqual(10_000);
   });
 
   test("returns at once with no probes", async () => {
@@ -315,5 +336,19 @@ describe("multi-instance settle budget", () => {
   test("the final settle wait fits the teardown reserve", () => {
     expect(SETTLE_MS).toBeLessThan(TEARDOWN_RESERVE_MS);
     expect(SETTLE_MS).toBeLessThan(SCENARIO_TIMEOUT_MS);
+  });
+
+  test("the smallest settle budget leaves room for the stable window", () => {
+    expect(SETTLE_FLOOR_MS).toBeGreaterThan(DEFAULT_STABLE_MS);
+    expect(SETTLE_MS).toBeGreaterThanOrEqual(SETTLE_FLOOR_MS);
+  });
+
+  test("a settle wait given only the floor succeeds when the probes recover at once", async () => {
+    const ms = await waitForNetwork([probe("p", () => null)], {
+      timeoutMs: SETTLE_FLOOR_MS,
+      intervalMs: 1_000,
+      ...fakeClock(),
+    });
+    expect(ms).toBeLessThanOrEqual(SETTLE_FLOOR_MS);
   });
 });
