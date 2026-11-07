@@ -19,7 +19,6 @@ export const N1_TEST_IDS = {
   loadMore: "notification-load-more",
   empty: "notification-empty",
   settingsLink: "notification-settings-link",
-  accountLink: "account-notifications-link",
   signOut: "nav-signout",
   // Settings
   defaultInApp: "notify-default-in_app",

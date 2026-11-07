@@ -50,7 +50,6 @@ render tests; `apps/web/tests/selectors.test.ts` checks the literal ones and the
 
 | Test id                      | Element and attributes                                                                                                      |
 | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `account-preferences-link`   | In the account menu, a link to `/settings/preferences`                                                                      |
 | `preferences-page`           | The page container of `/settings/preferences` (members only)                                                                |
 | `locale-select`              | The Language `Select` trigger on the page; `data-value` = the saved choice (`auto` when `users.locale` is null, else a tag) |
 | `locale-option-auto`         | The "Automatic" item (save `users.locale` = null)                                                                           |

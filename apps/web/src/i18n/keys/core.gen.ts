@@ -8,8 +8,6 @@ export type Key =
   | "nav.signIn"
   | "nav.signUp"
   | "nav.signOut"
-  | "nav.dashboard"
-  | "nav.relays"
   | "nav.accountMenu"
   | "nav.menu"
   | "nav.skipToContent"

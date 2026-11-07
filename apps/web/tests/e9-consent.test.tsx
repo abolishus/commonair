@@ -697,8 +697,6 @@ describe("selectors", () => {
     for (const section of sections)
       for (const m of section.matchAll(/`([a-z][a-z0-9-]+)`/g))
         if (m[1] && /-/.test(m[1]) && !m[1].startsWith("data-") && !m[1].includes("_")) ids.add(m[1]);
-    // The account menu link is the contract step's (site chrome), not these pages'.
-    ids.delete("account-connections-link");
     expect(ids.size).toBeGreaterThanOrEqual(15);
     expect([...ids].filter((id) => !seenIds.has(id))).toEqual([]);
   });

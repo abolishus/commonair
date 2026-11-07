@@ -3,8 +3,6 @@
   "nav.signIn": "Iniciar sesión",
   "nav.signUp": "Registrarse",
   "nav.signOut": "Cerrar sesión",
-  "nav.dashboard": "Estudio de creador",
-  "nav.relays": "Relays",
   "nav.accountMenu": "Menú de la cuenta de {name}",
   "nav.menu": "Menú",
   "nav.skipToContent": "Saltar al contenido",

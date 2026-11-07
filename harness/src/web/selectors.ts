@@ -100,7 +100,6 @@ export const E4B_CHANGED_E1_IDS = [E1_TEST_IDS.chatMessage] as const;
  */
 export const E4B_TEST_IDS = {
   revenueLink: "revenue-link",
-  accountSubscriptionsLink: "account-subscriptions-link",
   accountTreasuryLink: "account-treasury-link",
   footerTransparencyLink: "footer-transparency-link",
   supportOpen: "support-open",
@@ -201,7 +200,6 @@ export const E4C_TEST_IDS = {
   appealRow: "appeal-row",
   moderationLabelNotice: "moderation-label-notice",
   labelAppealDialog: "label-appeal-dialog",
-  accountAppealsLink: "account-appeals-link",
   accountModerationLink: "account-moderation-link",
   modq: "modq",
   modqItem: "modq-item",

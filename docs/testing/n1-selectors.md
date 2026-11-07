@@ -45,7 +45,6 @@ checks them against this file.
 | `notification-load-more`     | Loads the next page inside the popover                                                          |
 | `notification-empty`         | Shown instead of the list when there is nothing                                                 |
 | `notification-settings-link` | Link to `/settings/notifications`                                                               |
-| `account-notifications-link` | The account menu's entry for `/settings/notifications`                                          |
 | `nav-signout`                | The account menu's sign-out entry (step 7 signs out to drop the subscription)                   |
 
 ### Settings (`/settings/notifications`)

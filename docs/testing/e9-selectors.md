@@ -59,11 +59,10 @@ against this file.
 
 ### Connections (`/settings/connections`)
 
-| Test id                    | Element / meaning                                                                                                           |
-| -------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `account-connections-link` | In the account menu, a link to `/settings/connections`                                                                      |
-| `connections`              | Page wrapper; `connections-empty` `<EmptyState>`                                                                            |
-| `connection`               | One authorized app: `data-app-id`, `data-client-id`, `data-scopes` (space-separated); `connection-revoke` (`ConfirmDialog`) |
+| Test id       | Element / meaning                                                                                                           |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `connections` | Page wrapper; `connections-empty` `<EmptyState>`                                                                            |
+| `connection`  | One authorized app: `data-app-id`, `data-client-id`, `data-scopes` (space-separated); `connection-revoke` (`ConfirmDialog`) |
 
 ### Developer console (`/developer`, `/developer/apps/$appId`)
 

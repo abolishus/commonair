@@ -3,8 +3,6 @@
   "nav.signIn": "Sign in",
   "nav.signUp": "Sign up",
   "nav.signOut": "Sign out",
-  "nav.dashboard": "Creator studio",
-  "nav.relays": "Relays",
   "nav.accountMenu": "Account menu for {name}",
   "nav.menu": "Menu",
   "nav.skipToContent": "Skip to content",

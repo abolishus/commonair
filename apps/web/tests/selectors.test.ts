@@ -406,12 +406,7 @@ describe("n2-selectors.md: language switchers (batch 5)", () => {
         prefixes.some((p) => id.startsWith(p) && id.length > p.length);
 
   it("lists test ids, templated ones included, and only listed ones are pending", () => {
-    for (const id of [
-      "preferences-page",
-      "account-preferences-link",
-      "locale-option-<tag>",
-      "footer-locale-option-<tag>",
-    ])
+    for (const id of ["preferences-page", "locale-option-<tag>", "footer-locale-option-<tag>"])
       expect(ids).toContain(id);
     for (const id of PENDING_N2_SWITCHER_IDS) expect(ids).toContain(id);
   });

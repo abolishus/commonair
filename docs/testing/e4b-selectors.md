@@ -93,12 +93,11 @@ the Stripe unit's brief; the test ids below do not change.
 
 ### Navigation
 
-| Test id                      | Element / meaning                                               |
-| ---------------------------- | --------------------------------------------------------------- |
-| `revenue-link`               | On `/dashboard` and in the studio sidebar, a link to `/revenue` |
-| `account-subscriptions-link` | In the account menu, a link to `/settings/subscriptions`        |
-| `account-treasury-link`      | In the account menu, a link to `/treasury`, for treasurers only |
-| `footer-transparency-link`   | In the site footer, a link to `/transparency`                   |
+| Test id                    | Element / meaning                                               |
+| -------------------------- | --------------------------------------------------------------- |
+| `revenue-link`             | On `/dashboard` and in the studio sidebar, a link to `/revenue` |
+| `account-treasury-link`    | In the account menu, a link to `/treasury`, for treasurers only |
+| `footer-transparency-link` | In the site footer, a link to `/transparency`                   |
 
 ### Support dialog (`/$channel`)
 

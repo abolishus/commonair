@@ -104,7 +104,7 @@ describe("goals and chat overlays and head", () => {
     expect(metas("color-scheme")).toEqual(["normal"]);
     expect(metas("robots")).toEqual(["noindex, nofollow"]);
     // The root's own tags survive the merge.
-    expect(metas("viewport")).toEqual(["width=device-width, initial-scale=1"]);
+    expect(metas("viewport")).toEqual(["width=device-width, initial-scale=1, viewport-fit=cover"]);
   });
 });
 

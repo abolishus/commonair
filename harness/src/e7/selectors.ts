@@ -25,7 +25,6 @@ export const E7_TEST_IDS = {
   dmcaReceipt: "dmca-receipt",
   footerDmcaLink: "footer-dmca-link",
   // /settings/copyright
-  accountCopyrightLink: "account-copyright-link",
   copyright: "copyright",
   copyrightEmpty: "copyright-empty",
   copyrightNotice: "copyright-notice",

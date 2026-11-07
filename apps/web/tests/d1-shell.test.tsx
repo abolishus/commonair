@@ -39,6 +39,7 @@ const { AppTabBar } = await import("../src/components/shell/tab-bar.tsx");
 const { FILLED_CTA_ATTRIBUTE } = await import("../src/components/shell/use-filled-cta.ts");
 const { opensKeyboard } = await import("../src/components/shell/use-keyboard-open.ts");
 const { resetHomeFeed } = await import("../src/components/discovery/feed.ts");
+const { FollowButton } = await import("../src/components/channel-follow.tsx");
 
 /** The header as the `_app` layout renders it: told whether this page has the tab bar. */
 function LayoutHeader() {
@@ -177,6 +178,25 @@ describe("the header, signed out", () => {
     await waitFor(() => expect(authButton("signUp")?.getAttribute("data-cta-style")).toBe("outline"));
     cta.remove();
     await waitFor(() => expect(authButton("signUp")?.getAttribute("data-cta-style")).toBe("fill"));
+  });
+
+  it("a channel's Follow is a filled CTA: beside it Sign up is the outline", async () => {
+    vi.stubGlobal("IntersectionObserver", FakeObserver);
+    const state = { following: null, count: 0, pending: false, previous: null, settledAt: 0 };
+    await renderInRouter(
+      themed(
+        <>
+          <LayoutHeader />
+          <FollowButton signedIn={false} state={state} onToggle={() => {}} />
+        </>,
+      ),
+      "/",
+    );
+    const follow = await screen.findByTestId("follow-button");
+    expect(follow.hasAttribute(FILLED_CTA_ATTRIBUTE)).toBe(true);
+    await waitFor(() => expect(FakeObserver.all.some((o) => o.targets.has(follow))).toBe(true));
+    act(() => FakeObserver.fire(follow, true));
+    await waitFor(() => expect(authButton("signUp")?.getAttribute("data-cta-style")).toBe("outline"));
   });
 
   it("names the brand link 'Test Air, home' and shows the name (not collapsed)", async () => {

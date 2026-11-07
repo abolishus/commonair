@@ -26,7 +26,6 @@ export const E9_TEST_IDS = {
   deviceDone: "device-done",
   deviceError: "device-error",
   // /settings/connections
-  accountConnectionsLink: "account-connections-link",
   connections: "connections",
   connectionsEmpty: "connections-empty",
   connection: "connection",

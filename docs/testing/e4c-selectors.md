@@ -122,7 +122,6 @@ is somehow invalid (fail closed).
 | `appeal-row`              | One appeal: `data-appeal-id`, `data-subject-type`, `data-status`                                                                                                                                                                                                                   |
 | `moderation-label-notice` | On `/dashboard` and `/settings/appeals` while a label is active: `data-label-id`, `data-label` (`mature`); contains `label-appeal-open`                                                                                                                                            |
 | `label-appeal-dialog`     | The appeal dialog: `label-appeal-body` (10–5000), `label-appeal-submit`                                                                                                                                                                                                            |
-| `account-appeals-link`    | In the account menu, a link to `/settings/appeals`                                                                                                                                                                                                                                 |
 
 ### Moderators (`/admin/moderation`, `/admin/appeals`)
 

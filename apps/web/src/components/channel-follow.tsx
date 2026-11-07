@@ -54,12 +54,19 @@ export interface FollowButtonProps {
 
 /**
  * Follow is the channel's call to action, so it is an `AccentButton` in both states (one element,
- * so keyboard focus survives the toggle); `aria-pressed` and the label carry the state.
+ * so keyboard focus survives the toggle); `aria-pressed` and the label carry the state. It is the
+ * page's filled CTA (`data-filled-cta`), so the header's Sign up drops to an outline beside it.
  */
 export function FollowButton({ signedIn, state, onToggle }: FollowButtonProps): React.JSX.Element {
   if (!signedIn)
     return (
-      <AccentButton data-testid="follow-button" size="sm" nativeButton={false} render={<Link to="/signin" />}>
+      <AccentButton
+        data-testid="follow-button"
+        data-filled-cta=""
+        size="sm"
+        nativeButton={false}
+        render={<Link to="/signin" />}
+      >
         <HugeiconsIcon icon={FavouriteIcon} strokeWidth={2} aria-hidden />
         {t("follow.follow")}
       </AccentButton>
@@ -68,6 +75,7 @@ export function FollowButton({ signedIn, state, onToggle }: FollowButtonProps): 
   return (
     <AccentButton
       data-testid="follow-button"
+      data-filled-cta=""
       data-following={following ? "true" : "false"}
       size="sm"
       aria-pressed={following}
