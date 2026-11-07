@@ -9,10 +9,13 @@ import type { Accent } from "./channel-avatar.tsx";
 /**
  * Channel-accent tone on top of the `default` Button. Hover moves the surface
  * away from its foreground (`bg-channel-accent-hover`), so contrast only grows;
- * the focus ring is Button's full-opacity `ring-ring` (3:1 on every surface).
+ * the focus ring is Button's full-opacity `ring-ring` at a 2px offset (3:1 on
+ * every surface, never drawn on the accent itself). Labels are 14 px / 600, the
+ * size at which the darker dark-theme accents (indigo, red, violet) read well.
+ * On creator pages this is the one filled call to action, never `variant="brand"`.
  */
 export const accentButtonClasses =
-  "bg-channel-accent text-channel-accent-foreground hover:bg-channel-accent-hover aria-expanded:bg-channel-accent-hover";
+  "bg-channel-accent text-sm font-semibold text-channel-accent-foreground hover:bg-channel-accent-hover aria-expanded:bg-channel-accent-hover";
 
 export interface AccentButtonProps extends Omit<React.ComponentProps<typeof Button>, "variant"> {
   /** Sets `data-accent` on the button itself; omit to inherit the surrounding channel's accent. */

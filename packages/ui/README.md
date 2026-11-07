@@ -38,7 +38,8 @@ that AGENTS.md requires ("use X, not Y").
 ```
 
 - **Themes.** Dark is the default (`:root`). `data-theme="light"` (or the `.light` class) selects
-  the light theme; `data-theme="system"` follows `prefers-color-scheme`. `applyTheme(theme)` sets
+  the light theme; `data-theme="system"` follows `prefers-color-scheme`. The light tokens are written once (the
+  `light-theme` custom variant in `globals.css`); Tailwind emits them for both cases. `applyTheme(theme)` sets
   both; `<ThemeToggle>` never stores anything itself, it calls `onValueChange` so the app persists
   the choice (account setting or cookie).
 - **Accents.** `data-accent="<name>"` (one of `ACCENTS` from contracts) sets
@@ -47,14 +48,47 @@ that AGENTS.md requires ("use X, not Y").
   computes the ratios from the CSS).
 - **Other tokens.** `--live` / `--live-foreground` (live badges), `--chat-1`…`--chat-12` (chat
   name colors, AA on background and card), `--overlay` (text over video), `--success` /
-  `--warning` / `--info` (status tones, AA as text on background, card and their own 10–15 % tint),
+  `--warning` (orange) / `--info` (status tones, AA as text on every surface and their own 10–15 % tint; always with an icon and a word),
   `--chart-1`…`--chart-8` (3:1 graphics on background and card; all text-safe except light
   `--chart-7`), `--sidebar*` (the `sidebar` component), `--color-channel-accent-hover` (accent
   hover surface), `--text-2xs` (the one size below `text-xs`), `--font-mono` (Rubik: use
   `tabular-nums` for codes and timestamps). `.dark` re-applies the dark tokens to a subtree; the
   preset's inverted menus (dropdown, context menu, select, combobox) use it.
-- **Radius.** base-lyra is square: `--radius` stays because CLI files reference the scale, but house
+- **Radius.** base-lyra is square and `--radius` is `0`, so every `rounded-xs`…`rounded-4xl` from
+  the CLI files renders square too (bare `rounded` is Tailwind's fixed 4px: never use it). House
   code uses only `rounded-none`, and `rounded-full` for avatars and dots (`tests/guards.test.ts`).
+- **Brand ("Open Broadcast").** `--brand` (marigold oklch(0.83 0.155 84), #f7bd36, the same fill in
+  both themes) with `--brand-foreground` (zinc-950, 11.7:1), `--brand-text` (the brand as text:
+  dark = the fill, light #8f5d00, AA on every surface), `--brand-subtle` (14 % over card) and
+  `--brand-ring` (the light theme's 1px `--brand-text` edge; the fill is only 1.7:1 on white).
+  Use it through `<Button variant="brand">`, and follow the rules (`tests/foundation.test.tsx`
+  checks what a scan can):
+  - **One filled brand call to action per screen** (Sign up, Join the co-op, Go live), at most one
+    `variant="brand"` per file unless a `one-brand-cta:` comment says why several are exclusive.
+  - Size `default` or `lg` only (14 px / 600 labels); never white text on it.
+  - Never beside another filled button (primary or channel accent): the second action is outline
+    or ghost.
+  - Never for live, status, links, Sign in, Report, settings, admin, destructive actions, or
+    channel-owned surfaces: on channel, video and clip pages the one filled call to action is
+    `<AccentButton>` in the channel's accent.
+  - The dark amber channel accent (and `--chat-3`, `--chart-3`) is lemon #fde047, and every
+    channel, chat, chart and status color stays at least OKLab ΔE 0.07 from the brand
+    (`tests/tokens.test.ts`); `--warning` is orange for the same reason.
+- **Surfaces.** page `bg-background` < sunken `bg-surface-sunken` (rails, sidebars, table header
+  bands; `--sidebar` is it) < card `bg-card` < raised `bg-surface-raised` (`--popover` is it: hover
+  cards, menus, sticky bars) < overlay (`bg-scrim` behind a raised panel). Dark steps up with a
+  lighter fill and a `ring-1 ring-foreground/10`; light with `shadow-raised` (none in dark). Never
+  a card inside a card.
+- **Type.** Reading text (descriptions, help text, card bodies, form labels and hints, empty-state
+  bodies) is `text-sm` (14 px); metadata, table cells, key-value lists, timestamps and counts stay
+  `text-xs`; `text-2xs` only over video. `text-display` is the marketing and home hero size.
+- **Focus.** One rule on every primitive: `focus-visible:ring-2 ring-ring ring-offset-2
+  ring-offset-background`. The offset matters: `--ring` on the brand fill is under 3:1.
+- **Motion and widths.** `duration-fast` (120 ms, hover and press, the default for `transition-*`),
+  `duration-base` (200 ms, popovers, menus, tabs), `duration-slow` (320 ms, sheets, drawers, hero),
+  `ease-out` / `ease-in-out`; all instant under `prefers-reduced-motion`. Page widths:
+  `max-w-page` / `max-w-board` (1600), `max-w-form-page` (1120), `max-w-form` (768),
+  `max-w-reading` (640).
 - **Charts.** `chart` (`ChartContainer`, recharts 3.8.0): give each series `color: "var(--chart-N)"`,
   never the `theme` key (its `.dark` selector does not match CommonAir's dark-by-default `:root`).
 - **Strings.** Components never inline English. Visible text comes from props; the few strings

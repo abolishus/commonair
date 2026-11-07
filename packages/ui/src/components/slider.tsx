@@ -28,7 +28,7 @@ function Slider({
       thumbAlignment="edge"
       {...props}
     >
-      <SliderPrimitive.Control className="relative flex w-full touch-none items-center select-none data-disabled:opacity-50 data-vertical:h-full data-vertical:min-h-40 data-vertical:w-auto data-vertical:flex-col">
+      <SliderPrimitive.Control className="relative flex w-full touch-none items-center select-none data-disabled:opacity-50 data-horizontal:min-h-6 data-vertical:h-full data-vertical:min-h-40 data-vertical:w-auto data-vertical:min-w-6 data-vertical:flex-col pointer-coarse:data-horizontal:min-h-11 pointer-coarse:data-vertical:min-w-11">
         <SliderPrimitive.Track
           data-slot="slider-track"
           className="relative grow overflow-hidden rounded-none bg-muted select-none data-horizontal:h-1 data-horizontal:w-full data-vertical:h-full data-vertical:w-1"
@@ -45,7 +45,7 @@ function Slider({
             // The thumb is the focusable range input, so it carries the accessible name.
             getAriaLabel={getAriaLabel}
             getAriaValueText={getAriaValueText}
-            className="relative block size-3 shrink-0 rounded-none border border-ring bg-white ring-ring transition-[color,box-shadow] select-none after:absolute after:-inset-2 hover:ring-1 focus-visible:ring-1 focus-visible:outline-hidden active:ring-1 disabled:pointer-events-none disabled:opacity-50"
+            className="relative block size-3 shrink-0 rounded-none border border-ring bg-white ring-ring transition-[color,box-shadow] select-none after:absolute after:-inset-2 pointer-coarse:after:-inset-4 hover:ring-1 has-focus-visible:ring-2 has-focus-visible:ring-offset-2 has-focus-visible:ring-offset-background active:ring-1 disabled:pointer-events-none disabled:opacity-50"
           />
         ))}
       </SliderPrimitive.Control>

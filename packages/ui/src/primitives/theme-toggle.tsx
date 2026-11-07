@@ -77,7 +77,8 @@ export function ThemeToggle({ value, onValueChange, labels, className }: ThemeTo
         <Tooltip key={theme}>
           <TooltipTrigger
             render={
-              <ToggleGroupItem value={theme} aria-label={text[theme]}>
+              // 40px touch targets below md (D1 item 7); the desktop size stays compact.
+              <ToggleGroupItem value={theme} aria-label={text[theme]} className="max-md:h-10 max-md:min-w-10">
                 <HugeiconsIcon icon={ICONS[theme]} strokeWidth={2} aria-hidden />
               </ToggleGroupItem>
             }
