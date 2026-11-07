@@ -16,7 +16,7 @@ import { ScrollArea } from "@commonair/ui/components/scroll-area";
 import * as React from "react";
 import { t } from "../../i18n/index.ts";
 import { api } from "../../lib/api.ts";
-import { FormError } from "../form-error.tsx";
+import { SectionLoadError } from "../../lib/section-load-error.tsx";
 import { BreakdownTable, type PaymentBreakdownDto } from "./breakdown-table.tsx";
 import { BreakdownCutSource, BreakdownHold, BreakdownTimeline } from "./breakdown-timeline.tsx";
 import { useLoad } from "./use-load.ts";
@@ -60,9 +60,21 @@ export function BreakdownView({ breakdown }: { breakdown: PaymentBreakdownDto })
   );
 }
 
+/**
+ * A busy (429) or unreachable load retries by itself after the server's `retryAfterSeconds` and
+ * says so; once the automatic retries run out, Retry is left, never a dead end.
+ */
 function BreakdownLoader({ paymentId, client }: { paymentId: string; client: BreakdownClient }): React.JSX.Element {
   const loaded = useLoad(paymentId, () => client.paymentBreakdown(paymentId));
-  if (loaded.failed) return <FormError>{t("breakdown.loadFailed")}</FormError>;
+  if (loaded.data === null && loaded.failed)
+    return (
+      <SectionLoadError
+        section={t("breakdown.title")}
+        load={loaded}
+        headingLevel={3}
+        data-testid="breakdown-load-error"
+      />
+    );
   if (!loaded.data)
     return (
       <SkeletonGroup label={t("breakdown.loading")}>

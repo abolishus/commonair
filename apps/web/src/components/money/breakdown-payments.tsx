@@ -10,7 +10,7 @@ import type * as React from "react";
 import { t } from "../../i18n/index.ts";
 import { toastActionError } from "../../lib/action-error.ts";
 import { api } from "../../lib/api.ts";
-import { FormError } from "../form-error.tsx";
+import { SectionLoadError } from "../../lib/section-load-error.tsx";
 import { BreakdownOpenButton } from "./breakdown-dialog.tsx";
 import type { PaymentBreakdownDto } from "./breakdown-table.tsx";
 import { type Page, usePaged } from "./use-load.ts";
@@ -90,13 +90,22 @@ export function PaymentsTable({ items, hasMore, loadingMore, onLoadMore }: Payme
   );
 }
 
-/** "Your payments" on `/settings/subscriptions`: `money.paymentBreakdowns({ role: "payer" })`. */
+/**
+ * "Your payments" on `/settings/subscriptions`: `money.paymentBreakdowns({ role: "payer" })`. A
+ * busy (429) or unreachable first load retries by itself after the server's `retryAfterSeconds`
+ * and says so; once the automatic retries run out, Retry is left, never a dead end.
+ */
 export function YourPayments({ load = loadMine }: { load?: PaymentsLoader }): React.JSX.Element {
   const paged = usePaged("payer", load, (err) => toastActionError(err, t("breakdown.payments.loadFailed")));
   return (
     <Section heading={t("breakdown.payments.title")} description={t("breakdown.payments.intro")}>
-      {paged.failed ? (
-        <FormError>{t("breakdown.payments.loadFailed")}</FormError>
+      {paged.items === null && paged.failed ? (
+        <SectionLoadError
+          section={t("breakdown.payments.title")}
+          load={paged.first}
+          headingLevel={3}
+          data-testid="payments-load-error"
+        />
       ) : (
         <PaymentsTable
           items={paged.items}
