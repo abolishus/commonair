@@ -4,18 +4,10 @@
 import { getRouteApi } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
 import { getRequestHeader } from "@tanstack/react-start/server";
-import * as React from "react";
 import { loadBootstrap, lookupSession } from "../server/bootstrap.ts";
 import type { Bootstrap, SessionLookup, SessionUser } from "./bootstrap-types.ts";
-import {
-  latestSession,
-  noteSession,
-  recoverSession,
-  serverSession,
-  sessionUserOf,
-  subscribeSession,
-  withLatestSession,
-} from "./session.ts";
+import { noteSession, sessionUserOf } from "./session.ts";
+import { type BootstrapView, type SessionRetry, useBootstrapView, useSessionRetryWith } from "./session-view.ts";
 
 /** Runs on the web server (SSR or as an RPC from the browser) so it can read env and cookies. */
 export const getBootstrap = createServerFn({ method: "GET" }).handler((): Promise<Bootstrap> =>
@@ -40,17 +32,19 @@ export async function getSessionUser(): Promise<SessionUser | null> {
 
 const rootApi = getRouteApi("__root__");
 
+export type { BootstrapView, SessionRetry } from "./session-view.ts";
+
 /**
  * The root loader's data. When the document could not check the session, a later lookup that
- * answers (a guard's, or the automatic retry started here, one at a time) fills `me` in, so a
- * member is never shown as signed out because the API was busy.
+ * answers (a guard's, or the automatic retry started here, one at a time) fills `me` in, and
+ * `sessionUnresolved` says so meanwhile, so a member is never shown as signed out because the API
+ * was busy (F1).
  */
-export function useBootstrap(): Bootstrap {
-  const boot = rootApi.useLoaderData();
-  const latest = React.useSyncExternalStore(subscribeSession, latestSession, serverSession);
-  const unavailable = boot.sessionUnavailable === true;
-  React.useEffect(() => {
-    if (unavailable) void recoverSession(() => getSessionUser());
-  }, [unavailable]);
-  return React.useMemo(() => withLatestSession(boot, latest), [boot, latest]);
+export function useBootstrap(): BootstrapView {
+  return useBootstrapView(rootApi.useLoaderData(), getSessionUser);
+}
+
+/** For the shell's account placeholder while the session is unresolved (F1): Retry, and how it stands. */
+export function useSessionRetry(): SessionRetry {
+  return useSessionRetryWith(useBootstrap().sessionUnresolved, getSessionUser);
 }

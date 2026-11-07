@@ -112,7 +112,7 @@ export function NotificationSettings({ client: given }: NotificationSettingsProp
           <SectionLoadError
             data-testid="notify-defaults-load-error"
             retryTestId="notify-defaults-retry"
-            section={t("fixSession.section.notifyDefaults")}
+            section={t("notifySettings.defaults.title")}
             load={loaded}
             headingLevel={3}
           />

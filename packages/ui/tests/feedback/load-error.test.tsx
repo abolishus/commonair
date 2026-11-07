@@ -41,6 +41,21 @@ describe("LoadError", () => {
     expect(block.querySelector("p")).toBeNull();
   });
 
+  test("an h1 when it stands for the whole page", () => {
+    render(
+      <LoadError
+        data-testid="err"
+        title="This page didn't load."
+        retryLabel="Retry"
+        onRetry={() => {}}
+        headingLevel={1}
+      />,
+    );
+    expect(within(screen.getByTestId("err")).getByRole("heading", { level: 1 }).textContent).toBe(
+      "This page didn't load.",
+    );
+  });
+
   test("busy swaps the warning icon for a spinner that respects reduced motion", () => {
     const { container, rerender } = render(
       <LoadError title="x" retryLabel="Retry" onRetry={() => {}} data-testid="err" />,

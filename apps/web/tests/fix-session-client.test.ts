@@ -4,7 +4,9 @@
 
 /** The browser half of F1 and F2: failure kinds, automatic backoff, and recovering the session. */
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import type { Loaded } from "../src/components/money/use-load.ts";
 import type { Bootstrap, SessionLookup, SessionUser } from "../src/lib/bootstrap-types.ts";
+import { useRetryingLoad } from "../src/lib/retrying-load.ts";
 import { errorStatus, isTransientFailure, loadFailureKind, retryAfterSeconds } from "../src/lib/load-failure.ts";
 import {
   AUTO_RETRY_MAX_MS,
@@ -21,6 +23,7 @@ import {
   latestSession,
   noteSession,
   recoverSession,
+  recoveryState,
   resetSessionForTests,
   sessionUserOf,
   subscribeSession,
@@ -278,5 +281,66 @@ describe("recoverSession", () => {
     release();
     await a;
     expect(check).toHaveBeenCalledOnce();
+  });
+
+  it("reports where it stands: retrying, then idle on an answer or gaveUp when the retries ran out", async () => {
+    const wait = async () => {};
+    const states: string[] = [];
+    subscribeSession(() => states.push(recoveryState()));
+    expect(recoveryState()).toBe("idle");
+    const running = recoverSession(async () => user, { wait });
+    expect(recoveryState()).toBe("retrying");
+    await running;
+    expect(recoveryState()).toBe("idle");
+    await recoverSession(
+      async () => {
+        throw new SessionUnavailableError();
+      },
+      { wait },
+    );
+    expect(recoveryState()).toBe("gaveUp");
+    expect(states).toEqual(["retrying", "idle", "retrying", "gaveUp"]);
+  });
+
+  it("starts over after it gave up (a Retry), and immediate asks before any wait", async () => {
+    const waits: number[] = [];
+    const wait = async (ms: number) => {
+      waits.push(ms);
+    };
+    const always = vi.fn<() => Promise<unknown>>(async () => {
+      throw new SessionUnavailableError();
+    });
+    await recoverSession(always, { wait });
+    expect(recoveryState()).toBe("gaveUp");
+    waits.length = 0;
+    const check = vi.fn<() => Promise<unknown>>(async () => user);
+    await recoverSession(check, { wait, immediate: true });
+    expect(check).toHaveBeenCalledOnce();
+    expect(waits).toEqual([]);
+    expect(recoveryState()).toBe("idle");
+  });
+
+  it("immediate still backs off when the first ask is busy", async () => {
+    const waits: number[] = [];
+    const check = vi
+      .fn<() => Promise<unknown>>()
+      .mockRejectedValueOnce(new SessionUnavailableError(2))
+      .mockResolvedValue(user);
+    await recoverSession(check, {
+      immediate: true,
+      wait: async (ms) => {
+        waits.push(ms);
+      },
+    });
+    expect(check).toHaveBeenCalledTimes(2);
+    expect(waits).toEqual([2_000]);
+  });
+});
+
+describe("useRetryingLoad", () => {
+  it("is a drop-in for useLoad (same key, load and result fields), so useLoad can delegate to it", () => {
+    // A type-level check: this assignment fails to compile if the shapes drift apart.
+    const asUseLoad: <T>(key: string, load: () => Promise<T>) => Loaded<T> = useRetryingLoad;
+    expect(asUseLoad).toBe(useRetryingLoad);
   });
 });

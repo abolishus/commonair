@@ -4,7 +4,7 @@
 
 /**
  * F3 on the notification surfaces: the inbox and each notification settings section fail on their
- * own with "{section} didn't load." and Retry; a 429 retries by itself (F2).
+ * own (the section's name and Retry); a 429 retries by itself (F2).
  */
 import { LocaleProvider, TooltipProvider } from "@commonair/ui";
 import { createMemoryHistory, createRootRoute, createRouter, RouterContextProvider } from "@tanstack/react-router";
@@ -14,7 +14,8 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { NotificationInbox } from "../src/components/notifications/inbox.tsx";
 import { NotificationSettings } from "../src/components/notifications/settings.tsx";
 import { en } from "../src/i18n/en.ts";
-import { locale, t, uiMessages } from "../src/i18n/index.ts";
+import { loadErrorNote, loadErrorTitle } from "../src/lib/load-copy.ts";
+import { locale, uiMessages } from "../src/i18n/index.ts";
 import type {
   FollowPage,
   InboxClient,
@@ -94,9 +95,7 @@ describe("NotificationInbox", () => {
       />,
     );
     const error = await screen.findByTestId("notification-load-error");
-    expect(error.querySelector("h3")?.textContent).toBe(
-      t("fixSession.load.title", { section: en["notifications.title"] }),
-    );
+    expect(error.querySelector("h3")?.textContent).toBe(loadErrorTitle(en["notifications.title"]));
     expect(error.getAttribute("aria-live")).toBe("polite");
     expect(screen.getByTestId("notification-mark-all-read").hasAttribute("disabled")).toBe(true);
     fail = false;
@@ -123,7 +122,8 @@ describe("NotificationInbox", () => {
       />,
     );
     const error = await screen.findByTestId("notification-load-error");
-    expect(error.textContent).toContain(t("fixSession.load.busy", { seconds: 2 }));
+    expect(error.textContent).toContain(loadErrorNote("busy", 2));
+    expect(error.getAttribute("data-busy")).toBe("true");
     await vi.advanceTimersByTimeAsync(2_000);
     expect(await screen.findByTestId("notification-empty")).toBeTruthy();
     expect(list).toHaveBeenCalledTimes(2);
@@ -138,10 +138,8 @@ describe("NotificationSettings", () => {
     const client = settingsClient({ preferences });
     wrap(<NotificationSettings client={client} />);
     const error = await screen.findByTestId("notify-defaults-load-error");
-    expect(error.textContent).toContain(
-      t("fixSession.load.title", { section: en["fixSession.section.notifyDefaults"] }),
-    );
-    expect(error.textContent).toContain(en["fixSession.load.sectionBody"]);
+    expect(error.textContent).toContain(loadErrorTitle(en["notifySettings.defaults.title"]));
+    expect(error.textContent).toContain(loadErrorNote("section"));
     expect(screen.getByRole("heading", { level: 2, name: en["notifySettings.defaults.title"] })).toBeTruthy();
     expect(screen.getByRole("heading", { level: 2, name: en["notifySettings.channels.title"] })).toBeTruthy();
     expect(await screen.findByText(en["notifySettings.channels.empty"])).toBeTruthy();
@@ -158,7 +156,7 @@ describe("NotificationSettings", () => {
     const client = settingsClient({ follows });
     wrap(<NotificationSettings client={client} />);
     const error = await screen.findByTestId("notify-channels-load-error");
-    expect(error.textContent).toContain(t("fixSession.load.title", { section: en["notifySettings.channels.title"] }));
+    expect(error.textContent).toContain(loadErrorTitle(en["notifySettings.channels.title"]));
     await waitFor(() => expect(document.querySelector('[data-testid="notify-default-email"]')).not.toBeNull());
     follows.mockResolvedValue(emptyFollows);
     fireEvent.click(within(error).getByTestId("notify-channels-retry"));

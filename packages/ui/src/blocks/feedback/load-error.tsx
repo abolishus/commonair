@@ -17,8 +17,11 @@ export interface LoadErrorProps extends Omit<React.ComponentProps<"section">, "t
   onRetry: () => void;
   /** An automatic retry is scheduled: a spinner replaces the warning icon. */
   busy?: boolean;
-  /** The title's heading level, to fit the page outline (default 2: the block stands for a section). */
-  headingLevel?: 2 | 3 | 4;
+  /**
+   * The title's heading level, to fit the page outline (default 2: the block stands for a
+   * section; 1 when it stands for the whole page, as on an error page).
+   */
+  headingLevel?: 1 | 2 | 3 | 4;
   /** `data-testid` on the Retry button. */
   retryTestId?: string;
 }

@@ -7,7 +7,7 @@ import { CoopSectionError } from "../../components/coop/load-error.tsx";
 import { CoopOverview } from "../../components/coop/overview.tsx";
 import { useCoopLoad, useMyMembership, type CoopRetryable } from "../../components/coop/use-coop.ts";
 import { api } from "../../lib/api.ts";
-import { useBootstrap } from "../../lib/bootstrap.ts";
+import { useBootstrap, useSessionRetry } from "../../lib/bootstrap.ts";
 import { t } from "../../i18n/index.ts";
 import { titleHead } from "../../lib/page-title.ts";
 
@@ -20,7 +20,8 @@ export const Route = createFileRoute("/_app/coop/")({
 const OPEN_LIMIT = 20;
 
 function CoopPage(): React.JSX.Element {
-  const { me } = useBootstrap();
+  const { me, sessionUnresolved } = useBootstrap();
+  const session = useSessionRetry();
   const membership = useMyMembership(me);
   const open = useCoopLoad("open", async () => {
     const pages = await Promise.all(
@@ -38,14 +39,27 @@ function CoopPage(): React.JSX.Element {
     load.state === "failed" ? <CoopSectionError section={section} load={load} alone={alone} /> : null;
   return (
     <CoopOverview
-      signedIn={me !== null}
+      // F1: a member whose session the API could not confirm is not shown the join view.
+      signedIn={me !== null || sessionUnresolved}
       membership={membership.data}
       openProposals={open.data}
       council={council.data}
       months={months.data}
       membershipError={
         // The card has no heading of its own on the page, so the error is a section heading.
-        membership.failed ? (
+        sessionUnresolved ? (
+          <CoopSectionError
+            section={t("coop.card.title")}
+            load={{
+              state: "failed",
+              failed: true,
+              busy: session.retrying,
+              gaveUp: session.gaveUp,
+              reload: session.retry,
+            }}
+            headingLevel={2}
+          />
+        ) : membership.failed ? (
           <CoopSectionError section={t("coop.card.title")} load={membership} headingLevel={2} />
         ) : null
       }

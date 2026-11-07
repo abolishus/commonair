@@ -27,6 +27,8 @@ export interface CoopRetryable {
   retryInMs?: number | null;
   /** The automatic retries ran out. */
   gaveUp?: boolean;
+  /** A retry is under way without a known wait. */
+  busy?: boolean;
 }
 
 export interface CoopLoad<T> extends CoopRetryable {

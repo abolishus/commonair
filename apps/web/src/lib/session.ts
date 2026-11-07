@@ -79,31 +79,68 @@ export function withLatestSession(boot: Bootstrap, lookup: SessionLookup | null)
 let recovering: Promise<void> | null = null;
 
 /**
- * Ask again, a few times with backoff, until a lookup answers (`check` records it through
- * `noteSession`). The first try waits too: the document's own check has just failed. One
- * recovery at a time however many components ask for it.
+ * Where the shell's recovery stands: `retrying` while `recoverSession` runs, `gaveUp` once its
+ * automatic retries ran out without an answer (only a Retry is left), else `idle`.
  */
-export function recoverSession(
-  check: () => Promise<unknown>,
-  opts: { wait?: (ms: number) => Promise<void> } = {},
-): Promise<void> {
+export type RecoveryState = "idle" | "retrying" | "gaveUp";
+
+let recovery: RecoveryState = "idle";
+
+function setRecovery(next: RecoveryState): void {
+  if (recovery === next) return;
+  recovery = next;
+  for (const listener of listeners) listener();
+}
+
+export function recoveryState(): RecoveryState {
+  return recovery;
+}
+
+/** The server snapshot: no recovery runs during SSR. */
+export function serverRecoveryState(): RecoveryState {
+  return "idle";
+}
+
+export interface RecoverOptions {
+  wait?: (ms: number) => Promise<void>;
+  /**
+   * Ask once straight away before backing off: a Retry the member pressed. The automatic
+   * recovery waits first, since the document's own check has just failed.
+   */
+  immediate?: boolean;
+}
+
+/**
+ * Ask again, a few times with backoff, until a lookup answers (`check` records it through
+ * `noteSession`). One recovery at a time however many components ask for it; once one gave up, the
+ * next call (a Retry) starts over.
+ */
+export function recoverSession(check: () => Promise<unknown>, opts: RecoverOptions = {}): Promise<void> {
   const wait = opts.wait ?? ((ms: number) => sleep(ms));
   recovering ??= (async () => {
+    setRecovery("retrying");
     let failure: unknown = new SessionUnavailableError();
+    let answered = false;
+    const ask = async (): Promise<boolean> => {
+      try {
+        await check();
+        return true;
+      } catch (err) {
+        failure = err;
+        return false;
+      }
+    };
     try {
-      for (let attempt = 0; ; attempt++) {
+      if (opts.immediate) answered = await ask();
+      for (let attempt = 0; !answered; attempt++) {
         const delay = autoRetryDelay(failure, attempt);
         if (delay === null) return;
         await wait(delay);
-        try {
-          await check();
-          return;
-        } catch (err) {
-          failure = err;
-        }
+        answered = await ask();
       }
     } finally {
       recovering = null;
+      setRecovery(answered ? "idle" : "gaveUp");
     }
   })();
   return recovering;
@@ -113,5 +150,6 @@ export function recoverSession(
 export function resetSessionForTests(): void {
   latest = null;
   recovering = null;
+  recovery = "idle";
   listeners.clear();
 }

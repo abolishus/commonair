@@ -30,8 +30,8 @@ export function CoopLoadError({ onRetry }: { onRetry: () => void }): React.JSX.E
 }
 
 /**
- * One section's failed load (F3), in place of the section's content: "{section} didn't load."
- * with Retry, and "Retrying in N seconds" while a busy API is retried by itself. Keeps the
+ * One section's failed load (F3), in place of the section's content: the section's name with
+ * Retry, and a spinner while a busy API is retried by itself. Keeps the
  * `coop-load-error` and `coop-retry` test ids.
  */
 export function CoopSectionError({
@@ -52,7 +52,12 @@ export function CoopSectionError({
       data-testid="coop-load-error"
       retryTestId="coop-retry"
       section={section}
-      load={{ retryInMs: load.retryInMs ?? null, gaveUp: load.gaveUp ?? false, reload: load.reload }}
+      load={{
+        retryInMs: load.retryInMs ?? null,
+        gaveUp: load.gaveUp ?? false,
+        busy: load.busy ?? false,
+        reload: load.reload,
+      }}
       alone={alone}
       headingLevel={headingLevel}
     />

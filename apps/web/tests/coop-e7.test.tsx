@@ -26,12 +26,19 @@ import {
 import { CoopPatronageTab, CoopSharesTab } from "../src/components/coop/treasury-tabs.tsx";
 import { coopLoads, type CoopRetryable } from "../src/components/coop/use-coop.ts";
 import { en } from "../src/i18n/en.ts";
-import { locale, t, uiMessages } from "../src/i18n/index.ts";
+import { loadErrorNote, loadErrorTitle, loadRetryLabel } from "../src/lib/load-copy.ts";
+import { locale, uiMessages } from "../src/i18n/index.ts";
 import type { SessionUser } from "../src/lib/bootstrap-types.ts";
 import type { ElectionDto, MembershipViewDto } from "../src/lib/coop.ts";
 import { ME, OTHER, PERIOD_ID, PROPOSAL_ID, board, council, elections, membershipView } from "./coop-fixtures.ts";
 
-const session = vi.hoisted(() => ({ me: null as SessionUser | null }));
+const session = vi.hoisted(() => ({
+  me: null as SessionUser | null,
+  /** The document could not check the session (F1). */
+  unresolved: false,
+  retrying: false,
+  retry: (() => {}) as () => void,
+}));
 /** API methods that reject (once per name, or every call while `always` has it). */
 const failing = vi.hoisted(() => ({
   names: new Set<string>(),
@@ -50,6 +57,13 @@ vi.mock("../src/lib/bootstrap.ts", () => ({
     instance: { name: "Test Air", sourceUrl: null },
     theme: "dark",
     now: 0,
+    sessionUnresolved: session.unresolved,
+  }),
+  useSessionRetry: () => ({
+    unresolved: session.unresolved,
+    retrying: session.retrying,
+    gaveUp: false,
+    retry: session.retry,
   }),
   getSessionUser: async () => session.me,
 }));
@@ -135,6 +149,9 @@ beforeAll(async () => {
 });
 beforeEach(() => {
   session.me = me;
+  session.unresolved = false;
+  session.retrying = false;
+  session.retry = () => {};
   failing.names.clear();
   failing.code = "INTERNAL_SERVER_ERROR";
   failing.extra = {};
@@ -244,13 +261,10 @@ describe("F3: /coop, /coop/council and /coop/settings fail per section", () => {
     const errors = await screen.findAllByTestId("coop-load-error");
     expect(errors).toHaveLength(2);
     const titles = errors.map((e) => e.querySelector("h3")?.textContent);
-    expect(titles).toEqual([
-      t("fixSession.load.title", { section: en["coop.decisions.title"] }),
-      t("fixSession.load.title", { section: en["coop.byClass.title"] }),
-    ]);
+    expect(titles).toEqual([loadErrorTitle(en["coop.decisions.title"]), loadErrorTitle(en["coop.byClass.title"])]);
     for (const e of errors) {
       expect(e.getAttribute("aria-live")).toBe("polite");
-      expect(e.textContent).toContain(en["fixSession.load.sectionBody"]);
+      expect(e.textContent).toContain(loadErrorNote("section"));
     }
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(en["coop.title"]);
     expect(screen.getByText(en["coop.intro"])).toBeTruthy();
@@ -258,12 +272,35 @@ describe("F3: /coop, /coop/council and /coop/settings fail per section", () => {
     expect((await screen.findAllByTestId("coop-council-member")).length).toBeGreaterThan(0);
   });
 
+  it("an unresolved session is not the signed-out view: the card is a Retry for the session", async () => {
+    session.me = null;
+    session.unresolved = true;
+    session.retrying = true;
+    const retry = vi.fn<() => void>();
+    session.retry = retry;
+    wrap(React.createElement(component(routes.overview)));
+    const error = await screen.findByTestId("coop-load-error");
+    expect(error.querySelector("h2")?.textContent).toBe(loadErrorTitle(en["coop.card.title"]));
+    expect(error.getAttribute("data-busy")).toBe("true");
+    expect(calls.counts.get("membership")).toBeUndefined();
+    fireEvent.click(within(error).getByTestId("coop-retry"));
+    expect(retry).toHaveBeenCalledOnce();
+    expect((await screen.findAllByTestId("coop-open-proposal")).length).toBeGreaterThan(0);
+  });
+
+  it("signed out (a definitive answer) shows no membership card at all", async () => {
+    session.me = null;
+    wrap(React.createElement(component(routes.overview)));
+    expect((await screen.findAllByTestId("coop-open-proposal")).length).toBeGreaterThan(0);
+    expect(screen.queryByTestId("coop-load-error")).toBeNull();
+    expect(screen.queryByTestId("coop-membership-card")).toBeNull();
+  });
+
   it("says to check the connection when nothing on the page loaded", async () => {
     for (const name of ["proposals", "council", "transparency"]) failing.names.add(name);
     wrap(React.createElement(component(routes.overview)));
     await waitFor(() => expect(screen.getAllByTestId("coop-load-error")).toHaveLength(4));
-    for (const e of screen.getAllByTestId("coop-load-error"))
-      expect(e.textContent).toContain(en["fixSession.load.pageBody"]);
+    for (const e of screen.getAllByTestId("coop-load-error")) expect(e.textContent).toContain(loadErrorNote("page"));
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(en["coop.title"]);
   });
 
@@ -271,7 +308,7 @@ describe("F3: /coop, /coop/council and /coop/settings fail per section", () => {
     failing.names.add("board");
     wrap(React.createElement(component(routes.council)));
     const error = await screen.findByTestId("coop-load-error");
-    expect(error.textContent).toContain(t("fixSession.load.title", { section: en["coop.board.title"] }));
+    expect(error.textContent).toContain(loadErrorTitle(en["coop.board.title"]));
     expect((await screen.findAllByTestId("council-member")).length).toBeGreaterThan(0);
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(en["coop.councilPage.title"]);
   });
@@ -280,9 +317,7 @@ describe("F3: /coop, /coop/council and /coop/settings fail per section", () => {
     failing.names.add("settings");
     wrap(React.createElement(component(routes.settings)));
     const error = await screen.findByTestId("coop-load-error");
-    expect(error.querySelector("h2")?.textContent).toBe(
-      t("fixSession.load.title", { section: en["coop.settings.title"] }),
-    );
+    expect(error.querySelector("h2")?.textContent).toBe(loadErrorTitle(en["coop.settings.title"]));
     expect(screen.getByText(en["coop.settings.protectedTitle"])).toBeTruthy();
     expect(screen.getByTestId("settings").contains(error)).toBe(true);
   });
@@ -295,8 +330,8 @@ describe("F3: /coop, /coop/council and /coop/settings fail per section", () => {
       failing.names.add("settings");
       wrap(React.createElement(component(routes.settings)));
       const error = await screen.findByTestId("coop-load-error");
-      expect(error.textContent).toContain(t("fixSession.load.busy", { seconds: 4 }));
-      expect(within(error).getByTestId("coop-retry").textContent).toBe(en["fixSession.retryNow"]);
+      expect(error.textContent).toContain(loadErrorNote("busy", 4));
+      expect(within(error).getByTestId("coop-retry").textContent).toBe(loadRetryLabel(true));
       expect(error.getAttribute("data-busy")).toBe("true");
       expect(calls.counts.get("settings")).toBe(1);
       failing.names.clear();
@@ -319,8 +354,9 @@ describe("F3: /coop, /coop/council and /coop/settings fail per section", () => {
       await screen.findByTestId("coop-load-error");
       for (let i = 0; i < 3; i++) await vi.advanceTimersByTimeAsync(1_000);
       await waitFor(() =>
-        expect(screen.getByTestId("coop-load-error").textContent).toContain(en["fixSession.load.stillFailing"]),
+        expect(screen.getByTestId("coop-load-error").textContent).toContain(loadErrorNote("stillFailing")),
       );
+      expect(screen.getByTestId("coop-load-error").getAttribute("data-busy")).toBeNull();
       expect(calls.counts.get("settings")).toBe(4);
       await vi.advanceTimersByTimeAsync(60_000);
       expect(calls.counts.get("settings")).toBe(4);
