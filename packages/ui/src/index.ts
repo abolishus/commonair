@@ -56,6 +56,14 @@ export {
 } from "./lib/format.ts";
 
 export { StreamCard, type StreamCardProps, type StreamCardData } from "./primitives/stream-card.tsx";
+export {
+  ChannelChip,
+  ChannelChipRow,
+  MAX_CARD_TAGS,
+  type ChannelChipProps,
+  type ChannelChipRowProps,
+  type StreamCardSlotLink,
+} from "./primitives/stream-card.tsx";
 export { ChannelAvatar, type ChannelAvatarProps, type Accent } from "./primitives/channel-avatar.tsx";
 export { LiveBadge, type LiveBadgeProps } from "./primitives/live-badge.tsx";
 export { StatusBadge, type StatusBadgeProps, type StatusTone } from "./primitives/status-badge.tsx";
@@ -75,6 +83,36 @@ export {
   StreamCardSkeleton,
   type AvatarSize,
 } from "./primitives/skeletons.tsx";
+export {
+  MediaCardSkeleton,
+  ChannelChipSkeleton,
+  CategoryTileSkeleton,
+  type StreamCardSkeletonProps,
+  type MediaCardSkeletonProps,
+  type CategoryTileSkeletonProps,
+} from "./primitives/skeletons.tsx";
+export {
+  Arcs,
+  SignalBars,
+  SIGNAL_ACCENTS,
+  SIGNAL_HEIGHTS,
+  EmptyArt,
+  MediaFallback,
+  CategoryArt,
+  categoryFallback,
+  categoryKind,
+  artHash,
+  type ArcsProps,
+  type SignalBarsProps,
+  type EmptyArtProps,
+  type EmptyArtSize,
+  type EmptyArtVariant,
+  type MediaFallbackKind,
+  type MediaFallbackProps,
+  type CategoryArtProps,
+  type CategoryArtShape,
+  type CategoryKind,
+} from "./art/index.ts";
 export { IconButton, type IconButtonProps } from "./primitives/icon-button.tsx";
 export { ConfirmDialog, type ConfirmDialogProps } from "./primitives/confirm-dialog.tsx";
 export {

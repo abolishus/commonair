@@ -37,3 +37,40 @@ export const RightToLeft: Story = {
   globals: { dir: "rtl" },
   args: { title: "لا توجد مقاطع بعد", description: "ستظهر هنا المقاطع التي تنشئها من البث المباشر." },
 };
+
+/** v2: a primary and a secondary action. */
+export const TwoActions: Story = {
+  args: {
+    icon: undefined,
+    title: "Nobody is live right now",
+    description: "Follow channels to hear when they go live, or catch up on videos.",
+    action: <Button>Browse videos</Button>,
+    secondaryAction: <Button variant="outline">Find channels</Button>,
+  },
+};
+export const Small: Story = { args: { size: "sm", action: undefined } };
+export const SmallArcs: Story = {
+  args: {
+    size: "sm",
+    icon: undefined,
+    art: "arcs",
+    title: "Queue clear",
+    description: "New reports show up here.",
+    action: undefined,
+  },
+};
+export const Bars: Story = { args: { art: "bars" } };
+/** A whole page (404/500): `size="lg"`, the arcs crossed by one bar. */
+export const PageNotFound: Story = {
+  args: {
+    size: "lg",
+    icon: undefined,
+    crossed: true,
+    title: "This page is not on the air",
+    description: "The link may be old, or the channel may have moved.",
+    action: <Button>Browse live channels</Button>,
+    secondaryAction: <Button variant="outline">Try again</Button>,
+  },
+};
+export const PageNotFoundLight: Story = { ...PageNotFound, globals: { theme: "light" } };
+export const PageNotFound320: Story = { ...PageNotFound, globals: { viewport: { value: "mobile320" } } };

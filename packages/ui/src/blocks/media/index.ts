@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 export { StreamGrid, type StreamGridProps, type StreamGridCardProps } from "./stream-grid.tsx";
+export { CardGrid, type CardGridProps } from "./stream-grid.tsx";
 export {
   CategoryTile,
   CategoryGrid,
@@ -15,6 +16,7 @@ export {
   type CategoryGridProps,
 } from "./category-tile.tsx";
 export { MediaCard, MediaGrid, type MediaCardData, type MediaCardProps, type MediaGridProps } from "./media-card.tsx";
+export { type MediaKind } from "./media-card.tsx";
 export { ChannelHeader, CategoryHeader, type ChannelHeaderProps, type CategoryHeaderProps } from "./channel-header.tsx";
 export {
   PlayerChrome,

@@ -3,6 +3,9 @@
 
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import {
+  CategoryTileSkeleton,
+  ChannelChipSkeleton,
+  MediaCardSkeleton,
   SkeletonAvatar,
   SkeletonButton,
   SkeletonGroup,
@@ -29,6 +32,14 @@ export const All: Story = {
       <SkeletonText lines={4} />
       <SkeletonButton />
       <StreamCardSkeleton />
+      <StreamCardSkeleton size="feature" />
+      <MediaCardSkeleton />
+      <MediaCardSkeleton kind="clip" layout="compact" />
+      <ChannelChipSkeleton />
+      <div className="grid grid-cols-2 gap-3">
+        <CategoryTileSkeleton />
+        <CategoryTileSkeleton shape="landscape" />
+      </div>
     </SkeletonGroup>
   ),
 };

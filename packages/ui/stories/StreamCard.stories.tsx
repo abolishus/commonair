@@ -5,8 +5,16 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { Tv01Icon } from "@hugeicons/core-free-icons";
 import { ACCENTS } from "@commonair/contracts/shapes";
 import { Button } from "../src/components/button.tsx";
-import { EmptyState, SkeletonGroup, StreamCard, StreamCardSkeleton } from "../src/index.ts";
-import { ResponsiveGrid } from "../src/layouts/page-layout.tsx";
+import {
+  ChannelChip,
+  ChannelChipRow,
+  ChannelChipSkeleton,
+  EmptyState,
+  SkeletonGroup,
+  StreamCard,
+  StreamCardSkeleton,
+} from "../src/index.ts";
+import { CardGrid } from "../src/blocks/media/stream-grid.tsx";
 import { LONG_NAME, LONG_TITLE, makeStream } from "./fixtures.ts";
 
 const meta = {
@@ -112,7 +120,7 @@ export const Loading: Story = {
 export const Grid: Story = {
   parameters: { fullWidth: true },
   render: () => (
-    <ResponsiveGrid cols={4}>
+    <CardGrid>
       {ACCENTS.map((accent, i) => (
         <StreamCard
           key={accent}
@@ -125,7 +133,7 @@ export const Grid: Story = {
           })}
         />
       ))}
-    </ResponsiveGrid>
+    </CardGrid>
   ),
 };
 
@@ -133,11 +141,11 @@ export const GridLoading: Story = {
   parameters: { fullWidth: true },
   render: () => (
     <SkeletonGroup>
-      <ResponsiveGrid cols={4}>
+      <CardGrid>
         {Array.from({ length: 8 }, (_, i) => (
           <StreamCardSkeleton key={i} />
         ))}
-      </ResponsiveGrid>
+      </CardGrid>
     </SkeletonGroup>
   ),
 };
@@ -151,5 +159,60 @@ export const GridEmpty: Story = {
       description="Follow channels to hear when they go live, or browse another category."
       action={<Button variant="outline">Browse categories</Button>}
     />
+  ),
+};
+
+/** `size="feature"`: the home hero card, 62/38 from 768 px, stacked below. A poster, never autoplay. */
+const featureArgs = { size: "feature" as const, ctaLabel: "Watch now", lazy: false, uptimeLabel: "1:12:09" };
+export const Feature: Story = { parameters: { fullWidth: true }, args: featureArgs };
+export const FeatureLight: Story = { parameters: { fullWidth: true }, args: featureArgs, globals: { theme: "light" } };
+export const FeatureMobile320: Story = {
+  parameters: { fullWidth: true },
+  args: { ...featureArgs, stream: makeStream({ title: LONG_TITLE, displayName: LONG_NAME }) },
+  globals: { viewport: { value: "mobile320" } },
+};
+export const FeatureNoThumbnail: Story = {
+  parameters: { fullWidth: true },
+  args: { ...featureArgs, stream: makeStream({ thumbnail: null, accent: "violet" }) },
+};
+export const FeatureLoading: Story = {
+  parameters: { fullWidth: true },
+  render: () => (
+    <SkeletonGroup>
+      <StreamCardSkeleton size="feature" />
+    </SkeletonGroup>
+  ),
+};
+
+const OFFLINE = [
+  { name: "Mika Draws", accent: "pink", meta: "Art · 3 hours ago" },
+  { name: "Basement Synths", accent: "sky", meta: "Music · 5 hours ago" },
+  { name: "Ferro Builds", accent: "zinc", meta: "Making · Yesterday" },
+  { name: "Studio Okra", accent: "green", meta: "Cooking · Yesterday" },
+  { name: "Polyglot Pete", accent: "indigo", meta: "Languages · 2 days ago" },
+  { name: "A channel name that is far too long for a chip", accent: "violet", meta: "Talk · 2 days ago" },
+] as const;
+
+/** `ChannelChip` rows for offline channels: a scroller below 768 px, wrapping above. */
+export const ChannelChips: Story = {
+  parameters: { fullWidth: true },
+  render: () => (
+    <ChannelChipRow aria-label="Recently live">
+      {OFFLINE.map((c) => (
+        <ChannelChip key={c.name} name={c.name} accent={c.accent} meta={c.meta} href={`#${c.accent}`} />
+      ))}
+    </ChannelChipRow>
+  ),
+};
+export const ChannelChipsLight: Story = { ...ChannelChips, globals: { theme: "light" } };
+export const ChannelChipsMobile320: Story = { ...ChannelChips, globals: { viewport: { value: "mobile320" } } };
+export const ChannelChipsLoading: Story = {
+  parameters: { fullWidth: true },
+  render: () => (
+    <SkeletonGroup className="flex gap-2">
+      <ChannelChipSkeleton />
+      <ChannelChipSkeleton />
+      <ChannelChipSkeleton />
+    </SkeletonGroup>
   ),
 };
