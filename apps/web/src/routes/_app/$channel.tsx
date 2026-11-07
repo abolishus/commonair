@@ -50,6 +50,7 @@ import {
   vodTiles,
 } from "../../components/channel/video-grid.tsx";
 import { FollowButton, FollowerCount, useFollow } from "../../components/channel-follow.tsx";
+import { CheckoutReturn } from "../../components/money/checkout-return.tsx";
 import { FollowGrantToggle } from "../../components/portability/grants.tsx";
 import { MovedNotice } from "../../components/portability/moved-notice.tsx";
 import { SupportButton } from "../../components/support/support-dialog.tsx";
@@ -435,6 +436,8 @@ function ChannelView({
       <div className={cn("flex min-w-0 flex-col lg:flex-row", theatreLayout ? null : "gap-6")}>
         <div className="flex min-w-0 flex-1 flex-col gap-4">
           <MovedNotice channelName={channel.displayName} movedTo={channel.movedTo} />
+          {/* After checkout (F12): announced before the player. */}
+          <CheckoutReturn channelName={channel.displayName} />
           {/* Offline, the banner heads the page; live it sits in About so the player comes first. */}
           {live ? null : banner}
           {stageNode}
