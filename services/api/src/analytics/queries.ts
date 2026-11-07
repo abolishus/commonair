@@ -16,7 +16,7 @@ import type {
   IntegritySummary,
 } from "@commonair/contracts/dto";
 import { schema } from "@commonair/db";
-import { and, asc, desc, eq, gte, isNotNull, lt, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, isNotNull, isNull, lt, lte, sql } from "drizzle-orm";
 import type { z } from "zod";
 import type { Deps } from "../deps.ts";
 import { apiError, notFound } from "../lib/errors.ts";
@@ -177,11 +177,40 @@ function costOf(deps: ReadDeps, rows: readonly RangeRow[]) {
   );
 }
 
+/**
+ * The channel's live broadcast, when it started before `to` (overhaul decision 2): the page's
+ * "Live now" entry with the worker's running peak. It is never in the rollup rows above until it
+ * has ended and settled.
+ */
+export async function liveEntry(
+  deps: Pick<Deps, "db">,
+  q: { channelId: string; to: Date },
+): Promise<NonNullable<AnalyticsRange["live"]> | null> {
+  const [b] = await deps.db
+    .select({
+      broadcastId: broadcasts.id,
+      title: broadcasts.title,
+      startedAt: broadcasts.startedAt,
+      peakSoFar: broadcasts.peakVerifiedViewers,
+    })
+    .from(schema.channels)
+    .innerJoin(broadcasts, eq(broadcasts.id, schema.channels.liveBroadcastId))
+    .where(
+      and(
+        eq(schema.channels.id, q.channelId),
+        eq(broadcasts.kind, "live"),
+        isNull(broadcasts.endedAt),
+        lt(broadcasts.startedAt, q.to),
+      ),
+    );
+  return b ? { ...b, startedAt: iso(b.startedAt) } : null;
+}
+
 export async function rangeAnalytics(
   deps: ReadDeps,
   q: { channelId: string; from: Date; to: Date; bypassed: boolean },
 ): Promise<AnalyticsRange> {
-  const rows = await rangeRows(deps, q);
+  const [rows, live] = await Promise.all([rangeRows(deps, q), liveEntry(deps, q)]);
   const totals = emptyAudience();
   const bytes: BySource = {};
   const verified: BySource = {};
@@ -208,6 +237,7 @@ export async function rangeAnalytics(
     })),
     delivery: deliveryMix(bytes, verified),
     cost: costOf(deps, rows),
+    live,
   };
 }
 

@@ -1,0 +1,10 @@
+{
+  "fixViewers.health.watchingNow": "Watching now",
+  "fixViewers.health.peakSoFar": "Peak so far",
+  "fixViewers.health.catchingUp": "Catching up",
+  "fixViewers.health.hint": "Watching now counts verified viewers right now. Final numbers settle after the stream.",
+  "fixViewers.analytics.live.heading": "Live now · started {time}",
+  "fixViewers.analytics.live.peak": "Peak so far",
+  "fixViewers.analytics.live.body": "Final figures appear 24 hours after the stream ends.",
+  "fixViewers.analytics.broadcast.option": "{title} · {date} · {duration}"
+}

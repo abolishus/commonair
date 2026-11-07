@@ -33,8 +33,9 @@ export function latestSample(health: Pick<StreamHealthDto, "live" | "samples">):
 }
 
 /**
- * The live numbers (F21): verified viewers, uptime and the newest sample's bitrate, frame rate,
- * dropped frames and resolution. A figure the sample does not carry is left out, never guessed.
+ * The live numbers (F21): watching now (the public live count, overhaul decision 2), the running
+ * peak, DVR viewers catching up, uptime and the newest sample's bitrate, frame rate, dropped frames
+ * and resolution. A figure the API or the sample does not carry is left out, never guessed.
  */
 export function LiveNumbers({
   health,
@@ -50,11 +51,29 @@ export function LiveNumbers({
   const rows: { term: string; value: React.ReactNode; id: string; raw: string | number }[] = [
     {
       id: "viewers",
-      term: t("studio.health.viewers"),
+      term: t("fixViewers.health.watchingNow"),
       value: <ViewerCount count={health.viewers.verified} />,
       raw: health.viewers.verified,
     },
   ];
+  if (health.peakSoFar !== undefined) {
+    // Never below the count beside it, whichever was read first.
+    const peak = Math.max(health.peakSoFar, health.viewers.verified);
+    rows.push({
+      id: "peak",
+      term: t("fixViewers.health.peakSoFar"),
+      value: <ViewerCount count={peak} icon={false} />,
+      raw: peak,
+    });
+  }
+  const catchingUp = health.viewers.catchingUp ?? 0;
+  if (catchingUp > 0)
+    rows.push({
+      id: "catchingUp",
+      term: t("fixViewers.health.catchingUp"),
+      value: formatNumber(catchingUp, locale),
+      raw: catchingUp,
+    });
   if (startedAt) {
     const secs = uptimeSeconds(startedAt, now);
     rows.push({ id: "uptime", term: t("studio.health.uptime"), value: formatUptime(secs), raw: secs });
@@ -88,14 +107,19 @@ export function LiveNumbers({
       });
   }
   return (
-    <dl data-testid="stream-health-numbers" className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3">
-      {rows.map((r) => (
-        <div key={r.id} data-testid="stream-health-number" data-metric={r.id} data-value={r.raw} className="min-w-0">
-          <dt className="text-xs text-muted-foreground">{r.term}</dt>
-          <dd className="text-sm font-medium tabular-nums">{r.value}</dd>
-        </div>
-      ))}
-    </dl>
+    <div className="flex flex-col gap-2">
+      <dl data-testid="stream-health-numbers" className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3">
+        {rows.map((r) => (
+          <div key={r.id} data-testid="stream-health-number" data-metric={r.id} data-value={r.raw} className="min-w-0">
+            <dt className="text-xs text-muted-foreground">{r.term}</dt>
+            <dd className="text-sm font-medium tabular-nums">{r.value}</dd>
+          </div>
+        ))}
+      </dl>
+      <p data-testid="stream-health-viewers-hint" className="text-xs text-muted-foreground">
+        {t("fixViewers.health.hint")}
+      </p>
+    </div>
   );
 }
 

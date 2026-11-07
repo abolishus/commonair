@@ -228,11 +228,21 @@ export const StreamHealth = z.object({
       lastError: z.string().nullable(),
     }),
   ),
+  /**
+   * Live-mode sessions only, the public count's filter (overhaul decision 2): `verified` is the
+   * same number `<ViewerCount>` shows; DVR viewers are in `catchingUp` (ADR 0016 decision 6).
+   */
   viewers: z.object({
     verified: z.number().int(),
     pending: z.number().int(),
     excluded: z.number().int(),
+    catchingUp: z.number().int().nonnegative().optional(),
   }),
+  /**
+   * The live broadcast's running peak of verified viewers (`broadcasts.peak_verified_viewers`,
+   * never below `viewers.verified`); 0 while offline. Provisional: analytics' settled peak is final.
+   */
+  peakSoFar: z.number().int().nonnegative().optional(),
 });
 
 /** One subtitle track (WebVTT). On `PlaybackStart` only active live tracks; on `Vod` only ready ones. */
@@ -2021,6 +2031,19 @@ export const AnalyticsRange = z.object({
   ),
   delivery: DeliveryMix,
   cost: Money.nullable(),
+  /**
+   * The channel's live broadcast when it started before `to` (overhaul decision 2): not in
+   * `broadcasts` or the totals until it ends and settles. `peakSoFar` is the running peak.
+   */
+  live: z
+    .object({
+      broadcastId: Id,
+      title: z.string(),
+      startedAt: Timestamp,
+      peakSoFar: z.number().int().nonnegative(),
+    })
+    .nullable()
+    .optional(),
 });
 export type AnalyticsRange = z.infer<typeof AnalyticsRange>;
 export const AnalyticsExclusions = z.object({

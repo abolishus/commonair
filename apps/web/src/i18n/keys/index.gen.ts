@@ -23,6 +23,7 @@ import type { Key as E8Studio } from "./e8-studio.gen.ts";
 import type { Key as E8Viewer } from "./e8-viewer.gen.ts";
 import type { Key as E9Consent } from "./e9-consent.gen.ts";
 import type { Key as E9Console } from "./e9-console.gen.ts";
+import type { Key as FixViewers } from "./fix-viewers.gen.ts";
 import type { Key as FuChannel } from "./fu-channel.gen.ts";
 import type { Key as FuLists } from "./fu-lists.gen.ts";
 import type { Key as FuTime } from "./fu-time.gen.ts";
@@ -85,6 +86,7 @@ export type MessageKey =
   | E8Viewer
   | E9Consent
   | E9Console
+  | FixViewers
   | FuChannel
   | FuLists
   | FuTime
@@ -146,6 +148,7 @@ export const NAMESPACES = [
   "e8-viewer",
   "e9-consent",
   "e9-console",
+  "fix-viewers",
   "fu-channel",
   "fu-lists",
   "fu-time",
