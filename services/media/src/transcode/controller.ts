@@ -38,6 +38,8 @@ export class TranscodeController {
   private ladder: Supervisor | null = null;
   private advertised: Rendition[] | null = null;
   private waiting = false;
+  /** Tail of the advertise/withdraw writes (see `serialize`). */
+  private writes: Promise<void> = Promise.resolve();
   private readonly log;
 
   constructor(
@@ -165,39 +167,56 @@ export class TranscodeController {
     await this.withdraw(false);
   }
 
-  private async advertise(renditions: Rendition[]): Promise<void> {
-    this.advertised = renditions;
-    try {
-      await this.ctx.valkey.set(
-        KEYS.renditions(this.b.channelId),
-        JSON.stringify(renditions),
-        "EX",
-        RENDITIONS_TTL_SECONDS,
-      );
-      await this.ctx.db
-        .update(schema.broadcasts)
-        .set({ transcodeActive: true })
-        .where(eq(schema.broadcasts.id, this.b.broadcastId));
-      await this.publish(renditions);
-      this.log.info("renditions live", { renditions });
-    } catch {
-      this.log.warn("could not advertise renditions", { errorCode: "RENDITIONS_ADVERTISE_FAILED" });
-    }
+  /**
+   * Advertise and withdraw write the same key, flag and event, and both start from callbacks
+   * (`onProgress`, `onExit`) that do not wait for each other. Run their writes one at a time in
+   * call order, so an advertise still in flight when the ladder stops cannot set the flag again
+   * after the withdraw cleared it.
+   */
+  private serialize(writes: () => Promise<void>): Promise<void> {
+    const run = this.writes.then(writes);
+    this.writes = run.catch(() => {});
+    return run;
   }
 
-  private async withdraw(silent: boolean): Promise<void> {
+  private advertise(renditions: Rendition[]): Promise<void> {
+    this.advertised = renditions;
+    return this.serialize(async () => {
+      try {
+        await this.ctx.valkey.set(
+          KEYS.renditions(this.b.channelId),
+          JSON.stringify(renditions),
+          "EX",
+          RENDITIONS_TTL_SECONDS,
+        );
+        await this.ctx.db
+          .update(schema.broadcasts)
+          .set({ transcodeActive: true })
+          .where(eq(schema.broadcasts.id, this.b.broadcastId));
+        await this.publish(renditions);
+        this.log.info("renditions live", { renditions });
+      } catch {
+        this.log.warn("could not advertise renditions", { errorCode: "RENDITIONS_ADVERTISE_FAILED" });
+      }
+    });
+  }
+
+  /** Key first, then the flag, then the event: a reader that saw the event sees both cleared. */
+  private withdraw(silent: boolean): Promise<void> {
     const was = this.advertised;
     this.advertised = null;
-    try {
-      await this.ctx.valkey.del(KEYS.renditions(this.b.channelId));
-      await this.ctx.db
-        .update(schema.broadcasts)
-        .set({ transcodeActive: false })
-        .where(eq(schema.broadcasts.id, this.b.broadcastId));
-      if (!silent && was) await this.publish(["source"]);
-    } catch {
-      this.log.warn("could not withdraw renditions", { errorCode: "RENDITIONS_WITHDRAW_FAILED" });
-    }
+    return this.serialize(async () => {
+      try {
+        await this.ctx.valkey.del(KEYS.renditions(this.b.channelId));
+        await this.ctx.db
+          .update(schema.broadcasts)
+          .set({ transcodeActive: false })
+          .where(eq(schema.broadcasts.id, this.b.broadcastId));
+        if (!silent && was) await this.publish(["source"]);
+      } catch {
+        this.log.warn("could not withdraw renditions", { errorCode: "RENDITIONS_WITHDRAW_FAILED" });
+      }
+    });
   }
 
   private publish(renditions: Rendition[]): Promise<void> {

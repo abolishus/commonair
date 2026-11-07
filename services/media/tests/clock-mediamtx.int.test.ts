@@ -157,6 +157,49 @@ function removeContainer(name: string): void {
   containers.delete(name);
 }
 
+/**
+ * What the running test is waiting on, with when it started. The recorder test once hung until
+ * vitest's 240 s timeout (CI 41309310706, B-frames run), which names no step; a stall watchdog
+ * prints this instead (`watchdog`).
+ */
+const inFlight = new Map<number, { what: string; since: number }>();
+let nextStep = 0;
+
+async function tracked<T>(what: string, run: () => Promise<T>): Promise<T> {
+  const id = nextStep++;
+  inFlight.set(id, { what, since: Date.now() });
+  try {
+    return await run();
+  } finally {
+    inFlight.delete(id);
+  }
+}
+
+function inFlightReport(): string {
+  const now = Date.now();
+  const steps = [...inFlight.values()].map((s) => `${s.what} (${Math.round((now - s.since) / 1000)} s)`);
+  return steps.length > 0 ? steps.join("; ") : "nothing in flight";
+}
+
+/** Prints what is still in flight, and `extra()`, if the test runs past `ms`; call the result to disarm. */
+function watchdog(label: string, ms: number, extra: () => string): () => void {
+  const timer = setTimeout(
+    () => console.warn(`${label}: still running after ${ms / 1000} s; waiting on ${inFlightReport()}; ${extra()}`),
+    ms,
+  );
+  return () => clearTimeout(timer);
+}
+
+/** The last `max` characters of a subprocess pipe, read as they come. */
+function tail(stream: ReadableStream<Uint8Array>, max = 2_000): { text: () => string; done: Promise<void> } {
+  let text = "";
+  const done = (async () => {
+    const dec = new TextDecoder();
+    for await (const chunk of stream) text = (text + dec.decode(chunk, { stream: true })).slice(-max);
+  })().catch(() => undefined);
+  return { text: () => text, done };
+}
+
 interface Frame {
   /** Presentation time in seconds as ffmpeg reports it (`-copyts`). */
   pts: number;
@@ -167,7 +210,11 @@ const W = 320;
 const H = 180;
 const DECODE = ["-fps_mode", "passthrough", "-vf", `showinfo,scale=${W}:${H},format=gray`, "-f", "rawvideo", "pipe:1"];
 
-async function decodeFrames(cmd: string[], input?: Uint8Array): Promise<Frame[]> {
+function decodeFrames(cmd: string[], input?: Uint8Array): Promise<Frame[]> {
+  return tracked(`ffmpeg decode (${input ? "piped segment" : "SRT"})`, () => decodeFramesNow(cmd, input));
+}
+
+async function decodeFramesNow(cmd: string[], input?: Uint8Array): Promise<Frame[]> {
   const p = Bun.spawn(cmd, { stdin: input ? "pipe" : "ignore", stdout: "pipe", stderr: "pipe" });
   if (input && p.stdin) {
     // ffmpeg exits once it has its frames; the unread rest then fails with EPIPE on Linux.
@@ -216,9 +263,11 @@ async function srtOrigin(slug: string): Promise<number> {
 }
 
 async function get(url: string): Promise<Uint8Array> {
-  const res = await fetch(url, { headers: { authorization: basic } });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return new Uint8Array(await res.arrayBuffer());
+  return tracked(`GET ${new URL(url).pathname}`, async () => {
+    const res = await fetch(url, { headers: { authorization: basic } });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return new Uint8Array(await res.arrayBuffer());
+  });
 }
 
 interface HlsSample {
@@ -287,6 +336,10 @@ async function waitFor<T>(what: string, fn: () => Promise<T | null | undefined |
 
 /** W0 as the media service takes it: polled until the path's PDT has settled. */
 async function settledW0(slug: string, ms = 40_000): Promise<W0Result> {
+  return tracked(`settled W0 of ${slug}`, () => settledW0Now(slug, ms));
+}
+
+async function settledW0Now(slug: string, ms: number): Promise<W0Result> {
   const deadline = Date.now() + ms;
   for (;;) {
     try {
@@ -456,10 +509,15 @@ describe("recorder over SRT (R4)", () => {
     ["no B-frames", PLAIN],
     ["B-frames", BFRAMES],
   ])("fMP4 times are the SRT timeline and W0 + time is the source PDT (%s)", async (_l, slug) => {
-    const offsets = await measured(() => recorderRun(slug));
+    // A normal run takes ~10 s, a measured-again one twice that: well before vitest's 240 s.
+    const disarm = watchdog(`recorder ${slug}`, 200_000, () => recorderState());
+    const offsets = await measured(() => recorderRun(slug)).finally(disarm);
     expect(offsets).toHaveLength(3);
     if (process.env.TEST_CLOCK_LOG) console.warn(`recorder ${slug}: run offset ms`, offsets);
   });
+
+  /** The current recorder run, for the watchdog: container, playlist and ffmpeg's stderr. */
+  let recorderState = (): string => "no recorder run yet";
 
   async function recorderRun(slug: string): Promise<number[]> {
     const dir = mkdtempSync(join(scratch, "rec-"));
@@ -476,36 +534,51 @@ describe("recorder over SRT (R4)", () => {
       [dir],
     );
     const proc = Bun.spawn(cmd, { stdin: "ignore", stdout: "ignore", stderr: "pipe" });
+    const stderr = tail(proc.stderr);
+    const startedAt = Date.now();
+    let segmentsSeen = 0;
+    recorderState = () =>
+      JSON.stringify({
+        container: name,
+        containerState: podman(["inspect", "-f", "{{.State.Status}} exit={{.State.ExitCode}}", name]).out || "gone",
+        runningMs: Date.now() - startedAt,
+        exitCode: proc.exitCode,
+        segmentsSeen,
+        stderrTail: stderr.text().slice(-1_000),
+      });
     // The source's PDT − strip over the recorder's window; W0 as the media service reads it.
-    const source = hlsSamples(`live/${slug}`, 9_000);
+    const source = tracked(`source samples of ${slug}`, () => hlsSamples(`live/${slug}`, 9_000));
     const w0 = await settledW0(slug);
     // A fresh handle per read: a Bun.file made before the file existed keeps reading it as empty.
     const playlist = {
       exists: () => Bun.file(join(dir, recorderPlaylist(runId))).exists(),
       text: () => Bun.file(join(dir, recorderPlaylist(runId))).text(),
     };
-    const stderr = new Response(proc.stderr).text();
     // Kept as seen while recording: stopping the container can cut ffmpeg's final rewrite of the
     // playlist short and leave it empty.
     let seen = "";
     try {
-      await waitFor(
-        "three recorder segments",
-        async () => {
-          if (!(await playlist.exists())) return false;
-          const text = await playlist.text();
-          if (parsePlaylist(text).segments.length < 3) return false;
-          seen = text;
-          return true;
-        },
-        60_000,
+      await tracked("three recorder segments", () =>
+        waitFor(
+          "three recorder segments",
+          async () => {
+            if (!(await playlist.exists())) return false;
+            const text = await playlist.text();
+            segmentsSeen = parsePlaylist(text).segments.length;
+            if (segmentsSeen < 3) return false;
+            seen = text;
+            return true;
+          },
+          60_000,
+        ),
       );
     } catch (err) {
       proc.kill("SIGKILL");
-      throw new Error(`${(err as Error).message}\n${(await stderr).slice(-2000)}`);
+      await tracked("recorder stderr after SIGKILL", () => stderr.done);
+      throw new Error(`${(err as Error).message}\n${stderr.text()}`);
     } finally {
       proc.kill("SIGINT");
-      await proc.exited;
+      await tracked("recorder container exit after SIGINT", () => proc.exited);
       removeContainer(name);
     }
     const k = origin.get(slug) ?? (await srtOrigin(slug));
