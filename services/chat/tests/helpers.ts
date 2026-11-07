@@ -4,7 +4,7 @@
 /** Integration-test helpers: seeding, chat instances, and a frame-recording WebSocket client. */
 import { ChannelChatSettings, type ServerFrame } from "@commonair/contracts";
 import { schema, uuidv7, type Database } from "@commonair/db";
-import { createLogger } from "@commonair/observability";
+import { createLogger, type Logger } from "@commonair/observability";
 import { randomSecret, sha256Hex, signChatToken } from "@commonair/tokens";
 import { startChatService, type ChatService, type ChatServiceOptions } from "../src/server.ts";
 
@@ -207,13 +207,46 @@ export class Client {
   }
 }
 
-/** Poll until `fn` returns a truthy value. */
-export async function eventually<T>(fn: () => Promise<T> | T, timeoutMs = 3000): Promise<NonNullable<T>> {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
+/**
+ * Poll until `fn` returns a truthy value. On timeout the error says how long it polled, how many
+ * times, and what `describe` reports about the state waited on, so a CI failure names its cause.
+ */
+export async function eventually<T>(
+  fn: () => Promise<T> | T,
+  timeoutMs = 3000,
+  describe?: () => unknown,
+): Promise<NonNullable<T>> {
+  const started = Date.now();
+  const deadline = started + timeoutMs;
+  for (let polls = 1; ; polls++) {
     const v = await fn();
     if (v) return v;
-    if (Date.now() > deadline) throw new Error("condition not met in time");
+    if (Date.now() > deadline) {
+      let state = "";
+      if (describe) {
+        try {
+          state = `; state: ${JSON.stringify(await describe())}`;
+        } catch (err) {
+          state = `; describe failed: ${String(err)}`;
+        }
+      }
+      throw new Error(`condition not met in time (${Date.now() - started} ms, ${polls} polls${state})`);
+    }
     await Bun.sleep(25);
   }
+}
+
+/** A logger that keeps warn-and-above entries (parsed) for a failure message, and prints nothing. */
+export function recordingLogger(service: string): { logger: Logger; entries: Record<string, unknown>[] } {
+  const entries: Record<string, unknown>[] = [];
+  const logger = createLogger({
+    service,
+    level: "warn",
+    write: (line) => {
+      entries.push(JSON.parse(line) as Record<string, unknown>);
+      // Bounded: a test that floods warnings must not grow without limit.
+      if (entries.length > 200) entries.shift();
+    },
+  });
+  return { logger, entries };
 }
