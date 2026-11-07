@@ -57,6 +57,9 @@ const NOT_IN_SEED_MODE: Record<string, string> = {
   P2P_TRACKER_URL: "harness tracker proxy (p2p scenario only)",
   // The captions scenario's capacity step; seed mode keeps the instance's own limit.
   CAPTIONS_MAX_STREAMS: "captions capacity step only",
+  // The harness's 2 s grace (compose.live-grace.yaml) only keeps scenario offline waits short.
+  // Seed mode keeps the production grace, so a seeded publisher's restart continues its broadcast.
+  LIVE_RECONNECT_GRACE_SECONDS: "harness offline waits only; seed mode keeps the production grace",
 };
 /** Preconditions seed-mode open checks instead of setting. */
 const REQUIRED = { DEMO_SEED_FULL: "true", WHISPER_URL: "http://whisper:8080" };
