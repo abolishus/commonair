@@ -20,10 +20,10 @@ import { createValkey, type ValkeyClient } from "@commonair/service";
 import { generateSigningKey, randomSecret, sha256Hex, signPlaybackToken, type SigningKey } from "@commonair/tokens";
 import { retryPortRace } from "../../../scripts/test-podman.ts";
 import { testOwnerArgs } from "../../../scripts/test-owner.ts";
-import { minuteOf } from "../src/accounting.ts";
 import { cdnAuthValue } from "../src/auth.ts";
 import { sessionAllowance } from "../src/issuance.ts";
 import { createOrigin, type Origin } from "../src/origin.ts";
+import { probeProductionMinute } from "./production-probe.ts";
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 180_000 });
 
@@ -542,15 +542,23 @@ describe("accounting", () => {
   test("relay issuance: sessions × production for the minute, upserted idempotently", async () => {
     const auth = { headers: { authorization: `Bearer ${relayToken}` } };
     // Make sure this minute has production: pull playlists and the newest objects as a relay would.
-    const bucket = await waitFor("production this minute", async () => {
-      await t.db.update(schema.playbackSessions).set({ lastHeartbeatAt: new Date() });
-      const pl = await text("/relay-pull/live/test/video1_stream.m3u8", auth);
-      for (const u of uris(pl.body).slice(-3)) await get(`/relay-pull/live/test/${u}`, auth);
-      const m = minuteOf(Date.now());
-      await origin.production.flush();
-      const prod = (await origin.production.read(m)).get("live/test");
-      return prod && sessionAllowance(prod).segments > 0 && sessionAllowance(prod).bytes > 0 ? m : undefined;
-    });
+    const bucket = await waitFor("production this minute", () =>
+      probeProductionMinute({
+        now: Date.now,
+        stamp: async (at) => {
+          await t.db.update(schema.playbackSessions).set({ lastHeartbeatAt: at });
+        },
+        pull: async () => {
+          const pl = await text("/relay-pull/live/test/video1_stream.m3u8", auth);
+          for (const u of uris(pl.body).slice(-3)) await get(`/relay-pull/live/test/${u}`, auth);
+          await origin.production.flush();
+        },
+        produced: async (m) => {
+          const prod = sessionAllowance((await origin.production.read(m)).get("live/test"));
+          return prod.segments > 0 && prod.bytes > 0;
+        },
+      }),
+    );
     await origin.production.flush();
     const rows = await origin.runIssuance(bucket);
     const allowance = sessionAllowance((await origin.production.read(bucket)).get("live/test"));
