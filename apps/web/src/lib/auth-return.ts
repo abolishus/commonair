@@ -7,6 +7,8 @@
  * `?returnTo=` is the route guards' (an OAuth consent page). Both are same-origin paths only:
  * anything else is dropped, never followed. An open redirect is a bug.
  */
+import { api } from "./api.ts";
+import { DEFAULT_LANDING } from "./auth.ts";
 import { safeReturnTo } from "./guard.ts";
 
 /** Any origin works: a relative path keeps whatever base it is resolved against. */
@@ -67,4 +69,52 @@ export function carriedSearch(search: Pick<AuthSearch, "returnTo" | "redirect">)
   const redirect = safeRedirect(search.redirect);
   if (redirect !== undefined) out.redirect = redirect;
   return out;
+}
+
+/** The studio: where an account that streams lands after signing in without a target. */
+export const STUDIO_LANDING = "/dashboard";
+
+/** How long sign-in waits to learn whether the account streams before going home anyway. */
+export const LANDING_PROBE_MS = 3000;
+
+/** What sign-in asks the API to tell a creator from a viewer (injectable for tests). */
+export interface LandingProbe {
+  /** The signed-in account's channel slug, or null. */
+  channelSlug: () => Promise<string | null>;
+  /** That channel's stream keys, revoked ones included: one exists once the account set up streaming. */
+  streamKeyCount: (channel: string) => Promise<number>;
+}
+
+const apiProbe: LandingProbe = {
+  channelSlug: async () => (await api().me.get()).channelSlug,
+  streamKeyCount: async (channel) => (await api().stream.keys({ channel })).length,
+};
+
+/**
+ * Where sign-in goes (F11): the visitor's target (`returnTo`, else `redirect`) when there is one;
+ * otherwise the studio only for an account that has created a stream key (every account that has
+ * streamed has one), and home for everyone else. A failure or a slow answer means home: a viewer
+ * must never land in the studio, and a creator is one click from it.
+ */
+export async function signInLanding(
+  target: string | undefined,
+  probe: LandingProbe = apiProbe,
+  timeoutMs = LANDING_PROBE_MS,
+): Promise<string> {
+  const safe = safeRedirect(target);
+  if (safe !== undefined) return safe;
+  const ask = (async () => {
+    const slug = await probe.channelSlug();
+    if (!slug) return DEFAULT_LANDING;
+    return (await probe.streamKeyCount(slug)) > 0 ? STUDIO_LANDING : DEFAULT_LANDING;
+  })().catch(() => DEFAULT_LANDING);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<string>((resolve) => {
+    timer = setTimeout(() => resolve(DEFAULT_LANDING), timeoutMs);
+  });
+  try {
+    return await Promise.race([ask, late]);
+  } finally {
+    clearTimeout(timer);
+  }
 }

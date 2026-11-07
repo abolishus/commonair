@@ -1,32 +1,46 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { EmptyState, MoneyAmount, formatMoney, useLocale } from "@commonair/ui";
+import {
+  EmptyState,
+  MoneyAmount,
+  RelativeTime,
+  formatMoney,
+  formatNumber,
+  formatPercent,
+  useLocale,
+} from "@commonair/ui";
 import {
   BreakdownBar,
   DataTable,
   MetricPanel,
   StatCard,
   StatGrid,
+  Legend,
+  getSegmentShares,
+  type BreakdownSegment,
   type DataTableColumn,
 } from "@commonair/ui/blocks/data";
+import { AlertCallout } from "@commonair/ui/blocks/feedback";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@commonair/ui/components/card";
 import { ResponsiveGrid } from "@commonair/ui/layouts";
 import { PieChartIcon, Radio02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type * as React from "react";
 import { t } from "../../i18n/index.ts";
-import {
-  egressShare,
-  monthCosts,
-  monthLabel,
-  transparencyFlow,
-  transparencyTotals,
-  type TransparencyMonthDto,
-} from "../../lib/money.ts";
+import { egressShare, monthCosts, monthLabel, transparencyTotals, type TransparencyMonthDto } from "../../lib/money.ts";
 import { formatBytes } from "../../lib/relays.ts";
 import { CoopTransparency } from "../coop/transparency.tsx";
 import { FeeSchedule } from "./fee-schedule.tsx";
+import {
+  creatorSharePercent,
+  lastDecision,
+  latestMemberCount,
+  revenueSegments,
+  revenueSplit,
+  spendingSegments,
+  type RevenueSplit,
+} from "./transparency-split.ts";
 
 /**
  * `/transparency` pieces (Transparency board) for the months shown, with the co-op's governance
@@ -108,6 +122,152 @@ export function SplitLines({
   );
 }
 
+interface SplitRow extends BreakdownSegment {
+  share: number;
+}
+
+/**
+ * One whole as a bar, with its table: the table is the legend and the text alternative, so the
+ * numbers never depend on telling chart colours apart (F4).
+ */
+export function SplitBarCard({
+  title,
+  description,
+  segments,
+  currency,
+  empty,
+  note,
+  ...props
+}: {
+  title: string;
+  description: string;
+  segments: BreakdownSegment[];
+  currency: string;
+  empty: string;
+  /** A line under the table. */
+  note?: string;
+} & Record<`data-${string}`, string>): React.JSX.Element {
+  const { locale } = useLocale();
+  const shares = getSegmentShares(segments);
+  const rows: SplitRow[] = segments.map((s, i) => ({ ...s, share: shares[i] ?? 0 }));
+  const total = segments.reduce((sum, s) => sum + Math.max(0, s.value), 0);
+  const columns: DataTableColumn<SplitRow>[] = [
+    {
+      id: "label",
+      header: t("fixWeb.transparency.table.part"),
+      // A key-only legend item: the bar's swatch beside the label, drawn by the design system.
+      cell: ({ row }) => (
+        <Legend
+          layout="inline"
+          items={[{ id: row.original.id, label: row.original.label, color: row.original.color }]}
+        />
+      ),
+    },
+    {
+      id: "amount",
+      header: t("fixWeb.transparency.table.amount"),
+      align: "numeric",
+      cell: ({ row }) => <MoneyAmount value={{ cents: row.original.value, currency }} />,
+    },
+    {
+      id: "share",
+      header: t("fixWeb.transparency.table.share"),
+      align: "numeric",
+      cell: ({ row }) => formatPercent(row.original.share / 100, locale),
+    },
+  ];
+  return (
+    <Card {...props} data-total={total}>
+      <CardHeader>
+        <CardTitle>{title}</CardTitle>
+        <CardDescription>{description}</CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4">
+        {total > 0 ? (
+          <>
+            <BreakdownBar
+              label={title}
+              segments={segments}
+              showLegend={false}
+              formatValue={(cents) => formatMoney(cents, currency, locale)}
+              formatLabel={(items, parts) =>
+                items
+                  .map((item, i) => t("money.shareLabel", { label: item.label, share: parts[i] ?? 0 }))
+                  .join(t("common.listSeparator"))
+              }
+            />
+            <DataTable
+              caption={title}
+              columns={columns}
+              rows={rows}
+              getRowId={(r) => r.id}
+              rowProps={(r) => ({
+                "data-testid": "transparency-split-row",
+                "data-part": r.id,
+                "data-cents": r.value,
+                "data-share": r.share,
+              })}
+            />
+          </>
+        ) : (
+          <p className="text-sm text-muted-foreground">{empty}</p>
+        )}
+        {note && <p className="text-xs text-muted-foreground">{note}</p>}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** "By the numbers" (coop-trust P3): members, creators paid, the creator share and the last decision. */
+export function NumbersStrip({
+  months,
+  split,
+  currency,
+}: {
+  months: readonly TransparencyMonthDto[];
+  split: RevenueSplit;
+  currency: string;
+}): React.JSX.Element {
+  const { locale } = useLocale();
+  const share = creatorSharePercent(split);
+  const decision = lastDecision(months);
+  const paid = months.reduce((sum, m) => sum + m.streamerPayouts.cents, 0);
+  const items: { id: string; label: string; value: React.ReactNode }[] = [
+    {
+      id: "members",
+      label: t("fixWeb.transparency.numbers.members"),
+      value: formatNumber(latestMemberCount(months), locale),
+    },
+    {
+      id: "paid",
+      label: t("fixWeb.transparency.numbers.paid"),
+      value: <MoneyAmount value={{ cents: paid, currency }} />,
+    },
+    {
+      id: "share",
+      label: t("fixWeb.transparency.numbers.share"),
+      value: share === null ? t("fixWeb.transparency.numbers.noRevenue") : formatPercent(share / 100, locale),
+    },
+    {
+      id: "decision",
+      label: t("fixWeb.transparency.numbers.decision"),
+      value: decision ? <RelativeTime date={decision.decidedAt} /> : t("fixWeb.transparency.numbers.noDecision"),
+    },
+  ];
+  return (
+    <section aria-label={t("fixWeb.transparency.numbers.title")} data-testid="transparency-numbers">
+      <dl className="grid grid-cols-2 gap-px bg-border ring-1 ring-border sm:grid-cols-4">
+        {items.map((item) => (
+          <div key={item.id} data-stat={item.id} className="flex min-w-0 flex-col gap-1 bg-card p-4">
+            <dt className="text-xs text-muted-foreground">{item.label}</dt>
+            <dd className="text-lg font-semibold tabular-nums">{item.value}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
+}
+
 export function TransparencyReport({ months }: { months: TransparencyMonthDto[] }): React.JSX.Element {
   const { locale } = useLocale();
   const first = months[0];
@@ -119,6 +279,7 @@ export function TransparencyReport({ months }: { months: TransparencyMonthDto[] 
       </>
     );
   const totals = transparencyTotals(months, first.revenue.currency);
+  const split = revenueSplit(months);
   const money = (cents: number) => <MoneyAmount value={{ cents, currency: totals.currency }} colorNegative />;
   const stats = [
     {
@@ -177,6 +338,32 @@ export function TransparencyReport({ months }: { months: TransparencyMonthDto[] 
   ];
   return (
     <>
+      <NumbersStrip months={months} split={split} currency={totals.currency} />
+      <SplitBarCard
+        data-testid="transparency-flow"
+        title={t("transparency.flow.title")}
+        description={t("transparency.flow.hint")}
+        segments={revenueSegments(split)}
+        currency={totals.currency}
+        empty={t("fixWeb.transparency.split.empty")}
+        note={t("fixWeb.transparency.split.feeNote")}
+      />
+      <SplitBarCard
+        data-testid="transparency-spending"
+        title={t("fixWeb.transparency.spending.title")}
+        description={t("fixWeb.transparency.spending.hint")}
+        segments={spendingSegments(months)}
+        currency={totals.currency}
+        empty={t("fixWeb.transparency.spending.empty")}
+      />
+      {totals.surplus < 0 && (
+        <AlertCallout
+          data-testid="transparency-deficit"
+          tone="info"
+          title={t("fixWeb.transparency.deficit.title")}
+          description={t("fixWeb.transparency.deficit.body")}
+        />
+      )}
       <StatGrid cols={4}>
         {stats.map((stat) => (
           <StatCard
@@ -190,25 +377,6 @@ export function TransparencyReport({ months }: { months: TransparencyMonthDto[] 
           />
         ))}
       </StatGrid>
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("transparency.flow.title")}</CardTitle>
-          <CardDescription>{t("transparency.flow.hint")}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <BreakdownBar
-            data-testid="transparency-flow"
-            label={t("transparency.flow.title")}
-            segments={transparencyFlow(months)}
-            formatValue={(cents) => formatMoney(cents, totals.currency, locale)}
-            formatLabel={(items, shares) =>
-              items
-                .map((item, i) => t("money.shareLabel", { label: item.label, share: shares[i] ?? 0 }))
-                .join(t("common.listSeparator"))
-            }
-          />
-        </CardContent>
-      </Card>
       <Card>
         <CardHeader>
           <CardTitle>{t("transparency.monthly")}</CardTitle>

@@ -23,10 +23,24 @@ import {
   type VoteChoice,
 } from "../../lib/coop.ts";
 import { titleHead } from "../../lib/page-title.ts";
+import { seoHead, siteFromMatches, withSeo } from "../../lib/seo.ts";
 
 /** Public: one proposal with its timeline, discussion, council response, ballot and tally. */
 export const Route = createFileRoute("/_app/coop/proposals/$id/")({
-  head: () => titleHead(t("pageTitle.coopProposal")),
+  // F13: the route has no loader (the proposal loads in the browser), so the preview is generic.
+  head: ({ params, matches }) => {
+    const site = siteFromMatches(matches);
+    const title = t("pageTitle.coopProposal");
+    return withSeo(
+      titleHead(title),
+      seoHead(site, {
+        title,
+        description: t("fixWeb.seo.proposal", { site: site.name }),
+        path: `/coop/proposals/${params.id}`,
+        type: "article",
+      }),
+    );
+  },
   component: ProposalRoute,
 });
 

@@ -52,7 +52,8 @@ describe("resendVerificationEmail", () => {
     expect(url).toBe(AUTH_ROUTES.sendVerificationEmail);
     expect(AUTH_ROUTES.sendVerificationEmail).toBe("/api/auth/send-verification-email");
     expect(init?.method).toBe("POST");
-    expect(bodyOf(init)).toEqual({ email: "a@example.test", callbackURL: "/dashboard" });
+    // F11: home, not the studio, without a target.
+    expect(bodyOf(init)).toEqual({ email: "a@example.test", callbackURL: "/" });
   });
 
   it("surfaces a rate limit as an AuthRequestError with status 429", async () => {
