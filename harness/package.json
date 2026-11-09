@@ -26,9 +26,9 @@
     "@commonair/tokens": "workspace:*",
     "@orpc/client": "catalog:",
     "@orpc/contract": "catalog:",
-    "altcha-lib": "2.6.0",
+    "altcha-lib": "2.8.0",
     "fflate": "catalog:",
-    "hls.js": "1.7.3",
+    "hls.js": "1.7.4",
     "playwright": "1.64.1",
     "tmi.js": "1.8.5",
     "zod": "catalog:"
