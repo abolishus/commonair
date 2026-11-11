@@ -676,6 +676,101 @@ The plan as written:
 
 ### Wave 4: the co-op, account and staff (D6 + D7)
 
+**Shipped 2026-11-11.** The contract step was `7414d32b`, with `2447254f` (the shared
+`SettingsSection`, `SettingsRow` and `DangerZone`) and test fixes up to `5d4bc2b3`; its CI (run
+43024463583) was green on rerun. What the step added:
+
+- preference types for go-live, governance, payout, creator and the weekly digest, stored in their
+  own enum (0057 merged the old `proposal`/`vote_open` rows into `governance`);
+- `users.first_notify_optin_at`, set once by triggers (0058);
+- case claiming (`moderation_cases.assignee_id`, staff only by trigger);
+- `transparency_notes`, `notification_digest_sends` and the markable `get_paid` step;
+- the `report_outcome` and `moderator_added` types;
+- the `AUTH_ROUTES` for security;
+- stubs for `me.deletion.preview`, `chat.bans.bulk`, `transparency.setNote`, `admin.overview`,
+  `admin.user`, `admin.revealEmail` and `moderation.assign`, and a `staff` access level.
+
+Nine units ran in one workflow pass (d6-transparency, d6-governance, d6-studio, d7-settings,
+d7-security, d7-notify, d7-admin, d7-mod, d7-pwa), merged at `a979e7d6`..`78c38f34` with the
+integration fixes up to `f3d0b2cb`. d7-security added one dependency, `uqr@0.1.2` (MIT), for the
+two-factor QR code. CI follow-ups were `9ba429ad`, `da9b31f5`, `83914864`, `50e449e6`,
+`55af9739`, `852d5252`, `aaecc5e8` and `ab074420`. `55af9739` fixed a real stall: the settings
+shell read appeals, copyright notices and the deletion request on every settings page load, which
+filled `e4b-money`'s payer bucket with 429s. `Me.settingsSummary` now carries all three, so the
+shell makes no requests of its own. Two more were also real: `aaecc5e8` taught `account-deletion` the new dialog's "I downloaded my data" step, and
+`ab074420` stopped the en-XA scanner flagging another run's username. `852d5252` fixed the
+`postgres-health.int` slow-replay flake after its second recurrence. CI on `ab074420` (run
+43071355872) was green on the first attempt, harness included; every earlier attempt is explained
+in `docs/operators/flakes.md`.
+
+Recorded calls (conservative defaults; the maintainer can revisit):
+
+- **Notifications:**
+  - Governance email is not offered until a governance mailer exists (wave 5); its unsubscribe
+    list keeps its rows.
+  - Payout notices always reach the inbox, as financial records. The payout email follows its
+    preference, which is on by default as it always was.
+  - Governance and creator in-app preferences apply when the inbox is read.
+  - The weekly digest goes out on Mondays from 09:00 UTC (members have no stored time zone), lists
+    only servable public media, and is skipped when empty. Its opt-in is recorded in
+    `consent_records` under its own policy version.
+  - Go-live display names and avatars are joined at read time, never stored.
+- **Transparency:**
+  - The deficit note states only the ledger figures. It says who covers the gap only through the
+    treasurer's own note, and never what creators' 90% does (open question 4 stays open).
+  - "How we count" says the creator's own player still counts, because leaving the owner out has
+    not shipped (wave 5).
+  - The month-note audit row stores the note's length, never its text.
+- **Settings:**
+  - The avatar reuses the channel upload, since every account has a channel.
+  - The deletion preview shows a legal hold only for litigation holds, never for holds that could
+    tip someone off.
+  - The autoplay-previews switch is gone until a preview player reads it.
+  - `features.payouts` is on for both adapters.
+  - Get paid applies after the first stream, never blocks `complete`, and can be closed with
+    "Not now" or "I've contacted the treasurer".
+- **Staff:**
+  - Only open cases can be claimed. Nobody claims a case about themselves, and a moderator cannot
+    take over another's claim.
+  - Bulk actions are dismissals and assignment only, one audit row each.
+  - An email reveal is audited with the admin's reason and no address in the details.
+  - The audit CSV defuses formula cells.
+- **Moderation:** `chat.bans.bulk` only times people out, never bans, and skips the owner, staff and
+  moderators. `report_outcome` is sent once per report (the first decision wins), never to the
+  reported account. `moderator_added` is not sent again for a role already held.
+
+What was left, and where it went:
+
+- **To the maintainer (browser checks, never run):**
+  - `/settings/security`: set up two-step with a real authenticator app, sign in with a code, add a
+    passkey, and use "Sign out everywhere else";
+  - the settings shell at 1024 px (side nav) and 375 px (select), the deletion banner, and the
+    three-step delete dialog;
+  - the notifications grid stacked at 320 px, and `/inbox` filters;
+  - the admin queue layout's keyboard shortcuts (j/k, Enter, e, ?) and the list-only view below
+    1024 px;
+  - the PWA install offer after a second visit with 3 minutes watched, the offline page, and the
+    iOS Add to Home Screen hint;
+  - the transparency v2 bars and table fallbacks, and the council grid's Show all;
+  - the visual check of the security and notifications page headers, and of the portability grants
+    section after it moved from a Card to a SettingsSection.
+- **To wave 5:**
+  - Nothing sends the new-sign-in email. d7-security removed an over-eager sender: it needs a
+    `session.create.after` hook that skips already-authenticated requests, and an int test.
+  - Moving the per-channel go-live overrides from `/settings/notifications` to `/following`.
+  - A governance mailer (vote opened, result published), then offering governance email.
+  - Server-side date filters for `safety.auditLog`, and `AdminQueueCount.nextDueAt`.
+  - The studio mod view on `QueueLayout`; `components/coop/admin.tsx` on the admin width rule after
+    a visual check.
+  - `docs/testing/b8-selectors.md`: document `/admin/appeals?case=` and the `appealq-*` ids.
+  - Small optional contract tidy-ups the units asked for: `PREFERENCE_MEDIA.payout` without
+    `in_app` (it is always on), `NOTIFY_JOBS` entries for the digest and video-ready sweeps,
+    `Bootstrap.instance.payouts`, and rendering the PWA screenshot SVGs to PNG at build.
+  - A `beforeinstallprompt` fired before the shell bundle runs is still missed (it would need an
+    inline script).
+
+The plan as written:
+
 - **D6, the co-op:**
   - from wave 2: a test for `apiSupportClient.memberRule` (the support dialog's member line) against the API;
   - transparency v2, with a "How we count" section for verified viewers (from wave 3: the watch
@@ -704,6 +799,9 @@ The plan as written:
 - how treasurers reach deleted members to refund bank-transfer shares;
 - from wave 3: the subscribers-only chat reason before typing (J3-d), `LoyaltyBalance.earnedToday`,
   `stream.lastBroadcast` for exact recap counts, and the J2-e first-connection share prompt;
+- from wave 4: the new-sign-in email sender, the per-channel go-live overrides on `/following`, a
+  governance mailer, audit-log date filters and `nextDueAt`, the studio mod view on `QueueLayout`,
+  the b8 selectors doc, and the small contract tidy-ups (the wave 4 "To wave 5" list);
 - the interest list and points redemption stay parked until their triggers (decisions 3 and 4);
 - from wave 2: Go 1.27.4 for GO-2026-6859 on or after 2026-11-17, for the toolchain, the golang image
   pins and CI's `GO_VERSION`; then remove the dated exception in `supply-chain.json`.
