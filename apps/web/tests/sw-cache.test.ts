@@ -8,7 +8,9 @@ import {
   type RouterRule,
   SHELL_PREFIXES,
   addNetworkRoutes,
+  UNCONTROLLED_PREFIXES,
   cacheName,
+  isWatchedNavigation,
   networkRouterRules,
   shouldServeFromCache,
   staleCaches,
@@ -90,13 +92,24 @@ describe("cache names", () => {
 });
 
 describe("static routing rules", () => {
-  it("sends everything outside /assets and /icons to the network", () => {
+  it("sends overlays and embeds, then everything but the shell and page navigations, to the network", () => {
     expect(networkRouterRules()).toEqual([
       {
-        condition: { not: { or: [{ urlPattern: "/assets/*" }, { urlPattern: "/icons/*" }] } },
+        condition: { or: [{ urlPattern: "/overlay/*" }, { urlPattern: "/embed/*" }] },
+        source: "network",
+      },
+      {
+        condition: {
+          not: { or: [{ urlPattern: "/assets/*" }, { urlPattern: "/icons/*" }, { requestMode: "navigate" }] },
+        },
         source: "network",
       },
     ]);
+  });
+
+  it("keeps the overlay and embed pages out of the worker's way before anything else", () => {
+    const [first] = networkRouterRules();
+    expect(first?.condition).toEqual({ or: UNCONTROLLED_PREFIXES.map((p) => ({ urlPattern: `${p}*` })) });
   });
 
   it("covers every path the fetch listener may answer", () => {
@@ -127,5 +140,43 @@ describe("static routing rules", () => {
         },
       }),
     ).toBe(false);
+  });
+});
+
+describe("isWatchedNavigation (the offline page)", () => {
+  const nav = (url: string, extra: Partial<{ method: string; mode: string }> = {}) => ({
+    method: "GET",
+    mode: "navigate",
+    url,
+    ...extra,
+  });
+
+  it.each(["/", "/somebody", "/directory", "/following?tab=live", "/settings/privacy"])(
+    "watches a navigation to %s",
+    (path) => {
+      expect(isWatchedNavigation(nav(`${ORIGIN}${path}`), ORIGIN)).toBe(true);
+    },
+  );
+
+  it.each([
+    ["an overlay", "/overlay/chat?token=x"],
+    ["an embed", "/embed/somebody"],
+  ])("never answers %s, which runs inside other software", (_label, path) => {
+    expect(isWatchedNavigation(nav(`${ORIGIN}${path}`), ORIGIN)).toBe(false);
+  });
+
+  it.each(["cors", "no-cors", "same-origin"])("ignores a %s request (only page navigations)", (mode) => {
+    expect(isWatchedNavigation(nav(`${ORIGIN}/`, { mode }), ORIGIN)).toBe(false);
+  });
+
+  it("ignores a form POST navigation, another origin and a malformed URL", () => {
+    expect(isWatchedNavigation(nav(`${ORIGIN}/signin`, { method: "POST" }), ORIGIN)).toBe(false);
+    expect(isWatchedNavigation(nav("https://elsewhere.example/"), ORIGIN)).toBe(false);
+    expect(isWatchedNavigation(nav("not a url"), ORIGIN)).toBe(false);
+  });
+
+  it("does not change what the shell cache serves: documents are still never cached", () => {
+    expect(shouldServeFromCache(get(`${ORIGIN}/`), ORIGIN, PRECACHE)).toBe(false);
+    expect(shouldServeFromCache(get(`${ORIGIN}/offline`), ORIGIN, PRECACHE)).toBe(false);
   });
 });

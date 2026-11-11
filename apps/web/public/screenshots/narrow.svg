@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 750 1334" width="750" height="1334">
+  <!-- SPDX-FileCopyrightText: 2026 CommonAir contributors -->
+  <!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
+  <!-- Self-made art for the manifest's narrow screenshot: the home page on a phone, drawn from the design tokens (zinc base, marigold brand, live red). No text, so it needs no translation. -->
+  <defs>
+    <linearGradient id="t1" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1d4ed8"/>
+      <stop offset="1" stop-color="#a78bfa"/>
+    </linearGradient>
+    <linearGradient id="t2" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#15803d"/>
+      <stop offset="1" stop-color="#fde047"/>
+    </linearGradient>
+    <linearGradient id="t3" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#f472b6"/>
+      <stop offset="1" stop-color="#818cf8"/>
+    </linearGradient>
+  </defs>
+  <rect width="750" height="1334" fill="#09090b"/>
+  <!-- Header: the mark, search, account -->
+  <rect width="750" height="112" fill="#0f0f12"/>
+  <g transform="translate(32 28) scale(0.109)">
+    <rect width="512" height="512" fill="#09090b"/>
+    <circle cx="256" cy="256" r="44" fill="#fafafa"/>
+    <g fill="none" stroke="#fafafa" stroke-width="36" stroke-linecap="round">
+      <path d="M185.3 185.3A100 100 0 0 0 185.3 326.7"/>
+      <path d="M326.7 185.3A100 100 0 0 1 326.7 326.7"/>
+      <path d="M135.8 135.8A170 170 0 0 0 135.8 376.2"/>
+      <path d="M376.2 135.8A170 170 0 0 1 376.2 376.2"/>
+    </g>
+  </g>
+  <rect x="112" y="32" width="510" height="48" fill="#18181b" stroke="#27272a" stroke-width="2"/>
+  <rect x="132" y="50" width="160" height="12" fill="#3f3f46"/>
+  <circle cx="686" cy="56" r="26" fill="#27272a"/>
+  <!-- Section heading -->
+  <circle cx="44" cy="164" r="8" fill="#dc2626"/>
+  <rect x="64" y="154" width="180" height="20" fill="#fafafa"/>
+  <!-- Stream card 1 -->
+  <rect x="32" y="200" width="686" height="386" fill="url(#t1)"/>
+  <circle cx="560" cy="330" r="130" fill="#fafafa" fill-opacity="0.08"/>
+  <circle cx="200" cy="470" r="90" fill="#09090b" fill-opacity="0.18"/>
+  <rect x="52" y="220" width="84" height="34" fill="#dc2626"/>
+  <rect x="66" y="232" width="56" height="10" fill="#ffffff"/>
+  <rect x="598" y="542" width="104" height="30" fill="#000000" fill-opacity="0.75"/>
+  <circle cx="64" cy="644" r="32" fill="#f7bd36"/>
+  <rect x="112" y="618" width="420" height="22" fill="#fafafa"/>
+  <rect x="112" y="652" width="260" height="16" fill="#aaaab4"/>
+  <rect x="112" y="680" width="120" height="30" fill="#27272a"/>
+  <!-- Stream card 2 -->
+  <rect x="32" y="744" width="686" height="386" fill="url(#t2)"/>
+  <path d="M32 1010 L250 860 L420 980 L560 900 L718 1000 L718 1130 L32 1130 Z" fill="#09090b" fill-opacity="0.22"/>
+  <rect x="52" y="764" width="84" height="34" fill="#dc2626"/>
+  <rect x="66" y="776" width="56" height="10" fill="#ffffff"/>
+  <rect x="598" y="1086" width="104" height="30" fill="#000000" fill-opacity="0.75"/>
+  <circle cx="64" cy="1188" r="32" fill="url(#t3)"/>
+  <rect x="112" y="1162" width="360" height="22" fill="#fafafa"/>
+  <rect x="112" y="1196" width="220" height="16" fill="#aaaab4"/>
+  <!-- Bottom tab bar: Home (current), Browse, Following, You -->
+  <rect y="1222" width="750" height="112" fill="#0f0f12"/>
+  <rect y="1222" width="750" height="2" fill="#27272a"/>
+  <rect x="68" y="1250" width="52" height="44" fill="#fafafa"/>
+  <rect x="254" y="1250" width="52" height="44" fill="#52525b"/>
+  <rect x="444" y="1250" width="52" height="44" fill="#52525b"/>
+  <circle cx="656" cy="1272" r="22" fill="#52525b"/>
+</svg>

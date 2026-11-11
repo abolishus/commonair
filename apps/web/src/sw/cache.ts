@@ -3,7 +3,9 @@
 
 /**
  * The app-shell cache (ADR 0028 decision 7): only the build's own static files, never media, API
- * answers, documents or anything that depends on who is signed in. Pure, so it is unit-tested.
+ * answers, documents or anything that depends on who is signed in. The offline page is built by
+ * the worker when a navigation fails (`offline.ts`), so it is never cached either. Pure, so it is
+ * unit-tested.
  */
 
 /** Every shell cache is named `commonair-shell-<version>`; nothing else in Cache Storage is ours. */
@@ -41,25 +43,61 @@ export function shouldServeFromCache(
 /** The shell's path prefixes: the only requests the fetch listener may answer. */
 export const SHELL_PREFIXES = ["/assets/", "/icons/"] as const;
 
-/** One Static Routing API rule (`InstallEvent.addRoutes`), as far as it is used here. */
+/** Pages that run inside other software and sites (OBS, embeds): never answered by the worker. */
+export const UNCONTROLLED_PREFIXES = ["/overlay/", "/embed/"] as const;
+
+/** A Static Routing API condition, as far as it is used here. */
+export type RouterCondition =
+  | { urlPattern: string }
+  | { requestMode: "navigate" }
+  | { or: RouterCondition[] }
+  | { not: RouterCondition };
+
+/** One Static Routing API rule (`InstallEvent.addRoutes`); the first rule that matches wins. */
 export interface RouterRule {
-  condition: { not: { or: { urlPattern: string }[] } };
+  condition: RouterCondition;
   source: "network";
 }
 
 /**
- * The Static Routing API rules: every request outside the shell goes straight to the network
- * without starting the worker or dispatching `fetch` (documents, `/api`, `/rpc`, each LL-HLS
- * playlist and part under `/hls`). Browsers without the API fall back to the listener, which
- * declines the same requests.
+ * The Static Routing API rules: overlay and embed pages, and every request that is neither the
+ * shell nor a page navigation, go straight to the network without starting the worker or
+ * dispatching `fetch` (`/api`, `/rpc`, each LL-HLS playlist and part under `/hls`, media).
+ * Navigations reach the listener only so a failed one can show the offline page (README D7.6);
+ * navigation preload starts their network request while the worker boots. Browsers without the
+ * API fall back to the listener, which declines the same requests.
  */
 export function networkRouterRules(): RouterRule[] {
   return [
     {
-      condition: { not: { or: SHELL_PREFIXES.map((prefix) => ({ urlPattern: `${prefix}*` })) } },
+      condition: { or: UNCONTROLLED_PREFIXES.map((prefix) => ({ urlPattern: `${prefix}*` })) },
+      source: "network",
+    },
+    {
+      condition: {
+        not: {
+          or: [...SHELL_PREFIXES.map((prefix) => ({ urlPattern: `${prefix}*` })), { requestMode: "navigate" as const }],
+        },
+      },
       source: "network",
     },
   ];
+}
+
+/**
+ * Whether a request is a page navigation the worker watches for failure (to answer with the
+ * offline page): a same-origin `GET` navigation, outside the overlay and embed pages. Its answer
+ * is the network's, untouched and never cached.
+ */
+export function isWatchedNavigation(request: { method: string; mode: string; url: string }, origin: string): boolean {
+  if (request.method !== "GET" || request.mode !== "navigate") return false;
+  let url: URL;
+  try {
+    url = new URL(request.url);
+  } catch {
+    return false;
+  }
+  return url.origin === origin && !UNCONTROLLED_PREFIXES.some((prefix) => url.pathname.startsWith(prefix));
 }
 
 /** Register the rules where the browser has the API; never fails the install. */
