@@ -10,6 +10,7 @@
 import { inArray, sql } from "drizzle-orm";
 import type { z } from "zod";
 import type { dto } from "@commonair/contracts";
+import { SCHEDULE_FEED_PATH } from "@commonair/contracts/enums";
 import { schema, uuidv7, type Executor } from "@commonair/db";
 import { badRequest, pgCode } from "../lib/errors.ts";
 import { expandSchedule, isSlotOccurrence, type OneOffRule, type Occurrence, type SlotRule } from "./expand.ts";
@@ -21,7 +22,7 @@ export type ChannelScheduleDto = z.infer<typeof dto.ChannelSchedule>;
 export type ChannelScheduleInput = z.infer<typeof dto.ChannelScheduleInput>;
 
 /** The subscribable feed (`raw-routes.ts` matches it); `?next=1` is the next stream alone. */
-export const scheduleFeedPath = (slug: string) => `/api/channels/${slug}/schedule.ics`;
+export const scheduleFeedPath = SCHEDULE_FEED_PATH;
 
 export interface LoadedSchedule {
   timezone: string;

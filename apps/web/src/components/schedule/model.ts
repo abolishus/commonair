@@ -10,7 +10,7 @@
  * typed in the browser's own time zone (`<input type="datetime-local">`), so no zone arithmetic
  * runs here.
  */
-import { SCHEDULE_RULES } from "@commonair/contracts/enums";
+import { SCHEDULE_FEED_PATH, SCHEDULE_RULES } from "@commonair/contracts/enums";
 import type * as D from "@commonair/contracts/dto";
 import type { z } from "zod";
 import type { MessageKey } from "../../i18n/index.ts";
@@ -22,7 +22,7 @@ export type ScheduleOccurrence = ChannelSchedule["upcoming"][number];
 // ── Calendar links ─────────────────────────────────────────────────────────────────────────────
 
 /** The first-party feed (`ChannelSchedule.feedPath`); the channel page knows it without a request. */
-export const scheduleFeedPath = (slug: string) => `/api/channels/${slug}/schedule.ics`;
+export const scheduleFeedPath = SCHEDULE_FEED_PATH;
 /** "Add to calendar": the next stream alone, as a download. */
 export const nextStreamIcsPath = (slug: string) => `${scheduleFeedPath(slug)}?next=1`;
 

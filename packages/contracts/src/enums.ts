@@ -993,6 +993,13 @@ export const SCHEDULE_RULES = {
 } as const;
 
 /**
+ * The channel's subscribable calendar feed (`ChannelSchedule.feedPath`, a raw API route); `?next=1`
+ * answers the next stream alone. One definition for the API and the web, which links it without a
+ * request.
+ */
+export const SCHEDULE_FEED_PATH = (slug: string): string => `/api/channels/${slug}/schedule.ics`;
+
+/**
  * Nightly server-side funnel counts (`growth_daily.metric`), from existing rows only. Viewer
  * funnel then creator funnel (growth-funnels.md P7 A).
  */
