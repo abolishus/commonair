@@ -56,3 +56,10 @@ export {
   type SetupChecklistLabels,
   type SetupStepState,
 } from "./setup-checklist.tsx";
+export {
+  LiveStatusBar,
+  type LiveStatusBarProps,
+  type LiveStatusBarLabels,
+  type LiveStatusState,
+  type LiveStatusHealth,
+} from "./live-status-bar.tsx";

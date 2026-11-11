@@ -635,3 +635,23 @@ export const D5_DASHBOARD_IDS = {
   streamRecapMember: "stream-recap-member",
   streamPreviewToggle: "stream-preview-toggle",
 } as const;
+
+/**
+ * d5-shell (overhaul wave 3, D5.2 and D5.8, J5-a): the sticky LiveStatusBar on every studio page
+ * (`data-state` offline, starting or live on `studioStatusBar`), the studio nav's new items and the
+ * account menu's "Creator studio" and "Mod view". A moderated channel's nav link is
+ * `${D5_SHELL_MODERATED_LINK_PREFIX}<slug>`, one per channel. Kept out of `TEST_IDS`.
+ */
+export const D5_SHELL_IDS = {
+  studioStatusBar: "studio-status-bar",
+  studioStatusManager: "studio-status-manager",
+  studioStatusChannel: "studio-status-channel",
+  studioStatusError: "studio-status-error",
+  studioStatusRetry: "studio-status-retry",
+  studioAudienceLink: "studio-audience-link",
+  studioModViewLink: "studio-mod-view-link",
+  accountStudioLink: "account-studio-link",
+  accountModViewLink: "account-mod-view-link",
+} as const;
+
+export const D5_SHELL_MODERATED_LINK_PREFIX = "studio-moderated-link-";

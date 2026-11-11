@@ -17,6 +17,7 @@ export interface AccountEntry {
   id:
     | "channel"
     | "studio"
+    | "modView"
     | "following"
     | "settings"
     | "coop"
@@ -29,6 +30,7 @@ export interface AccountEntry {
   to?:
     | "/$channel"
     | "/dashboard"
+    | "/mod/$channel"
     | "/following"
     | "/settings"
     | "/coop/membership"
@@ -36,7 +38,7 @@ export interface AccountEntry {
     | "/admin/moderation"
     | "/admin/legal"
     | "/admin/coop";
-  /** `channel` only: the member's own channel. */
+  /** `channel`: the member's own channel; `modView`: the first channel they moderate. */
   params?: { channel: string };
   separatorBefore?: boolean;
   destructive?: boolean;
@@ -69,6 +71,8 @@ export interface StudioEntry {
     | "streamManager"
     | "streamSettings"
     | "modView"
+    | "moderated"
+    | "audience"
     | "rehearse"
     | "overlays"
     | "interact"
@@ -101,13 +105,18 @@ export interface StudioEntry {
     | "/move"
     | "/import"
     | "/developer";
-  /** `modView` only: the channel the mod view opens (the member's own). */
+  /** `modView` and `moderated`: the channel the mod view opens (the member's own, or one they moderate). */
   params?: { channel: string };
+  /** `moderated` only: the channel's display name, for the label. */
+  label?: string;
   current: boolean;
 }
 
-/** The studio sidebar's groups (F22), in order. */
-export type StudioGroupId = "stream" | "community" | "content" | "money" | "tools";
+/**
+ * The studio sidebar's groups (overhaul D5.8, creator-studio.md P8), in order. `moderates` is the
+ * "Channels you moderate" group (ux-journeys J5-a), only for a member who holds a role elsewhere.
+ */
+export type StudioGroupId = "home" | "setup" | "community" | "moderates" | "content" | "money" | "grow" | "coopTools";
 
 export interface StudioGroup {
   id: StudioGroupId;
@@ -194,6 +203,8 @@ export interface AccountMenuOptions {
   legal?: boolean;
   /** Admins also get co-op administration (`/admin/coop`). */
   admin?: boolean;
+  /** `me.moderates` slugs, live first; any (but the own channel) adds "Mod view". */
+  moderates?: readonly string[];
 }
 
 export interface AdminEntry {
@@ -275,11 +286,14 @@ export function accountMenu(
     ];
     // The decisions log's order: Your channel, Creator studio, Following, Settings (one entry; its
     // pages have their own nav), Co-op membership, staff tools, then (the menu adds the theme)
-    // Sign out after a separator. Relays moved into the studio.
+    // Sign out after a separator. Relays moved into the studio. "Mod view" follows the studio for
+    // a member who moderates elsewhere (ux-journeys J5-a), opening the first (live-first) channel.
     const channel = options.channel ? options.channel : null;
+    const modded = options.moderates?.find((slug) => slug !== channel);
     return [
       ...(channel ? [{ id: "channel", to: "/$channel", params: { channel } } as const] : []),
       { id: "studio", to: "/dashboard" },
+      ...(modded ? [{ id: "modView", to: "/mod/$channel", params: { channel: modded } } as const] : []),
       { id: "following", to: "/following" },
       { id: "settings", to: "/settings" },
       { id: "coop", to: "/coop/membership" },
@@ -322,15 +336,36 @@ export function studioNav(pathname: string, options: StudioNavOptions = {}): Stu
   ];
 }
 
+/** A channel the member moderates or edits (`me.moderates`), as the nav needs it. */
+export interface ModeratedNavChannel {
+  slug: string;
+  displayName: string;
+}
+
 export interface StudioNavGroupOptions extends StudioNavOptions {
   /** The member's own channel slug, for the mod view link (`/mod/<channel>`). */
   channel: string;
+  /** `me.moderates`, in its order (live first); each gets a mod view link. The own channel is dropped. */
+  moderates?: readonly ModeratedNavChannel[];
+}
+
+/** `/mod/<slug>` exactly (not `/mod` or `/mod/<slug>/more`), as the slug. */
+function modViewSlug(path: string): string | null {
+  const parts = path.split("/");
+  return parts.length === 3 && parts[1] === "mod" && parts[2] ? parts[2] : null;
 }
 
 /**
- * The studio sidebar grouped (F22): Stream, Community, Content, Money and Tools. The stream
- * manager is current only on `/dashboard` itself (its settings page has its own entry); the mod
- * view is current on any `/mod/<channel>`.
+ * The studio sidebar grouped (overhaul D5.8, creator-studio.md P8): Home (stream manager), Set up
+ * (stream settings, alerts and overlays, rehearsal, captions), Community (mod view, chat safety,
+ * bot, polls and raids), Channels you moderate (a mod view link each, J5-a), Content (videos and
+ * clips), Money (revenue, crew), Grow (bring your audience, analytics, move, import) and Co-op &
+ * tools (relays, developer). The stream manager is current only on `/dashboard` itself. "Bring
+ * your audience" opens `/move` (move and follow links), the one page that always holds the
+ * audience tools: the dashboard checklist shows that step only before the first stream, while
+ * offline and for some sign-ups, so an anchor there would often land nowhere. "Move channel"
+ * stays the entry marked current on `/move`. A moderated channel's link is current on
+ * its `/mod/<channel>`; any other `/mod/<x>` marks the own mod view current.
  */
 export function studioNavGroups(pathname: string, options: StudioNavGroupOptions): StudioGroup[] {
   const path = normalize(pathname);
@@ -345,19 +380,34 @@ export function studioNavGroups(pathname: string, options: StudioNavGroupOptions
     to: "/dashboard/settings",
     current: path === "/dashboard/settings",
   };
+  const moderated = (options.moderates ?? []).filter((m) => m.slug !== options.channel);
+  const modSlug = modViewSlug(path);
+  const onModerated = modSlug !== null && moderated.some((m) => m.slug === modSlug);
   const modView: StudioEntry = {
     id: "modView",
     to: "/mod/$channel",
     params: { channel: options.channel },
-    current: path.startsWith("/mod/") && path.split("/").length === 3,
+    current: modSlug !== null && !onModerated,
   };
-  const [manager, ...stream] = pick("streamManager", "rehearse", "overlays", "captions", "relays");
+  const audience: StudioEntry = { id: "audience", to: "/move", current: false };
   const groups: StudioGroup[] = [
-    { id: "stream", items: [...(manager ? [manager, streamSettings] : [streamSettings]), ...stream] },
-    { id: "community", items: [...pick("chat", "bot", "interact"), modView] },
-    { id: "content", items: pick("content", "analytics") },
+    { id: "home", items: pick("streamManager") },
+    { id: "setup", items: [streamSettings, ...pick("overlays", "rehearse", "captions")] },
+    { id: "community", items: [modView, ...pick("chat", "bot", "interact")] },
+    {
+      id: "moderates",
+      items: moderated.map((m) => ({
+        id: "moderated",
+        to: "/mod/$channel",
+        params: { channel: m.slug },
+        label: m.displayName,
+        current: modSlug === m.slug,
+      })),
+    },
+    { id: "content", items: pick("content") },
     { id: "money", items: pick("revenue", "crew") },
-    { id: "tools", items: pick("move", "import", "developer") },
+    { id: "grow", items: [audience, ...pick("analytics", "move", "import")] },
+    { id: "coopTools", items: pick("relays", "developer") },
   ];
   return groups.filter((group) => group.items.length > 0);
 }

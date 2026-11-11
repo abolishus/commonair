@@ -73,6 +73,22 @@ describe("account menu", () => {
       expect(ids).not.toContain(gone);
   });
 
+  it("adds Mod view after Creator studio when the member moderates elsewhere (J5-a)", () => {
+    for (const moderates of [undefined, [], ["rivertide"]])
+      expect(accountMenu(true, { channel: "rivertide", moderates }).some((i) => i.id === "modView")).toBe(false);
+    const items = accountMenu(true, { channel: "rivertide", moderates: ["rivertide", "birch", "cedar"] });
+    expect(items.map((i) => i.id)).toEqual([
+      "channel",
+      "studio",
+      "modView",
+      "following",
+      "settings",
+      "coop",
+      "signOut",
+    ]);
+    expect(items[2]).toEqual({ id: "modView", to: "/mod/$channel", params: { channel: "birch" } });
+  });
+
   it("adds co-op administration for admins only, before sign out", () => {
     expect(accountMenu(true, { admin: false }).some((i) => i.id === "adminCoop")).toBe(false);
     expect(accountMenu(true).some((i) => i.id === "adminCoop")).toBe(false);
