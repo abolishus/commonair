@@ -183,8 +183,16 @@ export class Platform {
     return c.live?.viewerCount ?? null;
   }
 
-  /** Open a mix of browser and HTTP viewers on a channel; all are started, none awaited for frames. */
-  async openViewers(channel: string, mix: ViewerMix): Promise<Viewer[]> {
+  /**
+   * Open a mix of browser and HTTP viewers on a channel; all are started, none awaited for frames.
+   * `httpOptions` passes `HttpViewerOptions.heartbeats` and `fetchSegments` to the HTTP viewers
+   * (`load-cost` splits segment serving from playback API calls with them).
+   */
+  async openViewers(
+    channel: string,
+    mix: ViewerMix,
+    httpOptions: { heartbeats?: boolean; fetchSegments?: boolean } = {},
+  ): Promise<Viewer[]> {
     const viewers: Viewer[] = [];
     const player = this.env.HARNESS_PLAYER;
     for (const engine of ["chromium", "webkit"] as const satisfies BrowserEngine[]) {
@@ -219,6 +227,8 @@ export class Platform {
           api: this.api().client,
           decodeStripEvery: mix.httpStripEvery ?? 0,
           ...(mix.timing ? { timing: mix.timing } : {}),
+          ...(httpOptions.heartbeats === undefined ? {} : { heartbeats: httpOptions.heartbeats }),
+          ...(httpOptions.fetchSegments === undefined ? {} : { fetchSegments: httpOptions.fetchSegments }),
           log: this.log,
         }),
     );

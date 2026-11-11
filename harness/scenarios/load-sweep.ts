@@ -23,18 +23,17 @@ import {
   type LoadTopology,
   type StreamerFleet,
   busiestTxP95,
+  countLadders,
   loadTopology,
   recordHostMetrics,
   runAudience,
   startStreamers,
 } from "../src/load.ts";
 import { mbpsToBytesPerSecond } from "../src/env.ts";
-import { mapLimit } from "../src/load/async.ts";
 import { LOCAL_HOST } from "../src/load/processes.ts";
 import {
   type SweepRow,
   describeSource,
-  hasLadder,
   parseSweepParams,
   stepShape,
   stopsSweep,
@@ -42,29 +41,7 @@ import {
   sweepInconclusiveReasons,
   sweepRow,
 } from "../src/load/sweep.ts";
-import { type ScenarioContext, defineScenario } from "../src/scenario.ts";
-
-/** Streams with a transcode ladder right now, from `playback.start`'s renditions. */
-async function countLadders(ctx: ScenarioContext, channels: readonly string[]): Promise<number | null> {
-  const api = ctx.platform.api().client;
-  const results = await mapLimit(channels, 4, async (channel) => {
-    try {
-      const s = await api.playback.start({
-        channel,
-        deviceId: crypto.randomUUID(),
-        p2pCapable: false,
-        nativeHls: false,
-        embed: false,
-      });
-      await api.playback.end({ sessionId: s.sessionId, token: s.token }).catch(() => undefined);
-      return hasLadder(s.renditions);
-    } catch {
-      return null;
-    }
-  });
-  const known = results.filter((r): r is boolean => r !== null);
-  return known.length === 0 ? null : known.filter(Boolean).length;
-}
+import { defineScenario } from "../src/scenario.ts";
 
 /** Highest CPU p95 over every generator host that was measured. */
 function generatorCpuP95(r: LoadResult): number | null {

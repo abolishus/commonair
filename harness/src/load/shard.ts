@@ -55,6 +55,8 @@ export interface WorkerSpec {
   runId: string;
   /** The child stops on its own after this long, even without a signal. */
   maxMs: number;
+  /** The HTTP viewers' knobs (`load-cost`'s `heartbeats` / `fetchSegments`); absent = defaults. */
+  http?: { heartbeats?: boolean; fetchSegments?: boolean };
 }
 
 /** stdout lines of the child protocol start with this; everything else is ignored. */

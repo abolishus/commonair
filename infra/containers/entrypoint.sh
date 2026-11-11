@@ -17,6 +17,18 @@ case "${SERVICE:?SERVICE is not set}" in
     exec bun run start "$@"
     ;;
   *)
+    # Test instances only (docs/operators/capacity.md, "CPU profiles"): a quadlet drop-in sets
+    # COMMONAIR_CPU_PROFILE to a mounted directory, and Bun writes a CPU profile there when the
+    # service exits on SIGTERM. selfhost's render-env.sh never copies it from commonair.env.
+    # Unset or empty, the command is exactly the one at the end.
+    if [ -n "${COMMONAIR_CPU_PROFILE:-}" ]; then
+      if [ ! -d "$COMMONAIR_CPU_PROFILE" ] || [ ! -w "$COMMONAIR_CPU_PROFILE" ]; then
+        echo "COMMONAIR_CPU_PROFILE=$COMMONAIR_CPU_PROFILE is not a writable directory" >&2
+        exit 64
+      fi
+      echo "CPU profiler on for $SERVICE: profiles go to $COMMONAIR_CPU_PROFILE on exit (test instances only)" >&2
+      exec bun --cpu-prof --cpu-prof-md --cpu-prof-dir="$COMMONAIR_CPU_PROFILE" "services/${SERVICE}/src/main.ts" "$@"
+    fi
     exec bun "services/${SERVICE}/src/main.ts" "$@"
     ;;
 esac

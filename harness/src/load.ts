@@ -36,6 +36,7 @@ import {
 import { type LoadReport, buildLoadReport, loadVerdict } from "./load/report.ts";
 import { type ShardSpec, type WorkerSpec, shardCount, shardTotal, splitShards } from "./load/shard.ts";
 import { type CommandRunner, remotePodmanStats, remoteSnapshot, sshRunner } from "./load/ssh.ts";
+import { hasLadder } from "./load/sweep.ts";
 import {
   type ContainerCpuSample,
   ORIGIN_EGRESS_QUERY,
@@ -198,6 +199,8 @@ export interface LoadResult {
    * the first sign that a run measures the rate limiter rather than capacity (capacity.md).
    */
   heartbeatErrors: number;
+  /** Viewers that got a playback session (with `fetchSegments: false` none plays a segment). */
+  sessions: number;
 }
 
 /** Generous: a child opens its viewers with a staggered start (~50 ms each). */
@@ -276,6 +279,12 @@ export interface AudienceOptions {
   beforeStop?: () => Promise<void>;
   /** Generator thresholds for the inconclusive judgment (remote target only). */
   generatorThresholds?: GeneratorThresholds;
+  /** The HTTP viewers' `heartbeats` / `fetchSegments` (`load-cost`); absent = the defaults (both on). */
+  http?: { heartbeats?: boolean; fetchSegments?: boolean };
+  /** Called once the audience is open, as the hold starts (`load-cost` times its window from here). */
+  onHoldStart?: () => void;
+  /** Ends the hold early once it settles; `durationMs` stays the longest hold. */
+  until?: Promise<unknown>;
 }
 
 /** Open an audience on the fleet's channels, hold, collect, measure. Streams stay up. */
@@ -323,7 +332,7 @@ export async function runAudience(
     // Children first: they open their audience while this process opens the browsers.
     const maxMs = opts.durationMs + 30 * 60_000;
     shardSpecs.forEach((spec, i) => {
-      const worker: WorkerSpec = { shard: spec, runId: ctx.runId, maxMs };
+      const worker: WorkerSpec = { shard: spec, runId: ctx.runId, maxMs, ...(opts.http ? { http: opts.http } : {}) };
       const child = startShard(shardHosts[i] ?? LOCAL_HOST, worker, remote);
       children.push(child);
       ctx.defer(() => child.kill());
@@ -331,12 +340,16 @@ export async function runAudience(
     for (const a of allocation) {
       const channel = channels[a.channelIndex] as string;
       opened.push(
-        ...(await p.openViewers(channel, {
-          chromium: a.chromium,
-          webkit: a.webkit,
-          http: shards > 0 ? 0 : a.http,
-          perPage: 5,
-        })),
+        ...(await p.openViewers(
+          channel,
+          {
+            chromium: a.chromium,
+            webkit: a.webkit,
+            http: shards > 0 ? 0 : a.http,
+            perPage: 5,
+          },
+          opts.http ?? {},
+        )),
       );
     }
     for (const v of opened) ctx.defer(() => v.stop());
@@ -360,10 +373,18 @@ export async function runAudience(
   }
 
   const windowStarted = Date.now();
+  let settled = false;
+  const until = opts.until?.then(
+    () => void (settled = true),
+    () => void (settled = true),
+  );
+  opts.onHoldStart?.();
   await ctx.step(`${prefix}hold for ${Math.round(opts.durationMs / 1000)} s`, async () => {
     const deadline = windowStarted + opts.durationMs;
-    while (Date.now() < deadline && !ctx.signal.aborted) {
-      await Bun.sleep(Math.min(10_000, Math.max(0, deadline - Date.now())));
+    while (Date.now() < deadline && !ctx.signal.aborted && !settled) {
+      const nap = Bun.sleep(Math.min(10_000, Math.max(0, deadline - Date.now())));
+      await (until ? Promise.race([nap, until]) : nap);
+      if (settled) break;
       const agg = aggregateReports(await Promise.all(viewers.map((v) => v.report())));
       ctx.log.info("load progress", {
         started: agg.started,
@@ -424,6 +445,7 @@ export async function runAudience(
     browser,
     http: aggregateReports(reports.filter((r) => r.kind === "http")),
     heartbeatErrors: reports.reduce((n, r) => n + r.heartbeatErrors, 0),
+    sessions: reports.filter((r) => r.sessionId !== null).length,
     egressBySource,
     egressMethod,
     cpu: cpuSummary,
@@ -470,6 +492,34 @@ export async function runLoad(
   );
   recordLoadMetrics(ctx, result);
   return result;
+}
+
+/**
+ * Streams with a transcode ladder right now, from `playback.start`'s renditions (null when no
+ * channel answered). Each check opens and ends one playback session.
+ */
+export async function countLadders(
+  ctx: Pick<ScenarioContext, "platform">,
+  channels: readonly string[],
+): Promise<number | null> {
+  const api = ctx.platform.api().client;
+  const results = await mapLimit(channels, 4, async (channel) => {
+    try {
+      const s = await api.playback.start({
+        channel,
+        deviceId: crypto.randomUUID(),
+        p2pCapable: false,
+        nativeHls: false,
+        embed: false,
+      });
+      await api.playback.end({ sessionId: s.sessionId, token: s.token }).catch(() => undefined);
+      return hasLadder(s.renditions);
+    } catch {
+      return null;
+    }
+  });
+  const known = results.filter((r): r is boolean => r !== null);
+  return known.length === 0 ? null : known.filter(Boolean).length;
 }
 
 /** Egress by delivery source from the viewers' own byte counts (no Prometheus). Pure. */
