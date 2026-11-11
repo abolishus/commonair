@@ -32,6 +32,7 @@ import { planReview, staffActorType } from "../moderation/review.ts";
 import { liftRestrictionInTx } from "../moderation/restriction.ts";
 import { moderationRuntime } from "../moderation/runtime.ts";
 import { caseDecisionRuleRef, caseRuleRefAfter } from "../transparency/rule-ref.ts";
+import { notifyCaseReportersTx } from "./safety.ts";
 
 const { moderationCases, contentLabels, users, channels, evidenceObjects, ncmecReports, legalHolds } = schema;
 const { localHashList, modActions } = schema;
@@ -231,6 +232,9 @@ export const moderation = {
         });
       if (plan.notifyOwner && subjectUser)
         await notifyUser(tx, subjectUser, { kind: "moderation_decision", caseId: c.id, decision: input.decision });
+      // D7 (J5-f): the reports behind the case learn its outcome; an escalation decides nothing yet.
+      if (!plan.escalate)
+        await notifyCaseReportersTx(tx, c, plan.status === "cleared" ? "no_action" : "action_taken", subjectUser, now);
 
       await audit(tx, {
         actorType,
@@ -349,6 +353,7 @@ export const moderation = {
         reason: input.note,
         details: { caseId: c.id, origin: c.origin, listCategory: c.listCategory, hashesAdded: added.length },
       });
+      await notifyCaseReportersTx(tx, c, "action_taken", await caseUserId(tx, c), now);
       await emit(tx, "moderation.case.resolved", c.channelId, {
         case_id: c.id,
         tier: "t0",
@@ -482,6 +487,7 @@ export const moderation = {
           mediaRestored: false,
         },
       });
+      await notifyCaseReportersTx(tx, c, "no_action", await caseUserId(tx, c), now);
       await emit(tx, "moderation.case.resolved", c.channelId, {
         case_id: c.id,
         tier: "t0",
