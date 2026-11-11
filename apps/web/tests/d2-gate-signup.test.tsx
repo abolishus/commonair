@@ -20,19 +20,27 @@ import { resetUiMetricsForTests } from "../src/lib/ui-metrics.ts";
 import { Route as SignInRoute } from "../src/routes/_app/signin.tsx";
 import { Route as SignUpRoute } from "../src/routes/_app/signup.tsx";
 
+// `solves: false` stands for a widget still working on its challenge.
+const altchaWidget = vi.hoisted(() => ({ solves: true }));
 vi.mock("../src/components/altcha-field.tsx", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/components/altcha-field.tsx")>();
   const R = await import("react");
   return {
     ...actual,
     AltchaField: ({ onChange }: { onChange: (v: string | null) => void }) => {
-      R.useEffect(() => onChange("solved"), [onChange]);
+      R.useEffect(() => {
+        if (altchaWidget.solves) onChange("solved");
+      }, [onChange]);
       return null;
     },
   };
 });
 
-const answers = vi.hoisted(() => ({ username: { available: true, reason: null as string | null } }));
+const answers = vi.hoisted(() => ({
+  username: { available: true, reason: null as string | null },
+  usernameCalls: [] as string[],
+  settings: null as { key: string; value: unknown }[] | null,
+}));
 vi.mock("../src/lib/api.ts", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/lib/api.ts")>();
   return {
@@ -40,7 +48,16 @@ vi.mock("../src/lib/api.ts", async (importOriginal) => {
     api: () => ({
       legal: { current: async () => [] },
       users: {
-        usernameAvailable: async ({ username }: { username: string }) => ({ username, ...answers.username }),
+        usernameAvailable: async ({ username }: { username: string }) => {
+          answers.usernameCalls.push(username);
+          return { username, ...answers.username };
+        },
+      },
+      coop: {
+        settings: async () => {
+          if (!answers.settings) throw new Error("down");
+          return answers.settings;
+        },
       },
     }),
   };
@@ -54,6 +71,9 @@ beforeEach(() => {
   resetUiMetricsForTests();
   localStorage.clear();
   answers.username = { available: true, reason: null };
+  answers.usernameCalls = [];
+  answers.settings = null;
+  altchaWidget.solves = true;
   fetchMock = vi.fn<FetchFn>(async () => Response.json({}));
   vi.stubGlobal("fetch", fetchMock);
 });
@@ -170,10 +190,52 @@ describe("intent-aware sign-up", () => {
     expect(done.textContent).toContain("a@example.test");
     expect(done.textContent).toContain("back to rivertide to finish following");
     expect(counted()).toContainEqual({ surface: "signup", action: "submit", step: "follow" });
+    // Start over: the spent proof is dropped, so submit waits for a fresh solve.
+    altchaWidget.solves = false;
     act(() => {
       fireEvent.click(screen.getByTestId("signup-wrong-address"));
     });
     expect(await screen.findByTestId("signup-email")).toBeTruthy();
+    expect((screen.getByTestId("signup-submit") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("join: the share perk states the governed figures, or none when they are unknown", async () => {
+    answers.settings = [
+      {
+        key: "membership.classes",
+        value: { viewer: { shareCents: 2000, shareRefundableOnExit: true, minSubscriptionCents: 700 } },
+      },
+      { key: "payout.rules", value: { currency: "usd" } },
+    ];
+    wrap(<SignUp />, "/signup?intent=join");
+    await waitFor(() =>
+      expect(screen.getByTestId("signup-perks").textContent).toContain(
+        "A $20.00 share, refunded if you leave, or a $7.00+ monthly subscription",
+      ),
+    );
+    cleanup();
+    answers.settings = null;
+    wrap(<SignUp />, "/signup?intent=join");
+    const perks = screen.getByTestId("signup-perks");
+    expect(perks.textContent).toContain("A member share or a monthly subscription");
+    expect(perks.textContent).not.toMatch(/\$/);
+  });
+
+  it("asks once per name: an unchanged blur, or a blur after the prefill, costs no request", async () => {
+    wrap(<SignUp />, "/signup?intent=stream&username=neo_1");
+    const input = screen.getByTestId("signup-username");
+    await waitFor(() => expect(screen.getByTestId("signup-username-check").textContent).toBe("neo_1 is free."));
+    fireEvent.blur(input);
+    fireEvent.blur(input);
+    expect(answers.usernameCalls).toEqual(["neo_1"]);
+    expect(screen.getByTestId("signup-username-check").textContent).toBe("neo_1 is free.");
+    fireEvent.change(input, { target: { value: "neo_2" } });
+    fireEvent.blur(input);
+    await waitFor(() => expect(screen.getByTestId("signup-username-check").textContent).toBe("neo_2 is free."));
+    fireEvent.change(input, { target: { value: "neo_1" } });
+    fireEvent.blur(input);
+    expect(screen.getByTestId("signup-username-check").textContent).toBe("neo_1 is free.");
+    expect(answers.usernameCalls).toEqual(["neo_1", "neo_2"]);
   });
 
   it("a creator intent with no target lands on its own page and keeps no confirm", async () => {
@@ -269,7 +331,23 @@ describe("useUsernameCheck", () => {
     // A failure says nothing.
     act(() => result.current.run("offline_x"));
     await waitFor(() => expect(result.current.check).toEqual({ state: "idle" }));
+    // A settled name is not asked again; a failed one is (it was never answered).
+    const calls = checker.mock.calls.length;
+    act(() => result.current.run("freebie"));
+    expect(result.current.check).toEqual({ state: "free", username: "freebie" });
+    expect(checker.mock.calls.length).toBe(calls);
+    act(() => result.current.run("offline_x"));
+    expect(checker.mock.calls.length).toBe(calls + 1);
+    await waitFor(() => expect(result.current.check).toEqual({ state: "idle" }));
+    // A name still in flight is not asked twice either.
+    answers.pending_x = new Promise(() => {});
+    act(() => result.current.run("pending_x"));
+    act(() => result.current.run("pending_x"));
+    expect(checker.mock.calls.filter(([n]) => n === "pending_x")).toHaveLength(1);
     act(() => result.current.reset());
     expect(result.current.check).toEqual({ state: "idle" });
+    // After a reset the same name is asked again.
+    act(() => result.current.run("freebie"));
+    expect(checker.mock.calls.filter(([n]) => n === "freebie")).toHaveLength(2);
   });
 });

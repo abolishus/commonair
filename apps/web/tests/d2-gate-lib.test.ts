@@ -29,7 +29,7 @@ import {
   readPendingIntent,
   savePendingIntent,
 } from "../src/components/auth-gate/pending-intent.ts";
-import { signupAfterNote, signupPerks, signupTitle } from "../src/components/auth-gate/signup-copy.ts";
+import { joinTermsOf, signupAfterNote, signupPerks, signupTitle } from "../src/components/auth-gate/signup-copy.ts";
 import { t } from "../src/i18n/index.ts";
 import { signUp } from "../src/lib/auth.ts";
 import { authSearch, carriedSearch } from "../src/lib/auth-return.ts";
@@ -136,10 +136,21 @@ describe("pending intent", () => {
       expect(savePendingIntent({ intent: i, target: "/a" }, NOW, memoryStore())).toBe(true);
   });
 
+  it("keeps only intents that have a confirm (Follow), so nothing waits for one that never shows", () => {
+    expect([...CONFIRMABLE_INTENTS]).toEqual(["follow"]);
+    for (const intent of ["chat", "support", "predict", "clip", "watch"] as const) {
+      const store = memoryStore();
+      expect(savePendingIntent({ intent, target: "/rivertide", channel: "rivertide" }, NOW, store), intent).toBe(false);
+      expect(store.map.size).toBe(0);
+      store.map.set(PENDING_INTENT_KEY, JSON.stringify({ intent, path: "/rivertide", at: NOW }));
+      expect(readPendingIntent(NOW, store), intent).toBeNull();
+    }
+  });
+
   it("drops a bad channel but keeps the intent", () => {
     const store = memoryStore();
-    savePendingIntent({ intent: "chat", target: "/a", channel: "Bad Slug" }, NOW, store);
-    expect(readPendingIntent(NOW, store)).toEqual({ intent: "chat", path: "/a", at: NOW });
+    savePendingIntent({ intent: "follow", target: "/a", channel: "Bad Slug" }, NOW, store);
+    expect(readPendingIntent(NOW, store)).toEqual({ intent: "follow", path: "/a", at: NOW });
   });
 
   it("expires after the TTL and clears stale, future or broken values", () => {
@@ -164,18 +175,18 @@ describe("pending intent", () => {
 
   it("parses without touching storage, and matches by intent and path", () => {
     const store = memoryStore();
-    savePendingIntent({ intent: "clip", target: "/a" }, NOW, store);
+    savePendingIntent({ intent: "follow", target: "/a" }, NOW, store);
     const raw = pendingIntentSnapshot(store);
-    expect(parsePendingIntent(raw, NOW)).toEqual({ intent: "clip", path: "/a", at: NOW });
+    expect(parsePendingIntent(raw, NOW)).toEqual({ intent: "follow", path: "/a", at: NOW });
     expect(parsePendingIntent(raw, NOW + PENDING_INTENT_TTL_MS)).toBeNull();
     // Still stored: parsing is pure.
     expect(pendingIntentSnapshot(store)).toBe(raw);
     expect(parsePendingIntent(null)).toBeNull();
     const p = parsePendingIntent(raw, NOW);
-    expect(pendingMatches(p, "clip", "/a")).toBe(true);
-    expect(pendingMatches(p, "clip", "/b")).toBe(false);
+    expect(pendingMatches(p, "follow", "/a")).toBe(true);
+    expect(pendingMatches(p, "follow", "/b")).toBe(false);
     expect(pendingMatches(p, "chat", "/a")).toBe(false);
-    expect(pendingMatches(null, "clip", "/a")).toBe(false);
+    expect(pendingMatches(null, "follow", "/a")).toBe(false);
     expect(pendingIntentSnapshot(memoryStore(true))).toBeNull();
     expect(pendingIntentSnapshot(null)).toBeNull();
   });
@@ -233,14 +244,49 @@ describe("intent-aware sign-up copy", () => {
   });
 
   it("lists what the account gives for the intent", () => {
-    expect(signupPerks(undefined)).toEqual([
+    const keys = (intent: Parameters<typeof signupPerks>[0]) => signupPerks(intent).map((p) => p.key);
+    expect(keys(undefined)).toEqual([
       "d2Gate.signup.perk.follow",
       "d2Gate.signup.perk.chat",
       "d2Gate.signup.perk.vote",
     ]);
-    expect(signupPerks("stream")).toContain("d2Gate.signup.perk.channelAddress");
-    expect(signupPerks("import")).toContain("d2Gate.signup.perk.importReadOnly");
-    expect(signupPerks("join")).toContain("d2Gate.signup.perk.share");
+    expect(keys("stream")).toContain("d2Gate.signup.perk.channelAddress");
+    expect(keys("import")).toContain("d2Gate.signup.perk.importReadOnly");
+    // Join with the terms unknown: a variant with no figure (and no refund promise).
+    expect(keys("join")).toEqual(["d2Gate.signup.perk.vote", "d2Gate.signup.perk.shareNoFigure"]);
+    expect(t("d2Gate.signup.perk.shareNoFigure")).not.toMatch(/\d|refund/);
+  });
+
+  it("the join perk states the governed share and minimum sub, formatted as money", () => {
+    const terms = { shareCents: 1250, minSubCents: 499, refundableOnExit: true, currency: "eur" };
+    const [, share] = signupPerks("join", terms, "en");
+    expect(share?.key).toBe("d2Gate.signup.perk.share");
+    expect(t("d2Gate.signup.perk.share", share?.values)).toBe(
+      "A €12.50 share, refunded if you leave, or a €4.99+ monthly subscription",
+    );
+    const [, kept] = signupPerks("join", { ...terms, refundableOnExit: false }, "en");
+    expect(kept?.key).toBe("d2Gate.signup.perk.shareKept");
+    expect(t("d2Gate.signup.perk.shareKept", kept?.values)).toBe("A €12.50 share or a €4.99+ monthly subscription");
+  });
+
+  it("reads the join terms from membership.classes and payout.rules", () => {
+    const classes = {
+      key: "membership.classes",
+      value: { viewer: { shareCents: 500, shareRefundableOnExit: true, minSubscriptionCents: 300 } },
+    };
+    const payout = { key: "payout.rules", value: { currency: "usd", minimumCents: 1000 } };
+    expect(joinTermsOf([classes, payout])).toEqual({
+      shareCents: 500,
+      minSubCents: 300,
+      refundableOnExit: true,
+      currency: "usd",
+    });
+    expect(joinTermsOf(null)).toBeNull();
+    expect(joinTermsOf([classes])).toBeNull();
+    expect(joinTermsOf([payout])).toBeNull();
+    expect(joinTermsOf([{ key: "membership.classes", value: { viewer: { shareCents: 0 } } }, payout])).toBeNull();
+    const noShare = { ...classes, value: { viewer: { ...classes.value.viewer, shareCents: 0 } } };
+    expect(joinTermsOf([noShare, payout])).toBeNull();
   });
 
   it("says where verification brings them", () => {

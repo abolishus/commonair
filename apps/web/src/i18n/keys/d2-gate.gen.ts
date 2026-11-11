@@ -56,6 +56,8 @@ export type Key =
   | "d2Gate.signup.perk.deleteAnyTime"
   | "d2Gate.signup.perk.importReadOnly"
   | "d2Gate.signup.perk.share"
+  | "d2Gate.signup.perk.shareKept"
+  | "d2Gate.signup.perk.shareNoFigure"
   | "d2Gate.signup.watching"
   | "d2Gate.signup.after.follow"
   | "d2Gate.signup.after.chat"

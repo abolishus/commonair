@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { SITE } from "@commonair/config/site";
-import { ChannelAvatar, useRequestNow } from "@commonair/ui";
+import { ChannelAvatar, useLocale, useRequestNow } from "@commonair/ui";
 import { PageHeader } from "@commonair/ui/blocks/headers";
 import { Button } from "@commonair/ui/components/button";
 import { Checkbox } from "@commonair/ui/components/checkbox";
@@ -16,7 +16,13 @@ import * as React from "react";
 import { AltchaField, type AltchaFieldHandle } from "../../components/altcha-field.tsx";
 import { CHANNEL_INTENTS, intentLanding } from "../../components/auth-gate/intents.ts";
 import { savePendingIntent } from "../../components/auth-gate/pending-intent.ts";
-import { signupAfterNote, signupPerks, signupTitle } from "../../components/auth-gate/signup-copy.ts";
+import {
+  joinTermsOf,
+  signupAfterNote,
+  signupPerks,
+  signupTitle,
+  type JoinTerms,
+} from "../../components/auth-gate/signup-copy.ts";
 import {
   useUsernameCheck,
   type UsernameCheck,
@@ -109,6 +115,8 @@ function SignUpPage(): React.JSX.Element {
   const [doneEmail, setDoneEmail] = React.useState<string | null>(null);
   const altchaRef = React.useRef<AltchaFieldHandle>(null);
   const username = useUsernameCheck();
+  const { locale } = useLocale();
+  const [joinTerms, setJoinTerms] = React.useState<JoinTerms | null>(null);
   const { required, optional } = splitByAcceptance(docs ?? []);
   const title = signupTitle(intent, channel);
   const after = signupAfterNote(intent, channel, target);
@@ -122,6 +130,21 @@ function SignUpPage(): React.JSX.Element {
       .catch(() => {});
   }, []);
   React.useEffect(() => trackUi("signup", "view", intent ?? "none"), [intent]);
+  // The join perk states the governed share and minimum sub, never a figure baked into the copy.
+  React.useEffect(() => {
+    if (intent !== "join") return;
+    let live = true;
+    api()
+      .coop.settings()
+      .then((settings) => {
+        if (live) setJoinTerms(joinTermsOf(settings));
+      })
+      // Unknown: the perk names no figure.
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [intent]);
   // A name claimed on /creators: say at once whether it is still free.
   const { run } = username;
   React.useEffect(() => {
@@ -205,6 +228,8 @@ function SignUpPage(): React.JSX.Element {
             variant="outline"
             onClick={() => {
               setDoneEmail(null);
+              // The sign-up spent the proof: keep submit disabled until the remounted widget solves anew.
+              setAltcha(null);
               username.reset();
             }}
           >
@@ -232,7 +257,7 @@ function SignUpPage(): React.JSX.Element {
       ) : null}
       <section aria-label={t("d2Gate.signup.perks")}>
         <ul data-testid="signup-perks" className="flex flex-col gap-2 text-sm">
-          {signupPerks(intent).map((key) => (
+          {signupPerks(intent, joinTerms, locale).map(({ key, values }) => (
             <li key={key} className="flex items-start gap-2">
               <HugeiconsIcon
                 icon={CheckmarkCircle02Icon}
@@ -240,7 +265,7 @@ function SignUpPage(): React.JSX.Element {
                 aria-hidden
                 className="mt-0.5 size-4 shrink-0 text-success"
               />
-              <span>{t(key)}</span>
+              <span>{t(key, values)}</span>
             </li>
           ))}
         </ul>
