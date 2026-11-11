@@ -25,7 +25,7 @@
   "d5Money.payout.ready": "Los pagos están activos. La cooperativa envía lo disponible cada mes.",
   "d5Money.payout.readyMinimum": "Los pagos están activos. La cooperativa envía lo disponible cada mes cuando llega a {minimum}.",
   "d5Money.payout.connect": "Conecta una cuenta de pagos para que la cooperativa pueda pagarte. Tus ganancias se guardan hasta entonces.",
-  "d5Money.payout.manual": "La tesorería de la cooperativa te paga de esta forma. Tus ganancias se guardan hasta que esté lista.",
+  "d5Money.payout.manual": "Para cobrar, sigue las instrucciones de la tesorería que verás abajo. Tus ganancias se guardan hasta que se activen los pagos.",
   "d5Money.payout.waiting": "La tesorería de la cooperativa configura tu cuenta de pagos. Tus ganancias se guardan hasta que esté lista.",
   "d5Money.analytics.previous": "Periodo anterior",
   "d5Money.analytics.support": "Ganado",

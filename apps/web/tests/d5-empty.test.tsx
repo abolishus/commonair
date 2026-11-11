@@ -36,7 +36,6 @@ const SCANNED = [
   "src/components/attestations",
   "src/components/money/revenue.tsx",
   "src/components/money/crew.tsx",
-  "src/components/studio-money",
   "src/components/relays.tsx",
   "src/components/content-manager.tsx",
   "src/components/stream-health-card.tsx",
@@ -48,6 +47,7 @@ const SCANNED = [
 const NOT_OWNER_FILLABLE: Readonly<Record<string, string>> = {
   "analytics-page.tsx|analytics.pending.title": "fills itself 24 h after the broadcast",
   "revenue.tsx|studio.trend.revenueEmpty": "viewers fill it; the ledger's empty state carries the tiers action",
+  "revenue.tsx|revenue.payout.none": "the instance sets payouts up, not the streamer",
   "stream-health-card.tsx|dashboard.health.healthy": "not empty: nothing is wrong",
   "activity-feed.tsx|studio.activity.empty": "viewers fill it while live",
   "held-queue.tsx|held.empty": "word filters fill it",

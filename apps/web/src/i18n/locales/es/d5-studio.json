@@ -95,6 +95,9 @@
   "studio.trend.day": "Día",
   "studio.trend.dayLabel": "{day} {month}",
   "studio.trend.showTable": "Ver los días como tabla",
+  "studio.trend.revenueTitle": "Ingresos por día",
+  "studio.trend.revenueHint": "Bruto y neto de cada día del mes.",
+  "studio.trend.revenueLabel": "Ingresos brutos y netos por día",
   "studio.trend.revenueEmpty": "Sin ingresos este mes",
   "studio.trend.revenueEmptyHint": "Las suscripciones, los regalos y las propinas aparecen aquí día a día.",
   "studio.delta.up": "{percent} más que el periodo anterior",
@@ -110,5 +113,6 @@
   "studio.empty.proposeSplit": "Proponer un reparto",
   "studio.empty.setUpTiers": "Configurar los niveles de suscripción",
   "studio.empty.subscribersHint": "Los espectadores pueden suscribirse cuando tus niveles tienen nombre y precio.",
+  "studio.empty.payoutHint": "La instancia aún no ha configurado los pagos. Tus ganancias se guardan hasta entonces.",
   "studio.empty.turnOnCaptions": "Activar los subtítulos"
 }

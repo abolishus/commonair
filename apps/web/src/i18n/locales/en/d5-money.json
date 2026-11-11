@@ -25,7 +25,7 @@
   "d5Money.payout.ready": "Payouts are on. The co-op sends what's available each month.",
   "d5Money.payout.readyMinimum": "Payouts are on. The co-op sends what's available each month once it reaches {minimum}.",
   "d5Money.payout.connect": "Connect a payout account so the co-op can pay you. Your earnings are kept until you do.",
-  "d5Money.payout.manual": "The co-op's treasurer pays you this way. Your earnings are kept until it's set up.",
+  "d5Money.payout.manual": "To get paid, follow the treasurer's instructions below. Your earnings are kept until payouts are on.",
   "d5Money.payout.waiting": "The co-op's treasurer sets up your payout account. Your earnings are kept until it's ready.",
   "d5Money.analytics.previous": "Previous period",
   "d5Money.analytics.support": "Earned",

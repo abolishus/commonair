@@ -38,7 +38,9 @@ export function payoutView(account: PayoutAccountDto): PayoutView {
     };
   const instructions = account.instructions?.trim() ?? "";
   if (instructions)
-    return { ...base, state: "manual", status: "d5Money.payout.status.waiting", tone: "neutral", instructions };
+    // The treasurer's instructions ask the creator to act (e.g. "Contact the treasurer"), so this
+    // is the creator's next step, not something the co-op is waiting on.
+    return { ...base, state: "manual", status: "d5Money.payout.status.action", tone: "warning", instructions };
   return { ...base, state: "waiting", status: "d5Money.payout.status.waiting", tone: "neutral" };
 }
 

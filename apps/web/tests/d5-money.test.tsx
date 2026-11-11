@@ -172,6 +172,14 @@ describe("the payout card", () => {
     expect(payoutView(account({ instructions: "   " })).state).toBe("waiting");
   });
 
+  it("manual payouts ask the creator to act, not the co-op", () => {
+    const view = payoutView(account({ instructions: "Contact the co-op treasurer" }));
+    expect([view.state, view.status, view.tone]).toEqual(["manual", "d5Money.payout.status.action", "warning"]);
+    expect(view.instructions).toBe("Contact the co-op treasurer");
+    const waiting = payoutView(account({}));
+    expect([waiting.status, waiting.tone]).toEqual(["d5Money.payout.status.waiting", "neutral"]);
+  });
+
   it.each([
     [{ payoutsEnabled: true }, "ready", "Ready", "Payouts are on", false],
     [
@@ -181,7 +189,13 @@ describe("the payout card", () => {
       "Connect a payout account",
       true,
     ],
-    [{ instructions: "Bank transfer, monthly" }, "manual", "Waiting on the co-op", "pays you this way", false],
+    [
+      { instructions: "Bank transfer, monthly" },
+      "manual",
+      "Action needed",
+      "follow the treasurer's instructions",
+      false,
+    ],
     [{}, "waiting", "Waiting on the co-op", "sets up your payout account", false],
   ])("%o: one status, one explanation, one action at most", (over, state, status, explanation, action) => {
     wrap(<PayoutAccountCard account={account(over)} minimum="$25.00" />);
