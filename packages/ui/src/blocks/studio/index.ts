@@ -39,13 +39,6 @@ export {
   type OverlayTokenStatusView,
 } from "./overlay-token.tsx";
 export {
-  OVERLAY_KINDS,
-  OVERLAY_SIZES,
-  overlayUrlTestId,
-  type OverlayKind,
-  type OverlayLinkUrls,
-} from "./overlay-token.tsx";
-export {
   ContentBoard,
   mediaStatusTone,
   type ContentBoardProps,
@@ -55,7 +48,6 @@ export {
   type ClipRowData,
   type VodUpdate,
 } from "./content-board.tsx";
-export { CONTENT_SORTS, sortContent, type ContentSort } from "./content-board.tsx";
 
 export {
   SetupChecklist,

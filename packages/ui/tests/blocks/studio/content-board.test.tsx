@@ -10,15 +10,13 @@ import * as React from "react";
 import { act, render, screen, within } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vite-plus/test";
+import { CONTENT_SORTS, ContentBoard, sortContent } from "../../../src/blocks/studio/content-board.tsx";
 import {
-  CONTENT_SORTS,
-  ContentBoard,
   OVERLAY_KINDS,
   OVERLAY_SIZES,
   OverlayTokenPanel,
   overlayUrlTestId,
-  sortContent,
-} from "../../../src/blocks/studio/index.ts";
+} from "../../../src/blocks/studio/overlay-token.tsx";
 import { TooltipProvider } from "../../../src/components/tooltip.tsx";
 import { clips, contentLabels, overlayTokenLabels, overlayUrls, vods } from "../../../stories/e6-fixtures.tsx";
 

@@ -76,7 +76,7 @@ vi.mock("../src/lib/api.ts", async (importOriginal) => {
 const { Route: OverlaysRoute } = await import("../src/routes/_studio/overlays.tsx");
 const { Route: ContentRoute } = await import("../src/routes/_studio/content.tsx");
 const { clipCards, clipCounts, vodCards, watchPath } = await import("../src/components/content-library/model.ts");
-const { alertDraftProblems, dirtyAlertTypes, sameAlertDraft } =
+const { alertDraftProblems, dirtyAlertTypes, isAlertDirty, sameAlertDraft } =
   await import("../src/components/content-library/alert-drafts.ts");
 const { recordViewApi, useRecordView } = await import("../src/components/vod-watch/record-view.ts");
 
@@ -236,6 +236,21 @@ describe("alert drafts", () => {
     expect(dirtyAlertTypes([])).toEqual([]);
   });
 
+  it("counts text the fields cannot read as unsaved, not as saved", () => {
+    expect(isAlertDirty({ type: "tip", saved: draft, draft, durationText: "5", amountValid: true })).toBe(false);
+    // The draft keeps the old duration and amount while the text is unreadable.
+    expect(isAlertDirty({ type: "tip", saved: draft, draft, durationText: "" })).toBe(true);
+    expect(isAlertDirty({ type: "tip", saved: draft, draft, durationText: "abc" })).toBe(true);
+    expect(isAlertDirty({ type: "tip", saved: draft, draft, amountValid: false })).toBe(true);
+    expect(
+      dirtyAlertTypes([
+        { type: "tip", saved: draft, draft, durationText: "5", amountValid: false },
+        { type: "follow", saved: draft, draft, durationText: "5" },
+        { type: "raid", saved: draft, draft, durationText: "" },
+      ]),
+    ).toEqual(["tip", "raid"]);
+  });
+
   it("blocks a blank or long message, a duration outside 1-30 s, an unreadable or negative amount", () => {
     expect(alertDraftProblems(draft, "5").any).toBe(false);
     expect(alertDraftProblems({ ...draft, message: "  " }, "5").message).toBe(true);
@@ -311,6 +326,44 @@ describe("/overlays", () => {
     expect((screen.getByTestId("alert-save") as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByTestId("alert-save-bar").textContent).toContain(t("d5Content.alerts.invalid"));
     expect(within(configOf("tip")).getByTestId("alert-duration").getAttribute("data-ms")).toBe("");
+  });
+
+  it("unreadable duration or amount text marks the type unsaved and invalid; discard clears the text", async () => {
+    fns.alertsList.mockResolvedValue(configs());
+    fns.overlayStatus.mockResolvedValue({ active: false, createdAt: null, expiresAt: null });
+    wrap(React.createElement(component(OverlaysRoute)));
+    await waitFor(() => expect(screen.getAllByTestId("alert-config")).toHaveLength(4));
+    const bar = screen.getByTestId("alert-save-bar");
+    const save = () => screen.getByTestId("alert-save") as HTMLButtonElement;
+    const discard = () => screen.getByTestId("alert-discard") as HTMLButtonElement;
+    const amountInput = () =>
+      within(configOf("tip")).getByTestId("alert-min-amount").querySelector("input") as HTMLInputElement;
+
+    // A cleared duration leaves durationMs as saved, but the type is still unsaved and invalid.
+    fireEvent.change(within(configOf("follow")).getByTestId("alert-duration"), { target: { value: "" } });
+    expect(bar.getAttribute("data-dirty")).toBe("1");
+    expect(configOf("follow").getAttribute("data-dirty")).toBe("true");
+    expect(bar.textContent).toContain(t("d5Content.alerts.invalid"));
+    expect(save().disabled).toBe(true);
+    expect(discard().disabled).toBe(false);
+    fireEvent.click(discard());
+    expect(bar.getAttribute("data-dirty")).toBe("0");
+    expect((within(configOf("follow")).getByTestId("alert-duration") as HTMLInputElement).value).toBe("6");
+
+    // Amount text the field cannot read never reaches the draft.
+    fireEvent.change(amountInput(), { target: { value: "abc" } });
+    await waitFor(() => expect(bar.getAttribute("data-dirty")).toBe("1"));
+    expect(bar.textContent).toContain(t("d5Content.alerts.invalid"));
+    expect(save().disabled).toBe(true);
+    fireEvent.click(discard());
+    await waitFor(() => expect(bar.getAttribute("data-dirty")).toBe("0"));
+    // The field is remounted, so the bad text is gone along with the state.
+    expect(amountInput().value).not.toContain("abc");
+
+    // Another edit after the discard saves with the tip tab clean.
+    fireEvent.click(within(configOf("tip")).getByTestId("alert-enabled"));
+    expect(bar.getAttribute("data-dirty")).toBe("1");
+    expect(save().disabled).toBe(false);
   });
 
   it("creating links shows all three, with OBS sizes; revoke drops them", async () => {

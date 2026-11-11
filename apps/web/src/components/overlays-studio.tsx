@@ -12,7 +12,6 @@ import {
   OverlayTokenPanel,
   fillAlertTemplate,
   type AlertConfigDraft,
-  type OverlayLinkUrls,
   type OverlayTokenLabels,
   type OverlayTokenStatusView,
 } from "@commonair/ui/blocks/studio";
@@ -41,7 +40,7 @@ import {
 import {
   alertDraftProblems,
   dirtyAlertTypes,
-  sameAlertDraft,
+  isAlertDirty,
   type AlertDraftProblems,
 } from "./content-library/alert-drafts.ts";
 import { useLoad } from "./money/use-load.ts";
@@ -135,6 +134,7 @@ function AlertForm({
   type,
   saved,
   draft,
+  dirty,
   durationText,
   problems,
   currency,
@@ -147,6 +147,7 @@ function AlertForm({
   type: AlertType;
   saved: AlertConfigDraft;
   draft: AlertConfigDraft;
+  dirty: boolean;
   durationText: string;
   problems: AlertDraftProblems;
   currency: string;
@@ -182,7 +183,7 @@ function AlertForm({
       data-testid="alert-config"
       data-type={type}
       data-enabled={String(saved.enabled)}
-      data-dirty={!sameAlertDraft(saved, draft) || undefined}
+      data-dirty={dirty || undefined}
       aria-labelledby={`${id}-title`}
       className="flex min-w-0 flex-col gap-4 border bg-card p-4"
     >
@@ -332,6 +333,8 @@ function AlertConfigs({ channel, currency }: { channel: string; currency: string
   const [states, setStates] = React.useState<Partial<Record<AlertType, AlertState>> | null>(null);
   const [loadedFrom, setLoadedFrom] = React.useState<unknown>(null);
   const [saving, setSaving] = React.useState(false);
+  // Bumped on discard so each form remounts: the amount field keeps its own text.
+  const [discards, setDiscards] = React.useState(0);
   // A fresh load replaces every draft (adjusting state during render).
   if (loaded.data !== null && loaded.data !== loadedFrom) {
     setLoadedFrom(loaded.data);
@@ -383,7 +386,8 @@ function AlertConfigs({ channel, currency }: { channel: string; currency: string
     if (failed.length === 0) toast.success(t("d5Content.alerts.saved", { count: dirty.length }));
     else toastActionError(failed[0]?.reason, t("d5Content.alerts.saveFailed"));
   };
-  const discard = () =>
+  const discard = () => {
+    setDiscards((n) => n + 1);
     setStates((current) =>
       current
         ? Object.fromEntries(
@@ -394,6 +398,7 @@ function AlertConfigs({ channel, currency }: { channel: string; currency: string
           )
         : current,
     );
+  };
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
@@ -414,9 +419,11 @@ function AlertConfigs({ channel, currency }: { channel: string; currency: string
         {entries.map((s) => (
           <TabsContent key={s.type} value={s.type} keepMounted className="min-w-0">
             <AlertForm
+              key={`${s.type}-${discards}`}
               type={s.type}
               saved={s.saved}
               draft={s.draft}
+              dirty={isAlertDirty(s)}
               durationText={s.durationText}
               problems={problemsOf(s, s.type)}
               currency={currency}
@@ -479,6 +486,8 @@ function AlertConfigs({ channel, currency }: { channel: string; currency: string
  * response live only in this component's state: never in storage, a query cache or the address
  * bar, and they are dropped on revoke and on leaving the page.
  */
+type OverlayLinkUrls = NonNullable<React.ComponentProps<typeof OverlayTokenPanel>["createdUrls"]>;
+
 function OverlayToken({ channel }: { channel: string }): React.JSX.Element {
   const { locale } = useLocale();
   const loaded = useLoad(`overlay-token:${channel}`, () => api().interact.overlays.status({ channel }));

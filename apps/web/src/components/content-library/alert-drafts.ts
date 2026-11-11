@@ -20,11 +20,28 @@ export const sameAlertDraft = (a: AlertConfigDraft, b: AlertConfigDraft): boolea
   a.durationMs === b.durationMs &&
   a.animation === b.animation;
 
-/** The types whose draft differs from what was saved, in the order given. */
-export function dirtyAlertTypes<T extends string>(
-  entries: readonly { type: T; saved: AlertConfigDraft; draft: AlertConfigDraft }[],
-): T[] {
-  return entries.filter((e) => !sameAlertDraft(e.saved, e.draft)).map((e) => e.type);
+export interface AlertDraftEntry<T extends string> {
+  type: T;
+  saved: AlertConfigDraft;
+  draft: AlertConfigDraft;
+  /** The duration field's text, in seconds; the draft keeps the old value while it is unreadable. */
+  durationText?: string;
+  /** False while the amount field holds text it cannot read (it does not report a value then). */
+  amountValid?: boolean;
+}
+
+/**
+ * Whether a type has unsaved edits. Text the fields cannot read counts too: otherwise the save
+ * bar would say everything is saved while a field shows its error.
+ */
+export const isAlertDirty = <T extends string>(e: AlertDraftEntry<T>): boolean =>
+  !sameAlertDraft(e.saved, e.draft) ||
+  e.amountValid === false ||
+  (e.durationText !== undefined && e.durationText !== String(e.saved.durationMs / 1000));
+
+/** The types with unsaved edits, in the order given. */
+export function dirtyAlertTypes<T extends string>(entries: readonly AlertDraftEntry<T>[]): T[] {
+  return entries.filter(isAlertDirty).map((e) => e.type);
 }
 
 export interface AlertDraftProblems {
