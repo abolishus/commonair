@@ -4,8 +4,10 @@
 /**
  * The web app manifest (ADR 0028 decision 7, README D7.6), named from the instance (AGENTS.md
  * rule 5): one image serves every instance, so it is built per request rather than shipped as a
- * static file. Its words come from the `d7-pwa` catalogs, in the requester's language.
- * Production: `server/http.ts` (`/manifest.webmanifest`); dev: `scripts/vite-pwa.ts`.
+ * static file. Its words come from the `d7-pwa` catalogs, in the language the caller passes.
+ * Production: `server/http.ts` (`/manifest.webmanifest`); dev: `scripts/vite-pwa.ts`. Dev passes
+ * the request's `Accept-Language`; production does once `server.ts` hands the request to its
+ * `manifest` option (until then it answers in English).
  */
 import { localeDirection, parseAcceptLanguage } from "@commonair/i18n";
 import { pwaLocale, pwaText } from "../components/pwa/pwa-text.ts";
@@ -129,7 +131,8 @@ export function webManifest(
 
 /**
  * `/manifest.webmanifest` for a request's `Accept-Language` (English without one); the caller adds
- * the cache and security headers. It varies by language, so a shared cache keeps one per language.
+ * the cache and security headers. Its words depend on that header, so it says `vary` and a shared
+ * cache keeps one copy per language.
  */
 export function manifestResponse(config: PublicConfig, acceptLanguage: string | null = null): Response {
   const manifest = webManifest(config, parseAcceptLanguage(acceptLanguage));

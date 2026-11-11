@@ -113,6 +113,12 @@ export interface WatchClock {
   start(video: object, now: number): void;
   stop(video: object, now: number): void;
   take(now: number): number;
+  /**
+   * Forget the videos `stillPlaying` rejects without counting their time since the last `take`
+   * (or their start): a player torn down off the page never sends its `pause`, so what it last
+   * reported is all that is known.
+   */
+  sweep(stillPlaying: (video: object) => boolean): void;
   readonly playing: boolean;
 }
 
@@ -137,6 +143,9 @@ export function createWatchClock(): WatchClock {
         since = now;
       }
       return total;
+    },
+    sweep(stillPlaying) {
+      for (const video of videos) if (!stillPlaying(video)) videos.delete(video);
     },
     get playing() {
       return videos.size > 0;

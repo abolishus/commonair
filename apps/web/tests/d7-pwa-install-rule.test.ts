@@ -186,6 +186,23 @@ describe("createWatchClock", () => {
     expect(clock.take(5000)).toBe(5000);
   });
 
+  it("forgets a swept video without counting its time since the last take", () => {
+    const clock = createWatchClock();
+    const gone = {};
+    const kept = {};
+    clock.start(gone, 0);
+    expect(clock.take(30_000)).toBe(30_000);
+    clock.sweep((video) => video !== gone);
+    expect(clock.playing).toBe(false);
+    expect(clock.take(60_000)).toBe(0);
+    // A sweep that drops one of two keeps timing the other from where it was.
+    clock.start(gone, 100_000);
+    clock.start(kept, 100_000);
+    clock.sweep((video) => video === kept);
+    expect(clock.playing).toBe(true);
+    expect(clock.take(110_000)).toBe(10_000);
+  });
+
   it("ignores a repeated start, and a stop without a start", () => {
     const clock = createWatchClock();
     const video = {};

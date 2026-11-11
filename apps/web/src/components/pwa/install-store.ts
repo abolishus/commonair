@@ -176,30 +176,46 @@ const FLUSH_MS = 30_000;
 
 let started = false;
 
+function onPrompt(event: Event): void {
+  // The menus and the offer show the dialog when the viewer asks, not the browser's own bar.
+  event.preventDefault();
+  held = event as InstallPromptEvent;
+  refresh();
+}
+
+function onInstalled(): void {
+  installed = true;
+  held = null;
+  refresh();
+}
+
+// Chromium fires `beforeinstallprompt` once per page load and can do so before hydration, so the
+// store listens from the moment the shell bundle loads it rather than from `startInstallWatch`.
+if (typeof window !== "undefined") {
+  window.addEventListener("beforeinstallprompt", onPrompt);
+  window.addEventListener("appinstalled", onInstalled);
+}
+
+/** Still playing on the page: a player unmounted mid-play leaves without its `pause`. */
+function stillPlaying(video: object): boolean {
+  return video instanceof HTMLVideoElement && video.isConnected && !video.paused && !video.ended;
+}
+
 /**
- * Start once per page load (the PWA root does, after hydration): hold `beforeinstallprompt`, hear
- * `appinstalled`, count this page load as a visit when it is one, and time playing videos from
- * their own media events (the players' existing signals; nothing added to them). Returns a stop.
+ * Start once per page load (the PWA root does, after hydration): count this page load as a visit
+ * when it is one, and time playing videos from their own media events (the players' existing
+ * signals; nothing added to them). Returns a stop.
  */
 export function startInstallWatch(now: () => number = Date.now): () => void {
   if (started || typeof window === "undefined") return () => undefined;
   started = true;
   writeEngagement(recordVisit(readEngagement(), now()));
 
-  const onPrompt = (event: Event) => {
-    // The menus and the offer show the dialog when the viewer asks, not the browser's own bar.
-    event.preventDefault();
-    held = event as InstallPromptEvent;
-    refresh();
-  };
-  const onInstalled = () => {
-    installed = true;
-    held = null;
-    refresh();
-  };
-
   const clock = createWatchClock();
   const flush = () => {
+    // Before taking time: a video gone from the page (or stopped unheard) counts only up to the
+    // last flush, so browsing away from a watch page stops the clock.
+    clock.sweep(stillPlaying);
     const ms = clock.take(now());
     if (ms <= 0) return;
     writeEngagement(addWatched(readEngagement(), ms, now()));
@@ -220,8 +236,6 @@ export function startInstallWatch(now: () => number = Date.now): () => void {
     if (clock.playing) flush();
   }, FLUSH_MS);
 
-  window.addEventListener("beforeinstallprompt", onPrompt);
-  window.addEventListener("appinstalled", onInstalled);
   document.addEventListener("playing", onPlaying, true);
   for (const type of STOPS) document.addEventListener(type, onStop, true);
   document.addEventListener("visibilitychange", onHidden);
@@ -231,8 +245,6 @@ export function startInstallWatch(now: () => number = Date.now): () => void {
   return () => {
     flush();
     window.clearInterval(timer);
-    window.removeEventListener("beforeinstallprompt", onPrompt);
-    window.removeEventListener("appinstalled", onInstalled);
     document.removeEventListener("playing", onPlaying, true);
     for (const type of STOPS) document.removeEventListener(type, onStop, true);
     document.removeEventListener("visibilitychange", onHidden);

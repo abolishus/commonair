@@ -146,6 +146,16 @@ describe("install state", () => {
     expect(stored().dismissed).toBe(true);
   });
 
+  it("holds a beforeinstallprompt fired before the watch starts (before hydration)", () => {
+    Object.defineProperty(window, "onbeforeinstallprompt", { value: null, configurable: true });
+    const { event } = promptEvent("accepted");
+    window.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    stop = startInstallWatch();
+    render(<Probe />);
+    expect(screen.getByTestId("probe").textContent).toBe("prompt false false");
+  });
+
   it("goes away when the app is installed from the browser's own menu", () => {
     Object.defineProperty(window, "onbeforeinstallprompt", { value: null, configurable: true });
     stop = startInstallWatch();
@@ -213,6 +223,54 @@ describe("the visit and watch-time rule in the browser", () => {
     expect(stored().watchedMs).toBe(90_000);
     video.remove();
     audio.remove();
+  });
+
+  it("stops the clock when a playing video leaves the page without its pause", () => {
+    vi.useFakeTimers();
+    try {
+      let now = 0;
+      stop = startInstallWatch(() => now);
+      const video = document.createElement("video");
+      Object.defineProperty(video, "paused", { value: false, configurable: true });
+      document.body.append(video);
+      video.dispatchEvent(new Event("playing"));
+      now = 30_000;
+      vi.advanceTimersByTime(30_000);
+      expect(stored().watchedMs).toBe(30_000);
+      // An SPA navigation unmounts the player: the element leaves first, so its teardown's
+      // pause never reaches the document.
+      video.remove();
+      video.dispatchEvent(new Event("pause"));
+      for (let step = 0; step < 10; step += 1) {
+        now += 30_000;
+        vi.advanceTimersByTime(30_000);
+      }
+      expect(stored().watchedMs).toBe(30_000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops the clock for a video found paused or ended at a flush", () => {
+    vi.useFakeTimers();
+    try {
+      let now = 0;
+      stop = startInstallWatch(() => now);
+      const video = document.createElement("video");
+      let paused = false;
+      Object.defineProperty(video, "paused", { get: () => paused, configurable: true });
+      document.body.append(video);
+      video.dispatchEvent(new Event("playing"));
+      now = 30_000;
+      vi.advanceTimersByTime(30_000);
+      paused = true;
+      now = 120_000;
+      vi.advanceTimersByTime(90_000);
+      expect(stored().watchedMs).toBe(30_000);
+      video.remove();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("makes the offer due on a second visit with 3 minutes watched", () => {
