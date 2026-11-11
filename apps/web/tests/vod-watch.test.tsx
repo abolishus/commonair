@@ -160,6 +160,9 @@ function client(over: Partial<WatchClient> = {}, page: Partial<ReplayPage> = {})
     channel: vi.fn<WatchClient["channel"]>(async () => ({ displayName: "Rivertide", avatarUrl: null, accent: null })),
     vodChat: vi.fn<WatchClient["vodChat"]>(async (_id: string, _input: ReplayFetchInput) => replay),
     clipChat: vi.fn<WatchClient["clipChat"]>(async (_id: string, _input: ReplayFetchInput) => replay),
+    // More from (D3.9 shows a failed list with its own Retry): empty here.
+    channelVods: async () => ({ items: [], nextCursor: null }),
+    channelClips: async () => ({ items: [], nextCursor: null }),
     ...over,
   };
 }

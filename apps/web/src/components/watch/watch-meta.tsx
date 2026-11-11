@@ -18,7 +18,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import * as React from "react";
 import { t } from "../../i18n/index.ts";
 import { CategoryLink, type Clipboard } from "../channel/channel-meta.tsx";
-import { watchUrl, type WatchKind } from "./share.ts";
+import { browserShare, shareCancelled, watchUrl, type NativeShare, type WatchKind } from "./share.ts";
 
 const browserClipboard = (): Clipboard | null =>
   typeof navigator !== "undefined" && navigator.clipboard ? navigator.clipboard : null;
@@ -43,11 +43,28 @@ export interface WatchShareProps {
   /** VODs: the playhead in whole seconds when Share opens (null while unknown). */
   currentTime?: () => number | null;
   clipboard?: Clipboard | null;
+  /** The title the share sheet carries. */
+  title?: string;
+  /** The browser's share sheet; detected after hydration when not given, null for none. */
+  nativeShare?: NativeShare | null;
+}
+
+const subscribeNothing = () => () => {};
+const noShare = () => null;
+// One function for the browser's sheet, so the store's snapshot is stable between renders.
+let browserSheet: NativeShare | null | undefined;
+const readBrowserShare = () => (browserSheet ??= browserShare());
+
+/** The share sheet; none on the server and while hydrating, so both renders match. */
+function useNativeShare(given: NativeShare | null | undefined): NativeShare | null {
+  const found = React.useSyncExternalStore(subscribeNothing, readBrowserShare, noShare);
+  return given === undefined ? found : given;
 }
 
 /**
- * Share. A clip copies its link at once. A VOD opens a small popover with the link, a "Start at
- * <time>" checkbox that adds `?t=`, and Copy link.
+ * Share. Without a share sheet, a clip copies its link at once. Otherwise (and always for a VOD) a
+ * small popover shows the link, a "Start at <time>" checkbox for VODs that adds `?t=`, Copy link,
+ * and "Share…" for the browser's own share sheet (D3.9; `navigator.share`, no third-party code).
  */
 export function WatchShare({
   kind,
@@ -56,15 +73,18 @@ export function WatchShare({
   id,
   currentTime,
   clipboard = browserClipboard(),
+  title = "",
+  nativeShare,
 }: WatchShareProps): React.JSX.Element {
   const [open, setOpen] = React.useState(false);
   const [at, setAt] = React.useState<number | null>(null);
   const [withTime, setWithTime] = React.useState(false);
   const checkboxId = React.useId();
   const linkId = React.useId();
+  const share = useNativeShare(nativeShare);
   const plain = watchUrl(publicUrl, kind, slug, id);
 
-  if (kind === "clip")
+  if (kind === "clip" && !share)
     return (
       <IconButton
         data-testid="watch-share"
@@ -99,8 +119,8 @@ export function WatchShare({
           />
         }
       />
-      <PopoverContent align="end" data-testid="watch-share-popover">
-        <PopoverTitle>{t("watch.share.title")}</PopoverTitle>
+      <PopoverContent align="end" data-testid="watch-share-popover" data-kind={kind}>
+        <PopoverTitle>{kind === "vod" ? t("watch.share.title") : t("d3Watch.share.clipTitle")}</PopoverTitle>
         <Field>
           <FieldLabel htmlFor={linkId} className="sr-only">
             {t("watch.share.linkLabel")}
@@ -113,26 +133,48 @@ export function WatchShare({
             onFocus={(e) => e.currentTarget.select()}
           />
         </Field>
-        <Field orientation="horizontal" data-disabled={at === null ? true : undefined}>
-          <Checkbox
-            id={checkboxId}
-            data-testid="watch-share-time"
-            checked={withTime && at !== null}
-            disabled={at === null}
-            onCheckedChange={(checked) => setWithTime(checked === true)}
-          />
-          <FieldLabel htmlFor={checkboxId}>{t("watch.share.startAt", { time: formatDuration(at ?? 0) })}</FieldLabel>
-        </Field>
-        <Button
-          data-testid="watch-share-copy"
-          size="sm"
-          onClick={() => {
-            void copy(url, clipboard).then((ok) => ok && setOpen(false));
-          }}
-        >
-          <HugeiconsIcon icon={Copy01Icon} strokeWidth={2} aria-hidden />
-          {t("watch.share.copy")}
-        </Button>
+        {kind === "vod" ? (
+          <Field orientation="horizontal" data-disabled={at === null ? true : undefined}>
+            <Checkbox
+              id={checkboxId}
+              data-testid="watch-share-time"
+              checked={withTime && at !== null}
+              disabled={at === null}
+              onCheckedChange={(checked) => setWithTime(checked === true)}
+            />
+            <FieldLabel htmlFor={checkboxId}>{t("watch.share.startAt", { time: formatDuration(at ?? 0) })}</FieldLabel>
+          </Field>
+        ) : null}
+        <div className="flex flex-wrap gap-2">
+          <Button
+            data-testid="watch-share-copy"
+            size="sm"
+            onClick={() => {
+              void copy(url, clipboard).then((ok) => ok && setOpen(false));
+            }}
+          >
+            <HugeiconsIcon icon={Copy01Icon} strokeWidth={2} aria-hidden />
+            {t("watch.share.copy")}
+          </Button>
+          {share ? (
+            <Button
+              data-testid="watch-share-native"
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                share({ title: title.trim() || t("watch.share.label"), url }).then(
+                  () => setOpen(false),
+                  (err: unknown) => {
+                    if (!shareCancelled(err)) toast.error(t("d3Watch.share.nativeFailed"));
+                  },
+                );
+              }}
+            >
+              <HugeiconsIcon icon={Share08Icon} strokeWidth={2} aria-hidden />
+              {t("d3Watch.share.native")}
+            </Button>
+          ) : null}
+        </div>
       </PopoverContent>
     </Popover>
   );
@@ -154,6 +196,9 @@ export interface WatchMetaProps {
   publicUrl: string;
   currentTime?: () => number | null;
   clipboard?: Clipboard | null;
+  nativeShare?: NativeShare | null;
+  /** Under the details: the page's next steps ("Resume from", "Watch from this moment"). */
+  actions?: React.ReactNode;
 }
 
 export function WatchMeta(p: WatchMetaProps): React.JSX.Element {
@@ -171,6 +216,8 @@ export function WatchMeta(p: WatchMetaProps): React.JSX.Element {
           id={p.id}
           currentTime={p.currentTime}
           clipboard={p.clipboard}
+          title={title}
+          nativeShare={p.nativeShare}
         />
       </div>
       <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
@@ -194,6 +241,11 @@ export function WatchMeta(p: WatchMetaProps): React.JSX.Element {
           </span>
         ) : null}
       </div>
+      {p.actions ? (
+        <div data-testid="watch-actions" className="flex min-w-0 flex-wrap items-center gap-2">
+          {p.actions}
+        </div>
+      ) : null}
     </header>
   );
 }

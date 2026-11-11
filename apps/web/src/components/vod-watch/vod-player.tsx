@@ -52,6 +52,7 @@ import { DataModeNotice } from "../../player/data-mode.tsx";
 import { useScreenModes } from "../../player/fullscreen.ts";
 import { SEEK_STEP_SECONDS, VOLUME_STEP, usePlayerShortcuts } from "../../player/shortcuts.ts";
 import { useTheatre, useTheatreAvailable } from "../../player/theatre.ts";
+import { ClipButton } from "../watch/clip-button.tsx";
 import {
   clipOrigin,
   hlsOrigin,
@@ -87,10 +88,21 @@ export interface VodPlayerProps {
   captions: readonly CaptionTrack[];
   /** Called whenever the playhead moves (play, seek, metadata), with its wall clock. */
   onPlayhead?: (wallclock: Date | null) => void;
+  /** The playhead in media seconds, on every time update and on pause (Continue watching). */
+  onProgress?: (progress: PlayerProgress) => void;
+  /** Videos only: the viewer's Clip button in the bar (D3.7). */
+  clip?: { channel: string; vodId: string; signedIn: boolean; publicUrl?: string };
   handleRef?: React.Ref<WatchPlayerHandle>;
 }
 
 type PlayerState = "loading" | "ready" | "error";
+
+export interface PlayerProgress {
+  positionSeconds: number;
+  /** The element's duration once known, else the known length. */
+  durationSeconds: number;
+  paused: boolean;
+}
 
 /** The caption track to show first: the page's language, else the first one. */
 export function preferredTrack(tracks: readonly CaptionTrack[], locale: string): number {
@@ -129,6 +141,8 @@ export function VodPlayer({
   durationSeconds,
   captions,
   onPlayhead,
+  onProgress,
+  clip,
   handleRef,
 }: VodPlayerProps): React.JSX.Element {
   const videoRef = React.useRef<HTMLVideoElement>(null);
@@ -145,6 +159,14 @@ export function VodPlayer({
   React.useEffect(() => {
     onPlayheadRef.current = onPlayhead;
   }, [onPlayhead]);
+  const onProgressRef = React.useRef(onProgress);
+  React.useEffect(() => {
+    onProgressRef.current = onProgress;
+  }, [onProgress]);
+  const knownDuration = React.useRef(durationSeconds);
+  React.useEffect(() => {
+    knownDuration.current = durationSeconds;
+  }, [durationSeconds]);
 
   const handle = React.useMemo<WatchPlayerHandle>(
     () => ({
@@ -209,11 +231,16 @@ export function VodPlayer({
   React.useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
+    const progress = () => {
+      const length = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : knownDuration.current;
+      onProgressRef.current?.({ positionSeconds: video.currentTime, durationSeconds: length, paused: video.paused });
+    };
     const report = () => {
       const at = playerWallclock(source, video, hlsRef.current);
       setPlayhead(at ? at.toISOString() : "");
       setTime(video.currentTime);
       onPlayheadRef.current?.(at);
+      progress();
     };
     const onMeta = () => {
       if (Number.isFinite(video.duration) && video.duration > 0) setDuration(video.duration);
@@ -221,7 +248,10 @@ export function VodPlayer({
       report();
     };
     const onPlay = () => setPlaying(true);
-    const onPause = () => setPlaying(false);
+    const onPause = () => {
+      setPlaying(false);
+      progress();
+    };
     const onError = () => setState("error");
     const events: [string, () => void][] = [
       ["timeupdate", report],
@@ -290,6 +320,7 @@ export function VodPlayer({
     setQualityState({ options, value: hls.manualLevel });
   }, [locale]);
   const { hold } = bar;
+  const onClipOpen = React.useCallback((open: boolean) => hold("clip", open), [hold]);
   const settings = useSettings({
     ready: state === "ready",
     hintEnabled: false,
@@ -454,6 +485,21 @@ export function VodPlayer({
                 className="text-overlay-foreground"
               />
             )}
+            {variant === "vod" && clip ? (
+              <ClipButton
+                target={{
+                  kind: "vod",
+                  channel: clip.channel,
+                  vodId: clip.vodId,
+                  durationSeconds,
+                  position: () => videoRef.current?.currentTime ?? null,
+                }}
+                signedIn={clip.signedIn}
+                publicUrl={clip.publicUrl}
+                defaultTitle={title}
+                onOpenChange={onClipOpen}
+              />
+            ) : null}
           </>
         }
         settings={settings.props(menu)}

@@ -8,10 +8,12 @@
  * mature recording shows the 18+ gate (`components/safety`). Loaded in the browser, so the
  * per-viewer answers (subscriber, owner, blocks, 18+) never pass through a shared render.
  */
-import { EmptyState, SkeletonGroup, SkeletonText, SkeletonThumbnail } from "@commonair/ui";
+import { EmptyState, formatDuration, SkeletonGroup, SkeletonText, SkeletonThumbnail } from "@commonair/ui";
 import { PageContainer, SplitLayout } from "@commonair/ui/layouts";
 import { Button } from "@commonair/ui/components/button";
-import { Clock01Icon, Tv01Icon } from "@hugeicons/core-free-icons";
+import { Clock01Icon, Film02Icon, PlayIcon, Tv01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { Link } from "@tanstack/react-router";
 import * as React from "react";
 import { ReplayPanel } from "../../chat/replay/replay-panel.tsx";
 import type { ReplayFetch, ReplayFetchInput, ReplayPage } from "../../chat/replay/model.ts";
@@ -22,7 +24,8 @@ import { summarize } from "../../lib/channel-summary.ts";
 import { CHANNEL_MEDIA_PAGE, type ClipItem, type MediaPage, type VodItem } from "../channel/channel-data.ts";
 import { maturityClient, type MaturityClient } from "../safety/client.ts";
 import { MatureGate } from "../safety/mature-gate.tsx";
-import { playheadSeconds, seekToStart, type WatchKind } from "../watch/share.ts";
+import { momentStart, playheadSeconds, seekToStart, type WatchKind } from "../watch/share.ts";
+import { resumeOffer, useResumeWriter, type ResumeVideo } from "./resume-writer.ts";
 import {
   useWatchChannel,
   WatchChannelCard,
@@ -34,7 +37,13 @@ import { WatchMeta } from "../watch/watch-meta.tsx";
 import { WatchMore } from "../watch/watch-more.tsx";
 import { WatchNotAvailable } from "../watch/watch-not-available.tsx";
 import { clipState, vodState, type ClipDto, type VodDto, type WatchState } from "./state.ts";
-import { VodPlayer, type WatchPlayerHandle, type WatchSource } from "./vod-player.tsx";
+import {
+  VodPlayer,
+  type PlayerProgress,
+  type VodPlayerProps,
+  type WatchPlayerHandle,
+  type WatchSource,
+} from "./vod-player.tsx";
 
 export type { ChannelCard } from "../watch/watch-channel-card.tsx";
 
@@ -144,6 +153,23 @@ export function VodWatchPage({
   );
   const fetch = React.useCallback<ReplayFetch>((input) => c.vodChat(vodId, input), [c, vodId]);
   const more = React.useCallback(() => (c.channelVods ?? listVods)(channel), [c, channel]);
+  // Continue watching (D3.6): only a playable video is written. The offer is read by the layout,
+  // which mounts only once the video loaded in the browser (storage is per viewer, never SSR).
+  const ready = state === "ready";
+  const resumeVideo = React.useMemo<ResumeVideo | null>(
+    () =>
+      vod && ready
+        ? {
+            vodId: vod.id,
+            channelSlug: vod.channelSlug,
+            title: vod.title,
+            thumbnailUrl: vod.thumbnailUrl,
+            durationSeconds: vod.durationSeconds,
+          }
+        : null,
+    [vod, ready],
+  );
+  const onProgress = useResumeWriter(resumeVideo);
   if (loaded.kind === "loading") return <WatchSkeleton />;
   if (loaded.kind === "error") return <WatchError onRetry={reload} />;
   if (!vod || state === null || state === "not-found") return <WatchNotAvailable slug={channel} channel={card} />;
@@ -170,6 +196,9 @@ export function VodWatchPage({
       publicUrl={publicUrl}
       clipboard={clipboard}
       startAt={startAt}
+      onProgress={onProgress}
+      offerResume
+      clip={{ channel: vod.channelSlug, vodId: vod.id, signedIn: viewer !== null, publicUrl }}
       more={
         <WatchMore
           kind="vod"
@@ -232,6 +261,11 @@ export function ClipWatchPage({
       clipboard={clipboard}
       views={clip.views}
       creator={clip.creator ? { displayName: clip.creator.displayName } : null}
+      actions={
+        clip.vodId !== null ? (
+          <WatchFromMoment slug={clip.channelSlug} vodId={clip.vodId} offsetSeconds={clip.vodOffsetSeconds} />
+        ) : null
+      }
       more={
         <WatchMore
           kind="clip"
@@ -279,6 +313,14 @@ interface LayoutProps {
   views?: number | null;
   creator?: { displayName: string } | null;
   more: React.ReactNode;
+  /** Videos: Continue watching's writer. */
+  onProgress?: (progress: PlayerProgress) => void;
+  /** Videos: offer "Resume from m:ss" from Continue watching's stored point (D3.6). */
+  offerResume?: boolean;
+  /** Videos: the viewer's Clip button. */
+  clip?: VodPlayerProps["clip"];
+  /** Next steps under the details. */
+  actions?: React.ReactNode;
 }
 
 function WatchLayout(p: LayoutProps): React.JSX.Element {
@@ -308,6 +350,26 @@ function WatchLayout(p: LayoutProps): React.JSX.Element {
     handle.current?.seekToWallclock(at);
   }, []);
   const currentTime = React.useCallback(() => playheadSeconds(clockRef.current.playhead, clockRef.current.origin), []);
+  // Read once when the layout mounts (in the browser, after the video loaded): the writer keeps
+  // saving while the video plays, and the offer must not follow it.
+  const [offer, setOffer] = React.useState<number | null>(() =>
+    p.offerResume ? resumeOffer(p.id, p.startAt ?? null, p.durationSeconds) : null,
+  );
+  const resume = (at: number) => {
+    // Before the player knows media time 0, the `?t=` path seeks as soon as it does.
+    if (seekToStart(handle.current, at, duration) === "pending") pendingStart.current = at;
+    setOffer(null);
+  };
+  const resumeAt = p.state === "ready" ? offer : null;
+  const actions =
+    resumeAt !== null || p.actions ? (
+      <>
+        {resumeAt !== null ? (
+          <ResumeOffer at={resumeAt} onResume={() => resume(resumeAt)} onDismiss={() => setOffer(null)} />
+        ) : null}
+        {p.actions}
+      </>
+    ) : null;
 
   const stage =
     p.state === "gated" ? (
@@ -327,6 +389,8 @@ function WatchLayout(p: LayoutProps): React.JSX.Element {
         durationSeconds={p.durationSeconds}
         captions={p.captions}
         onPlayhead={onPlayhead}
+        onProgress={p.onProgress}
+        clip={p.clip}
         handleRef={handle}
       />
     ) : null;
@@ -352,6 +416,7 @@ function WatchLayout(p: LayoutProps): React.JSX.Element {
                 publicUrl={p.publicUrl ?? pageOrigin()}
                 currentTime={p.variant === "vod" ? currentTime : undefined}
                 clipboard={p.clipboard}
+                actions={actions}
               />
               <WatchChannelCard
                 slug={p.slug}
@@ -378,6 +443,62 @@ function WatchLayout(p: LayoutProps): React.JSX.Element {
         {p.more}
       </div>
     </PageContainer>
+  );
+}
+
+/** "Resume from m:ss" (D3.6), with a way to keep watching from where the page started. */
+function ResumeOffer({
+  at,
+  onResume,
+  onDismiss,
+}: {
+  at: number;
+  onResume: () => void;
+  onDismiss: () => void;
+}): React.JSX.Element {
+  return (
+    <div data-testid="watch-resume" data-at={at} className="flex min-w-0 flex-wrap items-center gap-2">
+      <Button data-testid="watch-resume-action" size="sm" variant="outline" onClick={onResume}>
+        <HugeiconsIcon icon={PlayIcon} strokeWidth={2} aria-hidden />
+        {t("d3Watch.resume.action", { time: formatDuration(at) })}
+      </Button>
+      <Button data-testid="watch-resume-dismiss" size="sm" variant="ghost" onClick={onDismiss}>
+        {t("d3Watch.resume.dismiss")}
+      </Button>
+    </div>
+  );
+}
+
+/** A clip's "Watch from this moment" (D3.9): its video, at the clip's start. */
+export function WatchFromMoment({
+  slug,
+  vodId,
+  offsetSeconds,
+}: {
+  slug: string;
+  vodId: string;
+  offsetSeconds: number | null;
+}): React.JSX.Element {
+  const start = momentStart(offsetSeconds);
+  return (
+    <Button
+      data-testid="watch-from-moment"
+      data-vod-id={vodId}
+      data-t={start ?? 0}
+      size="sm"
+      variant="outline"
+      nativeButton={false}
+      render={
+        <Link
+          to="/$channel/vods/$vodId"
+          params={{ channel: slug, vodId }}
+          search={start === null ? {} : { t: start }}
+        />
+      }
+    >
+      <HugeiconsIcon icon={Film02Icon} strokeWidth={2} aria-hidden />
+      {t("d3Watch.moment.action")}
+    </Button>
   );
 }
 

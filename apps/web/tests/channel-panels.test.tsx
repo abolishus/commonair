@@ -112,9 +112,10 @@ describe("the panels", () => {
     const body = 'Pixel <b onclick="steal()">sprites</b>\n<script>alert(1)</script>';
     const { container } = wrap(<ChannelPanels panels={[panel(1, { body })]} />);
     const el = byTestId(container, "channel-panel-body")[0] as HTMLElement;
-    expect(el.textContent).toBe(body);
+    // D3.8: markdown, never HTML. The line break is a <br>; the tags stay literal text.
+    expect(el.textContent).toBe(body.replace("\n", ""));
     expect(el.querySelector("b, script")).toBeNull();
-    expect(el.className).toContain("whitespace-pre-line");
+    expect(el.querySelectorAll("br")).toHaveLength(1);
   });
 
   it("links open in a new tab as nofollow ugc, with an icon and a label through t()", () => {
