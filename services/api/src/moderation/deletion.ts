@@ -16,8 +16,10 @@ import {
   StripeOutcomeUnknown,
   createAdapter,
 } from "@commonair/payments";
+import type { Deps } from "../deps.ts";
 import { audit } from "../events/audit.ts";
 import { iso } from "../lib/dto.ts";
+import { endSubscriptions, invalidateSubscribers } from "../money/checkout-shared.ts";
 
 const { accountDeletions, users } = schema;
 type DeletionRow = typeof accountDeletions.$inferSelect;
@@ -86,14 +88,20 @@ export async function deletionDatesAmong(db: Executor, userIds: readonly string[
  *
  * The subscriptions concerned are the ones the worker's deletion ends (services/worker
  * src/deletion/money.ts `concerned`): paid by the user or on the user's channels, gifts excepted.
- * Those still renewing (`active` or `past_due`, `cancel_at_period_end` false) are set to end at
- * period end, so the paid time runs out during the grace period and nothing is charged again.
+ * Those still renewing (`active`, `cancel_at_period_end` false) are set to end at period end, so
+ * the paid time runs out during the grace period and nothing is charged again. `past_due` ones end
+ * now, as a member's own cancel ends them (money/checkout.ts): their period is already over, and a
+ * provider left at period end keeps dunning the open invoice, so a retry could still charge the
+ * card and start a new paid period. Their pending renewal payments fail first, so a late confirm
+ * (or a late manual transfer) cannot revive them. Nothing marks them: there is nothing to restore.
  *
  * - Request: the provider first (`stopRenewalsAtProvider`, before the transaction). A provider that
  *   cannot be reached refuses the request, so a scheduled deletion never leaves a card charging;
- *   the subscriptions already stopped for it are turned back on (best effort). Then, in the request
- *   transaction, the local rows (`markRenewalsStopped`): `cancel_at_period_end`, the deletion's
- *   marker and an audit row each (ids and cents only).
+ *   the subscriptions already stopped for it are turned back on (best effort; one ended now stays
+ *   ended, and the provider's end event ends it here too). Then, in the request transaction, the
+ *   local rows: `endPastDue` (renewals failed, subscription ended, an audit row each) and
+ *   `markRenewalsStopped` (`cancel_at_period_end`, the deletion's marker and an audit row each; ids
+ *   and cents only).
  * - Cancel: in the cancel transaction, the manual rows carrying the deletion's marker renew again
  *   (`restoreManualRenewals`; the 0060 trigger clears the marker). After commit, each provider row
  *   is resumed at the provider and then locally (`resumeAtProvider`). A provider failure leaves that
@@ -101,7 +109,7 @@ export async function deletionDatesAmong(db: Executor, userIds: readonly string[
  *   cancel never fails because a provider is down.
  * ------------------------------------------------------------------------------------------------ */
 
-const { channels, subscriptions } = schema;
+const { channels, payments, subscriptions } = schema;
 
 /** The part of a payment adapter renewal stops need; tests pass their own. */
 export type RenewalAdapter = Pick<PaymentAdapter, "provider" | "cancelSubscription" | "resumeSubscription">;
@@ -129,18 +137,25 @@ export class RenewalStopError extends Error {
 const ownedChannels = (userId: string) =>
   sql`${subscriptions.channelId} in (select ${channels.id} from ${channels} where ${channels.ownerId} = ${userId})`;
 
-/** Subscriptions the user's deletion ends that still renew. */
-export function renewingConcerned(userId: string) {
-  return and(
+const concerned = (userId: string) =>
+  and(
     or(eq(subscriptions.subscriberId, userId), ownedChannels(userId)),
-    inArray(subscriptions.status, ["active", "past_due"]),
-    eq(subscriptions.cancelAtPeriodEnd, false),
     isNull(subscriptions.giftedById),
     isNull(subscriptions.giftPaymentId),
   );
+
+/** Subscriptions the user's deletion ends that still renew (set to end at period end). */
+export function renewingConcerned(userId: string) {
+  return and(concerned(userId), eq(subscriptions.status, "active"), eq(subscriptions.cancelAtPeriodEnd, false));
+}
+
+/** Subscriptions the user's deletion ends whose period is already over (ended now). */
+export function pastDueConcerned(userId: string) {
+  return and(concerned(userId), eq(subscriptions.status, "past_due"));
 }
 
 export const stopKey = (deletionId: string, subId: string) => `deletion-${deletionId}-stop-${subId}`;
+export const stopNowKey = (deletionId: string, subId: string) => `deletion-${deletionId}-stop-${subId}-now`;
 const undoKey = (deletionId: string, subId: string) => `deletion-${deletionId}-undo-${subId}`;
 export const resumeKey = (deletionId: string, subId: string) => `deletion-${deletionId}-resume-${subId}`;
 
@@ -152,6 +167,10 @@ interface ProviderRow {
   id: string;
   provider: string;
   ref: string | null;
+}
+
+interface StopRow extends ProviderRow {
+  status: string;
 }
 
 /** Turn back on what this request stopped before it failed (best effort; logged by id). */
@@ -178,14 +197,16 @@ async function undoStops(
 export interface StoppedRenewals {
   /** Provider-managed subscriptions set to end at period end at the provider. */
   ids: string[];
+  /** Provider-managed `past_due` subscriptions ended now at the provider. */
+  endedIds: string[];
   /** Turn them back on (the request's transaction failed after the provider calls). */
   undo(): Promise<void>;
 }
 
 /**
  * Before the request transaction: set every provider-managed subscription the deletion concerns to
- * end at period end at the provider. Throws `RenewalStopError` (after undoing the ones it stopped)
- * when one cannot be stopped.
+ * end at period end at the provider, and end the `past_due` ones now. Throws `RenewalStopError`
+ * (after undoing the period-end stops) when one cannot be stopped.
  */
 export async function stopRenewalsAtProvider(
   db: Executor,
@@ -194,11 +215,17 @@ export async function stopRenewalsAtProvider(
   deletionId: string,
   logger: Logger,
 ): Promise<StoppedRenewals> {
-  const rows = await db
-    .select({ id: subscriptions.id, provider: subscriptions.provider, ref: subscriptions.providerRef })
+  const rows: StopRow[] = await db
+    .select({
+      id: subscriptions.id,
+      provider: subscriptions.provider,
+      ref: subscriptions.providerRef,
+      status: subscriptions.status,
+    })
     .from(subscriptions)
-    .where(and(renewingConcerned(userId), ne(subscriptions.provider, "manual")));
+    .where(and(or(renewingConcerned(userId), pastDueConcerned(userId)), ne(subscriptions.provider, "manual")));
   const stopped: ProviderRow[] = [];
+  const ended: string[] = [];
   for (const r of rows) {
     let reason: RenewalStopError["reason"] | null = null;
     let providerStatus: number | null = null;
@@ -206,8 +233,12 @@ export async function stopRenewalsAtProvider(
     else if (adapter.provider !== r.provider) reason = "provider_mismatch";
     else if (!r.ref) reason = "no_reference";
     else {
+      const now = r.status === "past_due";
       try {
-        await adapter.cancelSubscription(r.ref, { atPeriodEnd: true, idempotencyKey: stopKey(deletionId, r.id) });
+        await adapter.cancelSubscription(r.ref, {
+          atPeriodEnd: !now,
+          idempotencyKey: now ? stopNowKey(deletionId, r.id) : stopKey(deletionId, r.id),
+        });
       } catch (err) {
         if (!isGone(err)) {
           reason = "provider_error";
@@ -225,9 +256,83 @@ export async function stopRenewalsAtProvider(
       await undoStops(adapter, stopped, deletionId, logger);
       throw new RenewalStopError(r.id, reason);
     }
-    stopped.push(r);
+    if (r.status === "past_due") ended.push(r.id);
+    else stopped.push(r);
   }
-  return { ids: stopped.map((r) => r.id), undo: () => undoStops(adapter, stopped, deletionId, logger) };
+  return {
+    ids: stopped.map((r) => r.id),
+    endedIds: ended,
+    undo: () => undoStops(adapter, stopped, deletionId, logger),
+  };
+}
+
+/**
+ * In the request transaction: the concerned `past_due` subscriptions end now, as a member's own
+ * cancel ends them (money/checkout.ts): their pending renewal payments fail first (lock order:
+ * payment rows before subscription rows, as the worker's expiry job), then the subscription ends,
+ * one audit row each. Provider rows end only when the provider ended them (`providerEnded`).
+ * Returns the channels whose subscribers' chat badges to invalidate after commit.
+ */
+export async function endPastDue(
+  tx: Executor,
+  input: { userId: string; deletionId: string; providerEnded: readonly string[]; actorId: string; now: Date },
+): Promise<Map<string, string[]>> {
+  const which =
+    input.providerEnded.length > 0
+      ? or(eq(subscriptions.provider, "manual"), inArray(subscriptions.id, [...input.providerEnded]))
+      : eq(subscriptions.provider, "manual");
+  const candidates = await tx
+    .select({ id: subscriptions.id })
+    .from(subscriptions)
+    .where(and(pastDueConcerned(input.userId), which));
+  const invalidate = new Map<string, string[]>();
+  if (candidates.length === 0) return invalidate;
+  const ids = candidates.map((c) => c.id);
+  const pending = await tx
+    .select({ id: payments.id })
+    .from(payments)
+    .where(and(inArray(payments.subscriptionId, ids), eq(payments.status, "pending")))
+    .for("update");
+  if (pending.length > 0)
+    await tx
+      .update(payments)
+      .set({ status: "failed", updatedAt: input.now })
+      .where(
+        and(
+          inArray(
+            payments.id,
+            pending.map((p) => p.id),
+          ),
+          eq(payments.status, "pending"),
+        ),
+      );
+  const subs = await tx
+    .select()
+    .from(subscriptions)
+    .where(and(inArray(subscriptions.id, ids), pastDueConcerned(input.userId)))
+    .for("update");
+  for (const sub of subs) {
+    const [c] = await tx.select().from(channels).where(eq(channels.id, sub.channelId));
+    if (!c) continue;
+    const subscribers = await endSubscriptions(tx, c, eq(subscriptions.id, sub.id), input.now);
+    if (subscribers.length === 0) continue;
+    invalidate.set(c.id, [...(invalidate.get(c.id) ?? []), ...subscribers]);
+    await audit(tx, {
+      actorType: "user",
+      actorId: input.actorId,
+      action: "subscription.renewal_stop",
+      subjectType: "subscription",
+      subjectId: sub.id,
+      channelId: sub.channelId,
+      details: { deletionId: input.deletionId, subscriptionId: sub.id, priceCents: sub.priceCents, endedNow: true },
+    });
+  }
+  return invalidate;
+}
+
+/** After the request commits: chat drops the cached badges of the subscriptions `endPastDue` ended. */
+export async function invalidateEnded(deps: Deps, ended: ReadonlyMap<string, readonly string[]>): Promise<void> {
+  for (const [channelId, userIds] of ended) await invalidateSubscribers(deps, channelId, userIds);
 }
 
 /**

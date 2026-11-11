@@ -18,5 +18,6 @@
   "w5Deletion.treasury.asked": "Email sent. Their reply comes to the co-op's contact address.",
   "w5Deletion.treasury.askFailed": "The email wasn't sent. Try again.",
   "w5Deletion.treasury.askTooSoon": "They were asked less than a day ago. Try again tomorrow.",
-  "w5Deletion.treasury.askedToday": "Asked less than a day ago"
+  "w5Deletion.treasury.askedToday": "Asked less than a day ago",
+  "w5Deletion.treasury.truncated": "More members hold a share than this list can check at once, so someone leaving may be missing here. Check the Held shares below too."
 }

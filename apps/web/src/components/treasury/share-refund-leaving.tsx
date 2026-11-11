@@ -9,7 +9,8 @@
  * it was last asked and waits.
  *
  * `LeavingSharesPanel` takes the shares as props (tests render it with fixtures);
- * `CoopSharesTab` (coop/treasury-tabs.tsx) loads them.
+ * `CoopSharesTab` (coop/treasury-tabs.tsx) loads them with `loadLeavingShares`, which reads every
+ * page of held shares: a member leaving can hold any of them, not only the newest page.
  */
 import { ConfirmDialog, MoneyAmount, RelativeTime } from "@commonair/ui";
 import { Section } from "@commonair/ui/blocks/headers";
@@ -25,6 +26,37 @@ import { fillNode } from "../../lib/fill.tsx";
 
 /** `coop.shares.askRefundDetails` allows one request a day per share. */
 export const ASK_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+
+/** Held shares per request while looking for members leaving (the contract's maximum). */
+export const LEAVING_PAGE = 100;
+/** At most this many pages are read; past it the panel says the list may be incomplete. */
+export const LEAVING_MAX_PAGES = 50;
+
+export interface LeavingLoad {
+  /** Shares of members leaving, soonest first. */
+  shares: ShareDto[];
+  /** More held shares exist than `LEAVING_MAX_PAGES` pages: some leaving members may be missing. */
+  truncated: boolean;
+}
+
+/**
+ * Every page of held shares, kept to the ones whose member is leaving. `list` is
+ * `coop.shares.list({ status: "held" })` for a cursor.
+ */
+export async function loadLeavingShares(
+  list: (cursor: string | undefined, limit: number) => Promise<{ items: ShareDto[]; nextCursor: string | null }>,
+  maxPages = LEAVING_MAX_PAGES,
+): Promise<LeavingLoad> {
+  const found: ShareDto[] = [];
+  let cursor: string | undefined;
+  for (let n = 0; n < maxPages; n++) {
+    const page = await list(cursor, LEAVING_PAGE);
+    found.push(...page.items.filter((s) => s.deletionScheduledFor !== null));
+    if (page.nextCursor === null) return { shares: leavingShares(found) ?? [], truncated: false };
+    cursor = page.nextCursor;
+  }
+  return { shares: leavingShares(found) ?? [], truncated: true };
+}
 
 /** The shares whose member has a deletion scheduled, soonest first (pure). */
 export function leavingShares(shares: readonly ShareDto[] | null): ShareDto[] | null {
@@ -48,16 +80,19 @@ export function askErrorText(err: unknown): string {
 export interface LeavingSharesPanelProps {
   /** Shares of members leaving (`leavingShares`); null while loading. Nothing renders when empty. */
   shares: ShareDto[] | null;
+  /** Not every held share was checked (`LeavingLoad.truncated`). */
+  truncated?: boolean;
   onAsk: (share: ShareDto) => Promise<void>;
   now?: () => number;
 }
 
 export function LeavingSharesPanel({
   shares,
+  truncated = false,
   onAsk,
   now = Date.now,
 }: LeavingSharesPanelProps): React.JSX.Element | null {
-  if (!shares || shares.length === 0) return null;
+  if (!shares || (shares.length === 0 && !truncated)) return null;
   const nowMs = now();
   return (
     <Section
@@ -65,6 +100,11 @@ export function LeavingSharesPanel({
       description={t("w5Deletion.treasury.intro")}
       data-testid="treasury-leaving-shares"
     >
+      {truncated ? (
+        <p className="text-muted-foreground text-sm" data-testid="treasury-leaving-shares-truncated">
+          {t("w5Deletion.treasury.truncated")}
+        </p>
+      ) : null}
       <ItemGroup className="gap-3">
         {shares.map((share) => (
           <LeavingShareItem key={share.id} share={share} onAsk={onAsk} recent={askedRecently(share, nowMs)} />

@@ -46,7 +46,7 @@ vi.mock("../src/lib/bootstrap.ts", () => ({
 const { impactLines } = await import("../src/components/settings/delete-model.ts");
 const { DeleteAccountSection, deletionRequestErrorText } =
   await import("../src/components/settings/delete-account.tsx");
-const { LeavingSharesPanel, askErrorText, askedRecently, leavingShares } =
+const { LEAVING_PAGE, LeavingSharesPanel, askErrorText, askedRecently, leavingShares, loadLeavingShares } =
   await import("../src/components/treasury/share-refund-leaving.tsx");
 const { leavingFirst } = await import("../src/components/coop/treasury-tabs.tsx");
 type DeletionClient = import("../src/components/settings/deletion-state.tsx").DeletionClient;
@@ -183,10 +183,64 @@ describe("leavingShares, leavingFirst and askedRecently", () => {
   });
 });
 
+describe("loadLeavingShares", () => {
+  /** Held shares in pages of `size`, newest first, as `coop.shares.list` answers. */
+  const pagesOf = (all: ShareDto[], size: number) => {
+    const asked: (string | undefined)[] = [];
+    const list = async (cursor: string | undefined, limit: number) => {
+      asked.push(cursor);
+      expect(limit).toBe(LEAVING_PAGE);
+      const start = cursor ? Number(cursor) : 0;
+      const items = all.slice(start, start + size);
+      return { items, nextCursor: start + size < all.length ? String(start + size) : null };
+    };
+    return { list, asked };
+  };
+
+  it("reads every page, so a member leaving past the first page is found", async () => {
+    const staying = Array.from({ length: 120 }, (_, i) => shareFixture(`h${i}`, "held"));
+    const deep = leaving("deep", "2026-11-15T00:00:00.000Z");
+    const early = leaving("early", "2026-12-01T00:00:00.000Z");
+    const { list, asked } = pagesOf([early, ...staying, deep], 50);
+    const r = await loadLeavingShares(list);
+    expect(r).toEqual({ shares: [deep, early], truncated: false });
+    expect(asked).toEqual([undefined, "50", "100"]);
+  });
+
+  it("one page when it is the only one; none leaving gives an empty list", async () => {
+    const { list, asked } = pagesOf([shareFixture("a", "held")], 50);
+    expect(await loadLeavingShares(list)).toEqual({ shares: [], truncated: false });
+    expect(asked).toEqual([undefined]);
+  });
+
+  it("stops at the page cap and says the list may be incomplete", async () => {
+    const all = [
+      leaving("x", "2026-11-15T00:00:00.000Z"),
+      ...Array.from({ length: 9 }, (_, i) => shareFixture(`h${i}`, "held")),
+    ];
+    const { list, asked } = pagesOf(all, 2);
+    const r = await loadLeavingShares(list, 3);
+    expect(r.truncated).toBe(true);
+    expect(r.shares.map((s) => s.id)).toEqual(["x"]);
+    expect(asked).toHaveLength(3);
+  });
+
+  it("a failed page fails the load (the tab shows its retry block)", async () => {
+    await expect(loadLeavingShares(async () => Promise.reject(new Error("down")))).rejects.toThrow("down");
+  });
+});
+
 describe("LeavingSharesPanel", () => {
   it("renders nothing without members leaving", () => {
     wrap(<LeavingSharesPanel shares={[]} onAsk={async () => {}} now={() => NOW} />);
     expect(screen.queryByTestId("treasury-leaving-shares")).toBeNull();
+  });
+
+  it("says when not every held share was checked", async () => {
+    wrap(<LeavingSharesPanel shares={[]} truncated onAsk={async () => {}} now={() => NOW} />);
+    expect((await screen.findByTestId("treasury-leaving-shares-truncated")).textContent).toBe(
+      en["w5Deletion.treasury.truncated"],
+    );
   });
 
   it("asks through a confirm dialog, then says the email went", async () => {

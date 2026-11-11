@@ -59,6 +59,15 @@ ask where to send the money.
   worker job was not chosen: it would schedule the deletion before the provider agreed, leaving a
   window where renewal is on at the provider and off here. No outbox row is written, as for a
   member's own cancel at period end: nothing outside the API reads that flag.
+- **`past_due` subscriptions end now**, as a member's own cancel ends them (`money/checkout.ts`):
+  their period is already over, and a provider subscription left at period end keeps dunning its
+  open invoice, so a retry could still charge the card and start a new paid period. The provider
+  is told to end it now (key `deletion-<deletionId>-stop-<subscriptionId>-now`); in the request
+  transaction its pending renewal payments fail first (manual ones too, so a late transfer cannot
+  revive it), then it ends (`channel.subscription.end`) with a `subscription.renewal_stop` audit
+  row (`endedNow: true`). It carries no marker: cancelling the deletion has nothing to restore.
+  If the request transaction fails after the provider ended it, the provider's end event ends it
+  here too.
 - **Cancel** (`me.deletion.cancel`): in the cancel transaction, manual subscriptions with the
   marker renew again; after commit, each provider one is resumed at the provider
   (`resumeSubscription`) and then locally. A provider failure leaves that subscription ending at
@@ -70,7 +79,10 @@ ask where to send the money.
   email names a share left `refund_pending` by its reference (the bank-transfer reference, else the
   share id).
 - **Treasury**: `coop.shares.list` fills `deletionScheduledFor`; the shares tab lists held shares
-  of members leaving, soonest first. `coop.shares.askRefundDetails` (treasurer) accepts a
+  of members leaving, soonest first. It reads every page of held shares (100 a request, at most 50
+  pages, then it says the list may be incomplete), since a leaving member's share can be on any
+  page. A `leaving` filter on `coop.shares.list` would make that one bounded request; it is a
+  contract request. `coop.shares.askRefundDetails` (treasurer) accepts a
   `refund_pending` share or a held share whose member has a deletion scheduled, at most once a
   day per share (409), and refuses a member who can no longer be emailed (412). The email
   (`shareRefundDetails`) is sent inside the transaction that records `refund_details_requested_at`

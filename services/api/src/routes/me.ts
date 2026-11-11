@@ -25,6 +25,8 @@ import { audit } from "../events/audit.ts";
 import {
   currentDeletion,
   DELETION_GRACE_DAYS,
+  endPastDue,
+  invalidateEnded,
   lockUser,
   markRenewalsStopped,
   RenewalStopError,
@@ -351,18 +353,17 @@ export const me = {
       }
       let created = false;
       let row: typeof schema.accountDeletions.$inferSelect;
+      let ended = new Map<string, string[]>();
       try {
         row = await deps.db.transaction(async (tx) => {
           await lockUser(tx, caller.user.id);
           const existing = await scheduledDeletion(tx, caller.user.id);
-          const mark = (id: string) =>
-            markRenewalsStopped(tx, {
-              userId: caller.user.id,
-              deletionId: id,
-              providerStopped: stopped.ids,
-              actorId: caller.user.id,
-              now,
-            });
+          const mark = async (id: string) => {
+            const input = { userId: caller.user.id, deletionId: id, actorId: caller.user.id, now };
+            // past_due ones end now (their period is over), the rest at period end.
+            ended = await endPastDue(tx, { ...input, providerEnded: stopped.endedIds });
+            await markRenewalsStopped(tx, { ...input, providerStopped: stopped.ids });
+          };
           if (existing) {
             // A concurrent request scheduled it first; what this one stopped is marked with it.
             await mark(existing.id);
@@ -394,6 +395,7 @@ export const me = {
         await stopped.undo();
         throw err;
       }
+      await invalidateEnded(deps, ended);
       if (created) await sendDeletionScheduled(deps, caller.user.id, row.scheduledFor);
       return toDeletion(row);
     }),

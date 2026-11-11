@@ -100,6 +100,36 @@ async function requestDeletion(who: Person) {
   });
 }
 
+/** A pending renewal payment for `sub` (what a late transfer or a dunning retry would confirm). */
+async function pendingRenewal(sub: Sub, provider: "manual" | "stripe" = "manual"): Promise<string> {
+  const [p] = await db()
+    .insert(schema.payments)
+    .values({
+      provider,
+      providerRef: uniqueName("renew"),
+      kind: "subscription",
+      status: "pending",
+      userId: sub.subscriberId,
+      channelId: sub.channelId,
+      subscriptionId: sub.id,
+      amountCents: sub.priceCents,
+      currency: "usd",
+      tier: sub.tier,
+      quantity: 1,
+    })
+    .returning({ id: schema.payments.id });
+  if (!p) throw new Error("no payment");
+  return p.id;
+}
+
+const paymentStatus = async (id: string) => {
+  const [p] = await db()
+    .select({ status: schema.payments.status })
+    .from(schema.payments)
+    .where(eq(schema.payments.id, id));
+  return p?.status;
+};
+
 const auditOf = (action: string, subjectId: string) =>
   db()
     .select()
@@ -126,6 +156,7 @@ describe("renewal stops when a deletion is requested (manual)", () => {
     ]);
     const pays = await subscribe(leaver, creator);
     const pastDue = await subscribe(leaver, other, { status: "past_due" });
+    const pastDueRenewal = await pendingRenewal(pastDue);
     const onChannel = await subscribe(fan, leaver);
     const gift = await subscribe(leaver, await signUpAndSignIn(api), { giftedById: gifter.userId });
     const unrelated = await subscribe(fan, creator);
@@ -138,8 +169,14 @@ describe("renewal stops when a deletion is requested (manual)", () => {
     expect(r.status).toBe(200);
     const deletionId = r.body.id;
 
-    for (const s of [pays, pastDue, onChannel, resumed])
+    for (const s of [pays, onChannel, resumed])
       expect(await subRow(s.id)).toMatchObject({ cancelAtPeriodEnd: true, renewalStoppedByDeletionId: deletionId });
+    // past_due: its period is over, so it ends now and its open renewal fails (a late transfer
+    // cannot revive it). Nothing marks it: cancelling the deletion has nothing to restore.
+    expect(await subRow(pastDue.id)).toMatchObject({ status: "canceled", renewalStoppedByDeletionId: null });
+    expect(await paymentStatus(pastDueRenewal)).toBe("failed");
+    const [endedAudit] = await auditOf("subscription.renewal_stop", pastDue.id);
+    expect(endedAudit?.details).toEqual({ deletionId, subscriptionId: pastDue.id, priceCents: 500, endedNow: true });
     for (const s of [gift, unrelated])
       expect(await subRow(s.id)).toMatchObject({ cancelAtPeriodEnd: false, renewalStoppedByDeletionId: null });
     expect(await subRow(ownCancel.id)).toMatchObject({ cancelAtPeriodEnd: true, renewalStoppedByDeletionId: null });
@@ -167,8 +204,9 @@ describe("renewal stops when a deletion is requested (manual)", () => {
       .where(eq(schema.subscriptions.id, resumed.id));
 
     expect((await leaver.client.call("DELETE", "/api/me/deletion")).status).toBe(200);
-    for (const s of [pays, pastDue, onChannel])
+    for (const s of [pays, onChannel])
       expect(await subRow(s.id)).toMatchObject({ cancelAtPeriodEnd: false, renewalStoppedByDeletionId: null });
+    expect(await subRow(pastDue.id)).toMatchObject({ status: "canceled" });
     // Not this deletion's to restore: the member's own cancels stay.
     expect(await subRow(ownCancel.id)).toMatchObject({ cancelAtPeriodEnd: true });
     expect(await subRow(resumed.id)).toMatchObject({ cancelAtPeriodEnd: true, renewalStoppedByDeletionId: null });
@@ -216,6 +254,61 @@ describe.skipIf(!stripeUp)("renewal stops at Stripe (stripe-mock)", () => {
     expect(await subRow(card.id)).toMatchObject({ cancelAtPeriodEnd: true, renewalStoppedByDeletionId: r.body.id });
     expect((await leaver.client.call("DELETE", "/api/me/deletion")).status).toBe(200);
     expect(await subRow(card.id)).toMatchObject({ cancelAtPeriodEnd: false, renewalStoppedByDeletionId: null });
+    useProvider("manual");
+  });
+
+  test("a past_due Stripe subscription ends now at Stripe and here, its renewal failed", async () => {
+    useProvider("stripe");
+    const [leaver, creator] = await Promise.all([signUpAndSignIn(api), signUpAndSignIn(api)]);
+    const card = await subscribe(leaver, creator, {
+      provider: "stripe",
+      providerRef: `sub_${uniqueName("")}`,
+      status: "past_due",
+      currentPeriodEnd: new Date(Date.now() - DAY),
+    });
+    const renewal = await pendingRenewal(card, "stripe");
+    const calls: { atPeriodEnd: boolean; idempotencyKey: string }[] = [];
+    const { createAdapter } = await import("@commonair/payments");
+    const real = createAdapter(api.deps.env);
+    const { stopRenewalsAtProvider, endPastDue } = await import("../src/moderation/deletion.ts");
+    // The request through the API, against stripe-mock.
+    const r = await requestDeletion(leaver);
+    expect(r.status).toBe(200);
+    expect(await subRow(card.id)).toMatchObject({ status: "canceled", renewalStoppedByDeletionId: null });
+    expect(await paymentStatus(renewal)).toBe("failed");
+    expect((await leaver.client.call("DELETE", "/api/me/deletion")).status).toBe(200);
+    expect(await subRow(card.id)).toMatchObject({ status: "canceled" });
+
+    // What the provider is told: end now (not at period end), under the stable "-now" key.
+    const other = await signUpAndSignIn(api);
+    const due = await subscribe(other, creator, {
+      provider: "stripe",
+      providerRef: `sub_${uniqueName("")}`,
+      status: "past_due",
+    });
+    const spy = {
+      provider: real.provider,
+      cancelSubscription: async (ref: string, opts: { atPeriodEnd: boolean; idempotencyKey: string }) => {
+        calls.push(opts);
+        await real.cancelSubscription?.(ref, opts);
+      },
+      resumeSubscription: real.resumeSubscription?.bind(real),
+    };
+    const stopped = await stopRenewalsAtProvider(db(), spy, other.userId, "d1", api.deps.logger);
+    expect(stopped).toMatchObject({ ids: [], endedIds: [due.id] });
+    expect(calls).toEqual([{ atPeriodEnd: false, idempotencyKey: `deletion-d1-stop-${due.id}-now` }]);
+    // A row the provider did not end is left alone locally.
+    const ended = await db().transaction((tx) =>
+      endPastDue(tx, {
+        userId: other.userId,
+        deletionId: "d1",
+        providerEnded: [],
+        actorId: other.userId,
+        now: new Date(),
+      }),
+    );
+    expect(ended.size).toBe(0);
+    expect(await subRow(due.id)).toMatchObject({ status: "past_due" });
     useProvider("manual");
   });
 

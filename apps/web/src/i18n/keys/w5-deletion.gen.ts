@@ -23,4 +23,5 @@ export type Key =
   | "w5Deletion.treasury.asked"
   | "w5Deletion.treasury.askFailed"
   | "w5Deletion.treasury.askTooSoon"
-  | "w5Deletion.treasury.askedToday";
+  | "w5Deletion.treasury.askedToday"
+  | "w5Deletion.treasury.truncated";
