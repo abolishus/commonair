@@ -64,16 +64,24 @@ export interface ChannelAbout {
   bio: string;
   /** `Channel.socials`, in the streamer's order. (Category and tags are polled: `ChannelSummary`.) */
   socials: ChannelSocial[];
+  /**
+   * Overhaul wave 5: set when a stream is scheduled (`Channel.nextStreamAt`), so About loads the
+   * schedule when opened; absent otherwise (no request for a channel without one).
+   */
+  schedule?: { channel: string };
 }
 
 export const NO_ABOUT: ChannelAbout = Object.freeze({ bio: "", socials: [] });
 
-export function channelAbout(c: Pick<ChannelDto, "description" | "socials">): ChannelAbout {
+export function channelAbout(
+  c: Pick<ChannelDto, "description" | "socials"> & Partial<Pick<ChannelDto, "slug" | "nextStreamAt">>,
+): ChannelAbout {
   // Defensive: a malformed entry (or an older API without the field) never breaks the page.
   const socials = (c.socials as ChannelSocial[] | undefined) ?? [];
   return {
     bio: c.description.trim(),
     socials: socials.filter((s) => SOCIAL_PLATFORMS.includes(s.platform) && isHttpsUrl(s.url)),
+    ...(c.slug && c.nextStreamAt ? { schedule: { channel: c.slug } } : {}),
   };
 }
 

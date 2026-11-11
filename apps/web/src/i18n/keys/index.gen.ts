@@ -89,6 +89,7 @@ import type { Key as W3Portability } from "./w3-portability.gen.ts";
 import type { Key as W3Predictions } from "./w3-predictions.gen.ts";
 import type { Key as W3SurgeRaids } from "./w3-surge-raids.gen.ts";
 import type { Key as W3WatchRooms } from "./w3-watch-rooms.gen.ts";
+import type { Key as W5Schedule } from "./w5-schedule.gen.ts";
 import type { Key as W5Viewers } from "./w5-viewers.gen.ts";
 
 /** Every message key, typed from the English catalogs. */
@@ -179,6 +180,7 @@ export type MessageKey =
   | W3Predictions
   | W3SurgeRaids
   | W3WatchRooms
+  | W5Schedule
   | W5Viewers;
 
 export const NAMESPACES = [
@@ -268,5 +270,6 @@ export const NAMESPACES = [
   "w3-predictions",
   "w3-surge-raids",
   "w3-watch-rooms",
+  "w5-schedule",
   "w5-viewers",
 ] as const;

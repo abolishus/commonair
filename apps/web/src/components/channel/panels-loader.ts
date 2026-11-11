@@ -29,6 +29,8 @@ export interface ChannelPage {
   since?: string | null;
   /** `Channel.ownerCoop` (D4.7 trust marks): the owner's co-op membership and council seat. */
   ownerCoop?: { member: boolean; council: boolean } | null;
+  /** `Channel.nextStreamAt` (overhaul wave 5): the offline page's next-stream card. */
+  nextStreamAt?: string | null;
 }
 
 /**
@@ -63,5 +65,6 @@ export const getChannelPage = createServerFn({ method: "GET" })
       clips,
       since: dto.createdAt,
       ownerCoop: dto.ownerCoop,
+      nextStreamAt: dto.nextStreamAt,
     };
   });

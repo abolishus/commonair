@@ -23,8 +23,10 @@ import {
   YoutubeIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import type * as React from "react";
+import * as React from "react";
 import { t } from "../../i18n/index.ts";
+import { useBootstrap } from "../../lib/bootstrap.ts";
+import { AboutSchedule, AboutTabContext } from "../schedule/about-schedule.tsx";
 import type { ChannelAbout } from "./channel-data.ts";
 import { socialLabel } from "./channel-data.ts";
 import { CategoryLink } from "./channel-meta.tsx";
@@ -179,7 +181,15 @@ export function ChannelAboutSection({
           <ChannelSocials name={name} socials={about.socials} />
         </CardContent>
       </Card>
+      {about.schedule ? <TabSchedule channel={about.schedule.channel} /> : null}
       <ChannelPanels panels={panels} />
     </div>
   );
+}
+
+/** The schedule, only in the About tab itself (Home's offline page embeds About without it). */
+function TabSchedule({ channel }: { channel: string }): React.JSX.Element | null {
+  const inTab = React.useContext(AboutTabContext);
+  const { config } = useBootstrap();
+  return inTab ? <AboutSchedule channel={channel} publicUrl={config.publicUrl} /> : null;
 }

@@ -10,6 +10,7 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@commonair/ui/components/tabs";
 import type * as React from "react";
 import { t } from "../../i18n/index.ts";
+import { AboutTabContext } from "../schedule/about-schedule.tsx";
 import { CHANNEL_TABS, isChannelTab, type ChannelTab } from "./channel-data.ts";
 
 function tabLabel(tab: ChannelTab): string {
@@ -53,7 +54,12 @@ export function ChannelTabs({ tab, onTabChange, panels }: ChannelTabsProps): Rea
       </div>
       {CHANNEL_TABS.map((id) => (
         <TabsContent key={id} value={id} data-testid={`channel-panel-${id}`} className="min-w-0 text-sm">
-          {id === tab ? panels[id] : null}
+          {id !== tab ? null : id === "about" ? (
+            // About's own content (the schedule) loads only here, not where Home embeds About.
+            <AboutTabContext.Provider value>{panels[id]}</AboutTabContext.Provider>
+          ) : (
+            panels[id]
+          )}
         </TabsContent>
       ))}
     </Tabs>

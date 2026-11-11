@@ -154,7 +154,7 @@ describe("account menu", () => {
 });
 
 describe("studio nav", () => {
-  it("lists stream manager, rehearsal, overlays, polls and raids, the bot, captions, content, analytics, revenue, crew, relays, move, import and developer, nothing else", () => {
+  it("lists stream manager, rehearsal, overlays, polls and raids, the bot, captions, content, analytics, schedule, revenue, crew, relays, move, import and developer, nothing else", () => {
     expect(studioNav("/dashboard", { twitchImport: true }).map((i) => [i.id, i.to])).toEqual([
       ["streamManager", "/dashboard"],
       ["rehearse", "/rehearse"],
@@ -164,6 +164,7 @@ describe("studio nav", () => {
       ["captions", "/captions"],
       ["content", "/content"],
       ["analytics", "/analytics"],
+      ["schedule", "/schedule"],
       ["revenue", "/revenue"],
       ["crew", "/crew"],
       ["relays", "/relays"],
@@ -180,6 +181,8 @@ describe("studio nav", () => {
     ["/captions", "captions"],
     ["/analytics", "analytics"],
     ["/analytics/", "analytics"],
+    ["/schedule", "schedule"],
+    ["/schedule/", "schedule"],
     ["/crew", "crew"],
     ["/crew/", "crew"],
     ["/overlays", "overlays"],
@@ -223,6 +226,7 @@ describe("studio nav", () => {
       ["captions", "/captions"],
       ["content", "/content"],
       ["analytics", "/analytics"],
+      ["schedule", "/schedule"],
       ["revenue", "/revenue"],
       ["crew", "/crew"],
       ["relays", "/relays"],

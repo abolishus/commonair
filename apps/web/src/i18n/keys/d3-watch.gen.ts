@@ -63,5 +63,4 @@ export type Key =
   | "d3Watch.offline.neverBody"
   | "d3Watch.offline.followBody"
   | "d3Watch.offline.latestLabel"
-  | "d3Watch.offline.calendar"
-  | "d3Watch.offline.calendarTitle";
+  | "d3Watch.offline.calendar";

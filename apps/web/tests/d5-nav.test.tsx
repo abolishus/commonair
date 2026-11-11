@@ -24,7 +24,7 @@ describe("studio groups", () => {
       ["community", ["modView", "chat", "bot", "interact"]],
       ["content", ["content"]],
       ["money", ["revenue", "crew"]],
-      ["grow", ["audience", "analytics", "move", "import"]],
+      ["grow", ["audience", "analytics", "schedule", "move", "import"]],
       ["coopTools", ["relays", "developer"]],
     ]);
   });
@@ -44,7 +44,12 @@ describe("studio groups", () => {
   it("leaves out chat safety and import when the instance does not offer them", () => {
     const groups = studioNavGroups("/dashboard", { channel: "aurora" });
     expect(groups.find((g) => g.id === "community")?.items.map((i) => i.id)).toEqual(["modView", "bot", "interact"]);
-    expect(groups.find((g) => g.id === "grow")?.items.map((i) => i.id)).toEqual(["audience", "analytics", "move"]);
+    expect(groups.find((g) => g.id === "grow")?.items.map((i) => i.id)).toEqual([
+      "audience",
+      "analytics",
+      "schedule",
+      "move",
+    ]);
   });
 
   it("links Bring your audience to /move whatever the setup or live state, never current", () => {

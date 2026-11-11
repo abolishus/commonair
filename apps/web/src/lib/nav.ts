@@ -81,6 +81,7 @@ export interface StudioEntry {
     | "captions"
     | "content"
     | "analytics"
+    | "schedule"
     | "revenue"
     | "crew"
     | "relays"
@@ -99,6 +100,7 @@ export interface StudioEntry {
     | "/captions"
     | "/content"
     | "/analytics"
+    | "/schedule"
     | "/revenue"
     | "/crew"
     | "/relays"
@@ -327,6 +329,7 @@ export function studioNav(pathname: string, options: StudioNavOptions = {}): Stu
     { id: "captions", to: "/captions", current: path === "/captions" },
     { id: "content", to: "/content", current: path === "/content" },
     { id: "analytics", to: "/analytics", current: path === "/analytics" },
+    { id: "schedule", to: "/schedule", current: path === "/schedule" },
     { id: "revenue", to: "/revenue", current: path === "/revenue" },
     { id: "crew", to: "/crew", current: path === "/crew" },
     { id: "relays", to: "/relays", current: path === "/relays" },
@@ -406,7 +409,7 @@ export function studioNavGroups(pathname: string, options: StudioNavGroupOptions
     },
     { id: "content", items: pick("content") },
     { id: "money", items: pick("revenue", "crew") },
-    { id: "grow", items: [audience, ...pick("analytics", "move", "import")] },
+    { id: "grow", items: [audience, ...pick("analytics", "schedule", "move", "import")] },
     { id: "coopTools", items: pick("relays", "developer") },
   ];
   return groups.filter((group) => group.items.length > 0);

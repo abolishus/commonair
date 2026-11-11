@@ -983,3 +983,55 @@ export const D7_MOD_IDS = {
   chatModWaveDelete: "chat-mod-wave-delete",
   chatModWaveDeleteDialog: "chat-mod-wave-delete-dialog",
 } as const;
+
+/**
+ * w5-schedule (overhaul wave 5): the studio's `/schedule` editor and the channel page's schedule.
+ * `scheduleSlot` rows carry `data-weekday`; `scheduleUpcomingItem` rows carry `data-starts-at` and
+ * `data-skipped`; `channelNextStream` (the offline hero, after hydration) carries `data-starts-at`.
+ * `channelOfflineCalendar` downloads the next stream (`…/schedule.ics?next=1`);
+ * `channelScheduleSubscribe` is the feed on `webcal:`.
+ */
+export const W5_SCHEDULE_IDS = {
+  studioScheduleLink: "studio-schedule-link",
+  scheduleEditor: "schedule-editor",
+  scheduleLoading: "schedule-loading",
+  scheduleLoadError: "schedule-load-error",
+  scheduleRetry: "schedule-retry",
+  scheduleTimezone: "schedule-timezone",
+  scheduleWeekly: "schedule-weekly",
+  scheduleSlot: "schedule-slot",
+  scheduleSlotWeekday: "schedule-slot-weekday",
+  scheduleSlotStart: "schedule-slot-start",
+  scheduleSlotDuration: "schedule-slot-duration",
+  scheduleSlotTitle: "schedule-slot-title",
+  scheduleSlotCategory: "schedule-slot-category",
+  scheduleSlotRemove: "schedule-slot-remove",
+  scheduleAddSlot: "schedule-add-slot",
+  scheduleSlotsFull: "schedule-slots-full",
+  scheduleOneOffs: "schedule-one-offs",
+  scheduleOneOff: "schedule-one-off",
+  scheduleOneOffStartsAt: "schedule-one-off-starts-at",
+  scheduleOneOffDuration: "schedule-one-off-duration",
+  scheduleOneOffTitle: "schedule-one-off-title",
+  scheduleOneOffCategory: "schedule-one-off-category",
+  scheduleOneOffRemove: "schedule-one-off-remove",
+  scheduleAddOneOff: "schedule-add-one-off",
+  scheduleOneOffsFull: "schedule-one-offs-full",
+  scheduleUpcoming: "schedule-upcoming",
+  scheduleUpcomingChanged: "schedule-upcoming-changed",
+  scheduleUpcomingItem: "schedule-upcoming-item",
+  scheduleUpcomingSkip: "schedule-upcoming-skip",
+  scheduleErrorSummary: "schedule-error-summary",
+  scheduleSave: "schedule-save",
+  channelNextStream: "channel-next-stream",
+  channelOfflineCalendar: "channel-offline-calendar",
+  channelScheduleSubscribe: "channel-schedule-subscribe",
+  channelSchedule: "channel-schedule",
+  channelScheduleSlot: "channel-schedule-slot",
+  channelScheduleOneOff: "channel-schedule-one-off",
+  channelScheduleError: "channel-schedule-error",
+  channelScheduleRetry: "channel-schedule-retry",
+} as const;
+
+/** w5-schedule routes. */
+export const W5_SCHEDULE_ROUTES = { studioSchedule: "/schedule" } as const;

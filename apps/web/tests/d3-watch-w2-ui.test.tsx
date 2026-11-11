@@ -304,7 +304,7 @@ describe("OfflineChannelHome", () => {
     expect(container.querySelector('[data-testid="channel-shelf"]')).toBeNull();
   });
 
-  it("a known next stream: when, its title, and Add to calendar as a download", () => {
+  it("a known next stream: when, its title, Add to calendar (the feed's next event) and the subscribable feed", async () => {
     wrap(
       <OfflineChannelHome
         channel={channel}
@@ -327,9 +327,22 @@ describe("OfflineChannelHome", () => {
     expect(byId("channel-offline-heading")?.textContent).toContain(t("d3Watch.offline.next"));
     expect(document.body.textContent).toContain("Campaign night");
     const cal = byId("channel-offline-calendar") as HTMLAnchorElement;
-    expect(cal.getAttribute("href")?.startsWith("data:text/calendar;charset=utf-8,")).toBe(true);
-    expect(decodeURIComponent(cal.getAttribute("href") ?? "")).toContain("URL:https://air.example/rivertide");
+    expect(cal.getAttribute("href")).toBe("/api/channels/rivertide/schedule.ics?next=1");
     expect(cal.getAttribute("download")).toBe("rivertide.ics");
+    const feed = byId("channel-schedule-subscribe") as HTMLAnchorElement;
+    expect(feed.getAttribute("href")).toBe("webcal://air.example/api/channels/rivertide/schedule.ics");
+    // The date block and the weekday and time are the viewer's, after hydration.
+    await waitFor(() => expect(byId("channel-next-stream")).not.toBeNull());
+    const start = new Date("2026-11-12T19:00:00.000Z");
+    expect(byId("channel-next-stream")?.textContent).toContain(String(start.getDate()));
+    fireEvent.click(cal);
+    fireEvent.click(feed);
+    expect(metrics.calls).toEqual(
+      expect.arrayContaining([
+        ["channel.schedule", "click", "ics"],
+        ["channel.schedule", "click", "feed"],
+      ]),
+    );
   });
 
   it("the owner gets the studio instead of Follow", () => {

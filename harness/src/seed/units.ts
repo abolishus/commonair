@@ -8,10 +8,11 @@ import { unit as media } from "./media.ts";
 import { unit as money } from "./money.ts";
 import { unit as platform } from "./platform.ts";
 import { unit as safety } from "./safety.ts";
+import { unit as schedule } from "./schedule.ts";
 import { unit as social } from "./social.ts";
 import type { SeedUnit, SeedUnitName } from "./types.ts";
 
-export const SEED_UNITS: readonly SeedUnit[] = [social, interact, money, coop, safety, platform, media];
+export const SEED_UNITS: readonly SeedUnit[] = [social, interact, money, coop, safety, platform, media, schedule];
 
 type UnitDeps = Pick<SeedUnit, "name" | "after">;
 
