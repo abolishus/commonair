@@ -12,7 +12,6 @@
   "d7Notify.row.go_live": "A channel you follow goes live",
   "d7Notify.row.go_live.hint": "Your default for every channel. Each channel's bell and its own choices are below.",
   "d7Notify.row.governance": "Co-op proposals and votes",
-  "d7Notify.row.governance.hint": "New proposals, and when voting opens on one.",
   "d7Notify.row.payout": "Payouts",
   "d7Notify.row.payout.hint": "When a payout is sent or changes.",
   "d7Notify.row.creator": "Your videos",

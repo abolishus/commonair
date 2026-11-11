@@ -867,6 +867,7 @@ export const D7_NOTIFY_IDS = {
   notifyCellNone: "notify-cell-none",
   notifyCellAlways: "notify-cell-always",
   notifyGovernanceInApp: "notify-pref-governance-in_app",
+  notifyGovernanceEmail: "notify-pref-governance-email",
   notifyPayoutEmail: "notify-pref-payout-email",
   notifyCreatorInApp: "notify-pref-creator-in_app",
   notifyCreatorEmail: "notify-pref-creator-email",

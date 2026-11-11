@@ -115,15 +115,16 @@ export const PREFERENCE_CELL_TEST_IDS: {
   readonly [T in PreferenceType]: Partial<Record<NotifyMedium, string>>;
 } = {
   go_live: { in_app: "notify-default-in_app", email: "notify-default-email", push: "notify-default-push" },
-  governance: { in_app: "notify-pref-governance-in_app" },
+  governance: { in_app: "notify-pref-governance-in_app", email: "notify-pref-governance-email" },
   payout: { email: "notify-pref-payout-email" },
   creator: { in_app: "notify-pref-creator-in_app", email: "notify-pref-creator-email" },
   digest_weekly: { email: "notify-pref-digest_weekly-email" },
 };
 
 /**
- * Offered cells the grid shows locked instead ("Always", with the reason). Payout notices are
- * financial records: they stay in the inbox whatever the in-app choice (decided conservatively).
+ * Cells the grid shows locked ("Always", with the reason): media that always reach the member, so
+ * `PREFERENCE_MEDIA` does not offer them. Payout notices are financial records: they always stay in
+ * the inbox (decided conservatively; overhaul wave 5 dropped payout in-app from the choices).
  */
 export const LOCKED_CELLS: { readonly [T in PreferenceType]?: Partial<Record<NotifyMedium, MessageKey>> } = {
   payout: { in_app: "d7Notify.locked.payoutInApp" },
@@ -132,7 +133,7 @@ export const LOCKED_CELLS: { readonly [T in PreferenceType]?: Partial<Record<Not
 /** The grid's rows with a choice, in order (`go_live` first: it has the per-channel overrides too). */
 export const GRID_ROWS: readonly { type: PreferenceType; label: MessageKey; hint: MessageKey }[] = [
   { type: "go_live", label: "d7Notify.row.go_live", hint: "d7Notify.row.go_live.hint" },
-  { type: "governance", label: "d7Notify.row.governance", hint: "d7Notify.row.governance.hint" },
+  { type: "governance", label: "d7Notify.row.governance", hint: "w5Notify.row.governance.hint" },
   { type: "payout", label: "d7Notify.row.payout", hint: "d7Notify.row.payout.hint" },
   { type: "creator", label: "d7Notify.row.creator", hint: "d7Notify.row.creator.hint" },
   { type: "digest_weekly", label: "d7Notify.row.digest_weekly", hint: "d7Notify.row.digest_weekly.hint" },
