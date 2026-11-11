@@ -207,8 +207,13 @@ describe("live events", () => {
     // Malformed live events are ignored; a valid one for another channel changes nothing here.
     for (const raw of ["{", "null", JSON.stringify({ channelId: 7 }), JSON.stringify({ channelId: uuidv7() })])
       await pub.publish(iso.busPrefix + BUS.live, raw);
-    await pub.publish(iso.busPrefix + BUS.live, JSON.stringify({ channelId: ch.id, status: "online" }));
+    const online = JSON.stringify({ channelId: ch.id, status: "online" });
+    await pub.publish(iso.busPrefix + BUS.live, online);
     const after = await eventually(async () => {
+      // Pub/sub delivers at most once (in production the directory's TTL is the backstop), and on
+      // a loaded CI runner one delivery was lost even with 10 s to arrive (docs/operators/flakes.md).
+      // The event is idempotent, so each poll sends it again.
+      await pub.publish(iso.busPrefix + BUS.live, online);
       const r = await v.say(ch.slug, "live message");
       await svc.flush();
       const [row] = await t.db
@@ -216,8 +221,6 @@ describe("live events", () => {
         .from(schema.chatMessages)
         .where(eq(schema.chatMessages.id, r.ack.id ?? uuidv7()));
       return row?.b === broadcastId ? r : null;
-      // The reload rides Valkey pub/sub, then a channel reload from Postgres: 3 s was short on a
-      // loaded CI runner (docs/operators/flakes.md). The bound only guards against a hang.
     }, 10_000);
     await svc.flush();
     const rows = await t.db

@@ -92,7 +92,7 @@ describe("selectUnits", () => {
   const all = names(ordered);
 
   test("the run order puts every dependency first", () => {
-    expect(all).toEqual(["social", "interact", "money", "media", "safety", "coop", "platform"]);
+    expect(all).toEqual(["social", "interact", "money", "media", "safety", "coop", "platform", "schedule"]);
   });
 
   test("no flags: every unit, from the start", () => {
@@ -102,7 +102,7 @@ describe("selectUnits", () => {
   test("--from resumes after the unit before it", () => {
     const s = selectUnits(ordered, "coop");
     expect(s.resumeAfter).toBe("safety");
-    expect(names(s.run)).toEqual(["coop", "platform"]);
+    expect(names(s.run)).toEqual(["coop", "platform", "schedule"]);
     expect(s.reachesEnd).toBe(true);
     // The first unit is a fresh run.
     expect(selectUnits(ordered, "social").resumeAfter).toBeUndefined();
@@ -114,7 +114,8 @@ describe("selectUnits", () => {
     expect(s.reachesEnd).toBe(false);
     const one = selectUnits(ordered, "media", "media");
     expect([one.resumeAfter, names(one.run), one.reachesEnd]).toEqual(["money", ["media"], false]);
-    expect(selectUnits(ordered, "platform", "platform").reachesEnd).toBe(true);
+    expect(selectUnits(ordered, "platform", "platform").reachesEnd).toBe(false);
+    expect(selectUnits(ordered, "schedule", "schedule").reachesEnd).toBe(true);
   });
 
   test("--to before --from, or a unit not in the order, throws", () => {

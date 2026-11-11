@@ -51,6 +51,7 @@ describe("N1 selectors match docs/testing/n1-selectors.md", () => {
     expect(groups).toEqual([
       "Header (signed in)",
       "Settings (`/settings/notifications`)",
+      "Per-channel alerts (`/following`)",
       "Push toggle (inside settings)",
       "Unsubscribe page (`/settings/notifications/unsubscribe`)",
       "PWA",
