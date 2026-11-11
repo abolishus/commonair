@@ -25,3 +25,11 @@ export { SwitchMatrix, type SwitchMatrixProps, type SwitchMatrixRow } from "./sw
 export { CommentComposer, type CommentComposerProps } from "./comment-composer.tsx";
 export { SelectField, type SelectFieldProps, type SelectFieldOption } from "./select-field.tsx";
 export { NoteDialog, type NoteDialogProps } from "./note-dialog.tsx";
+export {
+  DangerZone,
+  SettingsRow,
+  SettingsSection,
+  type DangerZoneProps,
+  type SettingsRowProps,
+  type SettingsSectionProps,
+} from "./settings-section.tsx";
