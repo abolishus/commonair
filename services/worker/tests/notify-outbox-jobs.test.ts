@@ -3,7 +3,7 @@
 
 /** The outbox relay's notification hook (N1, ADR 0028 decision 8). */
 import type { BusEvent } from "@commonair/contracts/events";
-import { GoLiveJob, NOTIFY_JOBS } from "@commonair/contracts/internal";
+import { GoLiveJob, GovernanceEmailJob, NOTIFY_JOBS } from "@commonair/contracts/internal";
 import { describe, expect, test } from "vite-plus/test";
 import { notifyJobsFor } from "../src/notify/outbox-jobs.ts";
 
@@ -30,6 +30,37 @@ describe("notifyJobsFor", () => {
       expect(j.opts.jobId).not.toContain(":");
       expect(GoLiveJob.parse(j.data)).toEqual(j.data);
     }
+  });
+
+  test("a vote opening or a published result starts the governance mailer (wave 5); other statuses do not", () => {
+    const p = "0190f0f0-0000-7000-8000-00000000cccc";
+    const update = (id: string, status: string): BusEvent =>
+      ({
+        id,
+        type: "coop.proposal.update",
+        version: "1",
+        channelId: null,
+        payload: { proposal_id: p, title: "T", status, kind: "ordinary", passed: null, reason: null },
+        occurredAt: "2026-11-11T00:00:00Z",
+      }) as unknown as BusEvent;
+    const ids = ["voting", "passed", "rejected", "council_review", "applied", "discussion"].map(
+      (status, i) => [status, `0190f0f0-0000-7000-8000-00000000010${i}`] as const,
+    );
+    const jobs = notifyJobsFor(ids.map(([status, id]) => update(id, status)));
+    expect(jobs).toEqual(
+      ids.slice(0, 3).map(([, id]) => ({
+        name: NOTIFY_JOBS.governanceEmail,
+        data: { eventId: id, after: null },
+        opts: { jobId: `governance-email-${id}` },
+      })),
+    );
+    for (const j of jobs) {
+      expect(j.opts.jobId).not.toContain(":");
+      expect(GovernanceEmailJob.parse(j.data)).toEqual(j.data);
+    }
+    // A malformed payload is ignored rather than enqueued.
+    const broken = { ...update("0190f0f0-0000-7000-8000-000000000200", "voting"), payload: { status: "voting" } };
+    expect(notifyJobsFor([broken as unknown as BusEvent])).toEqual([]);
   });
 
   test("nothing to enqueue for an empty or unrelated batch", () => {
