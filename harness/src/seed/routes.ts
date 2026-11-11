@@ -42,6 +42,8 @@ const form: SeedRoute = { as: "anonymous", expectData: false };
 
 export const SEED_ROUTES: Readonly<Record<string, SeedRoute>> = {
   "/": viewer,
+  // Overhaul wave 2 (d3-home): the channels viewer1 follows (seed-social), live first.
+  "/following": viewer,
   "/$channel": { ...viewer, params: { channel: ch("streamer1") }, okEmpty: [LIVE_CHAT_EMPTY] },
   // W2-vod-watch: streamer1's public VOD and a clip of it, published by seed-media.
   "/$channel/vods/$vodId": { ...viewer, params: { channel: ch("streamer1"), vodId: ex("media", "vodId") } },
@@ -64,6 +66,12 @@ export const SEED_ROUTES: Readonly<Record<string, SeedRoute>> = {
   "/signup": form,
   "/dmca": form,
   "/takedown": form,
+  // Overhaul wave 2 (d2-pages): the creators pitch with its fee calculator, and the public legal
+  // pages, which render the shipped drafts the base seed inserts (`seedLegalDocuments`).
+  "/creators": { as: "anonymous", expectData: false },
+  "/terms": { as: "anonymous", expectData: true },
+  "/privacy": { as: "anonymous", expectData: true },
+  "/guidelines": { as: "anonymous", expectData: true },
   "/transparency": { as: "anonymous", expectData: true },
   // W2b-attestations: the public verifier (a form until a statement is pasted or linked).
   "/attestations/verify": form,
@@ -144,6 +152,8 @@ export const SEED_ROUTES: Readonly<Record<string, SeedRoute>> = {
   "/admin/legal": { as: "legal", expectData: true },
   "/admin/apps": admin,
   "/admin/coop": admin,
+  // d2-metrics: seed-platform writes ui_counters and growth_daily rows for the report.
+  "/admin/growth": admin,
   // N4-web: domain blocks and key rotation; federation ships off, so no data after the seed.
   "/admin/federation": { as: "admin", expectData: true },
   "/treasury": { as: "treasurer", expectData: true },
