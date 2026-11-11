@@ -8,7 +8,8 @@
  *   on the member's channel, gifts excepted), at the provider first and locally with the marker;
  *   a provider that cannot be reached refuses the request and changes nothing;
  * - cancelling it turns renewal back on for exactly the marked ones; a provider that fails then
- *   leaves that one ending on both sides, unmarked, and the cancel still succeeds;
+ *   leaves that one ending on both sides, unmarked, and the cancel still succeeds; a renewal the
+ *   member cancels while the deletion is pending stays cancelled;
  * - the preview counts subscriptions paid past the deletion date (`endingBeforePaidThrough`);
  * - `coop.shares.askRefundDetails`: treasurer only, refund_pending or a leaving member's held
  *   share, once a day, audited by id, mailed through Mailpit, never returning the address;
@@ -213,6 +214,23 @@ describe("renewal stops when a deletion is requested (manual)", () => {
     const [back] = await auditOf("subscription.renewal_resume", pays.id);
     expect(back?.details).toEqual({ deletionId, subscriptionId: pays.id, resumed: true });
     expect(await auditOf("subscription.renewal_resume", resumed.id)).toHaveLength(0);
+  });
+
+  test("cancelling a renewal the deletion stopped keeps it cancelled when the deletion is cancelled", async () => {
+    useProvider("manual");
+    const [leaver, creator] = await Promise.all([signUpAndSignIn(api), signUpAndSignIn(api)]);
+    const pays = await subscribe(leaver, creator);
+    const r = await requestDeletion(leaver);
+    expect(r.status).toBe(200);
+    expect(await subRow(pays.id)).toMatchObject({ cancelAtPeriodEnd: true, renewalStoppedByDeletionId: r.body.id });
+
+    const cancel = await leaver.client.call("POST", `/api/me/subscriptions/${pays.id}/cancel`);
+    expect(cancel.status).toBe(200);
+    expect(await subRow(pays.id)).toMatchObject({ cancelAtPeriodEnd: true, renewalStoppedByDeletionId: null });
+
+    expect((await leaver.client.call("DELETE", "/api/me/deletion")).status).toBe(200);
+    expect(await subRow(pays.id)).toMatchObject({ cancelAtPeriodEnd: true, renewalStoppedByDeletionId: null });
+    expect(await auditOf("subscription.renewal_resume", pays.id)).toHaveLength(0);
   });
 
   test("a Stripe subscription on an instance that cannot reach the provider refuses the request", async () => {

@@ -5,7 +5,7 @@
  * Checkout, subscriptions and tips for viewers and channel owners (E4b api-checkout unit). The
  * treasurer's actions are in `checkout-treasurer.ts`; the state machines are in README.md.
  */
-import { and, desc, eq, inArray, lt, notInArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, lt, notInArray, sql } from "drizzle-orm";
 import { MONEY_LIMITS } from "@commonair/contracts/currency";
 import { PROCESSOR_FEE_ESTIMATE } from "@commonair/contracts/enums";
 import { type Executor, schema, uuidv7 } from "@commonair/db";
@@ -490,7 +490,21 @@ export const checkoutHandlers = {
       await invalidateSubscribers(deps, ended.channelId, [caller.user.id]);
       return toSubscriptionDto(ended.row, current.channel, current.subscriber);
     }
-    if (current.cancelAtPeriodEnd) return current;
+    if (current.cancelAtPeriodEnd) {
+      // Renewal is already off. If a pending deletion turned it off (ADR 0042), the member now
+      // chooses it too: drop the marker so cancelling the deletion does not turn renewal back on.
+      await deps.db
+        .update(subscriptions)
+        .set({ renewalStoppedByDeletionId: null })
+        .where(
+          and(
+            eq(subscriptions.id, input.id),
+            eq(subscriptions.subscriberId, caller.user.id),
+            isNotNull(subscriptions.renewalStoppedByDeletionId),
+          ),
+        );
+      return current;
+    }
     const [row] = await deps.db
       .update(subscriptions)
       .set({ cancelAtPeriodEnd: true, updatedAt: deps.now() })
