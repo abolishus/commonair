@@ -14,7 +14,7 @@
  * have not reached the public prefix yet has no thumbnail or playlist here, and cards carry no
  * caption tracks; the watch page loads both.
  */
-import { and, desc, eq, ilike, isNull, or, sql, type Column, type SQL } from "drizzle-orm";
+import { and, desc, eq, isNull, sql, type Column, type SQL } from "drizzle-orm";
 import type { z } from "zod";
 import type { dto } from "@commonair/contracts";
 import { VOD_PLAYLIST, vodPrefix } from "@commonair/contracts/storage";
@@ -28,16 +28,14 @@ type ChannelRow = typeof channels.$inferSelect;
 type VodCard = z.infer<typeof dto.VodCard>;
 type ClipCard = z.infer<typeof dto.ClipCard>;
 
-/** `%q%` for ILIKE, with the pattern characters escaped. */
-export const containsPattern = (q: string): string => `%${q.replace(/[\\%_]/g, (m) => `\\${m}`)}%`;
-
-/** The title holds the query as a substring, or every word of it in any order. */
-function titleMatches(title: Column, q: string): SQL {
-  return or(
-    ilike(title, containsPattern(q)),
-    sql`to_tsvector('simple', ${title}) @@ plainto_tsquery('simple', ${q})`,
-  ) as SQL;
-}
+/**
+ * Every word of the query in any order, as full-text search alone. No ILIKE substring branch: an
+ * OR with a predicate no index serves forces a full scan of vods and clips on every keystroke of
+ * this public search. `to_tsvector('simple', title)` must stay byte-identical to the expression of
+ * the `vods_title_search_idx` and `clips_title_search_idx` GIN indexes for them to be used.
+ */
+const titleMatches = (title: Column, q: string): SQL =>
+  sql`to_tsvector('simple', ${title}) @@ plainto_tsquery('simple', ${q})`;
 
 /**
  * No mature label anywhere, over a query joining `broadcasts` (possibly left: a clip's broadcast

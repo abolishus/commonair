@@ -51,7 +51,7 @@ deterministic: every API replica shows the same spotlight in the same window.
 - **Search**: Postgres full-text search on channel name, title and description (the
   `channels_search_idx` expression), live streams' titles and tags (live channels first, viewer
   accounts with no followers and no stream last), plus category names. Videos and clips match on
-  their title (substring, or every word in any order: [`search-media.ts`](search-media.ts)):
+  their title (full-text, every word in any order: [`search-media.ts`](search-media.ts)):
   public, ready videos newest first; ready clips, no more visible than their source, most viewed
   first. Anyone who has not confirmed 18+ gets no mature-labelled video or clip at all.
 - **Categories**: `liveChannels`, `viewerCount` (the sum of verified viewers) and `tags` (the ten

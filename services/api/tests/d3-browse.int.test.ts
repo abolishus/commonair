@@ -293,8 +293,12 @@ describe("search videos and clips", () => {
     expect(grown.clips[1]?.url).not.toBeNull();
   });
 
-  test("every word in any order matches, and LIKE characters are literal", async () => {
+  test("every word in any order matches; a word fragment or pattern characters do not", async () => {
     expect((await search(client(api), "firing glaze")).videos.map((v) => v.id)).toEqual([newest, older]);
+    // Full-text only, so the title GIN indexes serve the query: no substring match.
+    const fragment = await search(client(api), "glaz");
+    expect(fragment.videos).toEqual([]);
+    expect(fragment.clips).toEqual([]);
     expect((await search(client(api), "gl%ze")).videos).toEqual([]);
     expect((await search(client(api), "_laze")).clips).toEqual([]);
   });
