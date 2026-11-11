@@ -360,10 +360,11 @@ describe("channels.follow and unfollow", () => {
   test("a follow counts once and emits once; following again only changes notify; unfollow lowers", async () => {
     const [owner, fan] = await two();
     const path = `/api/channels/${owner.username}/follow`;
-    const first = await fan.client.call<{ following: true; followerCount: number }>("PUT", path, { notify: true });
-    expect(first.body).toEqual({ following: true, followerCount: 1 });
-    const again = await fan.client.call<{ following: true; followerCount: number }>("PUT", path, { notify: false });
-    expect(again.body).toEqual({ following: true, followerCount: 1 });
+    type Followed = { following: true; followerCount: number; firstFollow: boolean };
+    const first = await fan.client.call<Followed>("PUT", path, { notify: true });
+    expect(first.body).toEqual({ following: true, followerCount: 1, firstFollow: true });
+    const again = await fan.client.call<Followed>("PUT", path, { notify: false });
+    expect(again.body).toEqual({ following: true, followerCount: 1, firstFollow: false });
     const c = await channelOf(owner.username);
     const [row] = await db()
       .select()

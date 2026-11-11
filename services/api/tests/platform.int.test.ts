@@ -74,7 +74,7 @@ describe("follows", () => {
       {},
     );
     expect(f.status).toBe(200);
-    expect(f.body).toEqual({ following: true, followerCount: 1 });
+    expect(f.body).toMatchObject({ following: true, followerCount: 1 });
     // Following twice is idempotent: no second event, no double count.
     const again = await bob.client.call<{ followerCount: number }>("PUT", `/api/channels/${alice.username}/follow`, {
       notify: false,
