@@ -25,6 +25,7 @@ import type { Key as D4Layout } from "./d4-layout.gen.ts";
 import type { Key as D4Polish } from "./d4-polish.gen.ts";
 import type { Key as D5Content } from "./d5-content.gen.ts";
 import type { Key as D5Dashboard } from "./d5-dashboard.gen.ts";
+import type { Key as D5Money } from "./d5-money.gen.ts";
 import type { Key as D5Settings } from "./d5-settings.gen.ts";
 import type { Key as D5Shell } from "./d5-shell.gen.ts";
 import type { Key as D5Studio } from "./d5-studio.gen.ts";
@@ -104,6 +105,7 @@ export type MessageKey =
   | D4Polish
   | D5Content
   | D5Dashboard
+  | D5Money
   | D5Settings
   | D5Shell
   | D5Studio
@@ -182,6 +184,7 @@ export const NAMESPACES = [
   "d4-polish",
   "d5-content",
   "d5-dashboard",
+  "d5-money",
   "d5-settings",
   "d5-shell",
   "d5-studio",

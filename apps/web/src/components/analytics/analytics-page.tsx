@@ -7,13 +7,16 @@
  * and per broadcast its verified and unverified watch time, the audience chart (with a table
  * fallback), excluded groups by category (each with the group-appeal action), the delivery mix, the
  * marginal cost and share links. Groups under 5 sessions arrive from the API already hidden.
+ * D5.6 (d5-money): daily bars with the previous period behind, "What's working" insights and
+ * "Earnings vs cost" from `analytics.pnl`.
  */
-import type { AnalyticsRange, AnalyticsShareLink, BroadcastAnalytics } from "@commonair/contracts/dto";
+import type { AnalyticsPnl, AnalyticsRange, AnalyticsShareLink, BroadcastAnalytics } from "@commonair/contracts/dto";
 import {
   ConfirmDialog,
   EmptyState,
   MoneyAmount,
   RelativeTime,
+  Skeleton,
   SkeletonGroup,
   SkeletonText,
   ViewerCount,
@@ -24,7 +27,7 @@ import {
   formatPercent,
   useLocale,
 } from "@commonair/ui";
-import { DataTable, type DataTableColumn, StatCard, StatGrid, TrendChart } from "@commonair/ui/blocks/data";
+import { BarChart, DataTable, type DataTableColumn, StatCard, StatGrid, TrendChart } from "@commonair/ui/blocks/data";
 import { CopyField } from "@commonair/ui/blocks/forms";
 import { Section } from "@commonair/ui/blocks/headers";
 import { ToggleGroup, ToggleGroupItem } from "@commonair/ui/components/toggle-group";
@@ -55,6 +58,8 @@ import {
 import { GroupAppealAction } from "./group-appeal.tsx";
 import { LiveNowEntry } from "./live-now.tsx";
 import { audienceTrend, formatDayLabel, periodDelta, previousPeriod } from "../studio/trends.ts";
+import { BROADCAST_ANCHOR, InsightTiles } from "../studio-money/insight-tiles.tsx";
+import { PnlCard } from "../studio-money/pnl-card.tsx";
 
 export interface AnalyticsViewProps {
   channel: string;
@@ -88,8 +93,12 @@ export function AnalyticsView({
   const follows = useLoad(`follows|${channel}|${days}`, () =>
     client.followsSince ? client.followsSince({ channel, since: before.from }) : Promise.resolve(null),
   );
+  const pnl = useLoad(`pnl|${channel}|${days}`, () =>
+    client.pnl ? client.pnl({ channel, ...period }) : Promise.resolve(null),
+  );
   const selected = range.data ? pickBroadcast(range.data.broadcasts, wanted) : null;
   const picker = <RangePicker days={days} onChange={setDays} />;
+  const followedAt = follows.data && follows.data.complete ? follows.data.at : null;
 
   return (
     <div data-testid="analytics-page" className="flex flex-col gap-6">
@@ -103,8 +112,14 @@ export function AnalyticsView({
           </Button>
         </div>
       ) : range.data === null ? (
+        // Shaped like what loads: the tiles, then the chart.
         <SkeletonGroup label={t("analytics.loading")}>
-          <SkeletonText lines={6} />
+          <StatGrid cols={4}>
+            {[1, 2, 3, 4].map((i) => (
+              <Skeleton key={i} className="h-24 w-full" />
+            ))}
+          </StatGrid>
+          <Skeleton className="h-64 w-full" />
         </SkeletonGroup>
       ) : range.data.broadcasts.length === 0 ? (
         <EmptyState
@@ -121,12 +136,18 @@ export function AnalyticsView({
             range={range.data}
             previous={previous.data}
             follows={follows.data ? splitFollows(follows.data, period) : null}
+            earned={pnl.data?.revenue ?? null}
           />
           <RangeTrend
             period={period}
             range={range.data}
-            followedAt={follows.data && follows.data.complete ? follows.data.at : null}
+            followedAt={followedAt}
+            previous={previous.data ? { period: before, range: previous.data } : null}
           />
+          <InsightTiles range={range.data} period={period} followedAt={followedAt} onOpen={setWanted} />
+          {client.pnl ? (
+            <PnlCard pnl={pnl.data} failed={pnl.failed} onRetry={pnl.reload} broadcasts={range.data.broadcasts} />
+          ) : null}
           <BroadcastPicker broadcasts={range.data.broadcasts} value={selected} onChange={setWanted} />
           {selected ? (
             <BroadcastSection key={selected} channel={channel} broadcastId={selected} client={client} />
@@ -169,25 +190,31 @@ export function splitFollows(
 type TrendMetric = "hours" | "peak" | "followers";
 const METRICS: readonly TrendMetric[] = ["hours", "peak", "followers"];
 
-/** F24: the period by day, one metric at a time (their scales differ), with a table fallback. */
+/**
+ * F24, D5.6: the period by day as bars, one metric at a time (their scales differ), with the
+ * previous period as ghost bars behind and the figures in a table behind a toggle. Whole-number
+ * ticks, except hours (at most one decimal).
+ */
 export function RangeTrend({
   period,
   range,
   followedAt,
+  previous = null,
 }: {
   period: { from: string; to: string };
   range: AnalyticsRange;
   /** Null when the follower list is not available (or not complete): the metric is then not offered. */
   followedAt: readonly string[] | null;
+  /** The period before and its range, for the ghost bars; null while it loads or when it failed. */
+  previous?: { period: { from: string; to: string }; range: AnalyticsRange } | null;
 }): React.JSX.Element {
   const { locale } = useLocale();
   const [metric, setMetric] = React.useState<TrendMetric>("hours");
   const metrics = followedAt === null ? METRICS.filter((m) => m !== "followers") : METRICS;
   const shown = metrics.includes(metric) ? metric : "hours";
-  const rows = audienceTrend(period, range.broadcasts, followedAt ?? []).map((r) => ({
-    ...r,
-    day: formatDayLabel(r.date, locale),
-  }));
+  const rows = audienceTrend(period, range.broadcasts, followedAt ?? []);
+  // Day i of the period before sits behind day i of this one (the periods are the same length).
+  const before = previous ? audienceTrend(previous.period, previous.range.broadcasts, followedAt ?? []) : null;
   const labels: Record<TrendMetric, string> = {
     hours: t("studio.trend.hours"),
     peak: t("studio.trend.peak"),
@@ -198,17 +225,6 @@ export function RangeTrend({
     peak: "--chart-2",
     followers: "--chart-4",
   };
-  const format = (v: number) => formatNumber(v, locale);
-  type Row = (typeof rows)[number];
-  const columns: DataTableColumn<Row>[] = [
-    { id: "day", header: t("studio.trend.day"), cell: ({ row }) => row.original.day },
-    ...metrics.map((m): DataTableColumn<Row> => ({
-      id: m,
-      header: labels[m],
-      align: "numeric",
-      cell: ({ row }) => format(row.original[m]),
-    })),
-  ];
   const id = React.useId();
   return (
     <Section heading={t("studio.trend.heading")} description={t("studio.trend.hint")}>
@@ -235,29 +251,28 @@ export function RangeTrend({
             ))}
           </ToggleGroup>
         </div>
-        <TrendChart
-          data={rows}
-          xKey="day"
-          legend="bottom"
-          allowDecimals={shown === "hours"}
-          formatValue={format}
+        <BarChart
+          data={rows.map((r, i) => {
+            const ghost = before?.[i];
+            return {
+              key: r.date,
+              label: formatDayLabel(r.date, locale),
+              value: r[shown],
+              ...(ghost ? { previous: ghost[shown] } : {}),
+            };
+          })}
           ariaLabel={t("studio.trend.label", { metric: labels[shown] })}
-          series={[{ key: shown, label: labels[shown], color: color[shown] }]}
+          seriesLabel={labels[shown]}
+          {...(before ? { previousLabel: t("d5Money.analytics.previous") } : {})}
+          color={color[shown]}
+          maxDecimals={shown === "hours" ? 1 : 0}
+          locale={locale}
+          table={{
+            caption: t("studio.trend.heading"),
+            categoryHeader: t("studio.trend.day"),
+            showLabel: t("studio.trend.showTable"),
+          }}
         />
-        <Collapsible>
-          <CollapsibleTrigger render={<Button variant="outline" size="sm" />}>
-            {t("studio.trend.showTable")}
-          </CollapsibleTrigger>
-          <CollapsibleContent className="pt-3">
-            <DataTable
-              data-testid="analytics-trend-table"
-              caption={t("studio.trend.heading")}
-              columns={columns}
-              rows={rows}
-              getRowId={(r) => r.date}
-            />
-          </CollapsibleContent>
-        </Collapsible>
       </div>
     </Section>
   );
@@ -314,7 +329,7 @@ function BroadcastPicker({
     ]),
   );
   return (
-    <div className="flex min-w-0 flex-col gap-1">
+    <div id={BROADCAST_ANCHOR} className="flex min-w-0 scroll-mt-20 flex-col gap-1">
       <Label htmlFor={id} className="text-sm font-medium">
         {t("analytics.broadcast.label")}
       </Label>
@@ -339,15 +354,23 @@ function BroadcastPicker({
   );
 }
 
+/**
+ * The period's KPIs in P6's order: verified watch time, peak verified viewers, followers and
+ * earnings first; then the honesty figures (unverified, excluded) and the serving cost in their
+ * own group, "How we counted", so they never read as the headline.
+ */
 function RangeSummary({
   range,
   previous,
   follows,
+  earned,
 }: {
   range: AnalyticsRange;
   /** The period before, for the deltas; null while it loads or when it failed (no deltas then). */
   previous: AnalyticsRange | null;
   follows: FollowSplit | null;
+  /** `analytics.pnl` revenue: the creator's earnings in the period; null until it loads. */
+  earned: AnalyticsPnl["revenue"] | null;
 }): React.JSX.Element {
   const { locale } = useLocale();
   const hours = (s: number) => t("analytics.hours", { hours: hoursOf(s, locale) });
@@ -357,56 +380,74 @@ function RangeSummary({
       heading={t("analytics.range.heading")}
       description={t("analytics.range.broadcasts", { count: range.broadcasts.length })}
     >
-      <StatGrid cols={4}>
-        <StatCard
-          size="sm"
-          data-testid="analytics-range-verified"
-          label={t("analytics.stat.verified")}
-          value={hours(range.totals.verifiedViewerSeconds)}
-          delta={periodDelta(range.totals.verifiedViewerSeconds, prev?.verifiedViewerSeconds, locale)}
-        />
-        <StatCard
-          size="sm"
-          data-testid="analytics-range-peak"
-          label={t("analytics.stat.peak")}
-          value={<ViewerCount count={range.totals.peakVerifiedConcurrent} icon={false} />}
-          delta={periodDelta(range.totals.peakVerifiedConcurrent, prev?.peakVerifiedConcurrent, locale)}
-        />
-        {follows ? (
+      <div className="flex flex-col gap-4">
+        <StatGrid cols={4}>
           <StatCard
             size="sm"
-            data-testid="analytics-range-followers"
-            label={t("studio.trend.followers")}
-            data-capped={follows.capped || undefined}
-            value={
-              follows.capped
-                ? t("studio.trend.followersAtLeast", { count: formatNumber(follows.current, locale) })
-                : formatNumber(follows.current, locale)
-            }
-            // The list is today's followers: people who followed and left are not in either period.
-            hint={follows.capped ? t("studio.trend.followersCappedHint") : t("studio.trend.followersHint")}
-            delta={follows.capped ? undefined : periodDelta(follows.current, follows.previous, locale)}
+            data-testid="analytics-range-verified"
+            label={t("analytics.stat.verified")}
+            value={hours(range.totals.verifiedViewerSeconds)}
+            delta={periodDelta(range.totals.verifiedViewerSeconds, prev?.verifiedViewerSeconds, locale)}
           />
-        ) : null}
-        <StatCard
-          size="sm"
-          label={t("analytics.stat.unverified")}
-          value={hours(range.totals.unverifiedViewerSeconds)}
-        />
-        <StatCard
-          size="sm"
-          label={t("analytics.stat.excluded")}
-          value={hours(range.totals.excludedViewerSeconds)}
-          hint={t("analytics.stat.excludedHint")}
-          // More excluded time is not better: the arrow keeps its meaning, the colour flips.
-          delta={periodDelta(range.totals.excludedViewerSeconds, prev?.excludedViewerSeconds, locale, {
-            higherIsBetter: false,
-          })}
-        />
-        {range.cost ? (
-          <StatCard size="sm" label={t("analytics.stat.cost")} value={<MoneyAmount value={range.cost} />} />
-        ) : null}
-      </StatGrid>
+          <StatCard
+            size="sm"
+            data-testid="analytics-range-peak"
+            label={t("analytics.stat.peak")}
+            value={<ViewerCount count={range.totals.peakVerifiedConcurrent} icon={false} />}
+            delta={periodDelta(range.totals.peakVerifiedConcurrent, prev?.peakVerifiedConcurrent, locale)}
+          />
+          {follows ? (
+            <StatCard
+              size="sm"
+              data-testid="analytics-range-followers"
+              label={t("studio.trend.followers")}
+              data-capped={follows.capped || undefined}
+              value={
+                follows.capped
+                  ? t("studio.trend.followersAtLeast", { count: formatNumber(follows.current, locale) })
+                  : formatNumber(follows.current, locale)
+              }
+              // The list is today's followers: people who followed and left are not in either period.
+              hint={follows.capped ? t("studio.trend.followersCappedHint") : t("studio.trend.followersHint")}
+              delta={follows.capped ? undefined : periodDelta(follows.current, follows.previous, locale)}
+            />
+          ) : null}
+          {earned ? (
+            <StatCard
+              size="sm"
+              data-testid="analytics-range-earned"
+              data-cents={earned.cents}
+              label={t("d5Money.analytics.support")}
+              value={<MoneyAmount value={earned} colorNegative />}
+              hint={t("d5Money.analytics.supportHint")}
+            />
+          ) : null}
+        </StatGrid>
+        <div data-testid="analytics-counted" className="flex flex-col gap-2">
+          <h3 className="text-sm font-medium">{t("d5Money.analytics.counted.heading")}</h3>
+          <p className="text-xs text-muted-foreground">{t("d5Money.analytics.counted.hint")}</p>
+          <StatGrid cols={3}>
+            <StatCard
+              size="sm"
+              label={t("analytics.stat.unverified")}
+              value={hours(range.totals.unverifiedViewerSeconds)}
+            />
+            <StatCard
+              size="sm"
+              label={t("analytics.stat.excluded")}
+              value={hours(range.totals.excludedViewerSeconds)}
+              hint={t("analytics.stat.excludedHint")}
+              // More excluded time is not better: the arrow keeps its meaning, the colour flips.
+              delta={periodDelta(range.totals.excludedViewerSeconds, prev?.excludedViewerSeconds, locale, {
+                higherIsBetter: false,
+              })}
+            />
+            {range.cost ? (
+              <StatCard size="sm" label={t("analytics.stat.cost")} value={<MoneyAmount value={range.cost} />} />
+            ) : null}
+          </StatGrid>
+        </div>
+      </div>
     </Section>
   );
 }

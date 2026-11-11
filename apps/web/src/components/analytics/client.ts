@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import type { AnalyticsRange, AnalyticsShareLink, BroadcastAnalytics } from "@commonair/contracts/dto";
+import type { AnalyticsPnl, AnalyticsRange, AnalyticsShareLink, BroadcastAnalytics } from "@commonair/contracts/dto";
 import { api, errorCode } from "../../lib/api.ts";
 
 /** The `analytics.*` calls the studio page makes, injectable for render tests. */
@@ -16,6 +16,8 @@ export interface AnalyticsClient {
    * `complete` is false when the paging cap stopped before `since`. Absent: no followers trend.
    */
   followsSince?: (q: { channel: string; since: string }) => Promise<{ at: string[]; complete: boolean }>;
+  /** Earnings against serving cost per broadcast (D5.6). Absent: no "Earnings vs cost" card. */
+  pnl?: (q: { channel: string; from: string; to: string }) => Promise<AnalyticsPnl>;
 }
 
 /** Follower pages the trend reads at most (100 each): enough for a small channel's quarter. */
@@ -82,6 +84,7 @@ export function analyticsClient(): AnalyticsClient {
         (cursor) => api().channels.followers({ channel: q.channel, limit: SHARE_LINK_PAGE, cursor }),
         q.since,
       ),
+    pnl: (q) => api().analytics.pnl(q),
   };
 }
 

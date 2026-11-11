@@ -27,6 +27,14 @@ export {
   type PollOption,
 } from "./progress-row.tsx";
 export { TrendChart, type TrendChartProps, type TrendSeries } from "./trend-chart.tsx";
+export {
+  BarChart,
+  barTicks,
+  labelIndexes,
+  type BarChartProps,
+  type BarChartTable,
+  type BarDatum,
+} from "./bar-chart.tsx";
 export { DataTable, type DataTableProps, type DataTableColumn, type DataTableRowSelection } from "./data-table.tsx";
 export { Timeline, type TimelineProps, type TimelineStep, type TimelineUpdate } from "./timeline.tsx";
 export { UptimeStrip, type UptimeStripProps, type UptimeDay } from "./uptime-strip.tsx";

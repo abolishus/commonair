@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { Skeleton, SkeletonGroup, useLocale } from "@commonair/ui";
+import { Skeleton, SkeletonGroup, formatMoney, useLocale } from "@commonair/ui";
 import { PageHeader } from "@commonair/ui/blocks/headers";
 import { PageContainer, ResponsiveGrid } from "@commonair/ui/layouts";
 import { toast } from "@commonair/ui/toast";
@@ -21,6 +21,8 @@ import {
   TierEditor,
 } from "../../components/money/revenue.tsx";
 import { useLoad } from "../../components/money/use-load.ts";
+import { setupComplete } from "../../components/studio-money/payout.ts";
+import { RevenueReconcile, RevenueSetup, RevenueShareLine } from "../../components/studio-money/revenue-overview.tsx";
 import { t } from "../../i18n/index.ts";
 import { toastActionError } from "../../lib/action-error.ts";
 import { api } from "../../lib/api.ts";
@@ -74,6 +76,32 @@ function RevenueView({
   const account = useLoad(channel, () => api().money.payoutAccount());
   const tiers = useLoad(`tiers|${channel}`, () => api().money.tiers({ channel }));
   const ledger = useLedger(channel, month);
+  const { locale } = useLocale();
+  const minimumPayout = summary.data?.balance.minimumPayout;
+  const minimum = minimumPayout ? formatMoney(minimumPayout.cents, minimumPayout.currency, locale) : undefined;
+  // CS-9: while tiers or payouts are missing, setting them up comes before the reports.
+  const complete = setupComplete(tiers.data, account.data);
+
+  const setup = (
+    <RevenueSetup complete={complete}>
+      {account.data ? (
+        <PayoutAccountCard account={account.data} {...(minimum ? { minimum } : {})} />
+      ) : (
+        !account.failed && <CardSkeleton />
+      )}
+      {account.failed && <FormError>{t("revenue.payout.loadFailed")}</FormError>}
+      {tiers.data ? (
+        <TierEditor
+          tiers={tiers.data}
+          currency={tierEditorCurrency(tiers.data, instanceCurrency)}
+          onSave={(next: SubTierDto[]) => api().money.setTiers({ channel, tiers: next })}
+        />
+      ) : (
+        !tiers.failed && <CardSkeleton />
+      )}
+      {tiers.failed && <FormError>{t("revenue.tiers.loadFailed")}</FormError>}
+    </RevenueSetup>
+  );
 
   return (
     <PageContainer data-testid="revenue" className="flex flex-col gap-6 py-8">
@@ -86,28 +114,24 @@ function RevenueView({
       {summary.data ? (
         <>
           <RevenueStats summary={summary.data} />
+          <RevenueShareLine split={summary.data.split} />
+          <RevenueReconcile summary={summary.data} />
+        </>
+      ) : (
+        !summary.failed && <RevenueStatsSkeleton />
+      )}
+      {!complete && setup}
+      {summary.data ? (
+        <>
           <RevenueTrend summary={summary.data} />
           <ResponsiveGrid cols={2}>
             <RevenueSources summary={summary.data} />
             <RevenueTiers summary={summary.data} />
           </ResponsiveGrid>
         </>
-      ) : (
-        !summary.failed && <RevenueStatsSkeleton />
-      )}
+      ) : null}
       <RevenueLedger {...ledger} />
-      {account.data ? <PayoutAccountCard account={account.data} /> : !account.failed && <CardSkeleton />}
-      {account.failed && <FormError>{t("revenue.payout.loadFailed")}</FormError>}
-      {tiers.data ? (
-        <TierEditor
-          tiers={tiers.data}
-          currency={tierEditorCurrency(tiers.data, instanceCurrency)}
-          onSave={(next: SubTierDto[]) => api().money.setTiers({ channel, tiers: next })}
-        />
-      ) : (
-        !tiers.failed && <CardSkeleton />
-      )}
-      {tiers.failed && <FormError>{t("revenue.tiers.loadFailed")}</FormError>}
+      {complete && setup}
     </PageContainer>
   );
 }
