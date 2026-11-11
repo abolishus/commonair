@@ -1,0 +1,20 @@
+{
+  "w5Studio.recap.stat.peakSoFar": "Peak so far",
+  "w5Studio.recap.provisional": "{count} · provisional",
+  "w5Studio.recap.stat.chat": "Chat messages",
+  "w5Studio.share.title": "You're live: tell people",
+  "w5Studio.share.copy": "Copy link",
+  "w5Studio.share.share": "Share",
+  "w5Studio.share.shareTitle": "I'm live now",
+  "w5Studio.share.copied": "Channel link copied",
+  "w5Studio.share.copyFailed": "Couldn't copy the channel link.",
+  "w5Studio.share.dismiss": "Dismiss",
+  "w5Studio.mod.detail": "Selected message",
+  "w5Studio.mod.pick": "Pick a held message to review it here.",
+  "w5Studio.mod.none": "Nothing is waiting for review.",
+  "w5Studio.mod.back": "Back to held messages",
+  "w5Studio.mod.open": "Review",
+  "w5Studio.mod.openLabel": "Review {name}'s message",
+  "w5Studio.mod.allow": "Allow",
+  "w5Studio.mod.deny": "Deny"
+}

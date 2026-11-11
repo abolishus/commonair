@@ -1,12 +1,12 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-/** `stream.lastBroadcast` (overhaul wave 5). Contract step stub: w5-studio implements it. */
-import { ORPCError } from "@orpc/server";
-import { os } from "../lib/orpc.ts";
+/** `stream.lastBroadcast` (overhaul wave 5, D5.3): the recap's exact counts (`stream/last-broadcast.ts`). */
+import { os, requireChannel } from "../lib/orpc.ts";
+import { readLastBroadcast } from "../stream/last-broadcast.ts";
 
-const notYet = (): never => {
-  throw new ORPCError("NOT_IMPLEMENTED", { status: 501, message: "Not available yet" });
+export const streamLastBroadcast = {
+  lastBroadcast: os.stream.lastBroadcast.handler(async ({ context }) =>
+    readLastBroadcast(context.deps.db, requireChannel(context).id),
+  ),
 };
-
-export const streamLastBroadcast = { lastBroadcast: os.stream.lastBroadcast.handler(notYet) };

@@ -4,10 +4,11 @@
 
 /**
  * d5-dashboard: the stream recap (overhaul wave 3, D5.3). The rules (when it shows, which broadcast
- * and video, the counts over the stream), viewer numbers only once the analytics settle them, the
+ * and video), viewer numbers only once the analytics settle them (before that the running peak,
+ * provisional), the exact counts from `stream.lastBroadcast` (w5-studio: no list paging), the
  * video's states with Share and Make a clip, dismissing, and the one-time member-owner notice.
  */
-import type { AnalyticsRange } from "@commonair/contracts/dto";
+import type { AnalyticsRange, LastBroadcast } from "@commonair/contracts/dto";
 import { LocaleProvider, TooltipProvider } from "@commonair/ui";
 import { RouterContextProvider, createMemoryHistory, createRootRoute, createRouter } from "@tanstack/react-router";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -15,15 +16,14 @@ import type * as React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import {
   END_MATCH_MS,
-  MAX_COUNT_PAGES,
   MAX_STREAM_MS,
   RECAP_DISMISSED_KEY,
   RECAP_MAX_AGE_MS,
   averageViewers,
-  clipsDuring,
-  countDuring,
-  followsDuring,
+  lastBroadcastWindow,
+  matchLastBroadcast,
   memberNoticeKey,
+  pickRecapVideo,
   readFlag,
   recapVideo,
   recapVisible,
@@ -76,6 +76,18 @@ const BROADCAST = {
   durationSeconds: 6480,
   totals: totals(),
 };
+const LAST: LastBroadcast = {
+  broadcastId: "b1",
+  title: "Watercolour harbours",
+  startedAt: START,
+  endedAt: ENDED,
+  durationSeconds: 6480,
+  newFollowers: 2,
+  clips: 1,
+  chatMessages: 1234,
+  peakSoFar: 6,
+  vodId: "v1",
+};
 const range = (broadcasts: AnalyticsRange["broadcasts"]): AnalyticsRange => ({
   from: "2026-11-07T00:00:00.000Z",
   to: "2026-11-11T21:00:00.000Z",
@@ -122,7 +134,7 @@ describe("the recap's rules", () => {
     expect(recapWindow(ENDED, null)).toEqual({ start: Date.parse(ENDED) - MAX_STREAM_MS, end: Date.parse(ENDED) });
   });
 
-  it("picks the newest video made during the stream, and counts follows and clips in it", async () => {
+  it("picks the newest video made during the stream when the server names none", () => {
     const w = recapWindow(ENDED, BROADCAST);
     const vods = [
       { id: "old", createdAt: "2026-11-09T10:00:00.000Z" },
@@ -131,66 +143,29 @@ describe("the recap's rules", () => {
     ];
     expect(recapVideo(vods, w)?.id).toBe("this");
     expect(recapVideo([], w)).toBeNull();
-    const follows = [
-      { followedAt: "2026-11-10T18:30:00.000Z", excluded: false },
-      { followedAt: "2026-11-10T18:31:00.000Z", excluded: true },
-      { followedAt: "2026-11-10T20:30:00.000Z", excluded: false },
-      { followedAt: "2026-11-10T19:49:00.000Z", excluded: false },
+    expect(pickRecapVideo(vods, null, w)?.id).toBe("this");
+  });
+
+  it("uses the video stream.lastBroadcast names, and none when it names none", () => {
+    const w = lastBroadcastWindow(LAST);
+    const vods = [
+      { id: "v1", createdAt: "2026-11-10T18:10:00.000Z" },
+      { id: "later", createdAt: "2026-11-10T19:00:00.000Z" },
     ];
-    expect(await followsDuring(async () => ({ items: follows, nextCursor: null }), w)).toBe(2);
-    expect(
-      await clipsDuring(
-        async () => ({
-          items: [{ createdAt: "2026-11-10T19:00:00.000Z" }, { createdAt: "2026-11-09T19:00:00.000Z" }],
-          nextCursor: "c2",
-        }),
-        w,
-      ),
-    ).toBe(1);
+    expect(pickRecapVideo(vods, { vodId: "v1" }, w)?.id).toBe("v1");
+    expect(pickRecapVideo(vods, { vodId: null }, w)).toBeNull();
+    // Not among the newest videos: the window's newest stands in.
+    expect(pickRecapVideo(vods, { vodId: "gone" }, w)?.id).toBe("later");
   });
 
-  it("pages back past the stream's start when later follows fill the first page", async () => {
-    const w = recapWindow(ENDED, BROADCAST);
-    const after = Array.from({ length: 100 }, (_, i) => ({
-      followedAt: new Date(Date.parse("2026-11-11T08:00:00.000Z") - i * 1000).toISOString(),
-      excluded: false,
-    }));
-    const pages: Record<string, { items: typeof after; nextCursor: string | null }> = {
-      first: { items: after, nextCursor: "p2" },
-      p2: {
-        items: [
-          { followedAt: "2026-11-10T19:00:00.000Z", excluded: false },
-          { followedAt: "2026-11-10T18:30:00.000Z", excluded: false },
-          { followedAt: "2026-11-09T12:00:00.000Z", excluded: false },
-        ],
-        nextCursor: "p3",
-      },
-    };
-    const next = vi.fn<(cursor: string | undefined) => Promise<(typeof pages)[string]>>(async (cursor) => {
-      const page = pages[cursor ?? "first"];
-      if (!page) throw new Error(`unexpected cursor ${cursor}`);
-      return page;
-    });
-    expect(await followsDuring(next, w)).toBe(2);
-    // It stops once the list reaches back past the start: no third page.
-    expect(next).toHaveBeenCalledTimes(2);
-  });
-
-  it("states no count when the list is still newer than the stream after the page cap", async () => {
-    const w = recapWindow(ENDED, BROADCAST);
-    const later = { items: [{ createdAt: "2026-11-11T08:00:00.000Z" }], nextCursor: "more" };
-    const next = vi.fn<(cursor: string | undefined) => Promise<typeof later>>(async () => later);
-    expect(await clipsDuring(next, w)).toBeNull();
-    expect(next).toHaveBeenCalledTimes(MAX_COUNT_PAGES);
-    expect(
-      await countDuring(
-        async () => later,
-        (c) => c.createdAt,
-        w,
-        () => true,
-        1,
-      ),
-    ).toBeNull();
+  it("matches stream.lastBroadcast to lastLiveAt within five minutes, and windows it exactly", () => {
+    expect(matchLastBroadcast(LAST, ENDED)).toBe(LAST);
+    const near = { ...LAST, endedAt: new Date(Date.parse(ENDED) + END_MATCH_MS).toISOString() };
+    expect(matchLastBroadcast(near, ENDED)).toBe(near);
+    const off = { ...LAST, endedAt: new Date(Date.parse(ENDED) - END_MATCH_MS - 1).toISOString() };
+    expect(matchLastBroadcast(off, ENDED)).toBeNull();
+    expect(matchLastBroadcast(null, ENDED)).toBeNull();
+    expect(lastBroadcastWindow(LAST)).toEqual({ start: Date.parse(START), end: Date.parse(ENDED) });
   });
 
   it("remembers flags in storage and survives storage that throws", () => {
@@ -217,17 +192,7 @@ function client(over: Partial<RecapClient> = {}): RecapClient {
     vods: vi.fn<RecapClient["vods"]>(async () => [
       { id: "v1", status: "ready", createdAt: "2026-11-10T18:02:30.000Z" },
     ]),
-    follows: vi.fn<RecapClient["follows"]>(async () => ({
-      items: [
-        { followedAt: "2026-11-10T19:00:00.000Z", excluded: false },
-        { followedAt: "2026-11-10T18:30:00.000Z", excluded: false },
-      ],
-      nextCursor: null,
-    })),
-    clips: vi.fn<RecapClient["clips"]>(async () => ({
-      items: [{ createdAt: "2026-11-10T19:10:00.000Z" }],
-      nextCursor: null,
-    })),
+    lastBroadcast: vi.fn<RecapClient["lastBroadcast"]>(async () => LAST),
     revenue: vi.fn<RecapClient["revenue"]>(async () => ({
       net: { cents: 900, currency: "usd" },
       gross: { cents: 1000, currency: "usd" },
@@ -251,7 +216,7 @@ const recap = (c: RecapClient, over: Partial<React.ComponentProps<typeof StreamR
 );
 
 describe("StreamRecap", () => {
-  it("states the settled numbers: length, peak and average verified viewers, follows, earnings, clips", async () => {
+  it("states the settled numbers: length, peak and average verified viewers, follows, earnings, clips, chat", async () => {
     const c = client();
     wrap(recap(c));
     const card = await screen.findByTestId("stream-recap");
@@ -263,44 +228,70 @@ describe("StreamRecap", () => {
     expect(stat("followers")).toContain("2");
     expect(stat("support")).toContain("$9.00");
     expect(stat("clips")).toContain("1");
+    expect(stat("chat")).toContain("1,234");
     expect(screen.getByTestId("stream-recap-note").textContent).toContain(t("d5Dashboard.recap.settled"));
     expect(card.textContent).toContain("Watercolour harbours");
     // Revenue over the stream's exact span.
     expect(c.revenue).toHaveBeenCalledWith("aurora", new Date(START).toISOString(), ENDED);
+    // Four requests, none of them a list page.
+    expect(c.lastBroadcast).toHaveBeenCalledTimes(1);
+    expect(c.range).toHaveBeenCalledTimes(1);
+    expect(c.vods).toHaveBeenCalledTimes(1);
+    expect(c.revenue).toHaveBeenCalledTimes(1);
   });
 
-  it("before the numbers settle it says so and states no viewer numbers", async () => {
+  it("before the numbers settle: the running peak, provisional, and the exact counts", async () => {
     const c = client({ range: vi.fn<RecapClient["range"]>(async () => range([])) });
     wrap(recap(c));
     const card = await screen.findByTestId("stream-recap");
     await waitFor(() => expect(card.getAttribute("data-settled")).toBe("false"));
-    expect(screen.queryByTestId("stream-recap-stats")).toBeNull();
+    await screen.findByTestId("stream-recap-stats");
+    const stat = (id: string) => document.querySelector(`[data-stat="${id}"]`)?.textContent ?? "";
+    expect(stat("duration")).toContain("1:48:00");
+    expect(stat("peak")).toContain(t("w5Studio.recap.stat.peakSoFar"));
+    // ViewerCount carries its own screen-reader words after the number.
+    expect(stat("peak")).toMatch(/6.* · provisional$/);
+    expect(document.querySelector('[data-stat="average"]')).toBeNull();
+    expect(stat("followers")).toContain("2");
+    expect(stat("clips")).toContain("1");
+    expect(stat("chat")).toContain("1,234");
     expect(screen.getByTestId("stream-recap-note").textContent).toContain(t("d5Dashboard.recap.settling"));
-    expect(c.follows).not.toHaveBeenCalled();
+    expect(card.textContent).toContain("Watercolour harbours");
+    // Earnings wait for the settled numbers: three requests, none a list page.
     expect(c.revenue).not.toHaveBeenCalled();
-    // The video is already known.
+    expect(c.lastBroadcast).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId("stream-recap-video").getAttribute("data-video")).toBe("ready");
   });
 
-  it("a full page of follows made after the stream does not read as zero new followers", async () => {
-    const later = Array.from({ length: 100 }, () => ({ followedAt: "2026-11-11T08:00:00.000Z", excluded: false }));
-    const follows = vi.fn<RecapClient["follows"]>(async (_c, cursor) =>
-      cursor === undefined
-        ? { items: later, nextCursor: "p2" }
-        : { items: [{ followedAt: "2026-11-10T18:45:00.000Z", excluded: false }], nextCursor: null },
-    );
-    wrap(recap(client({ follows })));
-    await waitFor(() => expect(document.querySelector('[data-stat="followers"]')?.textContent).toContain("1"));
-    expect(follows).toHaveBeenCalledWith("aurora", "p2");
+  it("without stream.lastBroadcast or settled numbers it states no numbers at all", async () => {
+    const c = client({
+      range: vi.fn<RecapClient["range"]>(async () => range([])),
+      lastBroadcast: vi.fn<RecapClient["lastBroadcast"]>(async () => {
+        throw Object.assign(new Error("x"), { status: 500 });
+      }),
+    });
+    wrap(recap(c));
+    const card = await screen.findByTestId("stream-recap");
+    await waitFor(() => expect(card.getAttribute("data-settled")).toBe("false"));
+    expect(screen.queryByTestId("stream-recap-stats")).toBeNull();
+    expect(c.revenue).not.toHaveBeenCalled();
+    // The video is still found in the stream's longest possible window.
+    expect(screen.getByTestId("stream-recap-video").getAttribute("data-video")).toBe("ready");
   });
 
-  it("hides the follower count rather than undercount when the list never reaches the stream", async () => {
-    const later = Array.from({ length: 100 }, () => ({ followedAt: "2026-11-11T08:00:00.000Z", excluded: false }));
-    const follows = vi.fn<RecapClient["follows"]>(async () => ({ items: later, nextCursor: "more" }));
-    wrap(recap(client({ follows })));
+  it("another stream's counts are never shown: settled numbers stand alone", async () => {
+    const other = { ...LAST, endedAt: "2026-11-09T10:00:00.000Z" };
+    wrap(recap(client({ lastBroadcast: vi.fn<RecapClient["lastBroadcast"]>(async () => other) })));
     await waitFor(() => expect(document.querySelector('[data-stat="duration"]')).toBeTruthy());
+    expect(document.querySelector('[data-stat="average"]')).toBeTruthy();
     expect(document.querySelector('[data-stat="followers"]')).toBeNull();
-    expect(document.querySelector('[data-stat="clips"]')).toBeTruthy();
+    expect(document.querySelector('[data-stat="clips"]')).toBeNull();
+    expect(document.querySelector('[data-stat="chat"]')).toBeNull();
+  });
+
+  it("a stream without a saved video says so even when an older video is recent", async () => {
+    wrap(recap(client({ lastBroadcast: vi.fn<RecapClient["lastBroadcast"]>(async () => ({ ...LAST, vodId: null })) })));
+    await waitFor(() => expect(screen.getByTestId("stream-recap-video").getAttribute("data-video")).toBe("off"));
   });
 
   it("no earnings, no support tile", async () => {
