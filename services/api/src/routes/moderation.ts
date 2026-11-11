@@ -61,12 +61,16 @@ async function caseUserId(tx: Executor, c: CaseRow): Promise<string | null> {
 export const moderation = {
   queue: os.moderation.queue.handler(async ({ context, input }) => {
     const { deps } = context;
+    const caller = requireCaller(context);
     const offset = offsetOf(input.cursor);
     const where: SQL[] = [
       // T0 is never in the ordinary queue.
       input.tier ? eq(moderationCases.tier, input.tier) : inArray(moderationCases.tier, ["t1", "t2"]),
       input.status ? eq(moderationCases.status, input.status) : inArray(moderationCases.status, ["open", "labelled"]),
     ];
+    // D7.5 claiming: the caller's own cases, or the ones nobody has claimed.
+    if (input.assignee === "me") where.push(eq(moderationCases.assigneeId, caller.user.id));
+    if (input.assignee === "unassigned") where.push(isNull(moderationCases.assigneeId));
     const rows = await deps.db
       .select()
       .from(moderationCases)
