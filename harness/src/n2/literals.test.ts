@@ -88,6 +88,9 @@ describe("untranslatedWords", () => {
     expect(untranslatedWords("E2E_ST_ABC123", { userContent })).toEqual([]);
     expect(untranslatedWords(`${pseudoLocalize("Live")} My test stream`, { userContent })).toEqual([]);
     expect(untranslatedWords("hello from e2e_fan_x run42 · Reply", { userContent })).toEqual(["Reply"]);
+    // A handle the scenario never saw (another run's live channel in the side rail) is not text.
+    expect(untranslatedWords("e2e_st_239acg")).toEqual([]);
+    expect(untranslatedWords("e2e_st_239acg · Live now")).toEqual(["Live", "now"]);
   });
 
   test("allowlisted terms are ignored, case-sensitively", () => {

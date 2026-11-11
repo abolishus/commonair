@@ -197,6 +197,9 @@ function prepare(opts: LiteralOptions): Prepared {
 function wordsIn(text: string, p: Prepared): string[] {
   let s = p.userContent ? text.replace(p.userContent, " ") : text;
   for (const re of URLISH) s = s.replace(re, " ");
+  // Handles (`e2e_st_239acg`): catalog text never has an underscore inside a word, while every
+  // username can. Another scenario's live channel in the side rail is not this run's user content.
+  s = s.replace(/[\p{L}\p{N}]*_[\p{L}\p{N}_]*/gu, " ");
   if (p.intl) s = s.replace(p.intl, " ");
   s = stripPseudoSegments(s);
   const runs = s.match(/[A-Za-z]{3,}/g) ?? [];
