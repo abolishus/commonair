@@ -49,23 +49,30 @@ checks them against this file.
 
 ### Settings (`/settings/notifications`)
 
-| Test id                        | Element / meaning                                                                              |
-| ------------------------------ | ---------------------------------------------------------------------------------------------- |
-| `notify-default-in_app`        | Switch: the member's default for in-app go-live; `data-state`, `data-builtin` (`true`/`false`) |
-| `notify-default-email`         | Switch: the default for go-live email; `data-state`, `data-builtin`                            |
-| `notify-default-push`          | Switch: the default for go-live push; `data-state`, `data-builtin`                             |
-| `notify-email-unverified`      | Notice: email notifications need a verified address                                            |
-| `notify-channel`               | One followed channel: `data-slug`                                                              |
-| `notify-channel-bell`          | Switch: the follow's `notify` (the per-channel bell); `data-state`                             |
-| `notify-channel-email`         | Select: the channel's email override; options below                                            |
-| `notify-channel-email-default` | Option: no override (the member's default applies)                                             |
-| `notify-channel-email-on`      | Option: email on for this channel                                                              |
-| `notify-channel-email-off`     | Option: email off for this channel                                                             |
-| `notify-channel-push`          | Select: the channel's push override; options below                                             |
-| `notify-channel-push-default`  | Option: no override                                                                            |
-| `notify-channel-push-on`       | Option: push on for this channel                                                               |
-| `notify-channel-push-off`      | Option: push off for this channel                                                              |
-| `notify-save-error`            | A save failed                                                                                  |
+| Test id                   | Element / meaning                                                                              |
+| ------------------------- | ---------------------------------------------------------------------------------------------- |
+| `notify-default-in_app`   | Switch: the member's default for in-app go-live; `data-state`, `data-builtin` (`true`/`false`) |
+| `notify-default-email`    | Switch: the default for go-live email; `data-state`, `data-builtin`                            |
+| `notify-default-push`     | Switch: the default for go-live push; `data-state`, `data-builtin`                             |
+| `notify-email-unverified` | Notice: email notifications need a verified address                                            |
+| `notify-save-error`       | A save failed                                                                                  |
+
+### Per-channel alerts (`/following`)
+
+Overhaul wave 5 (w5-watch) moved these from `/settings/notifications` to `/following`: each live card and offline row carries the group. While the bell is on, `following-alert-options` opens a popover with the two selects (`W5_WATCH_IDS` in `harness/src/web/selectors.ts`).
+
+| Test id                        | Element / meaning                                                                                          |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| `notify-channel`               | One followed channel: `data-slug`                                                                          |
+| `notify-channel-bell`          | IconButton toggle: the follow's `notify` (the per-channel bell); `aria-pressed`, `data-state` (`on`/`off`) |
+| `notify-channel-email`         | Select: the channel's email override; options below                                                        |
+| `notify-channel-email-default` | Option: no override (the member's default applies)                                                         |
+| `notify-channel-email-on`      | Option: email on for this channel                                                                          |
+| `notify-channel-email-off`     | Option: email off for this channel                                                                         |
+| `notify-channel-push`          | Select: the channel's push override; options below                                                         |
+| `notify-channel-push-default`  | Option: no override                                                                                        |
+| `notify-channel-push-on`       | Option: push on for this channel                                                                           |
+| `notify-channel-push-off`      | Option: push off for this channel                                                                          |
 
 ### Push toggle (inside settings)
 
