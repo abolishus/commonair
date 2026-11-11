@@ -800,7 +800,7 @@ The plan as written:
 - the deletion marker `subscriptions.renewal_stopped_by_deletion_id`, `coop.shares.askRefundDetails`, and ADR 0042;
 - the new `NOTIFY_JOBS` and UI metric names.
 
-Seven units ran in one workflow pass (w5-viewers, w5-schedule, w5-deletion, w5-watch, w5-studio, w5-notify, w5-admin), merged at `dbfbf7d2`..`be7b7003` with the integration fixes up to `3d04c229`. The 14 px sweep ran after them on the merged result and was merged at `13c70418`. No unit added a dependency or an env var. CI follow-ups were `4f30a430` and `9f1233cc` (two chat flakes fixed at their third occurrence), `b5debc56` and `4b07c7c5`. CI on `__HEAD__` (run **RUN**) was green; every earlier attempt is explained in `docs/operators/flakes.md`.
+Seven units ran in one workflow pass (w5-viewers, w5-schedule, w5-deletion, w5-watch, w5-studio, w5-notify, w5-admin), merged at `dbfbf7d2`..`be7b7003` with the integration fixes up to `3d04c229`. The 14 px sweep ran after them on the merged result and was merged at `13c70418`. No unit added a dependency or an env var. CI follow-ups were `4f30a430` and `9f1233cc` (two chat flakes fixed at their third occurrence), `b5debc56` and `4b07c7c5`. CI on `4b07c7c5` (run 43102619111) was green on the first attempt; every earlier attempt is explained in `docs/operators/flakes.md`.
 
 What shipped:
 
