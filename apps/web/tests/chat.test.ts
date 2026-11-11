@@ -184,7 +184,7 @@ describe("ChatConnection", () => {
     expect(socket?.sent).toEqual([{ op: "join", channel: CHANNEL }]);
     socket?.frame(joinedFrame(true));
     expect(t.statuses).toEqual(["connecting", "open"]);
-    expect(t.joined).toEqual([{ canChat: true, canModerate: false }]);
+    expect(t.joined).toEqual([{ canChat: true, canModerate: false, badges: [] }]);
   });
 
   it("ignores a joined frame for another channel", async () => {
