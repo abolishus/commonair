@@ -162,3 +162,33 @@ The contexts each scenario hands its extensions are in `harness/src/b8/kit.ts`.
 The jury rerun cleanup and the localized rate-limit message are B8-harness's, in existing files:
 they are not extensions and add no id. The jury flag link (`jury-flag-case-link`) is covered by
 web unit tests, since the jury steps run in `e5-coop` with `jury.enabled` turned on by the step.
+
+## Appeal queue (overhaul wave 4, documented in wave 5)
+
+`/admin/appeals` follows `/admin/moderation`'s pattern: the open appeal lives in the URL as
+`/admin/appeals?case=<appeal id>`. The route's `validateSearch` (`parseAppealsSearch`) keeps `case`
+only when it is a UUID, lowercased, and drops anything else, so a bad link opens the plain queue.
+Selecting a row writes `?case=` with `replace` (no history entry per click); closing it removes
+`case`. The audit log's appeal subjects link here (`admin-audit-subject` with
+`data-subject-type="appeal"`). The queue sits in the shared `QueueLayout` (j/k move between rows,
+Enter opens, `?` lists the shortcuts; below 1024 px the list and the detail are separate views).
+
+These ids are not part of the batch 8 contract list above (`apps/web/tests/selectors.test.ts`
+checks that list exactly); they are set in `apps/web/src/components/safety/appeal-queue.tsx`, and
+the first ones were first documented in `e4c-selectors.md`.
+
+- `appealq-count`: the queue's result count over the list (with a "more" form while another
+  page can load).
+- `appealq-item`: one row (`<li>`); `data-appeal-id`, `data-kind`, `data-subject-type`,
+  `data-status` (`APPEAL_STATUSES`) and `data-open` (`"true"` or `"false"`; one row open at a
+  time).
+- `appealq-item-toggle`: the row's whole-width button (`aria-expanded`, `aria-controls` naming
+  the detail while open); a click opens or closes the appeal and rewrites `?case=`.
+- `appealq-detail`: the open appeal's detail pane; `data-appeal-id`. Its overturn note carries
+  `data-effect` when overturning would undo something.
+- `appealq-resolve`: the decision `ChoiceToggle` (open appeals only), with items
+  `appealq-resolve-upheld` and `appealq-resolve-overturned`.
+- `appealq-resolution`: the resolution text the appellant receives.
+- `appealq-submit`: records the decision (the harness clicks it with `clickConfirming`,
+  `harness/src/safety-web.ts`).
+- `appealq-load-more`: loads the next page of appeals; shown only while more exist.

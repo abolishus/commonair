@@ -4,7 +4,7 @@
 import { AppointWorkerForm, type AppointWorkerFormValues } from "@commonair/ui/blocks/coop";
 import { AlertCallout } from "@commonair/ui/blocks/feedback";
 import { PageHeader } from "@commonair/ui/blocks/headers";
-import { PageContainer, SplitLayout } from "@commonair/ui/layouts";
+import { AdminPage, SplitLayout } from "@commonair/ui/layouts";
 import type * as React from "react";
 import { t } from "../../i18n/index.ts";
 
@@ -26,8 +26,9 @@ export function AdminCoopPage({
   error,
 }: AdminCoopPageProps): React.JSX.Element {
   return (
-    <PageContainer data-testid="admin-coop" width="wide" className="flex flex-col gap-6 py-8">
-      <PageHeader size="compact" title={t("coop.admin.title")} description={t("coop.admin.intro")} />
+    // The admin width rule: `queue`, not `form`, because the form and its note sit side by side.
+    <AdminPage data-testid="admin-coop" width="queue">
+      <PageHeader title={t("coop.admin.title")} description={t("coop.admin.intro")} />
       <SplitLayout
         asideWidth="lg"
         main={
@@ -53,6 +54,6 @@ export function AdminCoopPage({
         }
         aside={<AlertCallout tone="info" description={t("coop.admin.note")} />}
       />
-    </PageContainer>
+    </AdminPage>
   );
 }

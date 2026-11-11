@@ -89,6 +89,7 @@ import type { Key as W3Portability } from "./w3-portability.gen.ts";
 import type { Key as W3Predictions } from "./w3-predictions.gen.ts";
 import type { Key as W3SurgeRaids } from "./w3-surge-raids.gen.ts";
 import type { Key as W3WatchRooms } from "./w3-watch-rooms.gen.ts";
+import type { Key as W5Admin } from "./w5-admin.gen.ts";
 
 /** Every message key, typed from the English catalogs. */
 export type MessageKey =
@@ -177,7 +178,8 @@ export type MessageKey =
   | W3Portability
   | W3Predictions
   | W3SurgeRaids
-  | W3WatchRooms;
+  | W3WatchRooms
+  | W5Admin;
 
 export const NAMESPACES = [
   "b8-channel",
@@ -266,4 +268,5 @@ export const NAMESPACES = [
   "w3-predictions",
   "w3-surge-raids",
   "w3-watch-rooms",
+  "w5-admin",
 ] as const;

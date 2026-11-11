@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * `/admin/audit` (overhaul wave 4, D7.5, AA-10): `safety.auditLog` as a table, newest first. The
- * actor, subject type and subject id filters go to the API; the date range filters the loaded
- * rows (the procedure has no time filter). CSV export writes the rows on screen, in the browser.
+ * `/admin/audit` (overhaul wave 4, D7.5, AA-10): `safety.auditLog` as a table, newest first. Every
+ * filter (actor, subject type and id, and since wave 5 a UTC date range) lives in the URL search
+ * and goes to the API, so a link reproduces the view. CSV export writes the loaded rows, which are
+ * already inside the range, in the browser.
  */
 import { RelativeTime } from "@commonair/ui";
 import { DataTable, FilterBar, type DataTableColumn } from "@commonair/ui/blocks/data";
@@ -19,7 +20,6 @@ import * as React from "react";
 import { t } from "../../i18n/index.ts";
 import { errorCode } from "../../lib/api.ts";
 import { SectionLoadError } from "../../lib/section-load-error.tsx";
-import { DateTimeTextField } from "../forms/date-time-field.tsx";
 import { usePaged } from "../money/use-load.ts";
 import type { AuditEntryDto, AuditFilters, ConsoleClient } from "./console-client.ts";
 import {
@@ -29,17 +29,74 @@ import {
   shortId,
   subjectTypeLabel,
 } from "./console-labels.ts";
-import { fromUtcInput } from "./forms.ts";
 
 const ALL = "all";
 const SUBJECT_ID_MAX = 200;
+const USERNAME = /^[a-z0-9_]{3,25}$/;
+const DAY_MS = 86_400_000;
 
-/** Rows inside the range (either end may be open); ends are ISO strings. */
-export function inRange(row: { createdAt: string }, from: string | null, to: string | null): boolean {
-  const at = Date.parse(row.createdAt);
-  if (from !== null && at < Date.parse(from)) return false;
-  if (to !== null && at > Date.parse(to)) return false;
-  return true;
+/** The page's URL search: the filters as typed (the actor by username), dates as UTC `YYYY-MM-DD`. */
+export interface AuditSearch {
+  actor?: string;
+  type?: string;
+  subject?: string;
+  from?: string;
+  to?: string;
+}
+
+/** A real calendar date written `YYYY-MM-DD`. */
+export function isUtcDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const d = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
+}
+
+/** A typed username as the API knows it ("@Mara" is "mara"), or null when it cannot be one. */
+export function normalizeActor(value: string): string | null {
+  const name = value.trim().replace(/^@/, "").toLowerCase();
+  return USERNAME.test(name) ? name : null;
+}
+
+/** `validateSearch`: anything malformed is dropped, never trusted; a reversed range keeps `from`. */
+export function parseAuditSearch(raw: Record<string, unknown>): AuditSearch {
+  const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+  const out: AuditSearch = {};
+  const actor = normalizeActor(str(raw.actor));
+  if (actor) out.actor = actor;
+  const type = str(raw.type);
+  if (isAuditSubjectType(type)) out.type = type;
+  const subject = str(raw.subject);
+  if (subject && subject.length <= SUBJECT_ID_MAX) out.subject = subject;
+  const from = str(raw.from);
+  const to = str(raw.to);
+  if (isUtcDate(from)) out.from = from;
+  if (isUtcDate(to) && !(out.from && to < out.from)) out.to = to;
+  return out;
+}
+
+/**
+ * The API's range for the chosen days: from the start of `from` (inclusive) to the start of the
+ * day after `to` (exclusive), so the To day is included and `from` is always before `to`.
+ */
+export function apiRange(search: Pick<AuditSearch, "from" | "to">): { from?: string; to?: string } {
+  const out: { from?: string; to?: string } = {};
+  if (search.from) out.from = `${search.from}T00:00:00.000Z`;
+  if (search.to) out.to = new Date(Date.parse(`${search.to}T00:00:00.000Z`) + DAY_MS).toISOString();
+  return out;
+}
+
+/** The API filters for a search, once its actor (if any) is resolved to an id. */
+export function auditFilters(search: AuditSearch, actorId: string | undefined): AuditFilters {
+  const filters: AuditFilters = {};
+  if (actorId) filters.actorId = actorId;
+  if (search.type) filters.subjectType = search.type;
+  if (search.subject) filters.subjectId = search.subject;
+  return { ...filters, ...apiRange(search) };
+}
+
+/** The export's file name, naming the range when there is one. */
+export function csvFilename(search: Pick<AuditSearch, "from" | "to">): string {
+  return `audit-log${search.from ? `-from-${search.from}` : ""}${search.to ? `-to-${search.to}` : ""}.csv`;
 }
 
 /** One CSV cell: quoted when it holds a comma, quote or line break; a leading = + - @ is defused. */
@@ -194,24 +251,74 @@ interface Draft {
   from: string;
   to: string;
 }
-const EMPTY: Draft = { actor: "", subjectType: ALL, subjectId: "", from: "", to: "" };
+const draftOf = (s: AuditSearch): Draft => ({
+  actor: s.actor ?? "",
+  subjectType: s.type ?? ALL,
+  subjectId: s.subject ?? "",
+  from: s.from ?? "",
+  to: s.to ?? "",
+});
 
-export function AuditLog({ client, now }: { client: ConsoleClient; now?: Date }): React.JSX.Element {
-  const [draft, setDraft] = React.useState<Draft>(EMPTY);
-  const [applied, setApplied] = React.useState<{ filters: AuditFilters; from: string | null; to: string | null }>({
-    filters: {},
-    from: null,
-    to: null,
-  });
+const actorErrorText = (err: unknown) =>
+  errorCode(err) === "NOT_FOUND" ? t("d7Admin.audit.actorUnknown") : t("d7Admin.audit.actorFailed");
+
+const NO_SEARCH: AuditSearch = {};
+
+export interface AuditLogProps {
+  client: ConsoleClient;
+  /** The filters from the URL (`parseAuditSearch`); none by default. */
+  search?: AuditSearch;
+  /** Applying or clearing writes the filters back to the URL. */
+  onSearchChange?: (search: AuditSearch) => void;
+}
+
+export function AuditLog({ client, search: incoming = NO_SEARCH, onSearchChange }: AuditLogProps): React.JSX.Element {
+  const incomingKey = JSON.stringify(incoming);
+  const [current, setCurrent] = React.useState<AuditSearch>(incoming);
+  const [seenKey, setSeenKey] = React.useState(incomingKey);
+  const [draft, setDraft] = React.useState<Draft>(() => draftOf(incoming));
   const [actorError, setActorError] = React.useState<string | null>(null);
   const [rangeError, setRangeError] = React.useState<string | null>(null);
+  if (seenKey !== incomingKey) {
+    // The URL changed from outside (back, a link): it replaces what is applied and typed.
+    setSeenKey(incomingKey);
+    setCurrent(incoming);
+    setDraft(draftOf(incoming));
+    setActorError(null);
+    setRangeError(null);
+  }
   const [applying, setApplying] = React.useState(false);
   const [names, setNames] = React.useState<ReadonlyMap<string, string>>(new Map());
-  const key = `audit|${JSON.stringify(applied.filters)}`;
+  const [actorIds, setActorIds] = React.useState<ReadonlyMap<string, string>>(new Map());
+  const actor = current.actor;
+  const actorId = actor ? actorIds.get(actor) : undefined;
+
+  // An actor from the URL is resolved here once; one typed and applied was resolved before applying.
+  React.useEffect(() => {
+    if (!actor || actorIds.has(actor)) return;
+    let live = true;
+    client.user(actor).then(
+      (v) => {
+        if (live) setActorIds((m) => new Map(m).set(actor, v.user.id));
+      },
+      (err: unknown) => {
+        if (live) setActorError(actorErrorText(err));
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [client, actor, actorIds]);
+
+  const ready = !actor || actorId !== undefined;
+  const filters = auditFilters(current, actorId);
+  const key = ready ? `audit|${JSON.stringify(filters)}` : `audit|actor|${actor ?? ""}`;
   const paged = usePaged(
     key,
     async (cursor) => {
-      const page = await client.auditLog(applied.filters, cursor);
+      // Until the actor resolves there is nothing to ask for: never list unfiltered by mistake.
+      if (!ready) return { items: [], nextCursor: null };
+      const page = await client.auditLog(filters, cursor);
       const ids = [
         ...page.items.flatMap((a) => (a.actorId ? [a.actorId] : [])),
         ...page.items.flatMap((a) => (a.subjectType === "user" ? [a.subjectId] : [])),
@@ -222,42 +329,53 @@ export function AuditLog({ client, now }: { client: ConsoleClient; now?: Date })
     },
     () => toast.error(t("d7Admin.audit.moreFailed")),
   );
-  const rows = (paged.items ?? []).filter((r) => inRange(r, applied.from, applied.to));
+  const rows = ready ? (paged.items ?? []) : [];
+  const loading = ready ? paged.items === null : actorError === null;
   const cols = React.useMemo(() => columns(names), [names]);
+
+  const commit = (next: AuditSearch) => {
+    // The URL catches up through `search` (which then matches); without a router it stays local.
+    setCurrent(next);
+    onSearchChange?.(next);
+  };
 
   const apply = async () => {
     setActorError(null);
     setRangeError(null);
-    const from = draft.from ? fromUtcInput(draft.from) : null;
-    const to = draft.to ? fromUtcInput(draft.to) : null;
-    if ((draft.from && from === null) || (draft.to && to === null))
-      return setRangeError(t("d7Admin.audit.rangeInvalid"));
-    if (from !== null && to !== null && Date.parse(from) > Date.parse(to))
-      return setRangeError(t("d7Admin.audit.rangeOrder"));
-    const filters: AuditFilters = {};
-    if (isAuditSubjectType(draft.subjectType)) filters.subjectType = draft.subjectType;
-    if (draft.subjectId.trim()) filters.subjectId = draft.subjectId.trim();
-    const actor = draft.actor.trim().replace(/^@/, "").toLowerCase();
-    if (actor) {
-      setApplying(true);
-      try {
-        filters.actorId = (await client.user(actor)).user.id;
-      } catch (err) {
-        setApplying(false);
-        return setActorError(
-          errorCode(err) === "NOT_FOUND" ? t("d7Admin.audit.actorUnknown") : t("d7Admin.audit.actorFailed"),
-        );
+    const from = draft.from.trim();
+    const to = draft.to.trim();
+    if ((from && !isUtcDate(from)) || (to && !isUtcDate(to))) return setRangeError(t("w5Admin.audit.dateInvalid"));
+    if (from && to && to < from) return setRangeError(t("w5Admin.audit.rangeOrder"));
+    const next: AuditSearch = {};
+    if (draft.actor.trim()) {
+      const name = normalizeActor(draft.actor);
+      if (!name) return setActorError(t("d7Admin.audit.actorUnknown"));
+      if (!actorIds.has(name)) {
+        setApplying(true);
+        try {
+          const id = (await client.user(name)).user.id;
+          setActorIds((m) => new Map(m).set(name, id));
+        } catch (err) {
+          return setActorError(actorErrorText(err));
+        } finally {
+          setApplying(false);
+        }
       }
-      setApplying(false);
+      next.actor = name;
     }
-    setApplied({ filters, from, to });
+    if (isAuditSubjectType(draft.subjectType)) next.type = draft.subjectType;
+    if (draft.subjectId.trim()) next.subject = draft.subjectId.trim();
+    if (from) next.from = from;
+    if (to) next.to = to;
+    commit(next);
   };
   const clear = () => {
-    setDraft(EMPTY);
+    setDraft(draftOf(NO_SEARCH));
     setActorError(null);
     setRangeError(null);
-    setApplied({ filters: {}, from: null, to: null });
+    commit({});
   };
+  const describedBy = rangeError ? "admin-audit-range-hint admin-audit-range-error" : "admin-audit-range-hint";
 
   return (
     <div data-testid="admin-audit" className="flex flex-col gap-6">
@@ -273,7 +391,7 @@ export function AuditLog({ client, now }: { client: ConsoleClient; now?: Date })
           data-testid="admin-audit-filters"
           searchLabel={t("d7Admin.audit.actor")}
           searchValue={draft.actor}
-          onSearchChange={(actor) => setDraft((d) => ({ ...d, actor }))}
+          onSearchChange={(next) => setDraft((d) => ({ ...d, actor: next }))}
           searchInputProps={{ "data-testid": "admin-audit-actor", maxLength: 40, name: "actor" }}
           filters={[
             {
@@ -304,27 +422,49 @@ export function AuditLog({ client, now }: { client: ConsoleClient; now?: Date })
               }}
             />
           </Field>
-          <DateTimeTextField
-            data-testid="admin-audit-from"
-            legend={t("d7Admin.audit.from")}
-            value={draft.from}
-            clearable
-            invalid={rangeError !== null}
-            now={now}
-            onValueChange={(from) => setDraft((d) => ({ ...d, from }))}
-          />
-          <DateTimeTextField
-            data-testid="admin-audit-to"
-            legend={t("d7Admin.audit.to")}
-            value={draft.to}
-            clearable
-            invalid={rangeError !== null}
-            now={now}
-            onValueChange={(to) => setDraft((d) => ({ ...d, to }))}
-          />
+          <Field data-invalid={rangeError !== null || undefined}>
+            <FieldLabel htmlFor="admin-audit-from">{t("w5Admin.audit.from")}</FieldLabel>
+            <Input
+              id="admin-audit-from"
+              data-testid="admin-audit-from"
+              name="from"
+              inputMode="numeric"
+              autoComplete="off"
+              maxLength={10}
+              placeholder={t("w5Admin.audit.datePlaceholder")}
+              aria-describedby={describedBy}
+              aria-invalid={rangeError !== null || undefined}
+              value={draft.from}
+              onChange={(e) => {
+                const from = e.currentTarget.value;
+                setDraft((d) => ({ ...d, from }));
+              }}
+            />
+          </Field>
+          <Field data-invalid={rangeError !== null || undefined}>
+            <FieldLabel htmlFor="admin-audit-to">{t("w5Admin.audit.to")}</FieldLabel>
+            <Input
+              id="admin-audit-to"
+              data-testid="admin-audit-to"
+              name="to"
+              inputMode="numeric"
+              autoComplete="off"
+              maxLength={10}
+              placeholder={t("w5Admin.audit.datePlaceholder")}
+              aria-describedby={describedBy}
+              aria-invalid={rangeError !== null || undefined}
+              value={draft.to}
+              onChange={(e) => {
+                const to = e.currentTarget.value;
+                setDraft((d) => ({ ...d, to }));
+              }}
+            />
+          </Field>
         </div>
-        {rangeError ? <FieldError>{rangeError}</FieldError> : null}
-        <p className="text-xs text-muted-foreground">{t("d7Admin.audit.rangeHint")}</p>
+        {rangeError ? <FieldError id="admin-audit-range-error">{rangeError}</FieldError> : null}
+        <p id="admin-audit-range-hint" className="text-sm text-muted-foreground">
+          {t("w5Admin.audit.rangeHint")}
+        </p>
         <div className="flex flex-wrap gap-2">
           <Button data-testid="admin-audit-apply" type="submit" disabled={applying} aria-busy={applying || undefined}>
             {t("d7Admin.audit.apply")}
@@ -338,7 +478,7 @@ export function AuditLog({ client, now }: { client: ConsoleClient; now?: Date })
             variant="outline"
             className="ms-auto"
             disabled={rows.length === 0}
-            onClick={() => download(auditCsv(rows, names), "audit-log.csv")}
+            onClick={() => download(auditCsv(rows, names), csvFilename(current))}
           >
             <HugeiconsIcon icon={Download01Icon} strokeWidth={2} aria-hidden />
             {t("d7Admin.audit.export", { count: rows.length })}
@@ -353,7 +493,7 @@ export function AuditLog({ client, now }: { client: ConsoleClient; now?: Date })
           caption={t("d7Admin.audit.caption")}
           columns={cols}
           rows={rows}
-          loading={paged.items === null}
+          loading={loading}
           getRowId={(r) => r.id}
           rowProps={(r) => ({
             "data-testid": "admin-audit-row",
@@ -363,7 +503,7 @@ export function AuditLog({ client, now }: { client: ConsoleClient; now?: Date })
           empty={t("d7Admin.audit.empty")}
         />
       )}
-      {paged.hasMore ? (
+      {ready && paged.hasMore ? (
         <div>
           <Button
             variant="ghost"

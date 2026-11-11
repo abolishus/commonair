@@ -1,0 +1,9 @@
+{
+  "w5Admin.audit.from": "Desde (fecha UTC)",
+  "w5Admin.audit.to": "Hasta (fecha UTC)",
+  "w5Admin.audit.datePlaceholder": "AAAA-MM-DD",
+  "w5Admin.audit.rangeHint": "Las fechas están en UTC, con el formato AAAA-MM-DD. Se incluyen los dos días, y la exportación usa el mismo rango.",
+  "w5Admin.audit.dateInvalid": "Escribe la fecha como AAAA-MM-DD, o déjala vacía.",
+  "w5Admin.audit.rangeOrder": "La fecha Desde no puede ser posterior a la fecha Hasta.",
+  "w5Admin.home.nextDue": "Próximo vencimiento"
+}

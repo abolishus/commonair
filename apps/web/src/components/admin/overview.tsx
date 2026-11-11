@@ -4,7 +4,8 @@
 /**
  * The `/admin` home (overhaul wave 4, D7.5, AA-11): one tile per queue the role can open (from
  * `admin.overview`), each linking to its queue, overdue and due-soon work called out in words and
- * colour; below them, for admins, the latest staff actions from the audit log.
+ * colour, and (wave 5) when the next deadline falls; below them, for admins, the latest staff
+ * actions from the audit log.
  */
 import { EmptyState, RelativeTime, SkeletonGroup, SkeletonText, StatusBadge } from "@commonair/ui";
 import { StatCard } from "@commonair/ui/blocks/data";
@@ -105,6 +106,7 @@ export function QueueTile({ count, me }: { count: AdminQueueCountDto; me: Me }):
       data-open={count.open}
       data-overdue={count.overdue}
       data-due-soon={count.dueSoon}
+      data-next-due={count.nextDueAt ?? undefined}
       tone={hot ? "destructive" : "default"}
       label={queueLabel(count.queue)}
       value={t("d7Admin.home.open", { count: count.open })}
@@ -132,6 +134,11 @@ export function QueueTile({ count, me }: { count: AdminQueueCountDto; me: Me }):
                 </StatusBadge>
               ) : null}
             </div>
+          ) : null}
+          {clocked && count.nextDueAt ? (
+            <p className="text-sm text-muted-foreground">
+              {t("w5Admin.home.nextDue")} <RelativeTime date={count.nextDueAt} />
+            </p>
           ) : null}
           {count.unassigned !== null && count.open > 0 ? (
             <p className="text-xs text-muted-foreground">{t("d7Admin.home.unassigned", { count: count.unassigned })}</p>

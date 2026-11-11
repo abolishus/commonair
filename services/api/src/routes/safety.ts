@@ -16,7 +16,7 @@
  *   representative `subjectId` among them; every body is kept as evidence, and removing the
  *   content deletes them all. A wave has several senders, so it is never a suspension or ban target.
  */
-import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import { REPORT_SUBJECTS, type REPORT_OUTCOMES, type REPORT_REASONS } from "@commonair/contracts/enums";
 import type { ReportOutcomeNotificationPayload } from "@commonair/contracts/notify";
 import { findClause, MODERATION_CONSTANTS, parseRuleRef } from "@commonair/moderation";
@@ -28,6 +28,7 @@ import { publishControl, publishUserControl } from "../lib/control.ts";
 import { decodeCursor, encodeCursor, isKeyCursor, isOffsetCursor, pageOf } from "../lib/cursor.ts";
 import { iso, userByUsername } from "../lib/dto.ts";
 import * as dmca from "../dmca/notices.ts";
+import { listAuditLog } from "../safety/audit-log.ts";
 import { badRequest, conflict, forbidden, notFound } from "../lib/errors.ts";
 import { os, requireCaller, requireChannel } from "../lib/orpc.ts";
 import { afterBroadcastEnded, endBroadcastInTx, type EndedBroadcast } from "../moderation/live.ts";
@@ -37,19 +38,8 @@ import { staffActorType } from "../moderation/review.ts";
 import { reportReasonRuleRef, staffRuleRef } from "../transparency/rule-ref.ts";
 import { watchRoomEvidence } from "../watch-rooms/evidence.ts";
 
-const {
-  reports,
-  users,
-  channels,
-  chatMessages,
-  vods,
-  clips,
-  broadcasts,
-  moderationCases,
-  modActions,
-  auditLog,
-  notifications,
-} = schema;
+const { reports, users, channels, chatMessages, vods, clips, broadcasts, moderationCases, modActions, notifications } =
+  schema;
 type ReportRow = typeof reports.$inferSelect;
 type ReportSubject = (typeof REPORT_SUBJECTS)[number];
 type ReportReason = (typeof REPORT_REASONS)[number];
@@ -623,43 +613,7 @@ export const safety = {
     );
   }),
 
-  auditLog: os.safety.auditLog.handler(async ({ context, input }) => {
-    const { deps } = context;
-    const cur = decodeCursor(input.cursor, isKeyCursor);
-    const where: (SQL | undefined)[] = [
-      input.subjectType ? eq(auditLog.subjectType, input.subjectType) : undefined,
-      input.subjectId ? eq(auditLog.subjectId, input.subjectId) : undefined,
-      input.actorId ? eq(auditLog.actorId, input.actorId) : undefined,
-      cur
-        ? or(
-            lt(auditLog.createdAt, new Date(cur.t)),
-            and(eq(auditLog.createdAt, new Date(cur.t)), lt(auditLog.id, cur.id)),
-          )
-        : undefined,
-    ];
-    const rows = await deps.db
-      .select()
-      .from(auditLog)
-      .where(and(...where))
-      .orderBy(desc(auditLog.createdAt), desc(auditLog.id))
-      .limit(input.limit + 1);
-    return pageOf(
-      rows,
-      input.limit,
-      (a) => ({
-        id: a.id,
-        actorType: a.actorType,
-        actorId: a.actorId,
-        action: a.action,
-        subjectType: a.subjectType,
-        subjectId: a.subjectId,
-        reason: a.reason,
-        details: a.details,
-        createdAt: iso(a.createdAt),
-      }),
-      (last) => encodeCursor({ t: iso(last.createdAt), id: last.id }),
-    );
-  }),
+  auditLog: os.safety.auditLog.handler(({ context, input }) => listAuditLog(context.deps.db, input)),
 
   dmca: {
     submit: os.safety.dmca.submit.handler(({ context, input }) => dmca.submitNotice(context.deps, input)),

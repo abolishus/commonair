@@ -1,0 +1,9 @@
+{
+  "w5Admin.audit.from": "From (UTC date)",
+  "w5Admin.audit.to": "To (UTC date)",
+  "w5Admin.audit.datePlaceholder": "YYYY-MM-DD",
+  "w5Admin.audit.rangeHint": "Dates are UTC, written YYYY-MM-DD. Both days are included, and the export has the same range.",
+  "w5Admin.audit.dateInvalid": "Write the date as YYYY-MM-DD, or leave it empty.",
+  "w5Admin.audit.rangeOrder": "The From date can't be after the To date.",
+  "w5Admin.home.nextDue": "Next due"
+}

@@ -16,7 +16,7 @@ import { createMemoryHistory, createRootRoute, createRouter, RouterContextProvid
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type * as React from "react";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
-import { auditCsv, AuditLog, csvCell, inRange } from "../src/components/admin/audit-log.tsx";
+import { auditCsv, AuditLog, csvCell } from "../src/components/admin/audit-log.tsx";
 import type {
   AdminQueueCountDto,
   AdminUserViewDto,
@@ -122,18 +122,17 @@ describe("access to the new pages", () => {
 
 describe("the admin width rule", () => {
   const dir = join(import.meta.dirname, "../src/routes/_admin");
-  // `admin.coop.tsx` renders `AdminCoopPage`, whose container lives in components/coop (another
-  // unit's file); its switch to AdminPage is a listed follow-up.
-  const EXEMPT = new Set(["admin.coop.tsx"]);
-  const routes = readdirSync(dir).filter((f) => f.endsWith(".tsx") && !EXEMPT.has(f));
+  // `admin.coop.tsx` renders `AdminCoopPage`, whose container lives in components/coop.
+  const SOURCE: Record<string, string> = { "admin.coop.tsx": join(dir, "../../components/coop/admin.tsx") };
+  const routes = readdirSync(dir).filter((f) => f.endsWith(".tsx"));
 
   it("covers every admin route", () => {
     expect(routes.length).toBeGreaterThanOrEqual(14);
   });
 
   it.each(routes)("%s uses AdminPage with a width, never PageContainer", (file) => {
-    const text = readFileSync(join(dir, file), "utf8");
-    expect(text).toMatch(/<AdminPage width="(queue|form|full)"/);
+    const text = readFileSync(SOURCE[file] ?? join(dir, file), "utf8");
+    expect(text).toMatch(/<AdminPage (data-testid="[a-z-]+" )?width="(queue|form|full)"/);
     expect(text).not.toContain("PageContainer");
   });
 });
@@ -193,10 +192,7 @@ describe("the admin home", () => {
 });
 
 describe("the audit log", () => {
-  it("helpers: the range, CSV cells (formulas defused) and short ids", () => {
-    expect(inRange({ createdAt: "2026-11-11T10:00:00Z" }, null, null)).toBe(true);
-    expect(inRange({ createdAt: "2026-11-11T10:00:00Z" }, "2026-11-11T11:00:00Z", null)).toBe(false);
-    expect(inRange({ createdAt: "2026-11-11T10:00:00Z" }, null, "2026-11-11T09:00:00Z")).toBe(false);
+  it("helpers: CSV cells (formulas defused) and short ids", () => {
     expect(csvCell("plain")).toBe("plain");
     expect(csvCell('a "b", c')).toBe('"a ""b"", c"');
     expect(csvCell("=HYPERLINK()")).toBe("'=HYPERLINK()");
