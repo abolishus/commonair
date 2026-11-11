@@ -18,6 +18,7 @@ import {
   type CoopMonthDto,
 } from "../../lib/coop.ts";
 import { monthLabel } from "../../lib/money.ts";
+import { GOVERNANCE_CAP, recentDecisions } from "../transparency-v2/model.ts";
 
 type Outcome = ReturnType<typeof governanceOutcomes>[number];
 
@@ -40,9 +41,12 @@ export function outcomeItem(g: Outcome): GovernanceOutcomeItem {
 
 type PatronageMonth = ReturnType<typeof patronageMonths>[number];
 
-/** `/transparency` E5 rows: governance outcomes per month and the patronage distributed. */
+/**
+ * `/transparency` E5 rows: governance outcomes and the patronage distributed per month. Outcomes are
+ * the most recent decisions first, capped at `GOVERNANCE_CAP`, then "All decisions" (coop-trust P3.6).
+ */
 export function CoopTransparency({ months }: { months: CoopMonthDto[] }): React.JSX.Element {
-  const outcomes = governanceOutcomes(months);
+  const outcomes = recentDecisions(months);
   const patronage = patronageMonths(months);
   const columns: DataTableColumn<PatronageMonth>[] = [
     { id: "month", header: t("transparency.month"), cell: ({ row }) => monthLabel(row.original.month) },
@@ -59,9 +63,21 @@ export function CoopTransparency({ months }: { months: CoopMonthDto[] }): React.
         <GovernanceOutcomeList
           label={t("coop.transparency.governance")}
           itemProps={{ "data-testid": "transparency-governance" }}
-          items={outcomes.map(outcomeItem)}
+          items={outcomes.items.map(outcomeItem)}
           empty={<p>{t("coop.transparency.governanceEmpty")}</p>}
         />
+        {outcomes.items.length > 0 && (
+          <p className="flex flex-wrap items-baseline gap-x-2 text-sm text-muted-foreground">
+            {outcomes.more && <span>{t("d6Transparency.governance.capped", { count: GOVERNANCE_CAP })}</span>}
+            <Link
+              to="/coop/proposals"
+              data-testid="transparency-all-decisions"
+              className="font-medium text-foreground underline underline-offset-4 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            >
+              {t("d6Transparency.governance.allDecisions")}
+            </Link>
+          </p>
+        )}
       </Section>
       <Section heading={t("coop.transparency.patronage")} description={t("coop.transparency.patronageHint")}>
         <DataTable

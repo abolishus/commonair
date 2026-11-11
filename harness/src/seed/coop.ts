@@ -29,6 +29,7 @@ import {
   planMemberships,
   rulesOf,
   seatsOf,
+  transparencyNotePlan,
 } from "./coop/plan.ts";
 import type { SeedUnit } from "./types.ts";
 
@@ -61,6 +62,8 @@ const TABLES = [
   "jury_cases",
   "jury_votes",
   "jury_flags",
+  // Overhaul wave 4 (D6.1): the treasurer's note on one month.
+  "transparency_notes",
 ] as const;
 
 /** What seed-coop publishes as `store.extra.coop` (the keys its brief names). */
@@ -298,6 +301,10 @@ export const unit: SeedUnit = {
     if (run.total.cents === 0)
       notes.push("seed-coop: the patronage period distributes nothing (no retained surplus in the ledger yet)");
 
+    // ------------------------------------------------------------ transparency note (D6.1)
+    const note = transparencyNotePlan(ctx.now, revenuePeriod);
+    await treasurer.api.client.transparency.setNote(note);
+
     // ------------------------------------------------------------ privacy and report
     const caused = await coopRowsSince(ctx.db, unitStart);
     const leaks = rowLeaks(caused.audit, caused.events, {
@@ -331,6 +338,7 @@ export const unit: SeedUnit = {
         `seed-coop: ${governance.counts.votes} votes, ${governance.counts.comments} comments, ${governance.counts.councilResponses} council responses, ${governance.counts.ballots} ballots; ${governance.elected} board seats from the closed election`,
         `seed-coop: ${membership.rows.appointments} workers appointed; shares: ${membership.rows.sharesBought} bought, ${membership.rows.sharesConfirmed} confirmed, ${membership.rows.sharesRefunded} refunded`,
         `seed-coop: patronage period ${window.start.toISOString()}..${window.end.toISOString()} for ${run.members} members, ${run.total.cents} cents (run by treasurer, approved by admin)`,
+        `seed-coop: the treasurer's transparency note is on ${note.month}`,
         `seed-coop: ${sessions.signedIn} accounts signed in through the API`,
       ],
     };

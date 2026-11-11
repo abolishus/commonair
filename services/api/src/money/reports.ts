@@ -38,6 +38,7 @@ import { isoOrNull } from "../lib/dto.ts";
 import { badRequest, conflict, forbidden, notFound } from "../lib/errors.ts";
 import { type ResolvedContext, os, requireCaller, requireChannel } from "../lib/orpc.ts";
 import { stripePayoutAccount } from "./stripe-connect.ts";
+import { monthNotes } from "../transparency/notes.ts";
 import { startPayoutTransfers } from "./transfers.ts";
 import {
   type PaymentFacts,
@@ -701,6 +702,8 @@ async function transparency(deps: Deps, months: number) {
       ...[...members].filter((r) => num(r.n) > 0).map((r) => r.month),
     ]),
   ].sort();
+  // The treasurer's notes on the months shown, in one query (D6.1).
+  const notes = await monthNotes(db, shown);
   const empty = (month: string) => ({
     month,
     revenueCents: 0,
@@ -749,8 +752,7 @@ async function transparency(deps: Deps, months: number) {
           writeOffs: suspenseBy.get(m.month)?.writeOffs ?? 0,
           heldAtMonthEnd: money(suspenseBy.get(m.month)?.heldAtMonthEndCents ?? 0, currency),
         },
-        // Contract step placeholder (overhaul wave 4): d6-transparency reads `transparency_notes`.
-        note: null,
+        note: notes.get(m.month) ?? null,
       };
     })
     .reverse();
