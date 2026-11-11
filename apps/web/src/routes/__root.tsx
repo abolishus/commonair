@@ -15,6 +15,7 @@ import {
 } from "@tanstack/react-router";
 import * as React from "react";
 import { ConsentRoot } from "../components/consent/consent-root.tsx";
+import { useEmailSource } from "../components/notifications/email-source.tsx";
 import { ErrorState, NotFoundState, ShellFallback } from "../components/not-found.tsx";
 import { PwaRoot } from "../components/pwa/pwa-root.tsx";
 import { onLocaleApplied, syncLocale } from "../i18n/client.ts";
@@ -148,6 +149,8 @@ function RootComponent(): React.JSX.Element {
   React.useEffect(() => {
     void syncLocale({ locale: bootLocale, localeFromUser });
   }, [bootLocale, localeFromUser]);
+  // Count and strip `?src=` from our email's links on every page, signed in or out (D7.3).
+  useEmailSource();
   const tabDiffers = chosen === null && tab !== null && tab !== boot.theme;
   React.useEffect(() => {
     if (tabDiffers && tab) applyTheme(tab);
