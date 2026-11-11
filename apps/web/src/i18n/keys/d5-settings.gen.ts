@@ -9,6 +9,8 @@ export type Key =
   | "settings.list.noMatch"
   | "settings.list.noMatchHint"
   | "settings.list.searchLoaded"
+  | "settings.notifications.bell"
+  | "settings.notifications.search"
   | "settings.grants.search"
   | "settings.grants.allOn"
   | "settings.grants.allOff"

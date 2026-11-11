@@ -4,6 +4,8 @@
   "settings.list.noMatch": "Nothing matches “{query}”",
   "settings.list.noMatchHint": "Check the spelling, or search for part of the name.",
   "settings.list.searchLoaded": "{count, plural, one {Searching the # channel loaded so far. Load more to search further.} other {Searching the # channels loaded so far. Load more to search further.}}",
+  "settings.notifications.bell": "Go-live alerts",
+  "settings.notifications.search": "Search channels you follow",
   "settings.grants.search": "Search channels",
   "settings.grants.allOn": "All on",
   "settings.grants.allOff": "All off",
