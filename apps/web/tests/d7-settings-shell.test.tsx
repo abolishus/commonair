@@ -38,8 +38,15 @@ import { Route as SettingsRoute } from "../src/routes/_app/settings.tsx";
 
 configure({ asyncUtilTimeout: 5_000 });
 
-const boot = vi.hoisted(() => ({ me: { id: "u1", username: "viewer1" } as null | { id: string; username: string } }));
+type BootMe = {
+  id: string;
+  username: string;
+  settingsSummary?: { deletionScheduledFor: string | null; openAppeals: number; openCopyright: number };
+};
+const boot = vi.hoisted(() => ({ me: { id: "u1", username: "viewer1" } as null | BootMe }));
 const fake = vi.hoisted(() => ({
+  /** Requests the shell made (it should make none: the bootstrap carries what it shows). */
+  reads: 0,
   appeals: [] as { status: string }[],
   dmca: [] as { status: string }[],
   deletion: null as null | { id: string; status: string; scheduledFor: string; retained: unknown[] },
@@ -56,11 +63,26 @@ vi.mock("../src/lib/ui-metrics.ts", () => ({ trackUi: vi.fn<(...args: unknown[])
 
 vi.mock("../src/lib/api.ts", () => ({
   api: () => ({
-    appeals: { mine: async () => fake.appeals },
-    safety: { dmca: { mine: async () => fake.dmca } },
+    appeals: {
+      mine: async () => {
+        fake.reads++;
+        return fake.appeals;
+      },
+    },
+    safety: {
+      dmca: {
+        mine: async () => {
+          fake.reads++;
+          return fake.dmca;
+        },
+      },
+    },
     me: {
       deletion: {
-        get: async () => fake.deletion,
+        get: async () => {
+          fake.reads++;
+          return fake.deletion;
+        },
         cancel: async () => {
           fake.cancels++;
           return { ok: true };
@@ -79,6 +101,7 @@ afterEach(() => {
   fake.dmca = [];
   fake.deletion = null;
   fake.cancels = 0;
+  fake.reads = 0;
 });
 
 const WEB = join(import.meta.dirname, "..");
@@ -203,13 +226,19 @@ describe("the settings layout", () => {
     await waitFor(() => expect(router.state.location.pathname).toBe("/following"));
   });
 
-  it("Appeals and Copyright show their open counts", async () => {
-    fake.appeals = [{ status: "open" }, { status: "open" }, { status: "upheld" }];
-    fake.dmca = [{ status: "actioned" }, { status: "restored" }, { status: "rejected" }];
+  it("Appeals and Copyright show their open counts from the bootstrap, with no request", async () => {
+    boot.me = {
+      id: "u1",
+      username: "viewer1",
+      settingsSummary: { deletionScheduledFor: null, openAppeals: 2, openCopyright: 1 },
+    };
     await mount("/settings/account");
     await waitFor(() => expect(screen.getByTestId("settings-tab-appeals").textContent).toContain("2"));
     expect(screen.getByTestId("settings-tab-copyright").textContent).toContain("1");
     expect(screen.getByTestId("settings-tab-privacy").textContent).toBe(settingsTabLabel("privacy"));
+    await new Promise((r) => setTimeout(r, 20));
+    // The e4b-money scenario loads settings pages often: the shell adds nothing to the member's bucket.
+    expect(fake.reads).toBe(0);
   });
 
   it("the unsubscribe page and a signed-out visitor get no nav", async () => {
@@ -232,7 +261,11 @@ describe("the settings layout", () => {
 
 describe("the scheduled-deletion banner", () => {
   it("shows above every settings page while a deletion is scheduled, and Cancel removes it", async () => {
-    fake.deletion = { id: "d", status: "scheduled", scheduledFor: "2026-12-06T12:00:00.000Z", retained: [] };
+    boot.me = {
+      id: "u1",
+      username: "viewer1",
+      settingsSummary: { deletionScheduledFor: "2026-12-06T12:00:00.000Z", openAppeals: 0, openCopyright: 0 },
+    };
     await mount("/settings/appeals");
     const banner = await screen.findByTestId("deletion-banner");
     expect(banner.dataset.scheduledFor).toBe("2026-12-06T12:00:00.000Z");
@@ -243,14 +276,20 @@ describe("the scheduled-deletion banner", () => {
     fireEvent.click(within(banner).getByTestId("deletion-banner-cancel"));
     await waitFor(() => expect(screen.queryByTestId("deletion-banner")).toBeNull());
     expect(fake.cancels).toBe(1);
+    expect(fake.reads).toBe(0);
   });
 
-  it("is absent with nothing scheduled, or a canceled request", async () => {
+  it("is absent with nothing scheduled, or without a summary", async () => {
+    boot.me = {
+      id: "u1",
+      username: "viewer1",
+      settingsSummary: { deletionScheduledFor: null, openAppeals: 0, openCopyright: 0 },
+    };
     await mount("/settings/account");
     await new Promise((r) => setTimeout(r, 20));
     expect(screen.queryByTestId("deletion-banner")).toBeNull();
     cleanup();
-    fake.deletion = { id: "d", status: "canceled", scheduledFor: "2026-12-06T12:00:00.000Z", retained: [] };
+    boot.me = { id: "u1", username: "viewer1" };
     await mount("/settings/account");
     await new Promise((r) => setTimeout(r, 20));
     expect(screen.queryByTestId("deletion-banner")).toBeNull();

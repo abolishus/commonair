@@ -4,11 +4,11 @@
 /**
  * The settings nav's count badges (D7.1): appeals still waiting on a decision, and copyright
  * notices still in effect on the member's content (removed, or countered and not yet restored).
- * From existing reads (`appeals.mine`, `safety.dmca.mine`); a failed read shows no badge.
+ * The counts come with `Me.settingsSummary` (the same rules as `openAppeals`/`openCopyright` over
+ * `appeals.mine` and `safety.dmca.mine`), so a settings page load makes no extra requests: the
+ * e4b-money scenario fills a member's rate-limit bucket with settings page loads otherwise.
  */
 import type { DMCA_STATUSES } from "@commonair/contracts/enums";
-import * as React from "react";
-import { api } from "../../lib/api.ts";
 import type { SettingsCounts } from "./settings-nav.tsx";
 
 /** Copyright notices the member can still act on or is waiting out. */
@@ -22,33 +22,13 @@ export function openCopyright(notices: readonly { status: (typeof DMCA_STATUSES)
   return notices.filter((n) => OPEN_DMCA.has(n.status)).length;
 }
 
-export interface CountsClient {
-  appeals(): Promise<readonly { status: string }[]>;
-  copyright(): Promise<readonly { status: (typeof DMCA_STATUSES)[number] }[]>;
+/** What `Me.settingsSummary` carries for the badges (no request of its own: the bootstrap has it). */
+export interface SummaryCounts {
+  openAppeals: number;
+  openCopyright: number;
 }
 
-export const countsClient = (): CountsClient => ({
-  appeals: () => Promise.resolve().then(() => api().appeals.mine()),
-  copyright: () => Promise.resolve().then(() => api().safety.dmca.mine()),
-});
-
-/** Loads both counts once per mount of the settings layout. */
-export function useSettingsCounts(client?: CountsClient): SettingsCounts {
-  const [counts, setCounts] = React.useState<SettingsCounts>({});
-  const [c] = React.useState(() => client ?? countsClient());
-  React.useEffect(() => {
-    let live = true;
-    c.appeals().then(
-      (list) => live && setCounts((prev) => ({ ...prev, appeals: openAppeals(list) })),
-      () => {},
-    );
-    c.copyright().then(
-      (list) => live && setCounts((prev) => ({ ...prev, copyright: openCopyright(list) })),
-      () => {},
-    );
-    return () => {
-      live = false;
-    };
-  }, [c]);
-  return counts;
+/** The badges from the bootstrap's `Me.settingsSummary`; none when it is missing. */
+export function settingsCounts(summary: SummaryCounts | null | undefined): SettingsCounts {
+  return summary ? { appeals: summary.openAppeals, copyright: summary.openCopyright } : {};
 }

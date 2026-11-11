@@ -20,6 +20,8 @@ export interface SessionUser {
    * call of its own on every page). Absent where a caller built the user without it.
    */
   pendingLegal?: Me["pendingLegal"];
+  /** The settings shell's banner and badges, from the same `me.get` (overhaul wave 4). Absent where a caller built the user without it. */
+  settingsSummary?: Me["settingsSummary"];
 }
 
 /**

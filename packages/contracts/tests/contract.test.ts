@@ -115,6 +115,7 @@ describe("locale (ADR 0029)", () => {
     memberships: [],
     pendingLegal: [],
     channelSlug: null,
+    settingsSummary: { deletionScheduledFor: null, openAppeals: 0, openCopyright: 0 },
   };
 
   test("LocaleTag takes BCP 47 tags as the platform stores them", () => {

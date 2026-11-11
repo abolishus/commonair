@@ -40,6 +40,7 @@ const ME = {
   role: "user",
   locale: null,
   pendingLegal: [{ kind: "terms", version: "2026-10-01" }],
+  settingsSummary: { deletionScheduledFor: null, openAppeals: 1, openCopyright: 0 },
 };
 
 /** An oRPC error answer, as the API sends one. */
@@ -124,6 +125,7 @@ describe("lookupSession and loadSessionUser (F1)", () => {
       channelSlug: null,
       role: "user",
       pendingLegal: [{ kind: "terms", version: "2026-10-01" }],
+      settingsSummary: { deletionScheduledFor: null, openAppeals: 1, openCopyright: 0 },
     });
   });
 

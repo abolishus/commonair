@@ -59,7 +59,7 @@ async function loadMe(deps: Deps, userId: string) {
   const [u] = await deps.db.select().from(users).where(eq(users.id, userId));
   if (!u) throw notFound("User not found");
   const now = deps.now();
-  const [pub, member, pending, channel, mature] = await Promise.all([
+  const [pub, member, pending, channel, mature, summary] = await Promise.all([
     loadUsersPublic(deps, [u.id]),
     deps.db
       .select({ class: memberships.class, since: memberships.joinedAt })
@@ -68,6 +68,7 @@ async function loadMe(deps: Deps, userId: string) {
     pendingDocuments(deps.db, u.id, now),
     deps.db.select({ slug: channels.slug }).from(channels).where(eq(channels.ownerId, u.id)),
     matureConfirmed(deps.db, u.id),
+    settingsSummary(deps.db, u.id),
   ]);
   const adult = isAdult(u.birthDate, now);
   return {
@@ -84,6 +85,36 @@ async function loadMe(deps: Deps, userId: string) {
     memberships: member.map((m) => ({ class: m.class, since: iso(m.since) })),
     pendingLegal: pending.map((p) => ({ kind: p.kind, version: p.version })),
     channelSlug: channel[0]?.slug ?? null,
+    settingsSummary: summary,
+  };
+}
+
+/**
+ * `Me.settingsSummary` (overhaul wave 4): the settings shell's banner and badges in one query, so
+ * a settings page load adds no requests to the member's rate-limit bucket. The counts match what
+ * the Appeals and Copyright pages list (`appeals.mine` open; `safety.dmca.mine` actioned or
+ * countered).
+ */
+async function settingsSummary(db: Executor, userId: string) {
+  const rows = await db.execute<{
+    deletion_scheduled_for: Date | string | null;
+    open_appeals: number;
+    open_copyright: number;
+  }>(sql`select
+      (select d.scheduled_for from account_deletions d
+        where d.user_id = ${userId} and d.status = 'scheduled'
+        order by d.requested_at desc limit 1) as deletion_scheduled_for,
+      (select count(*)::int from appeals a
+        where a.appellant_id = ${userId} and a.status = 'open') as open_appeals,
+      (select count(distinct n.id)::int from dmca_notices n
+        join dmca_notice_items i on i.notice_id = n.id
+        where i.owner_id = ${userId} and n.status in ('actioned', 'countered')) as open_copyright`);
+  const row = rows[0];
+  const at = row?.deletion_scheduled_for;
+  return {
+    deletionScheduledFor: at ? new Date(at).toISOString() : null,
+    openAppeals: Number(row?.open_appeals ?? 0),
+    openCopyright: Number(row?.open_copyright ?? 0),
   };
 }
 

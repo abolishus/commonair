@@ -53,6 +53,18 @@ export const Me = UserPublic.extend({
   memberships: z.array(z.object({ class: z.enum(E.MEMBER_CLASSES), since: Timestamp })),
   pendingLegal: z.array(z.object({ kind: z.enum(E.LEGAL_DOCUMENT_KINDS), version: z.string() })),
   channelSlug: Slug.nullable(),
+  /**
+   * Overhaul wave 4 (D7.1, D7.4): what the settings shell shows on every page (the scheduled
+   * deletion banner, the Appeals and Copyright badges), carried here so a settings page load
+   * makes no extra requests.
+   */
+  settingsSummary: z.object({
+    deletionScheduledFor: Timestamp.nullable(),
+    /** The member's appeals still waiting on a decision. */
+    openAppeals: z.number().int().nonnegative(),
+    /** Copyright notices on the member's content still in effect (actioned, or countered and not restored). */
+    openCopyright: z.number().int().nonnegative(),
+  }),
 });
 export type Me = z.infer<typeof Me>;
 

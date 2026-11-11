@@ -41,8 +41,12 @@ export function scheduledRequest(request: DeletionRequestDto | null | undefined)
   return request?.status === "scheduled" ? request : null;
 }
 
-function useDeletionLoader(client: DeletionClient, enabled: boolean): DeletionState {
-  const [request, setRequest] = React.useState<DeletionRequestDto | null | undefined>(undefined);
+function useDeletionLoader(
+  client: DeletionClient,
+  enabled: boolean,
+  initial?: DeletionRequestDto | null,
+): DeletionState {
+  const [request, setRequest] = React.useState<DeletionRequestDto | null | undefined>(initial);
   const [failed, setFailed] = React.useState(false);
   const [attempt, setAttempt] = React.useState(0);
   React.useEffect(() => {
@@ -79,15 +83,26 @@ function useDeletionLoader(client: DeletionClient, enabled: boolean): DeletionSt
   return { request, failed, reload, schedule, cancel };
 }
 
+/**
+ * The banner's request as `Me.settingsSummary` states it: only the scheduled date is known, which
+ * is all the banner and Cancel need. `id` and `retained` stay empty until a page loads the request.
+ */
+export function summaryRequest(scheduledFor: string | null | undefined): DeletionRequestDto | null {
+  return scheduledFor ? { id: "", status: "scheduled", scheduledFor, retained: [] } : null;
+}
+
 export function DeletionProvider({
   client: clientProp,
+  initial,
   children,
 }: {
   client?: DeletionClient;
+  /** From the bootstrap (`Me.settingsSummary`): given, the provider makes no request of its own. */
+  initial?: DeletionRequestDto | null;
   children: React.ReactNode;
 }): React.JSX.Element {
   const [client] = React.useState(() => clientProp ?? deletionClient());
-  const state = useDeletionLoader(client, true);
+  const state = useDeletionLoader(client, initial === undefined, initial);
   return <Ctx.Provider value={state}>{children}</Ctx.Provider>;
 }
 

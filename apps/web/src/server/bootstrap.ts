@@ -61,6 +61,7 @@ function signedIn(m: Me): SessionLookup {
       channelSlug: m.channelSlug,
       role: m.role,
       pendingLegal: m.pendingLegal,
+      settingsSummary: m.settingsSummary,
     },
   };
 }

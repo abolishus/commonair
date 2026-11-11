@@ -5,11 +5,12 @@ import { PageContainer } from "@commonair/ui/layouts";
 import { Outlet, createFileRoute, useLocation } from "@tanstack/react-router";
 import type * as React from "react";
 import { DeletionBanner } from "../../components/settings/deletion-banner.tsx";
-import { DeletionProvider } from "../../components/settings/deletion-state.tsx";
-import { useSettingsCounts } from "../../components/settings/nav-counts.ts";
+import { DeletionProvider, summaryRequest } from "../../components/settings/deletion-state.tsx";
+import { settingsCounts } from "../../components/settings/nav-counts.ts";
 import { SettingsNav, settingsTabFor, type SettingsItemId } from "../../components/settings/settings-nav.tsx";
 import { t } from "../../i18n/index.ts";
 import { useBootstrap } from "../../lib/bootstrap.ts";
+import type { SessionUser } from "../../lib/bootstrap-types.ts";
 import { titleHead } from "../../lib/page-title.ts";
 
 /**
@@ -29,11 +30,14 @@ function SettingsLayout(): React.JSX.Element {
   const pathname = useLocation({ select: (location) => location.pathname });
   const current = settingsTabFor(pathname);
   if (!me || current === null) return <Outlet />;
-  return <SettingsShell current={current} />;
+  return <SettingsShell current={current} summary={me.settingsSummary} />;
 }
 
-function SettingsShell({ current }: { current: SettingsItemId }): React.JSX.Element {
-  const counts = useSettingsCounts();
+type Summary = SessionUser["settingsSummary"];
+
+function SettingsShell({ current, summary }: { current: SettingsItemId; summary: Summary }): React.JSX.Element {
+  // The badges and the banner come with the bootstrap's `/me`: no extra requests per page load.
+  const counts = settingsCounts(summary);
   return (
     <PageContainer
       data-testid="settings-layout"
@@ -41,7 +45,7 @@ function SettingsShell({ current }: { current: SettingsItemId }): React.JSX.Elem
       className="flex flex-col gap-6 py-8 lg:flex-row lg:items-start"
     >
       <SettingsNav current={current} counts={counts} />
-      <DeletionProvider>
+      <DeletionProvider initial={summaryRequest(summary?.deletionScheduledFor)}>
         <div data-testid="settings-main" className="flex min-w-0 max-w-3xl flex-1 flex-col gap-6">
           <DeletionBanner />
           <Outlet />

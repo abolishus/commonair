@@ -193,6 +193,7 @@ const ME: Me = {
   memberships: [],
   pendingLegal: [],
   channelSlug: "viewer1",
+  settingsSummary: { deletionScheduledFor: null, openAppeals: 0, openCopyright: 0 },
 };
 
 function accountFake(me: Me = ME) {
