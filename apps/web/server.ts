@@ -25,7 +25,7 @@ const server = createWebServer({
   publicUrl: env.PUBLIC_URL,
   clientDir: new URL("client/", distDir).pathname,
   ssr: (req) => ssr.default.fetch(req),
-  manifest: () => manifestResponse(publicConfig(env)),
+  manifest: (req) => manifestResponse(publicConfig(env), req.headers.get("accept-language")),
   onProxyFailure: (fields) => logger.warn("api proxy failed", fields),
 });
 

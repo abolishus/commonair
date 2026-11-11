@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from "vite-plus/test";
 import { createHandler, securityHeaders, staticPath } from "../src/server/http.ts";
+import { manifestResponse } from "../src/server/pwa.ts";
 import {
   HOP_BY_HOP,
   downstreamResponse,
@@ -290,6 +291,31 @@ describe("createHandler", () => {
     // Other methods still reach SSR.
     const post = await withManifest(new Request("http://localhost/manifest.webmanifest", { method: "POST" }), null);
     expect(await post.text()).toBe("ssr");
+  });
+
+  it("hands the request to the manifest, so a Spanish Accept-Language gets lang es", async () => {
+    const config = {
+      instanceName: "Test",
+      publicUrl: "https://stream.example.org",
+      chatUrl: "wss://stream.example.org/chat",
+      ingestRtmpUrl: "rtmp://stream.example.org/live",
+      playbackUrl: "https://stream.example.org/hls",
+      currency: "usd",
+    };
+    const localised = createHandler({
+      apiUrl: API,
+      publicUrl: "https://stream.example.org",
+      clientDir: "/nonexistent-dir-for-tests/",
+      ssr: () => new Response("ssr"),
+      manifest: (req) => manifestResponse(config, req.headers.get("accept-language")),
+    });
+    const req = (lang: string) =>
+      new Request("http://localhost/manifest.webmanifest", { headers: { "accept-language": lang } });
+    const es = await localised(req("es-MX,es;q=0.9,en;q=0.5"), null);
+    expect(((await es.json()) as { lang: string }).lang).toBe("es");
+    expect(es.headers.get("content-language")).toBe("es");
+    const en = await localised(req("en-GB"), null);
+    expect(((await en.json()) as { lang: string }).lang).toBe("en");
   });
 
   it("without the manifest option, /manifest.webmanifest reaches SSR as before", async () => {
