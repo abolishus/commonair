@@ -216,7 +216,9 @@ describe("live events", () => {
         .from(schema.chatMessages)
         .where(eq(schema.chatMessages.id, r.ack.id ?? uuidv7()));
       return row?.b === broadcastId ? r : null;
-    });
+      // The reload rides Valkey pub/sub, then a channel reload from Postgres: 3 s was short on a
+      // loaded CI runner (docs/operators/flakes.md). The bound only guards against a hang.
+    }, 10_000);
     await svc.flush();
     const rows = await t.db
       .select({ id: schema.chatMessages.id, b: schema.chatMessages.broadcastId })
