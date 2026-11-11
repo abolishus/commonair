@@ -13,18 +13,31 @@ import {
   isSecondApproverRefusal,
   runWindow,
   runWindowErrorText,
+  type ShareDto,
   type ShareStatus,
 } from "../../lib/coop.ts";
 import { usePaged } from "../money/use-load.ts";
 import { PayoutTransfers } from "../treasury/payout-transfers.tsx";
 import { RefundRequests } from "../treasury/refund-requests.tsx";
+import { LeavingSharesPanel, leavingShares } from "../treasury/share-refund-leaving.tsx";
 import { CoopLoadError } from "./load-error.tsx";
 import { PatronagePanel, SharesPanel, type PatronageRunResultDto } from "./treasury.tsx";
 import { coopLoads, pagedLoad, useCoopLoad } from "./use-coop.ts";
 
 const PAGE = 50;
 
-/** Treasury `shares` tab with its data: shares by status, refunds recorded as sent now. */
+/** Members leaving first (their deletion date, soonest first), then the rest in list order (pure). */
+export function leavingFirst(shares: ShareDto[] | null): ShareDto[] | null {
+  if (shares === null) return null;
+  const leaving = leavingShares(shares) ?? [];
+  return [...leaving, ...shares.filter((s) => s.deletionScheduledFor === null)];
+}
+
+/**
+ * Treasury `shares` tab with its data: members leaving with a share (ADR 0042: ask for refund
+ * details before their deletion date), then shares by status, refunds recorded as sent now. The
+ * held shares load with the tab, so a treasurer sees who is leaving whatever the status filter.
+ */
 export function CoopSharesTab(): React.JSX.Element {
   const [status, setStatus] = React.useState<ShareStatus>("refund_pending");
   const shares = usePaged(
@@ -32,13 +45,25 @@ export function CoopSharesTab(): React.JSX.Element {
     (cursor) => api().coop.shares.list({ status, limit: PAGE, cursor }),
     (err) => toastActionError(err, t("treasury.loadMoreFailed")),
   );
-  const loads = coopLoads([pagedLoad(shares)]);
+  const held = usePaged(
+    "shares|held|leaving",
+    (cursor) => api().coop.shares.list({ status: "held", limit: PAGE, cursor }),
+    (err) => toastActionError(err, t("treasury.loadMoreFailed")),
+  );
+  const loads = coopLoads([pagedLoad(shares), pagedLoad(held)]);
   if (loads.failed) return <CoopLoadError onRetry={loads.retry} />;
   return (
-    <>
+    <div className="flex flex-col gap-6">
       {loads.stale && <CoopLoadError onRetry={loads.retry} />}
+      <LeavingSharesPanel
+        shares={leavingShares(held.items)}
+        onAsk={async (share) => {
+          await api().coop.shares.askRefundDetails({ shareId: share.id });
+          held.reload();
+        }}
+      />
       <SharesPanel
-        shares={shares.items}
+        shares={leavingFirst(shares.items)}
         status={status}
         onStatusChange={setStatus}
         hasMore={shares.hasMore}
@@ -58,7 +83,7 @@ export function CoopSharesTab(): React.JSX.Element {
           else if (errorCode(err) === "CONFLICT") shares.reload();
         }}
       />
-    </>
+    </div>
   );
 }
 

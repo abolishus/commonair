@@ -1,0 +1,22 @@
+{
+  "w5Deletion.impact.subscriptions": "{count, plural, one {The # subscription you pay for stops renewing now.} other {The # subscriptions you pay for stop renewing now.}} Time you've paid for runs out as usual, and nothing is charged again.",
+  "w5Deletion.impact.subscriptionsLink": "See them on your subscriptions page.",
+  "w5Deletion.impact.channelSubscriptions": "{count, plural, one {# paid subscription to your channel stops renewing now.} other {# paid subscriptions to your channel stop renewing now.}} Subscribers keep the time they've paid for.",
+  "w5Deletion.impact.endingEarly": "{count, plural, one {# subscription is paid past your deletion date. It ends with your account, without an automatic refund.} other {# subscriptions are paid past your deletion date. They end with your account, without an automatic refund.}}",
+  "w5Deletion.impact.share": "Your co-op membership ends, and your {amount} member share comes back to you under the bylaws. The co-op's treasury emails you before the deletion date to ask where to send it. After that, you can still claim it with the share reference in that email. Votes you've already cast still count.",
+  "w5Deletion.banner.body": "Your subscriptions have stopped renewing, so nothing is charged again. Cancel any time before then to keep your account and turn renewals back on.",
+  "w5Deletion.renewalStopFailed": "We couldn't stop your subscriptions renewing, so nothing was scheduled. Try again in a few minutes.",
+  "w5Deletion.treasury.title": "Members leaving",
+  "w5Deletion.treasury.intro": "These members hold a share and have asked to delete their account. Ask them where to send the refund before the date: after it, the platform can't reach them.",
+  "w5Deletion.treasury.deletesOn": "Account deleted",
+  "w5Deletion.treasury.lastAsked": "Last asked",
+  "w5Deletion.treasury.neverAsked": "Not asked yet",
+  "w5Deletion.treasury.ask": "Ask for refund details",
+  "w5Deletion.treasury.askTitle": "Email {name} for refund details?",
+  "w5Deletion.treasury.askBody": "We email the member to write to the co-op's contact address with where to send their {amount} share, quoting its reference. You won't see their address. You can ask once a day.",
+  "w5Deletion.treasury.askConfirm": "Send the email",
+  "w5Deletion.treasury.asked": "Email sent. Their reply comes to the co-op's contact address.",
+  "w5Deletion.treasury.askFailed": "The email wasn't sent. Try again.",
+  "w5Deletion.treasury.askTooSoon": "They were asked less than a day ago. Try again tomorrow.",
+  "w5Deletion.treasury.askedToday": "Asked less than a day ago"
+}

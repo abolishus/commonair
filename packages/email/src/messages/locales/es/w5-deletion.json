@@ -1,0 +1,12 @@
+{
+  "shareRefundDetails.subject": "Tu aportación de {amount} en {instance}: ¿adónde la enviamos?",
+  "shareRefundDetails.preview": "Responde a la tesorería de la cooperativa para que podamos reembolsar tu aportación.",
+  "shareRefundDetails.heading": "Vamos a reembolsar tu aportación",
+  "shareRefundDetails.body": "Se te debe devolver tu aportación de {amount}. La tesorería de la cooperativa necesita saber adónde enviarla.",
+  "shareRefundDetails.amountLabel": "Importe",
+  "shareRefundDetails.referenceLabel": "Referencia de la aportación",
+  "shareRefundDetails.deleteAtLabel": "Tu cuenta se eliminará el",
+  "shareRefundDetails.reply": "Escribe a {contact} desde esta dirección, indica la referencia de la aportación y cuéntanos cómo quieres recibir el reembolso. La tesorería te responderá con el siguiente paso.",
+  "shareRefundDetails.afterDeletion": "Si tu cuenta se elimina antes, el reembolso se te sigue debiendo: indica la referencia de la aportación cuando escribas.",
+  "shareRefundDetails.safety": "Nunca pedimos números de tarjeta ni contraseñas por correo."
+}

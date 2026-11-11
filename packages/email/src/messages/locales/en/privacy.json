@@ -10,13 +10,17 @@
   "accountDeletionScheduled.preview": "Your account is scheduled for deletion. You can still cancel.",
   "accountDeletionScheduled.heading": "Your account is scheduled for deletion",
   "accountDeletionScheduled.body": "You asked us to delete your {instance} account. It will be deleted permanently on {date}.",
-  "accountDeletionScheduled.cancelInfo": "Changed your mind? Cancel any time before then and everything stays as it is.",
+  "accountDeletionScheduled.renewals": "Your subscriptions, and paid subscriptions to your channel, have stopped renewing. Time already paid for runs until its usual end date, and nothing is charged again. Anything still paid past {date} ends with the account, without an automatic refund.",
+  "accountDeletionScheduled.share": "Your {amount} member share comes back to you. The co-op's treasury will email you before {date} to ask where to send it. After that, you can still claim it by writing to {contact} and quoting the share reference {reference}.",
+  "accountDeletionScheduled.cancelInfo": "Changed your mind? Cancel any time before then: your account stays, and the subscriptions this stopped renew again.",
   "accountDeletionScheduled.action": "Cancel deletion",
   "accountDeletionScheduled.notYou": "If you did not ask for this, cancel now and contact {contact}.",
   "accountDeletionCompleted.subject": "Your {instance} account has been deleted",
   "accountDeletionCompleted.preview": "Your account and personal data have been deleted.",
   "accountDeletionCompleted.heading": "Your account has been deleted",
   "accountDeletionCompleted.body": "Your {instance} account was deleted on {date}. Your personal data has been removed.",
+  "accountDeletionCompleted.subscriptions": "Subscriptions that were still running ended with the account. Nothing more will be charged.",
+  "accountDeletionCompleted.share": "Your {amount} member share is still owed to you. To claim it, write to {contact} and quote the share reference {reference}.",
   "accountDeletionCompleted.retained": "Records the law requires us to keep, such as payment records, are kept without your personal details.",
   "accountDeletionCompleted.farewell": "Thank you for being part of {instance}."
 }

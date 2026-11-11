@@ -7,10 +7,11 @@
  * subscribers: nothing stopped either.
  *
  * The subscriptions concerned are the ones the user pays for **and** the ones others pay on the
- * user's channels, gifts excepted (they never renew and expire on their own). They all end **now**:
- * the account, or the channel, that gave them their value is gone. No prorated refund is made for
- * the unused part of a period (a treasurer can refund by hand; recorded as a follow-up in
- * docs/design/2026-11-overhaul/README.md).
+ * user's channels, gifts excepted (they never renew and expire on their own). Their renewal already
+ * stopped when the deletion was requested (ADR 0042, services/api/src/moderation/deletion.ts), so
+ * the paid time mostly ran out during the grace period; what is still running ends **now**: the
+ * account, or the channel, that gave it its value is gone. No prorated refund is made for the
+ * unused part of a period (ADR 0042 decision 4: a treasurer can refund by hand).
  *
  * - **Before the transaction** (`stopProviderRenewals`): each provider-managed subscription that
  *   can still renew is cancelled at the provider now. A provider failure throws, so the deletion
@@ -165,6 +166,24 @@ export interface MoneyAndMembership {
   paymentsFailed: number;
   membershipsExited: number;
   sharesRefundPending: number;
+  /** The share now owed back, for the completed notice (how to claim it by reference). */
+  shareRefund: ShareRefundOwed | null;
+}
+
+export interface ShareRefundOwed {
+  shareId: string;
+  amountCents: number;
+  currency: string;
+  /** What the member quotes to claim it: the bank-transfer reference, else the share id. */
+  reference: string;
+}
+
+/** The share's reference for the member: its manual payment's bank-transfer reference, else its id. */
+export function shareReferenceOf(
+  share: { id: string },
+  payment: { provider: string; providerRef: string | null } | undefined,
+): string {
+  return payment?.provider === "manual" && payment.providerRef ? payment.providerRef : share.id;
 }
 
 /** In the deletion transaction: end the subscriptions, then leave the co-op. */
@@ -268,6 +287,7 @@ export async function endMoneyAndMembership(tx: Executor, userId: string, now: D
     );
   }
   let sharesRefundPending = 0;
+  let shareRefund: ShareRefundOwed | null = null;
   // Settings are read only when there is a share to judge, so a deletion never waits on them.
   if (share && membershipClassesOf(await loadSettings(tx)).viewer.shareRefundableOnExit) {
     const [pending] = await tx
@@ -294,7 +314,26 @@ export async function endMoneyAndMembership(tx: Executor, userId: string, now: D
         now,
       );
       sharesRefundPending = 1;
+      const [p] = share.paymentId
+        ? await tx
+            .select({ provider: s.payments.provider, providerRef: s.payments.providerRef })
+            .from(s.payments)
+            .where(eq(s.payments.id, share.paymentId))
+        : [];
+      shareRefund = {
+        shareId: share.id,
+        amountCents: share.amountCents,
+        currency: share.currency,
+        reference: shareReferenceOf(share, p),
+      };
     }
   }
-  return { ended, incompleteExpired, paymentsFailed, membershipsExited: exited.length, sharesRefundPending };
+  return {
+    ended,
+    incompleteExpired,
+    paymentsFailed,
+    membershipsExited: exited.length,
+    sharesRefundPending,
+    shareRefund,
+  };
 }

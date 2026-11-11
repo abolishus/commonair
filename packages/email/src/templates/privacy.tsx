@@ -29,9 +29,19 @@ export const dataExportReady = defineTemplate("dataExportReady", {
   },
 });
 
+/** A member share the deletion gives back (ADR 0042): amount and the reference to quote. */
+export interface DeletionShareData {
+  amountCents: number;
+  currency: string;
+  /** The bank-transfer reference, or the share id when it has none. */
+  reference: string;
+}
+
 export interface AccountDeletionScheduledData {
   deleteAt: DateInput;
   cancelUrl: string;
+  /** The held share refunded on exit, or null (none, or the bylaws keep it). */
+  share: DeletionShareData | null;
 }
 
 export const accountDeletionScheduled = defineTemplate("accountDeletionScheduled", {
@@ -39,10 +49,23 @@ export const accountDeletionScheduled = defineTemplate("accountDeletionScheduled
   subject: (ctx, d: AccountDeletionScheduledData) => ctx.text(ctx.messages.subject, { date: ctx.date(d.deleteAt) }),
   body: (ctx, d: AccountDeletionScheduledData) => {
     const m = ctx.messages;
+    const date = ctx.date(d.deleteAt);
     return (
       <>
         <H1>{ctx.t(m.heading)}</H1>
-        <P>{ctx.t(m.body, { date: <strong>{ctx.date(d.deleteAt)}</strong> })}</P>
+        <P>{ctx.t(m.body, { date: <strong>{date}</strong> })}</P>
+        {/* ADR 0042: renewal stopped at the request; never an automatic refund. */}
+        <P>{ctx.t(m.renewals, { date })}</P>
+        {d.share ? (
+          <P>
+            {ctx.t(m.share, {
+              amount: <strong>{ctx.money(d.share.amountCents, d.share.currency)}</strong>,
+              date,
+              reference: <strong>{d.share.reference}</strong>,
+              contact: ctx.contact("general"),
+            })}
+          </P>
+        ) : null}
         <P>{ctx.t(m.cancelInfo)}</P>
         <Action ctx={ctx} href={d.cancelUrl} label={m.action} />
         <Notice>{ctx.t(m.notYou, { contact: ctx.contact("privacy") })}</Notice>
@@ -53,6 +76,8 @@ export const accountDeletionScheduled = defineTemplate("accountDeletionScheduled
 
 export interface AccountDeletionCompletedData {
   deletedAt: DateInput;
+  /** The share the deletion left owed (`refund_pending`), or null. */
+  shareRefund: DeletionShareData | null;
 }
 
 export const accountDeletionCompleted = defineTemplate("accountDeletionCompleted", {
@@ -64,6 +89,16 @@ export const accountDeletionCompleted = defineTemplate("accountDeletionCompleted
       <>
         <H1>{ctx.t(m.heading)}</H1>
         <P>{ctx.t(m.body, { date: ctx.date(d.deletedAt) })}</P>
+        <P>{ctx.t(m.subscriptions)}</P>
+        {d.shareRefund ? (
+          <P>
+            {ctx.t(m.share, {
+              amount: <strong>{ctx.money(d.shareRefund.amountCents, d.shareRefund.currency)}</strong>,
+              reference: <strong>{d.shareRefund.reference}</strong>,
+              contact: ctx.contact("general"),
+            })}
+          </P>
+        ) : null}
         <P>{ctx.t(m.retained)}</P>
         <Muted>{ctx.t(m.farewell)}</Muted>
       </>

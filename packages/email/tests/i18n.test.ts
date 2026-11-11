@@ -56,6 +56,7 @@ describe("catalogs", () => {
       "receipt",
       "security",
       "trust",
+      "w5-deletion",
     ]);
     for (const lang of Object.keys(BUNDLED)) expect(groups(lang)).toEqual(groups("en"));
   });

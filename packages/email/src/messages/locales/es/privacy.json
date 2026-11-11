@@ -10,13 +10,17 @@
   "accountDeletionScheduled.preview": "La eliminación de tu cuenta está programada. Todavía puedes cancelarla.",
   "accountDeletionScheduled.heading": "La eliminación de tu cuenta está programada",
   "accountDeletionScheduled.body": "Nos pediste eliminar tu cuenta de {instance}. Se eliminará de forma permanente el {date}.",
-  "accountDeletionScheduled.cancelInfo": "¿Cambiaste de opinión? Cancela en cualquier momento antes de esa fecha y todo quedará como está.",
+  "accountDeletionScheduled.renewals": "Tus suscripciones, y las suscripciones de pago a tu canal, dejaron de renovarse. El tiempo ya pagado dura hasta su fecha de fin habitual y no se cobra nada más. Lo que siga pagado después del {date} termina con la cuenta, sin reembolso automático.",
+  "accountDeletionScheduled.share": "Tu aportación de {amount} se te devuelve. La tesorería de la cooperativa te escribirá antes del {date} para preguntarte adónde enviarla. Después de esa fecha, todavía puedes reclamarla escribiendo a {contact} con la referencia de la aportación {reference}.",
+  "accountDeletionScheduled.cancelInfo": "¿Cambiaste de opinión? Cancela en cualquier momento antes de esa fecha: tu cuenta se queda y las suscripciones que se detuvieron vuelven a renovarse.",
   "accountDeletionScheduled.action": "Cancelar la eliminación",
   "accountDeletionScheduled.notYou": "Si no lo pediste, cancela ahora y escribe a {contact}.",
   "accountDeletionCompleted.subject": "Se eliminó tu cuenta de {instance}",
   "accountDeletionCompleted.preview": "Se eliminaron tu cuenta y tus datos personales.",
   "accountDeletionCompleted.heading": "Se eliminó tu cuenta",
   "accountDeletionCompleted.body": "Tu cuenta de {instance} se eliminó el {date}. Se borraron tus datos personales.",
+  "accountDeletionCompleted.subscriptions": "Las suscripciones que seguían activas terminaron con la cuenta. No se cobrará nada más.",
+  "accountDeletionCompleted.share": "Todavía se te debe tu aportación de {amount}. Para reclamarla, escribe a {contact} con la referencia de la aportación {reference}.",
   "accountDeletionCompleted.retained": "Los registros que la ley nos obliga a conservar, como los registros de pagos, se guardan sin tus datos personales.",
   "accountDeletionCompleted.farewell": "Gracias por ser parte de {instance}."
 }

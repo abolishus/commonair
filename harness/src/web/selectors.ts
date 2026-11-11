@@ -983,3 +983,16 @@ export const D7_MOD_IDS = {
   chatModWaveDelete: "chat-mod-wave-delete",
   chatModWaveDeleteDialog: "chat-mod-wave-delete-dialog",
 } as const;
+
+/**
+ * w5-deletion (overhaul wave 5, ADR 0042): the treasury shares tab's "Members leaving" list.
+ * `treasuryLeavingShare` carries `data-share-id`; `treasuryShareAskRefundDetails` opens
+ * `treasuryShareAskRefundDetailsDialog` and is disabled for a day after each ask.
+ */
+export const W5_DELETION_IDS = {
+  treasuryLeavingShares: "treasury-leaving-shares",
+  treasuryLeavingShare: "treasury-leaving-share",
+  treasuryLeavingShareAsked: "treasury-leaving-share-asked",
+  treasuryShareAskRefundDetails: "treasury-share-ask-refund-details",
+  treasuryShareAskRefundDetailsDialog: "treasury-share-ask-refund-details-dialog",
+} as const;

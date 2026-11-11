@@ -55,6 +55,7 @@ test("the registry covers every notice the platform sends", () => {
       "contentRestored",
       "appealDecided",
       "enforcementStatement",
+      "shareRefundDetails",
     ].toSorted(),
   );
   expect(

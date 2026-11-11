@@ -123,6 +123,11 @@ export interface PaymentAdapter {
     providerSubscriptionRef: string,
     opts: { atPeriodEnd: boolean; idempotencyKey: string },
   ): Promise<void>;
+  /**
+   * Turn renewal back on for a subscription set to end at period end (overhaul wave 5: a cancelled
+   * account deletion restores what it turned off, ADR 0042). Fails for one already ended.
+   */
+  resumeSubscription?(providerSubscriptionRef: string, opts: { idempotencyKey: string }): Promise<void>;
   /** Ask the provider to refund; the posting follows the provider's refund event. */
   refund?(request: RefundRequest): Promise<{ providerRef: string }>;
   /** Create the creator's payout account if needed and return an onboarding link. */
