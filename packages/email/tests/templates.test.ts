@@ -34,6 +34,7 @@ test("the registry covers every notice the platform sends", () => {
       "twoFactorEnabled",
       "twoFactorDisabled",
       "newSignIn",
+      "changeEmailConfirm",
       "streamKeyRevoked",
       "dataExportReady",
       "accountDeletionScheduled",
@@ -155,6 +156,7 @@ function cyrillicSamples(origin: string): SampleData {
     contentTitle: "Ночь спидрана",
     device: "Фаерфокс",
     location: "Лиссабон",
+    newEmail: "ада@пример.рф",
     foundIn: "публичный репозиторий",
     decisionNote: "В уведомлении не указано произведение",
     address: "Улица Примерная, 1",
@@ -332,6 +334,24 @@ test("free-text fields may contain URLs: rendered as text, never as links", asyn
   expect(key.html).not.toMatch(/href="https:\/\/evil/);
   const signIn = await render("newSignIn", { ...samples.newSignIn, device: "https://evil.example/ua" });
   expect(signIn.html).not.toMatch(/href="https:\/\/evil/);
+});
+
+test("newSignIn links the sessions anchor and names an unidentified device in words", async () => {
+  expect(samples.newSignIn.sessionsUrl.endsWith("/settings/security#sessions")).toBe(true);
+  const { device: _device, ...rest } = samples.newSignIn;
+  const mail = await render("newSignIn", rest);
+  expect(mail.text).toContain(en.newSignIn.deviceUnknown);
+  expect(mail.html).toContain("/settings/security#sessions");
+});
+
+test("changeEmailConfirm shows the new address as text and links the confirmation", async () => {
+  const mail = await render("changeEmailConfirm", {
+    ...samples.changeEmailConfirm,
+    newEmail: "https://evil.example/x@example.org",
+  });
+  expect(mail.text).toContain("https://evil.example/x@example.org");
+  expect(mail.html).not.toMatch(/href="https:\/\/evil/);
+  expect(mail.html).toContain("verify-email?token=sample");
 });
 
 test("interpolation keeps unknown placeholders visible", () => {

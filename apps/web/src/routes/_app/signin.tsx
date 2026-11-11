@@ -11,6 +11,8 @@ import { AuthLayout } from "../../components/auth-layout.tsx";
 import { FormError } from "../../components/form-error.tsx";
 import { ResetPasswordField, SignInPasswordField } from "../../components/password-fields.tsx";
 import { ResendVerification } from "../../components/resend-verification.tsx";
+import { PasskeySignIn } from "../../components/security/passkey-sign-in.tsx";
+import { TwoFactorStep } from "../../components/security/two-factor-step.tsx";
 import { t } from "../../i18n/index.ts";
 import { AuthRequestError, signIn } from "../../lib/auth.ts";
 import { authSearch, authTarget, carriedSearch, signInLanding, type AuthSearch } from "../../lib/auth-return.ts";
@@ -80,6 +82,18 @@ function SignInForm({
   const [pending, setPending] = React.useState(false);
   /** The address of a sign-in refused as unverified: offers a new link for it. */
   const [unverified, setUnverified] = React.useState<string | null>(null);
+  /** The password was right and two-step sign-in is on: the code step shows (D7.2). */
+  const [codeStep, setCodeStep] = React.useState(false);
+
+  /** Signed in (by password, code or passkey): land where the visitor was going. */
+  const land = async () => {
+    // Signed in from a sign-up prompt: the page offers a one-tap confirm of the action.
+    savePendingIntent({ intent: carried.intent, target, channel: carried.channel });
+    // F11: the target, else the studio for an account that streams and home for everyone else.
+    // A full load renders it on the server with the new session cookie (stays pending until the
+    // page goes away).
+    window.location.assign(await signInLanding(target));
+  };
 
   const onSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -90,19 +104,30 @@ function SignInForm({
     setError(null);
     setUnverified(null);
     try {
-      await signIn(email, field(form, "password"));
-      // Signed in from a sign-up prompt: the page offers a one-tap confirm of the action.
-      savePendingIntent({ intent: carried.intent, target, channel: carried.channel });
-      // F11: the target, else the studio for an account that streams and home for everyone else.
-      // A full load renders it on the server with the new session cookie (stays pending until the
-      // page goes away).
-      window.location.assign(await signInLanding(target));
+      const result = await signIn(email, field(form, "password"));
+      if (result.twoFactorRedirect) {
+        setCodeStep(true);
+        setPending(false);
+        return;
+      }
+      await land();
     } catch (err) {
       setError(authErrorMessage(err));
       if (err instanceof AuthRequestError && err.code === "EMAIL_NOT_VERIFIED") setUnverified(email);
       setPending(false);
     }
   };
+
+  if (codeStep)
+    return (
+      <TwoFactorStep
+        onSignedIn={land}
+        onStartOver={(reason) => {
+          setCodeStep(false);
+          setError(reason ?? null);
+        }}
+      />
+    );
 
   return (
     <AuthLayout title={t("signin.title")} {...(target ? { description: t("d2Gate.signin.back") } : {})}>
@@ -142,6 +167,7 @@ function SignInForm({
           >
             {t("signin.submit")}
           </Button>
+          <PasskeySignIn onSignedIn={land} />
           <FieldDescription>
             {t("signin.noAccount")}{" "}
             <Button variant="link" nativeButton={false} render={<Link to="/signup" search={carried} />}>

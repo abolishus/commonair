@@ -14,7 +14,7 @@ import { APIError, createAuthMiddleware } from "better-auth/api";
 import { admin, magicLink, twoFactor, username } from "better-auth/plugins";
 import { adminAc, userAc } from "better-auth/plugins/admin/access";
 import { and, desc, eq, sql } from "drizzle-orm";
-import { ALTCHA_FIELD, AUTH_BASE_PATH, AUTH_ROUTES } from "@commonair/contracts/auth";
+import { ALTCHA_FIELD, AUTH_BASE_PATH, AUTH_ROUTES, SECURITY_SETTINGS_PATH } from "@commonair/contracts/auth";
 import { SIGNUP_INTENTS, type SignupIntent } from "@commonair/contracts/enums";
 import { schema, uuidv7, type Database, type Executor } from "@commonair/db";
 import type { Deps } from "../deps.ts";
@@ -170,6 +170,25 @@ export function createAuth(deps: Deps, opts: { background?: AuthBackground } = {
           input: true,
           returned: false,
           transform: { input: (v) => normalizeSignupIntent(v) },
+        },
+      },
+      // D7.2: a verified member's change mails a confirmation to the CURRENT address first; its
+      // link mails a verification to the new address, and only that second link changes the email.
+      changeEmail: {
+        enabled: true,
+        sendChangeEmailConfirmation: async ({ user, newEmail, url }) => {
+          background.mail("changeEmailConfirm", () =>
+            mailer.send(
+              "changeEmailConfirm",
+              {
+                newEmail,
+                confirmUrl: publicLink(site, withVerificationCallback(url, site.publicUrl)),
+                expiresInMinutes: VERIFY_MINUTES,
+                locale: localeOf(user as unknown as Record<string, unknown>),
+              },
+              user.email,
+            ),
+          );
         },
       },
     },
@@ -334,7 +353,7 @@ export function createAuth(deps: Deps, opts: { background?: AuthBackground } = {
             await sendNotice(logger, "twoFactorEnabled", () =>
               mailer.send(
                 "twoFactorEnabled",
-                { changedAt: deps.now(), securityUrl: appUrl(site, "/settings/security"), locale: localeOf(user) },
+                { changedAt: deps.now(), securityUrl: appUrl(site, SECURITY_SETTINGS_PATH), locale: localeOf(user) },
                 user.email,
               ),
             );

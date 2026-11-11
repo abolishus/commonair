@@ -10,7 +10,13 @@ import { chargebackNotice, payoutSent } from "./templates/payments.tsx";
 import { channelMoved } from "./templates/portability.tsx";
 import { accountDeletionCompleted, accountDeletionScheduled, dataExportReady } from "./templates/privacy.tsx";
 import { paymentReceipt } from "./templates/receipt.tsx";
-import { newSignIn, streamKeyRevoked, twoFactorDisabled, twoFactorEnabled } from "./templates/security.tsx";
+import {
+  changeEmailConfirm,
+  newSignIn,
+  streamKeyRevoked,
+  twoFactorDisabled,
+  twoFactorEnabled,
+} from "./templates/security.tsx";
 import {
   appealDecided,
   contentRestored,
@@ -28,6 +34,7 @@ export const templates = {
   twoFactorEnabled,
   twoFactorDisabled,
   newSignIn,
+  changeEmailConfirm,
   streamKeyRevoked,
   dataExportReady,
   accountDeletionScheduled,
