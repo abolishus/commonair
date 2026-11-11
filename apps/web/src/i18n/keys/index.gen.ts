@@ -19,6 +19,7 @@ import type { Key as D2Player } from "./d2-player.gen.ts";
 import type { Key as D3Browse } from "./d3-browse.gen.ts";
 import type { Key as D3Home } from "./d3-home.gen.ts";
 import type { Key as D3Watch } from "./d3-watch.gen.ts";
+import type { Key as D4Layout } from "./d4-layout.gen.ts";
 import type { Key as D4Polish } from "./d4-polish.gen.ts";
 import type { Key as D5Settings } from "./d5-settings.gen.ts";
 import type { Key as D5Studio } from "./d5-studio.gen.ts";
@@ -92,6 +93,7 @@ export type MessageKey =
   | D3Browse
   | D3Home
   | D3Watch
+  | D4Layout
   | D4Polish
   | D5Settings
   | D5Studio
@@ -164,6 +166,7 @@ export const NAMESPACES = [
   "d3-browse",
   "d3-home",
   "d3-watch",
+  "d4-layout",
   "d4-polish",
   "d5-settings",
   "d5-studio",

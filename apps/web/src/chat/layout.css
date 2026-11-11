@@ -2,12 +2,27 @@
  * SPDX-FileCopyrightText: 2026 CommonAir contributors
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
- * The chat column on `lg` (design review F6; `layout.ts` `chatColumnClass`): sticky and as tall
- * as the viewport less the site header (`SiteHeader`, `min-h-14` = 3.5rem) and the page's `py-4`
- * (1rem above, 1rem below). In theatre mode it docks at the top at the viewport less the header.
- * Plain CSS because a calc() height is an arbitrary Tailwind value, which the source policy bans.
- * Unlayered, so it wins over the `h-112` utility the column carries below `lg`.
+ * The chat column (`layout.ts` `chatColumnClass`). Plain CSS because a calc() height is an
+ * arbitrary Tailwind value, which the source policy bans. Unlayered, so it wins over the `h-112`
+ * utility the column carries below `lg`.
+ *
+ * Below `lg`, on the watch page (`chat-column-fill`, overhaul D4.1): the column is a flex item that
+ * takes what is left of the viewport (the page's watch layout sizes the box around it), never less
+ * than 16rem, and keeps the message box above the home indicator.
+ *
+ * On `lg` (design review F6): sticky and as tall as the viewport less the site header
+ * (`SiteHeader`, `min-h-14` = 3.5rem) and the page's `py-4` (1rem above, 1rem below). In theatre
+ * mode it docks at the top at the viewport less the header.
  */
+@media (max-width: 63.99rem) {
+  .chat-column.chat-column-fill {
+    flex: 1 1 0;
+    height: auto;
+    min-height: 16rem;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
 @media (min-width: 64rem) {
   .chat-column {
     position: sticky;

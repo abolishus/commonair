@@ -64,7 +64,6 @@ beforeEach(() => {
   FakeController.instances = [];
   window.localStorage.clear();
   window.sessionStorage.clear();
-  window.sessionStorage.setItem("commonair:player-settings-hint", "seen");
   resetTheatreForTests();
   const data = new Map<string, string>([["commonair:p2p-notice", "seen"]]);
   setP2PStorage(() => ({

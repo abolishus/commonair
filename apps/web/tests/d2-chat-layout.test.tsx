@@ -45,6 +45,34 @@ describe("chatColumnClass", () => {
     expect(lgRule(".chat-column.chat-column-theatre")).toEqual({ top: "0", height: "calc(100svh - 3.5rem)" });
   });
 
+  it("on the watch page (fill, D4.1): below lg it takes what the viewport leaves, above the home indicator", () => {
+    expect(classes(chatColumnClass({ theatre: false, fill: true }))).toEqual([
+      "h-112",
+      "chat-column",
+      "chat-column-fill",
+    ]);
+    expect(classes(chatColumnClass({ theatre: true, fill: true }))).toEqual([
+      "h-112",
+      "chat-column",
+      "chat-column-theatre",
+      "chat-column-fill",
+    ]);
+    const below = /@media \(max-width: 63\.99rem\) \{([^@]*)\}/.exec(css)?.[1] ?? "";
+    const body = /\.chat-column\.chat-column-fill\s*\{([^}]*)\}/.exec(below)?.[1] ?? "";
+    const decls = Object.fromEntries(
+      body
+        .split(";")
+        .map((d) => d.split(":").map((p) => p.trim()))
+        .filter((p): p is [string, string] => p.length === 2 && p[0] !== ""),
+    );
+    expect(decls).toEqual({
+      flex: "1 1 0",
+      height: "auto",
+      "min-height": "16rem",
+      "padding-bottom": "env(safe-area-inset-bottom)",
+    });
+  });
+
   it("no longer uses the fixed lg:h-160, and the constant is the non-theatre column", () => {
     for (const theatre of [false, true]) expect(chatColumnClass({ theatre })).not.toContain("h-160");
     expect(CHAT_COLUMN_CLASS).toBe(chatColumnClass({ theatre: false }));

@@ -3,7 +3,7 @@
 
 /**
  * The About tab (F2; `channel-about`): the banner on top (when the page did not already show it),
- * the bio and follower count, the category, the streamer's social links (`channel-socials`), then
+ * the owner's co-op mark (overhaul D4.7), the bio and follower count, the category, the streamer's social links (`channel-socials`), then
  * B8-web's panels as they are. The bio is plain text with its line breaks kept, never parsed.
  */
 import type { ChannelSocial } from "@commonair/contracts/shapes";
@@ -30,6 +30,7 @@ import { socialLabel } from "./channel-data.ts";
 import { CategoryLink } from "./channel-meta.tsx";
 import { ChannelPanels } from "./panels.tsx";
 import type { ChannelPanelView } from "./panels-data.ts";
+import { TrustBadge, type OwnerCoop } from "../watch-layout/watch-layout.tsx";
 
 type Platform = ChannelSocial["platform"];
 
@@ -126,6 +127,7 @@ export function ChannelAboutSection({
   panels,
   banner,
   since = null,
+  coop = null,
 }: {
   name: string;
   about: ChannelAbout;
@@ -139,6 +141,8 @@ export function ChannelAboutSection({
   banner?: React.ReactNode;
   /** `Channel.createdAt` (D3.8): when the channel was created; left out when unknown. */
   since?: string | null;
+  /** `Channel.ownerCoop` (overhaul D4.7): the owner's co-op mark on the card, when they have one. */
+  coop?: OwnerCoop | null;
 }): React.JSX.Element {
   return (
     <div data-testid="channel-about" className="flex min-w-0 flex-col gap-6">
@@ -150,6 +154,7 @@ export function ChannelAboutSection({
           </CardTitle>
         </CardHeader>
         <CardContent className="flex min-w-0 flex-col gap-3">
+          <TrustBadge data-testid="channel-about-trust" coop={coop} name={name} className="self-start" />
           <p className="text-sm text-muted-foreground">{followers}</p>
           {about.bio !== "" ? (
             <p data-testid="channel-about-bio" className="text-sm break-words whitespace-pre-line">

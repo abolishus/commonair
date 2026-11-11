@@ -4,7 +4,7 @@
 /**
  * The control bar's shared pieces for the live and VOD players (D2-player, F3 and F5): the
  * fullscreen, PiP, theatre and chat buttons, the settings menu's sections (quality, speed), the
- * data saver chip, the one-time settings hint and the `?` shortcuts dialog. Test ids:
+ * data saver chip and the `?` shortcuts dialog. Test ids:
  * `player-controls`, `player-settings`, `player-fullscreen`, `player-theatre`, `player-pip`,
  * `player-shortcuts-dialog`, `player-data-saver-chip` (harness `D_TEST_IDS`).
  */
@@ -123,7 +123,7 @@ export function ScreenButtons({ modes, embed }: { modes: ScreenModes; embed: boo
           icon={chatHidden ? PanelRightOpenIcon : PanelRightCloseIcon}
           pressed={chatHidden}
           onClick={() => setChatHidden(!chatHidden)}
-          className="hidden md:inline-flex"
+          className="hidden lg:inline-flex"
         />
       )}
       {theatreAvailable && (
@@ -136,7 +136,7 @@ export function ScreenButtons({ modes, embed }: { modes: ScreenModes; embed: boo
           shortcut="T"
           pressed={theatre}
           onClick={() => setTheatre(!theatre)}
-          className="hidden md:inline-flex"
+          className="hidden lg:inline-flex"
         />
       )}
       {modes.fullscreen.support !== "none" && (
@@ -294,84 +294,36 @@ export function DataSaverChip({ choice }: { choice: DataModeChoice }): React.JSX
   );
 }
 
-/** `sessionStorage` key of the dismissed settings hint (per tab, like the player's other hints). */
-export const SETTINGS_HINT_KEY = "commonair:player-settings-hint";
-
-function hintSeen(): boolean {
-  try {
-    return globalThis.sessionStorage?.getItem(SETTINGS_HINT_KEY) === "seen";
-  } catch {
-    return false;
-  }
-}
-
-let hintSeenInMemory = false;
-
-/** Tests: forget a dismissal kept in memory (storage blocked). */
-export function resetSettingsHintForTests(): void {
-  hintSeenInMemory = false;
-}
-
-function markHintSeen(): void {
-  hintSeenInMemory = true;
-  try {
-    globalThis.sessionStorage?.setItem(SETTINGS_HINT_KEY, "seen");
-  } catch {
-    // Kept in memory for this page instead.
-  }
-}
-
 /**
- * The settings menu, and its one-time hint: shown once `ready` (playing) unless dismissed in this
- * tab; dismissed by its button or by opening the menu.
+ * The settings menu's state and props. The one-time hint is gone (D4.2): `ready`, `hintEnabled`
+ * and `suggested` are still accepted from the players and ignored, and `hintOpen` is always false.
  */
 export function useSettings({
-  ready,
-  hintEnabled,
-  suggested,
   onOpenChange,
 }: {
-  ready: boolean;
-  hintEnabled: boolean;
-  /** The browser asked to save data: the hint says where Data saver is. */
-  suggested: boolean;
+  ready?: boolean;
+  hintEnabled?: boolean;
+  suggested?: boolean;
   onOpenChange?: (open: boolean) => void;
 }): {
   open: boolean;
   setOpen: (open: boolean) => void;
-  /** The one-time hint is on screen: the bar holds while it is, so the gear it points at stays. */
+  /** Always false: kept so the players' bar hold keeps compiling. */
   hintOpen: boolean;
   props: (children: React.ReactNode, badge?: React.ReactNode) => Settings;
 } {
   const [open, setOpenState] = React.useState(false);
-  const [dismissed, setDismissed] = React.useState(false);
-  const [seen] = React.useState(() => (typeof window === "undefined" ? true : hintSeen() || hintSeenInMemory));
-  const hintOpen = hintEnabled && ready && !seen && !dismissed && !open;
-  const dismiss = React.useCallback(() => {
-    setDismissed(true);
-    markHintSeen();
-  }, []);
   const setOpen = React.useCallback(
     (next: boolean) => {
       setOpenState(next);
-      if (next) dismiss();
       onOpenChange?.(next);
     },
-    [dismiss, onOpenChange],
-  );
-  const hintChildren = (
-    <>
-      <p className="text-sm font-medium">{t("player.hint.title")}</p>
-      <p className="text-xs text-muted-foreground">{t(suggested ? "player.hint.suggested" : "player.hint.body")}</p>
-      <Button size="sm" variant="secondary" className="self-end" onClick={dismiss}>
-        {t("player.hint.dismiss")}
-      </Button>
-    </>
+    [onOpenChange],
   );
   return {
     open,
     setOpen,
-    hintOpen,
+    hintOpen: false,
     props: (children, badge) => ({
       label: t("player.settings.label"),
       icon: Settings02Icon,
@@ -381,11 +333,6 @@ export function useSettings({
       closeLabel: t("player.settings.close"),
       contentProps: { "data-testid": "player-settings-menu" },
       badge,
-      hint: {
-        open: hintOpen,
-        children: hintChildren,
-        props: { "data-testid": "player-settings-hint" },
-      },
       children,
     }),
   };
