@@ -3,16 +3,17 @@
 
 /**
  * `/following` (D3.5): the channels the viewer follows, Live now first, then the offline ones as
- * rows, each with its go-live alert bell (`channels.follow` with `notify`). Nobody followed yet:
+ * rows, each with its go-live alert controls: the bell (`channels.follow` with `notify`) and, from
+ * overhaul wave 5, the channel's email and push overrides (`alerts.tsx`). Nobody followed yet:
  * an empty state that points to Browse. Signed out: the sign-up prompt's buttons (intent follow,
  * back to `/following`).
  */
-import { ChannelAvatar, EmptyState, IconButton, RelativeTime, Skeleton } from "@commonair/ui";
+import { ChannelAvatar, EmptyState, RelativeTime, Skeleton } from "@commonair/ui";
 import { Section } from "@commonair/ui/blocks/headers";
 import { Button } from "@commonair/ui/components/button";
 import { PageContainer } from "@commonair/ui/layouts";
 import { toast } from "@commonair/ui/toast";
-import { FavouriteIcon, Notification01Icon, NotificationOff01Icon } from "@hugeicons/core-free-icons";
+import { FavouriteIcon } from "@hugeicons/core-free-icons";
 import { Link } from "@tanstack/react-router";
 import * as React from "react";
 import { t } from "../../i18n/index.ts";
@@ -28,7 +29,14 @@ import { AuthGateActions } from "../auth-gate/auth-gate-prompt.tsx";
 import { feedViewer, useHomeFeed } from "../discovery/feed.ts";
 import { DiscoveryStreamCard } from "../discovery/stream-cards.tsx";
 import { CardGrid } from "@commonair/ui/blocks/media";
+import { AlertControls, useAlertPreferences, type AlertPreferences, type AlertPreferencesClient } from "./alerts.tsx";
 import { FOLLOWS_PAGE, followingView, withNotify, type FollowRow, type OfflineFollow } from "./model.ts";
+
+/** The go-live preference calls, as the settings page made them. */
+const alertClient: AlertPreferencesClient = {
+  preferences: () => api().notifications.preferences.get({ type: "go_live" }),
+  setPreference: (input) => api().notifications.preferences.set({ type: "go_live", ...input }),
+};
 
 export function FollowingPage({ me }: { me: SessionUser | null }): React.JSX.Element {
   React.useEffect(() => {
@@ -86,6 +94,7 @@ function FollowingList({ me }: { me: SessionUser }): React.JSX.Element {
   const setCursor = (next: string | null) => setLocal((s) => ({ ...s, cursor: next }));
   const [more, setMore] = React.useState<"idle" | "loading">("idle");
   const [pending, setPending] = React.useState<ReadonlySet<string>>(new Set());
+  const alerts = useAlertPreferences(alertClient);
 
   const view = React.useMemo(() => (rows ? followingView(rows, feed.home) : null), [rows, feed.home]);
   const collisions = React.useMemo(() => collidingNames((rows ?? []).map((r) => r.channel)), [rows]);
@@ -165,14 +174,17 @@ function FollowingList({ me }: { me: SessionUser }): React.JSX.Element {
       {view.live.length > 0 && (
         <Section data-testid="following-live" heading={t("d3Home.followingPage.live")}>
           <CardGrid max={4}>
-            {view.live.map(({ card }, index) => (
-              <DiscoveryStreamCard
-                key={card.channel.id}
-                card={card}
-                collisions={collisions}
-                showReason={false}
-                lazy={index >= 4}
-              />
+            {view.live.map(({ card, notify }, index) => (
+              <div key={card.channel.id} className="flex min-w-0 flex-col gap-1">
+                <DiscoveryStreamCard card={card} collisions={collisions} showReason={false} lazy={index >= 4} />
+                <AlertControls
+                  channel={card.channel}
+                  notify={notify}
+                  busy={pending.has(card.channel.id)}
+                  onToggle={() => void setAlert(card, !notify)}
+                  alerts={alerts}
+                />
+              </div>
             ))}
           </CardGrid>
         </Section>
@@ -187,6 +199,7 @@ function FollowingList({ me }: { me: SessionUser }): React.JSX.Element {
                 label={displayLabel(collisions, row.channel)}
                 busy={pending.has(row.channel.id)}
                 onToggle={() => void setAlert(row, !row.notify)}
+                alerts={alerts}
               />
             ))}
           </ul>
@@ -212,11 +225,13 @@ function OfflineRow({
   label,
   busy,
   onToggle,
+  alerts,
 }: {
   row: OfflineFollow;
   label: string;
   busy: boolean;
   onToggle: () => void;
+  alerts: AlertPreferences;
 }): React.JSX.Element {
   return (
     <li
@@ -260,19 +275,7 @@ function OfflineRow({
           <span dir="auto">{row.category.name}</span>
         </Link>
       )}
-      <IconButton
-        data-testid="following-bell"
-        variant={row.notify ? "secondary" : "ghost"}
-        icon={row.notify ? Notification01Icon : NotificationOff01Icon}
-        aria-pressed={row.notify}
-        disabled={busy}
-        label={
-          row.notify
-            ? t("d3Home.followingPage.alertOn", { channel: row.channel.displayName })
-            : t("d3Home.followingPage.alertOff", { channel: row.channel.displayName })
-        }
-        onClick={onToggle}
-      />
+      <AlertControls channel={row.channel} notify={row.notify} busy={busy} onToggle={onToggle} alerts={alerts} />
     </li>
   );
 }

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { and, desc, eq, lt, ne, or } from "drizzle-orm";
+import { and, desc, eq, inArray, lt, ne, or } from "drizzle-orm";
 import type { ModeratorAddedNotificationPayload } from "@commonair/contracts/notify";
 import { schema, uuidv7 } from "@commonair/db";
 import type { Deps } from "../deps.ts";
@@ -21,7 +21,11 @@ import { restrictedIds, withRestriction } from "../moderation/restriction.ts";
 import { changeRoleInTx } from "../channels/roles.ts";
 import { mediaSettingsOf, updateMediaSettings } from "../channels/media-settings.ts";
 
-const { channels, channelPanels, categories, follows, users, channelRoles, followPortabilityGrants } = schema;
+const { channels, channelPanels, categories, follows, users, channelRoles, followPortabilityGrants, subscriptions } =
+  schema;
+
+/** What chat counts as subscribed (`services/chat/src/directory.ts`, `SUB_ACTIVE`). */
+const SUBSCRIBED_STATUSES = ["active", "past_due"] as const;
 
 /** Revoke any active stream key found in `text`, and store the text with keys redacted. */
 async function scrubKeys(deps: Deps, text: string, source: LeakSource): Promise<string> {
@@ -40,7 +44,7 @@ export const channelsRoutes = {
     const dto = { ...raw, live: raw.live ? withRestriction(raw.live, restricted) : null };
     if (!caller) return { ...dto, viewer: null };
     // A follow the integrity system excluded still reads as followed to its owner.
-    const [[f], [g]] = await Promise.all([
+    const [[f], [g], [s]] = await Promise.all([
       deps.db
         .select({ followerId: follows.followerId, notify: follows.notify })
         .from(follows)
@@ -50,10 +54,29 @@ export const channelsRoutes = {
         .select({ userId: followPortabilityGrants.userId })
         .from(followPortabilityGrants)
         .where(and(eq(followPortabilityGrants.userId, caller.user.id), eq(followPortabilityGrants.channelId, c.id))),
+      // Overhaul wave 5 (J3-d): a subscribers-only chat says why before the viewer types. A gifted
+      // sub is the recipient's own row; `subscriptions_active_uq` serves the lookup.
+      deps.db
+        .select({ id: subscriptions.id })
+        .from(subscriptions)
+        .where(
+          and(
+            eq(subscriptions.subscriberId, caller.user.id),
+            eq(subscriptions.channelId, c.id),
+            inArray(subscriptions.status, [...SUBSCRIBED_STATUSES]),
+          ),
+        )
+        .limit(1),
     ]);
     return {
       ...dto,
-      viewer: { following: f !== undefined, notify: f?.notify, portabilityGrant: g !== undefined },
+      viewer: {
+        following: f !== undefined,
+        notify: f?.notify,
+        portabilityGrant: g !== undefined,
+        // Absent = false (the contract's default), so the common answer keeps its shape.
+        ...(s ? { subscribed: true } : {}),
+      },
     };
   }),
 

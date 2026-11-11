@@ -17,6 +17,7 @@ import {
 } from "../components/auth-gate/intent-confirms.tsx";
 import { useAccountFacts, type AccountFactsClient } from "../components/chat-gate/account-facts.ts";
 import { ComposerGate } from "../components/chat-gate/composer-gate.tsx";
+import type { SupportClient } from "../components/support/support-dialog.tsx";
 import { LegalDocumentLink, type LegalDoc } from "../components/legal-document-link.tsx";
 import { reportClient as defaultReportClient, type ReportClient } from "../components/safety/client.ts";
 import { ReportForm } from "../components/safety/report-dialog.tsx";
@@ -49,7 +50,15 @@ import { ChatPollCard } from "./interact/poll-card.tsx";
 import { ChatPredictionCard, type PredictionChannel } from "./interact/prediction-card.tsx";
 import { RaidBanner } from "./interact/raid-banner.tsx";
 import { useChatInteract } from "./interact/use-chat-interact.ts";
-import { composerGate, isGateRefusal, needsAccountFacts, type GateRefusal } from "./gate-reason.ts";
+import {
+  composerGate,
+  isGateRefusal,
+  joinedStanding,
+  needsAccountFacts,
+  subscribedFact,
+  type GateRefusal,
+  type JoinedStanding,
+} from "./gate-reason.ts";
 import { useBusyLog } from "./live-region.ts";
 import { errorMessage, noticeMessage } from "./messages.ts";
 import { ModeChips } from "./mode-chips.tsx";
@@ -100,6 +109,13 @@ export interface ChatPanelProps {
    * followers-only chat says so before they type (J3-d). Unknown leaves it to the server's refusal.
    */
   following?: boolean | null;
+  /**
+   * Whether the viewer subscribes (`Channel.viewer.subscribed`), so a subscribers-only chat says
+   * so before they type (J3-d). Unknown leaves it to the `joined` badges, then the server.
+   */
+  subscribed?: boolean | null;
+  /** The subscribers-only gate's Support dialog calls; tests pass a fake. */
+  supportClient?: SupportClient;
   /** `me.get` for the composer gate's email and account-age reasons; tests pass a fake. */
   accountFactsClient?: AccountFactsClient;
   /** A moderator's wave actions (`chat.bans.bulk`, delete); tests pass a fake. */
@@ -216,9 +232,14 @@ export function ChatPanel({
   dismissStore,
   modTools = "menu",
   following = null,
+  subscribed = null,
+  supportClient,
   accountFactsClient,
   waveModClient,
 }: ChatPanelProps): React.JSX.Element {
+  // The viewer's standing from the `joined` badges, kept with its channel so a switch drops it.
+  const [joinedAs, setJoinedAs] = React.useState<{ channel: string; standing: JoinedStanding } | null>(null);
+  const joined = joinedAs?.channel === channel ? joinedAs.standing : null;
   const [status, setStatus] = React.useState<ChatStatus>("connecting");
   const [rows, dispatch] = React.useReducer(chatReducer, EMPTY_ROWS);
   // One tick per new row (never for a trim), for the "N new messages" pill and the busy log.
@@ -309,6 +330,7 @@ export function ChatPanel({
       {
         onStatus: setStatus,
         onJoined: (me) => {
+          setJoinedAs({ channel, standing: joinedStanding(me.badges) });
           setCanChat(me.canChat);
           setCanModerate(me.canModerate);
           canModerateRef.current = me.canModerate;
@@ -457,6 +479,8 @@ export function ChatPanel({
     facts: {
       ...(account ? { emailVerified: account.emailVerified, accountCreatedAt: account.createdAt } : {}),
       following,
+      subscribed: subscribedFact(subscribed, joined),
+      ...(joined ? { vip: joined.vip, staff: joined.staff } : {}),
     },
     privileged,
     now: mountedAt,
@@ -800,7 +824,16 @@ export function ChatPanel({
               modeNote={
                 <>
                   {!toolbar && <ModeChips settings={settings} channelName={name} />}
-                  {gate && <ComposerGate reason={gate} channelName={name} email={account?.email} now={mountedAt} />}
+                  {gate && (
+                    <ComposerGate
+                      reason={gate}
+                      channel={channel}
+                      channelName={name}
+                      email={account?.email}
+                      now={mountedAt}
+                      supportClient={supportClient}
+                    />
+                  )}
                 </>
               }
               // The viewer's points sit in the input row, as on Twitch (design review F6).

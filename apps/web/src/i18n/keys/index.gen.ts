@@ -92,6 +92,7 @@ import type { Key as W3WatchRooms } from "./w3-watch-rooms.gen.ts";
 import type { Key as W5Deletion } from "./w5-deletion.gen.ts";
 import type { Key as W5Schedule } from "./w5-schedule.gen.ts";
 import type { Key as W5Viewers } from "./w5-viewers.gen.ts";
+import type { Key as W5Watch } from "./w5-watch.gen.ts";
 
 /** Every message key, typed from the English catalogs. */
 export type MessageKey =
@@ -183,7 +184,8 @@ export type MessageKey =
   | W3WatchRooms
   | W5Deletion
   | W5Schedule
-  | W5Viewers;
+  | W5Viewers
+  | W5Watch;
 
 export const NAMESPACES = [
   "b8-channel",
@@ -275,4 +277,5 @@ export const NAMESPACES = [
   "w5-deletion",
   "w5-schedule",
   "w5-viewers",
+  "w5-watch",
 ] as const;
