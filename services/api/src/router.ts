@@ -45,7 +45,8 @@ import { meDeletionPreview } from "./routes/deletion-preview.ts";
 import { chatBansBulk } from "./routes/chat-bulk.ts";
 import { transparencyNote } from "./routes/transparency-note.ts";
 import { adminConsole, caseAssign } from "./routes/admin-console.ts";
-import { channelSchedule, streamLastBroadcast } from "./routes/schedule.ts";
+import { channelSchedule } from "./routes/schedule.ts";
+import { streamLastBroadcast } from "./routes/last-broadcast.ts";
 import { shareRefundDetails } from "./routes/share-refund-details.ts";
 
 export const router = base.router({
