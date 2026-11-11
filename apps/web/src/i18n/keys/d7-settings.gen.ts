@@ -83,8 +83,6 @@ export type Key =
   | "d7Settings.prefs.playback.perDevice"
   | "d7Settings.prefs.dataSaver.label"
   | "d7Settings.prefs.dataSaver.hint"
-  | "d7Settings.prefs.autoplay.label"
-  | "d7Settings.prefs.autoplay.hint"
   | "d7Settings.privacy.intro"
   | "d7Settings.privacy.download.title"
   | "d7Settings.privacy.download.none"

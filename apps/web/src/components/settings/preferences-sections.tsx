@@ -4,8 +4,8 @@
 /**
  * Settings → Preferences beyond the language (D7.1 P7: how the site behaves): the theme, the same
  * choice as the account menu's, and playback on this device: data saver by default, sharing with
- * other viewers (P2P, moved here from Privacy) and stream previews that play by themselves. Each
- * saves at once with a toast; all of it lives in this browser, so nothing is sent to the server.
+ * other viewers (P2P, moved here from Privacy). Each saves at once with a toast; all of it lives
+ * in this browser, so nothing is sent to the server.
  */
 import type { Theme } from "@commonair/ui";
 import { SettingsRow, SettingsSection } from "@commonair/ui/blocks/forms";
@@ -19,12 +19,6 @@ import { ThemeContext } from "../../lib/theme-context.ts";
 import { localStore, readDataModeChoice, saveDataModeChoice } from "../../player/budget.ts";
 import { setP2PPreference } from "../../player/p2p/preference.ts";
 import { p2pSwitchOn, useMounted, useOperatorP2PDefault, useP2PPrefs } from "../../player/p2p/use-p2p.ts";
-import {
-  browserStore,
-  prefersReducedMotion,
-  readAutoplayPreviews,
-  saveAutoplayPreviews,
-} from "./preferences-storage.ts";
 
 const THEME_CHOICES = ["system", "dark", "light"] as const satisfies readonly Theme[];
 
@@ -96,13 +90,11 @@ export function PlaybackSection(): React.JSX.Element {
   const dataId = React.useId();
   const p2pId = React.useId();
   const p2pHint = React.useId();
-  const autoplayId = React.useId();
 
   // Device state is unknown on the server: read only once mounted, so hydration matches. A choice
   // made here wins for this page, also when the browser refused to keep it.
-  const [chosen, setChosen] = React.useState<{ dataSaver?: boolean; autoplay?: boolean }>({});
+  const [chosen, setChosen] = React.useState<{ dataSaver?: boolean }>({});
   const dataSaver = chosen.dataSaver ?? (mounted && readDataModeChoice(localStore()).choice.on);
-  const autoplay = chosen.autoplay ?? (mounted && readAutoplayPreviews(browserStore(), prefersReducedMotion()));
 
   const operatorDefault = useOperatorP2PDefault();
   const prefs = useP2PPrefs();
@@ -153,22 +145,6 @@ export function PlaybackSection(): React.JSX.Element {
           onCheckedChange={(on) => {
             setP2PPreference(on ? "on" : "off");
             toast.success(t("d7Settings.saved"));
-          }}
-        />
-      </SettingsRow>
-      <SettingsRow
-        label={t("d7Settings.prefs.autoplay.label")}
-        hint={t("d7Settings.prefs.autoplay.hint")}
-        controlId={autoplayId}
-      >
-        <Switch
-          id={autoplayId}
-          data-testid="preferences-autoplay-previews"
-          checked={autoplay}
-          disabled={!mounted}
-          onCheckedChange={(on) => {
-            setChosen((c) => ({ ...c, autoplay: on }));
-            savedToast(saveAutoplayPreviews(browserStore(), on));
           }}
         />
       </SettingsRow>

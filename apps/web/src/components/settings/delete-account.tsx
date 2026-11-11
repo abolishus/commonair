@@ -273,7 +273,14 @@ export function DeleteAccountSection({
                       size="sm"
                       variant="outline"
                       nativeButton={false}
-                      render={<a href={account.downloadUrl} rel="noreferrer noopener" download aria-label={t("privacy.export.download")} />}
+                      render={
+                        <a
+                          href={account.downloadUrl}
+                          rel="noreferrer noopener"
+                          download
+                          aria-label={t("privacy.export.download")}
+                        />
+                      }
                       data-testid="deletion-download"
                     >
                       {t("privacy.export.download")}

@@ -78,8 +78,6 @@
   "d7Settings.prefs.playback.perDevice": "These settings apply to this device only.",
   "d7Settings.prefs.dataSaver.label": "Data saver",
   "d7Settings.prefs.dataSaver.hint": "Start streams at a lower quality to use less data. You can change it on any stream.",
-  "d7Settings.prefs.autoplay.label": "Play previews by themselves",
-  "d7Settings.prefs.autoplay.hint": "Stream previews may move and play muted. Off if your device asks for less motion.",
   "d7Settings.privacy.intro": "Get a copy of what we hold about you, choose who can reach you, or delete your account.",
   "d7Settings.privacy.download.title": "Download your data",
   "d7Settings.privacy.download.none": "Last export: none.",

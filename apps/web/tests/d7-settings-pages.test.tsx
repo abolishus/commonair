@@ -5,7 +5,7 @@
 /**
  * D7.2, D7.4 and P7: `/settings/account` (name with an explicit Save, the picture through the
  * channel avatar upload, email verification, what channels see, the 18+ withdrawal), Preferences
- * (theme, data saver, P2P, autoplay previews) and the three-step delete dialog built from
+ * (theme, data saver, P2P) and the three-step delete dialog built from
  * `me.deletion.preview`. Each runs on fake clients; the pure helpers are tested exhaustively.
  */
 import type { DeletionPreview, Me } from "@commonair/contracts/dto";
@@ -43,8 +43,6 @@ vi.mock("../src/lib/bootstrap.ts", () => ({
 
 const { maskEmail, displayNameProblem, DISPLAY_NAME_MAX } = await import("../src/components/settings/account-model.ts");
 const { impactLines, canConfirm } = await import("../src/components/settings/delete-model.ts");
-const { readAutoplayPreviews, saveAutoplayPreviews, AUTOPLAY_PREVIEWS_KEY } =
-  await import("../src/components/settings/preferences-storage.ts");
 const { AccountSettings } = await import("../src/components/settings/account-page.tsx");
 const { DeleteAccountSection } = await import("../src/components/settings/delete-account.tsx");
 const { ThemeSection, PlaybackSection } = await import("../src/components/settings/preferences-sections.tsx");
@@ -170,42 +168,6 @@ describe("canConfirm", () => {
     expect(canConfirm({ downloaded: true, typed: "", username: "viewer1" })).toBe(false);
     expect(canConfirm({ downloaded: true, typed: "viewer", username: "viewer1" })).toBe(false);
     expect(canConfirm({ downloaded: true, typed: " Viewer1 ", username: "viewer1" })).toBe(true);
-  });
-});
-
-describe("autoplay previews storage", () => {
-  const store = (value: string | null, fail = false) => ({
-    getItem: () => {
-      if (fail) throw new Error("blocked");
-      return value;
-    },
-  });
-  it("defaults to on, or off when reduced motion is asked for", () => {
-    expect(readAutoplayPreviews(store(null), false)).toBe(true);
-    expect(readAutoplayPreviews(store(null), true)).toBe(false);
-    expect(readAutoplayPreviews(null, true)).toBe(false);
-  });
-  it("a saved choice wins either way; junk and blocked storage fall back", () => {
-    expect(readAutoplayPreviews(store("on"), true)).toBe(true);
-    expect(readAutoplayPreviews(store("off"), false)).toBe(false);
-    expect(readAutoplayPreviews(store("maybe"), false)).toBe(true);
-    expect(readAutoplayPreviews(store("on", true), true)).toBe(false);
-  });
-  it("saves on or off, and says when the browser refused", () => {
-    const kept = new Map<string, string>();
-    expect(saveAutoplayPreviews({ setItem: (k, v) => void kept.set(k, v) }, false)).toBe(true);
-    expect(kept.get(AUTOPLAY_PREVIEWS_KEY)).toBe("off");
-    expect(
-      saveAutoplayPreviews(
-        {
-          setItem: () => {
-            throw new Error("quota");
-          },
-        },
-        true,
-      ),
-    ).toBe(false);
-    expect(saveAutoplayPreviews(null, true)).toBe(false);
   });
 });
 
@@ -412,7 +374,7 @@ describe("Preferences sections", () => {
     expect(toasts.success).toHaveBeenCalledWith(en["d7Settings.saved"]);
   });
 
-  it("data saver, P2P (with its disclosure) and autoplay previews save on this device", async () => {
+  it("data saver and P2P (with its disclosure) save on this device; there is no previews switch", async () => {
     wrap(<PlaybackSection />);
     const dataSaver = await screen.findByTestId("preferences-data-saver");
     await waitFor(() => expect((dataSaver as HTMLButtonElement).getAttribute("aria-disabled")).not.toBe("true"));
@@ -423,10 +385,8 @@ describe("Preferences sections", () => {
     expect(hint?.textContent).toBe(en["p2p.disclosure"]);
     fireEvent.click(p2p);
     await waitFor(() => expect(localStorage.getItem("commonair:p2p")).toContain("on"));
-    const autoplay = screen.getByTestId("preferences-autoplay-previews");
-    const before = autoplay.getAttribute("aria-checked");
-    fireEvent.click(autoplay);
-    await waitFor(() => expect(localStorage.getItem(AUTOPLAY_PREVIEWS_KEY)).toBe(before === "true" ? "off" : "on"));
+    // No preview surface plays by itself yet, so no switch claims to control one.
+    expect(screen.queryByTestId("preferences-autoplay-previews")).toBeNull();
   });
 });
 

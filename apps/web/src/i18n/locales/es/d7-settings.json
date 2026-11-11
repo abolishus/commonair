@@ -78,8 +78,6 @@
   "d7Settings.prefs.playback.perDevice": "Estos ajustes solo se aplican a este dispositivo.",
   "d7Settings.prefs.dataSaver.label": "Ahorro de datos",
   "d7Settings.prefs.dataSaver.hint": "Empieza los directos con menos calidad para gastar menos datos. Puedes cambiarlo en cualquier directo.",
-  "d7Settings.prefs.autoplay.label": "Reproducir las vistas previas solas",
-  "d7Settings.prefs.autoplay.hint": "Las vistas previas pueden moverse y reproducirse sin sonido. Desactivado si tu dispositivo pide menos movimiento.",
   "d7Settings.privacy.intro": "Consigue una copia de lo que guardamos sobre ti, elige quién puede contactarte o elimina tu cuenta.",
   "d7Settings.privacy.download.title": "Descargar tus datos",
   "d7Settings.privacy.download.none": "Última exportación: ninguna.",

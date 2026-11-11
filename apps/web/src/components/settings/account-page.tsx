@@ -373,7 +373,13 @@ function EmailSection({ me, client }: { me: Me; client: AccountClient }): React.
           variant="outline"
           size="sm"
           nativeButton={false}
-          render={<a data-testid="account-email-change" href={`${SECURITY_SETTINGS_PATH}#email`} aria-label={t("d7Settings.account.email.change")} />}
+          render={
+            <a
+              data-testid="account-email-change"
+              href={`${SECURITY_SETTINGS_PATH}#email`}
+              aria-label={t("d7Settings.account.email.change")}
+            />
+          }
         >
           {t("d7Settings.account.email.change")}
         </Button>

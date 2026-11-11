@@ -118,7 +118,13 @@ function itemLink(id: SettingsItemId): React.ReactElement {
     case "account":
       return <Link data-testid="settings-tab-account" to="/settings/account" />;
     case "security":
-      return <a data-testid="settings-tab-security" href={SECURITY_SETTINGS_PATH} aria-label={settingsTabLabel("security")} />;
+      return (
+        <a
+          data-testid="settings-tab-security"
+          href={SECURITY_SETTINGS_PATH}
+          aria-label={settingsTabLabel("security")}
+        />
+      );
     case "preferences":
       return <Link data-testid="settings-tab-preferences" to="/settings/preferences" />;
     case "notifications":
