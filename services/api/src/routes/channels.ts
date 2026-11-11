@@ -17,6 +17,7 @@ import { incomingKey, UPLOAD_TYPES } from "../moderation/upload-keys.ts";
 import { commitUpload } from "../moderation/uploads.ts";
 import { attributeFollow } from "../portability/attribution.ts";
 import { restrictedIds, withRestriction } from "../moderation/restriction.ts";
+import { moderatorAddedNoticeTx } from "../channels/moderator-added.ts";
 import { changeRoleInTx } from "../channels/roles.ts";
 import { mediaSettingsOf, updateMediaSettings } from "../channels/media-settings.ts";
 
@@ -336,8 +337,12 @@ async function changeRole(
   const target = await userByUsername(deps, input.username);
   if (!target) throw notFound("User not found");
   if (target.id === c.ownerId) throw badRequest("The owner already has every role");
-  const changed = await deps.db.transaction((tx) =>
-    changeRoleInTx(tx, { channel: c, target, role: input.role, op, actorId: caller.user.id }),
-  );
+  const changed = await deps.db.transaction(async (tx) => {
+    const done = await changeRoleInTx(tx, { channel: c, target, role: input.role, op, actorId: caller.user.id });
+    // D7 (J5-g): a member made a moderator or editor hears about it; a VIP badge is not authority.
+    if (done && op === "add" && (input.role === "moderator" || input.role === "editor"))
+      await moderatorAddedNoticeTx(tx, { channel: c, userId: target.id, role: input.role });
+    return done;
+  });
   if (changed) await publishControl(deps, c.id, { op: "invalidate", scope: "user", userId: target.id });
 }

@@ -32,6 +32,7 @@ import { os, requireCaller, requireChannel } from "../lib/orpc.ts";
 import { afterBroadcastEnded, endBroadcastInTx, type EndedBroadcast } from "../moderation/live.ts";
 import { setSuspension } from "../moderation/suspension.ts";
 import { notifyRoles } from "../moderation/notify.ts";
+import { notifyReportOutcomesTx } from "../moderation/report-outcome.ts";
 import { staffActorType } from "../moderation/review.ts";
 import { reportReasonRuleRef, staffRuleRef } from "../transparency/rule-ref.ts";
 import { watchRoomEvidence } from "../watch-rooms/evidence.ts";
@@ -417,6 +418,14 @@ export const safety = {
         .where(and(eq(reports.id, r.id), eq(reports.status, "open")))
         .returning();
       if (!updated) throw conflict("This report is already resolved");
+      // D7 (J5-f): the reporter learns the outcome, never the reported person.
+      await notifyReportOutcomesTx(
+        tx,
+        [r],
+        input.status === "actioned" ? "action_taken" : "no_action",
+        new Set([...(info?.userId ? [info.userId] : []), ...wave.map((m) => m.userId)]),
+        now,
+      );
       const ruleRef =
         input.action === "none" || input.action === "ban_from_channel" ? null : staffRuleRef(input.clauseId);
       const [action] =
