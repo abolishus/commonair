@@ -216,8 +216,11 @@ describe("commonair-pg-health", () => {
   }, 300_000);
 
   test("a slow replay that keeps advancing is reported as progressing and never stopped", async () => {
-    // Every fetch takes 3 s, so the replay outlasts the 10 s bound several times over.
-    const bound = ["-e", "COMMONAIR_PG_STALL_SECONDS=10"];
+    // Every fetch takes 3 s, so the ~45 s replay outlasts the 20 s bound twice over. Not 10 s: after
+    // "redo done" the server asks the archive for segments and history files that do not exist, 3 s
+    // each, with the title on the last segment, and with a loaded runner's slow `podman exec` checks
+    // that passed 10 s and stopped a healthy promotion (runs 42981804518 and 43056096724).
+    const bound = ["-e", "COMMONAIR_PG_STALL_SECONDS=20"];
     const c = startRecovery("slow", "slow", "sleep 3 && cp /backup/archive/%f %p", bound);
     const codes: number[] = [];
     const regular: number[] = [];
