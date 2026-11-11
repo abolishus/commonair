@@ -4,6 +4,7 @@
 import { toast } from "@commonair/ui/toast";
 import { createFileRoute } from "@tanstack/react-router";
 import type * as React from "react";
+import { JuryExplainer } from "../../components/coop/jury-explainer.tsx";
 import { CoopLoadGate } from "../../components/coop/load-error.tsx";
 import { activeMemberClasses } from "../../components/coop/rules.ts";
 import { coopLoads, toastCoopError, useCoopLoad, useMyMembership } from "../../components/coop/use-coop.ts";
@@ -12,24 +13,31 @@ import { ineligibleReason } from "../../components/jury/model.ts";
 import { isSafetyStaff } from "../../components/safety/access.ts";
 import { t } from "../../i18n/index.ts";
 import { api } from "../../lib/api.ts";
+import type { SessionUser } from "../../lib/bootstrap-types.ts";
 import { getSessionUser, useBootstrap } from "../../lib/bootstrap.ts";
-import { requireSession } from "../../lib/guard.ts";
 import { titleHead } from "../../lib/page-title.ts";
 
 /**
  * `/coop/jury`: the advisory jury (ADR 0038): opt in or out, and a seated juror's cases and votes.
- * Staff also see the cases a jury majority disagreed with.
+ * Staff also see the cases a jury majority disagreed with. Signed out: a public explainer
+ * (overhaul D2.5) instead of a redirect to sign-in.
  */
 export const Route = createFileRoute("/_app/coop/jury")({
-  beforeLoad: () => requireSession(() => getSessionUser()),
+  // Resolves the session before the first render; when the API can't say (F1) this throws and the
+  // route shows its error page with Retry rather than the explainer to a member.
+  beforeLoad: async () => ({ me: await getSessionUser() }),
   head: () => titleHead(t("pageTitle.coopJury")),
   component: JuryRoute,
 });
 
 function JuryRoute(): React.JSX.Element {
   const { me } = useBootstrap();
+  return me ? <MemberJury me={me} /> : <JuryExplainer />;
+}
+
+function MemberJury({ me }: { me: SessionUser }): React.JSX.Element {
   const staff = isSafetyStaff(me);
-  const status = useCoopLoad(`jury-status|${me?.id ?? "-"}`, () => api().jury.status());
+  const status = useCoopLoad(`jury-status|${me.id}`, () => api().jury.status());
   const seated = status.data?.seat?.panelId ?? null;
   const panel = useCoopLoad(`jury-panel|${seated ?? "-"}`, () => (seated ? api().jury.panel() : Promise.resolve(null)));
   const cases = useCoopLoad(`jury-cases|${seated ?? "-"}`, () => (seated ? api().jury.cases() : Promise.resolve([])));

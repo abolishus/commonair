@@ -3,9 +3,11 @@
 
 import { createFileRoute } from "@tanstack/react-router";
 import type * as React from "react";
+import { CoopJoinBand, showJoinBand } from "../../components/coop/join-band.tsx";
 import { CoopSectionError } from "../../components/coop/load-error.tsx";
 import { CoopOverview } from "../../components/coop/overview.tsx";
 import { useCoopLoad, useMyMembership, type CoopRetryable } from "../../components/coop/use-coop.ts";
+import { coopFacts } from "../../components/creators/facts.ts";
 import { api } from "../../lib/api.ts";
 import { useBootstrap, useSessionRetry } from "../../lib/bootstrap.ts";
 import { t } from "../../i18n/index.ts";
@@ -33,12 +35,20 @@ function CoopPage(): React.JSX.Element {
   });
   const council = useCoopLoad("council", () => api().coop.council());
   const months = useCoopLoad("months", () => api().coop.transparency({ months: 3 }));
+  // The band's numbers; while they load (or if they fail) it says the same in general terms.
+  const settings = useCoopLoad("settings", () => api().coop.settings());
+  const facts = coopFacts(settings.data);
   // F3: each section fails on its own; the header, intro and every loaded section stay.
   const alone = [open, council, months].every((l) => l.state === "failed");
   const error = (load: CoopRetryable, section: string) =>
     load.state === "failed" ? <CoopSectionError section={section} load={load} alone={alone} /> : null;
   return (
     <CoopOverview
+      joinBand={
+        showJoinBand(me !== null || sessionUnresolved, membership.data) ? (
+          <CoopJoinBand membership={facts.membership} currency={facts.payout?.currency} />
+        ) : null
+      }
       // F1: a member whose session the API could not confirm is not shown the join view.
       signedIn={me !== null || sessionUnresolved}
       membership={membership.data}

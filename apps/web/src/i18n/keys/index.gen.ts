@@ -10,6 +10,7 @@ import type { Key as D1Discovery } from "./d1-discovery.gen.ts";
 import type { Key as D1Shell } from "./d1-shell.gen.ts";
 import type { Key as D2Channel } from "./d2-channel.gen.ts";
 import type { Key as D2Chat } from "./d2-chat.gen.ts";
+import type { Key as D2Pages } from "./d2-pages.gen.ts";
 import type { Key as D2Player } from "./d2-player.gen.ts";
 import type { Key as D3Watch } from "./d3-watch.gen.ts";
 import type { Key as D4Polish } from "./d4-polish.gen.ts";
@@ -76,6 +77,7 @@ export type MessageKey =
   | D1Shell
   | D2Channel
   | D2Chat
+  | D2Pages
   | D2Player
   | D3Watch
   | D4Polish
@@ -141,6 +143,7 @@ export const NAMESPACES = [
   "d1-shell",
   "d2-channel",
   "d2-chat",
+  "d2-pages",
   "d2-player",
   "d3-watch",
   "d4-polish",
