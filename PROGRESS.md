@@ -29,8 +29,9 @@ admission control and a Postgres pooler as launch requirements, and per-stream c
 The reordered S1 plan, with new units S1-i to S1-o, is in
 [S1-scaling.md](.claude/briefs/next/S1-scaling.md#launch-scale-2026-11-11-adr-0041). Each unit has a
 full brief in `.claude/briefs/s1/`, in four waves behind a
-[contract step](.claude/briefs/s1/launch-contract-step.md) the orchestrator has not done yet. No
-unit has started. Waiting on the
+[contract step](.claude/briefs/s1/launch-contract-step.md) the orchestrator has not done yet. S1-i
+(the `load-cost` scenario, CPU profiling switch, GPU runbook) merged 2026-11-11; its paid run has not
+happened, so `capacity.md`'s cost table has only an invented example row. Waiting on the
 maintainer: acceptance of the ADR, the budget ceiling (after S1-i's numbers), the region, approval
 of S1-i's paid DigitalOcean run, and the droplet-limit request. Answered 2026-11-11: about 10,000
 concurrent viewers, a raised ladder threshold (working value 200), launch in waves (100, 300, 1,000
