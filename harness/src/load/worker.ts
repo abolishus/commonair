@@ -40,7 +40,7 @@ async function main(raw: string | undefined): Promise<number> {
   const timer = setTimeout(() => release(), spec.maxMs);
   try {
     for (const { channel, http } of spec.shard.channels) {
-      viewers.push(...(await platform.openViewers(channel, { http })));
+      viewers.push(...(await platform.openViewers(channel, { http }, spec.http ?? {})));
     }
     await send({ type: "started", shard: spec.shard.index, viewers: viewers.length });
     await stopped;
