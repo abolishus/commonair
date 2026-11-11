@@ -5,7 +5,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import * as React from "react";
 import { CoopLoadGate } from "../../components/coop/load-error.tsx";
 import { ProposalList } from "../../components/coop/proposals.tsx";
-import { coopLoads, pagedLoad, toastCoopError, useMyMembership } from "../../components/coop/use-coop.ts";
+import { coopLoads, pagedLoad, toastCoopError, useCoopLoad, useMyMembership } from "../../components/coop/use-coop.ts";
 import { usePaged } from "../../components/money/use-load.ts";
 import { api } from "../../lib/api.ts";
 import { useBootstrap } from "../../lib/bootstrap.ts";
@@ -31,6 +31,8 @@ function ProposalsPage(): React.JSX.Element {
       api().coop.proposals.list(filter === "all" ? { limit: PAGE, cursor } : { status: filter, limit: PAGE, cursor }),
     toastCoopError,
   );
+  // Only the quorum ticks read the settings; without them the cards still render.
+  const settings = useCoopLoad("settings", () => api().coop.settings());
   return (
     <CoopLoadGate status={coopLoads([pagedLoad(proposals), membership])} tab="proposals">
       <ProposalList
@@ -41,6 +43,7 @@ function ProposalsPage(): React.JSX.Element {
         hasMore={proposals.hasMore}
         loadingMore={proposals.loadingMore}
         onLoadMore={proposals.loadMore}
+        settings={settings.data}
       />
     </CoopLoadGate>
   );

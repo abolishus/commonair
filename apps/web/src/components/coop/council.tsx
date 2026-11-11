@@ -1,25 +1,18 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { EmptyState, RelativeTime, Skeleton, SkeletonGroup, formatNumber, useLocale } from "@commonair/ui";
-import { GovernanceSettingsList, SeatList, formatSettingValue } from "@commonair/ui/blocks/coop";
-import { KeyValueList, type KeyValueRow } from "@commonair/ui/blocks/data";
+import { EmptyState, RelativeTime, Skeleton, SkeletonGroup } from "@commonair/ui";
 import { AlertCallout } from "@commonair/ui/blocks/feedback";
 import { PageHeader, Section } from "@commonair/ui/blocks/headers";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@commonair/ui/components/card";
 import { PageContainer, ResponsiveGrid, SplitLayout } from "@commonair/ui/layouts";
 import { Calendar03Icon, UserGroupIcon } from "@hugeicons/core-free-icons";
-import { Link } from "@tanstack/react-router";
 import type * as React from "react";
 import { t } from "../../i18n/index.ts";
-import {
-  classLabel,
-  type BoardSeatDto,
-  type CouncilDto,
-  type ElectionDto,
-  type MemberClass,
-  type SettingDto,
-} from "../../lib/coop.ts";
+import type { BoardSeatDto, CouncilDto, ElectionDto, MemberClass, SettingDto } from "../../lib/coop.ts";
+import { BoardSeats, CouncilSeats, SeatingExplainer } from "../governance/council.tsx";
+import { electionsInOrder, hasOpenElection } from "../governance/model.ts";
+import { GovernanceSettingsGroups } from "../governance/settings-groups.tsx";
 import { ElectionItem, type ElectionActions } from "./elections.tsx";
 import { CoopTabs } from "./nav.tsx";
 
@@ -29,13 +22,6 @@ function Loading(): React.JSX.Element {
       <Skeleton className="h-32 w-full" />
     </SkeletonGroup>
   );
-}
-
-/** A method value: numbers through the locale, anything structured as JSON. */
-function methodValue(value: unknown, locale: string): string {
-  if (typeof value === "number") return formatNumber(value, locale);
-  if (typeof value === "string") return value;
-  return formatSettingValue(value);
 }
 
 export interface CouncilPageProps extends Partial<ElectionActions> {
@@ -60,7 +46,11 @@ const refuse = async (): Promise<void> => {
   throw new Error("signed out");
 };
 
-/** `/coop/council`: the current creator council and how it was seated, board seats, and board elections. */
+/**
+ * `/coop/council` (overhaul D6.3, CT-8): board elections first while one is open or nominating,
+ * then the council as people (avatar tiles linked to their channels, a contribution share instead
+ * of a raw score), "How seating works" in sentences, and the board.
+ */
 export function CouncilPage({
   council,
   board,
@@ -72,11 +62,42 @@ export function CouncilPage({
   onNominate = refuse,
   onVote = refuse,
 }: CouncilPageProps): React.JSX.Element {
-  const { locale } = useLocale();
-  const method: KeyValueRow[] = Object.entries(council?.method ?? {}).map(([key, value]) => ({
-    term: key,
-    value: methodValue(value, locale),
-  }));
+  const open = hasOpenElection(elections);
+  const electionsSection = (
+    <Section
+      data-testid="council-elections"
+      data-open={String(open)}
+      heading={t("coop.elections.title")}
+      description={t("coop.elections.intro")}
+    >
+      {membershipError}
+      {elections === null ? (
+        (sectionErrors.elections ?? <Loading />)
+      ) : elections.length === 0 ? (
+        // F25: nobody on this page can schedule one (the board does), so no action.
+        <EmptyState
+          data-testid="council-elections-empty"
+          icon={Calendar03Icon}
+          headingLevel={3}
+          title={t("coop.elections.empty")}
+          description={t("settings.coop.electionsEmptyHint")}
+        />
+      ) : (
+        <ResponsiveGrid cols={2}>
+          {electionsInOrder(elections).map((e) => (
+            <ElectionItem
+              key={e.id}
+              election={e}
+              meId={meId}
+              classes={classes}
+              onNominate={onNominate}
+              onVote={onVote}
+            />
+          ))}
+        </ResponsiveGrid>
+      )}
+    </Section>
+  );
   return (
     <PageContainer
       data-testid="council"
@@ -91,6 +112,7 @@ export function CouncilPage({
         description={t("coop.councilPage.intro")}
         tabs={<CoopTabs current="council" />}
       />
+      {open ? electionsSection : null}
       <SplitLayout
         asideWidth="lg"
         main={
@@ -98,75 +120,34 @@ export function CouncilPage({
             <Section heading={t("coop.council.title")}>
               {council === null ? (
                 (sectionErrors.council ?? <Loading />)
-              ) : (
-                <SeatList
-                  label={t("coop.council.title")}
-                  itemProps={{ "data-testid": "council-member" }}
-                  items={council.members.map((m) => ({
-                    userId: m.user.id,
-                    name: m.user.displayName,
-                    rank: m.rank,
-                    score: m.contributionScore,
-                    description: t("coop.council.rankScore", {
-                      rank: m.rank,
-                      score: formatNumber(m.contributionScore, locale),
-                    }),
-                  }))}
-                  empty={
-                    <EmptyState
-                      icon={UserGroupIcon}
-                      headingLevel={3}
-                      title={t("coop.council.emptyTitle")}
-                      description={t("coop.council.emptyHint")}
-                    />
-                  }
+              ) : council.members.length === 0 ? (
+                <EmptyState
+                  icon={UserGroupIcon}
+                  headingLevel={3}
+                  title={t("coop.council.emptyTitle")}
+                  description={t("coop.council.emptyHint")}
                 />
+              ) : (
+                <CouncilSeats council={council} />
               )}
-              {council?.endsAt && (
-                <p>
+              {council?.endsAt ? (
+                <p className="text-sm text-muted-foreground">
                   {t("coop.council.termEnds")} <RelativeTime date={council.endsAt} />
                 </p>
-              )}
+              ) : null}
             </Section>
-            <Section heading={t("coop.elections.title")} description={t("coop.elections.intro")}>
-              {membershipError}
-              {elections === null ? (
-                (sectionErrors.elections ?? <Loading />)
-              ) : elections.length === 0 ? (
-                // F25: nobody on this page can schedule one (the board does), so no action.
-                <EmptyState
-                  data-testid="council-elections-empty"
-                  icon={Calendar03Icon}
-                  headingLevel={3}
-                  title={t("coop.elections.empty")}
-                  description={t("settings.coop.electionsEmptyHint")}
-                />
-              ) : (
-                <ResponsiveGrid cols={2}>
-                  {elections.map((e) => (
-                    <ElectionItem
-                      key={e.id}
-                      election={e}
-                      meId={meId}
-                      classes={classes}
-                      onNominate={onNominate}
-                      onVote={onVote}
-                    />
-                  ))}
-                </ResponsiveGrid>
-              )}
-            </Section>
+            {open ? null : electionsSection}
           </div>
         }
         aside={
           <div className="flex flex-col gap-4">
             <Card size="sm">
               <CardHeader>
-                <CardTitle>{t("coop.council.methodTitle")}</CardTitle>
+                <CardTitle>{t("d6Governance.seating.title")}</CardTitle>
                 <CardDescription>{t("coop.council.methodHint")}</CardDescription>
               </CardHeader>
               <CardContent>
-                {sectionErrors.method ?? <KeyValueList data-testid="council-method" rows={method} />}
+                {sectionErrors.method ?? (council ? <SeatingExplainer method={council.method} /> : <Loading />)}
               </CardContent>
             </Card>
             <Card size="sm">
@@ -177,26 +158,16 @@ export function CouncilPage({
               <CardContent>
                 {board === null ? (
                   (sectionErrors.board ?? <Loading />)
-                ) : (
-                  <SeatList
-                    label={t("coop.board.title")}
-                    itemProps={{ "data-testid": "board-seat" }}
-                    items={board.map((seat) => ({
-                      userId: seat.user.id,
-                      name: seat.user.displayName,
-                      memberClass: seat.class,
-                      description: t("coop.board.seat", { class: classLabel(seat.class) }),
-                    }))}
-                    empty={
-                      <EmptyState
-                        data-testid="council-board-empty"
-                        icon={UserGroupIcon}
-                        headingLevel={3}
-                        title={t("coop.board.empty")}
-                        description={t("settings.coop.boardEmptyHint")}
-                      />
-                    }
+                ) : board.length === 0 ? (
+                  <EmptyState
+                    data-testid="council-board-empty"
+                    icon={UserGroupIcon}
+                    headingLevel={3}
+                    title={t("coop.board.empty")}
+                    description={t("settings.coop.boardEmptyHint")}
                   />
+                ) : (
+                  <BoardSeats board={board} />
                 )}
               </CardContent>
             </Card>
@@ -207,7 +178,7 @@ export function CouncilPage({
   );
 }
 
-/** `/coop/settings`: every governance setting, protected flags and the decision that last set it. */
+/** `/coop/settings`: every governance setting in words, by theme, protected flags and the decision that last set each. */
 export function SettingsPage({
   settings,
   error = null,
@@ -228,32 +199,7 @@ export function SettingsPage({
         title={t("coop.settings.protectedTitle")}
         description={t("coop.settings.protectedHint")}
       />
-      {settings === null ? (
-        (error ?? <Loading />)
-      ) : (
-        <GovernanceSettingsList
-          itemProps={{ "data-testid": "setting-row" }}
-          labels={{
-            protected: t("coop.settings.protected"),
-            seeded: t("coop.settings.seeded"),
-            setBy: t("coop.settings.setBy"),
-          }}
-          items={settings.map((s) => ({
-            key: s.key,
-            description: s.description,
-            value: s.value,
-            protected: s.protected,
-            updatedAt: <RelativeTime date={s.updatedAt} />,
-            updatedBy: s.updatedByProposalId
-              ? {
-                  proposalId: s.updatedByProposalId,
-                  label: t("coop.settings.proposal"),
-                  link: { render: <Link to="/coop/proposals/$id" params={{ id: s.updatedByProposalId }} /> },
-                }
-              : null,
-          }))}
-        />
-      )}
+      {settings === null ? (error ?? <Loading />) : <GovernanceSettingsGroups settings={settings} />}
     </PageContainer>
   );
 }

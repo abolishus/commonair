@@ -31,7 +31,10 @@ import {
   type CouncilDto,
   type MembershipViewDto,
   type ProposalDto,
+  type SettingDto,
 } from "../../lib/coop.ts";
+import { percentText } from "../../lib/coop-settings-format.ts";
+import { COUNCIL_PREVIEW, contributionShare } from "../governance/model.ts";
 import { CoopTabs } from "./nav.tsx";
 import { ProposalItem } from "./proposals.tsx";
 import { outcomeItem } from "./transparency.tsx";
@@ -54,6 +57,8 @@ export interface CoopOverviewProps {
   sectionErrors?: Partial<Record<OverviewSection, React.ReactNode>>;
   /** The join band (D2.5), under the header: for visitors and accounts that aren't members yet. */
   joinBand?: React.ReactNode;
+  /** `coop.settings`, for the quorum ticks on open proposals (null: no tick). */
+  settings?: readonly SettingDto[] | null;
 }
 
 /** The overview's sections that load on their own. */
@@ -108,6 +113,7 @@ export function CoopOverview({
   membershipError = null,
   sectionErrors = {},
   joinBand = null,
+  settings = null,
 }: CoopOverviewProps): React.JSX.Element {
   const { locale } = useLocale();
   const counts = membersByClass(months);
@@ -182,7 +188,13 @@ export function CoopOverview({
               ) : (
                 <div className="flex flex-col gap-3">
                   {openProposals.map((p) => (
-                    <ProposalItem key={p.id} proposal={p} testId="coop-open-proposal" headingLevel={3} />
+                    <ProposalItem
+                      key={p.id}
+                      proposal={p}
+                      testId="coop-open-proposal"
+                      headingLevel={3}
+                      settings={settings}
+                    />
                   ))}
                 </div>
               )}
@@ -251,20 +263,37 @@ export function CoopOverview({
                   variant="ghost"
                   size="xs"
                   nativeButton={false}
-                  render={<Link to="/coop/council" aria-label={t("coop.council.more")} />}
+                  render={<Link to="/coop/council" data-testid="coop-council-all" />}
                 >
-                  {t("coop.council.more")}
+                  {council && council.members.length > COUNCIL_PREVIEW
+                    ? t("d6Governance.council.showAllCount", { count: council.members.length })
+                    : t("coop.council.more")}
                 </Button>
               }
               aria-busy={council || sectionErrors.council ? undefined : true}
               empty={council ? <p>{t("coop.council.empty")}</p> : (sectionErrors.council ?? <CouncilLoading />)}
-              items={(council?.members ?? []).map((m) => ({
-                id: m.user.id,
-                attributes: { "data-testid": "coop-council-member", "data-user-id": m.user.id, "data-rank": m.rank },
-                media: <ChannelAvatar name={m.user.displayName} size="sm" decorative />,
-                title: m.user.displayName,
-                description: t("coop.council.rank", { rank: m.rank }),
-              }))}
+              // CT-8: the top five link to their channels; the rest are on /coop/council.
+              items={(council?.members ?? []).slice(0, COUNCIL_PREVIEW).map((m) => {
+                const share = contributionShare(m.contributionScore, council);
+                return {
+                  id: m.user.id,
+                  attributes: { "data-testid": "coop-council-member", "data-user-id": m.user.id, "data-rank": m.rank },
+                  media: <ChannelAvatar name={m.user.displayName} size="sm" decorative />,
+                  title: (
+                    <Link
+                      to="/$channel"
+                      params={{ channel: m.user.username }}
+                      className="hover:underline hover:underline-offset-4"
+                    >
+                      {m.user.displayName}
+                    </Link>
+                  ),
+                  description:
+                    share === null
+                      ? t("coop.council.rank", { rank: m.rank })
+                      : t("d6Governance.council.rankShare", { rank: m.rank, share: percentText(share, locale) }),
+                };
+              })}
             />
           </div>
         }

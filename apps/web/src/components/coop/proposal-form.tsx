@@ -2,29 +2,23 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { Skeleton, SkeletonGroup } from "@commonair/ui";
-import { ProposalChangeEditor } from "@commonair/ui/blocks/coop";
 import { AlertCallout } from "@commonair/ui/blocks/feedback";
 import { CharacterCountField, FormSection, SwitchField } from "@commonair/ui/blocks/forms";
 import { Breadcrumbs, PageHeader, Section } from "@commonair/ui/blocks/headers";
 import { PageContainer } from "@commonair/ui/layouts";
 import { Link } from "@tanstack/react-router";
-import type * as React from "react";
+import * as React from "react";
 import { t } from "../../i18n/index.ts";
 import {
   PROPOSAL_BODY_MAX,
   PROPOSAL_TITLE_MAX,
-  changeKeyOptions,
+  PROPOSAL_TITLE_MIN,
   deriveKind,
-  kindHint,
-  kindLabel,
   proposalInput,
-  rowError,
-  rowErrorText,
-  settingJson,
-  type ChangeRow,
   type ProposalDraft,
   type SettingDto,
 } from "../../lib/coop.ts";
+import { ChangeEditor, typedProblems } from "../governance/change-editor.tsx";
 
 export interface ProposalFormProps {
   mode: "new" | "edit";
@@ -40,13 +34,11 @@ export interface ProposalFormProps {
   error: string | null;
 }
 
-let rowSeq = 0;
-const newRowId = () => `new-${++rowSeq}`;
-
 /**
- * `/coop/proposals/new` and `/coop/proposals/$id/edit`: title, body, setting changes (whole JSON
- * values) and "affects creators". A protected key makes the proposal protected and forces
- * "affects creators" on, as the API does.
+ * `/coop/proposals/new` and `/coop/proposals/$id/edit`: title, body, setting changes (typed fields
+ * per known setting, JSON as the advanced fallback) and "affects creators". A protected key makes
+ * the proposal protected and forces "affects creators" on, as the API does. Problems show once a
+ * field is left or saving is tried; a save with problems shows them all and saves nothing.
  */
 export function ProposalForm({
   mode,
@@ -60,14 +52,19 @@ export function ProposalForm({
 }: ProposalFormProps): React.JSX.Element {
   const kind = settings ? deriveKind(draft.rows, settings) : "ordinary";
   const isProtected = kind === "protected";
-  const input = proposalInput(draft, kind);
+  const input = typedProblems(draft.rows).size > 0 ? null : proposalInput(draft, kind);
   const set = (patch: Partial<ProposalDraft>) => onDraftChange({ ...draft, ...patch });
-  const setRows = (rows: ChangeRow[]) => set({ rows });
-  const shown = draft.rows.map((row) => {
-    const problem = rowError(row, draft.rows);
-    // "No key yet" needs no message: the select shows its placeholder.
-    return problem && problem !== "noKey" ? { ...row, error: rowErrorText(problem) } : row;
-  });
+  const [submitted, setSubmitted] = React.useState(false);
+  const [titleTouched, setTitleTouched] = React.useState(false);
+  const [bodyTouched, setBodyTouched] = React.useState(false);
+  const formRef = React.useRef<HTMLDivElement>(null);
+  const titleLength = draft.title.trim().length;
+  const titleError =
+    (submitted || titleTouched) && (titleLength < PROPOSAL_TITLE_MIN || titleLength > PROPOSAL_TITLE_MAX)
+      ? t("d6Governance.form.error.title", { min: PROPOSAL_TITLE_MIN, max: PROPOSAL_TITLE_MAX })
+      : undefined;
+  const bodyError =
+    (submitted || bodyTouched) && draft.body.trim().length === 0 ? t("d6Governance.form.error.body") : undefined;
   const title = mode === "new" ? t("coop.form.newTitle") : t("coop.form.editTitle");
   return (
     <PageContainer width="narrow" className="flex flex-col gap-6 py-8">
@@ -90,97 +87,90 @@ export function ProposalForm({
           <Skeleton className="h-64 w-full" />
         </SkeletonGroup>
       ) : (
-        <FormSection
-          data-testid="proposal-form"
-          title={t("coop.form.section")}
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (input && !saving) void onSave(input);
-          }}
-          actions={{
-            saveLabel: mode === "new" ? t("coop.form.saveNew") : t("coop.form.saveEdit"),
-            cancelLabel: t("coop.form.cancel"),
-            onCancel,
-            disabled: saving || input === null,
-            saveProps: { "data-testid": "proposal-save" },
-          }}
-        >
-          <CharacterCountField
-            label={t("coop.form.title")}
-            hint={t("coop.form.titleHint")}
-            maxLength={PROPOSAL_TITLE_MAX}
-            value={draft.title}
-            onValueChange={(value) => set({ title: value })}
-            inputProps={{ "data-testid": "proposal-title", disabled: saving }}
-          />
-          <CharacterCountField
-            label={t("coop.form.body")}
-            hint={t("coop.form.bodyHint")}
-            multiline
-            maxLength={PROPOSAL_BODY_MAX}
-            value={draft.body}
-            onValueChange={(value) => set({ body: value })}
-            textareaProps={{ "data-testid": "proposal-body", rows: 8, disabled: saving }}
-          />
-          <SwitchField
-            label={t("coop.form.affectsCreators")}
-            description={isProtected ? t("coop.form.affectsCreatorsForced") : t("coop.form.affectsCreatorsHint")}
-            checked={draft.affectsCreators || isProtected}
-            disabled={isProtected || saving}
-            onCheckedChange={(checked) => set({ affectsCreators: checked })}
-            switchProps={{ "data-testid": "proposal-affects-creators" }}
-          />
-          <Section heading={t("coop.form.changes")} headingLevel={3}>
-            <ProposalChangeEditor
-              rows={shown}
-              keyOptions={changeKeyOptions(settings)}
-              disabled={saving}
-              labels={{
-                key: t("coop.form.changeKey"),
-                keyPlaceholder: t("coop.form.changeKeyPlaceholder"),
-                value: t("coop.form.changeValue"),
-                valueHint: t("coop.form.changeValueHint"),
-                protected: t("coop.form.changeProtected"),
-                remove: t("coop.form.changeRemove"),
-                add: t("coop.form.changeAdd"),
-                empty: t("coop.form.changesEmpty"),
-              }}
-              kind={{
-                kind,
-                label: kindLabel(kind),
-                description: kindHint(kind),
-                props: { "data-testid": "proposal-kind" },
-              }}
-              rowProps={{ "data-testid": "proposal-change" }}
-              keyTriggerProps={{ "data-testid": "proposal-change-key" }}
-              valueProps={{ "data-testid": "proposal-change-value" }}
-              removeProps={{ "data-testid": "proposal-change-remove" }}
-              addProps={{ "data-testid": "proposal-change-add" }}
-              onAdd={() => setRows([...draft.rows, { id: newRowId(), key: "", value: "" }])}
-              onRemove={(id) => setRows(draft.rows.filter((row) => row.id !== id))}
-              onRowChange={(id, patch) =>
-                setRows(
-                  draft.rows.map((row) => {
-                    if (row.id !== id) return row;
-                    const next = { ...row, ...patch };
-                    // A new key starts from its whole current value: a change replaces the setting.
-                    if (patch.key !== undefined && patch.key !== row.key && (row.value.trim() === "" || row.key !== ""))
-                      next.value = settingJson(settings, patch.key);
-                    return next;
-                  }),
-                )
+        <div ref={formRef} className="contents">
+          <FormSection
+            data-testid="proposal-form"
+            title={t("coop.form.section")}
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (saving) return;
+              if (input) {
+                void onSave(input);
+                return;
               }
+              // Show every problem and take the member to the first one.
+              setSubmitted(true);
+              requestAnimationFrame(() =>
+                formRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus(),
+              );
+            }}
+            actions={{
+              saveLabel: mode === "new" ? t("coop.form.saveNew") : t("coop.form.saveEdit"),
+              cancelLabel: t("coop.form.cancel"),
+              onCancel,
+              disabled: saving,
+              saveProps: { "data-testid": "proposal-save", "data-valid": String(input !== null) },
+            }}
+          >
+            <CharacterCountField
+              label={t("coop.form.title")}
+              hint={t("coop.form.titleHint")}
+              maxLength={PROPOSAL_TITLE_MAX}
+              value={draft.title}
+              onValueChange={(value) => set({ title: value })}
+              errors={titleError}
+              inputProps={{ "data-testid": "proposal-title", disabled: saving, onBlur: () => setTitleTouched(true) }}
             />
-          </Section>
-          {isProtected && (
-            <AlertCallout
-              tone="warning"
-              title={t("coop.form.protectedTitle")}
-              description={t("coop.form.protectedHint")}
+            <CharacterCountField
+              label={t("coop.form.body")}
+              hint={t("coop.form.bodyHint")}
+              multiline
+              maxLength={PROPOSAL_BODY_MAX}
+              value={draft.body}
+              onValueChange={(value) => set({ body: value })}
+              errors={bodyError}
+              textareaProps={{
+                "data-testid": "proposal-body",
+                rows: 8,
+                disabled: saving,
+                onBlur: () => setBodyTouched(true),
+              }}
             />
-          )}
-          {error && <AlertCallout tone="danger" description={error} />}
-        </FormSection>
+            <SwitchField
+              label={t("coop.form.affectsCreators")}
+              description={isProtected ? t("coop.form.affectsCreatorsForced") : t("coop.form.affectsCreatorsHint")}
+              checked={draft.affectsCreators || isProtected}
+              disabled={isProtected || saving}
+              onCheckedChange={(checked) => set({ affectsCreators: checked })}
+              switchProps={{ "data-testid": "proposal-affects-creators" }}
+            />
+            <Section heading={t("coop.form.changes")} headingLevel={3}>
+              <ChangeEditor
+                rows={draft.rows}
+                settings={settings}
+                kind={kind}
+                disabled={saving}
+                submitted={submitted}
+                onRowsChange={(rows) => set({ rows })}
+              />
+            </Section>
+            {isProtected && (
+              <AlertCallout
+                tone="warning"
+                title={t("coop.form.protectedTitle")}
+                description={t("coop.form.protectedHint")}
+              />
+            )}
+            {submitted && input === null ? (
+              <AlertCallout
+                data-testid="proposal-form-problems"
+                tone="danger"
+                description={t("d6Governance.form.fixProblems")}
+              />
+            ) : null}
+            {error && <AlertCallout tone="danger" description={error} />}
+          </FormSection>
+        </div>
       )}
     </PageContainer>
   );

@@ -62,6 +62,8 @@ function ProposalView({ id }: { id: string }): React.JSX.Element {
   );
   const membership = useMyMembership(me);
   const council = useCoopLoad("council", () => api().coop.council());
+  // The quorum tick and the join prompt read the settings; the page renders without them.
+  const settings = useCoopLoad("settings", () => api().coop.settings());
   const [now, setNow] = React.useState(() => Date.now());
   const [closedNotice, setClosedNotice] = React.useState(false);
 
@@ -121,6 +123,7 @@ function ProposalView({ id }: { id: string }): React.JSX.Element {
         commentsError={inline(comments)}
         memberError={inline(membership)}
         councilError={inline(council)}
+        settings={settings.data}
         onSubmitProposal={() => after(() => api().coop.proposals.submit({ id }), t("coop.proposal.submitted"))}
         onWithdraw={() => after(() => api().coop.proposals.withdraw({ id }), t("coop.proposal.withdrawn"))}
         onComment={async (body) => {
