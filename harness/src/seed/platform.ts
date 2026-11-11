@@ -22,6 +22,7 @@ import {
   waitDeliveries,
 } from "./platform/api.ts";
 import { FEDERATION_FIX, seedFederation } from "./platform/federation.ts";
+import { planGrowth, writeGrowth } from "./platform/growth.ts";
 import { TWITCH_FIX, seedImports } from "./platform/portability.ts";
 import { MINUTE_MS, planPlatform } from "./platform/plan.ts";
 import { buildActivateQuery, buildAuthorizeQuery, parseUnsubscribeLink } from "./platform/queries.ts";
@@ -62,6 +63,9 @@ const TABLES = [
   "federation_inbox_items",
   "federation_deliveries",
   "federation_objects",
+  // Overhaul wave 2 (D2.8): growth counters.
+  "ui_counters",
+  "growth_daily",
 ] as const;
 
 /** The digest sweep runs every 30 s; allow a few sweeps on a loaded stack. */
@@ -265,6 +269,8 @@ export const unit: SeedUnit = {
         unsubscribeQuery,
       } satisfies PlatformExtra;
 
+      const growth = await writeGrowth(ctx.db, planGrowth(ctx.rng.fork("growth"), ctx.now, ctx.scale.factor));
+
       const after = await tableCounts(ctx.db, TABLES);
       for (const t of TABLES) rows[t] = (after[t] ?? 0) - (before[t] ?? 0);
       // Drained by the worker, as it should be: report what was queued.
@@ -280,6 +286,7 @@ export const unit: SeedUnit = {
         `seed-platform: streamer3's Twitch import finished ${imports.twitch.status}${imports.bundle ? `; the bundle import finished ${imports.bundle.status} (standing verified: ${String(imports.bundle.standingVerified)})` : "; no bundle round trip (fewer than two bulk streamers)"}. The Twitch category is not matched (the fixture category is not seeded)`,
         "seed-platform: /import is filled for streamer3 (the brief's importer); routes.ts signs /import in as streamer1",
         `seed-platform: federation: ${fedResult.followers} peer followers, ${fedResult.blocked} blocked, ${fedResult.rotated} key(s) rotated`,
+        `seed-platform: growth_daily (${growth.growth_daily} rows, 400 days) and ui_counters (${growth.ui_counters} rows, 30 days) are planned figures inserted directly, not counts of the seeded rows; some cells stay under the k floor so /admin/growth and /transparency show "fewer than 5"`,
       );
       return { rows, notes };
     } finally {
