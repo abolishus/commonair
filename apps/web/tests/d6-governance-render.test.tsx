@@ -424,7 +424,9 @@ describe("the typed change editor", () => {
     expect(id("proposal-save").getAttribute("data-valid")).toBe("true");
     fireEvent.click(id("proposal-save"));
     expect(onSave).toHaveBeenCalledWith(
-      expect.objectContaining({ changes: [{ key: "payout.rules", value: expect.objectContaining({ minimumCents: 3000 }) }] }),
+      expect.objectContaining({
+        changes: [{ key: "payout.rules", value: expect.objectContaining({ minimumCents: 3000 }) }],
+      }),
     );
   });
 
@@ -439,7 +441,10 @@ describe("the typed change editor", () => {
     const initial = draft("payout.rules", payout.value);
     wrap(
       <StatefulForm
-        initial={{ ...initial, rows: [...initial.rows, { id: "r2", key: "platform.cut", value: JSON.stringify(cut.value) }] }}
+        initial={{
+          ...initial,
+          rows: [...initial.rows, { id: "r2", key: "platform.cut", value: JSON.stringify(cut.value) }],
+        }}
         list={[payout, cut]}
         onSave={onSave}
       />,
@@ -608,7 +613,10 @@ describe("/coop council preview", () => {
         signedIn={false}
         membership={null}
         openProposals={[]}
-        council={{ ...council, members: members(8), method: {
+        council={{
+          ...council,
+          members: members(8),
+          method: {
             weights: { revenue: 1, streamingHours: 0, relayBandwidth: 0, viewerHours: 0 },
             totals: { revenueCents: 100, eligibleHours: 10, relayBytes: 0, viewerHours: 0 },
           },

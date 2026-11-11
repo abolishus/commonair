@@ -184,7 +184,7 @@ describe("payout-transfers", () => {
     expect(sent.length).toBeGreaterThanOrEqual(2);
     expect(sent.at(-1)?.props).toMatchObject({ currency: "usd", earningsUrl: "https://example.test/revenue" });
     // RFC 8058: the notice carries the `payout` list's one-click unsubscribe (D7.3).
-    expect((sent.at(-1)?.props as { unsubscribeUrl?: string }).unsubscribeUrl).toMatch(
+    expect((sent.at(-1)!.props as { unsubscribeUrl?: string }).unsubscribeUrl).toMatch(
       /^https:\/\/example\.test\/.+\?list=payout&token=.+/,
     );
     // A redelivered job changes nothing and calls Stripe no more.

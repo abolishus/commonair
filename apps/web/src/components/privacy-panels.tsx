@@ -227,7 +227,14 @@ export function ExportSection({
                 variant="outline"
                 nativeButton={false}
                 // A signed link: never leak it through Referer.
-                render={<a href={row.downloadUrl} rel="noreferrer noopener" download aria-label={t("privacy.export.download")} />}
+                render={
+                  <a
+                    href={row.downloadUrl}
+                    rel="noreferrer noopener"
+                    download
+                    aria-label={t("privacy.export.download")}
+                  />
+                }
                 data-testid="export-download"
               >
                 {t("privacy.export.download")}

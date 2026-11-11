@@ -198,7 +198,9 @@ describe("contributionShare", () => {
   });
 
   it("null for nothing contributed, a bad score or a score past the whole", () => {
-    expect(contributionShare(0, term(W, { revenueCents: 0, eligibleHours: 0, relayBytes: 0, viewerHours: 0 }))).toBeNull();
+    expect(
+      contributionShare(0, term(W, { revenueCents: 0, eligibleHours: 0, relayBytes: 0, viewerHours: 0 })),
+    ).toBeNull();
     expect(contributionShare(0, term({ revenue: 0, streamingHours: 0, relayBandwidth: 0, viewerHours: 0 }))).toBeNull();
     expect(contributionShare(Number.NaN, term())).toBeNull();
     expect(contributionShare(-1, term())).toBeNull();

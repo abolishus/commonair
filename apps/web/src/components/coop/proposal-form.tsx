@@ -63,8 +63,7 @@ export function ProposalForm({
       return next;
     });
   }, []);
-  const input =
-    unparsed.size > 0 || typedProblems(draft.rows).size > 0 ? null : proposalInput(draft, kind);
+  const input = unparsed.size > 0 || typedProblems(draft.rows).size > 0 ? null : proposalInput(draft, kind);
   const set = (patch: Partial<ProposalDraft>) => onDraftChange({ ...draft, ...patch });
   const [submitted, setSubmitted] = React.useState(false);
   const [titleTouched, setTitleTouched] = React.useState(false);
