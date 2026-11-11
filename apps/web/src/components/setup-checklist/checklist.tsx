@@ -8,7 +8,8 @@
  * an Edit. While the encoder step is current the page checks for a signal gently (every 10 s while
  * visible, backing off on failures), and after a minute without one it says what to check. Going
  * live happens in the encoder, so there is never a "Go live" button. After the first stream the
- * same card lists only what is still open ("After your first stream"), and it goes away once done.
+ * same card lists only what is still open ("After your first stream"), including "Get paid" on an
+ * instance with payouts (overhaul wave 4, J2-h), and it goes away once done.
  */
 import { SkeletonText, formatNumber, useLocale } from "@commonair/ui";
 import { AlertCallout } from "@commonair/ui/blocks/feedback";
@@ -39,6 +40,13 @@ import {
   resolutionLabel,
   setupPollDelay,
 } from "./model.ts";
+import {
+  type PayoutStepClient,
+  PayoutStepAction,
+  PayoutStepDetail,
+  apiPayoutStepClient,
+  usePayoutStep,
+} from "./payout-step.tsx";
 import { SetupPanel } from "./setup-panel.tsx";
 
 export interface GoLiveChecklistProps {
@@ -50,6 +58,8 @@ export interface GoLiveChecklistProps {
   /** "Add a title" / Edit on the stream info step: the page's stream info editor. */
   onEditInfo?: () => void;
   client?: SetupClient;
+  /** The "Get paid" step's payout account and rules. */
+  payoutClient?: PayoutStepClient;
   pollEnv?: PollEnv;
   download?: (filename: string, json: string) => void;
 }
@@ -61,6 +71,7 @@ export function GoLiveChecklist({
   refreshKey,
   onEditInfo,
   client = apiSetupClient,
+  payoutClient = apiPayoutStepClient,
   pollEnv,
   download,
 }: GoLiveChecklistProps): React.JSX.Element | null {
@@ -94,6 +105,10 @@ export function GoLiveChecklist({
   const needsIngest = phase === "setup";
   const ingest = useRetryingLoad(`ingest|${channel}|${needsIngest ? 1 : 0}`, () =>
     needsIngest ? client.ingest(channel) : Promise.resolve(null),
+  );
+  const payout = usePayoutStep(
+    steps.some((s) => s.step === "get_paid" && s.done === false),
+    payoutClient,
   );
   const [newKey, setNewKey] = React.useState<string | null>(null);
   const [creating, setCreating] = React.useState(false);
@@ -272,8 +287,12 @@ export function GoLiveChecklist({
               ),
         };
       case "get_paid":
-        // Contract step placeholder (overhaul wave 4, J2-h): d6-studio builds the step's action.
-        return base;
+        return {
+          ...base,
+          hint: payout.ruleLine ?? base.hint,
+          action: s.done ? editLink(s.step, "/revenue") : <PayoutStepAction view={payout.view} current={isCurrent} />,
+          detail: <PayoutStepDetail channel={channel} view={payout.view} client={client} onMarked={reload} />,
+        };
       case "bring_your_audience":
         return {
           ...base,

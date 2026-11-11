@@ -57,22 +57,33 @@ const BEFORE_FIRST: ReadonlySet<StreamSetupStep> = new Set([
   "import_twitch",
 ]);
 
+/**
+ * Optional steps the "After your first stream" card still lists while open: "Get paid" never
+ * blocks `complete`, but setting up payouts belongs in the first-run path (ux-journeys J2-h).
+ */
+const LISTED_AFTER_FIRST: ReadonlySet<StreamSetupStep> = new Set(["get_paid"]);
+
+/** Open and listed after the first stream: every required step, and the optional ones above. */
+const openAfterFirst = (s: SetupStep) => s.done === false && (!s.optional || LISTED_AFTER_FIRST.has(s.step));
+
 export type ChecklistPhase = "setup" | "after" | "complete";
 
 /**
  * `setup` until the first live stream ("Ready to go live"), then `after` while a step is still
- * open ("After your first stream"), then `complete` (nothing to show).
+ * open ("After your first stream": a required one, or "Get paid"), then `complete` (nothing to show).
  */
 export function checklistPhase(state: StreamSetupState): ChecklistPhase {
   const live = state.steps.find((s) => s.step === "first_live")?.done === true;
   if (!live) return "setup";
-  return state.complete ? "complete" : "after";
+  // The API's `complete` covers the required steps; the listed optional ones keep the card open.
+  const listedOpen = state.steps.some((s) => LISTED_AFTER_FIRST.has(s.step) && s.done === false);
+  return state.complete && !listedOpen ? "complete" : "after";
 }
 
 /**
  * The steps a phase lists: before the first stream every applicable step up to going live, plus
  * "Bring your audience" for someone who signed up to import (they have viewers elsewhere already,
- * ux-journeys J2-a); after it, only the required steps still open.
+ * ux-journeys J2-a); after it, only the required steps still open, and "Get paid" while open.
  */
 export function phaseSteps(state: StreamSetupState, phase: ChecklistPhase = checklistPhase(state)): SetupStep[] {
   const steps = visibleSteps(state);
@@ -80,7 +91,7 @@ export function phaseSteps(state: StreamSetupState, phase: ChecklistPhase = chec
     return steps.filter(
       (s) => BEFORE_FIRST.has(s.step) || (s.step === "bring_your_audience" && state.signupIntent === "import"),
     );
-  if (phase === "after") return steps.filter((s) => s.done === false && !s.optional);
+  if (phase === "after") return steps.filter(openAfterFirst);
   return [];
 }
 

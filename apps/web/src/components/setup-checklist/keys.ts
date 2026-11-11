@@ -48,9 +48,9 @@ export const STEP_KEYS: Readonly<Record<StreamSetupStep, StepKeys>> = {
     summary: "d5Dashboard.step.import_twitch.summary",
   },
   get_paid: {
-    title: "d5Dashboard.step.get_paid.title",
-    hint: "d5Dashboard.step.get_paid.hint",
-    summary: "d5Dashboard.step.get_paid.summary",
+    title: "d6Studio.getPaid.title",
+    hint: "d6Studio.getPaid.hint",
+    summary: "d6Studio.getPaid.summary",
   },
   bring_your_audience: {
     title: "d5Dashboard.step.bring_your_audience.title",

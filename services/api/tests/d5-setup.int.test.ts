@@ -76,6 +76,7 @@ describe("readSetupState, one step at a time", () => {
       rehearsal: false,
       first_live: false,
       import_twitch: null,
+      get_paid: null,
       bring_your_audience: false,
     });
   });

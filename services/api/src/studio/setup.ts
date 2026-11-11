@@ -17,6 +17,8 @@
  * - `import_twitch`: null unless the owner signed up with `intent=import`; then a finished
  *   (`done`) Twitch import, and null again while the instance has the import switched off and none
  *   finished (a step nobody can complete must not block `complete`);
+ * - `get_paid` (optional, overhaul wave 4): null before the first live stream or on an instance
+ *   without payouts; then a payout account with payouts enabled, or an owner mark (`payout-step.ts`);
  * - `bring_your_audience`: a `channel_setup_steps` row (`stream.setupMark`).
  *
  * One round trip: every check is a scalar subquery of a single select.
@@ -25,11 +27,12 @@ import { and, eq, sql } from "drizzle-orm";
 import { STREAM_SETUP_STEPS, type StreamSetupMarkable, type StreamSetupStep } from "@commonair/contracts/enums";
 import type { StreamSetupState } from "@commonair/contracts/dto";
 import { type Database, schema } from "@commonair/db";
+import { getPaidDone, payoutsAvailable } from "./payout-step.ts";
 
-const { broadcasts, channelSetupSteps, channels, portabilityImports, streamKeys, users } = schema;
+const { broadcasts, channelSetupSteps, channels, payoutAccounts, portabilityImports, streamKeys, users } = schema;
 
 /** Steps the checklist shows but `complete` does not wait for. */
-export const OPTIONAL_SETUP_STEPS: ReadonlySet<StreamSetupStep> = new Set(["rehearsal"]);
+export const OPTIONAL_SETUP_STEPS: ReadonlySet<StreamSetupStep> = new Set(["rehearsal", "get_paid"]);
 
 export interface SetupFacts {
   profile: boolean;
@@ -41,10 +44,16 @@ export interface SetupFacts {
   signupIntent: StreamSetupState["signupIntent"];
   twitchImportDone: boolean;
   audienceMarked: boolean;
+  payoutReady: boolean;
+  payoutMarked: boolean;
 }
 
 /** The step list from the facts; pure, so the rules are unit-tested without a database. */
-export function setupStateFromFacts(facts: SetupFacts, twitchImportAvailable: boolean): StreamSetupState {
+export function setupStateFromFacts(
+  facts: SetupFacts,
+  twitchImportAvailable: boolean,
+  payouts: boolean = payoutsAvailable(),
+): StreamSetupState {
   const importStep =
     facts.signupIntent !== "import" ? null : facts.twitchImportDone ? true : twitchImportAvailable ? false : null;
   const done: Record<StreamSetupStep, boolean | null> = {
@@ -55,8 +64,7 @@ export function setupStateFromFacts(facts: SetupFacts, twitchImportAvailable: bo
     rehearsal: facts.rehearsal,
     first_live: facts.live,
     import_twitch: importStep,
-    // Contract step placeholder (overhaul wave 4, J2-h): d6-studio derives it (payout account or mark).
-    get_paid: null,
+    get_paid: getPaidDone(facts, payouts),
     bring_your_audience: facts.audienceMarked,
   };
   const steps = STREAM_SETUP_STEPS.map((step) => ({
@@ -102,6 +110,14 @@ export async function readSetupFacts(db: Database, channelId: string): Promise<S
         sql`select 1 from ${channelSetupSteps} where ${channelSetupSteps.channelId} = ${channels.id}
             and ${channelSetupSteps.step} = 'bring_your_audience'`,
       ),
+      payoutReady: exists(
+        sql`select 1 from ${payoutAccounts} where ${payoutAccounts.userId} = ${channels.ownerId}
+            and ${payoutAccounts.payoutsEnabled}`,
+      ),
+      payoutMarked: exists(
+        sql`select 1 from ${channelSetupSteps} where ${channelSetupSteps.channelId} = ${channels.id}
+            and ${channelSetupSteps.step} = 'get_paid'`,
+      ),
     })
     .from(channels)
     .innerJoin(users, eq(users.id, channels.ownerId))
@@ -114,8 +130,9 @@ export async function readSetupState(
   db: Database,
   channelId: string,
   twitchImportAvailable: boolean,
+  payouts: boolean = payoutsAvailable(),
 ): Promise<StreamSetupState> {
-  return setupStateFromFacts(await readSetupFacts(db, channelId), twitchImportAvailable);
+  return setupStateFromFacts(await readSetupFacts(db, channelId), twitchImportAvailable, payouts);
 }
 
 /**

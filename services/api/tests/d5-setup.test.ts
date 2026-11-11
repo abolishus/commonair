@@ -16,6 +16,8 @@ const none: SetupFacts = {
   signupIntent: null,
   twitchImportDone: false,
   audienceMarked: false,
+  payoutReady: false,
+  payoutMarked: false,
 };
 const all: SetupFacts = {
   ...none,
@@ -30,10 +32,10 @@ const doneOf = (facts: SetupFacts, available = true) =>
   Object.fromEntries(setupStateFromFacts(facts, available).steps.map((s) => [s.step, s.done]));
 
 describe("setupStateFromFacts", () => {
-  test("steps come in STREAM_SETUP_STEPS order; only the rehearsal is optional", () => {
+  test("steps come in STREAM_SETUP_STEPS order; only the rehearsal and Get paid are optional", () => {
     const state = setupStateFromFacts(none, true);
     expect(state.steps.map((s) => s.step)).toEqual([...STREAM_SETUP_STEPS]);
-    expect(state.steps.filter((s) => s.optional).map((s) => s.step)).toEqual(["rehearsal"]);
+    expect(state.steps.filter((s) => s.optional).map((s) => s.step)).toEqual(["rehearsal", "get_paid"]);
     expect(state.complete).toBe(false);
     expect(state.signupIntent).toBeNull();
   });
@@ -48,7 +50,7 @@ describe("setupStateFromFacts", () => {
     ["audienceMarked", "bring_your_audience"],
   ] as const)("%s marks %s and nothing else", (fact, step) => {
     const done = doneOf({ ...none, [fact]: true });
-    const others = STREAM_SETUP_STEPS.filter((s) => s !== step && s !== "import_twitch");
+    const others = STREAM_SETUP_STEPS.filter((s) => s !== step && s !== "import_twitch" && s !== "get_paid");
     expect(Object.fromEntries(others.map((s) => [s, done[s]]))).toEqual(
       Object.fromEntries(others.map((s) => [s, false])),
     );

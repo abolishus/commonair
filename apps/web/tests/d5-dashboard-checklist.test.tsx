@@ -64,9 +64,9 @@ type Done = Partial<Record<StreamSetupStep, boolean | null>>;
 function setupState(done: Done, signupIntent: StreamSetupState["signupIntent"] = null): StreamSetupState {
   const steps = STREAM_SETUP_STEPS.map((step) => ({
     step,
-    // `get_paid` does not apply until d6-studio derives it (overhaul wave 4 contract step).
+    // `get_paid` applies only after the first stream on an instance with payouts (d6-studio's tests).
     done: step in done ? (done[step] ?? null) : step === "import_twitch" || step === "get_paid" ? null : false,
-    optional: step === "rehearsal",
+    optional: step === "rehearsal" || step === "get_paid",
   }));
   return {
     steps,

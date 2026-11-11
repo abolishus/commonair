@@ -637,6 +637,28 @@ export const D5_DASHBOARD_IDS = {
 } as const;
 
 /**
+ * d6-studio (overhaul wave 4, D6.4 and J2-h): the checklist's "Get paid" step (`[data-step="get_paid"]`
+ * inside `setupChecklist`; its detail carries `data-state` manual or waiting) and the co-op card on
+ * `/dashboard` (`data-status` member, lapsed or notYet). Kept out of `TEST_IDS`.
+ */
+export const D6_STUDIO_IDS = {
+  setupGetPaidAction: "setup-step-get_paid-action",
+  setupGetPaidRevenue: "setup-step-get_paid-revenue",
+  setupGetPaid: "setup-get-paid",
+  setupGetPaidInstructions: "setup-get-paid-instructions",
+  setupGetPaidMark: "setup-step-get_paid-mark",
+  studioCoopCard: "studio-coop-card",
+  studioCoopCardLoading: "studio-coop-card-loading",
+  studioCoopCardError: "studio-coop-card-error",
+  studioCoopCardRetry: "studio-coop-card-retry",
+  studioCoopStatus: "studio-coop-status",
+  studioCoopCouncil: "studio-coop-council",
+  studioCoopProgress: "studio-coop-progress",
+  studioCoopMembership: "studio-coop-membership",
+  studioCoopAbout: "studio-coop-about",
+} as const;
+
+/**
  * d5-shell (overhaul wave 3, D5.2 and D5.8, J5-a): the sticky LiveStatusBar on every studio page
  * (`data-state` offline, starting or live on `studioStatusBar`), the studio nav's new items and the
  * account menu's "Creator studio" and "Mod view". A moderated channel's nav link is
