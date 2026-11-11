@@ -187,6 +187,39 @@ describe("the rendered step", () => {
     expect(track.calls).toContain("studio.checklist|click|get_paid");
   });
 
+  it("Stripe Connect not finished: Not now marks the step, and the card clears", async () => {
+    const setup = setupClient([afterFirst({ get_paid: false }), afterFirst({ get_paid: true })]);
+    wrap(
+      <GoLiveChecklist
+        channel="aurora"
+        publicUrl="https://site.test"
+        client={setup}
+        payoutClient={payoutClient(STRIPE)}
+      />,
+    );
+    const skip = await screen.findByTestId("setup-step-get_paid-skip");
+    expect(skip.textContent).toBe(t("d6Studio.getPaid.notNow"));
+    expect(screen.getByTestId("setup-get-paid").getAttribute("data-state")).toBe("connect");
+    fireEvent.click(skip);
+    await waitFor(() => expect(setup.mark).toHaveBeenCalledWith("aurora", "get_paid"));
+    await waitFor(() => expect(screen.queryByTestId("setup-checklist")).toBeNull());
+    expect(setup.state).toHaveBeenCalledTimes(2);
+  });
+
+  it("the payout account failing still leaves Not now, so the card can clear", async () => {
+    const setup = setupClient([afterFirst({ get_paid: false })]);
+    wrap(
+      <GoLiveChecklist
+        channel="aurora"
+        publicUrl="https://site.test"
+        client={setup}
+        payoutClient={payoutClient(new Error("down"))}
+      />,
+    );
+    fireEvent.click(await screen.findByTestId("setup-step-get_paid-skip"));
+    await waitFor(() => expect(setup.mark).toHaveBeenCalledWith("aurora", "get_paid"));
+  });
+
   it("manual: the treasurer's instructions, and I've contacted the treasurer marks the step", async () => {
     const setup = setupClient([afterFirst({ get_paid: false }), afterFirst({ get_paid: true })]);
     wrap(
@@ -199,6 +232,7 @@ describe("the rendered step", () => {
     );
     expect((await screen.findByTestId("setup-get-paid-instructions")).textContent).toBe(MANUAL.instructions);
     expect(screen.queryByTestId("setup-step-get_paid-action")).toBeNull();
+    expect(screen.queryByTestId("setup-step-get_paid-skip")).toBeNull();
     const mark = screen.getByTestId("setup-step-get_paid-mark");
     expect(mark.textContent).toBe(t("d6Studio.getPaid.contacted"));
     fireEvent.click(mark);

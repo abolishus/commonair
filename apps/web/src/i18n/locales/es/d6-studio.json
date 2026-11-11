@@ -7,6 +7,7 @@
   "d6Studio.getPaid.action": "Agregar datos de pago",
   "d6Studio.getPaid.waiting": "La tesorería de la cooperativa configura tu cuenta de pagos. Contáctala para agregar tus datos de pago.",
   "d6Studio.getPaid.contacted": "Ya contacté a la tesorería",
+  "d6Studio.getPaid.notNow": "Ahora no",
   "d6Studio.getPaid.markFailed": "No se guardó. Inténtalo de nuevo.",
   "d6Studio.coop.title": "Cooperativa",
   "d6Studio.coop.loading": "Cargando tu membresía de la cooperativa",

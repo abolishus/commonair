@@ -12,6 +12,7 @@ export type Key =
   | "d6Studio.getPaid.action"
   | "d6Studio.getPaid.waiting"
   | "d6Studio.getPaid.contacted"
+  | "d6Studio.getPaid.notNow"
   | "d6Studio.getPaid.markFailed"
   | "d6Studio.coop.title"
   | "d6Studio.coop.loading"

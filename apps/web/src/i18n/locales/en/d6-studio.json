@@ -7,6 +7,7 @@
   "d6Studio.getPaid.action": "Add payout details",
   "d6Studio.getPaid.waiting": "The co-op's treasurer sets up your payout account. Contact them to add your payout details.",
   "d6Studio.getPaid.contacted": "I've contacted the treasurer",
+  "d6Studio.getPaid.notNow": "Not now",
   "d6Studio.getPaid.markFailed": "That didn't save. Try again.",
   "d6Studio.coop.title": "Co-op",
   "d6Studio.coop.loading": "Loading your co-op membership",

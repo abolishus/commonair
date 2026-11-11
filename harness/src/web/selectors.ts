@@ -638,7 +638,7 @@ export const D5_DASHBOARD_IDS = {
 
 /**
  * d6-studio (overhaul wave 4, D6.4 and J2-h): the checklist's "Get paid" step (`[data-step="get_paid"]`
- * inside `setupChecklist`; its detail carries `data-state` manual or waiting) and the co-op card on
+ * inside `setupChecklist`; its detail carries `data-state` manual, waiting, connect or unknown) and the co-op card on
  * `/dashboard` (`data-status` member, lapsed or notYet). Kept out of `TEST_IDS`.
  */
 export const D6_STUDIO_IDS = {
@@ -647,6 +647,7 @@ export const D6_STUDIO_IDS = {
   setupGetPaid: "setup-get-paid",
   setupGetPaidInstructions: "setup-get-paid-instructions",
   setupGetPaidMark: "setup-step-get_paid-mark",
+  setupGetPaidSkip: "setup-step-get_paid-skip",
   studioCoopCard: "studio-coop-card",
   studioCoopCardLoading: "studio-coop-card-loading",
   studioCoopCardError: "studio-coop-card-error",

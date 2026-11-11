@@ -100,7 +100,11 @@ export function PayoutStepAction({
   );
 }
 
-/** The expanded step for the manual adapter: the treasurer's instructions and the mark. */
+/**
+ * The expanded step. Manual adapter: the treasurer's instructions and "I've contacted the
+ * treasurer". Otherwise (Stripe Connect not finished, or the account unknown): "Not now", the same
+ * mark, so the optional step can always close the card on every adapter.
+ */
 export function PayoutStepDetail({
   channel,
   view,
@@ -113,7 +117,7 @@ export function PayoutStepDetail({
   onMarked: () => void;
 }): React.JSX.Element | null {
   const [marking, setMarking] = React.useState(false);
-  if (view?.state !== "manual" && view?.state !== "waiting") return null;
+  if (view?.state === "ready") return null;
   const mark = async () => {
     click();
     setMarking(true);
@@ -126,6 +130,15 @@ export function PayoutStepDetail({
       setMarking(false);
     }
   };
+  const markProps = { disabled: marking, "aria-busy": marking || undefined, onClick: () => void mark() };
+  if (view?.state !== "manual" && view?.state !== "waiting")
+    return (
+      <div data-testid="setup-get-paid" data-state={view?.state ?? "unknown"} className="min-w-0">
+        <Button data-testid="setup-step-get_paid-skip" variant="ghost" size="sm" {...markProps}>
+          {t("d6Studio.getPaid.notNow")}
+        </Button>
+      </div>
+    );
   return (
     <div data-testid="setup-get-paid" data-state={view.state} className="flex min-w-0 flex-col gap-3">
       {view.instructions ? (
@@ -136,13 +149,7 @@ export function PayoutStepDetail({
         <p className="text-sm">{t("d6Studio.getPaid.waiting")}</p>
       )}
       <div>
-        <Button
-          data-testid="setup-step-get_paid-mark"
-          variant="outline"
-          disabled={marking}
-          aria-busy={marking || undefined}
-          onClick={() => void mark()}
-        >
+        <Button data-testid="setup-step-get_paid-mark" variant="outline" {...markProps}>
           {t("d6Studio.getPaid.contacted")}
         </Button>
       </div>
