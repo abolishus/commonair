@@ -48,7 +48,8 @@ describe("setupStateFromFacts", () => {
     ["audienceMarked", "bring_your_audience"],
   ] as const)("%s marks %s and nothing else", (fact, step) => {
     const done = doneOf({ ...none, [fact]: true });
-    const others = STREAM_SETUP_STEPS.filter((s) => s !== step && s !== "import_twitch");
+    // `get_paid` has its own rules (overhaul wave 4, d6-studio), like `import_twitch`.
+    const others = STREAM_SETUP_STEPS.filter((s) => s !== step && s !== "import_twitch" && s !== "get_paid");
     expect(Object.fromEntries(others.map((s) => [s, done[s]]))).toEqual(
       Object.fromEntries(others.map((s) => [s, false])),
     );
