@@ -3,6 +3,15 @@
 
 export { AppShell, type AppShellProps } from "./app-shell.tsx";
 export { AdminShell, type AdminShellProps } from "./admin-shell.tsx";
+export { AdminPage, type AdminPageProps } from "./admin-shell.tsx";
+export {
+  QueueLayout,
+  nextRowIndex,
+  ownsKeys,
+  type QueueLayoutProps,
+  type QueueShortcut,
+  type QueueShortcutsCopy,
+} from "./queue-layout.tsx";
 export { BottomTabBar, type BottomTabBarProps, type TabBarItem } from "./bottom-tab-bar.tsx";
 export { BREAKPOINTS, CONTENT_MAX, TAB_BAR_HEIGHT, WORDMARK_MIN, below } from "./breakpoints.ts";
 export {
