@@ -19,7 +19,9 @@ export type RateLimitBucket =
   | "playback"
   | "app"
   | "eventsub"
-  | "readyz";
+  | "readyz"
+  | "lookup"
+  | "metrics";
 export interface RateLimitRule {
   max: number;
   windowMs: number;
@@ -49,6 +51,13 @@ export const DEFAULT_RATE_LIMITS: Record<RateLimitBucket, RateLimitRule> = {
    * throttled.
    */
   readyz: { max: 60, windowMs: 60_000 },
+  /** Lookups made while a form is typed in (`users.usernameAvailable`); apart from `auth`. */
+  lookup: { max: 60, windowMs: 60_000 },
+  /**
+   * First-party UI counter beacons (`metrics.ui`), always per address. A ceiling only: the
+   * handler's own per-address and per-(surface, day) caps decide what counts.
+   */
+  metrics: { max: 600, windowMs: 60_000 },
 };
 
 export interface RateLimitResult {

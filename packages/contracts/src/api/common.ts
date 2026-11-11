@@ -41,7 +41,12 @@ export interface ProcedureMeta {
    */
   scopes?: Scope[];
   /** Per-caller rate limit bucket name (see services/api rate limits). */
-  rateLimit?: "default" | "write" | "auth" | "chat" | "expensive" | "playback";
+  rateLimit?: "default" | "write" | "auth" | "chat" | "expensive" | "playback" | "lookup" | "metrics";
+  /**
+   * Limit by the client address even when the caller is signed in: for anonymous-by-design
+   * routes (UI counters) whose handler never reads the caller, so no user id reaches Valkey.
+   */
+  limitByAddress?: true;
   /**
    * Suspended callers may still call this write, so they can appeal (ADR 0019). Redress only:
    * a router test keeps `appeals.create` the sole holder.

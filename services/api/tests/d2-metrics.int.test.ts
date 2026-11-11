@@ -125,6 +125,22 @@ describe("metrics.ui", () => {
     });
   });
 
+  test("beacons have their own high bucket: 40 from one address all answer Ok, keyed by address", async () => {
+    const ev = { surface: "home.hero", action: "click", step: "none" } as const;
+    const statuses: number[] = [];
+    for (let i = 0; i < 40; i++) statuses.push((await beacon(ev)).status);
+    expect(statuses.filter((s) => s !== 200)).toEqual([]);
+    // Signed in, the limiter still keys by address: no user id reaches the metrics bucket.
+    const signedIn = await client(api, { jar: plain.client.jar }).call("POST", "/api/metrics/ui", ev);
+    expect(signedIn.status).toBe(200);
+    const keys = await api.deps.valkey.keys(`${api.keyPrefix}rl:metrics:*`);
+    expect(keys.length).toBeGreaterThan(0);
+    for (const k of keys) {
+      expect(k).toContain("rl:metrics:ip:");
+      expect(k).not.toContain(plain.userId);
+    }
+  });
+
   test("Valkey holds hashed, short-lived bucket keys and never the address", async () => {
     await recordUiMetric(api.deps, "203.0.113.77", { surface: "coop.band", action: "click", step: "none" });
     const keys = await api.deps.valkey.keys(`${api.keyPrefix}ui-metrics:*`);

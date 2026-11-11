@@ -386,7 +386,8 @@ export const contract = {
      * with? Rate-limited; answers only taken / reserved / invalid, never who holds it.
      */
     usernameAvailable: base
-      .meta({ access: "public", rateLimit: "auth" })
+      // Its own bucket: lookups while typing never use up the per-address sign-up budget (`auth`).
+      .meta({ access: "public", rateLimit: "lookup" })
       .route({
         method: "GET",
         path: "/usernames/available",
@@ -407,7 +408,8 @@ export const contract = {
   /** Wave 2 (D2.8): first-party UI counters. No cookie, no user id; daily totals only. */
   metrics: {
     ui: base
-      .meta({ access: "public", rateLimit: "write" })
+      // A high ceiling: the handler's own per-address and per-(surface, day) caps are the binding ones.
+      .meta({ access: "public", rateLimit: "metrics", limitByAddress: true })
       .route({
         method: "POST",
         path: "/metrics/ui",

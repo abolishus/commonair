@@ -142,15 +142,17 @@ export const os = base.use(async ({ context, next, procedure }, input) => {
   // ADR 0027 §4: an app's user token is its own subject, so one app cannot spend a user's
   // allowance for every other app and the user's own session.
   const appId = caller?.kind === "token" ? caller.appId : (app?.appId ?? null);
-  const subject = caller
-    ? caller.kind === "token" && caller.appId
-      ? `g:${caller.appId}:${caller.user.id}`
-      : `u:${caller.user.id}`
-    : app
-      ? `a:${app.appId}`
-      : relay
-        ? `r:${relay.id}`
-        : `ip:${req.rateLimitHash}`;
+  const subject = meta.limitByAddress
+    ? `ip:${req.rateLimitHash}`
+    : caller
+      ? caller.kind === "token" && caller.appId
+        ? `g:${caller.appId}:${caller.user.id}`
+        : `u:${caller.user.id}`
+      : app
+        ? `a:${app.appId}`
+        : relay
+          ? `r:${relay.id}`
+          : `ip:${req.rateLimitHash}`;
   const nowMs = deps.now().getTime();
   const rl = await deps.rateLimitStore.hit(
     rateLimitKey(bucket, subject),

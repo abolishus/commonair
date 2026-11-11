@@ -145,13 +145,13 @@ describe("users.usernameAvailable", () => {
 describe("users.usernameAvailable rate limit", () => {
   let limited: TestApi;
   beforeAll(async () => {
-    limited = await startApi({ rateLimits: { auth: { max: 3, windowMs: 60_000 } } });
+    limited = await startApi({ rateLimits: { lookup: { max: 3, windowMs: 60_000 } } });
   }, 60_000);
   afterAll(async () => {
     await limited?.stop();
   });
 
-  test("the auth bucket applies", async () => {
+  test("its own lookup bucket applies", async () => {
     const c = client(limited);
     const statuses: number[] = [];
     for (let i = 0; i < 5; i++)

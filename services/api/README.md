@@ -78,6 +78,8 @@ client address (IPv4 per address, IPv6 per /64, HMAC'd). `/api/auth/*` writes us
 | `chat`      | 20 / 30 seconds | user                                                           |
 | `expensive` | 5 / hour        | user, relay or address                                         |
 | `mail`      | 10 / hour       | per template per recipient mailbox, across all senders and IPs |
+| `lookup`    | 60 / minute     | user or address (`users.usernameAvailable`, apart from `auth`) |
+| `metrics`   | 600 / minute    | address, signed in or not (`metrics.ui` beacons)               |
 
 The `mail` bucket (`recipientLimitedMailer` in `src/mail.ts`) keys on
 `<template>:HMAC(AUTH_SECRET, "mail:" + mailbox)`, where the mailbox is the address lower-cased

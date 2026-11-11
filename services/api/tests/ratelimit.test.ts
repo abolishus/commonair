@@ -60,6 +60,8 @@ test("default buckets match the documented limits", () => {
     app: { max: 6000, windowMs: 60_000 },
     eventsub: { max: 60, windowMs: 60_000 },
     readyz: { max: 60, windowMs: 60_000 },
+    lookup: { max: 60, windowMs: 60_000 },
+    metrics: { max: 600, windowMs: 60_000 },
   });
 });
 
