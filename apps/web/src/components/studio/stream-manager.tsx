@@ -100,7 +100,9 @@ function PreviewSection({ children, className }: { children: React.ReactNode; cl
           {shown ? t("d5Dashboard.preview.hide") : t("d5Dashboard.preview.show")}
         </Button>
       </div>
-      <div id={id} className="d5dash-preview-cap min-w-0">
+      {/* Capped so the 16:9 preview stays near 40% of a laptop screen's height (D5.2). A
+          viewport-relative cap needs a utility in styles.css (requested from its owner). */}
+      <div id={id} className="mx-auto w-full max-w-3xl min-w-0">
         {shown ? children : null}
       </div>
     </section>

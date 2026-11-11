@@ -36,6 +36,13 @@ vi.mock("../src/lib/api.ts", async (importOriginal) => {
     }),
   };
 });
+// The checklist and recap have their own tests; here only where they sit matters.
+vi.mock("../src/components/setup-checklist/checklist.tsx", () => ({
+  GoLiveChecklist: () => <section data-testid="setup-checklist" />,
+}));
+vi.mock("../src/components/recap/stream-recap.tsx", () => ({
+  StreamRecap: () => <section data-testid="stream-recap" />,
+}));
 vi.mock("../src/lib/bootstrap.ts", () => ({
   useBootstrap: () => ({ config: { ingestRtmpUrl: "rtmp://cfg.test/live" } }),
 }));
@@ -43,6 +50,7 @@ vi.mock("../src/lib/bootstrap.ts", () => ({
 const { ControlRoom } = await import("../src/components/studio/control-room.tsx");
 const { StreamManager } = await import("../src/components/studio/stream-manager.tsx");
 const { StreamSetup } = await import("../src/components/studio/stream-setup.tsx");
+const { DashboardTop } = await import("../src/components/studio/dashboard-top.tsx");
 const { focusStreamInfoTitle, STREAM_INFO_TITLE_ID } = await import("../src/components/studio/stream-info.tsx");
 type LiveChannel = import("../src/components/studio/control-room.tsx").LiveChannel;
 
@@ -211,6 +219,77 @@ describe("ControlRoom", () => {
     });
     expect(await screen.findByTestId("fake-player")).toBeTruthy();
     expect(load).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("DashboardTop above the board", () => {
+  const env: PollEnv = {
+    isVisible: () => true,
+    onVisibilityChange: () => () => undefined,
+    setInterval: () => 0,
+    clearInterval: () => undefined,
+  };
+  let answered = false;
+  const room = (channel: LiveChannel) => {
+    answered = false;
+    return wrap(
+      <ControlRoom
+        slug="aurora"
+        username="aurora"
+        load={async () => channel}
+        pollEnv={env}
+        renderPreview={() => <div data-testid="fake-player" />}
+        renderChat={() => null}
+        renderTop={(c) => {
+          if (c) answered = true;
+          return (
+            <DashboardTop
+              channel={c}
+              slug="aurora"
+              publicUrl="https://example.test"
+              refreshKey="0"
+              onEditInfo={() => undefined}
+            />
+          );
+        }}
+        infoClient={infoClient()}
+        healthLoad={async () => OFFLINE_HEALTH}
+        activitySource={quiet}
+      />,
+    );
+  };
+  const before = (a: Node, b: Node) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+
+  it("offline: the recap and checklist sit above stream info and health", async () => {
+    room({ id: "ch-1", displayName: "Aurora", live: null, lastLiveAt: "2026-11-10T19:50:00.000Z" });
+    const checklist = await screen.findByTestId("setup-checklist");
+    expect(screen.getByTestId("stream-recap")).toBeTruthy();
+    const info = document.querySelector('[data-slot="stream-info"]');
+    const health = document.querySelector('[data-slot="stream-health"]');
+    expect(info && before(checklist, info)).toBe(true);
+    expect(health && before(checklist, health)).toBe(true);
+  });
+
+  it("live: no checklist or recap, so stream info and health lead the page", async () => {
+    room({ id: "ch-1", displayName: "Aurora", live: { startedAt: "2026-11-11T18:00:00.000Z" } });
+    await waitFor(() => expect(answered).toBe(true));
+    expect(document.querySelector('[data-slot="stream-info"]')).toBeTruthy();
+    expect(document.querySelector('[data-slot="stream-health"]')).toBeTruthy();
+    expect(screen.queryByTestId("setup-checklist")).toBeNull();
+    expect(screen.queryByTestId("stream-recap")).toBeNull();
+  });
+
+  it("waits for the first channel answer before showing the checklist", () => {
+    wrap(
+      <DashboardTop
+        channel={null}
+        slug="aurora"
+        publicUrl="https://example.test"
+        refreshKey="0"
+        onEditInfo={() => undefined}
+      />,
+    );
+    expect(screen.queryByTestId("setup-checklist")).toBeNull();
   });
 });
 

@@ -114,6 +114,7 @@
   "dashboard.rotateConfirmBody": "The current key stops working immediately. Update your encoder with the new one.",
   "dashboard.keyRotated": "New stream key created",
   "dashboard.rotateFailed": "Could not create a new key. Try again.",
+  "dashboard.loadFailed": "Your stream settings didn't load. Refresh the page to retry.",
   "dashboard.keyTruncated": "…",
   "appearance.title": "Channel appearance",
   "appearance.hint": "Images are checked before they are published.",

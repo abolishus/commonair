@@ -15,11 +15,13 @@ import type * as React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import {
   END_MATCH_MS,
+  MAX_COUNT_PAGES,
   MAX_STREAM_MS,
   RECAP_DISMISSED_KEY,
   RECAP_MAX_AGE_MS,
   averageViewers,
   clipsDuring,
+  countDuring,
   followsDuring,
   memberNoticeKey,
   readFlag,
@@ -120,7 +122,7 @@ describe("the recap's rules", () => {
     expect(recapWindow(ENDED, null)).toEqual({ start: Date.parse(ENDED) - MAX_STREAM_MS, end: Date.parse(ENDED) });
   });
 
-  it("picks the newest video made during the stream, and counts follows and clips in it", () => {
+  it("picks the newest video made during the stream, and counts follows and clips in it", async () => {
     const w = recapWindow(ENDED, BROADCAST);
     const vods = [
       { id: "old", createdAt: "2026-11-09T10:00:00.000Z" },
@@ -135,10 +137,60 @@ describe("the recap's rules", () => {
       { followedAt: "2026-11-10T20:30:00.000Z", excluded: false },
       { followedAt: "2026-11-10T19:49:00.000Z", excluded: false },
     ];
-    expect(followsDuring(follows, w)).toBe(2);
-    expect(clipsDuring([{ createdAt: "2026-11-10T19:00:00.000Z" }, { createdAt: "2026-11-09T19:00:00.000Z" }], w)).toBe(
-      1,
-    );
+    expect(await followsDuring(async () => ({ items: follows, nextCursor: null }), w)).toBe(2);
+    expect(
+      await clipsDuring(
+        async () => ({
+          items: [{ createdAt: "2026-11-10T19:00:00.000Z" }, { createdAt: "2026-11-09T19:00:00.000Z" }],
+          nextCursor: "c2",
+        }),
+        w,
+      ),
+    ).toBe(1);
+  });
+
+  it("pages back past the stream's start when later follows fill the first page", async () => {
+    const w = recapWindow(ENDED, BROADCAST);
+    const after = Array.from({ length: 100 }, (_, i) => ({
+      followedAt: new Date(Date.parse("2026-11-11T08:00:00.000Z") - i * 1000).toISOString(),
+      excluded: false,
+    }));
+    const pages: Record<string, { items: typeof after; nextCursor: string | null }> = {
+      first: { items: after, nextCursor: "p2" },
+      p2: {
+        items: [
+          { followedAt: "2026-11-10T19:00:00.000Z", excluded: false },
+          { followedAt: "2026-11-10T18:30:00.000Z", excluded: false },
+          { followedAt: "2026-11-09T12:00:00.000Z", excluded: false },
+        ],
+        nextCursor: "p3",
+      },
+    };
+    const next = vi.fn<(cursor: string | undefined) => Promise<(typeof pages)[string]>>(async (cursor) => {
+      const page = pages[cursor ?? "first"];
+      if (!page) throw new Error(`unexpected cursor ${cursor}`);
+      return page;
+    });
+    expect(await followsDuring(next, w)).toBe(2);
+    // It stops once the list reaches back past the start: no third page.
+    expect(next).toHaveBeenCalledTimes(2);
+  });
+
+  it("states no count when the list is still newer than the stream after the page cap", async () => {
+    const w = recapWindow(ENDED, BROADCAST);
+    const later = { items: [{ createdAt: "2026-11-11T08:00:00.000Z" }], nextCursor: "more" };
+    const next = vi.fn<(cursor: string | undefined) => Promise<typeof later>>(async () => later);
+    expect(await clipsDuring(next, w)).toBeNull();
+    expect(next).toHaveBeenCalledTimes(MAX_COUNT_PAGES);
+    expect(
+      await countDuring(
+        async () => later,
+        (c) => c.createdAt,
+        w,
+        () => true,
+        1,
+      ),
+    ).toBeNull();
   });
 
   it("remembers flags in storage and survives storage that throws", () => {
@@ -165,11 +217,17 @@ function client(over: Partial<RecapClient> = {}): RecapClient {
     vods: vi.fn<RecapClient["vods"]>(async () => [
       { id: "v1", status: "ready", createdAt: "2026-11-10T18:02:30.000Z" },
     ]),
-    follows: vi.fn<RecapClient["follows"]>(async () => [
-      { followedAt: "2026-11-10T18:30:00.000Z", excluded: false },
-      { followedAt: "2026-11-10T19:00:00.000Z", excluded: false },
-    ]),
-    clips: vi.fn<RecapClient["clips"]>(async () => [{ createdAt: "2026-11-10T19:10:00.000Z" }]),
+    follows: vi.fn<RecapClient["follows"]>(async () => ({
+      items: [
+        { followedAt: "2026-11-10T19:00:00.000Z", excluded: false },
+        { followedAt: "2026-11-10T18:30:00.000Z", excluded: false },
+      ],
+      nextCursor: null,
+    })),
+    clips: vi.fn<RecapClient["clips"]>(async () => ({
+      items: [{ createdAt: "2026-11-10T19:10:00.000Z" }],
+      nextCursor: null,
+    })),
     revenue: vi.fn<RecapClient["revenue"]>(async () => ({
       net: { cents: 900, currency: "usd" },
       gross: { cents: 1000, currency: "usd" },
@@ -222,6 +280,27 @@ describe("StreamRecap", () => {
     expect(c.revenue).not.toHaveBeenCalled();
     // The video is already known.
     expect(screen.getByTestId("stream-recap-video").getAttribute("data-video")).toBe("ready");
+  });
+
+  it("a full page of follows made after the stream does not read as zero new followers", async () => {
+    const later = Array.from({ length: 100 }, () => ({ followedAt: "2026-11-11T08:00:00.000Z", excluded: false }));
+    const follows = vi.fn<RecapClient["follows"]>(async (_c, cursor) =>
+      cursor === undefined
+        ? { items: later, nextCursor: "p2" }
+        : { items: [{ followedAt: "2026-11-10T18:45:00.000Z", excluded: false }], nextCursor: null },
+    );
+    wrap(recap(client({ follows })));
+    await waitFor(() => expect(document.querySelector('[data-stat="followers"]')?.textContent).toContain("1"));
+    expect(follows).toHaveBeenCalledWith("aurora", "p2");
+  });
+
+  it("hides the follower count rather than undercount when the list never reaches the stream", async () => {
+    const later = Array.from({ length: 100 }, () => ({ followedAt: "2026-11-11T08:00:00.000Z", excluded: false }));
+    const follows = vi.fn<RecapClient["follows"]>(async () => ({ items: later, nextCursor: "more" }));
+    wrap(recap(client({ follows })));
+    await waitFor(() => expect(document.querySelector('[data-stat="duration"]')).toBeTruthy());
+    expect(document.querySelector('[data-stat="followers"]')).toBeNull();
+    expect(document.querySelector('[data-stat="clips"]')).toBeTruthy();
   });
 
   it("no earnings, no support tile", async () => {

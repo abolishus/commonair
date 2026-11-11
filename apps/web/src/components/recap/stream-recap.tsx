@@ -34,6 +34,7 @@ import { SectionLoadError } from "../../lib/section-load-error.tsx";
 import { trackUi } from "../../lib/ui-metrics.ts";
 import { watchUrl } from "../watch/share.ts";
 import {
+  type Page,
   RANGE_BEFORE_MS,
   RECAP_DISMISSED_KEY,
   averageViewers,
@@ -63,16 +64,18 @@ export interface RecapVideo {
 export interface RecapClient {
   range: (channel: string, from: string, to: string) => Promise<AnalyticsRange>;
   vods: (channel: string) => Promise<RecapVideo[]>;
-  follows: (channel: string) => Promise<{ followedAt: string; excluded: boolean }[]>;
-  clips: (channel: string) => Promise<{ createdAt: string }[]>;
+  /** One newest-first page of the channel's follows. */
+  follows: (channel: string, cursor: string | undefined) => Promise<Page<{ followedAt: string; excluded: boolean }>>;
+  /** One newest-first page of the channel's clips. */
+  clips: (channel: string, cursor: string | undefined) => Promise<Page<{ createdAt: string }>>;
   revenue: (channel: string, from: string, to: string) => Promise<{ net: Money; gross: Money }>;
 }
 
 export const apiRecapClient: RecapClient = {
   range: (channel, from, to) => api().analytics.range({ channel, from, to }),
   vods: async (channel) => (await api().vods.list({ channel, limit: 10 })).items,
-  follows: async (channel) => (await api().channels.followers({ channel, limit: 100 })).items,
-  clips: async (channel) => (await api().clips.list({ channel, limit: 50, sort: "recent", range: "all" })).items,
+  follows: (channel, cursor) => api().channels.followers({ channel, cursor, limit: 100 }),
+  clips: (channel, cursor) => api().clips.list({ channel, cursor, limit: 100, sort: "recent", range: "all" }),
   revenue: (channel, from, to) => api().money.revenue({ channel, from, to }),
 };
 
@@ -189,14 +192,8 @@ function RecapCard({
     const from = new Date(window.start).toISOString();
     const to = new Date(window.end).toISOString();
     const [follows, clips, revenue] = await Promise.all([
-      client.follows(channel).then(
-        (f) => followsDuring(f, window),
-        () => null,
-      ),
-      client.clips(channel).then(
-        (c) => clipsDuring(c, window),
-        () => null,
-      ),
+      followsDuring((cursor) => client.follows(channel, cursor), window).catch(() => null),
+      clipsDuring((cursor) => client.clips(channel, cursor), window).catch(() => null),
       client.revenue(channel, from, to).then(
         (r) => (r.gross.cents > 0 ? r.net : null),
         () => null,

@@ -114,6 +114,7 @@
   "dashboard.rotateConfirmBody": "La clave actual deja de funcionar de inmediato. Actualiza tu codificador con la nueva.",
   "dashboard.keyRotated": "Nueva clave de transmisión creada",
   "dashboard.rotateFailed": "No se pudo crear una clave nueva. Inténtalo de nuevo.",
+  "dashboard.loadFailed": "No se pudo cargar la configuración de tu transmisión. Actualiza la página para reintentar.",
   "dashboard.keyTruncated": "…",
   "appearance.title": "Apariencia del canal",
   "appearance.hint": "Las imágenes se revisan antes de publicarse.",

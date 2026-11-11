@@ -82,14 +82,62 @@ export function recapVideo<V extends { createdAt: string }>(vods: readonly V[], 
   return best;
 }
 
+/** One newest-first page of a cursor list (the contract's `page()`). */
+export interface Page<T> {
+  items: readonly T[];
+  nextCursor: string | null;
+}
+
+export type PageFetch<T> = (cursor: string | undefined) => Promise<Page<T>>;
+
+/** How many pages a recap count reads before it gives up rather than guess. */
+export const MAX_COUNT_PAGES = 10;
+
+/**
+ * Counts the items made during the stream across a newest-first list, paging until the list
+ * reaches back past the stream's start. Items made after the stream push the stream's own off the
+ * first page, so one page is not enough. Null when the list is still newer than the start after
+ * `maxPages`: the recap then shows no number rather than an undercount.
+ */
+export async function countDuring<T>(
+  next: PageFetch<T>,
+  at: (item: T) => string,
+  w: RecapWindow,
+  counts: (item: T) => boolean = () => true,
+  maxPages = MAX_COUNT_PAGES,
+): Promise<number | null> {
+  let n = 0;
+  let cursor: string | undefined;
+  for (let pages = 0; pages < maxPages; pages++) {
+    const page = await next(cursor);
+    let oldest = Number.POSITIVE_INFINITY;
+    for (const item of page.items) {
+      const x = Date.parse(at(item));
+      if (x < oldest) oldest = x;
+      if (inWindow(at(item), w) && counts(item)) n++;
+    }
+    if (page.nextCursor === null || oldest < w.start) return n;
+    cursor = page.nextCursor;
+  }
+  return null;
+}
+
 /** Follows during the stream, not counting excluded ones (they never count anywhere). */
-export function followsDuring(follows: readonly { followedAt: string; excluded: boolean }[], w: RecapWindow): number {
-  return follows.filter((f) => !f.excluded && inWindow(f.followedAt, w)).length;
+export function followsDuring(
+  next: PageFetch<{ followedAt: string; excluded: boolean }>,
+  w: RecapWindow,
+): Promise<number | null> {
+  return countDuring(
+    next,
+    (f) => f.followedAt,
+    w,
+    (f) => !f.excluded,
+  );
 }
 
 /** Clips made during the stream. */
-export function clipsDuring(clips: readonly { createdAt: string }[], w: RecapWindow): number {
-  return clips.filter((c) => inWindow(c.createdAt, w)).length;
+export function clipsDuring(next: PageFetch<{ createdAt: string }>, w: RecapWindow): Promise<number | null> {
+  return countDuring(next, (c) => c.createdAt, w);
 }
 
 type StorageLike = Pick<Storage, "getItem" | "setItem">;

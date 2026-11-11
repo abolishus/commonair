@@ -45,7 +45,7 @@ export interface GoLiveChecklistProps {
   channel: string;
   publicUrl: string;
   intent?: DashboardIntent;
-  /** Bump to reload the state (stream info saved elsewhere on the page, the channel went live). */
+  /** Bump to reload the state (stream info saved elsewhere on the page, a stream ended). */
   refreshKey?: string | number;
   /** "Add a title" / Edit on the stream info step: the page's stream info editor. */
   onEditInfo?: () => void;
