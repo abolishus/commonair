@@ -127,6 +127,8 @@ export const instance = {
         giveaways: env.GIVEAWAYS_ENABLED,
         federation: env.FEDERATION_ENABLED,
         twitchImport: twitchImportAvailable(env),
+        // Both adapters pay creators out (manual through the treasurer, Stripe through Connect).
+        payouts: true,
       },
       minAge: env.AUTH_MIN_AGE,
     };

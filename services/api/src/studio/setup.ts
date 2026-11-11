@@ -55,6 +55,8 @@ export function setupStateFromFacts(facts: SetupFacts, twitchImportAvailable: bo
     rehearsal: facts.rehearsal,
     first_live: facts.live,
     import_twitch: importStep,
+    // Contract step placeholder (overhaul wave 4, J2-h): d6-studio derives it (payout account or mark).
+    get_paid: null,
     bring_your_audience: facts.audienceMarked,
   };
   const steps = STREAM_SETUP_STEPS.map((step) => ({

@@ -13,5 +13,14 @@
   "unsubscribe.settings": "Configuración de notificaciones",
   "unsubscribe.invalid.title": "Este enlace para darte de baja no funciona",
   "unsubscribe.invalid.body": "Puede que el enlace esté incompleto o vencido. Ábrelo de nuevo desde el correo o elige tus correos en tu configuración de notificaciones.",
-  "unsubscribe.failed": "No se pudo completar la baja. Inténtalo de nuevo."
+  "unsubscribe.failed": "No se pudo completar la baja. Inténtalo de nuevo.",
+  "unsubscribe.title.payout": "¿Dejar de recibir correos de pagos?",
+  "unsubscribe.title.creator": "¿Dejar de recibir correos sobre tus videos?",
+  "unsubscribe.title.weekly": "¿Dejar de recibir el correo semanal?",
+  "unsubscribe.intro.payout": "Ya no recibirás un correo cuando se envíe o retenga un pago. Tu estudio sigue mostrando todos los pagos.",
+  "unsubscribe.intro.creator": "Ya no recibirás un correo cuando uno de tus videos esté listo. Tu bandeja de entrada lo sigue mostrando.",
+  "unsubscribe.intro.weekly": "Ya no recibirás el correo semanal «Lo que te perdiste».",
+  "unsubscribe.done.payout": "Ya no recibirás correos de pagos. Puedes volver a activarlos en tu configuración de notificaciones.",
+  "unsubscribe.done.creator": "Ya no recibirás correos sobre tus videos. Puedes volver a activarlos en tu configuración de notificaciones.",
+  "unsubscribe.done.weekly": "Ya no recibirás el correo semanal. Puedes volver a activarlo en tu configuración de notificaciones."
 }

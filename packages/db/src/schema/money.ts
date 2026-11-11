@@ -258,6 +258,25 @@ export const paymentFraudFlags = pgTable(
   ],
 );
 
+/**
+ * Overhaul wave 4 (D6.1): the treasurer's optional public note on a transparency month
+ * (`transparency.setNote`, audited). Mutable; an empty note is a deleted row.
+ */
+export const transparencyNotes = pgTable(
+  "transparency_notes",
+  {
+    /** `YYYY-MM` (UTC). */
+    month: text().primaryKey(),
+    body: text().notNull(),
+    updatedBy: uuid().references(() => users.id, { onDelete: "set null" }),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    check("transparency_notes_month_format", sql`${t.month} ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'`),
+    check("transparency_notes_body_length", sql`char_length(${t.body}) between 1 and 2000`),
+  ],
+);
+
 /** Infrastructure costs recorded by the treasurer; feed the transparency page and surplus. */
 export const infraCosts = pgTable(
   "infra_costs",

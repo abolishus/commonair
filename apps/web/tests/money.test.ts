@@ -445,6 +445,7 @@ describe("transparency", () => {
   });
   const month = (key: string, over: Partial<TransparencyMonthDto> = {}): TransparencyMonthDto => ({
     month: key,
+    note: null,
     revenue: usd(10_000),
     streamerPayouts: usd(6000),
     coopRetained: usd(1500),

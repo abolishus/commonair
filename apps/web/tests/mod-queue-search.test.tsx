@@ -81,6 +81,8 @@ const detail = (id: string, status: ModerationCaseDetailDto["status"]): Moderati
   resolvedAt: status === "open" ? null : "2026-10-21T13:00:00.000Z",
   resolution: null,
   resolutionNote: null,
+  assignee: null,
+  assignedAt: null,
   flags: [],
   history: [],
   notScored: [],

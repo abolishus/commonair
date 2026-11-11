@@ -952,6 +952,7 @@ describe("composition-rendered selectors", () => {
   it("transparency: stats, flow, month rows; empty state without months", () => {
     const month = (key: string, revenue: number): TransparencyMonthDto => ({
       month: key,
+      note: null,
       revenue: usd(revenue),
       streamerPayouts: usd(6000),
       coopRetained: usd(1500),

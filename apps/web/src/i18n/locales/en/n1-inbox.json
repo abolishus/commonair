@@ -55,5 +55,7 @@
   "notifySettings.option.defaultOn": "Default (on)",
   "notifySettings.option.defaultOff": "Default (off)",
   "notifySettings.option.on": "On",
-  "notifySettings.option.off": "Off"
+  "notifySettings.option.off": "Off",
+  "notifications.type.report_outcome": "A report you made was reviewed",
+  "notifications.type.moderator_added": "You are now a moderator"
 }

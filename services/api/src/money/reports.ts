@@ -749,6 +749,8 @@ async function transparency(deps: Deps, months: number) {
           writeOffs: suspenseBy.get(m.month)?.writeOffs ?? 0,
           heldAtMonthEnd: money(suspenseBy.get(m.month)?.heldAtMonthEndCents ?? 0, currency),
         },
+        // Contract step placeholder (overhaul wave 4): d6-transparency reads `transparency_notes`.
+        note: null,
       };
     })
     .reverse();

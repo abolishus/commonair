@@ -80,6 +80,8 @@ const legalCase = (over: Partial<LegalCaseDto> = {}): LegalCaseDto => ({
   resolvedAt: null,
   resolution: null,
   resolutionNote: null,
+  assignee: null,
+  assignedAt: null,
   list: "csam",
   firstReviewer: null,
   firstReviewedAt: null,

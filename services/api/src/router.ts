@@ -41,10 +41,14 @@ import { usernameRoutes } from "./routes/username.ts";
 import { meModerates } from "./routes/moderates.ts";
 import { streamSetup } from "./routes/setup.ts";
 import { clipViews, vodViews } from "./routes/views.ts";
+import { meDeletionPreview } from "./routes/deletion-preview.ts";
+import { chatBansBulk } from "./routes/chat-bulk.ts";
+import { transparencyNote } from "./routes/transparency-note.ts";
+import { adminConsole, caseAssign } from "./routes/admin-console.ts";
 
 export const router = base.router({
   instance,
-  me: { ...me, ...meModerates },
+  me: { ...me, ...meModerates, deletion: { ...me.deletion, ...meDeletionPreview } },
   users: { ...users, ...usernameRoutes },
   categories: categoriesRoutes,
   directory,
@@ -54,7 +58,7 @@ export const router = base.router({
   p2p,
   vods: { ...vods, ...vodsRecent, ...vodViews },
   clips: { ...clips, ...clipsRecent, ...clipViews },
-  chat,
+  chat: { ...chat, bans: { ...chat.bans, ...chatBansBulk } },
   money,
   developer,
   bot,
@@ -62,14 +66,14 @@ export const router = base.router({
   coop,
   integrity,
   analytics,
-  transparency: { ...transparency, ...transparencyNumbers },
+  transparency: { ...transparency, ...transparencyNumbers, ...transparencyNote },
   appeals,
   safety,
   legal,
   relays,
-  admin: { ...admin, ...adminGrowth },
+  admin: { ...admin, ...adminGrowth, ...adminConsole },
   metrics,
-  moderation,
+  moderation: { ...moderation, ...caseAssign },
   ncii,
   notifications,
   // Batch 7 (W3, N3, N4): 501 stubs until each unit fills its own route file.

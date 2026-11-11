@@ -29,6 +29,8 @@ export type Access =
   | "legal"
   | "safety-staff"
   | "finance"
+  /** Overhaul wave 4 (D7.5): any platform staff role (moderator, admin, legal, treasurer). */
+  | "staff"
   | "relay"
   | "overlay";
 

@@ -77,6 +77,7 @@ async function loadMe(deps: Deps, userId: string) {
     role: u.role,
     isAdult: adult,
     matureConfirmed: adult && mature,
+    matureConfirmedAt: adult && mature ? isoOrNull(u.matureConfirmedAt) : null,
     shareEmailWithFollowedChannels: u.shareEmailWithFollowedChannels,
     locale: u.locale,
     memberships: member.map((m) => ({ class: m.class, since: iso(m.since) })),
@@ -129,6 +130,8 @@ export const me = {
       set.shareEmailWithFollowedChannels = input.shareEmailWithFollowedChannels;
     // The contract validates the tag; null clears the choice (ADR 0029).
     if (input.locale !== undefined) set.locale = input.locale;
+    // Overhaul wave 4 (D7.2): withdrawing the 18+ confirmation; confirming again is `confirmMature`.
+    if (input.matureConfirmed === false) set.matureConfirmedAt = null;
     if (set.name === "") throw badRequest("Display name cannot be blank");
     if (Object.keys(set).length > 0) await context.deps.db.update(users).set(set).where(eq(users.id, caller.user.id));
     return loadMe(context.deps, caller.user.id);

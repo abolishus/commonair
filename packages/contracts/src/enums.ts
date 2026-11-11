@@ -308,18 +308,71 @@ export const NOTIFICATION_TYPES = [
   "membership",
   /** Overhaul wave 3 (D5.3, ux-journeys J2-f): a broadcast's video is ready; in-app only until D7 adds a `creator` preference. */
   "vod_ready",
+  /** Overhaul wave 4 (D7, ux-journeys J5): a report the member filed was decided (outcome only, never the subject's fate in detail). */
+  "report_outcome",
+  /** Overhaul wave 4 (D7, ux-journeys J5): the member was made a moderator or editor of a channel. */
+  "moderator_added",
 ] as const;
+export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 /** Where a notification can reach someone (`notification_preferences.medium`, ADR 0028 decision 4). */
 export const NOTIFY_MEDIA = ["in_app", "email", "push"] as const;
 export type NotifyMedium = (typeof NOTIFY_MEDIA)[number];
-/** Types a member sets preferences for through the API (N1: go-live only; other types keep their in-app behaviour). */
-export const PREFERENCE_TYPES = ["go_live"] as const;
 /**
- * One-click unsubscribe lists (RFC 8058). `governance` stores email-off rows for `proposal` and
- * `vote_open`. `moved` (batch 7, decision (l)): the one "this channel moved" email a portability
- * grant asks for.
+ * What a member sets preferences for (`notification_preferences.type`). Overhaul wave 4 (D7.3)
+ * widened it from go-live only: each preference type covers the notification types in
+ * `PREFERENCE_TYPE_NOTIFICATIONS`; `digest_weekly` is the opt-in weekly "What you missed" email,
+ * which has no in-app row. Types not covered by any (moderation, system, export_ready, raid,
+ * membership, report_outcome, moderator_added) always reach the inbox.
  */
-export const UNSUBSCRIBE_LISTS = ["go_live", "governance", "moved"] as const;
+export const PREFERENCE_TYPES = ["go_live", "governance", "payout", "creator", "digest_weekly"] as const;
+export type PreferenceType = (typeof PREFERENCE_TYPES)[number];
+/** The notification types each preference type governs. */
+export const PREFERENCE_TYPE_NOTIFICATIONS: Readonly<Record<PreferenceType, readonly NotificationType[]>> = {
+  go_live: ["go_live"],
+  governance: ["proposal", "vote_open"],
+  payout: ["payout"],
+  creator: ["vod_ready"],
+  digest_weekly: [],
+};
+/**
+ * The media the settings grid offers per preference type: only those with a sender today. A
+ * medium left out is not offered (`notifications.preferences.set` refuses it). Governance email
+ * waits for the governance mailer (wave 5); the digest is email only.
+ */
+export const PREFERENCE_MEDIA: Readonly<Record<PreferenceType, readonly NotifyMedium[]>> = {
+  go_live: ["in_app", "email", "push"],
+  governance: ["in_app"],
+  payout: ["in_app", "email"],
+  creator: ["in_app", "email"],
+  digest_weekly: ["email"],
+};
+/**
+ * One-click unsubscribe lists (RFC 8058). Each list but `moved` turns off the email of the
+ * preference type in `UNSUBSCRIBE_LIST_PREFERENCE`. `moved` (batch 7, decision (l)): the one "this
+ * channel moved" email a portability grant asks for.
+ */
+export const UNSUBSCRIBE_LISTS = ["go_live", "governance", "moved", "payout", "creator", "weekly"] as const;
+export type UnsubscribeList = (typeof UNSUBSCRIBE_LISTS)[number];
+export const UNSUBSCRIBE_LIST_PREFERENCE: Readonly<Record<UnsubscribeList, PreferenceType | null>> = {
+  go_live: "go_live",
+  governance: "governance",
+  moved: null,
+  payout: "payout",
+  creator: "creator",
+  weekly: "digest_weekly",
+};
+/** The weekly "What you missed" email (overhaul wave 4, D7.3; account-admin.md P5). */
+export const DIGEST_RULES = {
+  /** At most this many new videos and clips from follows. */
+  maxItems: 6,
+  /** Sent on this UTC weekday (1 = Monday) at `sendHourUtc`; members have no stored time zone. */
+  weekdayUtc: 1,
+  sendHourUtc: 9,
+} as const;
+/** `?src=` values the web counts (in aggregate, `metrics.ui`) and strips from links in our email. */
+export const EMAIL_LINK_SOURCES = ["digest"] as const;
+/** What a decided report came to, as its reporter is told (`report_outcome`). */
+export const REPORT_OUTCOMES = ["action_taken", "no_action"] as const;
 /** Why the last Discord post failed; shown in the studio (never the URL). */
 export const DISCORD_WEBHOOK_ERRORS = ["unauthorized", "not_found", "rate_limited", "rejected", "network"] as const;
 export const INCIDENT_STATUSES = ["investigating", "identified", "monitoring", "resolved"] as const;
@@ -815,11 +868,17 @@ export const STREAM_SETUP_STEPS = [
   "rehearsal",
   "first_live",
   "import_twitch",
+  /**
+   * Overhaul wave 4 (J2-h): "Get paid: add payout details", shown when `InstanceInfo.features.payouts`.
+   * Done when the owner's payout account is ready, or marked (the manual adapter's setup happens
+   * with the treasurer, outside the app).
+   */
+  "get_paid",
   "bring_your_audience",
 ] as const;
 export type StreamSetupStep = (typeof STREAM_SETUP_STEPS)[number];
 /** Steps nothing else records, so the owner marks them (`stream.setupMark`, `channel_setup_steps`). */
-export const STREAM_SETUP_MARKABLE = ["bring_your_audience"] as const;
+export const STREAM_SETUP_MARKABLE = ["bring_your_audience", "get_paid"] as const;
 export type StreamSetupMarkable = (typeof STREAM_SETUP_MARKABLE)[number];
 
 /** `POST /metrics/ui` surfaces: the closed list of on-screen places the web may count (P7 B). */
@@ -852,6 +911,15 @@ export const UI_METRIC_SURFACES = [
   "watch.points",
   "studio.checklist",
   "studio.recap",
+  // Overhaul wave 4 (D6, D7).
+  "transparency",
+  "studio.coopCard",
+  "settings.security",
+  "settings.notifications",
+  "inbox",
+  "deletion",
+  "pwa.install",
+  "digest",
 ] as const;
 /** What happened on a surface. */
 export const UI_METRIC_ACTIONS = [
@@ -891,6 +959,10 @@ export const UI_METRIC_STEPS = [
   "email",
   "install",
   ...STREAM_SETUP_STEPS,
+  // Overhaul wave 4: security set-up steps and the digest opt-in.
+  "totp",
+  "passkey",
+  "weekly",
 ] as const;
 
 /**
@@ -914,5 +986,26 @@ export const GROWTH_METRICS = [
 export type GrowthMetric = (typeof GROWTH_METRICS)[number];
 /** Aggregates below this are shown as null (k-anonymity floor, growth-funnels.md P7 C). */
 export const GROWTH_K_FLOOR = 5;
+/**
+ * Staff queues `admin.overview` counts (overhaul wave 4, D7.5). Each is shown only to the roles that
+ * can open it.
+ */
+export const ADMIN_QUEUES = [
+  "moderation",
+  "legal",
+  "appeals",
+  "dmca",
+  "ncii",
+  "integrity",
+  "incidents",
+  "apps_review",
+  "payments",
+] as const;
+export type AdminQueue = (typeof ADMIN_QUEUES)[number];
+/** Why `chat.bans.bulk` left a target out. */
+export const BULK_TIMEOUT_SKIPS = ["owner", "staff", "moderator", "already_banned", "not_in_channel"] as const;
+/** Timeout lengths the wave row and the message menu offer (seconds; ux-journeys J5-d). */
+export const CHAT_TIMEOUT_SECONDS = [60, 600, 3600, 86_400] as const;
+
 /** Why a username can't be claimed (`users.usernameAvailable`). */
 export const USERNAME_UNAVAILABLE_REASONS = ["taken", "reserved", "invalid"] as const;

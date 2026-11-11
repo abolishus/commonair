@@ -41,16 +41,25 @@ const TITLE: Record<UnsubscribeList, MessageKey> = {
   go_live: "unsubscribe.title.go_live",
   governance: "unsubscribe.title.governance",
   moved: "unsubscribe.title.moved",
+  payout: "unsubscribe.title.payout",
+  creator: "unsubscribe.title.creator",
+  weekly: "unsubscribe.title.weekly",
 };
 const INTRO: Record<UnsubscribeList, MessageKey> = {
   go_live: "unsubscribe.intro.go_live",
   governance: "unsubscribe.intro.governance",
   moved: "unsubscribe.intro.moved",
+  payout: "unsubscribe.intro.payout",
+  creator: "unsubscribe.intro.creator",
+  weekly: "unsubscribe.intro.weekly",
 };
 const DONE: Record<UnsubscribeList, MessageKey> = {
   go_live: "unsubscribe.done.go_live",
   governance: "unsubscribe.done.governance",
   moved: "unsubscribe.done.moved",
+  payout: "unsubscribe.done.payout",
+  creator: "unsubscribe.done.creator",
+  weekly: "unsubscribe.done.weekly",
 };
 
 const applyViaApi = (input: UnsubscribeInput) => api().notifications.unsubscribe(input);

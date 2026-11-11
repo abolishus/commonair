@@ -91,6 +91,8 @@ export const raidPolicy = pgEnum("raid_policy", E.RAID_POLICIES);
 export const raidCancelReason = pgEnum("raid_cancel_reason", E.RAID_CANCEL_REASONS);
 export const notificationType = pgEnum("notification_type", E.NOTIFICATION_TYPES);
 export const notificationMedium = pgEnum("notification_medium", E.NOTIFY_MEDIA);
+/** Overhaul wave 4 (D7.3): what a preference row is for (`PREFERENCE_TYPES`), no longer a notification type. */
+export const notificationPreferenceType = pgEnum("notification_preference_type", E.PREFERENCE_TYPES);
 export const discordWebhookError = pgEnum("discord_webhook_error", E.DISCORD_WEBHOOK_ERRORS);
 export const incidentStatus = pgEnum("incident_status", E.INCIDENT_STATUSES);
 export const componentStatus = pgEnum("component_status", E.COMPONENT_STATUSES);

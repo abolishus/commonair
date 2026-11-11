@@ -4,7 +4,7 @@
 /** Go-live notifications, web push and the Discord adapter (N1, ADR 0028): shared rules and payloads. */
 import { z } from "zod";
 import { Slug } from "./api/common.ts";
-import { MEMBERSHIP_BASES, type NotifyMedium, type PREFERENCE_TYPES } from "./enums.ts";
+import { MEMBERSHIP_BASES, REPORT_OUTCOMES, REPORT_SUBJECTS, type NotifyMedium, type PreferenceType } from "./enums.ts";
 
 export const NOTIFY_RULES = {
   /** Followers per fan-out job (one transaction each); the job enqueues the next page. */
@@ -32,10 +32,14 @@ export const NOTIFY_RULES = {
 } as const;
 
 /** Built-in preferences when a member has no row (ADR 0028 decision 4). */
-export const NOTIFY_DEFAULTS: Readonly<
-  Record<(typeof PREFERENCE_TYPES)[number], Readonly<Record<NotifyMedium, boolean>>>
-> = {
+export const NOTIFY_DEFAULTS: Readonly<Record<PreferenceType, Readonly<Record<NotifyMedium, boolean>>>> = {
   go_live: { in_app: true, email: false, push: false },
+  governance: { in_app: true, email: false, push: false },
+  // Payout notices were always mailed before preferences covered them.
+  payout: { in_app: true, email: true, push: false },
+  creator: { in_app: true, email: false, push: false },
+  // Opt-in only, unticked by default (account-admin.md P5).
+  digest_weekly: { in_app: false, email: false, push: false },
 };
 
 /**
@@ -48,6 +52,12 @@ export const GoLiveNotificationPayload = z.object({
   slug: Slug,
   broadcastId: z.uuid(),
   title: z.string().max(140),
+  /**
+   * Overhaul wave 4 (D7.3): the channel's display name and avatar, joined at read time by
+   * `me.notifications` (never stored in the row). Absent when the channel is gone.
+   */
+  displayName: z.string().optional(),
+  avatarUrl: z.string().nullable().optional(),
 });
 export type GoLiveNotificationPayload = z.infer<typeof GoLiveNotificationPayload>;
 
@@ -85,6 +95,25 @@ export const VodReadyNotificationPayload = z.object({
   title: z.string().max(140),
 });
 export type VodReadyNotificationPayload = z.infer<typeof VodReadyNotificationPayload>;
+
+/**
+ * `notifications.payload` of a `report_outcome` row (overhaul wave 4, D7): a report the member
+ * filed was decided. The outcome only: never the moderator, the note or what happened to whom.
+ */
+export const ReportOutcomeNotificationPayload = z.object({
+  reportId: z.uuid(),
+  subjectType: z.enum(REPORT_SUBJECTS),
+  outcome: z.enum(REPORT_OUTCOMES),
+});
+export type ReportOutcomeNotificationPayload = z.infer<typeof ReportOutcomeNotificationPayload>;
+
+/** `notifications.payload` of a `moderator_added` row (overhaul wave 4, D7): the member got a channel role. */
+export const ModeratorAddedNotificationPayload = z.object({
+  channelId: z.uuid(),
+  slug: Slug,
+  role: z.enum(["moderator", "editor"]),
+});
+export type ModeratorAddedNotificationPayload = z.infer<typeof ModeratorAddedNotificationPayload>;
 
 /**
  * The plaintext of a push message, encrypted to the browser (RFC 8291) before it leaves the

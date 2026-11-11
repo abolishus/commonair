@@ -18,4 +18,13 @@ export type Key =
   | "unsubscribe.settings"
   | "unsubscribe.invalid.title"
   | "unsubscribe.invalid.body"
-  | "unsubscribe.failed";
+  | "unsubscribe.failed"
+  | "unsubscribe.title.payout"
+  | "unsubscribe.title.creator"
+  | "unsubscribe.title.weekly"
+  | "unsubscribe.intro.payout"
+  | "unsubscribe.intro.creator"
+  | "unsubscribe.intro.weekly"
+  | "unsubscribe.done.payout"
+  | "unsubscribe.done.creator"
+  | "unsubscribe.done.weekly";

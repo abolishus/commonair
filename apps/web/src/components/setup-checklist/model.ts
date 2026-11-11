@@ -37,6 +37,7 @@ export const STEP_MINUTES: Readonly<Record<StreamSetupStep, number | null>> = {
   rehearsal: 5,
   first_live: null,
   import_twitch: 2,
+  get_paid: 3,
   bring_your_audience: 1,
 };
 

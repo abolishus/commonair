@@ -64,11 +64,17 @@ export const moderationCases = pgTable(
     resolutionNote: text(),
     /** Decision (d): the clause the case cites (`<id>@<version>`); null for a CSAM-list T0 (ADR 0019 decision 1). */
     ruleRef: text(),
+    /** Overhaul wave 4 (D7.5): the staff member who claimed the case (`moderation.assign`); null = unclaimed. */
+    assigneeId: uuid(),
+    assignedAt: ts(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
     index("moderation_cases_queue_idx").on(t.tier, t.status, t.priority, t.createdAt),
+    index("moderation_cases_assignee_idx")
+      .on(t.assigneeId)
+      .where(sql`${t.assigneeId} is not null`),
     check(
       "moderation_cases_rule_ref_format",
       sql`${t.ruleRef} is null or ${t.ruleRef} ~ '${sql.raw(RULE_REF_PATTERN)}'`,

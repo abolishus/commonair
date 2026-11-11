@@ -13,5 +13,14 @@
   "unsubscribe.settings": "Notification settings",
   "unsubscribe.invalid.title": "This unsubscribe link does not work",
   "unsubscribe.invalid.body": "The link may be incomplete or out of date. Open it again from the email, or choose your emails in your notification settings.",
-  "unsubscribe.failed": "You weren't unsubscribed. Try again."
+  "unsubscribe.failed": "You weren't unsubscribed. Try again.",
+  "unsubscribe.title.payout": "Stop payout emails?",
+  "unsubscribe.title.creator": "Stop emails about your videos?",
+  "unsubscribe.title.weekly": "Stop the weekly email?",
+  "unsubscribe.intro.payout": "You will no longer get an email when a payout is sent or held. Your studio still shows every payout.",
+  "unsubscribe.intro.creator": "You will no longer get an email when a video of yours is ready. Your inbox still shows it.",
+  "unsubscribe.intro.weekly": "You will no longer get the weekly “What you missed” email.",
+  "unsubscribe.done.payout": "You will no longer get payout emails. You can turn them back on in your notification settings.",
+  "unsubscribe.done.creator": "You will no longer get emails about your videos. You can turn them back on in your notification settings.",
+  "unsubscribe.done.weekly": "You will no longer get the weekly email. You can turn it back on in your notification settings."
 }

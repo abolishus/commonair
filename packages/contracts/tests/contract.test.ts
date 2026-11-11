@@ -110,6 +110,7 @@ describe("locale (ADR 0029)", () => {
     role: "user",
     isAdult: true,
     matureConfirmed: false,
+    matureConfirmedAt: null,
     shareEmailWithFollowedChannels: false,
     memberships: [],
     pendingLegal: [],

@@ -53,6 +53,12 @@ export const users = pgTable(
     locale: text(),
     /** Wave 2 (D2.8): why the account was made (`?intent=` at sign-up); null when unknown. Not PII. */
     signupIntent: signupIntent(),
+    /**
+     * Overhaul wave 4 (from wave 2): the member's first notification opt-in (an email or push
+     * preference turned on, or a browser registered for push). Set once by a database trigger
+     * (0058), never cleared, so the `notify_optin` growth metric counts first opt-ins exactly.
+     */
+    firstNotifyOptinAt: ts(),
     /** Set when deletion completes; the row is pseudonymized, not dropped, if retention requires it. */
     deletedAt: ts(),
     pseudonymizedAt: ts(),

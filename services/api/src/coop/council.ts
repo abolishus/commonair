@@ -137,6 +137,8 @@ export const councilHandlers = {
       description: r.description,
       updatedAt: iso(r.updatedAt),
       updatedByProposalId: r.updatedByProposalId,
+      // Contract step placeholder (overhaul wave 4): d6-governance joins the proposal's title.
+      updatedByProposalTitle: null,
     }));
   }),
 

@@ -318,6 +318,6 @@ export const channelSetupSteps = pgTable(
   },
   (t) => [
     primaryKey({ columns: [t.channelId, t.step] }),
-    check("channel_setup_steps_step", sql`${t.step} IN ('bring_your_audience')`),
+    check("channel_setup_steps_step", sql`${t.step} IN ('bring_your_audience', 'get_paid')`),
   ],
 );

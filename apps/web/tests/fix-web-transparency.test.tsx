@@ -32,6 +32,7 @@ const usd = (cents: number) => ({ cents, currency: "usd" });
 function month(key: string, over: Partial<TransparencyMonthDto> = {}): TransparencyMonthDto {
   return {
     month: key,
+    note: null,
     revenue: usd(10_000),
     streamerPayouts: usd(8000),
     coopRetained: usd(1000),

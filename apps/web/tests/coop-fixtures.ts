@@ -73,6 +73,7 @@ export const settings: SettingDto[] = [
     description: "How the directory ranks channels.",
     updatedAt: "2026-10-01T00:00:00.000Z",
     updatedByProposalId: PROPOSAL_ID,
+    updatedByProposalTitle: null,
   },
   {
     key: "platform.cut",
@@ -81,6 +82,7 @@ export const settings: SettingDto[] = [
     description: "The creator share of revenue.",
     updatedAt: "2026-09-01T00:00:00.000Z",
     updatedByProposalId: null,
+    updatedByProposalTitle: null,
   },
   {
     key: "membership.classes",
@@ -93,6 +95,7 @@ export const settings: SettingDto[] = [
     description: "Who qualifies for each class.",
     updatedAt: "2026-09-01T00:00:00.000Z",
     updatedByProposalId: null,
+    updatedByProposalTitle: null,
   },
 ];
 
@@ -307,6 +310,7 @@ export const statement: StatementDto = {
 export function month(key: string, over: Partial<CoopMonthDto> = {}): CoopMonthDto {
   return {
     month: key,
+    note: null,
     revenue: usd(10_000),
     streamerPayouts: usd(6000),
     coopRetained: usd(1500),

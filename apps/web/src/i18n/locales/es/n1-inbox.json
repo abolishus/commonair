@@ -55,5 +55,7 @@
   "notifySettings.option.defaultOn": "Predeterminado (activado)",
   "notifySettings.option.defaultOff": "Predeterminado (desactivado)",
   "notifySettings.option.on": "Activado",
-  "notifySettings.option.off": "Desactivado"
+  "notifySettings.option.off": "Desactivado",
+  "notifications.type.report_outcome": "Se revisó un reporte que hiciste",
+  "notifications.type.moderator_added": "Ahora eres moderador"
 }

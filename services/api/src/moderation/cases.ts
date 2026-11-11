@@ -25,7 +25,9 @@ export type LegalCaseDto = z.infer<typeof dto.LegalCase>;
 
 /** Users and channels referenced by a set of cases, in two queries. */
 export async function refsFor(db: Executor, cases: readonly CaseRow[]) {
-  const userIds = [...new Set(cases.map((c) => c.userId).filter((x): x is string => x !== null))];
+  const userIds = [
+    ...new Set(cases.flatMap((c) => [c.userId, c.assigneeId]).filter((x): x is string => x !== null)),
+  ];
   const channelIds = [...new Set(cases.map((c) => c.channelId).filter((x): x is string => x !== null))];
   const [us, cs] = await Promise.all([
     userIds.length
@@ -58,6 +60,8 @@ export function toCase(c: CaseRow, refs: Awaited<ReturnType<typeof refsFor>>): M
     resolvedAt: isoOrNull(c.resolvedAt),
     resolution: c.resolution,
     resolutionNote: c.resolutionNote,
+    assignee: (c.assigneeId && refs.users.get(c.assigneeId)) || null,
+    assignedAt: isoOrNull(c.assignedAt),
   };
 }
 

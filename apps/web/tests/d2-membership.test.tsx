@@ -86,6 +86,7 @@ const setting = (key: string, value: unknown): SettingDto => ({
   description: "",
   updatedAt: "2026-10-01T00:00:00.000Z",
   updatedByProposalId: null,
+  updatedByProposalTitle: null,
 });
 /** The seeded co-op (packages/db/src/seed.ts). */
 const SEEDED: SettingDto[] = [

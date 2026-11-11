@@ -271,6 +271,9 @@ export function GoLiveChecklist({
                 "setup-step-import_twitch-action",
               ),
         };
+      case "get_paid":
+        // Contract step placeholder (overhaul wave 4, J2-h): d6-studio builds the step's action.
+        return base;
       case "bring_your_audience":
         return {
           ...base,

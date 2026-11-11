@@ -6,22 +6,25 @@
  * route (`email-unsubscribe.ts`) and the web confirm page's `notifications.unsubscribe`. The token
  * is the only authority: no session is read. No audit row: it is a member's own preference.
  */
-import { UNSUBSCRIBE_LISTS, type NOTIFICATION_TYPES } from "@commonair/contracts/enums";
+import { UNSUBSCRIBE_LIST_PREFERENCE, UNSUBSCRIBE_LISTS, type PreferenceType } from "@commonair/contracts/enums";
 import { schema, uuidv7, type Database } from "@commonair/db";
 import { verifyUnsubscribeToken } from "@commonair/tokens";
 import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 
 export type UnsubscribeList = (typeof UNSUBSCRIBE_LISTS)[number];
-type NotificationType = (typeof NOTIFICATION_TYPES)[number];
-
-/** The notification types whose email each list turns off. */
-export const UNSUBSCRIBE_LIST_TYPES: Readonly<Record<UnsubscribeList, readonly NotificationType[]>> = {
+/**
+ * The preference types whose email each list turns off (overhaul wave 4: preference rows have
+ * their own type). Batch 7 decision (l): the one "channel moved" email has none; unsubscribing from
+ * it withdraws the member's portability grants (W3-portability).
+ */
+export const UNSUBSCRIBE_LIST_TYPES: Readonly<Record<UnsubscribeList, readonly PreferenceType[]>> = {
   go_live: ["go_live"],
-  governance: ["proposal", "vote_open"],
-  // Batch 7 decision (l): the one "channel moved" email is not a notification type; unsubscribing
-  // from it withdraws the member's portability grants (W3-portability).
+  governance: ["governance"],
   moved: [],
-};
+  payout: ["payout"],
+  creator: ["creator"],
+  weekly: ["digest_weekly"],
+} satisfies Record<UnsubscribeList, readonly (typeof UNSUBSCRIBE_LIST_PREFERENCE)[UnsubscribeList][]>;
 
 /** Longest token accepted (the contract's input bound); real tokens are about 70 characters. */
 export const MAX_UNSUBSCRIBE_TOKEN_LENGTH = 200;

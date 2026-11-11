@@ -288,7 +288,10 @@ export function platformCounts(scale: SeedScale) {
  */
 const INBOX_TYPES = NOTIFICATION_TYPES.filter((t) => t !== "vod_ready");
 
-const PAYLOAD_KINDS: Record<Exclude<NotificationType, "go_live" | "proposal" | "vote_open" | "vod_ready">, string[]> = {
+const PAYLOAD_KINDS: Record<
+  Exclude<NotificationType, "go_live" | "proposal" | "vote_open" | "vod_ready" | "report_outcome" | "moderator_added">,
+  string[]
+> = {
   raid: ["raid_incoming"],
   export_ready: ["data_export"],
   payout: ["payout_paid", "payout_held"],
@@ -492,6 +495,11 @@ export function planPlatform(rng: Rng, scale: SeedScale, world: PlatformWorld, n
         return { kind: r.pick(PAYLOAD_KINDS.membership), basis: "subscription" };
       case "vod_ready":
         return {};
+      // Overhaul wave 4: the reporter's outcome (enums and ids only) and the made-moderator notice.
+      case "report_outcome":
+        return { reportId: rngUuid(r), subjectType: "chat_message", outcome: r.pick(["action_taken", "no_action"]) };
+      case "moderator_added":
+        return { channelId: s1.id, slug: s1.slug, role: "moderator" };
       default:
         return { kind: r.pick(PAYLOAD_KINDS[type]) };
     }

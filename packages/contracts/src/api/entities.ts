@@ -45,6 +45,8 @@ export const Me = UserPublic.extend({
   isAdult: z.boolean(),
   /** Has the viewer confirmed 18+ for mature streams (signed-in adults only). */
   matureConfirmed: z.boolean(),
+  /** Overhaul wave 4 (D7.2): when the 18+ confirmation was made ("confirmed 18+ on {date}"); null if not. */
+  matureConfirmedAt: Timestamp.nullable(),
   shareEmailWithFollowedChannels: z.boolean(),
   /** The language the member chose; null = not chosen, so the web negotiates (ADR 0029). */
   locale: LocaleTag.nullable(),
@@ -1135,6 +1137,8 @@ export const GovernanceSetting = z.object({
   description: z.string(),
   updatedAt: Timestamp,
   updatedByProposalId: Id.nullable(),
+  /** Overhaul wave 4 (D6.2): that proposal's title ("Changed by …"); null when none or it is gone. */
+  updatedByProposalTitle: z.string().nullable(),
 });
 export const ProposalView = z.object({
   id: Id,
@@ -1269,6 +1273,11 @@ export const TransparencyMonth = z.object({
     writeOffs: z.number().int().nonnegative(),
     heldAtMonthEnd: Money,
   }),
+  /**
+   * Overhaul wave 4 (D6.1): the treasurer's optional note on the month (`transparency.setNote`), for
+   * example what pays a deficit. Public text, never personal data.
+   */
+  note: z.object({ body: z.string(), updatedAt: Timestamp }).nullable(),
 });
 
 export const IntegrityFlag = z.object({
@@ -1614,6 +1623,11 @@ export const InstanceInfo = z.object({
     federation: z.boolean(),
     /** Twitch import available (decision (b)): `OAUTH_TWITCH_*` set and TWITCH_IMPORT_ENABLED. */
     twitchImport: z.boolean(),
+    /**
+     * Overhaul wave 4 (J2-h): creators can be paid out on this instance, so the studio checklist
+     * shows "Get paid". Both adapters pay out (manual through the treasurer, Stripe through Connect).
+     */
+    payouts: z.boolean(),
   }),
   minAge: z.number().int(),
 });
@@ -1679,6 +1693,9 @@ export const ModerationCase = z.object({
   resolvedAt: Timestamp.nullable(),
   resolution: z.string().nullable(),
   resolutionNote: z.string().nullable(),
+  /** Overhaul wave 4 (D7.5): the staff member who claimed the case (`moderation.assign`), so two people never decide it. */
+  assignee: UserRef.nullable(),
+  assignedAt: Timestamp.nullable(),
 });
 export type ModerationCase = z.infer<typeof ModerationCase>;
 
@@ -2674,3 +2691,88 @@ export const ModeratedChannel = z.object({
   live: z.boolean(),
 });
 export type ModeratedChannel = z.infer<typeof ModeratedChannel>;
+
+// Overhaul wave 4 (D6, D7) ----------------------------------------------------------------
+
+/**
+ * `me.deletion.preview` (D7.4): what deleting the account changes, from the caller's own rows,
+ * before they ask for it. Counts and amounts only.
+ */
+export const DeletionPreview = z.object({
+  /** Days between the request and the deletion (`DELETION_GRACE_DAYS`). */
+  graceDays: z.number().int().positive(),
+  /** Subscriptions the caller pays for; they end when the deletion is requested (F0). */
+  activeSubscriptions: z.number().int().nonnegative(),
+  /** Paid subscriptions to the caller's channel; they end with the channel. */
+  channelSubscriptions: z.number().int().nonnegative(),
+  /** Earnings not yet paid out; still paid per the payout rules. Null when there are none. */
+  pendingPayout: Money.nullable(),
+  /** Current co-op memberships and whether a refundable share goes back (per the bylaws). */
+  memberships: z.array(z.object({ class: z.enum(E.MEMBER_CLASSES), shareRefund: Money.nullable() })),
+  /** A legal hold keeps the records it covers (ADR 0004); the account is still deleted. */
+  legalHold: z.boolean(),
+  /** The request already scheduled, if any. */
+  scheduled: DeletionRequest.nullable(),
+});
+export type DeletionPreview = z.infer<typeof DeletionPreview>;
+
+/** One staff queue on `/admin` (D7.5). Only queues the caller's role can open are returned. */
+export const AdminQueueCount = z.object({
+  queue: z.enum(E.ADMIN_QUEUES),
+  open: z.number().int().nonnegative(),
+  /** Past their deadline (SLA, legal clock or counter-notice window), where the queue has one. */
+  overdue: z.number().int().nonnegative(),
+  /** Due within the next hour. */
+  dueSoon: z.number().int().nonnegative(),
+  /** The oldest open item's creation time. */
+  oldestAt: Timestamp.nullable(),
+  /** Open items nobody has claimed (moderation only; null elsewhere). */
+  unassigned: z.number().int().nonnegative().nullable(),
+});
+export const AdminOverview = z.object({ queues: z.array(AdminQueueCount) });
+export type AdminOverview = z.infer<typeof AdminOverview>;
+
+/** `admin.user` (D7.5): where staff go from a report to a person. Never the email (`admin.revealEmail`). */
+export const AdminUserView = z.object({
+  user: z.object({
+    id: Id,
+    username: z.string(),
+    displayName: z.string(),
+    role: z.enum(E.PLATFORM_ROLES),
+    accountType: z.enum(E.ACCOUNT_TYPES),
+    emailVerified: z.boolean(),
+    twoFactorEnabled: z.boolean(),
+    createdAt: Timestamp,
+    deletedAt: Timestamp.nullable(),
+  }),
+  channel: ChannelRefView.nullable(),
+  /** Active suspensions of the user or their channel. */
+  suspensions: z.array(
+    z.object({
+      target: z.enum(["user", "channel"]),
+      reason: z.string(),
+      since: Timestamp,
+      until: Timestamp.nullable(),
+    }),
+  ),
+  /** The latest statements of reasons about them (at most 20). */
+  enforcement: z.array(EnforcementStatement),
+  /** Open reports whose subject is the user, their channel or their content. */
+  openReports: z.number().int().nonnegative(),
+  /** Open T1/T2 cases on the user or their channel (T0 only for the legal role). */
+  openCases: z.array(ModerationCase),
+  legalHolds: z.array(LegalHold),
+  deletion: DeletionRequest.nullable(),
+  /** The latest audit entries with the user as subject (at most 20). */
+  recentAudit: z.array(AuditEntry),
+});
+export type AdminUserView = z.infer<typeof AdminUserView>;
+
+/** `chat.bans.bulk` (J5-d): timeouts for a wave's senders; never bans. */
+export const BulkTimeoutResult = z.object({
+  timedOut: z.array(z.object({ userId: Id, username: z.string(), expiresAt: Timestamp })),
+  skipped: z.array(z.object({ userId: Id, reason: z.enum(E.BULK_TIMEOUT_SKIPS) })),
+  /** Messages deleted when `deleteMessages` was set. */
+  deletedMessages: z.number().int().nonnegative(),
+});
+export type BulkTimeoutResult = z.infer<typeof BulkTimeoutResult>;

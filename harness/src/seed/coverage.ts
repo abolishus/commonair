@@ -21,6 +21,8 @@ export const NOT_SEEDED: Readonly<Record<string, string>> = {
     "batch 8 contract step: written only by M1-connect's transfer service; seed-full seeds it after that unit merges",
   patronage_payouts:
     "batch 8 contract step: written only by M1-coop-money's payout path; seed-full seeds it after that unit merges",
+  transparency_notes: "overhaul wave 4 contract step: d6-transparency seeds a treasurer note after it merges",
+  notification_digest_sends: "overhaul wave 4 contract step: written only by d7-notify's weekly digest sweep",
 };
 
 export interface CoverageProblems {

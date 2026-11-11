@@ -104,6 +104,8 @@ const TYPE_LABEL: Record<NotificationType, MessageKey> = {
   system: "notifications.type.system",
   membership: "notifications.type.membership",
   vod_ready: "notifications.type.vod_ready",
+  report_outcome: "notifications.type.report_outcome",
+  moderator_added: "notifications.type.moderator_added",
 };
 
 /**
@@ -176,8 +178,18 @@ export function describeNotification(n: Pick<NotificationDto, "type" | "payload"
         target: slug && SLUG.test(slug) && id && UUID.test(id) ? { kind: "vod", slug, id } : null,
       };
     }
+    case "moderator_added": {
+      // Overhaul wave 4: `{channelId, slug, role}`; d7-notify links the mod view.
+      const slug = str(payload.slug);
+      return {
+        kind: "generic",
+        label: TYPE_LABEL.moderator_added,
+        target: slug && SLUG.test(slug) ? { kind: "channel", slug } : null,
+      };
+    }
     case "raid":
     case "payout":
+    case "report_outcome":
       return { kind: "generic", label: TYPE_LABEL[n.type], target: null };
   }
 }

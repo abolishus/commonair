@@ -4,7 +4,7 @@
 /** N1 contract step: push keys, the Discord URL rule, payloads, settings and the router namespace. */
 import { describe, expect, test } from "vite-plus/test";
 import { contract } from "../src/api/router.ts";
-import { NOTIFICATION_TYPES, PREFERENCE_TYPES, UNSUBSCRIBE_LISTS } from "../src/enums.ts";
+import { NOTIFICATION_TYPES, PREFERENCE_TYPE_NOTIFICATIONS, PREFERENCE_TYPES, UNSUBSCRIBE_LISTS } from "../src/enums.ts";
 import { DiscordJob, GoLiveJob } from "../src/internal.ts";
 import {
   DISCORD_WEBHOOK_URL,
@@ -91,7 +91,8 @@ describe("payloads", () => {
   test("defaults and rules", () => {
     expect(NOTIFY_DEFAULTS.go_live).toEqual({ in_app: true, email: false, push: false });
     expect(NOTIFY_RULES.readGoLiveRetentionDays).toBeLessThan(NOTIFY_RULES.retentionDays);
-    for (const t of PREFERENCE_TYPES) expect(NOTIFICATION_TYPES).toContain(t);
+    for (const t of PREFERENCE_TYPES)
+      for (const n of PREFERENCE_TYPE_NOTIFICATIONS[t]) expect(NOTIFICATION_TYPES).toContain(n);
     expect(UNSUBSCRIBE_LISTS).toContain("go_live");
   });
 

@@ -97,7 +97,7 @@ describe("POST (RFC 8058 one-click)", () => {
         { userId: m.id, type: "go_live", channelId: b.channelId, medium: "email", enabled: false },
         { userId: m.id, type: "go_live", channelId: a.channelId, medium: "push", enabled: true },
         { userId: m.id, type: "go_live", channelId: null, medium: "in_app", enabled: true },
-        { userId: m.id, type: "proposal", channelId: null, medium: "email", enabled: true },
+        { userId: m.id, type: "governance", channelId: null, medium: "email", enabled: true },
       ]);
     const res = await oneClick({ list: "go_live", token: await token(m.id, "go_live") });
     expect(res.status).toBe(200);
@@ -114,7 +114,7 @@ describe("POST (RFC 8058 one-click)", () => {
     // Other media and other lists are untouched.
     expect(find("go_live", "push", a.channelId)).toBe(true);
     expect(find("go_live", "in_app", null)).toBe(true);
-    expect(find("proposal", "email", null)).toBe(true);
+    expect(find("governance", "email", null)).toBe(true);
     expect(rows).toHaveLength(6);
   });
 
@@ -124,12 +124,12 @@ describe("POST (RFC 8058 one-click)", () => {
     expect(await prefs(m.id)).toEqual([{ type: "go_live", medium: "email", channelId: null, enabled: false }]);
   });
 
-  test("governance: email off for proposal and vote_open, go-live untouched", async () => {
+  test("governance: email off for the governance preference, go-live untouched", async () => {
     const m = await newMember();
     await db()
       .insert(np)
       .values([
-        { userId: m.id, type: "vote_open", channelId: null, medium: "email", enabled: true },
+        { userId: m.id, type: "governance", channelId: null, medium: "email", enabled: true },
         { userId: m.id, type: "go_live", channelId: null, medium: "email", enabled: true },
       ]);
     // A multipart body is accepted as well: the token authorizes, not the body.
@@ -146,8 +146,7 @@ describe("POST (RFC 8058 one-click)", () => {
     expect(res.status).toBe(200);
     expect(await prefs(m.id)).toEqual([
       { type: "go_live", medium: "email", channelId: null, enabled: true },
-      { type: "proposal", medium: "email", channelId: null, enabled: false },
-      { type: "vote_open", medium: "email", channelId: null, enabled: false },
+      { type: "governance", medium: "email", channelId: null, enabled: false },
     ]);
   });
 

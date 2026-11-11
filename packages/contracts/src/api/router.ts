@@ -59,6 +59,7 @@ const platformMod = base.meta({ access: "platform-moderator" });
 const legal = base.meta({ access: "legal" });
 const safetyStaff = base.meta({ access: "safety-staff" });
 const finance = base.meta({ access: "finance" });
+const staff = base.meta({ access: "staff" });
 
 /** `vods.chat` / `clips.chat` (ADR 0012 amendment 1 decision 5). */
 const ChatReplayInput = z.object({
@@ -151,6 +152,8 @@ export const contract = {
           shareEmailWithFollowedChannels: z.boolean().optional(),
           /** A language tag, or null to clear the choice (back to browser and instance defaults). */
           locale: D.LocaleTag.nullable().optional(),
+          /** Overhaul wave 4 (D7.2): `false` withdraws the 18+ confirmation (confirming stays `me.confirmMature`). */
+          matureConfirmed: z.literal(false).optional(),
         }),
       )
       .output(D.Me),
@@ -206,7 +209,13 @@ export const contract = {
         summary: "In-app notifications",
         ...tag("Users"),
       })
-      .input(PageInput.extend({ unreadOnly: z.boolean().default(false) }))
+      .input(
+        PageInput.extend({
+          unreadOnly: z.boolean().default(false),
+          /** Overhaul wave 4 (D7.3, `/inbox` filter chips): only these types; absent = every type. */
+          types: z.array(z.enum(E.NOTIFICATION_TYPES)).min(1).max(E.NOTIFICATION_TYPES.length).optional(),
+        }),
+      )
       .output(
         page(
           z.object({
@@ -314,6 +323,15 @@ export const contract = {
           ...tag("Compliance"),
         })
         .output(D.DeletionRequest.nullable()),
+      /** Overhaul wave 4 (D7.4): what deleting the account would change, before asking for it. */
+      preview: user
+        .route({
+          method: "GET",
+          path: "/me/deletion/preview",
+          summary: "What deleting your account changes",
+          ...tag("Compliance"),
+        })
+        .output(D.DeletionPreview),
     },
     bots: {
       create: user
@@ -1316,6 +1334,29 @@ export const contract = {
         })
         .input(ChannelRef.extend({ username: Slug }))
         .output(Ok),
+      /**
+       * Overhaul wave 4 (J5-d): time out every sender of a message wave, optionally deleting the
+       * messages. Never a ban. Capped at the wave size; the owner, staff and the channel's
+       * moderators are skipped. One audit row and one outbox row per target.
+       */
+      bulk: mod
+        .meta({ access: "moderator", scopes: ["moderator:manage:chat"], rateLimit: "write" })
+        .route({
+          method: "POST",
+          path: "/channels/{channel}/bans/bulk",
+          summary: "Time out every sender of a message wave",
+          ...tag("Moderation"),
+        })
+        .input(
+          ChannelRef.extend({
+            /** The wave's messages, all in this channel; their senders are the targets. */
+            messageIds: z.array(Id).min(1).max(E.MESSAGE_SET_RULES.maxMessages),
+            durationSeconds: z.literal(E.CHAT_TIMEOUT_SECONDS),
+            reason: z.string().max(500).default(""),
+            deleteMessages: z.boolean().default(false),
+          }),
+        )
+        .output(D.BulkTimeoutResult),
     },
     filters: {
       list: mod
@@ -3611,6 +3652,22 @@ export const contract = {
         ...tag("Transparency"),
       })
       .output(D.GrowthNumbers),
+    /** Overhaul wave 4 (D6.1): the treasurer's note on a month (`TransparencyMonth.note`); empty body removes it. Audited. */
+    setNote: treasurer
+      .meta({ access: "treasurer", rateLimit: "write" })
+      .route({
+        method: "PUT",
+        path: "/transparency/notes/{month}",
+        summary: "Set or remove the treasurer's note on a transparency month",
+        ...tag("Transparency"),
+      })
+      .input(
+        z.object({
+          month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
+          body: z.string().max(2000),
+        }),
+      )
+      .output(Ok),
   },
 
   appeals: {
@@ -4069,6 +4126,36 @@ export const contract = {
   },
 
   admin: {
+    /** Overhaul wave 4 (D7.5): open counts per queue the caller's role can open (`/admin` home). */
+    overview: staff
+      .route({
+        method: "GET",
+        path: "/admin/overview",
+        summary: "Open items per staff queue",
+        ...tag("Admin"),
+      })
+      .output(D.AdminOverview),
+    /** Overhaul wave 4 (D7.5): one person's standing, cases, holds and audit trail (`/admin/users/$username`). */
+    user: safetyStaff
+      .route({
+        method: "GET",
+        path: "/admin/users/{username}",
+        summary: "A user's standing for staff",
+        ...tag("Admin"),
+      })
+      .input(z.object({ username: Slug }))
+      .output(D.AdminUserView),
+    /** Overhaul wave 4 (D7.5): the user's email address, for admins only; every reveal writes an audit row. */
+    revealEmail: admin
+      .meta({ access: "admin", rateLimit: "write" })
+      .route({
+        method: "POST",
+        path: "/admin/users/{username}/email-reveal",
+        summary: "Reveal a user's email address (audited)",
+        ...tag("Admin"),
+      })
+      .input(z.object({ username: Slug, reason: z.string().min(1).max(500) }))
+      .output(z.object({ email: z.string() })),
     /** Wave 2 (D2.8): the growth funnels from `growth_daily` and `ui_counters`. */
     growth: admin
       .route({
@@ -4168,9 +4255,25 @@ export const contract = {
         PageInput.extend({
           tier: z.enum(["t1", "t2"]).optional(),
           status: z.enum(E.MODERATION_CASE_STATUSES).optional(),
+          /** Overhaul wave 4 (D7.5): only the caller's claimed cases, or only unclaimed ones. */
+          assignee: z.enum(["me", "unassigned"]).optional(),
         }),
       )
       .output(page(D.ModerationCase)),
+    /**
+     * Overhaul wave 4 (D7.5): claim a T1/T2 case for yourself, or release it (`assigneeId` null).
+     * Assigning someone else needs the admin role. Audited.
+     */
+    assign: safetyStaff
+      .meta({ access: "safety-staff", rateLimit: "write" })
+      .route({
+        method: "PUT",
+        path: "/admin/moderation/cases/{id}/assignee",
+        summary: "Claim or release a moderation case",
+        ...tag("Moderation"),
+      })
+      .input(z.object({ id: Id, assigneeId: Id.nullable() }))
+      .output(D.ModerationCase),
     case: safetyStaff
       .route({
         method: "GET",

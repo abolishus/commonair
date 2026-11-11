@@ -110,6 +110,8 @@ const caseDetail: ModerationCaseDetailDto = {
   resolvedAt: null,
   resolution: null,
   resolutionNote: null,
+  assignee: null,
+  assignedAt: null,
   flags: ["a", "b"].map((suffix) => ({
     id: `0192f000-0000-7000-8000-00000000001${suffix === "a" ? "2" : "3"}`,
     tier: "t1",

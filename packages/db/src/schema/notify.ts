@@ -3,8 +3,16 @@
 
 /** Go-live notifications, web push and the Discord adapter (N1, ADR 0028). Mutable working state: no history. */
 import { sql } from "drizzle-orm";
-import { boolean, index, integer, pgTable, primaryKey, text, unique, uuid } from "drizzle-orm/pg-core";
-import { createdAt, discordWebhookError, id, notificationMedium, notificationType, ts, updatedAt } from "./_shared.ts";
+import { boolean, date, index, integer, pgTable, primaryKey, text, unique, uuid } from "drizzle-orm/pg-core";
+import {
+  createdAt,
+  discordWebhookError,
+  id,
+  notificationMedium,
+  notificationPreferenceType,
+  ts,
+  updatedAt,
+} from "./_shared.ts";
 import { users } from "./auth.ts";
 import { channels } from "./channels.ts";
 import { broadcasts } from "./media.ts";
@@ -17,7 +25,7 @@ export const notificationPreferences = pgTable(
     userId: uuid()
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    type: notificationType().notNull(),
+    type: notificationPreferenceType().notNull(),
     channelId: uuid().references(() => channels.id, { onDelete: "cascade" }),
     medium: notificationMedium().notNull(),
     enabled: boolean().notNull(),
@@ -107,3 +115,21 @@ export const discordWebhooks = pgTable("discord_webhooks", {
   lastError: discordWebhookError(),
   updatedAt: updatedAt(),
 });
+
+/**
+ * Overhaul wave 4 (D7.3): one weekly "What you missed" email per member and week, claimed by an
+ * insert before sending, so a retried or concurrent sweep never mails twice. Working state: rows
+ * older than a few weeks may be pruned; deleted with the account.
+ */
+export const notificationDigestSends = pgTable(
+  "notification_digest_sends",
+  {
+    userId: uuid()
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** The Monday (UTC) of the week the digest covers. */
+    weekStart: date({ mode: "string" }).notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.weekStart] })],
+);

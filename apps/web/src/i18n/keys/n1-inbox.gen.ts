@@ -60,4 +60,6 @@ export type Key =
   | "notifySettings.option.defaultOn"
   | "notifySettings.option.defaultOff"
   | "notifySettings.option.on"
-  | "notifySettings.option.off";
+  | "notifySettings.option.off"
+  | "notifications.type.report_outcome"
+  | "notifications.type.moderator_added";
