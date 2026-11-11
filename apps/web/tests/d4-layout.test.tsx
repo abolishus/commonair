@@ -61,7 +61,9 @@ vi.mock("../src/lib/api.ts", () => ({
 vi.mock("../src/lib/use-channel.ts", () => ({ useChannel: (_slug: string, initial: unknown) => initial }));
 vi.mock("../src/player/player.tsx", () => ({ Player: () => <div data-testid="player" /> }));
 vi.mock("../src/chat/chat-panel.tsx", () => ({
-  ChatPanel: ({ className }: { className?: string }) => <div data-testid="chat" className={className} />,
+  ChatPanel: ({ className, following }: { className?: string; following?: boolean | null }) => (
+    <div data-testid="chat" data-following={String(following)} className={className} />
+  ),
 }));
 vi.mock("../src/components/support/support-dialog.tsx", () => ({
   SupportButton: () => <span data-testid="support-stub">Support</span>,
@@ -71,9 +73,7 @@ const { Route } = await import("../src/routes/_app/$channel.tsx");
 const { defaultWatchPanel, useModerates, useWatchPanel } =
   await import("../src/components/watch-layout/watch-layout.tsx");
 const { parseChannelSearch } = await import("../src/components/channel/channel-data.ts");
-type ChannelPage = import("../src/components/channel/panels-loader.ts").ChannelPage & {
-  ownerCoop?: { member: boolean; council: boolean } | null;
-};
+type ChannelPage = import("../src/components/channel/panels-loader.ts").ChannelPage;
 
 beforeAll(async () => {
   const c = Route.options.component as { preload?: () => Promise<void> } | undefined;
@@ -296,6 +296,35 @@ describe("one Follow button (every breakpoint)", () => {
     renderPage(data);
     await screen.findByTestId("player");
     expect(screen.queryByTestId("portability-grant-toggle")).toBeNull();
+  });
+
+  it("a follower's Following menu carries the move grant and the known alerts; chat knows they follow", async () => {
+    fake.me = VIEWER;
+    const data = page({ live: true });
+    data.summary.following = true;
+    data.summary.notify = false;
+    renderPage(data);
+    await screen.findByTestId("player");
+    // The page's `Channel.viewer.notify`, so the bell never reads the follows list.
+    expect(screen.getByTestId("follow-bell").dataset.notify).toBe("false");
+    expect(screen.getByTestId("chat").dataset.following).toBe("true");
+    fireEvent.click(screen.getByTestId("follow-button"));
+    await screen.findByTestId("follow-menu");
+    expect(screen.getByTestId("follow-menu-move").textContent).toContain("Fernsby");
+  });
+
+  it("not following: chat is told so; signed out: unknown", async () => {
+    fake.me = VIEWER;
+    renderPage(page({ live: true }));
+    await screen.findByTestId("player");
+    expect(screen.getByTestId("chat").dataset.following).toBe("false");
+    cleanup();
+    fake.me = null;
+    const data = page({ live: true });
+    data.summary.following = null;
+    renderPage(data);
+    await screen.findByTestId("player");
+    expect(screen.getByTestId("chat").dataset.following).toBe("null");
   });
 });
 

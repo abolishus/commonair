@@ -59,7 +59,6 @@ import { playerStage } from "../../components/safety/stage.ts";
 import { ReportButton } from "../../components/safety/report-dialog.tsx";
 import {
   ModViewButton,
-  type OwnerCoop,
   OwnerShortcuts,
   TrustBadge,
   useModerates,
@@ -74,12 +73,6 @@ import { seoHead, siteFromMatches, withSeo } from "../../lib/seo.ts";
 import { useChannel } from "../../lib/use-channel.ts";
 import { Player } from "../../player/player.tsx";
 import { TheatreProvider, useTheatre, useTheatreAvailable, useTheatreChat } from "../../player/theatre.ts";
-
-/**
- * `Channel.ownerCoop` (D4.7 trust marks) rides on the page data once the loader passes it on
- * (`panels-loader.ts` is another unit's); until then it is absent and no mark shows.
- */
-type ChannelPageData = ChannelPage & { ownerCoop?: OwnerCoop | null };
 
 export const Route = createFileRoute("/_app/$channel")({
   // `?tab=videos|clips|about` (F2): each tab is a link and Back steps through them. Clips adds
@@ -153,7 +146,7 @@ function ChannelView({
   clipFilter,
   onClipFilterChange,
 }: {
-  page: ChannelPageData;
+  page: ChannelPage;
   tab: ChannelTab;
   onTabChange: (tab: ChannelTab) => void;
   clipFilter: ClipFilter;
@@ -166,6 +159,23 @@ function ChannelView({
   const own = me !== null && (me.channelSlug ?? me.username) === channel.slug;
   const follow = useFollow(channel.slug, channel.following, channel.followerCount, channel.requestedAt ?? 0);
   const signedIn = me !== null;
+  // Both mounts (the actions row, the offline hero) carry the channel for the sign-up prompt and
+  // the confirm, the known alerts and the "Email me once if they move" grant (D4.3).
+  const followButton = (
+    <FollowButton
+      signedIn={signedIn}
+      state={follow.state}
+      onToggle={follow.toggle}
+      channel={{
+        slug: channel.slug,
+        name: channel.displayName,
+        accent: channel.accent ?? null,
+        avatarUrl: channel.avatarUrl ?? null,
+      }}
+      notify={channel.notify}
+      portabilityGrant={typeof channel.portabilityGrant === "boolean" ? channel.portabilityGrant : undefined}
+    />
+  );
   const mature = channel.mature || channel.live?.mature === true;
   const restricted = channel.live?.restricted === "under_review";
   const [client] = React.useState(maturityClient);
@@ -323,7 +333,7 @@ function ChannelView({
           </>
         ) : (
           <>
-            {heroFollow ? null : <FollowButton signedIn={signedIn} state={follow.state} onToggle={follow.toggle} />}
+            {heroFollow ? null : followButton}
             <SupportButton
               channel={channel.slug}
               channelName={channel.displayName}
@@ -396,7 +406,7 @@ function ChannelView({
       lastLiveAt={channel.lastLiveAt}
       videos={videoTiles}
       clips={clipTileList}
-      follow={heroFollow ? <FollowButton signedIn={signedIn} state={follow.state} onToggle={follow.toggle} /> : null}
+      follow={heroFollow ? followButton : null}
       own={own}
       about={aboutSection(false)}
       publicUrl={config.publicUrl}
@@ -450,6 +460,8 @@ function ChannelView({
       selfUsername={me?.username ?? null}
       channelName={channel.displayName}
       ageGated={stage === "mature-gate" || stage === "restricted-locked"}
+      // J3-d: a followers-only chat says why before the viewer types.
+      following={follow.state.following ?? null}
       // Bounded so the log scrolls inside it; below `lg` it fills the viewport under the player
       // (D4.1), in theatre it is the theatre's height.
       className={chatColumnClass({ theatre: theatreLayout, fill: true })}

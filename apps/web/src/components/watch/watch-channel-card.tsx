@@ -104,7 +104,14 @@ function LoadedCard({ slug, card, signedIn }: { slug: string; card: ChannelCard;
       slug={slug}
       card={card}
       followers={card.followerCount !== undefined ? <FollowerCount count={follow.state.count} /> : null}
-      follow={<FollowButton signedIn={signedIn} state={follow.state} onToggle={follow.toggle} />}
+      follow={
+        <FollowButton
+          signedIn={signedIn}
+          state={follow.state}
+          onToggle={follow.toggle}
+          channel={{ slug, name: card.displayName ?? slug }}
+        />
+      }
     />
   );
 }

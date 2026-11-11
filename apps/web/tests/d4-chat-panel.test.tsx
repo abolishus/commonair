@@ -26,6 +26,7 @@ import type { ChatMessageFrame, SocketLike } from "../src/chat/connection.ts";
 import type { InteractClient } from "../src/chat/interact/client.ts";
 import type { LoyaltyBalanceDto, PredictionViewDto } from "../src/chat/interact/state.ts";
 import type { DismissStore } from "../src/chat/pinned/dismissed.ts";
+import { PENDING_INTENT_KEY, savePendingIntent } from "../src/components/auth-gate/pending-intent.ts";
 import type { AccountFactsClient } from "../src/components/chat-gate/account-facts.ts";
 import type { ReportClient } from "../src/components/safety/client.ts";
 import { locale, t, uiMessages } from "../src/i18n/index.ts";
@@ -583,5 +584,62 @@ describe("the points popover (D4.5)", () => {
       await new Promise((r) => setTimeout(r, 20));
     });
     expect(screen.queryByTestId("chat-points")).toBeNull();
+  });
+});
+
+describe("the sign-up intent confirms in the chat column (d4-follow, D2.1)", () => {
+  afterEach(() => localStorage.removeItem(PENDING_INTENT_KEY));
+
+  it("intent=chat: above the composer once it is usable; Say hi only focuses the input", async () => {
+    savePendingIntent({ intent: "chat", target: "/" });
+    panel();
+    const ws = await join();
+    const card = await screen.findByTestId("intent-confirm");
+    expect(card.dataset.intent).toBe("chat");
+    // Directly above the composer, in the footer.
+    const input = screen.getByTestId("chat-input");
+    expect(card.compareDocumentPosition(input) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(screen.getByTestId("intent-confirm-chat"));
+    expect(document.activeElement).toBe(input);
+    await waitFor(() => expect(screen.queryByTestId("intent-confirm")).toBeNull());
+    expect(localStorage.getItem(PENDING_INTENT_KEY)).toBeNull();
+    // Nothing was sent on the viewer's behalf.
+    expect(ws.sent.filter((f) => f.op === "message")).toEqual([]);
+  });
+
+  it("intent=chat: nothing while a known gate closes the composer", async () => {
+    savePendingIntent({ intent: "chat", target: "/" });
+    panel({ following: false });
+    await join({ settings: { followersOnlyMinutes: 0 } });
+    await screen.findByTestId("chat-composer-gate");
+    expect(screen.queryByTestId("intent-confirm")).toBeNull();
+    expect(localStorage.getItem(PENDING_INTENT_KEY)).not.toBeNull();
+  });
+
+  it("intent=predict: beside the open prediction; Join opens the strip and focuses the card, no bet", async () => {
+    savePendingIntent({ intent: "predict", target: "/" });
+    const bet = vi.fn<InteractClient["bet"]>();
+    panel({ interactClient: interact({ predictionCurrent: async () => prediction, bet }) });
+    await join();
+    const card = await screen.findByTestId("intent-confirm");
+    expect(card.dataset.intent).toBe("predict");
+    fireEvent.click(screen.getByTestId("intent-confirm-predict"));
+    await waitFor(() =>
+      expect((document.activeElement as HTMLElement | null)?.dataset.predictionId).toBe(prediction.id),
+    );
+    expect(screen.getByTestId("chat-pinned-strip").dataset.expanded).toBe("true");
+    expect(bet).not.toHaveBeenCalled();
+    expect(localStorage.getItem(PENDING_INTENT_KEY)).toBeNull();
+  });
+
+  it("intent=predict: nothing without an open prediction", async () => {
+    savePendingIntent({ intent: "predict", target: "/" });
+    panel();
+    await join();
+    await screen.findByTestId("chat-input");
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(screen.queryByTestId("intent-confirm")).toBeNull();
   });
 });

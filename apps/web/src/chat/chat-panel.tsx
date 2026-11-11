@@ -10,6 +10,11 @@ import { useNavigate } from "@tanstack/react-router";
 import * as React from "react";
 import { Dialog, DialogContent } from "@commonair/ui/components/dialog";
 import { ChatSignUpPrompt } from "../components/auth-gate/chat-prompt.tsx";
+import {
+  ChatIntentConfirm,
+  PredictionIntentConfirm,
+  revealAndFocus,
+} from "../components/auth-gate/intent-confirms.tsx";
 import { useAccountFacts, type AccountFactsClient } from "../components/chat-gate/account-facts.ts";
 import { ComposerGate } from "../components/chat-gate/composer-gate.tsx";
 import { LegalDocumentLink, type LegalDoc } from "../components/legal-document-link.tsx";
@@ -529,6 +534,25 @@ export function ChatPanel({
     if (goal) return <GoalCard key={goal.id} goal={goal} item={item} />;
     return null;
   };
+  // Back from sign-up with `intent=chat` or `intent=predict` (D2.1): the one-tap confirms only
+  // focus the composer or bring the open prediction into view; neither sends or bets.
+  const chatPanelEl = () => listRef.current?.closest<HTMLElement>('[data-testid="chat"]') ?? null;
+  const focusComposer = () =>
+    chatPanelEl()?.querySelector<HTMLInputElement>('[data-testid="chat-input"]:not(:disabled)')?.focus();
+  const predictionShown = shownPinned.some((item) => item.kind === "prediction");
+  const joinPrediction = () => {
+    const panel = chatPanelEl();
+    // The cards fold into the strip's line; open it first, then reveal the card once it renders.
+    panel
+      ?.querySelector<HTMLButtonElement>(
+        '[data-testid="chat-pinned-strip"] [data-part="toggle"][aria-expanded="false"]',
+      )
+      ?.click();
+    window.setTimeout(() => {
+      const id = prediction ? CSS.escape(prediction.id) : null;
+      revealAndFocus(id ? (panel?.querySelector<HTMLElement>(`[data-prediction-id="${id}"]`) ?? null) : null);
+    }, 0);
+  };
   const toolbar = canModerate && modTools === "toolbar";
   const pinned =
     toolbar || incomingRaid || raid || shownPinned.length > 0 || surgeActive || gateDenied || gated ? (
@@ -556,6 +580,10 @@ export function ChatPanel({
         {shownPinned.length > 0 && (
           <PinnedStrip items={shownPinned} renderCard={renderCard} onDismiss={dismissPinned} />
         )}
+        <PredictionIntentConfirm
+          predictionOpen={signedIn && prediction?.status === "active" && predictionShown}
+          onJoin={joinPrediction}
+        />
       </div>
     ) : undefined;
 
@@ -740,6 +768,7 @@ export function ChatPanel({
               {calm.digest}
             </output>
           )}
+          {signedIn && <ChatIntentConfirm canChat={!inputDisabled && !gateLocks} onSayHi={focusComposer} />}
           {signedIn ? (
             <ChatComposer
               value={draft}

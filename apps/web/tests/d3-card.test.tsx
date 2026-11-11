@@ -8,7 +8,7 @@
  * below the threshold) and "Watch live". The live state is polled on the channel page's interval.
  */
 import { LocaleProvider, TooltipProvider } from "@commonair/ui";
-import { act, cleanup, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type * as React from "react";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import {
@@ -107,6 +107,15 @@ describe("WatchChannelCard", () => {
     const follow = byId(root, "follow-button");
     expect(follow?.getAttribute("data-auth-gate")).toBe("follow");
     expect(follow?.hasAttribute("data-filled-cta")).toBe(true);
+  });
+
+  it("signed out, Follow's sign-up prompt names the channel by its display name", async () => {
+    const { container } = wrap(
+      <WatchChannelCard slug="rivertide" card={card({ displayName: "River Tide" })} signedIn={false} />,
+    );
+    fireEvent.click(byId(container, "follow-button") as HTMLElement);
+    const prompt = await screen.findByTestId("auth-gate");
+    expect(prompt.textContent).toContain("River Tide");
   });
 
   it("live with a low verified count: Just started instead of the number", () => {

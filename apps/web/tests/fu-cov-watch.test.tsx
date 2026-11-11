@@ -219,6 +219,10 @@ describe("summarize defaults", () => {
       live: { catchingUpCount: 0, restricted: null, mature: true },
     });
     expect(summarize(channelDto({ viewer: null }) as never).portabilityGrant).toBeNull();
+    // `Channel.viewer.notify` while following; unknown (null) otherwise.
+    expect(s.notify).toBeNull();
+    expect(summarize(channelDto({ viewer: { following: true, notify: false } }) as never).notify).toBe(false);
+    expect(summarize(channelDto({ viewer: null }) as never).notify).toBeNull();
   });
 });
 

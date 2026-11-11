@@ -40,6 +40,8 @@ export interface ChannelSummary {
   following: boolean | null;
   /** The caller asked to be told if the channel moves (decision (l)); null when anonymous or unknown. */
   portabilityGrant?: boolean | null;
+  /** `Channel.viewer.notify`: the caller's go-live alerts while following; null when unknown. */
+  notify?: boolean | null;
   /** `Channel.movedTo` (ADR 0037): where the channel moved and when; null when it has not moved. */
   movedTo: { url: string; at: string } | null;
   /** When the browser poll that produced this started (ms); absent for the SSR snapshot. */
@@ -88,6 +90,7 @@ export function summarize(c: ChannelDto): ChannelSummary {
     followerCount: c.followerCount,
     following: c.viewer?.following ?? null,
     portabilityGrant: c.viewer ? (c.viewer.portabilityGrant ?? false) : null,
+    notify: c.viewer?.notify ?? null,
     movedTo: c.movedTo ?? null,
   };
 }
