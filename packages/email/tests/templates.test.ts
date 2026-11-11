@@ -115,8 +115,8 @@ test("only member announcements carry an unsubscribe link", async () => {
       };
     }),
   );
-  // Overhaul wave 4 (D7.3): the weekly digest and the video-ready email have preference lists of
-  // their own.
+  // Overhaul wave 4 (D7.3): the weekly digest, the video-ready email and the payout notice have
+  // preference lists of their own.
   const announcements = new Set([
     "governanceResultPublished",
     "governanceVoteOpened",
@@ -124,6 +124,7 @@ test("only member announcements carry an unsubscribe link", async () => {
     "channelMoved",
     "weeklyDigest",
     "vodReady",
+    "payoutSent",
   ]);
   expect(rows).toEqual(rows.map(({ id }) => ({ id, header: announcements.has(id), footer: announcements.has(id) })));
 });

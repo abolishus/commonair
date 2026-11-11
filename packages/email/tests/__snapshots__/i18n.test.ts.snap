@@ -707,7 +707,9 @@ Recibes este correo por tu cuenta en Example Air.
 
 ¿Tienes preguntas? Escribe a hello@air.example.test.
 
-Example Air funciona con software libre. Obtén el código fuente https://forge.example.test/air/commonair/tree/0123abcd."
+Example Air funciona con software libre. Obtén el código fuente https://forge.example.test/air/commonair/tree/0123abcd.
+
+Darte de baja de estos correos https://air.example.test/api/email/unsubscribe?list=payout&token=sample"
 `;
 
 exports[`streamKeyRevoked in Spanish > renders with lang and dir, and differs from English in subject and body 1`] = `

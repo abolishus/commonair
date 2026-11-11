@@ -11,10 +11,13 @@ export interface PayoutSentData {
   sentAt: DateInput;
   reference: string;
   earningsUrl: string;
+  /** RFC 8058 one-click unsubscribe from the `payout` list (D7.3). */
+  unsubscribeUrl: string;
 }
 
 export const payoutSent = defineTemplate("payoutSent", {
-  links: ["earningsUrl"],
+  links: ["earningsUrl", "unsubscribeUrl"],
+  unsubscribeUrl: (d: PayoutSentData) => d.unsubscribeUrl,
   subject: (ctx, d: PayoutSentData) => ctx.text(ctx.messages.subject, { amount: ctx.money(d.amountCents, d.currency) }),
   body: (ctx, d: PayoutSentData) => {
     const m = ctx.messages;
