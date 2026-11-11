@@ -14,8 +14,11 @@
  *   chargeback; with `provider=stripe` a fresh payer's tip is charged back and the dispute won
  *   (dispute fee returned), and the tick still reports 0.
  */
+import { KEYS } from "@commonair/contracts/internal";
 import type { Page } from "playwright";
 import type { ApiClient } from "../api/client.ts";
+import { rateLimitSpend } from "../multi/valkey.ts";
+import { valkeyUrl } from "../multi/replicas.ts";
 import { isNotFound } from "../safety.ts";
 import { stripeEvent, stripeId } from "../stripe.ts";
 import type { SignedInUser } from "../users.ts";
@@ -250,7 +253,16 @@ export async function stepBreakdown(ext: MoneyExtension): Promise<void> {
   await ctx.step("payer A: /settings/subscriptions breakdown dialogs show the API's numbers", async () => {
     const p = await payerSession.goto(W1_ROUTES.subscriptions);
     // No reload: a busy first load must recover by itself (its 429s are logged by the session).
-    await byW1Id(p, W.breakdownOpen).first().waitFor({ timeout: PAYMENTS_TIMEOUT_MS });
+    try {
+      await byW1Id(p, W.breakdownOpen).first().waitFor({ timeout: PAYMENTS_TIMEOUT_MS });
+    } catch (err) {
+      // Name what spent the payer's read budget, so a 429 stall points at its cause.
+      const key = KEYS.rateLimit("default", `u:${payers.a.id}`);
+      const spend = await rateLimitSpend(valkeyUrl(process.env), key).catch((e: unknown) => String(e));
+      ctx.log.warn("payer A's default rate-limit bucket", { spend });
+      ctx.data("w1.breakdown.payerSpend", spend);
+      throw err;
+    }
     for (const [name, paymentId] of Object.entries(ids)) {
       const shown = await readDialog(p, paymentId);
       const api = seen.get(paymentId);

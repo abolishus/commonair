@@ -91,3 +91,32 @@ export async function oldestCompleted(url: string, queue: string, prefix = "bull
     client.close();
   }
 }
+
+/**
+ * What spent a rate-limit bucket: its entries (`<ms>:<procedure>:<uuid>`, the API's
+ * `rateLimitMember`) counted per procedure, most first. Pure.
+ */
+export function spendByProcedure(members: readonly string[]): { procedure: string; count: number }[] {
+  const counts = new Map<string, number>();
+  for (const m of members) {
+    const first = m.indexOf(":");
+    const last = m.lastIndexOf(":");
+    const procedure = first >= 0 && last > first ? m.slice(first + 1, last) || "?" : "?";
+    counts.set(procedure, (counts.get(procedure) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([procedure, count]) => ({ procedure, count }))
+    .sort((x, y) => y.count - x.count || x.procedure.localeCompare(y.procedure));
+}
+
+/** The live entries of the API's rate-limit bucket `key` (`rl:<bucket>:<subject>`), per procedure. */
+export async function rateLimitSpend(url: string, key: string): Promise<{ procedure: string; count: number }[]> {
+  const client = new RedisClient(url);
+  try {
+    await client.connect();
+    const members = (await client.send("ZRANGE", [key, "0", "-1"])) as unknown[];
+    return spendByProcedure(members.map(String));
+  } finally {
+    client.close();
+  }
+}

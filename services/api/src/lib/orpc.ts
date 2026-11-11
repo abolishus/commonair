@@ -17,7 +17,7 @@ import type { Deps } from "../deps.ts";
 import { decideAccess, type AppCaller, type Caller, type ChannelRole } from "./access.ts";
 import { bearerToken, resolveCaller } from "./caller.ts";
 import { apiError, rateLimited } from "./errors.ts";
-import { rateLimitKey } from "./ratelimit.ts";
+import { rateLimitKey, rateLimitMember } from "./ratelimit.ts";
 import { resolveOverlayToken } from "../overlay/tokens.ts";
 
 export interface RequestInfo {
@@ -96,7 +96,7 @@ export const base = implement(contract, {
   initialInputValidationIndex: Number.NEGATIVE_INFINITY,
 }).$context<BaseContext>();
 
-export const os = base.use(async ({ context, next, procedure }, input) => {
+export const os = base.use(async ({ context, next, path, procedure }, input) => {
   const { deps, auth, req } = context;
   const meta = procedure["~orpc"].meta as ProcedureMeta;
   const write = (procedure["~orpc"].route.method ?? "POST") !== "GET";
@@ -154,11 +154,12 @@ export const os = base.use(async ({ context, next, procedure }, input) => {
           ? `r:${relay.id}`
           : `ip:${req.rateLimitHash}`;
   const nowMs = deps.now().getTime();
+  // The member names the procedure, so a full bucket shows what spent it (no personal data).
   const rl = await deps.rateLimitStore.hit(
     rateLimitKey(bucket, subject),
     deps.rateLimits[bucket],
     nowMs,
-    `${nowMs}:${crypto.randomUUID()}`,
+    rateLimitMember(nowMs, path),
   );
   if (!rl.allowed) throw rateLimited(rl.retryAfterSeconds);
   if (appId) {

@@ -2,7 +2,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { expect, test } from "vite-plus/test";
-import { DEFAULT_RATE_LIMITS, decide, memoryRateLimitStore, rateLimitKey } from "../src/lib/ratelimit.ts";
+import {
+  DEFAULT_RATE_LIMITS,
+  decide,
+  memoryRateLimitStore,
+  rateLimitKey,
+  rateLimitMember,
+} from "../src/lib/ratelimit.ts";
 
 const rule = { max: 3, windowMs: 10_000 };
 
@@ -72,4 +78,12 @@ test("clear forgets every key: a limited key passes again", async () => {
   expect((await s.hit("k", rule, 1_001, "b")).allowed).toBe(false);
   s.clear();
   expect(await s.hit("k", rule, 1_002, "c")).toEqual({ allowed: true, count: 1, retryAfterSeconds: 0 });
+});
+
+test("a bucket entry names the procedure that spent it, and two hits in one ms stay apart", () => {
+  const a = rateLimitMember(1_700_000_000_000, ["money", "mySubscriptions"]);
+  const b = rateLimitMember(1_700_000_000_000, ["money", "mySubscriptions"]);
+  expect(a).toMatch(/^1700000000000:money\.mySubscriptions:[0-9a-f-]{36}$/);
+  expect(a).not.toBe(b);
+  expect(rateLimitMember(5, [])).toMatch(/^5::[0-9a-f-]{36}$/);
 });

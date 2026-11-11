@@ -134,3 +134,8 @@ export function valkeyRateLimitStore(valkey: ValkeyClient): RateLimitStore {
 }
 
 export const rateLimitKey = (bucket: RateLimitBucket, subject: string) => KEYS.rateLimit(bucket, subject);
+
+/** A bucket entry: `<ms>:<procedure path>:<uuid>`, unique per hit; the path says what spent it. */
+export function rateLimitMember(nowMs: number, path: readonly string[]): string {
+  return `${nowMs}:${path.join(".")}:${crypto.randomUUID()}`;
+}
