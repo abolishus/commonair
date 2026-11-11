@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { AUTH_ROUTES } from "@commonair/contracts/auth";
+import type { SignupIntent } from "@commonair/contracts/enums";
 
 /** better-auth's HTTP surface as services/api mounts it (outside the oRPC contract). */
 export { AUTH_ROUTES };
@@ -13,6 +14,8 @@ export interface SignUpInput {
   birthDate: string;
   altcha: string;
   acceptedDocumentIds: string[];
+  /** `?intent=` (README D2.8), stored as `users.signup_intent`; the API keeps only known values. */
+  signupIntent?: SignupIntent | undefined;
 }
 
 export class AuthRequestError extends Error {
@@ -54,8 +57,14 @@ export const DEFAULT_LANDING = "/";
  * against its trusted origins).
  */
 export function signUp(input: SignUpInput, callbackURL = DEFAULT_LANDING): Promise<void> {
-  // The display name starts as the username.
-  return post(AUTH_ROUTES.signUp, { ...input, name: input.username, callbackURL });
+  // The display name starts as the username. A sign-up with no intent records "none" (null is
+  // left for accounts made where nobody asked, such as before the column existed).
+  return post(AUTH_ROUTES.signUp, {
+    ...input,
+    signupIntent: input.signupIntent ?? "none",
+    name: input.username,
+    callbackURL,
+  });
 }
 
 /**

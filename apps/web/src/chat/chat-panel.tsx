@@ -3,12 +3,12 @@
 
 import { ConfirmDialog, EmptyState, StatusBadge } from "@commonair/ui";
 import { ChatComposer, ChatMessage, ChatPanel as ChatPanelShell } from "@commonair/ui/blocks/media";
-import { Button } from "@commonair/ui/components/button";
 import { toast } from "@commonair/ui/toast";
 import { cn } from "@commonair/ui/lib/utils";
 import { Alert02Icon, Message01Icon, UnavailableIcon, UserBlock01Icon } from "@hugeicons/core-free-icons";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import * as React from "react";
+import { ChatSignUpPrompt } from "../components/auth-gate/chat-prompt.tsx";
 import { LegalDocumentLink, type LegalDoc } from "../components/legal-document-link.tsx";
 import type { ReportClient } from "../components/safety/client.ts";
 import { HeldQueue } from "../components/mod/held-queue.tsx";
@@ -646,14 +646,7 @@ export function ChatPanel({
               onSubmit={noop}
               placeholder={t("chat.placeholder")}
               sendLabel={t("chat.send")}
-              signin={
-                <>
-                  {t("chat.signInPrompt")}
-                  <Button variant="outline" size="xs" nativeButton={false} render={<Link to="/signin" />}>
-                    {t("nav.signIn")}
-                  </Button>
-                </>
-              }
+              signin={<ChatSignUpPrompt />}
             />
           )}
           <ReplayDisclosure />

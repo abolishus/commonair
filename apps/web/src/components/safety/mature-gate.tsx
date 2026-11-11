@@ -1,15 +1,23 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { EmptyState, SkeletonGroup, SkeletonThumbnail } from "@commonair/ui";
+import { EmptyState, SkeletonGroup, SkeletonThumbnail, StatusBadge } from "@commonair/ui";
 import { SensitiveMedia } from "@commonair/ui/blocks/media";
 import { AspectRatio } from "@commonair/ui/components/aspect-ratio";
 import { Button } from "@commonair/ui/components/button";
 import { Alert02Icon } from "@hugeicons/core-free-icons";
-import { Link } from "@tanstack/react-router";
 import * as React from "react";
+import { Link } from "@tanstack/react-router";
+import {
+  AuthGateActions,
+  AuthGatePanel,
+  useGateChannel,
+  useGateSearch,
+  type GateChannel,
+} from "../auth-gate/auth-gate-prompt.tsx";
 import { FormError } from "../form-error.tsx";
 import { t } from "../../i18n/index.ts";
+import { trackUi } from "../../lib/ui-metrics.ts";
 import { toastActionError } from "../../lib/action-error.ts";
 import { errorCode } from "../../lib/api.ts";
 import { maturityClient, type MaturityClient } from "./client.ts";
@@ -80,21 +88,66 @@ export interface MatureGateProps {
   checking?: boolean;
   onConfirmed: () => void;
   client?: MaturityClient;
+  /** Signed out: the channel the sign-up prompt carries (the `$channel` param otherwise). */
+  channel?: GateChannel | null;
 }
 
-/** `mature-gate`: replaces the player of a mature stream until the viewer confirmed 18+. */
+/**
+ * `mature-gate`: replaces the player of a mature stream until the viewer confirmed 18+. Signed
+ * out it is the sign-up prompt inline (`intent=watch`): the account comes first, the 18+ confirm
+ * after.
+ */
 export function MatureGate({
   signedIn,
   checking = false,
   onConfirmed,
   client = maturityClient(),
+  channel,
 }: MatureGateProps): React.JSX.Element {
   const { pending, notAdult, confirmMature } = useConfirmMature(client, onConfirmed);
+  const gateChannel = useGateChannel(channel);
+  const search = useGateSearch("watch", gateChannel);
   if (checking)
     return (
       <SkeletonGroup label={t("safety.mature.checking")}>
         <SkeletonThumbnail />
       </SkeletonGroup>
+    );
+  if (!signedIn)
+    return (
+      <AspectRatio ratio={16 / 9} className="grid place-items-center overflow-y-auto bg-muted p-4">
+        <div className="flex flex-col items-center gap-3">
+          <StatusBadge tone="neutral">{t("d2Gate.watch.badge")}</StatusBadge>
+          <AuthGatePanel
+            data-testid="mature-gate"
+            intent="watch"
+            channel={gateChannel}
+            actions={
+              <div className="flex flex-wrap justify-center gap-2">
+                <Button
+                  data-testid="mature-gate-create"
+                  data-filled-cta=""
+                  variant="brand"
+                  size="lg"
+                  nativeButton={false}
+                  render={<Link to="/signup" search={search} onClick={() => trackUi("authGate", "create", "watch")} />}
+                >
+                  {t("d2Gate.create")}
+                </Button>
+                <Button
+                  data-testid="mature-gate-signin"
+                  variant="ghost"
+                  size="lg"
+                  nativeButton={false}
+                  render={<Link to="/signin" search={search} onClick={() => trackUi("authGate", "signin", "watch")} />}
+                >
+                  {t("safety.mature.signin")}
+                </Button>
+              </div>
+            }
+          />
+        </div>
+      </AspectRatio>
     );
   return (
     <AspectRatio ratio={16 / 9} className="grid place-items-center overflow-y-auto bg-muted">
@@ -102,26 +155,20 @@ export function MatureGate({
         data-testid="mature-gate"
         icon={Alert02Icon}
         title={t("safety.mature.title")}
-        description={signedIn ? t("safety.mature.confirmHint") : t("safety.mature.signinHint")}
+        description={t("safety.mature.confirmHint")}
         action={
-          signedIn ? (
-            <div className="flex flex-col items-center gap-2">
-              {notAdult ? <FormError>{t("safety.mature.notAdult")}</FormError> : null}
-              <Button
-                data-testid="mature-gate-confirm"
-                size="sm"
-                disabled={pending || notAdult}
-                aria-busy={pending || undefined}
-                onClick={() => void confirmMature()}
-              >
-                {t("safety.mature.confirm")}
-              </Button>
-            </div>
-          ) : (
-            <Button data-testid="mature-gate-signin" size="sm" nativeButton={false} render={<Link to="/signin" />}>
-              {t("safety.mature.signin")}
+          <div className="flex flex-col items-center gap-2">
+            {notAdult ? <FormError>{t("safety.mature.notAdult")}</FormError> : null}
+            <Button
+              data-testid="mature-gate-confirm"
+              size="sm"
+              disabled={pending || notAdult}
+              aria-busy={pending || undefined}
+              onClick={() => void confirmMature()}
+            >
+              {t("safety.mature.confirm")}
             </Button>
-          )
+          </div>
         }
       />
     </AspectRatio>
@@ -135,13 +182,15 @@ export interface RestrictedStreamProps {
   onConfirmed: () => void;
   children: React.ReactNode;
   client?: MaturityClient;
+  /** Signed out: the channel the sign-up prompt carries (the `$channel` param otherwise). */
+  channel?: GateChannel | null;
 }
 
 /**
  * `stream-restricted`: a T1-restricted stream plays muted under a blur with an interstitial over
  * it. Only signed-in, 18+-confirmed viewers can reveal it (`stream-restricted-reveal`); revealing
  * never unmutes (the player starts muted and stays so until the viewer unmutes). The reveal is
- * per page view.
+ * per page view. Signed out, the interstitial offers Create account and Sign in (`intent=watch`).
  */
 export function RestrictedStream({
   signedIn,
@@ -149,7 +198,9 @@ export function RestrictedStream({
   onConfirmed,
   children,
   client = maturityClient(),
+  channel,
 }: RestrictedStreamProps): React.JSX.Element {
+  const gateChannel = useGateChannel(channel);
   const canReveal = signedIn && confirmed;
   const [reveal, setReveal] = React.useState({ eligible: canReveal, revealed: false });
   if (reveal.eligible !== canReveal) setReveal({ eligible: canReveal, revealed: false });
@@ -166,9 +217,11 @@ export function RestrictedStream({
           <p className="font-medium">{t("safety.restricted.title")}</p>
           <p className="text-muted-foreground">{t("safety.restricted.body")}</p>
           {!signedIn ? (
-            <Button size="sm" variant="outline" nativeButton={false} render={<Link to="/signin" />}>
-              {t("safety.mature.signin")}
-            </Button>
+            <>
+              {/* Revealing needs an account that confirmed 18+, so say so before the buttons. */}
+              <p className="text-muted-foreground">{t("safety.mature.signinHint")}</p>
+              <AuthGateActions intent="watch" channel={gateChannel} className="flex flex-wrap justify-center gap-2" />
+            </>
           ) : confirmed ? (
             <Button
               data-testid="stream-restricted-reveal"

@@ -200,7 +200,7 @@ describe("Report on phones (F4)", () => {
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(LONG_NAME);
   });
 
-  it("signed out, the menu's Report goes to sign-in", async () => {
+  it("signed out, the menu's Report opens the sign-in prompt (Sign in first, no brand fill)", async () => {
     renderPage(page());
     const more = await screen.findByTestId("channel-overflow");
     act(() => {
@@ -208,7 +208,18 @@ describe("Report on phones (F4)", () => {
     });
     const item = await screen.findByTestId("channel-overflow-report");
     expect(item.textContent).toBe("Report");
-    expect(item.getAttribute("href")).toBe("/signin");
+    act(() => {
+      fireEvent.click(item);
+    });
+    const gate = await screen.findByTestId("auth-gate");
+    expect(gate.getAttribute("data-intent")).toBe("report");
+    const signIn = screen.getByTestId("auth-gate-signin");
+    expect(signIn.getAttribute("href")).toMatch(/^\/signin/);
+    expect(screen.getByTestId("auth-gate-create").hasAttribute("data-filled-cta")).toBe(false);
+    act(() => {
+      fireEvent.keyDown(gate, { key: "Escape" });
+    });
+    await waitFor(() => expect(screen.queryByTestId("auth-gate")).toBeNull());
   });
 
   it("signed in, the menu's Report opens the report dialog for the channel", async () => {

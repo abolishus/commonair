@@ -22,7 +22,11 @@ const KEYS = join(I18N, "keys");
  * Keys defined but used nowhere outside `src/i18n/`. Empty: the two found at the switch to JSON
  * (`nav.account`, `safety.appealq.intro`) were dead and removed. Add a key here only with a reason.
  */
-const UNUSED_ALLOWED: readonly string[] = [];
+const UNUSED_ALLOWED: readonly string[] = [
+  // d2-gate replaced "Sign in to chat." with the sign-up prompt (d2Gate.chat.prompt); its catalog
+  // (core.json) belongs to another unit, so the key leaves at integration, and this line with it.
+  "chat.signInPrompt",
+];
 
 /** Released locales: every English key translated (batch 5 decision (j)). Others may lag. */
 const REQUIRED_LOCALES: readonly string[] = ["es"];

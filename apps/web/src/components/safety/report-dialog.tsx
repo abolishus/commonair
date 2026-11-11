@@ -18,8 +18,8 @@ import { Textarea } from "@commonair/ui/components/textarea";
 import { toast } from "@commonair/ui/toast";
 import { Flag01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Link } from "@tanstack/react-router";
 import * as React from "react";
+import { AuthGatePrompt } from "../auth-gate/auth-gate-prompt.tsx";
 import { t } from "../../i18n/index.ts";
 import { toastActionError } from "../../lib/action-error.ts";
 import { errorCode } from "../../lib/api.ts";
@@ -38,7 +38,8 @@ export interface ReportButtonProps {
 }
 
 /**
- * `report-open`: signed out a link to /signin; signed in it opens the report dialog. After a
+ * `report-open`: signed out it opens the sign-in prompt (`intent=report`, Sign in first); signed
+ * in it opens the report dialog. After a
  * report is filed the button carries its id (`data-report-id`).
  */
 export function ReportButton({
@@ -58,9 +59,13 @@ export function ReportButton({
   );
   if (!signedIn)
     return (
-      <Button data-testid="report-open" variant="outline" size="sm" nativeButton={false} render={<Link to="/signin" />}>
+      <AuthGatePrompt
+        intent="report"
+        align="end"
+        trigger={<Button data-testid="report-open" variant="outline" size="sm" />}
+      >
         {content}
-      </Button>
+      </AuthGatePrompt>
     );
   return (
     <Dialog open={open} onOpenChange={setOpen}>

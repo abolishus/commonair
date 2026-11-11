@@ -6,6 +6,7 @@ import { Field, FieldDescription, FieldGroup, FieldLabel } from "@commonair/ui/c
 import { Input } from "@commonair/ui/components/input";
 import { Link, createFileRoute, useLocation, useNavigate } from "@tanstack/react-router";
 import * as React from "react";
+import { savePendingIntent } from "../../components/auth-gate/pending-intent.ts";
 import { AuthLayout } from "../../components/auth-layout.tsx";
 import { FormError } from "../../components/form-error.tsx";
 import { ResetPasswordField, SignInPasswordField } from "../../components/password-fields.tsx";
@@ -90,6 +91,8 @@ function SignInForm({
     setUnverified(null);
     try {
       await signIn(email, field(form, "password"));
+      // Signed in from a sign-up prompt: the page offers a one-tap confirm of the action.
+      savePendingIntent({ intent: carried.intent, target, channel: carried.channel });
       // F11: the target, else the studio for an account that streams and home for everyone else.
       // A full load renders it on the server with the new session cookie (stays pending until the
       // page goes away).
@@ -102,7 +105,7 @@ function SignInForm({
   };
 
   return (
-    <AuthLayout title={t("signin.title")}>
+    <AuthLayout title={t("signin.title")} {...(target ? { description: t("d2Gate.signin.back") } : {})}>
       <form onSubmit={(e) => void onSubmit(e)}>
         <FieldGroup>
           {notice && (
