@@ -7,6 +7,7 @@
  * B8-web's panels as they are. The bio is plain text with its line breaks kept, never parsed.
  */
 import type { ChannelSocial } from "@commonair/contracts/shapes";
+import { RelativeTime } from "@commonair/ui";
 import { Card, CardContent, CardHeader, CardTitle } from "@commonair/ui/components/card";
 import {
   BlueskyIcon,
@@ -124,6 +125,7 @@ export function ChannelAboutSection({
   followers,
   panels,
   banner,
+  since = null,
 }: {
   name: string;
   about: ChannelAbout;
@@ -135,6 +137,8 @@ export function ChannelAboutSection({
   panels: readonly ChannelPanelView[];
   /** The banner, or its pending frame, or null. */
   banner?: React.ReactNode;
+  /** `Channel.createdAt` (D3.8): when the channel was created; left out when unknown. */
+  since?: string | null;
 }): React.JSX.Element {
   return (
     <div data-testid="channel-about" className="flex min-w-0 flex-col gap-6">
@@ -160,6 +164,11 @@ export function ChannelAboutSection({
             <p className="flex min-w-0 flex-wrap items-center gap-1 text-sm text-muted-foreground">
               <span>{t("channel.tabs.streamsIn")}</span>
               <CategoryLink category={category} />
+            </p>
+          ) : null}
+          {since ? (
+            <p data-testid="channel-about-since" className="text-sm text-muted-foreground">
+              {t("d3Watch.about.since")} <RelativeTime date={since} />
             </p>
           ) : null}
           <ChannelSocials name={name} socials={about.socials} />

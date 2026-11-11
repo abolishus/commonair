@@ -2,18 +2,22 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * "More from <channel>" under a VOD or clip (F11, `watch-more-grid`): D2-channel's shelf (its cards
- * and its "View all" link to the Videos or Clips tab), VODs on a VOD page and clips on a clip page,
- * without the item being watched, at most `MORE_FROM_SIZE`. Secondary content: when the list
- * fails or the channel has nothing else, the section is left out rather than shown empty.
+ * What to watch next under a VOD or clip (F11, D3.9): "Up next" (`watch-up-next`, one card: the
+ * item recorded right after this one, else the newest other one), then "More from <channel>"
+ * (`watch-more-grid`, D2-channel's shelf with its "View all" link to the Videos or Clips tab),
+ * VODs on a VOD page and clips on a clip page, never the item being watched, at most
+ * `MORE_FROM_SIZE`. It degrades in steps: loading frames; a failed list says so with Retry (never
+ * a silent gap); one other item is Up next alone; nothing else leaves the section out.
  */
 import { SkeletonGroup, SkeletonText, SkeletonThumbnail } from "@commonair/ui";
+import { Section } from "@commonair/ui/blocks/headers";
+import { Button } from "@commonair/ui/components/button";
 import * as React from "react";
 import { t } from "../../i18n/index.ts";
 import type { ClipItem, MediaPage, VodItem } from "../channel/channel-data.ts";
 import { useMediaList } from "../channel/use-media-list.ts";
-import { clipTiles, MediaShelf, vodTiles } from "../channel/video-grid.tsx";
-import { MORE_FROM_SIZE, moreFrom, type WatchKind } from "./share.ts";
+import { clipTiles, MediaShelf, VideoTileList, vodTiles, type VideoTile } from "../channel/video-grid.tsx";
+import { MORE_FROM_SIZE, moreFrom, upNext, type WatchKind } from "./share.ts";
 
 export type WatchMoreProps = {
   slug: string;
@@ -35,7 +39,7 @@ function VodMore({ fetchPage, ...p }: Common & { fetchPage: () => Promise<MediaP
     React.useCallback(() => fetchPage(), [fetchPage]),
     null,
   );
-  return <MoreSection {...p} kind="vod" status={list.status} tiles={vodTiles(list.items)} />;
+  return <MoreSection {...p} kind="vod" status={list.status} retry={list.retry} tiles={vodTiles(list.items)} />;
 }
 
 function ClipMore({ fetchPage, ...p }: Common & { fetchPage: () => Promise<MediaPage<ClipItem>> }) {
@@ -43,7 +47,17 @@ function ClipMore({ fetchPage, ...p }: Common & { fetchPage: () => Promise<Media
     React.useCallback(() => fetchPage(), [fetchPage]),
     null,
   );
-  return <MoreSection {...p} kind="clip" status={list.status} tiles={clipTiles(list.items)} />;
+  return <MoreSection {...p} kind="clip" status={list.status} retry={list.retry} tiles={clipTiles(list.items)} />;
+}
+
+/** The shelves to show from a loaded list: Up next, then More from without it. */
+export function nextShelves(
+  tiles: readonly VideoTile[],
+  currentId: string,
+): { next: VideoTile | null; more: VideoTile[] } {
+  const next = upNext(tiles, currentId);
+  const rest = next ? tiles.filter((tile) => tile.id !== next.id) : tiles;
+  return { next, more: moreFrom(rest, currentId, MORE_FROM_SIZE) };
 }
 
 function MoreSection({
@@ -52,13 +66,28 @@ function MoreSection({
   channelName,
   currentId,
   status,
+  retry,
   tiles,
 }: Common & {
   kind: WatchKind;
   status: "loading" | "ready" | "error";
-  tiles: ReturnType<typeof vodTiles>;
+  retry: () => void;
+  tiles: readonly VideoTile[];
 }): React.JSX.Element | null {
-  if (status === "error") return null;
+  const heading = t("watch.more.heading", { name: channelName });
+  if (status === "error")
+    return (
+      <div
+        data-testid="watch-more-grid"
+        data-state="error"
+        className="flex min-w-0 flex-wrap items-center gap-3 text-sm text-muted-foreground"
+      >
+        <output>{t("d3Watch.more.loadFailed", { name: channelName })}</output>
+        <Button data-testid="watch-more-retry" size="sm" variant="outline" onClick={retry}>
+          {t("d3Watch.more.retry")}
+        </Button>
+      </div>
+    );
   if (status === "loading")
     return (
       <div data-testid="watch-more-grid" data-state="loading" className="min-w-0">
@@ -74,22 +103,24 @@ function MoreSection({
         </SkeletonGroup>
       </div>
     );
-  const shown = moreFrom(tiles, currentId, MORE_FROM_SIZE);
-  if (shown.length === 0) return null;
+  const { next, more } = nextShelves(tiles, currentId);
+  if (!next) return null;
   return (
-    <div
-      data-testid="watch-more-grid"
-      data-state="ready"
-      data-kind={kind}
-      data-count={shown.length}
-      className="min-w-0"
-    >
-      <MediaShelf
-        kind={kind === "vod" ? "vods" : "clips"}
-        tiles={shown}
-        heading={t("watch.more.heading", { name: channelName })}
-        channel={slug}
-      />
+    <div className="flex min-w-0 flex-col gap-8">
+      <Section data-testid="watch-up-next" data-kind={kind} data-id={next.id} heading={t("d3Watch.upNext.heading")}>
+        <VideoTileList tiles={[next]} />
+      </Section>
+      {more.length > 0 ? (
+        <div
+          data-testid="watch-more-grid"
+          data-state="ready"
+          data-kind={kind}
+          data-count={more.length}
+          className="min-w-0"
+        >
+          <MediaShelf kind={kind === "vod" ? "vods" : "clips"} tiles={more} heading={heading} channel={slug} />
+        </div>
+      ) : null}
     </div>
   );
 }

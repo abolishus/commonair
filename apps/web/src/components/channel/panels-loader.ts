@@ -25,6 +25,8 @@ export interface ChannelPage {
   /** Null when the list failed to load; the page asks again in the browser. */
   vods: MediaPage<VodItem> | null;
   clips: MediaPage<ClipItem> | null;
+  /** `Channel.createdAt` (D3.8, "Channel created … ago" in About). */
+  since?: string | null;
 }
 
 /**
@@ -51,5 +53,12 @@ export const getChannelPage = createServerFn({ method: "GET" })
       client.clips.list({ ...ref, limit: CHANNEL_MEDIA_PAGE, sort: "recent" }).catch(() => null),
     ]);
     if (!dto) return null;
-    return { summary: summarize(dto), extras: channelExtras(dto), about: channelAbout(dto), vods, clips };
+    return {
+      summary: summarize(dto),
+      extras: channelExtras(dto),
+      about: channelAbout(dto),
+      vods,
+      clips,
+      since: dto.createdAt,
+    };
   });

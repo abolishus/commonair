@@ -3,9 +3,9 @@
 
 /**
  * The channel's panels on `/$channel` (`channel-panels`, `channel-panel`;
- * docs/testing/b8-selectors.md). A panel's body is plain text: React escapes it and
- * `whitespace-pre-line` keeps its line breaks, so nothing in it is ever parsed as HTML or markdown
- * (the studio's paste-in preview shows it the same way). A link is a user-generated, off-site link:
+ * docs/testing/b8-selectors.md). A panel's body is a small, safe markdown subset (D3.8,
+ * `PanelMarkdown`): parsed to data and rendered as React elements, never as HTML, so raw HTML in it
+ * shows as text. A link, in the body or the panel's own, is a user-generated, off-site link:
  * `nofollow ugc`, opened in a new tab with an icon and a label that say so. An image sits in a fixed
  * 2:1 frame (the seed's panel art is 320 × 160) and loads lazily. No panels, no section.
  */
@@ -14,9 +14,10 @@ import { AspectRatio } from "@commonair/ui/components/aspect-ratio";
 import { Card, CardContent, CardHeader, CardTitle } from "@commonair/ui/components/card";
 import { LinkSquare02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { cn } from "@commonair/ui/lib/utils";
 import * as React from "react";
 import { t } from "../../i18n/index.ts";
-import type { ChannelPanelView } from "./panels-data.ts";
+import { parsePanelMarkdown, type ChannelPanelView, type MdInline } from "./panels-data.ts";
 
 /** `rel` of every panel link: the target is the streamer's choice, so it gets no referrer, opener or rank. */
 export const PANEL_LINK_REL = "noopener noreferrer nofollow ugc";
@@ -58,11 +59,7 @@ export function ChannelPanel({ panel: p, index }: { panel: ChannelPanelView; ind
       ) : null}
       {body !== "" || p.linkUrl ? (
         <CardContent className="flex min-w-0 flex-col gap-3">
-          {body !== "" ? (
-            <p data-testid="channel-panel-body" className="text-sm break-words whitespace-pre-line">
-              {body}
-            </p>
-          ) : null}
+          {body !== "" ? <PanelMarkdown data-testid="channel-panel-body" body={body} /> : null}
           {p.linkUrl ? (
             <div>
               <Button
@@ -88,6 +85,105 @@ export function ChannelPanel({ panel: p, index }: { panel: ChannelPanelView; ind
         </CardContent>
       ) : null}
     </Card>
+  );
+}
+
+function MdInlines({ nodes }: { nodes: readonly MdInline[] }): React.JSX.Element {
+  return (
+    <>
+      {nodes.map((n, i) => {
+        switch (n.type) {
+          case "text":
+            return <React.Fragment key={i}>{n.text}</React.Fragment>;
+          case "strong":
+            return (
+              <strong key={i} className="font-semibold">
+                <MdInlines nodes={n.children} />
+              </strong>
+            );
+          case "em":
+            return (
+              <em key={i}>
+                <MdInlines nodes={n.children} />
+              </em>
+            );
+          case "code":
+            return (
+              <code key={i} className="bg-muted px-1 font-mono text-[0.9em]">
+                {n.text}
+              </code>
+            );
+          case "link":
+            return (
+              <a
+                key={i}
+                data-testid="channel-panel-body-link"
+                href={n.href}
+                target="_blank"
+                rel={PANEL_LINK_REL}
+                className="break-all underline underline-offset-4 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              >
+                {n.text}
+                <span className="sr-only"> {t("d3Watch.panels.opensNewTab")}</span>
+              </a>
+            );
+        }
+      })}
+    </>
+  );
+}
+
+/**
+ * A panel body's markdown (D3.8), rendered from `parsePanelMarkdown`'s data as React elements: no
+ * HTML is ever parsed or injected, and every link is the streamer's, so it gets `PANEL_LINK_REL`.
+ */
+export function PanelMarkdown({
+  body,
+  className,
+  ...props
+}: {
+  body: string;
+  className?: string;
+  "data-testid"?: string;
+}): React.JSX.Element {
+  const blocks = React.useMemo(() => parsePanelMarkdown(body), [body]);
+  return (
+    <div className={cn("flex min-w-0 flex-col gap-2 text-sm break-words", className)} {...props}>
+      {blocks.map((b, i) => {
+        switch (b.type) {
+          case "p":
+            return (
+              <p key={i}>
+                {b.lines.map((line, j) => (
+                  <React.Fragment key={j}>
+                    {j > 0 ? <br /> : null}
+                    <MdInlines nodes={line} />
+                  </React.Fragment>
+                ))}
+              </p>
+            );
+          case "heading":
+            return (
+              <h3 key={i} className={cn("font-semibold", b.level === 1 ? "text-base" : "text-sm")}>
+                <MdInlines nodes={b.children} />
+              </h3>
+            );
+          case "ul":
+          case "ol": {
+            const List = b.type;
+            return (
+              <List key={i} className={cn("flex flex-col gap-1 ps-5", b.type === "ul" ? "list-disc" : "list-decimal")}>
+                {b.items.map((item, j) => (
+                  <li key={j}>
+                    <MdInlines nodes={item} />
+                  </li>
+                ))}
+              </List>
+            );
+          }
+        }
+      })}
+    </div>
   );
 }
 

@@ -9,7 +9,7 @@
  * or the list fails.
  */
 import { LocaleProvider, TooltipProvider } from "@commonair/ui";
-import { cleanup, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import type * as React from "react";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import type { ClipItem, MediaPage, VodItem } from "../src/components/channel/channel-data.ts";
@@ -139,7 +139,10 @@ describe("WatchMore", () => {
     expect(cards(grid).every((c) => c.getAttribute("data-kind") === "vods")).toBe(true);
     expect(grid.textContent).toContain(t("watch.more.heading", { name: "Rivertide" }));
     expect(byId(grid, "channel-shelf-view-all")?.getAttribute("href")).toBe("/rivertide?tab=videos");
-    expect(cards(grid)[0]?.querySelector("a")?.getAttribute("href")).toBe(`/rivertide/vods/${id(3)}`);
+    // D3.9: the newest is the newest other video, Up next; More from starts after it.
+    expect(byId(container, "watch-up-next")?.getAttribute("data-id")).toBe(id(3));
+    expect(shown).not.toContain(id(3));
+    expect(cards(grid)[0]?.querySelector("a")?.getAttribute("href")).toBe(`/rivertide/vods/${id(4)}`);
   });
 
   it("a clip page: clips, and View all to the Clips tab", async () => {
@@ -154,7 +157,9 @@ describe("WatchMore", () => {
     );
     await waitFor(() => expect(byId(container, "watch-more-grid")?.getAttribute("data-state")).toBe("ready"));
     const grid = byId(container, "watch-more-grid") as HTMLElement;
-    expect(cards(grid).map((c) => c.getAttribute("data-id"))).toEqual([id(1), id(3)]);
+    // D3.9: the clip cut right after this one is Up next; More from has the rest.
+    expect(byId(container, "watch-up-next")?.getAttribute("data-id")).toBe(id(1));
+    expect(cards(grid).map((c) => c.getAttribute("data-id"))).toEqual([id(3)]);
     expect(cards(grid).every((c) => c.getAttribute("data-kind") === "clips")).toBe(true);
     expect(byId(grid, "channel-shelf-view-all")?.getAttribute("href")).toBe("/rivertide?tab=clips");
   });
@@ -181,14 +186,35 @@ describe("WatchMore", () => {
     await waitFor(() => expect(byId(container, "watch-more-grid")).toBeNull());
   });
 
-  it("a failed list: the section is left out", async () => {
+  it("a failed list says so with Retry (D3.9: never a silent gap), and Retry asks again", async () => {
+    let fail = true;
     const fetchPage = vi.fn<() => Promise<MediaPage<VodItem>>>(async () => {
-      throw new Error("network");
+      if (fail) throw new Error("network");
+      return page([vodItem(1), vodItem(2)]);
     });
     const { container } = wrap(
       <WatchMore kind="vod" slug="rivertide" channelName="Rivertide" currentId={id(1)} fetchPage={fetchPage} />,
     );
-    await waitFor(() => expect(fetchPage).toHaveBeenCalled());
-    await waitFor(() => expect(byId(container, "watch-more-grid")).toBeNull());
+    await waitFor(() => expect(byId(container, "watch-more-grid")?.getAttribute("data-state")).toBe("error"));
+    expect(container.textContent).toContain(t("d3Watch.more.loadFailed", { name: "Rivertide" }));
+    fail = false;
+    fireEvent.click(byId(container, "watch-more-retry") as HTMLElement);
+    await waitFor(() => expect(byId(container, "watch-up-next")?.getAttribute("data-id")).toBe(id(2)));
+    expect(fetchPage).toHaveBeenCalledTimes(2);
+  });
+
+  it("one other item: Up next alone, no More from", async () => {
+    const { container } = wrap(
+      <WatchMore
+        kind="vod"
+        slug="rivertide"
+        channelName="Rivertide"
+        currentId={id(1)}
+        fetchPage={async () => page([vodItem(1), vodItem(2)])}
+      />,
+    );
+    await waitFor(() => expect(byId(container, "watch-up-next")).not.toBeNull());
+    expect(byId(container, "watch-more-grid")).toBeNull();
+    expect(cards(container).map((c) => c.getAttribute("data-id"))).toEqual([id(2)]);
   });
 });

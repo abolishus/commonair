@@ -88,3 +88,33 @@ export function seekToStart(
   if (!player || !origin) return "pending";
   return player.seekToWallclock(new Date(origin.getTime() + startSeconds * 1000)) ? "done" : "pending";
 }
+
+/**
+ * "Up next" (D3.9): the item recorded right after the current one (lists are newest first, so the
+ * one before it), else the newest other item. Null when the channel has nothing else.
+ */
+export function upNext(tiles: readonly VideoTile[], currentId: string): VideoTile | null {
+  const at = tiles.findIndex((tile) => tile.id === currentId);
+  if (at > 0) return tiles[at - 1] ?? null;
+  return tiles.find((tile) => tile.id !== currentId) ?? null;
+}
+
+/** "Watch from this moment": the clip's place in its video as the video page's `?t=` (whole seconds). */
+export function momentStart(vodOffsetSeconds: number | null): number | null {
+  if (vodOffsetSeconds === null || !Number.isFinite(vodOffsetSeconds)) return null;
+  const at = Math.floor(vodOffsetSeconds);
+  return at > 0 ? at : null;
+}
+
+/** The browser's share sheet (`navigator.share`), when it has one. */
+export type NativeShare = (data: { title: string; url: string }) => Promise<void>;
+
+export function browserShare(): NativeShare | null {
+  if (typeof navigator === "undefined" || typeof navigator.share !== "function") return null;
+  return (data) => navigator.share(data);
+}
+
+/** Whether a share-sheet failure is the viewer closing it (not worth a message). */
+export function shareCancelled(err: unknown): boolean {
+  return err instanceof Error && err.name === "AbortError";
+}

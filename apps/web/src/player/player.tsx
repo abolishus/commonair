@@ -7,6 +7,7 @@ import { cn } from "@commonair/ui/lib/utils";
 import { PauseIcon, PlayIcon } from "@hugeicons/core-free-icons";
 import * as React from "react";
 import type { LegalDoc } from "../components/legal-document-link.tsx";
+import { ClipButton } from "../components/watch/clip-button.tsx";
 import { t } from "../i18n/index.ts";
 import { api, apiKeepalive } from "../lib/api.ts";
 import {
@@ -69,6 +70,14 @@ export interface PlayerProps {
   className?: string;
   /** A failed `playback.start` (the channel page shows the 18+ gate for `mature_gate`). */
   onStartError?: (err: unknown) => void;
+  /**
+   * The viewer's Clip button in the bar (D3.7): the last 30 seconds. Left out without it, and
+   * never in the embed.
+   */
+  clip?: { signedIn: boolean; publicUrl?: string };
+  /** Over the picture's top corners (the embed's channel name and "Watch on"). */
+  topStart?: React.ReactNode;
+  topEnd?: React.ReactNode;
 }
 
 const RETRY_MS = 5_000;
@@ -99,6 +108,9 @@ export function Player({
   offline,
   className,
   onStartError,
+  clip,
+  topStart,
+  topEnd,
 }: PlayerProps): React.JSX.Element {
   const videoRef = React.useRef<HTMLVideoElement>(null);
   const containerRef = React.useRef<HTMLElement>(null);
@@ -330,6 +342,7 @@ export function Player({
   }, [dataModeOn]);
 
   const { hold } = bar;
+  const onClipOpen = React.useCallback((open: boolean) => hold("clip", open), [hold]);
   const onSettingsOpen = React.useCallback(
     (open: boolean) => {
       hold("settings", open);
@@ -491,6 +504,8 @@ export function Player({
         data-theatre={theatre ? "on" : "off"}
         variant={live ? "live" : "offline"}
         liveBadgeProps={{ "data-testid": "live-badge" }}
+        topStart={topStart}
+        topEnd={topEnd}
         stage={stage}
         scrubber={slot ? <DvrScrubber {...slot.dvr} /> : undefined}
         controlsVisible={bar.visible}
@@ -511,6 +526,14 @@ export function Player({
               {p2p.available && <P2PIndicator status={p2p} onOpen={() => setDialogOpen(true)} />}
               {slot && <CaptionsToggle controller={slot.controller} captions={features.captions} />}
               {slot && <DvrControls {...slot.dvr} />}
+              {live && !embed && clip ? (
+                <ClipButton
+                  target={{ kind: "live", channel }}
+                  signedIn={clip.signedIn}
+                  publicUrl={clip.publicUrl}
+                  onOpenChange={onClipOpen}
+                />
+              ) : null}
             </>
           ) : undefined
         }
