@@ -253,7 +253,9 @@ describe("the rendered step", () => {
         payoutClient={payoutClient({ ...MANUAL, instructions: null })}
       />,
     );
-    expect((await screen.findByTestId("setup-get-paid")).getAttribute("data-state")).toBe("waiting");
+    await waitFor(async () =>
+      expect((await screen.findByTestId("setup-get-paid")).getAttribute("data-state")).toBe("waiting"),
+    );
     expect(screen.getByText(t("d6Studio.getPaid.waiting"))).toBeTruthy();
     expect(screen.getByTestId("setup-step-get_paid-mark")).toBeTruthy();
   });
