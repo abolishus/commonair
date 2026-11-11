@@ -22,6 +22,7 @@ import { Link } from "@tanstack/react-router";
 import * as React from "react";
 import { t } from "../../i18n/index.ts";
 import { categoryLink, tagLink as tagRoute } from "../../lib/category-route.ts";
+import { AuthGateDialog } from "../auth-gate/auth-gate-prompt.tsx";
 import { reportClient, type ReportClient, type ReportSubject } from "../safety/client.ts";
 import { ReportForm } from "../safety/report-dialog.tsx";
 
@@ -108,7 +109,7 @@ export function ShareButton({
 
 /**
  * Phones only (`sm:hidden`): the "More" menu that holds Report, so Follow and Support keep their
- * room. Signed out, Report goes to sign-in, as the desktop button does.
+ * room. Signed out, Report opens the sign-in prompt, as the desktop button does.
  */
 export function ChannelOverflowMenu({
   signedIn,
@@ -150,17 +151,14 @@ export function ChannelOverflowMenu({
           }
         />
         <DropdownMenuContent align="end">
-          {signedIn ? (
-            <DropdownMenuItem data-testid="channel-overflow-report" onClick={() => setOpen(true)}>
-              {content}
-            </DropdownMenuItem>
-          ) : (
-            <DropdownMenuItem data-testid="channel-overflow-report" render={<Link to="/signin" />}>
-              {content}
-            </DropdownMenuItem>
-          )}
+          <DropdownMenuItem data-testid="channel-overflow-report" onClick={() => setOpen(true)}>
+            {content}
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      {/* Signed out, Report opens the sign-in prompt (`intent=report`) as a dialog: the menu item
+          it would anchor to is gone once the menu closes. */}
+      {signedIn ? null : <AuthGateDialog intent="report" open={open} onOpenChange={setOpen} finalFocus={trigger} />}
       {signedIn ? (
         <Dialog open={open} onOpenChange={setOpen}>
           {open && (

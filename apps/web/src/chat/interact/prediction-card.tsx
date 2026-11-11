@@ -7,6 +7,7 @@ import { Button } from "@commonair/ui/components/button";
 import { Input } from "@commonair/ui/components/input";
 import { Progress, ProgressLabel } from "@commonair/ui/components/progress";
 import * as React from "react";
+import { PredictionSignUpPrompt } from "../../components/auth-gate/chat-prompt.tsx";
 import { type MessageKey, t } from "../../i18n/index.ts";
 import { errorCode } from "../../lib/api.ts";
 import { errorReason, errorRequirement } from "../../lib/coop.ts";
@@ -318,7 +319,7 @@ export function ChatPredictionCard({
         settled && p.result ? (
           <PredictionResult prediction={p} name={name} fmt={fmt} />
         ) : !signedIn ? (
-          t("chatPrediction.signIn")
+          <PredictionSignUpPrompt />
         ) : !isStaff && points !== null && max < 1 && p.status === "active" && !p.myBet ? (
           t("chatPrediction.noPoints", { name })
         ) : undefined

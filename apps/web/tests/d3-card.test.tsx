@@ -103,8 +103,10 @@ describe("WatchChannelCard", () => {
     const watch = byId(root, "watch-live");
     expect(watch?.textContent).toContain(t("watch.card.watchLive"));
     expect(watch?.getAttribute("href")).toBe("/rivertide");
-    // Signed out, Follow goes to sign-in.
-    expect(byId(root, "follow-button")?.getAttribute("href")).toBe("/signin");
+    // Signed out, Follow opens the sign-up prompt (d2-gate), still the card's filled CTA.
+    const follow = byId(root, "follow-button");
+    expect(follow?.getAttribute("data-auth-gate")).toBe("follow");
+    expect(follow?.hasAttribute("data-filled-cta")).toBe(true);
   });
 
   it("live with a low verified count: Just started instead of the number", () => {

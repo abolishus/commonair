@@ -7,6 +7,8 @@
  * `?returnTo=` is the route guards' (an OAuth consent page). Both are same-origin paths only:
  * anything else is dropped, never followed. An open redirect is a bug.
  */
+import type { SignupIntent } from "@commonair/contracts/enums";
+import { channelSlugOf, signupIntentOf } from "../components/auth-gate/intents.ts";
 import { api } from "./api.ts";
 import { DEFAULT_LANDING } from "./auth.ts";
 import { safeReturnTo } from "./guard.ts";
@@ -36,10 +38,21 @@ export interface AuthSearch {
   token?: string;
   /** `INVALID_TOKEN` from the API's redirect when the reset link expired or was used. */
   error?: string;
+  /**
+   * Why the visitor came (README D2.2): a sign-up intent; `vote` arrives as `join` and `report` as
+   * nothing. The sign-up headline names it and the account records it (`users.signup_intent`).
+   */
+  intent?: SignupIntent;
+  /** The channel the action was on (a slug), for the headline and the confirm. */
+  channel?: string;
+  /** A name claimed elsewhere (`/creators`), pre-filled on sign-up. */
+  username?: string;
 }
 
 const TOKEN = /^[A-Za-z0-9_-]{8,256}$/;
 const ERROR = /^[A-Z_]{1,64}$/;
+/** Only what could be a username (sign-up still checks the rules and the reserved list). */
+const USERNAME = /^[A-Za-z0-9_]{1,25}$/;
 
 /** `validateSearch` for `/signin` and `/signup`: a bad value is dropped, not an error page. */
 export function authSearch(search: Record<string, unknown>): AuthSearch {
@@ -50,6 +63,12 @@ export function authSearch(search: Record<string, unknown>): AuthSearch {
   if (redirect !== undefined) out.redirect = redirect;
   if (typeof search.token === "string" && TOKEN.test(search.token)) out.token = search.token;
   if (typeof search.error === "string" && ERROR.test(search.error)) out.error = search.error;
+  const intent = signupIntentOf(search.intent);
+  if (intent !== undefined && intent !== "none") out.intent = intent;
+  const channel = channelSlugOf(search.channel);
+  if (channel !== undefined) out.channel = channel;
+  if (typeof search.username === "string" && USERNAME.test(search.username))
+    out.username = search.username.toLowerCase();
   return out;
 }
 
@@ -58,16 +77,20 @@ export function authTarget(search: Pick<AuthSearch, "returnTo" | "redirect">): s
   return safeRedirect(search.returnTo) ?? safeRedirect(search.redirect);
 }
 
-/** The search to carry between `/signin` and `/signup`, so switching forms keeps the target. */
-export function carriedSearch(search: Pick<AuthSearch, "returnTo" | "redirect">): {
-  returnTo?: string;
-  redirect?: string;
-} {
-  const out: { returnTo?: string; redirect?: string } = {};
+export type CarriedSearch = Pick<AuthSearch, "returnTo" | "redirect" | "intent" | "channel" | "username">;
+
+/** The search to carry between `/signin` and `/signup`, so switching forms keeps the target and intent. */
+export function carriedSearch(search: CarriedSearch): CarriedSearch {
+  const out: CarriedSearch = {};
   const returnTo = safeRedirect(search.returnTo);
   if (returnTo !== undefined) out.returnTo = returnTo;
   const redirect = safeRedirect(search.redirect);
   if (redirect !== undefined) out.redirect = redirect;
+  const intent = signupIntentOf(search.intent);
+  if (intent !== undefined && intent !== "none") out.intent = intent;
+  const channel = channelSlugOf(search.channel);
+  if (channel !== undefined) out.channel = channel;
+  if (typeof search.username === "string" && USERNAME.test(search.username)) out.username = search.username;
   return out;
 }
 
