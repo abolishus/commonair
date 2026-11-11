@@ -15,7 +15,7 @@ import { titleHead } from "../../lib/page-title.ts";
  * Moderators, admins and `legal`: the `_admin` layout's guard answered everyone else with not-found.
  * `?tab=<tab>&case=<id>` opens a tab and a case (or report) directly, as a jury flag links here
  * (docs/testing/b8-selectors.md); selecting rewrites them in place. `?assignee=me|unassigned`
- * (overhaul wave 4, D7.5) filters the cases and labels tabs by claim.
+ * (overhaul wave 4, D7.5) filters the cases tab by claim (labelled cases cannot be claimed).
  */
 export const Route = createFileRoute("/_admin/admin/moderation")({
   head: () => titleHead(t("safety.modq.title")),

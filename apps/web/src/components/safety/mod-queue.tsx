@@ -204,11 +204,8 @@ export function ModQueue({
     (cursor) => client.cases({ tier: "t1", status: "open", cursor, ...claimFilter }),
     moreFailed,
   );
-  const labels = usePaged(
-    `t2|${assignee ?? ""}`,
-    (cursor) => client.cases({ tier: "t2", status: "labelled", cursor, ...claimFilter }),
-    moreFailed,
-  );
+  // Labelled cases are decided: they cannot be claimed, so the claim filter never applies to them.
+  const labels = usePaged("t2", (cursor) => client.cases({ tier: "t2", status: "labelled", cursor }), moreFailed);
   // `legal` alone may not read reports: never ask.
   const reports = usePaged(
     canReports ? "reports" : "none",
@@ -426,16 +423,17 @@ export function ModQueue({
       shortcuts={shortcuts}
     />
   );
-  const caseTab = (paged: typeof cases, label: string) =>
+  // Only open cases can be claimed (planAssign), so the labels tab gets no selection, bulk bar or claim filter.
+  const caseTab = (paged: typeof cases, label: string, claimable: boolean) =>
     queue({
       listLabel: label,
-      filters: claimFilterBar,
+      filters: claimable ? claimFilterBar : undefined,
       count: resultsLine(
         paged,
-        true,
+        claimable,
         (paged.items ?? []).map((c) => c.id),
       ),
-      bulk: caseBulk,
+      bulk: claimable ? caseBulk : undefined,
       list: (
         <>
           {paged.failed && <FormError>{t("safety.modq.loadFailed")}</FormError>}
@@ -443,8 +441,8 @@ export function ModQueue({
             cases={paged.items ?? (paged.failed ? [] : null)}
             selectedId={selected?.kind === "case" ? selected.id : null}
             onSelect={(id) => setSelected({ kind: "case", id })}
-            checked={checked}
-            onCheck={check}
+            checked={claimable ? checked : undefined}
+            onCheck={claimable ? check : undefined}
             meId={me?.id ?? null}
           />
           {paged.hasMore && <LoadMore loading={paged.loadingMore} onClick={paged.loadMore} />}
@@ -458,14 +456,14 @@ export function ModQueue({
       label: t("safety.modq.tab.cases"),
       "data-testid": "modq-tab-cases",
       count: loadedLabel(cases),
-      content: caseTab(cases, t("safety.modq.tab.cases")),
+      content: caseTab(cases, t("safety.modq.tab.cases"), true),
     },
     {
       id: "labels",
       label: t("safety.modq.tab.labels"),
       "data-testid": "modq-tab-labels",
       count: loadedLabel(labels),
-      content: caseTab(labels, t("safety.modq.tab.labels")),
+      content: caseTab(labels, t("safety.modq.tab.labels"), false),
     },
     ...(canReports
       ? [

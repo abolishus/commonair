@@ -26,8 +26,19 @@ import {
 
 export const RESOLUTION_MAX = 5000;
 
-/** `/admin/appeals`: open appeals in a QueueLayout; a row opens the appeal beside the list to resolve it. */
-export function AppealQueue({ client: clientProp }: { client?: AppealQueueClient }): React.JSX.Element {
+/**
+ * `/admin/appeals`: open appeals in a QueueLayout; a row opens the appeal beside the list to resolve it.
+ * With `onOpenChange` the open appeal is controlled (the route keeps it in `?case=`).
+ */
+export function AppealQueue({
+  client: clientProp,
+  openId,
+  onOpenChange,
+}: {
+  client?: AppealQueueClient;
+  openId?: string | null;
+  onOpenChange?: (id: string | null) => void;
+}): React.JSX.Element {
   const [client] = React.useState(() => clientProp ?? appealQueueClient());
   const appeals = usePaged(
     "appeals",
@@ -39,18 +50,28 @@ export function AppealQueue({ client: clientProp }: { client?: AppealQueueClient
       {appeals.failed && <FormError>{t("safety.appealq.loadFailed")}</FormError>}
       <AppealQueueList
         appeals={appeals.items ?? (appeals.failed ? [] : null)}
+        hasMore={appeals.hasMore}
+        footer={
+          appeals.hasMore ? (
+            <div>
+              <Button
+                data-testid="appealq-load-more"
+                variant="ghost"
+                size="sm"
+                disabled={appeals.loadingMore}
+                onClick={appeals.loadMore}
+              >
+                {t("safety.modq.loadMore")}
+              </Button>
+            </div>
+          ) : null
+        }
+        {...(onOpenChange ? { openId: openId ?? null, onOpenChange } : {})}
         onResolve={async (appeal, status, resolution) => {
           await client.resolve({ id: appeal.id, status, resolution });
           appeals.reload();
         }}
       />
-      {appeals.hasMore && (
-        <div>
-          <Button variant="ghost" size="sm" disabled={appeals.loadingMore} onClick={appeals.loadMore}>
-            {t("safety.modq.loadMore")}
-          </Button>
-        </div>
-      )}
     </div>
   );
 }
@@ -72,11 +93,24 @@ const EMPTY_DRAFT: Draft = { status: "", resolution: "" };
 export function AppealQueueList({
   appeals,
   onResolve,
+  hasMore = false,
+  footer,
+  openId: openIdProp,
+  onOpenChange,
 }: {
   appeals: AppealDto[] | null;
   onResolve: (appeal: AppealDto, status: Decision, resolution: string) => Promise<void>;
+  /** More appeals exist past the loaded page: the count says "at least". */
+  hasMore?: boolean;
+  /** Rendered under the rows inside the list pane (Load more). */
+  footer?: React.ReactNode;
+  /** Controlled open appeal; without `onOpenChange` the list keeps it itself. */
+  openId?: string | null;
+  onOpenChange?: (id: string | null) => void;
 }): React.JSX.Element {
-  const [openId, setOpenId] = React.useState<string | null>(null);
+  const [ownOpenId, setOwnOpenId] = React.useState<string | null>(null);
+  const openId = onOpenChange ? (openIdProp ?? null) : ownOpenId;
+  const setOpenId = onOpenChange ?? setOwnOpenId;
   const [drafts, setDrafts] = React.useState<Readonly<Record<string, Draft>>>({});
   const detailId = React.useId();
   if (appeals === null)
@@ -92,19 +126,28 @@ export function AppealQueueList({
     <QueueLayout
       listLabel={t("safety.appealq.title")}
       detailLabel={t("d7Admin.queue.detail")}
-      count={<span>{t("d7Admin.queue.results", { count: appeals.length })}</span>}
+      count={
+        <span data-testid="appealq-count">
+          {hasMore
+            ? t("d7Admin.queue.resultsMore", { count: appeals.length })
+            : t("d7Admin.queue.results", { count: appeals.length })}
+        </span>
+      }
       list={
-        <ul className="flex flex-col gap-2" aria-label={t("safety.appealq.title")}>
-          {appeals.map((appeal) => (
-            <AppealRow
-              key={appeal.id}
-              appeal={appeal}
-              open={openId === appeal.id}
-              detailId={detailId}
-              onToggle={() => setOpenId(openId === appeal.id ? null : appeal.id)}
-            />
-          ))}
-        </ul>
+        <>
+          <ul className="flex flex-col gap-2" aria-label={t("safety.appealq.title")}>
+            {appeals.map((appeal) => (
+              <AppealRow
+                key={appeal.id}
+                appeal={appeal}
+                open={openId === appeal.id}
+                detailId={detailId}
+                onToggle={() => setOpenId(openId === appeal.id ? null : appeal.id)}
+              />
+            ))}
+          </ul>
+          {footer}
+        </>
       }
       detail={
         open ? (

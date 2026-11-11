@@ -27,8 +27,16 @@ import { auditActionLabel, CATALOGUED_ACTIONS, shortId } from "../src/components
 import { AdminHome, QueueTile } from "../src/components/admin/overview.tsx";
 import { UserStanding } from "../src/components/admin/user-view.tsx";
 import { adminPageFor, isStaff, mayOpenAdminPage } from "../src/components/safety/access.ts";
-import type { ModerationCaseDetailDto, ModerationCaseDto, ModerationClient } from "../src/components/safety/client.ts";
+import { AppealQueue, AppealQueueList } from "../src/components/safety/appeal-queue.tsx";
+import type {
+  AppealDto,
+  AppealQueueClient,
+  ModerationCaseDetailDto,
+  ModerationCaseDto,
+  ModerationClient,
+} from "../src/components/safety/client.ts";
 import { forEachSelected, ModQueue } from "../src/components/safety/mod-queue.tsx";
+import { parseAppealsSearch } from "../src/routes/_admin/admin.appeals.tsx";
 import { locale, t, uiMessages } from "../src/i18n/index.ts";
 
 afterEach(() => {
@@ -511,5 +519,78 @@ describe("claiming and bulk actions on the mod queue", () => {
     );
     await screen.findByTestId("modq-claim");
     expect(screen.queryByTestId("modq-claim-me")).toBeNull();
+  });
+
+  it("labelled cases are decided: the labels tab has no selection, bulk assign or claim filter", async () => {
+    const cases = vi.fn<ModerationClient["cases"]>(async ({ tier }) => ({
+      items: tier === "t2" ? [{ ...summary(ID(12)), tier: "t2", status: "labelled" } as ModerationCaseDto] : [],
+      nextCursor: null,
+    }));
+    wrap(
+      <ModQueue
+        canReports
+        client={modClient({ cases })}
+        me={{ id: ID(1), role: "moderator" }}
+        location={{ tab: "labels", case: null, assignee: "me" }}
+        onLocationChange={() => {}}
+      />,
+    );
+    await screen.findAllByTestId("modq-item");
+    expect(screen.queryByTestId("modq-item-check")).toBeNull();
+    expect(screen.queryByTestId("modq-select-all")).toBeNull();
+    expect(screen.queryByTestId("modq-bulk-assign")).toBeNull();
+    expect(screen.queryByTestId("modq-filter-assignee")).toBeNull();
+    // The claim filter never reaches the labels query, so it cannot hide every row.
+    expect(cases).toHaveBeenCalledWith(expect.not.objectContaining({ assignee: "me" }));
+    expect(cases).toHaveBeenCalledWith(expect.objectContaining({ tier: "t2", status: "labelled" }));
+  });
+});
+
+const appeal = (n: number): AppealDto => ({
+  id: ID(n),
+  kind: "account",
+  subjectType: "account_action",
+  subjectId: ID(90),
+  exclusionCategory: null,
+  body: `Appeal ${n}`,
+  status: "open",
+  resolution: null,
+  createdAt: "2026-10-23T12:00:00.000Z",
+  resolvedAt: null,
+});
+
+describe("the appeals queue", () => {
+  it("?case= keeps only a well-formed id", () => {
+    expect(parseAppealsSearch({ case: ID(40).toUpperCase() })).toEqual({ case: ID(40) });
+    expect(parseAppealsSearch({ case: "nope" })).toEqual({});
+    expect(parseAppealsSearch({})).toEqual({});
+  });
+
+  it("the open appeal is controlled by the route: it opens from the id and reports clicks", () => {
+    const onOpenChange = vi.fn<(id: string | null) => void>();
+    wrap(
+      <AppealQueueList
+        appeals={[appeal(40), appeal(41)]}
+        openId={ID(41)}
+        onOpenChange={onOpenChange}
+        onResolve={vi.fn<(a: AppealDto, s: "upheld" | "overturned", r: string) => Promise<void>>()}
+      />,
+    );
+    expect(screen.getByTestId("appealq-detail").getAttribute("data-appeal-id")).toBe(ID(41));
+    fireEvent.click(screen.getAllByTestId("appealq-item-toggle")[0] as HTMLElement);
+    expect(onOpenChange).toHaveBeenCalledWith(ID(40));
+    fireEvent.click(screen.getAllByTestId("appealq-item-toggle")[1] as HTMLElement);
+    expect(onOpenChange).toHaveBeenCalledWith(null);
+  });
+
+  it("a partial first page says so, and Load more sits in the list", async () => {
+    const client: AppealQueueClient = {
+      queue: vi.fn<AppealQueueClient["queue"]>(async () => ({ items: [appeal(40)], nextCursor: "next" })),
+      resolve: vi.fn<AppealQueueClient["resolve"]>(),
+    };
+    wrap(<AppealQueue client={client} />);
+    const countLine = await screen.findByTestId("appealq-count");
+    expect(countLine.textContent).toBe(t("d7Admin.queue.resultsMore", { count: 1 }));
+    expect(screen.getByTestId("appealq-load-more")).toBeTruthy();
   });
 });

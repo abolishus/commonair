@@ -113,7 +113,7 @@ export function AuditSubject({
       );
     case "appeal":
       return (
-        <Link {...linkProps} to="/admin/appeals">
+        <Link {...linkProps} to="/admin/appeals" search={{ case: id }}>
           {label}
         </Link>
       );
