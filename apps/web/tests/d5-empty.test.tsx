@@ -133,7 +133,7 @@ describe("the empties newbie sees (rendered)", () => {
             vods: "VODs",
             clips: "Clips",
             vodsEmptyTitle: t("content.vodsEmpty"),
-            vodsEmptyDescription: t("content.vodsEmptyHint"),
+            vodsEmptyDescription: t("d5Content.vodsEmptyBody"),
             clipsEmptyTitle: t("content.clipsEmpty"),
             clipsEmptyDescription: t("content.clipsEmptyHint"),
           } as React.ComponentProps<typeof ContentBoard>["labels"]
