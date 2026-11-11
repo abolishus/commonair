@@ -35,6 +35,13 @@ export interface ChannelHeaderProps extends React.ComponentProps<"section"> {
   followers?: React.ReactNode;
   /** Shown beside the viewer count: DVR viewers, who are not live viewers (ADR 0016 decision 6). */
   catchingUp?: React.ReactNode;
+  /** Right after the viewer count, e.g. "Verified viewers · How we count" (overhaul D4.7). */
+  viewerCountNote?: React.ReactNode;
+  /**
+   * The watch page's phone and tablet row (overhaul D4.1): below `lg` the stream title is left out
+   * (the page shows it in its About panel), so the row stays compact under the sticky player.
+   */
+  compactBelowLg?: boolean;
   lastLive?: React.ReactNode;
   variant?: "live" | "offline" | "vod" | "compact";
   meta?: React.ReactNode;
@@ -60,6 +67,8 @@ export function ChannelHeader({
   viewerCount,
   followers,
   catchingUp,
+  viewerCountNote,
+  compactBelowLg = false,
   lastLive,
   variant = live ? "live" : "offline",
   meta,
@@ -88,7 +97,14 @@ export function ChannelHeader({
           {badges}
           {variant === "offline" && offlineLabel && <StatusBadge tone="neutral">{offlineLabel}</StatusBadge>}
         </div>
-        {title && <p className="line-clamp-2 text-sm break-words text-muted-foreground">{title}</p>}
+        {title && (
+          <p
+            data-slot="channel-header-title"
+            className={cn("line-clamp-2 text-sm break-words text-muted-foreground", compactBelowLg && "max-lg:hidden")}
+          >
+            {title}
+          </p>
+        )}
         {(category || tags.length > 0) && (
           <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
             {category}
@@ -106,9 +122,10 @@ export function ChannelHeader({
           </div>
         )}
         {meta && <div className="text-xs text-muted-foreground">{meta}</div>}
-        {(viewerCount !== undefined || catchingUp || uptime || followers || lastLive) && (
+        {(viewerCount !== undefined || viewerCountNote || catchingUp || uptime || followers || lastLive) && (
           <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
             {viewerCount !== undefined && <ViewerCount count={viewerCount} />}
+            {viewerCountNote}
             {catchingUp}
             {uptime}
             {followers}

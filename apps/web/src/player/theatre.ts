@@ -25,10 +25,11 @@ export function useTheatre(): Theatre {
 }
 
 /**
- * Below Tailwind's `md` (48rem) the theatre button is hidden, so the `t` key and the `?` dialog
- * must not offer theatre there either: there would be no visible way back out.
+ * Below Tailwind's `lg` (64rem) the watch page is the phone and tablet layout (overhaul D4.1: a
+ * sticky player over Chat | About), so there is no theatre: the button is hidden, and the `t` key
+ * and the `?` dialog must not offer it either (there would be no visible way back out).
  */
-export const THEATRE_NARROW_QUERY = "(max-width: 47.99rem)";
+export const THEATRE_NARROW_QUERY = "(max-width: 63.99rem)";
 
 function narrowQuery(): MediaQueryList | null {
   try {
@@ -51,7 +52,7 @@ const serverWide = () => false;
 
 /**
  * Whether theatre mode is on offer here: a provider is mounted (the page lays out from it) and the
- * viewport is at least `md`. The player hides its button and ignores `t` otherwise.
+ * viewport is at least `lg`. The player hides its button and ignores `t` otherwise.
  */
 export function useTheatreAvailable(): boolean {
   const provided = React.useContext(TheatreContext) !== OFF;

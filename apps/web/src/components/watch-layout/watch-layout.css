@@ -1,0 +1,46 @@
+/*
+ * SPDX-FileCopyrightText: 2026 CommonAir contributors
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * The channel page's phone and tablet layout, below `lg` (overhaul D4.1; mockup
+ * product/channel-live-mobile.html). The page marks itself `data-watch-layout` and says which panel
+ * the "Chat | About" switch shows (`data-watch-panel`):
+ *
+ * - The site header scrolls away (the shell keeps it sticky everywhere else) and the player
+ *   (`data-watch-slot="stage"`) sticks to the top instead. The bottom tab bar is already off on
+ *   watch pages (`lib/nav.ts` `tabBarVisible`: shell area "watch").
+ * - With Chat showing, the page is exactly the viewport less the 3.5rem header, and the chat
+ *   column (`chat-column-fill`) takes what the player, the compact row and the switch leave, so
+ *   the message box sits on the viewport's bottom edge. The footer is left out there; About keeps it.
+ *
+ * Route-level by `:has()`: the shell (`AppShell`) needs no flag of its own.
+ */
+@media (max-width: 63.99rem) {
+  body:has([data-watch-layout]) [data-slot="app-shell-header"] {
+    position: relative;
+  }
+
+  body:has([data-watch-layout][data-watch-panel="chat"]) [data-slot="site-footer"] {
+    display: none;
+  }
+
+  [data-watch-layout] [data-watch-slot="stage"] {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+
+  [data-watch-layout][data-watch-panel="chat"] {
+    min-height: calc(100dvh - 3.5rem);
+  }
+
+  [data-watch-layout][data-watch-panel="chat"] > [data-watch-slot="columns"] {
+    flex: 1 1 auto;
+  }
+
+  [data-watch-layout][data-watch-panel="chat"] [data-watch-slot="chat"] {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+  }
+}

@@ -187,16 +187,16 @@ describe("ChannelHeader at narrow widths (F4)", () => {
 });
 
 describe("Report on phones (F4)", () => {
-  it("a visitor gets the Report button for wide screens and a More menu for phones", async () => {
+  it("a visitor gets Share and Report from lg and a More menu below it (D4.1)", async () => {
     renderPage(page());
     const report = await screen.findByTestId("report-open");
     expect(classes(report.parentElement).has("hidden")).toBe(true);
-    expect(classes(report.parentElement).has("sm:contents")).toBe(true);
+    expect(classes(report.parentElement).has("lg:contents")).toBe(true);
     const more = screen.getByTestId("channel-overflow");
     expect(more.getAttribute("aria-label")).toBe("More actions");
-    expect(classes(more).has("sm:hidden")).toBe(true);
-    // Share is always there, and the name is the page's heading.
-    expect(screen.getByTestId("channel-share")).toBeTruthy();
+    expect(classes(more).has("lg:hidden")).toBe(true);
+    // Share sits beside Report from lg, and in the menu below it; the name is the page's heading.
+    expect(screen.getByTestId("channel-share").parentElement).toBe(report.parentElement);
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(LONG_NAME);
   });
 

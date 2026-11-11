@@ -80,7 +80,6 @@ beforeEach(() => {
   captionsPressed.count = 0;
   window.localStorage.clear();
   window.sessionStorage.clear();
-  window.sessionStorage.setItem("commonair:player-settings-hint", "seen");
   resetTheatreForTests();
   const data = new Map<string, string>([["commonair:p2p-notice", "seen"]]);
   setP2PStorage(() => ({
@@ -270,9 +269,9 @@ describe("the live player's shortcuts", () => {
     expect(screen.getByTestId("player").getAttribute("data-theatre")).toBe("off");
   });
 
-  it("below md there is no theatre button, so t does nothing and the dialog leaves it out", async () => {
+  it("below lg there is no theatre button, so t does nothing and the dialog leaves it out", async () => {
     window.matchMedia = ((q: string) => ({
-      matches: q === "(pointer: fine)" || q === "(max-width: 47.99rem)",
+      matches: q === "(pointer: fine)" || q === "(max-width: 63.99rem)",
     })) as typeof window.matchMedia;
     await playing(
       <TheatreProvider>

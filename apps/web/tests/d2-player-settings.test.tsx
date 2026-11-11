@@ -14,7 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 import type { PlayerControllerOptions, QualityLevel } from "../src/player/controller.ts";
 import { locale, uiMessages } from "../src/i18n/index.ts";
 import { DATA_MODE_STORAGE_KEY } from "../src/player/budget.ts";
-import { SETTINGS_HINT_KEY, qualityLabel, resetSettingsHintForTests } from "../src/player/controls.tsx";
+import { qualityLabel } from "../src/player/controls.tsx";
 import { setP2PStorage } from "../src/player/p2p/preference.ts";
 
 const LEVELS: QualityLevel[] = [
@@ -71,7 +71,6 @@ beforeEach(() => {
   FakeController.instances = [];
   window.localStorage.clear();
   window.sessionStorage.clear();
-  resetSettingsHintForTests();
   const data = new Map<string, string>([["commonair:p2p-notice", "seen"]]);
   setP2PStorage(() => ({
     getItem: (k: string) => data.get(k) ?? null,
@@ -232,86 +231,17 @@ describe("the data saver chip", () => {
   });
 });
 
-describe("the one-time hint", () => {
-  it("appears on the gear once playing, not before; Got it dismisses it for the tab", async () => {
-    wrap(<Player channel="rivertide" live />);
-    await waitFor(() => expect(FakeController.instances).toHaveLength(1));
-    expect(screen.queryByTestId("player-settings-hint")).toBeNull();
-    act(() => last().opts.onState("playing"));
-    const hint = await screen.findByTestId("player-settings-hint");
-    expect(hint.textContent).toContain("Quality and Data saver moved");
-    // It never takes focus from the viewer.
-    expect(hint.contains(document.activeElement)).toBe(false);
-    fireEvent.click(within(hint).getByRole("button", { name: "Got it" }));
-    await waitFor(() => expect(screen.queryByTestId("player-settings-hint")).toBeNull());
-    expect(window.sessionStorage.getItem(SETTINGS_HINT_KEY)).toBe("seen");
-    cleanup();
-    FakeController.instances = [];
-    await playing();
-    expect(screen.queryByTestId("player-settings-hint")).toBeNull();
-  });
-
-  it("holds the bar while it is on screen, so the gear it points at stays; a tap on it keeps the bar", async () => {
-    wrap(<Player channel="rivertide" live />);
-    await waitFor(() => expect(FakeController.instances).toHaveLength(1));
-    vi.useFakeTimers();
-    try {
-      act(() => last().opts.onState("playing"));
-      const hint = screen.getByTestId("player-settings-hint");
-      const shown = () => screen.getByTestId("player-controls").getAttribute("data-visible");
-      act(() => void vi.advanceTimersByTime(3_000));
-      expect(shown()).toBe("true");
-      const gotIt = within(hint).getByRole("button", { name: "Got it" });
-      fireEvent.pointerDown(gotIt, { pointerType: "touch" });
-      expect(shown()).toBe("true");
-      fireEvent.click(gotIt);
-      expect(screen.queryByTestId("player-settings-hint")).toBeNull();
-      // Released: the bar hides again after the usual inactivity.
-      act(() => void vi.advanceTimersByTime(3_000));
-      expect(shown()).toBe("false");
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("opening the menu dismisses it too", async () => {
-    await playing();
-    await screen.findByTestId("player-settings-hint");
-    openMenu();
-    await waitFor(() => expect(screen.queryByTestId("player-settings-hint")).toBeNull());
-    expect(window.sessionStorage.getItem(SETTINGS_HINT_KEY)).toBe("seen");
-  });
-
-  it("says why when the browser asked to save data", async () => {
+describe("no settings hint (overhaul D4.2)", () => {
+  it("nothing covers the player once playing, even when the browser asked to save data", async () => {
     Object.defineProperty(navigator, "connection", { configurable: true, value: { saveData: true } });
     try {
       await playing();
-      expect((await screen.findByTestId("player-settings-hint")).textContent).toContain(
-        "Your browser asked to save data",
-      );
+      expect(screen.queryByTestId("player-settings-hint")).toBeNull();
+      expect(document.querySelector('[data-slot="player-hint"]')).toBeNull();
+      expect(document.body.textContent).not.toContain("Quality and Data saver moved");
+      expect(window.sessionStorage.getItem("commonair:player-settings-hint")).toBeNull();
     } finally {
       Reflect.deleteProperty(navigator, "connection");
-    }
-  });
-
-  it("embeds get no hint; blocked storage still dismisses it for the page", async () => {
-    await playing(<Player channel="rivertide" live embed />);
-    expect(screen.queryByTestId("player-settings-hint")).toBeNull();
-    cleanup();
-    FakeController.instances = [];
-    const spy = vi.spyOn(window, "sessionStorage", "get").mockImplementation(() => {
-      throw new Error("SecurityError");
-    });
-    try {
-      await playing();
-      const hint = await screen.findByTestId("player-settings-hint");
-      fireEvent.click(within(hint).getByRole("button", { name: "Got it" }));
-      cleanup();
-      FakeController.instances = [];
-      await playing();
-      expect(screen.queryByTestId("player-settings-hint")).toBeNull();
-    } finally {
-      spy.mockRestore();
     }
   });
 });

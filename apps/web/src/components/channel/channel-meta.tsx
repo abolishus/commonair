@@ -4,7 +4,8 @@
 /**
  * The live metadata under the title (F9, F12): the category as a link into the directory, tags as
  * links, uptime from the broadcast's `startedAt`, Share (copies the canonical URL, confirms with a
- * toast), "Just started" for a low verified count, and the phone overflow menu that holds Report.
+ * toast), "Just started" for a low verified count, and the phone and tablet overflow menu that
+ * holds Share and Report below `lg` (overhaul D4.1).
  * Category and tag URLs come from `lib/category-route.ts` (D1-web's), never written here.
  */
 import { IconButton, RelativeTime, StatusBadge } from "@commonair/ui";
@@ -77,6 +78,17 @@ export interface Clipboard {
 const browserClipboard = (): Clipboard | null =>
   typeof navigator !== "undefined" && navigator.clipboard ? navigator.clipboard : null;
 
+/** Copies `url` and confirms with a toast (or says it could not). */
+export async function shareUrl(url: string, clipboard: Clipboard | null): Promise<void> {
+  try {
+    if (!clipboard) throw new Error("no clipboard");
+    await clipboard.writeText(url);
+    toast.success(t("channel.meta.shareCopied"));
+  } catch {
+    toast.error(t("channel.meta.shareFailed"));
+  }
+}
+
 /** Copies the channel's canonical URL and confirms with a toast (or says it could not). */
 export function ShareButton({
   url,
@@ -85,15 +97,7 @@ export function ShareButton({
   url: string;
   clipboard?: Clipboard | null;
 }): React.JSX.Element {
-  const share = async () => {
-    try {
-      if (!clipboard) throw new Error("no clipboard");
-      await clipboard.writeText(url);
-      toast.success(t("channel.meta.shareCopied"));
-    } catch {
-      toast.error(t("channel.meta.shareFailed"));
-    }
-  };
+  const share = () => shareUrl(url, clipboard);
   return (
     <IconButton
       data-testid="channel-share"
@@ -108,8 +112,9 @@ export function ShareButton({
 }
 
 /**
- * Phones only (`sm:hidden`): the "More" menu that holds Report, so Follow and Support keep their
- * room. Signed out, Report opens the sign-in prompt, as the desktop button does.
+ * Below `lg` (the page passes `lg:hidden`): the "More" menu that holds Share (when `shareUrl` is
+ * given) and Report, so the compact row keeps its room for Follow and Support. Signed out, Report
+ * opens the sign-in prompt, as the desktop button does.
  */
 export function ChannelOverflowMenu({
   signedIn,
@@ -117,12 +122,17 @@ export function ChannelOverflowMenu({
   subjectId,
   client,
   className,
+  shareUrl: url,
+  clipboard = browserClipboard(),
 }: {
   signedIn: boolean;
   subjectType: ReportSubject;
   subjectId: string;
   client?: ReportClient;
   className?: string;
+  /** The channel's canonical URL: adds Share to the menu. */
+  shareUrl?: string;
+  clipboard?: Clipboard | null;
 }): React.JSX.Element {
   const [open, setOpen] = React.useState(false);
   const [reports] = React.useState(() => client ?? reportClient());
@@ -151,6 +161,16 @@ export function ChannelOverflowMenu({
           }
         />
         <DropdownMenuContent align="end">
+          {url === undefined ? null : (
+            <DropdownMenuItem
+              data-testid="channel-overflow-share"
+              data-url={url}
+              onClick={() => void shareUrl(url, clipboard)}
+            >
+              <HugeiconsIcon icon={Share08Icon} strokeWidth={2} aria-hidden />
+              {t("channel.meta.share")}
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem data-testid="channel-overflow-report" onClick={() => setOpen(true)}>
             {content}
           </DropdownMenuItem>

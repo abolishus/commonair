@@ -374,6 +374,31 @@ export const FU_CHANNEL_IDS = {
   clipsFilteredEmpty: "clips-filtered-empty",
 } as const;
 
+/**
+ * Overhaul wave 3, d4-layout, on the channel page. Below `lg` the page is a sticky player over the
+ * "Chat | About" switch (`watchPanelSwitch`, `data-panel`; the page root carries
+ * `data-watch-panel`); Share and Report move into `channel-overflow` (`overflowShare`). Exactly
+ * one `follow-button` at every width: offline on Home it is inside the Follow hero. The owner gets
+ * the two shortcuts, a non-owner moderator `modView`. `trustBadge` (offline header) and
+ * `aboutTrust` carry `data-kind` council|member. `verifiedViewers` (from `lg`) and
+ * `verifiedViewersMobile` (About panel) link "How we count".
+ */
+export const D4_LAYOUT_IDS = {
+  watchPanelSwitch: "watch-panel-switch",
+  watchPanelChat: "watch-panel-chat",
+  watchPanelAbout: "watch-panel-about",
+  watchAboutIntro: "watch-about-intro",
+  overflowShare: "channel-overflow-share",
+  ownerStreamManager: "channel-owner-stream-manager",
+  ownerEdit: "channel-owner-edit",
+  modView: "channel-mod-view",
+  trustBadge: "channel-trust-badge",
+  aboutTrust: "channel-about-trust",
+  verifiedViewers: "channel-verified-viewers",
+  verifiedViewersMobile: "channel-verified-viewers-mobile",
+  offlineFollowHero: "channel-offline-follow-hero",
+} as const;
+
 /** The follow-up ids on a category page: the header's verified viewers and tags, and the media tabs. */
 export const FU_CATEGORY_IDS = {
   categoryViewerCount: "category-viewer-count",

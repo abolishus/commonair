@@ -51,20 +51,28 @@ import {
 } from "../../components/channel/video-grid.tsx";
 import { FollowButton, FollowerCount, useFollow } from "../../components/channel-follow.tsx";
 import { CheckoutReturn } from "../../components/money/checkout-return.tsx";
-import { FollowGrantToggle } from "../../components/portability/grants.tsx";
 import { MovedNotice } from "../../components/portability/moved-notice.tsx";
 import { SupportButton } from "../../components/support/support-dialog.tsx";
 import { isMatureGate, maturityClient } from "../../components/safety/client.ts";
 import { MatureGate, RestrictedStream, useViewerMaturity } from "../../components/safety/mature-gate.tsx";
 import { playerStage } from "../../components/safety/stage.ts";
 import { ReportButton } from "../../components/safety/report-dialog.tsx";
+import {
+  ModViewButton,
+  OwnerShortcuts,
+  TrustBadge,
+  useModerates,
+  useWatchPanel,
+  VerifiedViewers,
+  WatchPanelSwitch,
+} from "../../components/watch-layout/watch-layout.tsx";
 import { t } from "../../i18n/index.ts";
 import { useBootstrap } from "../../lib/bootstrap.ts";
 import { titleHead } from "../../lib/page-title.ts";
 import { seoHead, siteFromMatches, withSeo } from "../../lib/seo.ts";
 import { useChannel } from "../../lib/use-channel.ts";
 import { Player } from "../../player/player.tsx";
-import { TheatreProvider, useTheatre, useTheatreChat } from "../../player/theatre.ts";
+import { TheatreProvider, useTheatre, useTheatreAvailable, useTheatreChat } from "../../player/theatre.ts";
 
 export const Route = createFileRoute("/_app/$channel")({
   // `?tab=videos|clips|about` (F2): each tab is a link and Back steps through them. Clips adds
@@ -155,6 +163,7 @@ function ChannelView({
   const restricted = channel.live?.restricted === "under_review";
   const [client] = React.useState(maturityClient);
   const { theatre } = useTheatre();
+  const theatreAvailable = useTheatreAvailable();
   const { chatHidden } = useTheatreChat();
   const vods = useChannelVods(channel.slug, page.vods);
   // Live -> offline: the loaded list predates the broadcast that just ended (it was still recording,
@@ -234,17 +243,41 @@ function ChannelView({
     );
 
   const justStarted = live && channel.live !== null && showsJustStarted(channel.live.viewerCount);
+  const theatreLayout = theatre && live && theatreAvailable;
+  // D4.1: below `lg` the page is a sticky player over "Chat | About" (CSS; desktop shows both).
+  const [panel, setPanel] = useWatchPanel(live, tab);
+  // Exactly one `follow-button` on the page: offline, the Follow hero holds it while Home shows
+  // (mockup channel-offline.html); everywhere else the header row does.
+  const heroFollow = offlineHome && tab === "home" && panel === "about";
+  const moderates = useModerates(channel.slug, signedIn && !own);
+  const subjectType = channel.live ? "broadcast" : "channel";
+  const subjectId = channel.live ? channel.live.id : channel.id;
+  const shareLink = channelUrl(config.publicUrl, channel.slug);
   const header = (
     <ChannelHeader
       name={channel.displayName}
       avatarUrl={channel.avatarUrl}
       accent={channel.accent}
       live={live}
+      compactBelowLg
       title={channel.live?.title || channel.title}
       offlineLabel={live ? undefined : t("channel.offline.label")}
-      badges={justStarted ? <JustStartedBadge /> : undefined}
+      badges={
+        justStarted ? (
+          <JustStartedBadge />
+        ) : live ? undefined : (
+          // D4.7: the trust mark sits in the header on the offline page only (About has its own).
+          <TrustBadge data-testid="channel-trust-badge" coop={page.ownerCoop} name={channel.displayName} />
+        )
+      }
       // F12: below the threshold the count is replaced by "Just started", never padded.
       viewerCount={live && !justStarted ? channel.live?.viewerCount : undefined}
+      viewerCountNote={
+        live && !justStarted ? (
+          // Below `lg` the note moves into the About panel, so the compact row stays one line.
+          <VerifiedViewers data-testid="channel-verified-viewers" className="max-lg:hidden" />
+        ) : undefined
+      }
       category={live && channel.category ? <CategoryLink category={channel.category} /> : undefined}
       tags={channel.tags}
       tagsLabel={t("channel.meta.tags")}
@@ -273,39 +306,38 @@ function ChannelView({
           </span>
         ) : undefined
       }
+      className={theatreLayout ? undefined : "px-4 py-2 lg:p-0"}
       actions={
-        <>
-          {own ? null : (
-            <>
-              <FollowButton signedIn={signedIn} state={follow.state} onToggle={follow.toggle} />
-              <SupportButton
-                channel={channel.slug}
-                channelName={channel.displayName}
-                accent={channel.accent}
-                signedIn={signedIn}
-              />
-            </>
-          )}
-          <ShareButton url={channelUrl(config.publicUrl, channel.slug)} />
-          {own ? null : (
-            <>
-              {/* F4: on phones Report moves into the "More" menu so Follow and Support keep their room. */}
-              <span className="hidden sm:contents">
-                <ReportButton
-                  signedIn={signedIn}
-                  subjectType={channel.live ? "broadcast" : "channel"}
-                  subjectId={channel.live ? channel.live.id : channel.id}
-                />
-              </span>
-              <ChannelOverflowMenu
-                className="sm:hidden"
-                signedIn={signedIn}
-                subjectType={channel.live ? "broadcast" : "channel"}
-                subjectId={channel.live ? channel.live.id : channel.id}
-              />
-            </>
-          )}
-        </>
+        own ? (
+          <>
+            {/* D4.6: the owner's shortcuts; never shown to anyone else. */}
+            <OwnerShortcuts />
+            <ShareButton url={shareLink} />
+          </>
+        ) : (
+          <>
+            {heroFollow ? null : <FollowButton signedIn={signedIn} state={follow.state} onToggle={follow.toggle} />}
+            <SupportButton
+              channel={channel.slug}
+              channelName={channel.displayName}
+              accent={channel.accent}
+              signedIn={signedIn}
+            />
+            {moderates ? <ModViewButton channel={channel.slug} /> : null}
+            {/* F4, D4.1: below `lg` Share and Report move into the "More" menu so the row keeps its room. */}
+            <span className="hidden lg:contents">
+              <ShareButton url={shareLink} />
+              <ReportButton signedIn={signedIn} subjectType={subjectType} subjectId={subjectId} />
+            </span>
+            <ChannelOverflowMenu
+              className="lg:hidden"
+              signedIn={signedIn}
+              subjectType={subjectType}
+              subjectId={subjectId}
+              shareUrl={shareLink}
+            />
+          </>
+        )
       }
     />
   );
@@ -327,6 +359,7 @@ function ChannelView({
       panels={panels}
       banner={withBanner ? banner : null}
       since={page.since}
+      coop={page.ownerCoop}
     />
   );
   // Live, the player and chat stay above the tabs on every tab, so switching never restarts the stream.
@@ -356,7 +389,7 @@ function ChannelView({
       lastLiveAt={channel.lastLiveAt}
       videos={videoTiles}
       clips={clipTileList}
-      follow={<FollowButton signedIn={signedIn} state={follow.state} onToggle={follow.toggle} />}
+      follow={heroFollow ? <FollowButton signedIn={signedIn} state={follow.state} onToggle={follow.toggle} /> : null}
       own={own}
       about={aboutSection(false)}
       publicUrl={config.publicUrl}
@@ -402,16 +435,6 @@ function ChannelView({
       }}
     />
   );
-  const grant =
-    !own && follow.state.following === true && typeof channel.portabilityGrant === "boolean" ? (
-      // Remounted when the polled grant changes, so the switch never shows a stale value.
-      <FollowGrantToggle
-        key={`${channel.slug}:${String(channel.portabilityGrant)}`}
-        channel={channel.slug}
-        displayName={channel.displayName}
-        initial={channel.portabilityGrant}
-      />
-    ) : null;
   const chat = (
     <ChatPanel
       channel={channel.slug}
@@ -420,48 +443,91 @@ function ChannelView({
       selfUsername={me?.username ?? null}
       channelName={channel.displayName}
       ageGated={stage === "mature-gate" || stage === "restricted-locked"}
-      // D2-chat sizes the column (bounded so the log scrolls inside it; full height in theatre).
-      className={chatColumnClass({ theatre: theatre && live })}
+      // Bounded so the log scrolls inside it; below `lg` it fills the viewport under the player
+      // (D4.1), in theatre it is the theatre's height.
+      className={chatColumnClass({ theatre: theatreLayout, fill: true })}
     />
   );
+  // Below `lg`, the About panel: the stream title and the count's note (the compact row leaves
+  // them out), then the channel's tabs.
   const details = (
-    <>
-      {header}
-      {grant}
+    <div
+      data-watch-slot="details"
+      className={cn(
+        "flex min-w-0 flex-col gap-4",
+        theatreLayout ? null : "px-4 pt-2 pb-8 lg:p-0",
+        panel === "about" ? null : "max-lg:hidden",
+      )}
+    >
+      {theatreLayout ? null : (
+        <div data-testid="watch-about-intro" className="flex min-w-0 flex-col gap-1 lg:hidden">
+          {channel.live?.title || channel.title ? (
+            <p className="text-base font-semibold break-words">{channel.live?.title || channel.title}</p>
+          ) : null}
+          {live && !justStarted ? (
+            <VerifiedViewers data-testid="channel-verified-viewers-mobile" className="text-xs text-muted-foreground" />
+          ) : null}
+        </div>
+      )}
       {tabs}
-    </>
+    </div>
   );
 
-  const theatreLayout = theatre && live;
-  // The player and chat keep their place in the tree in both layouts (only class names change), so
-  // toggling theatre never remounts them: no new `playback.start` or lost DVR position, and chat
-  // keeps its connection, scroll and draft. Only the header and tabs move.
-  // Default: page width, chat beside the stage and details. Theatre (decision (b)): the stage spans
-  // the viewport with chat docked right, and the details follow at page width.
+  // The player and chat keep their place in the tree in every layout (only class names change), so
+  // toggling theatre or the panel, or crossing `lg`, never remounts them: no new `playback.start`
+  // or lost DVR position, and chat keeps its connection, scroll and draft. Only the header and
+  // tabs move. Default: page width, chat beside the stage and details from `lg`; below it the
+  // phone layout (`watch-layout.css`). Theatre (`lg` only, decision (b)): the stage spans the
+  // viewport with chat docked right, and the details follow at page width.
   return (
     <div
       data-testid="channel-page"
       data-layout={theatreLayout ? "theatre" : "default"}
+      data-watch-layout=""
+      data-watch-panel={panel}
       className={cn(
         "flex min-w-0 flex-col",
-        theatreLayout ? "w-full gap-4 pb-4" : "mx-auto w-full max-w-7xl px-4 py-4",
+        theatreLayout ? "w-full gap-4 pb-4" : "mx-auto w-full max-w-7xl lg:px-4 lg:py-4",
       )}
     >
-      <div className={cn("flex min-w-0 flex-col lg:flex-row", theatreLayout ? null : "gap-6")}>
-        <div className="flex min-w-0 flex-1 flex-col gap-4">
-          <MovedNotice channelName={channel.displayName} movedTo={channel.movedTo} />
-          {/* After checkout (F12): announced before the player. */}
-          <CheckoutReturn channelName={channel.displayName} />
+      <div
+        data-watch-slot="columns"
+        className={cn("flex min-w-0 flex-col lg:flex-row", theatreLayout ? null : "lg:gap-6")}
+      >
+        <div className="flex min-w-0 flex-col lg:flex-1 lg:gap-4">
+          <div className="flex min-w-0 flex-col gap-4 px-4 empty:hidden lg:px-0">
+            <MovedNotice channelName={channel.displayName} movedTo={channel.movedTo} />
+            {/* After checkout (F12): announced before the player. */}
+            <CheckoutReturn channelName={channel.displayName} />
+          </div>
           {/* Offline, the banner heads the page; live it sits in About so the player comes first. */}
           {live ? null : banner}
-          {stageNode}
-          {theatreLayout ? null : details}
+          {stageNode ? <div data-watch-slot="stage">{stageNode}</div> : null}
+          {theatreLayout ? null : (
+            <>
+              {header}
+              <WatchPanelSwitch value={panel} onChange={setPanel} />
+              {details}
+            </>
+          )}
         </div>
         {/* Collapsed in theatre, chat stays mounted (connection, scroll and draft kept) but hidden. */}
-        <aside className={cn("min-w-0 lg:w-80 lg:shrink-0", theatreLayout && chatHidden && "hidden")}>{chat}</aside>
+        <aside
+          data-watch-slot="chat"
+          className={cn(
+            "min-w-0 lg:w-80 lg:shrink-0",
+            theatreLayout && chatHidden && "hidden",
+            panel === "chat" ? null : "max-lg:hidden",
+          )}
+        >
+          {chat}
+        </aside>
       </div>
       {theatreLayout ? (
-        <div className="mx-auto flex w-full max-w-7xl min-w-0 flex-col gap-4 px-4">{details}</div>
+        <div className="mx-auto flex w-full max-w-7xl min-w-0 flex-col gap-4 px-4">
+          {header}
+          {details}
+        </div>
       ) : null}
     </div>
   );

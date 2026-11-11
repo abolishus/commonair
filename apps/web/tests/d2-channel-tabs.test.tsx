@@ -18,7 +18,7 @@ import {
   createRoute,
   createRouter,
 } from "@tanstack/react-router";
-import { act, cleanup, configure, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, configure, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import * as React from "react";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { locale, uiMessages } from "../src/i18n/index.ts";
@@ -231,9 +231,13 @@ describe("the channel tabs", () => {
   it("opens on Home, and each tab is a search param that Back steps through", async () => {
     const { history, loader } = renderPage(page());
     await waitFor(() => expect(tabs().getAttribute("data-tab")).toBe("home"));
-    const list = screen.getByRole("tablist");
-    expect(list.getAttribute("aria-label")).toBe("Channel sections");
-    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Home", "Videos", "Clips", "About"]);
+    // The phone layout's "Chat | About" switch is a tablist too (D4.1).
+    const list = screen.getByRole("tablist", { name: "Channel sections" });
+    expect(
+      within(list)
+        .getAllByRole("tab")
+        .map((t) => t.textContent),
+    ).toEqual(["Home", "Videos", "Clips", "About"]);
 
     clickTab("videos");
     await waitFor(() => expect(history.location.search).toBe("?tab=videos"));
@@ -469,7 +473,7 @@ describe("the theatre layout", () => {
       <TheatreContext.Provider value={{ theatre: true, setTheatre: () => {} }}>{node}</TheatreContext.Provider>
     ));
     await waitFor(() => expect(layout()).toBe("theatre"));
-    expect(screen.getByTestId("chat").className).toBe(chatColumnClass({ theatre: true }));
+    expect(screen.getByTestId("chat").className).toBe(chatColumnClass({ theatre: true, fill: true }));
   });
 
   it("stays default while offline, even with theatre on", async () => {
@@ -477,7 +481,7 @@ describe("the theatre layout", () => {
       <TheatreContext.Provider value={{ theatre: true, setTheatre: () => {} }}>{node}</TheatreContext.Provider>
     ));
     await waitFor(() => expect(layout()).toBe("default"));
-    expect(screen.getByTestId("chat").className).toBe(chatColumnClass({ theatre: false }));
+    expect(screen.getByTestId("chat").className).toBe(chatColumnClass({ theatre: false, fill: true }));
   });
 
   it("toggling it never remounts the player or chat (the stream and chat connection stay)", async () => {

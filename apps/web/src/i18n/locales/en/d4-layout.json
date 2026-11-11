@@ -1,0 +1,13 @@
+{
+  "d4Layout.panels.label": "Chat or About",
+  "d4Layout.panels.chat": "Chat",
+  "d4Layout.panels.about": "About",
+  "d4Layout.owner.editChannel": "Edit channel",
+  "d4Layout.mod.view": "Mod view",
+  "d4Layout.trust.member": "Member-owner",
+  "d4Layout.trust.council": "Creator council",
+  "d4Layout.trust.memberLabel": "{name} is a member-owner of the co-op",
+  "d4Layout.trust.councilLabel": "{name} sits on the creator council",
+  "d4Layout.viewers.verified": "Verified viewers",
+  "d4Layout.viewers.howWeCount": "How we count"
+}
