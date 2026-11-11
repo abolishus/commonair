@@ -223,6 +223,10 @@ describe("summarize defaults", () => {
     expect(s.notify).toBeNull();
     expect(summarize(channelDto({ viewer: { following: true, notify: false } }) as never).notify).toBe(false);
     expect(summarize(channelDto({ viewer: null }) as never).notify).toBeNull();
+    // `Channel.viewer.subscribed` (w5-watch): left out when false, so signed in without it is false.
+    expect(s.subscribed).toBe(false);
+    expect(summarize(channelDto({ viewer: { following: false, subscribed: true } }) as never).subscribed).toBe(true);
+    expect(summarize(channelDto({ viewer: null }) as never).subscribed).toBeNull();
   });
 });
 

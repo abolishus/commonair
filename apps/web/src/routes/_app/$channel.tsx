@@ -463,6 +463,8 @@ function ChannelView({
       ageGated={stage === "mature-gate" || stage === "restricted-locked"}
       // J3-d: a followers-only chat says why before the viewer types.
       following={follow.state.following ?? null}
+      // w5-watch: a subscribers-only chat says why before the chat joins (`Channel.viewer.subscribed`).
+      subscribed={channel.subscribed ?? null}
       // Bounded so the log scrolls inside it; below `lg` it fills the viewport under the player
       // (D4.1), in theatre it is the theatre's height.
       className={chatColumnClass({ theatre: theatreLayout, fill: true })}

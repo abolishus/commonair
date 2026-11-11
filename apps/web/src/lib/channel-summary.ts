@@ -42,6 +42,12 @@ export interface ChannelSummary {
   portabilityGrant?: boolean | null;
   /** `Channel.viewer.notify`: the caller's go-live alerts while following; null when unknown. */
   notify?: boolean | null;
+  /**
+   * `Channel.viewer.subscribed` (w5-watch), for the subscribers-only gate before chat joins. The
+   * contract leaves it out when false, so a signed-in caller without it does not subscribe; null
+   * when anonymous.
+   */
+  subscribed?: boolean | null;
   /** `Channel.movedTo` (ADR 0037): where the channel moved and when; null when it has not moved. */
   movedTo: { url: string; at: string } | null;
   /** When the browser poll that produced this started (ms); absent for the SSR snapshot. */
@@ -91,6 +97,7 @@ export function summarize(c: ChannelDto): ChannelSummary {
     following: c.viewer?.following ?? null,
     portabilityGrant: c.viewer ? (c.viewer.portabilityGrant ?? false) : null,
     notify: c.viewer?.notify ?? null,
+    subscribed: c.viewer ? c.viewer.subscribed === true : null,
     movedTo: c.movedTo ?? null,
   };
 }
