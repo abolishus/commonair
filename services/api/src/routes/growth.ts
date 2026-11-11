@@ -2,16 +2,25 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * First-party growth counters (overhaul wave 2, D2.8): `metrics.ui`, `admin.growth` and
- * `transparency.numbers`. Contract step stubs: d2-metrics implements them.
+ * First-party growth counters (overhaul wave 2, D2.8): `metrics.ui` (public, ignores the session),
+ * `admin.growth` (admins) and `transparency.numbers` (public). See `../growth/`.
  */
-import { ORPCError } from "@orpc/server";
+import { recordUiMetric } from "../growth/ingest.ts";
+import { growthNumbers, growthReport } from "../growth/report.ts";
 import { os } from "../lib/orpc.ts";
 
-const notYet = () => {
-  throw new ORPCError("NOT_IMPLEMENTED", { status: 501, message: "Not available yet" });
+export const metrics = {
+  // Counted or not (rate limited, capped), the answer is the same.
+  ui: os.metrics.ui.handler(async ({ context, input }) => {
+    await recordUiMetric(context.deps, context.req.ip, input);
+    return { ok: true as const };
+  }),
 };
-
-export const metrics = { ui: os.metrics.ui.handler(notYet) };
-export const adminGrowth = { growth: os.admin.growth.handler(notYet) };
-export const transparencyNumbers = { numbers: os.transparency.numbers.handler(notYet) };
+export const adminGrowth = {
+  growth: os.admin.growth.handler(async ({ context, input }) =>
+    growthReport(context.deps.db, context.deps.now(), input.days),
+  ),
+};
+export const transparencyNumbers = {
+  numbers: os.transparency.numbers.handler(async ({ context }) => growthNumbers(context.deps.db, context.deps.now())),
+};

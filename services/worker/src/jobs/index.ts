@@ -80,6 +80,7 @@ import { job as payoutTransfers } from "./payout-transfers.ts";
 import { job as portabilityIncomingCleanup } from "./portability-incoming-cleanup.ts";
 import { job as refundReconcile } from "./refund-reconcile.ts";
 import { job as federationFollowerCleanup } from "./federation-follower-cleanup.ts";
+import { job as growthDaily } from "../growth/job.ts";
 
 export const JOBS = [
   webhookFanout,
@@ -167,4 +168,6 @@ export const JOBS = [
   refundReconcile,
   payoutTransfers,
   patronagePayout,
+  // Design overhaul wave 2 (D2.8).
+  growthDaily,
 ] as readonly JobDefinition[];
