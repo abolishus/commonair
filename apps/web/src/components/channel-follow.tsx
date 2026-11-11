@@ -131,11 +131,25 @@ export function FollowButton({
   // Follow pressed (or confirmed): the API's `firstFollow` answer comes back to this control only.
   const disarm = React.useRef<(() => void) | null>(null);
   React.useEffect(() => () => disarm.current?.(), []);
+  // A toggle swaps the whole control (Follow <-> the split button), so the focused button
+  // unmounts. Once the toggle settles, focus lands on whichever control is now the primary one.
+  const restoreFocus = React.useRef(false);
+  const toggle = () => {
+    restoreFocus.current = true;
+    onToggle();
+  };
   const follow = () => {
     disarm.current?.();
     disarm.current = armFirstFollow(() => setAlertPrompt(true));
-    onToggle();
+    toggle();
   };
+  React.useEffect(() => {
+    if (!restoreFocus.current || state.pending) return;
+    restoreFocus.current = false;
+    // The first-follow prompt takes focus and hands it to the menu trigger when it closes.
+    if (alertPrompt) return;
+    (state.following === true ? menuTrigger.current : button.current)?.focus();
+  }, [state.following, state.pending, alertPrompt]);
   // Settled (followed, refused, or not the first): nothing stays armed for a later follow.
   React.useEffect(() => {
     if (state.pending) return;
@@ -174,11 +188,7 @@ export function FollowButton({
           portabilityGrant={portabilityGrant}
           pending={state.pending}
           triggerRef={menuTrigger}
-          onUnfollow={() => {
-            onToggle();
-            // The split button unmounts; keep focus on Follow, not the page body.
-            requestAnimationFrame(() => button.current?.focus());
-          }}
+          onUnfollow={toggle}
         />
         <FirstFollowPrompt
           open={alertPrompt}
@@ -201,7 +211,7 @@ export function FollowButton({
       aria-pressed={following}
       aria-busy={state.pending || undefined}
       disabled={state.pending}
-      onClick={following ? onToggle : follow}
+      onClick={following ? toggle : follow}
     />
   );
   const label = (
@@ -214,8 +224,11 @@ export function FollowButton({
   const settle = (yes: boolean) => {
     if (yes) {
       intent.confirm();
+      // Focus follows the toggle once it settles (the effect above).
       follow();
-    } else intent.dismiss();
+      return;
+    }
+    intent.dismiss();
     // The confirm unmounts; keep focus on Follow, not the page body.
     requestAnimationFrame(() => button.current?.focus());
   };

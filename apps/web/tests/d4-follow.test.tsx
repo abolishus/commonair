@@ -202,10 +202,63 @@ describe("the Following split button", () => {
 });
 
 /** A channel page's follow: `useFollow` with the API stubbed, and its `FollowButton`. */
-function FollowPage({ call }: { call: FollowApi }): React.JSX.Element {
-  const f = useFollow("rivertide", false, 3, 0, call);
+function FollowPage({ call, following = false }: { call: FollowApi; following?: boolean }): React.JSX.Element {
+  const f = useFollow("rivertide", following, 3, 0, call);
   return <FollowButton signedIn state={f.state} onToggle={f.toggle} channel={RIVERTIDE} setNotify={async () => ({})} />;
 }
+
+describe("focus across a follow toggle", () => {
+  it("Follow: focus moves to the Following menu trigger once the follow lands", async () => {
+    let release: () => void = () => {};
+    const call = vi.fn<FollowApi>(
+      () =>
+        new Promise((r) => {
+          release = () => r({ following: true, followerCount: 4, firstFollow: false });
+        }),
+    );
+    await renderInRouter(<FollowPage call={call} />, "/rivertide");
+    const follow = await screen.findByTestId("follow-button");
+    act(() => follow.focus());
+    click(follow);
+    await act(async () => release());
+    await waitFor(() => expect(id("follow-button").getAttribute("data-following")).toBe("true"));
+    await waitFor(() => expect(document.activeElement).toBe(id("follow-button")));
+    expect(document.activeElement?.getAttribute("aria-label")).toBe(t("d4Follow.menu.label", { channel: "Rivertide" }));
+  });
+
+  it("Unfollow confirm: focus returns to Follow once the unfollow lands", async () => {
+    let release: () => void = () => {};
+    const call = vi.fn<FollowApi>(
+      () =>
+        new Promise((r) => {
+          release = () => r({ following: false, followerCount: 2 });
+        }),
+    );
+    await renderInRouter(<FollowPage call={call} following />, "/rivertide");
+    click(await screen.findByTestId("follow-button"));
+    click(await screen.findByTestId("follow-menu-unfollow"));
+    await screen.findByTestId("follow-unfollow-dialog");
+    click(id("confirm-dialog-confirm"));
+    await waitFor(() => expect(call).toHaveBeenCalledWith("rivertide", false));
+    await act(async () => release());
+    await waitFor(() => expect(id("follow-button").getAttribute("data-following")).toBe("false"));
+    await waitFor(() => expect(document.activeElement).toBe(id("follow-button")));
+    expect((id("follow-button") as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("a failed follow: focus stays on Follow", async () => {
+    const call = vi.fn<FollowApi>(async () => {
+      throw new Error("offline");
+    });
+    await renderInRouter(<FollowPage call={call} />, "/rivertide");
+    const follow = await screen.findByTestId("follow-button");
+    act(() => follow.focus());
+    click(follow);
+    await waitFor(() => expect(call).toHaveBeenCalled());
+    await waitFor(() => expect(id("follow-button").getAttribute("data-following")).toBe("false"));
+    await waitFor(() => expect(document.activeElement).toBe(id("follow-button")));
+  });
+});
 
 describe("the first-follow alert prompt", () => {
   it("opens after the caller's first follow, on the control that was pressed", async () => {
