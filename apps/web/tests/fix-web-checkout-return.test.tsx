@@ -9,17 +9,25 @@
  * params are stripped with `replaceState` and the rest of the URL is kept.
  */
 import { LocaleProvider, TooltipProvider } from "@commonair/ui";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { createMemoryHistory, createRootRoute, createRouter, RouterContextProvider } from "@tanstack/react-router";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import type { PaymentBreakdownDto } from "../src/components/money/breakdown-table.tsx";
 import {
   CheckoutReturn,
+  WELCOME_SKEW_MS,
+  coopOutcome,
   creatorCents,
   readCheckoutReturn,
   withoutCheckoutParams,
   type CheckoutReturnClient,
 } from "../src/components/money/checkout-return.tsx";
 import { locale, t, uiMessages } from "../src/i18n/index.ts";
+import type { MembershipViewDto } from "../src/lib/coop.ts";
+import { resetUiMetricsForTests } from "../src/lib/ui-metrics.ts";
+import { votingProposal } from "./coop-fixtures.ts";
+
+const router = createRouter({ routeTree: createRootRoute(), history: createMemoryHistory({ initialEntries: ["/"] }) });
 
 const PAY = "0192f000-0000-7000-8000-0000000000a1";
 const usd = (cents: number) => ({ cents, currency: "usd" });
@@ -53,18 +61,133 @@ function at(url: string): void {
 
 function mount(client: CheckoutReturnClient, opts: { pollMs?: number; slowMs?: number } = {}) {
   return render(
-    <LocaleProvider locale={locale} messages={uiMessages}>
-      <TooltipProvider>
-        <CheckoutReturn channelName="Fernsby" client={client} pollMs={opts.pollMs ?? 5} slowMs={opts.slowMs ?? 5000} />
-      </TooltipProvider>
-    </LocaleProvider>,
+    <RouterContextProvider router={router}>
+      <LocaleProvider locale={locale} messages={uiMessages}>
+        <TooltipProvider>
+          <CheckoutReturn
+            channelName="Fernsby"
+            client={client}
+            pollMs={opts.pollMs ?? 5}
+            slowMs={opts.slowMs ?? 5000}
+          />
+        </TooltipProvider>
+      </LocaleProvider>
+    </RouterContextProvider>,
   );
 }
 
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+  vi.unstubAllGlobals();
   at("/");
+});
+
+const PAID_AT = "2026-11-06T12:00:00.000Z";
+function view(over: Partial<MembershipViewDto> = {}): Pick<MembershipViewDto, "memberships" | "eligibility"> {
+  return {
+    memberships: [],
+    eligibility: [
+      { class: "viewer", eligible: true, basis: "subscription", progress: null, detail: "" },
+      { class: "streamer", eligible: false, basis: null, progress: null, detail: "" },
+    ],
+    ...over,
+  } as Pick<MembershipViewDto, "memberships" | "eligibility">;
+}
+const viewerRow = (basis: "subscription" | "share", joinedAt: string, status = "active") =>
+  ({ id: "m1", class: "viewer", status, basis, joinedAt }) as MembershipViewDto["memberships"][number];
+
+describe("coopOutcome", () => {
+  const paid = { succeededAt: PAID_AT };
+  const shift = (ms: number) => new Date(Date.parse(PAID_AT) + ms).toISOString();
+  it("welcome: a viewer membership by subscription that started with this payment (clock skew allowed)", () => {
+    expect(coopOutcome(view({ memberships: [viewerRow("subscription", shift(200))] }), paid)).toBe("welcome");
+    expect(coopOutcome(view({ memberships: [viewerRow("subscription", shift(-WELCOME_SKEW_MS))] }), paid)).toBe(
+      "welcome",
+    );
+  });
+  it("none: already a member before this payment, or a member by share", () => {
+    expect(coopOutcome(view({ memberships: [viewerRow("subscription", shift(-WELCOME_SKEW_MS - 1))] }), paid)).toBe(
+      "none",
+    );
+    expect(coopOutcome(view({ memberships: [viewerRow("share", shift(1000))] }), paid)).toBe("none");
+  });
+  it("joining: eligible by subscription and not a member yet; none after a voluntary exit or when not eligible", () => {
+    expect(coopOutcome(view(), paid)).toBe("joining");
+    expect(coopOutcome(view({ memberships: [viewerRow("subscription", shift(-86_400_000), "exited")] }), paid)).toBe(
+      "none",
+    );
+    expect(coopOutcome(view({ memberships: [viewerRow("subscription", shift(-86_400_000), "lapsed")] }), paid)).toBe(
+      "joining",
+    );
+    expect(
+      coopOutcome(
+        view({ eligibility: [{ class: "viewer", eligible: false, basis: null, progress: null, detail: "" }] }),
+        paid,
+      ),
+    ).toBe("none");
+    expect(
+      coopOutcome(
+        view({ eligibility: [{ class: "viewer", eligible: true, basis: "share", progress: null, detail: "" }] }),
+        paid,
+      ),
+    ).toBe("none");
+  });
+});
+
+describe("CheckoutReturn welcome", () => {
+  it("a sub that started membership: Welcome to the co-op with the first vote, counted and linked", async () => {
+    resetUiMetricsForTests();
+    const sent: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: RequestInit) => {
+        sent.push(init.body as string);
+        return new Response(null, { status: 204 });
+      }),
+    );
+    at(`/fern?checkout=success&payment=${PAY}`);
+    const base = votingProposal({ canVote: true, myVote: null, title: "Weekly office hours" });
+    const open = {
+      ...base,
+      timeline: { ...base.timeline, votingEndsAt: new Date(Date.now() + 86_400_000).toISOString() },
+    };
+    mount({ payment: async () => payment(), coop: async () => "welcome", proposals: async () => [open] });
+    await waitFor(() => expect(screen.getByTestId("coop-welcome")).toBeTruthy());
+    expect(screen.getByTestId("checkout-return").dataset.coop).toBe("welcome");
+    expect(screen.queryByTestId("checkout-return-coop")).toBeNull();
+    const welcome = screen.getByTestId("coop-welcome");
+    expect(welcome.textContent).toContain(t("d2Membership.welcome.title"));
+    expect(welcome.textContent).toContain(t("d2Membership.welcome.body"));
+    await waitFor(() => expect(screen.getByTestId("first-vote").dataset.kind).toBe("vote"));
+    expect(screen.getByTestId("first-vote-link").textContent).toBe("Weekly office hours");
+    const link = screen.getByTestId("coop-welcome-link");
+    expect(link.getAttribute("href")).toBe("/coop/membership");
+    expect(sent).toContain(JSON.stringify({ surface: "coop.welcome", action: "view", step: "none" }));
+    fireEvent.click(link);
+    expect(sent).toContain(JSON.stringify({ surface: "coop.welcome", action: "click", step: "none" }));
+  });
+
+  it("no proposals open: the welcome says votes come from now on; a failed load leaves the note out", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status: 204 })),
+    );
+    at(`/fern?checkout=success&payment=${PAY}`);
+    mount({ payment: async () => payment(), coop: async () => "welcome", proposals: async () => [] });
+    await waitFor(() => expect(screen.getByTestId("first-vote").dataset.kind).toBe("none"));
+    expect(screen.getByTestId("first-vote").textContent).toContain(t("d2Membership.firstVote.fromNow"));
+    cleanup();
+
+    at(`/fern?checkout=success&payment=${PAY}`);
+    mount({
+      payment: async () => payment(),
+      coop: async () => "welcome",
+      proposals: () => Promise.reject(Object.assign(new Error("nope"), { code: "BAD_REQUEST" })),
+    });
+    await waitFor(() => expect(screen.getByTestId("coop-welcome")).toBeTruthy());
+    expect(screen.queryByTestId("first-vote")).toBeNull();
+  });
 });
 
 describe("readCheckoutReturn", () => {
@@ -107,7 +230,7 @@ describe("CheckoutReturn", () => {
     at("/fern?tab=clips");
     const client = {
       payment: vi.fn<CheckoutReturnClient["payment"]>(),
-      joinsCoop: vi.fn<CheckoutReturnClient["joinsCoop"]>(),
+      coop: vi.fn<CheckoutReturnClient["coop"]>(),
     };
     const { container } = mount(client);
     expect(container.textContent).toBe("");
@@ -119,7 +242,7 @@ describe("CheckoutReturn", () => {
     at("/fern?checkout=canceled&tab=about");
     const client = {
       payment: vi.fn<CheckoutReturnClient["payment"]>(),
-      joinsCoop: vi.fn<CheckoutReturnClient["joinsCoop"]>(),
+      coop: vi.fn<CheckoutReturnClient["coop"]>(),
     };
     mount(client);
     const note = screen.getByTestId("checkout-return");
@@ -140,7 +263,7 @@ describe("CheckoutReturn", () => {
         if (calls < 3) throw notYet();
         return payment();
       }),
-      joinsCoop: vi.fn<CheckoutReturnClient["joinsCoop"]>(async () => true),
+      coop: vi.fn<CheckoutReturnClient["coop"]>(async () => "joining"),
     };
     mount(client);
     expect(screen.getByTestId("checkout-return").dataset.state).toBe("pending");
@@ -160,26 +283,26 @@ describe("CheckoutReturn", () => {
 
   it("no co-op line when the sub does not make the payer a member (or the check fails)", async () => {
     at(`/fern?checkout=success&payment=${PAY}`);
-    mount({ payment: async () => payment(), joinsCoop: async () => false });
+    mount({ payment: async () => payment(), coop: async () => "none" });
     await waitFor(() => expect(screen.getByTestId("checkout-return").dataset.state).toBe("confirmed"));
     expect(screen.queryByTestId("checkout-return-coop")).toBeNull();
     cleanup();
 
     at(`/fern?checkout=success&payment=${PAY}`);
-    mount({ payment: async () => payment(), joinsCoop: () => Promise.reject(new Error("429")) });
+    mount({ payment: async () => payment(), coop: () => Promise.reject(new Error("429")) });
     await waitFor(() => expect(screen.getByTestId("checkout-return").dataset.state).toBe("confirmed"));
     expect(screen.queryByTestId("checkout-return-coop")).toBeNull();
   });
 
   it("a tip: thanks without the membership check", async () => {
     at(`/fern?checkout=success&payment=${PAY}`);
-    const joinsCoop = vi.fn<CheckoutReturnClient["joinsCoop"]>(async () => true);
-    mount({ payment: async () => payment({ kind: "tip", gross: usd(1000) }), joinsCoop });
+    const coop = vi.fn<CheckoutReturnClient["coop"]>(async () => "joining");
+    mount({ payment: async () => payment({ kind: "tip", gross: usd(1000) }), coop });
     await waitFor(() => expect(screen.getByTestId("checkout-return").dataset.state).toBe("confirmed"));
     expect(screen.getByTestId("checkout-return").textContent).toContain(
       t("fixWeb.checkout.tipped", { channel: "Fernsby" }),
     );
-    expect(joinsCoop).not.toHaveBeenCalled();
+    expect(coop).not.toHaveBeenCalled();
     expect(screen.queryByTestId("checkout-return-coop")).toBeNull();
   });
 
@@ -187,7 +310,7 @@ describe("CheckoutReturn", () => {
     vi.useFakeTimers();
     at(`/fern?checkout=success&payment=${PAY}`);
     const pay = vi.fn<CheckoutReturnClient["payment"]>(() => Promise.reject(notYet()));
-    mount({ payment: pay, joinsCoop: async () => false }, { pollMs: 100, slowMs: 300 });
+    mount({ payment: pay, coop: async () => "none" }, { pollMs: 100, slowMs: 300 });
     await act(async () => {
       await vi.advanceTimersByTimeAsync(400);
     });
@@ -205,7 +328,7 @@ describe("CheckoutReturn", () => {
     vi.useFakeTimers();
     at(`/fern?checkout=success&payment=${PAY}`);
     const pay = vi.fn<CheckoutReturnClient["payment"]>(() => Promise.reject(notYet()));
-    const { unmount } = mount({ payment: pay, joinsCoop: async () => false }, { pollMs: 100, slowMs: 10_000 });
+    const { unmount } = mount({ payment: pay, coop: async () => "none" }, { pollMs: 100, slowMs: 10_000 });
     await act(async () => {
       await vi.advanceTimersByTimeAsync(250);
     });

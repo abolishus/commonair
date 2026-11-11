@@ -34,6 +34,7 @@ import { Comment01Icon } from "@hugeicons/core-free-icons";
 import { Link } from "@tanstack/react-router";
 import * as React from "react";
 import { t } from "../../i18n/index.ts";
+import { cannotVoteReason } from "./first-vote.tsx";
 import {
   COMMENT_MAX,
   COUNCIL_RESPONSE_MAX,
@@ -439,7 +440,10 @@ export function ProposalPage({
                   myVote={p.myVote}
                   myVoteText={p.myVote ? t("coop.vote.yours", { choice: voteChoiceLabel(p.myVote) }) : undefined}
                   canVote={p.canVote}
-                  cannotVoteReason={meId ? t("coop.vote.notInElectorate") : t("coop.vote.signIn")}
+                  cannotVoteReason={cannotVoteReason({
+                    signedIn: meId !== null,
+                    member: memberError ? null : member,
+                  })}
                   submitLabel={p.myVote ? t("coop.vote.change") : t("coop.vote.cast")}
                   pending={voting}
                   onSubmit={(value) => {

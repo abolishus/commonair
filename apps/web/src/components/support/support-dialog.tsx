@@ -65,15 +65,19 @@ import {
   type TipDraft,
 } from "../../lib/support.ts";
 import { safeHttpUrl } from "../../lib/url.ts";
+import { SubMemberNotice, subMakesMember, subMemberRule, type SubMemberRule } from "./member-notice.tsx";
 
 /** The calls the dialog makes; tests pass a stub, the app the oRPC client. */
 export interface SupportClient {
   support: (input: { channel: string }) => Promise<SupportInfo>;
   checkout: (request: CheckoutRequest) => Promise<CheckoutResult>;
+  /** The co-op's sub rule (`membership.classes`) for the member line; omitted or failed: no line. */
+  memberRule?: () => Promise<SubMemberRule | null>;
 }
 
 export const apiSupportClient: SupportClient = {
   support: (input) => api().money.support(input),
+  memberRule: async () => subMemberRule(await api().coop.settings()),
   checkout: (request) =>
     request.kind === "tip" ? api().money.tip(request.input) : api().money.subscribe(request.input),
 };
@@ -144,7 +148,23 @@ export function SupportDialogContent({
   const [info, setInfo] = React.useState<SupportInfo | null>(null);
   const [failed, setFailed] = React.useState(false);
   const [result, setResult] = React.useState<Extract<CheckoutResult, { kind: "instructions" }> | null>(null);
+  const [joinsCoop, setJoinsCoop] = React.useState(false);
   const [attempt, setAttempt] = React.useState(0);
+  const [memberRule, setMemberRule] = React.useState<SubMemberRule | null>(null);
+
+  React.useEffect(() => {
+    let live = true;
+    // Only the co-op line depends on it: a failure leaves the line out, never the dialog.
+    client
+      .memberRule?.()
+      .then((rule) => {
+        if (live) setMemberRule(rule);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [client]);
 
   React.useEffect(() => {
     let live = true;
@@ -177,9 +197,18 @@ export function SupportDialogContent({
         </div>
       </DialogHeader>
       {result ? (
-        <SupportInstructions result={result} onDone={onClose} />
+        <SupportInstructions result={result} joinsCoop={joinsCoop} onDone={onClose} />
       ) : info ? (
-        <SupportForm channel={channel} info={info} checkout={client.checkout} onInstructions={setResult} />
+        <SupportForm
+          channel={channel}
+          info={info}
+          checkout={client.checkout}
+          memberRule={memberRule}
+          onInstructions={(r, joins) => {
+            setJoinsCoop(joins === true);
+            setResult(r);
+          }}
+        />
       ) : failed ? (
         <div className="flex flex-col gap-3">
           <SupportAlert>{t("support.loadFailed")}</SupportAlert>
@@ -223,13 +252,26 @@ export interface SupportFormProps {
   channel: string;
   info: SupportInfo;
   checkout: SupportClient["checkout"];
-  onInstructions: (result: Extract<CheckoutResult, { kind: "instructions" }>) => void;
+  /**
+   * Bank-transfer instructions to show; `joinsCoop` when the checkout was a self sub that will make
+   * the payer a co-op member once the payment is confirmed.
+   */
+  onInstructions: (result: Extract<CheckoutResult, { kind: "instructions" }>, joinsCoop?: boolean) => void;
+  /** The co-op's sub rule for the member line (null: no line). */
+  memberRule?: SubMemberRule | null;
   /** Starting state (tests and stories); the dialog opens on the first open tab. */
   initial?: Partial<SupportDraft>;
 }
 
 /** The subscribe / gift / tip form. Totals, validation and the request come from lib/support.ts. */
-export function SupportForm({ channel, info, checkout, onInstructions, initial }: SupportFormProps): React.JSX.Element {
+export function SupportForm({
+  channel,
+  info,
+  checkout,
+  onInstructions,
+  memberRule = null,
+  initial,
+}: SupportFormProps): React.JSX.Element {
   const { locale } = useLocale();
   const available = tabAvailability(info);
   const [draft, setDraft] = React.useState<SupportDraft>(() => ({
@@ -250,6 +292,10 @@ export function SupportForm({ channel, info, checkout, onInstructions, initial }
   const parts = splitCents(total ?? 0, info.split);
   const percents = splitPercents(info.split);
   const held = info.viewer?.subscription ?? null;
+  // The owner cannot subscribe to their own channel, and it would not count for membership anyway.
+  const rule = info.viewer?.isOwner ? null : memberRule;
+  const tierCents = info.tiers.find((tier) => tier.tier === draft.tier)?.price.cents ?? 0;
+  const memberSub = subMakesMember(rule, tierCents);
   const update = (next: Partial<SupportDraft>) => {
     setDraft((d) => ({ ...d, ...next }));
     setError(null);
@@ -267,7 +313,7 @@ export function SupportForm({ channel, info, checkout, onInstructions, initial }
     setError(null);
     try {
       const result = await checkout(request);
-      if (result.kind === "instructions") onInstructions(result);
+      if (result.kind === "instructions") onInstructions(result, draft.tab === "sub" && memberSub);
       else {
         const url = safeHttpUrl(result.url);
         if (url) {
@@ -372,7 +418,17 @@ export function SupportForm({ channel, info, checkout, onInstructions, initial }
             disabled: !available.sub.enabled,
             "aria-describedby":
               [reasonId("sub"), held ? `${ids}-current` : undefined].filter(Boolean).join(" ") || undefined,
-            content: <div className="pt-2">{tierGroup}</div>,
+            content: (
+              <div className="flex flex-col gap-3 pt-2">
+                {tierGroup}
+                <SubMemberNotice
+                  rule={rule}
+                  currency={info.currency}
+                  cents={tierCents}
+                  tierCents={info.tiers.map((tier) => tier.price.cents)}
+                />
+              </div>
+            ),
           },
           {
             id: "gift",
@@ -577,11 +633,17 @@ export function SupportForm({ channel, info, checkout, onInstructions, initial }
 
 export interface SupportInstructionsProps {
   result: Extract<CheckoutResult, { kind: "instructions" }>;
+  /** A self sub that qualifies: membership starts when the co-op confirms the transfer. */
+  joinsCoop?: boolean;
   onDone: () => void;
 }
 
 /** Manual adapter result: the reference to quote, the amount and the co-op's instructions. */
-export function SupportInstructions({ result, onDone }: SupportInstructionsProps): React.JSX.Element {
+export function SupportInstructions({
+  result,
+  joinsCoop = false,
+  onDone,
+}: SupportInstructionsProps): React.JSX.Element {
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(result.reference);
@@ -631,6 +693,11 @@ export function SupportInstructions({ result, onDone }: SupportInstructionsProps
       />
       <p className="break-words whitespace-pre-line">{result.instructions}</p>
       <p className="text-muted-foreground">{t("support.instructions.hint")}</p>
+      {joinsCoop && (
+        <p data-testid="support-instructions-coop" className="text-muted-foreground">
+          {t("d2Membership.support.memberOnConfirm")}
+        </p>
+      )}
       <DialogFooter>
         <Button onClick={onDone}>{t("support.instructions.done")}</Button>
       </DialogFooter>

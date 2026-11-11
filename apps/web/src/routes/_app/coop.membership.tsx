@@ -1,25 +1,40 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { PageHeader } from "@commonair/ui/blocks/headers";
+import { PageContainer } from "@commonair/ui/layouts";
 import { toast } from "@commonair/ui/toast";
-import { Navigate, createFileRoute } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import * as React from "react";
-import { CoopLoadGate } from "../../components/coop/load-error.tsx";
-import { MembershipPanel, type ShareInstructionsDto } from "../../components/coop/membership.tsx";
+import { useFirstVote } from "../../components/coop/first-vote.tsx";
+import { CoopLoadGate, CoopSectionError } from "../../components/coop/load-error.tsx";
+import {
+  MemberVoteCard,
+  MembershipPanel,
+  MembershipPitch,
+  MembershipPitchLead,
+  PitchDetails,
+  isMember,
+  pitchFacts,
+  type ShareInstructionsDto,
+} from "../../components/coop/membership.tsx";
+import { CoopTabs } from "../../components/coop/nav.tsx";
 import { SharePayByCard, cardSharesAllowed } from "../../components/coop/shares-card.tsx";
 import { coopLoads, toastCoopError, useCoopLoad, useMyMembership } from "../../components/coop/use-coop.ts";
 import { t } from "../../i18n/index.ts";
 import { isSessionExpired } from "../../lib/action-error.ts";
 import { api, errorCode } from "../../lib/api.ts";
-import { getSessionUser, useBootstrap } from "../../lib/bootstrap.ts";
+import { useBootstrap, useSessionRetry } from "../../lib/bootstrap.ts";
 import { classLabel, errorRequirement, shareRules, type MemberClass } from "../../lib/coop.ts";
-import { requireSession } from "../../lib/guard.ts";
 import { titleHead } from "../../lib/page-title.ts";
 
+/**
+ * Public since overhaul wave 2 (D2.5): signed out, the membership pitch; signed in without an
+ * active membership, the pitch's hero above today's page (eligibility and the share); a member
+ * keeps today's page, with their first vote from the real electorate on top.
+ */
 export const Route = createFileRoute("/_app/coop/membership")({
   head: () => titleHead(t("pageTitle.coopMembership")),
-  // Server-side guard (SSR and client navigation); the component keeps a client fallback.
-  beforeLoad: () => requireSession(() => getSessionUser()),
   component: MembershipPage,
 });
 
@@ -31,16 +46,32 @@ function toastRejoinError(err: unknown): void {
   else toastCoopError(err);
 }
 
+/** How many months the pitch reads (member counts, the last decisions). */
+const PITCH_MONTHS = 3;
+
 function MembershipPage(): React.JSX.Element {
-  const { me, config } = useBootstrap();
+  const { me, config, instance: site, sessionUnresolved } = useBootstrap();
+  const session = useSessionRetry();
   const membership = useMyMembership(me);
   const settings = useCoopLoad("settings", () => api().coop.settings());
+  // The pitch's numbers: a failed read only leaves the stats and decisions out.
+  const months = useCoopLoad("months", () => api().coop.transparency({ months: PITCH_MONTHS }));
   // Batch 8 (M1-coop-money): card payment for shares needs Stripe on the instance and the setting
   // on. A failed read only hides "Pay by card"; the bank-transfer path stays.
   const instance = useCoopLoad("instance", () => Promise.resolve().then(() => api().instance.info()));
   const card = cardSharesAllowed(instance.data?.features.payments ?? null, settings.data);
+  const member = isMember(membership.data);
+  const firstVote = useFirstVote(member, me?.id ?? "-");
   const [instructions, setInstructions] = React.useState<ShareInstructionsDto | null>(null);
   const [buying, setBuying] = React.useState(false);
+  const facts = pitchFacts(settings.data);
+  const pitch = {
+    facts,
+    currency: config.currency,
+    siteName: site.name,
+    sourceUrl: site.sourceUrl,
+    months: months.data,
+  };
 
   const buy = async () => {
     if (buying) return;
@@ -79,7 +110,34 @@ function MembershipPage(): React.JSX.Element {
     }
   };
 
-  if (!me) return <Navigate to="/signin" replace />;
+  if (!me) {
+    // F1: a member whose session the API could not confirm is not shown the join pitch.
+    if (sessionUnresolved)
+      return (
+        <PageContainer data-testid="membership" width="wide" className="flex flex-col gap-6 py-8">
+          <PageHeader title={t("coop.membership.title")} tabs={<CoopTabs current="membership" />} />
+          <CoopSectionError
+            section={t("coop.membership.title")}
+            headingLevel={2}
+            load={{
+              state: "failed",
+              failed: true,
+              busy: session.retrying,
+              gaveUp: session.gaveUp,
+              reload: session.retry,
+            }}
+          />
+        </PageContainer>
+      );
+    return (
+      <CoopLoadGate status={coopLoads([settings])} tab="membership">
+        <MembershipPitch {...pitch} signedIn={false} />
+      </CoopLoadGate>
+    );
+  }
+
+  // Signed in: the pitch frames the page until the view says they are a member.
+  const showPitch = membership.data !== null && !member;
   return (
     <CoopLoadGate status={coopLoads([membership, settings])} tab="membership">
       <MembershipPanel
@@ -94,8 +152,20 @@ function MembershipPage(): React.JSX.Element {
         onRejoin={rejoin}
         onRejoinError={toastRejoinError}
         hideBuy={card}
+        lead={
+          showPitch ? (
+            <MembershipPitchLead {...pitch} signedIn />
+          ) : member ? (
+            <MemberVoteCard choice={firstVote} />
+          ) : null
+        }
       />
       {card && <SharePayByCard view={membership.data} paying={buying} onPay={buy} />}
+      {showPitch && (
+        <PageContainer width="wide" className="pb-8">
+          <PitchDetails {...pitch} />
+        </PageContainer>
+      )}
     </CoopLoadGate>
   );
 }

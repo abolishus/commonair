@@ -7,12 +7,19 @@
  * it (`money.paymentBreakdown` answers NOT_FOUND until the payment succeeded), then confirms; on
  * cancel it says so quietly. The params are stripped with `replaceState` as soon as they are read,
  * so a reload or a shared link never replays the notice.
+ *
+ * Overhaul wave 2: once a sub is confirmed, a qualifying one that started the payer's viewer
+ * membership (the payment webhook starts it in the same transaction) ends in "Welcome to the
+ * co-op" with the payer's first vote; one the sync will still pick up says it is on its way.
  */
 import { formatMoney, useLocale } from "@commonair/ui";
 import { AlertCallout } from "@commonair/ui/blocks/feedback";
 import * as React from "react";
 import { t } from "../../i18n/index.ts";
 import { api } from "../../lib/api.ts";
+import type { MembershipViewDto } from "../../lib/coop.ts";
+import { loadOpenProposals, useFirstVote, type FirstVoteLoader } from "../coop/first-vote.tsx";
+import { CoopWelcome } from "../coop/welcome.tsx";
 import type { PaymentBreakdownDto } from "./breakdown-table.tsx";
 
 export const CHECKOUT_PARAM = "checkout";
@@ -42,25 +49,47 @@ export function withoutCheckoutParams(href: string): string {
   return `${url.pathname}${query ? `?${query}` : ""}${url.hash}`;
 }
 
+/**
+ * What a confirmed sub did for the payer's co-op membership: `welcome` it started their viewer
+ * membership just now; `joining` it qualifies and the hourly sync will start it; `none` otherwise
+ * (already a member, a cheap or gifted sub, a co-op that does not count subs, or a member who left
+ * the viewer class and rejoins on the membership page).
+ */
+export type CoopOutcome = "welcome" | "joining" | "none";
+
+/** How far before the payment's own time a membership still counts as started by it (clock skew). */
+export const WELCOME_SKEW_MS = 5 * 60_000;
+
+/** The outcome from the payer's membership view (pure). */
+export function coopOutcome(
+  view: Pick<MembershipViewDto, "memberships" | "eligibility">,
+  payment: Pick<PaymentBreakdownDto, "succeededAt">,
+): CoopOutcome {
+  const viewer = view.memberships.find((m) => m.class === "viewer");
+  if (viewer?.status === "active") {
+    const since = Date.parse(payment.succeededAt) - WELCOME_SKEW_MS;
+    return viewer.basis === "subscription" && Date.parse(viewer.joinedAt) >= since ? "welcome" : "none";
+  }
+  // A voluntary exit is respected: the sync never re-enrols, so "within the hour" would be untrue.
+  if (viewer?.status === "exited") return "none";
+  const eligible = view.eligibility.find((e) => e.class === "viewer");
+  return eligible?.eligible === true && eligible.basis === "subscription" ? "joining" : "none";
+}
+
 /** What the notice needs from the API (tests pass a stub). */
 export interface CheckoutReturnClient {
   /** Rejects (NOT_FOUND) until the payment has succeeded. */
   payment: (paymentId: string) => Promise<PaymentBreakdownDto>;
-  /**
-   * The subscription will make the payer a viewer member: they are not one yet and their
-   * subscription qualifies (paid, not a gift, at least the minimum, the co-op counts subs).
-   */
-  joinsCoop: () => Promise<boolean>;
+  /** What the confirmed sub did for the payer's membership (`coopOutcome`). */
+  coop: (payment: PaymentBreakdownDto) => Promise<CoopOutcome>;
+  /** Open proposals for the welcome's first vote (`first-vote.tsx`). */
+  proposals?: FirstVoteLoader;
 }
 
 const apiClient: CheckoutReturnClient = {
   payment: (paymentId) => api().money.paymentBreakdown({ paymentId }),
-  joinsCoop: async () => {
-    const view = await api().coop.membership();
-    if (view.memberships.some((m) => m.class === "viewer" && m.status === "active")) return false;
-    const viewer = view.eligibility.find((e) => e.class === "viewer");
-    return viewer?.eligible === true && viewer.basis === "subscription";
-  },
+  coop: async (payment) => coopOutcome(await api().coop.membership(), payment),
+  proposals: loadOpenProposals,
 };
 
 /** Between polls, and how long to poll before saying it is taking a while. */
@@ -72,7 +101,7 @@ export type CheckoutReturnState =
   | { kind: "canceled" }
   | { kind: "pending" }
   | { kind: "slow" }
-  | { kind: "confirmed"; payment: PaymentBreakdownDto; joinsCoop: boolean };
+  | { kind: "confirmed"; payment: PaymentBreakdownDto; coop: CoopOutcome };
 
 /**
  * Reads the return params once on mount (the browser's own URL: the router's search schema drops
@@ -108,8 +137,11 @@ export function useCheckoutReturn({
       try {
         const payment = await clientRef.current.payment(params.paymentId);
         if (stopped) return;
-        const joins = payment.kind === "subscription" ? await clientRef.current.joinsCoop().catch(() => false) : false;
-        if (!stopped) setState({ kind: "confirmed", payment, joinsCoop: joins });
+        const coop: CoopOutcome =
+          payment.kind === "subscription"
+            ? await clientRef.current.coop(payment).catch((): CoopOutcome => "none")
+            : "none";
+        if (!stopped) setState({ kind: "confirmed", payment, coop });
         return;
       } catch {
         // Not confirmed yet (or a blip): ask again until it is slow.
@@ -149,6 +181,12 @@ export function CheckoutReturn({
 }): React.JSX.Element | null {
   const { locale } = useLocale();
   const state = useCheckoutReturn({ client, pollMs, slowMs });
+  const welcome = state.kind === "confirmed" && state.coop === "welcome";
+  const firstVote = useFirstVote(
+    welcome,
+    state.kind === "confirmed" ? state.payment.paymentId : "-",
+    client?.proposals ?? loadOpenProposals,
+  );
   switch (state.kind) {
     case "none":
       return null;
@@ -175,31 +213,35 @@ export function CheckoutReturn({
       const { payment } = state;
       const subscription = payment.kind === "subscription";
       return (
-        <AlertCallout
-          data-testid="checkout-return"
-          data-state="confirmed"
-          data-payment-id={payment.paymentId}
-          data-joins-coop={state.joinsCoop ? "true" : "false"}
-          tone="info"
-          live
-          title={
-            subscription
-              ? t("fixWeb.checkout.subscribed", { channel: payment.channel.displayName })
-              : t("fixWeb.checkout.tipped", { channel: payment.channel.displayName })
-          }
-          description={
-            <>
-              <p>
-                {t("fixWeb.checkout.share", {
-                  channel: payment.channel.displayName,
-                  amount: formatMoney(creatorCents(payment), payment.gross.currency, locale),
-                  price: formatMoney(payment.gross.cents, payment.gross.currency, locale),
-                })}
-              </p>
-              {state.joinsCoop && <p data-testid="checkout-return-coop">{t("fixWeb.checkout.joinsCoop")}</p>}
-            </>
-          }
-        />
+        <div className="flex flex-col gap-3">
+          <AlertCallout
+            data-testid="checkout-return"
+            data-state="confirmed"
+            data-payment-id={payment.paymentId}
+            data-joins-coop={state.coop === "none" ? "false" : "true"}
+            data-coop={state.coop}
+            tone="info"
+            live
+            title={
+              subscription
+                ? t("fixWeb.checkout.subscribed", { channel: payment.channel.displayName })
+                : t("fixWeb.checkout.tipped", { channel: payment.channel.displayName })
+            }
+            description={
+              <>
+                <p>
+                  {t("fixWeb.checkout.share", {
+                    channel: payment.channel.displayName,
+                    amount: formatMoney(creatorCents(payment), payment.gross.currency, locale),
+                    price: formatMoney(payment.gross.cents, payment.gross.currency, locale),
+                  })}
+                </p>
+                {state.coop === "joining" && <p data-testid="checkout-return-coop">{t("fixWeb.checkout.joinsCoop")}</p>}
+              </>
+            }
+          />
+          {welcome && <CoopWelcome firstVote={firstVote} />}
+        </div>
       );
     }
   }
