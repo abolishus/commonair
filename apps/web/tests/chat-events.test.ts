@@ -142,11 +142,14 @@ describe("chat-message badges", () => {
     );
   });
 
-  it("draws the kinds the composition knows, in a fixed order, with catalog labels", () => {
+  it("draws only the highest kind the composition knows, with its catalog label (D4.4)", () => {
     expect(visibleBadges([{ type: "subscriber" }, { type: "bot" }, { type: "moderator" }])).toEqual([
       { kind: "moderator", label: "Moderator" },
-      { kind: "subscriber", label: "Subscriber" },
     ]);
+    expect(visibleBadges([{ type: "subscriber" }, { type: "broadcaster" }])).toEqual([
+      { kind: "broadcaster", label: "Broadcaster" },
+    ]);
+    expect(visibleBadges([{ type: "member" }])).toEqual([{ kind: "member", label: "Co-op member" }]);
     expect(visibleBadges([{ type: "staff" }])).toEqual([]);
   });
 });
@@ -207,9 +210,9 @@ describe("channel.raid rows", () => {
   it("the raider's login as data-user, the verified count as given, one line with a plural", () => {
     const v = chatEventView("channel.raid", raidPayload());
     expect(v).toMatchObject({ type: "channel.raid", user: "mothwing", name: "Mothwing", viewers: 12, amount: null });
-    expect(chatEventText(v!)).toBe("Mothwing is raiding with 12 viewers!");
+    expect(chatEventText(v!)).toBe("Mothwing is raiding with 12 viewers");
     expect(chatEventText(chatEventView("channel.raid", raidPayload({ viewers: 1 }))!)).toBe(
-      "Mothwing is raiding with 1 viewer!",
+      "Mothwing is raiding with 1 viewer",
     );
     // An empty display name falls back to the login.
     expect(chatEventView("channel.raid", raidPayload({ from_broadcaster_user_name: "" }))?.name).toBe("mothwing");

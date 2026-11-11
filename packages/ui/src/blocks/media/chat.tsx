@@ -17,7 +17,13 @@ export interface ChatPanelProps extends React.ComponentProps<"section"> {
   children: React.ReactNode;
   variant?: "live" | "replay" | "mobile";
   logLabel: string;
-  newMessagesLabel: string;
+  /** The jump-to-latest pill's text; a function gets how many rows arrived since the reader scrolled up. */
+  newMessagesLabel: string | ((count: number) => string);
+  /**
+   * A counter that grows by one with every new row (never with a trim of old ones), so the pill can
+   * say "3 new messages". Without it the pill only says `newMessagesLabel(0)`.
+   */
+  rowSeq?: number;
   onJumpToLatest?: () => void;
   /** `off` when another live region summarizes the log (Calm Chat's digest). */
   logLive?: "polite" | "off";
@@ -33,6 +39,7 @@ export function ChatPanel({
   variant = "live",
   logLabel,
   newMessagesLabel,
+  rowSeq = 0,
   onJumpToLatest,
   logLive = "polite",
   className,
@@ -41,6 +48,12 @@ export function ChatPanel({
   const scrollAreaRef = React.useRef<HTMLDivElement>(null);
   const [showLatest, setShowLatest] = React.useState(false);
   const atBottomRef = React.useRef(true);
+  // The row counter when the reader left the bottom; null while they are there.
+  const [leftAt, setLeftAt] = React.useState<number | null>(null);
+  const seqRef = React.useRef(rowSeq);
+  React.useEffect(() => {
+    seqRef.current = rowSeq;
+  }, [rowSeq]);
   const getViewport = (): HTMLElement | null =>
     scrollAreaRef.current?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]') ?? null;
 
@@ -50,6 +63,7 @@ export function ChatPanel({
     const updateScrollPosition = () => {
       atBottomRef.current = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 48;
       setShowLatest(!atBottomRef.current);
+      setLeftAt((at) => (atBottomRef.current ? null : (at ?? seqRef.current)));
     };
     viewport.addEventListener("scroll", updateScrollPosition);
     return () => viewport.removeEventListener("scroll", updateScrollPosition);
@@ -65,8 +79,11 @@ export function ChatPanel({
     if (viewport) viewport.scrollTop = viewport.scrollHeight;
     atBottomRef.current = true;
     setShowLatest(false);
+    setLeftAt(null);
     onJumpToLatest?.();
   };
+  const unread = leftAt === null ? 0 : Math.max(0, rowSeq - leftAt);
+  const pillLabel = typeof newMessagesLabel === "function" ? newMessagesLabel(unread) : newMessagesLabel;
   return (
     <section
       data-slot="chat-panel"
@@ -82,7 +99,7 @@ export function ChatPanel({
         </div>
       </header>
       {pinned && (
-        <div data-slot="chat-pinned" className="border-b border-border p-2">
+        <div data-slot="chat-pinned" className="grid gap-2 px-2 pt-2">
           {pinned}
         </div>
       )}
@@ -97,8 +114,16 @@ export function ChatPanel({
           {children}
         </div>
         {showLatest && (
-          <Button type="button" size="sm" variant="secondary" onClick={jump} className="absolute end-2 bottom-2">
-            {newMessagesLabel}
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            data-slot="chat-jump-latest"
+            data-count={unread}
+            onClick={jump}
+            className="absolute end-2 bottom-2 shadow-raised"
+          >
+            {pillLabel}
           </Button>
         )}
       </ScrollArea>
@@ -115,16 +140,8 @@ export interface ChatBadgeProps extends React.ComponentProps<typeof StatusBadge>
 }
 
 export function ChatBadge({ kind, label, ...props }: ChatBadgeProps): React.JSX.Element {
-  const tone =
-    kind === "broadcaster"
-      ? "danger"
-      : kind === "moderator"
-        ? "success"
-        : kind === "vip"
-          ? "warning"
-          : kind === "member"
-            ? "accent"
-            : "neutral";
+  // One quiet badge per line: only the channel's own name stands out (D4.4, a calmer column).
+  const tone = kind === "broadcaster" ? "accent" : "neutral";
   return (
     <StatusBadge tone={tone} aria-label={label} data-chat-badge={kind} {...props}>
       {label}

@@ -39,7 +39,16 @@ function ModViewRoute(): React.JSX.Element {
         </PageContainer>
       )}
       header={<PageHeader title={t("studio.mod.title", { channel })} description={t("studio.mod.intro")} />}
-      chat={<ChatPanel channel={channel} signedIn selfUsername={me.username} className={CHAT_COLUMN_CLASS} />}
+      // The mod view has room for every chat mode at once: the toolbar, not the header menu (J5-b).
+      chat={
+        <ChatPanel
+          channel={channel}
+          signedIn
+          selfUsername={me.username}
+          modTools="toolbar"
+          className={CHAT_COLUMN_CLASS}
+        />
+      }
     />
   );
 }
