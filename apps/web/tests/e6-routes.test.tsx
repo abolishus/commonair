@@ -668,7 +668,8 @@ describe("/settings/privacy", () => {
     wrap(React.createElement(component(PrivacyRoute)));
     await waitFor(() => expect(ids("export-row")).toHaveLength(2));
     expect(ids("export-request").map((el) => el.getAttribute("data-kind"))).toEqual(["account", "channel"]);
-    const [queued, ready] = ids("export-row");
+    // D7.4: one row per kind (account, then channel), each showing its newest export.
+    const [ready, queued] = ids("export-row");
     expect(attrs(ready, "data-kind", "data-status")).toEqual(["account", "ready"]);
     expect(ready?.querySelector('[data-testid="export-download"]')?.getAttribute("href")).toContain("X-Amz-Signature");
     expect(attrs(queued, "data-kind", "data-status")).toEqual(["channel", "queued"]);
@@ -743,7 +744,10 @@ describe("/settings/privacy", () => {
 
   it("does not poll exports when nothing is queued or running", async () => {
     const poll = fakePoll();
-    fns.exportsList.mockResolvedValue([exportJob(), exportJob({ id: "f", status: "failed", downloadUrl: null })]);
+    fns.exportsList.mockResolvedValue([
+      exportJob(),
+      exportJob({ id: "f", kind: "channel", status: "failed", downloadUrl: null }),
+    ]);
     wrap(<ExportSection hasChannel pollEnv={poll.env} />);
     await waitFor(() => expect(ids("export-row")).toHaveLength(2));
     expect(poll.periods()).toEqual([]);
@@ -787,6 +791,9 @@ describe("/settings/privacy", () => {
     const confirmDisabled = () => screen.getByTestId("confirm-dialog-confirm").getAttribute("aria-disabled") === "true";
     expect(confirmDisabled()).toBe(true);
     fireEvent.change(input, { target: { value: "rivertide" } });
+    // D7.4 step 2: the download tick is needed too.
+    expect(confirmDisabled()).toBe(true);
+    fireEvent.click(screen.getByTestId("deletion-downloaded"));
     await waitFor(() => expect(confirmDisabled()).toBe(false));
     fireEvent.click(screen.getByTestId("confirm-dialog-confirm"));
     await waitFor(() => expect(fns.deletionRequest).toHaveBeenCalledWith({ confirmUsername: "rivertide" }));

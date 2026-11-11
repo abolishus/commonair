@@ -41,7 +41,7 @@ vi.mock("../src/lib/consent.ts", async (importOriginal) => {
 
 import { FooterLocaleSwitcher } from "../src/components/locale/footer-locale-switcher.tsx";
 import { switchableLocales } from "../src/components/locale/language-label.tsx";
-import { PreferencesPage } from "../src/components/locale/preferences-page.tsx";
+import { LanguageSection } from "../src/components/locale/preferences-page.tsx";
 import { en } from "../src/i18n/en.ts";
 import { SUPPORTED_LOCALES, locale, uiMessages } from "../src/i18n/index.ts";
 
@@ -115,10 +115,10 @@ describe("switchableLocales", () => {
   });
 });
 
-describe("PreferencesPage", () => {
+describe("LanguageSection", () => {
   it("lists Automatic and every locale but en-XA, each label in its own language with lang", async () => {
-    await mount(<PreferencesPage initial={null} />);
-    expect(byId("preferences-page")).not.toBeNull();
+    await mount(<LanguageSection initial={null} />);
+    expect(byId("preferences-language")).not.toBeNull();
     await pick("locale-select", "locale-option-auto");
     // Choosing the current value does nothing.
     expect(fake.update).not.toHaveBeenCalled();
@@ -137,7 +137,7 @@ describe("PreferencesPage", () => {
   });
 
   it("the select is labelled and described", async () => {
-    await mount(<PreferencesPage initial={null} />);
+    await mount(<LanguageSection initial={null} />);
     const trigger = screen.getByRole("combobox", { name: en["preferences.language.label"] });
     expect(trigger.getAttribute("data-testid")).toBe("locale-select");
     const described = document.getElementById(trigger.getAttribute("aria-describedby") ?? "");
@@ -150,7 +150,7 @@ describe("PreferencesPage", () => {
   it("shows the saved choice from me.get: null is auto, a tag is that tag", async () => {
     let answer: (v: { locale: string | null }) => void = () => undefined;
     fake.get.mockImplementation(() => new Promise((r) => (answer = r)));
-    await mount(<PreferencesPage initial={null} />);
+    await mount(<LanguageSection initial={null} />);
     // The stand-in until me.get answers.
     expect(must("locale-select").dataset.value).toBe("auto");
     await act(async () => answer({ locale: "es" }));
@@ -159,7 +159,7 @@ describe("PreferencesPage", () => {
     cleanup();
 
     fake.get.mockImplementation(() => new Promise((r) => (answer = r)));
-    await mount(<PreferencesPage initial="es" />);
+    await mount(<LanguageSection initial="es" />);
     expect(must("locale-select").dataset.value).toBe("es");
     await act(async () => answer({ locale: null }));
     expect(must("locale-select").dataset.value).toBe("auto");
@@ -167,7 +167,7 @@ describe("PreferencesPage", () => {
   });
 
   it("choosing a language saves it, then applies it, and stays saving until the remount", async () => {
-    await mount(<PreferencesPage initial={null} />);
+    await mount(<LanguageSection initial={null} />);
     await waitFor(() => expect(fake.get).toHaveBeenCalled());
     await pick("locale-select", "locale-option-es");
     await waitFor(() => expect(fake.applyLocale).toHaveBeenCalledWith("es"));
@@ -183,7 +183,7 @@ describe("PreferencesPage", () => {
 
   it("when the catalog fails to load, it reloads the root loader and settles on Saved", async () => {
     fake.applyLocale.mockRejectedValue(new Error("chunk"));
-    const router = await mount(<PreferencesPage initial={null} />);
+    const router = await mount(<LanguageSection initial={null} />);
     const invalidate = vi.spyOn(router, "invalidate").mockResolvedValue(undefined);
     await waitFor(() => expect(fake.get).toHaveBeenCalled());
     await pick("locale-select", "locale-option-es");
@@ -192,27 +192,27 @@ describe("PreferencesPage", () => {
     expect(must("locale-select").hasAttribute("data-disabled")).toBe(false);
     cleanup();
     // Nothing carried: the next visit is quiet.
-    await mount(<PreferencesPage initial="es" />);
+    await mount(<LanguageSection initial="es" />);
     await waitFor(() => expect(fake.get).toHaveBeenCalled());
     expect(must("locale-save-status").dataset.state).toBe("idle");
   });
 
   it("a save carried for a remount expires after ten seconds", async () => {
-    await mount(<PreferencesPage initial={null} />);
+    await mount(<LanguageSection initial={null} />);
     await waitFor(() => expect(fake.get).toHaveBeenCalled());
     await pick("locale-select", "locale-option-es");
     await waitFor(() => expect(fake.applyLocale).toHaveBeenCalled());
     cleanup();
     vi.setSystemTime(Date.now() + 10_001);
     fake.get.mockImplementation(() => new Promise(() => undefined));
-    await mount(<PreferencesPage initial={null} />);
+    await mount(<LanguageSection initial={null} />);
     expect(must("locale-select").dataset.value).toBe("auto");
     await act(async () => new Promise((r) => setTimeout(r, 150)));
     expect(must("locale-save-status").dataset.state).toBe("idle");
   });
 
   it("the page remounted by the switch keeps the choice and announces Saved after mount", async () => {
-    await mount(<PreferencesPage initial={null} />);
+    await mount(<LanguageSection initial={null} />);
     await waitFor(() => expect(fake.get).toHaveBeenCalled());
     await pick("locale-select", "locale-option-es");
     await waitFor(() => expect(fake.applyLocale).toHaveBeenCalled());
@@ -220,7 +220,7 @@ describe("PreferencesPage", () => {
     // The root loader has not answered yet: me.get still says auto, the stand-in is null.
     let answer: (v: { locale: string | null }) => void = () => undefined;
     fake.get.mockImplementation(() => new Promise((r) => (answer = r)));
-    await mount(<PreferencesPage initial={null} />);
+    await mount(<LanguageSection initial={null} />);
     expect(must("locale-select").dataset.value).toBe("es");
     await waitFor(() => expect(must("locale-save-status").dataset.state).toBe("saved"));
     await act(async () => answer({ locale: "es" }));
@@ -228,14 +228,14 @@ describe("PreferencesPage", () => {
     cleanup();
     // Taken once: the next visit is quiet.
     fake.get.mockResolvedValue({ locale: "es" });
-    await mount(<PreferencesPage initial="es" />);
+    await mount(<LanguageSection initial="es" />);
     await waitFor(() => expect(fake.get).toHaveBeenCalled());
     expect(must("locale-save-status").dataset.state).toBe("idle");
   });
 
   it("choosing Automatic saves null and reloads the root loader instead of applying a tag", async () => {
     fake.get.mockResolvedValue({ locale: "es" });
-    const router = await mount(<PreferencesPage initial="es" />);
+    const router = await mount(<LanguageSection initial="es" />);
     const invalidate = vi.spyOn(router, "invalidate").mockResolvedValue(undefined);
     await waitFor(() => expect(fake.get).toHaveBeenCalled());
     await pick("locale-select", "locale-option-auto");
@@ -250,7 +250,7 @@ describe("PreferencesPage", () => {
   it("Automatic resolving to the language shown announces Saved here and carries nothing", async () => {
     fake.boot = { me: ME, locale: "en", localeFromUser: false };
     fake.get.mockResolvedValue({ locale: "en" });
-    const router = await mount(<PreferencesPage initial="en" />);
+    const router = await mount(<LanguageSection initial="en" />);
     vi.spyOn(router, "invalidate").mockResolvedValue(undefined);
     await waitFor(() => expect(fake.get).toHaveBeenCalled());
     await pick("locale-select", "locale-option-auto");
@@ -259,7 +259,7 @@ describe("PreferencesPage", () => {
     cleanup();
     // Back within ten seconds: quiet, and the value comes from initial, not a stale carry.
     fake.get.mockImplementation(() => new Promise(() => undefined));
-    await mount(<PreferencesPage initial="en" />);
+    await mount(<LanguageSection initial="en" />);
     expect(must("locale-select").dataset.value).toBe("en");
     await act(async () => new Promise((r) => setTimeout(r, 150)));
     expect(must("locale-save-status").dataset.state).toBe("idle");
@@ -268,7 +268,7 @@ describe("PreferencesPage", () => {
   it("Automatic resolving to another language leaves Saved to the remounted page", async () => {
     fake.boot = { me: ME, locale: "es", localeFromUser: false };
     fake.get.mockResolvedValue({ locale: "en" });
-    const router = await mount(<PreferencesPage initial="en" />);
+    const router = await mount(<LanguageSection initial="en" />);
     vi.spyOn(router, "invalidate").mockResolvedValue(undefined);
     await waitFor(() => expect(fake.get).toHaveBeenCalled());
     await pick("locale-select", "locale-option-auto");
@@ -277,7 +277,7 @@ describe("PreferencesPage", () => {
     expect(must("locale-save-status").dataset.state).toBe("saving");
     cleanup();
     fake.get.mockImplementation(() => new Promise(() => undefined));
-    await mount(<PreferencesPage initial={null} />);
+    await mount(<LanguageSection initial={null} />);
     expect(must("locale-select").dataset.value).toBe("auto");
     await waitFor(() => expect(must("locale-save-status").dataset.state).toBe("saved"));
   });
@@ -285,7 +285,7 @@ describe("PreferencesPage", () => {
   it("a choice made before me.get answers wins over its answer", async () => {
     let answer: (v: { locale: string | null }) => void = () => undefined;
     fake.get.mockImplementation(() => new Promise((r) => (answer = r)));
-    await mount(<PreferencesPage initial={null} />);
+    await mount(<LanguageSection initial={null} />);
     await pick("locale-select", "locale-option-es");
     await waitFor(() => expect(fake.applyLocale).toHaveBeenCalledWith("es"));
     await act(async () => answer({ locale: null }));
@@ -295,7 +295,7 @@ describe("PreferencesPage", () => {
   it("an API error restores the previous value and toasts", async () => {
     const error = vi.spyOn(toast, "error").mockImplementation(() => 1);
     fake.update.mockRejectedValue(new Error("boom"));
-    await mount(<PreferencesPage initial={null} />);
+    await mount(<LanguageSection initial={null} />);
     await waitFor(() => expect(fake.get).toHaveBeenCalled());
     await pick("locale-select", "locale-option-es");
     await waitFor(() => expect(error).toHaveBeenCalledWith(en["localeSwitcher.saveFailed"]));

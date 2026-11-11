@@ -4,14 +4,13 @@
 /**
  * `/settings/connections`: every app the member authorized (`developer.grants.list`), what each
  * may do in plain words, and a confirmed revoke (`developer.grants.revoke`), which also cuts the
- * app's chat bots and event subscriptions at once (ADR 0027 §1).
+ * app's chat bots and event subscriptions at once (ADR 0027 §1). One settings section with a row
+ * per app (D7.1); the route brings the page header.
  */
 import { ConfirmDialog, EmptyState, RelativeTime, SkeletonGroup, SkeletonText } from "@commonair/ui";
 import { AlertCallout } from "@commonair/ui/blocks/feedback";
-import { PageHeader } from "@commonair/ui/blocks/headers";
+import { SettingsSection } from "@commonair/ui/blocks/forms";
 import { Button } from "@commonair/ui/components/button";
-import { Card, CardContent, CardHeader } from "@commonair/ui/components/card";
-import { Skeleton } from "@commonair/ui";
 import { toast } from "@commonair/ui/toast";
 import { PlugSocketIcon, Unlink02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -50,18 +49,9 @@ export function Connections({ client }: { client: OAuthClient }): React.JSX.Elem
     toast.success(t("oauth.connections.revoked", { app: grant.app.name }));
   };
 
-  return (
-    <div data-testid="connections" className="flex flex-col gap-6">
-      <PageHeader
-        title={t("oauth.connections.pageTitle")}
-        description={
-          load.kind === "loaded" && load.grants.length > 0
-            ? t("oauth.connections.introWithCount", { count: load.grants.length })
-            : t("oauth.connections.intro")
-        }
-      />
-      {load.kind === "loading" && <ConnectionsSkeleton />}
-      {load.kind === "failed" && (
+  if (load.kind === "failed")
+    return (
+      <div data-testid="connections">
         <AlertCallout
           data-testid="connections-load-error"
           tone="danger"
@@ -81,42 +71,44 @@ export function Connections({ client }: { client: OAuthClient }): React.JSX.Elem
             </Button>
           }
         />
-      )}
-      {load.kind === "loaded" &&
-        (load.grants.length === 0 ? (
+      </div>
+    );
+
+  return (
+    <SettingsSection
+      data-testid="connections"
+      title={t("d7Settings.connections.title")}
+      description={
+        load.kind === "loaded" && load.grants.length > 0
+          ? t("oauth.connections.introWithCount", { count: load.grants.length })
+          : t("oauth.connections.intro")
+      }
+    >
+      {load.kind === "loading" ? (
+        <SkeletonGroup label={t("oauth.connections.loading")} className="flex flex-col gap-4 px-4 py-4 sm:px-6">
+          <SkeletonText lines={3} />
+          <SkeletonText lines={3} />
+        </SkeletonGroup>
+      ) : load.grants.length === 0 ? (
+        <div className="px-4 py-4 sm:px-6">
           <EmptyState
             data-testid="connections-empty"
             icon={PlugSocketIcon}
             title={t("oauth.connections.empty")}
             description={t("oauth.connections.emptyHint")}
+            headingLevel={3}
           />
-        ) : (
-          <ul className="flex flex-col gap-4">
-            {load.grants.map((grant) => (
-              <li key={grant.app.id}>
-                <ConnectionRow grant={grant} onRevoke={() => revoke(grant)} />
-              </li>
-            ))}
-          </ul>
-        ))}
-    </div>
-  );
-}
-
-function ConnectionsSkeleton(): React.JSX.Element {
-  return (
-    <SkeletonGroup label={t("oauth.connections.loading")} className="flex flex-col gap-4">
-      {[0, 1].map((i) => (
-        <Card key={i}>
-          <CardHeader>
-            <Skeleton className="h-5 w-1/3" />
-          </CardHeader>
-          <CardContent>
-            <SkeletonText lines={3} />
-          </CardContent>
-        </Card>
-      ))}
-    </SkeletonGroup>
+        </div>
+      ) : (
+        <ul className="flex flex-col divide-y">
+          {load.grants.map((grant) => (
+            <li key={grant.app.id}>
+              <ConnectionRow grant={grant} onRevoke={() => revoke(grant)} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </SettingsSection>
   );
 }
 
@@ -130,15 +122,16 @@ export function ConnectionRow({
   const { app } = grant;
   const listId = React.useId();
   return (
-    <Card
+    <div
       data-testid="connection"
       data-app-id={app.id}
       data-client-id={app.clientId}
       data-scopes={grant.scopes.join(" ")}
+      className="flex min-w-0 flex-col gap-3 px-4 py-4 sm:px-6"
     >
-      <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex min-w-0 flex-col gap-1">
-          <h2 className="text-base font-semibold break-words">{app.name}</h2>
+          <h3 className="text-base font-semibold break-words">{app.name}</h3>
           {app.description && <p className="text-sm break-words text-muted-foreground">{app.description}</p>}
           <AppOwner owner={app.owner} testId="connection-owner" />
         </div>
@@ -163,21 +156,19 @@ export function ConnectionRow({
           onError={(err) => toastActionError(err, t("oauth.connections.revokeFailed"))}
           contentProps={{ "data-testid": "connection-revoke-dialog" }}
         />
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3">
-        <p id={listId} className="text-sm font-medium">
-          {t("oauth.connections.permissions")}
-        </p>
-        <ScopeList scopes={grant.scopes} labelledBy={listId} itemTestId="connection-scope" detailed={false} />
-        <p className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-          <span>{fillNode(t("oauth.connections.authorized"), "when", <RelativeTime date={grant.authorizedAt} />)}</span>
-          <span>
-            {grant.lastUsedAt
-              ? fillNode(t("oauth.connections.lastUsed"), "when", <RelativeTime date={grant.lastUsedAt} />)
-              : t("oauth.connections.neverUsed")}
-          </span>
-        </p>
-      </CardContent>
-    </Card>
+      </div>
+      <p id={listId} className="text-sm font-medium">
+        {t("oauth.connections.permissions")}
+      </p>
+      <ScopeList scopes={grant.scopes} labelledBy={listId} itemTestId="connection-scope" detailed={false} />
+      <p className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+        <span>{fillNode(t("oauth.connections.authorized"), "when", <RelativeTime date={grant.authorizedAt} />)}</span>
+        <span>
+          {grant.lastUsedAt
+            ? fillNode(t("oauth.connections.lastUsed"), "when", <RelativeTime date={grant.lastUsedAt} />)
+            : t("oauth.connections.neverUsed")}
+        </span>
+      </p>
+    </div>
   );
 }

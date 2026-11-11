@@ -4,15 +4,19 @@
 import { PageContainer } from "@commonair/ui/layouts";
 import { Outlet, createFileRoute, useLocation } from "@tanstack/react-router";
 import type * as React from "react";
-import { SettingsNav, settingsTabFor } from "../../components/settings/settings-nav.tsx";
+import { DeletionBanner } from "../../components/settings/deletion-banner.tsx";
+import { DeletionProvider } from "../../components/settings/deletion-state.tsx";
+import { useSettingsCounts } from "../../components/settings/nav-counts.ts";
+import { SettingsNav, settingsTabFor, type SettingsItemId } from "../../components/settings/settings-nav.tsx";
 import { t } from "../../i18n/index.ts";
 import { useBootstrap } from "../../lib/bootstrap.ts";
 import { titleHead } from "../../lib/page-title.ts";
 
 /**
- * The settings layout (F27): one width (`default`) and the settings tab row above each of the seven
- * pages. Each page guards its own session and brings its own `PageHeader`; the email unsubscribe
- * page (signed out, no tab) renders as it is.
+ * The settings shell (overhaul wave 4, D7.1): the grouped section nav beside the page from `lg`
+ * (a select above it below that), one width, and the scheduled-deletion banner above every page
+ * (D7.4). Each page guards its own session and brings its own `PageHeader`, whose h1 is the nav
+ * label; the email unsubscribe page (signed out, no nav item) renders as it is.
  */
 export const Route = createFileRoute("/_app/settings")({
   // A fallback only: every page below sets its own title.
@@ -25,10 +29,24 @@ function SettingsLayout(): React.JSX.Element {
   const pathname = useLocation({ select: (location) => location.pathname });
   const current = settingsTabFor(pathname);
   if (!me || current === null) return <Outlet />;
+  return <SettingsShell current={current} />;
+}
+
+function SettingsShell({ current }: { current: SettingsItemId }): React.JSX.Element {
+  const counts = useSettingsCounts();
   return (
-    <PageContainer data-testid="settings-layout" data-width="default" className="flex flex-col gap-6 py-8">
-      <SettingsNav current={current} />
-      <Outlet />
+    <PageContainer
+      data-testid="settings-layout"
+      data-width="default"
+      className="flex flex-col gap-6 py-8 lg:flex-row lg:items-start"
+    >
+      <SettingsNav current={current} counts={counts} />
+      <DeletionProvider>
+        <div data-testid="settings-main" className="flex min-w-0 max-w-3xl flex-1 flex-col gap-6">
+          <DeletionBanner />
+          <Outlet />
+        </div>
+      </DeletionProvider>
     </PageContainer>
   );
 }

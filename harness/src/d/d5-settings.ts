@@ -4,13 +4,16 @@
 /**
  * Unit D5-settings' `d-surfaces` steps (.claude/briefs/d/D5-settings.md), on the seeded stack:
  *
- * - F27: as the seeded viewer, `/settings/privacy` shows the settings navigation (the tab row from
- *   `sm` up, the select below it) with Privacy current;
- * - F37: the account deletion control is within the first viewport, above the long sections;
+ * - F27, D7.1: as the seeded viewer, `/settings/privacy` shows the settings navigation (the
+ *   grouped section nav from `lg` up, the select below it) with Privacy & data current, and bare
+ *   `/settings` lands on Account;
+ * - D7.4 (replacing F37's "first viewport"): the deletion control is in the page's danger zone,
+ *   the last section, after Download your data;
  * - F38: `/settings/subscriptions` names each channel from `Subscription.channel`, with no
  *   per-channel `channels.get` lookups.
  */
 import type { Page } from "playwright";
+import { D7_SETTINGS_IDS as D7 } from "../web/selectors.ts";
 import { waitForHydration } from "../web/session.ts";
 import type { DContext } from "./context.ts";
 
@@ -28,28 +31,43 @@ export async function steps(ctx: DContext): Promise<void> {
   const s = ctx.scenario;
   const page = ctx.viewer;
 
-  await s.step("d5-settings: /settings/privacy has the settings navigation and deletion in sight", async () => {
+  await s.step("d5-settings: /settings/privacy has the settings navigation and its danger zone", async () => {
     await open(ctx, page, PRIVACY);
-    const nav = page.locator('[data-testid="settings-nav"]');
+    const nav = page.locator(`[data-testid="${D7.settingsNav}"]`);
     await nav.waitFor({ timeout: UI_TIMEOUT_MS });
     s.assert("the settings navigation marks Privacy", (await nav.getAttribute("data-current")) === "privacy");
-    const tab = page.locator('[data-testid="settings-tab-privacy"]');
-    const select = page.locator('[data-testid="settings-nav-select"]');
+    const tab = page.locator(`[data-testid="${D7.settingsTabPrivacy}"]`);
+    const select = page.locator(`[data-testid="${D7.settingsNavSelect}"]`);
     const [tabShown, selectShown] = await Promise.all([tab.isVisible(), select.isVisible()]);
-    s.assert("the tab row or, on a phone, the select is shown", tabShown || selectShown, { tabShown, selectShown });
-    if (tabShown) s.check("the Privacy tab is the current page", (await tab.getAttribute("aria-current")) === "page");
+    s.assert("the section nav or, below lg, the select is shown", tabShown || selectShown, { tabShown, selectShown });
+    if (tabShown) s.check("Privacy & data is the current page", (await tab.getAttribute("aria-current")) === "page");
 
+    // D7.4 order: download, who can see you, then the danger zone last. It holds
     // `deletion-request`, or `deletion-status` when the seeded viewer already has a request.
-    const control = page.locator('[data-testid="deletion-request"], [data-testid="deletion-status"]').first();
+    const danger = page.locator(`[data-testid="${D7.privacyDelete}"]`);
+    await danger.waitFor({ timeout: UI_TIMEOUT_MS });
+    const control = danger.locator('[data-testid="deletion-request"], [data-testid="deletion-status"]').first();
     await control.waitFor({ timeout: UI_TIMEOUT_MS });
-    const box = await control.boundingBox();
-    const viewport = page.viewportSize();
-    const height = viewport?.height ?? (await page.evaluate(() => window.innerHeight));
-    s.assert("the delete control is within the first viewport", box !== null && box.y + box.height <= height, {
-      top: box?.y ?? null,
-      bottom: box ? box.y + box.height : null,
-      viewportHeight: height,
-    });
+    const order = await page
+      .locator('[data-testid="privacy-page"] > *')
+      .evaluateAll((els) => els.map((el) => el.getAttribute("data-testid") ?? el.tagName.toLowerCase()));
+    s.check(
+      "download comes first and the danger zone last",
+      order[1] === D7.privacyDownload && order[order.length - 1] === D7.privacyDelete,
+      {
+        order,
+      },
+    );
+  });
+
+  await s.step("d7-settings: bare /settings lands on Account", async () => {
+    await open(ctx, page, "/settings");
+    await page.locator(`[data-testid="${D7.accountPage}"]`).waitFor({ timeout: UI_TIMEOUT_MS });
+    s.assert("the URL is /settings/account", new URL(page.url()).pathname === "/settings/account", { url: page.url() });
+    s.check(
+      "the nav marks Account",
+      (await page.locator(`[data-testid="${D7.settingsNav}"]`).getAttribute("data-current")) === "account",
+    );
   });
 
   await s.step("d5-settings: /settings/subscriptions names channels without per-channel lookups", async () => {

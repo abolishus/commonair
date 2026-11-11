@@ -1,8 +1,7 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { PageHeader } from "@commonair/ui/blocks/headers";
-import { Label } from "@commonair/ui/components/label";
+import { SettingsRow, SettingsSection } from "@commonair/ui/blocks/forms";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@commonair/ui/components/select";
 import { toast } from "@commonair/ui/toast";
 import { useRouter } from "@tanstack/react-router";
@@ -44,13 +43,14 @@ function negotiated(data: unknown): string | undefined {
 }
 
 /**
- * Settings → Preferences: the member's language (batch 5 decision (e)). The saved choice is
+ * Settings → Preferences, the Language section (batch 5 decision (e); a `SettingsSection` since
+ * D7.1, the route brings the page header). The saved choice is
  * `Me.locale` (null: Automatic, so the cookie, the browser's languages and the instance default
  * decide), read with `me.get`; until it answers, `initial` (the root loader's locale when the
  * member's choice decided it, else null) stands in so the server render already shows it.
  * A choice saves at once; there is no unsaved state to lose when the tree remounts.
  */
-export function PreferencesPage({ initial }: { initial: string | null }): React.JSX.Element {
+export function LanguageSection({ initial }: { initial: string | null }): React.JSX.Element {
   const router = useRouter();
   const [value, setValue] = React.useState(() => carriedValue() ?? initial ?? AUTO);
   const [status, setStatus] = React.useState<Status>("idle");
@@ -150,17 +150,13 @@ export function PreferencesPage({ initial }: { initial: string | null }): React.
 
   const autoLabel = t("preferences.language.auto");
   return (
-    <div data-testid="preferences-page" className="flex flex-col gap-6">
-      <PageHeader title={t("preferences.pageTitle")} description={t("settings.preferences.intro")} />
-      <section aria-labelledby={`${selectId}-title`} className="flex flex-col gap-3">
-        <h2 id={`${selectId}-title`} className="text-base font-medium">
-          {t("preferences.language.title")}
-        </h2>
-        <p id={hintId} className="text-sm text-muted-foreground">
-          {t("preferences.language.description")}
-        </p>
-        <div className="flex flex-col gap-1">
-          <Label htmlFor={selectId}>{t("preferences.language.label")}</Label>
+    <SettingsSection
+      data-testid="preferences-language"
+      title={t("preferences.language.title")}
+      description={<span id={hintId}>{t("preferences.language.description")}</span>}
+    >
+      <SettingsRow label={t("preferences.language.label")} controlId={selectId}>
+        <div className="flex w-full flex-col gap-1 sm:w-80">
           <Select<string>
             value={value}
             disabled={status === "saving"}
@@ -173,7 +169,7 @@ export function PreferencesPage({ initial }: { initial: string | null }): React.
               data-testid="locale-select"
               data-value={value}
               aria-describedby={hintId}
-              className="w-full sm:w-80"
+              className="w-full"
             >
               <SelectValue>{(v: string) => (v === AUTO ? autoLabel : <LanguageLabel tag={v} />)}</SelectValue>
             </SelectTrigger>
@@ -191,20 +187,20 @@ export function PreferencesPage({ initial }: { initial: string | null }): React.
               ))}
             </SelectContent>
           </Select>
+          <p
+            aria-live="polite"
+            data-testid="locale-save-status"
+            data-state={status}
+            className="min-h-5 text-sm text-muted-foreground"
+          >
+            {status === "saving"
+              ? t("preferences.language.saving")
+              : status === "saved"
+                ? t("preferences.language.saved")
+                : null}
+          </p>
         </div>
-        <p
-          aria-live="polite"
-          data-testid="locale-save-status"
-          data-state={status}
-          className="min-h-5 text-sm text-muted-foreground"
-        >
-          {status === "saving"
-            ? t("preferences.language.saving")
-            : status === "saved"
-              ? t("preferences.language.saved")
-              : null}
-        </p>
-      </section>
-    </div>
+      </SettingsRow>
+    </SettingsSection>
   );
 }
