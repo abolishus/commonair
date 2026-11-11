@@ -8,6 +8,7 @@ import { Link, Navigate, createFileRoute } from "@tanstack/react-router";
 import * as React from "react";
 import { DashboardLabelNotices } from "../../components/safety/appeals.tsx";
 import { parseDashboardSearch } from "../../components/setup-checklist/model.ts";
+import { StudioCoopCard } from "../../components/studio-coop/coop-card.tsx";
 import { ControlRoom } from "../../components/studio/control-room.tsx";
 import { DashboardTop } from "../../components/studio/dashboard-top.tsx";
 import { focusStreamInfoTitle } from "../../components/studio/stream-info.tsx";
@@ -22,7 +23,8 @@ import { titleHead } from "../../lib/page-title.ts";
  * go live" checklist until setup is done (overhaul wave 3, D5.1 and D5.3; `?intent=stream|import`
  * opens the right step). The board puts the live numbers and the title editor first (D5.2). A board: `wide` (F26).
  * "View channel" is the one place the sidebar does not go. The sticky LiveStatusBar belongs to the
- * studio shell, not this page.
+ * studio shell, not this page. Below the board, out of the way of the live work: the co-op card
+ * (overhaul wave 4, D6.4).
  */
 export const Route = createFileRoute("/_studio/dashboard")({
   validateSearch: parseDashboardSearch,
@@ -73,6 +75,7 @@ function DashboardPage(): React.JSX.Element {
           />
         )}
       />
+      <StudioCoopCard userId={me.id} />
     </PageContainer>
   );
 }
