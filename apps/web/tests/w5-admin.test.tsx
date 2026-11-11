@@ -4,8 +4,10 @@
 
 /**
  * Overhaul wave 5, w5-admin: the audit log's UTC date range (URL search, API range, validation,
- * export name) and the admin home's "Next due" on a queue tile.
+ * export name), the admin home's "Next due" on a queue tile, and /admin/coop on AdminPage.
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { LocaleProvider, TooltipProvider } from "@commonair/ui";
 import { createMemoryHistory, createRootRoute, createRouter, RouterContextProvider } from "@tanstack/react-router";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -251,5 +253,15 @@ describe("the admin home's next deadline", () => {
     wrap(<QueueTile count={count("appeals", { nextDueAt: "2026-11-12T00:00:00.000Z" })} me={me} />);
     const tile = screen.getByTestId("admin-home-tile");
     expect(tile.textContent).not.toContain(t("w5Admin.home.nextDue"));
+  });
+});
+
+describe("/admin/coop and the admin width rule", () => {
+  // d7-admin's width-rule test skips admin.coop.tsx, whose container lives in components/coop.
+  const coop = readFileSync(join(import.meta.dirname, "../src/components/coop/admin.tsx"), "utf8");
+
+  it("renders AdminPage at queue width (form and note side by side), never PageContainer", () => {
+    expect(coop).toMatch(/<AdminPage data-testid="admin-coop" width="queue"/);
+    expect(coop).not.toContain("PageContainer");
   });
 });

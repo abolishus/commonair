@@ -959,9 +959,14 @@ export const D7_ADMIN_IDS = {
   modqBulkDismissNote: "modq-bulk-dismiss-note",
   modqBulkDismissSubmit: "modq-bulk-dismiss-submit",
   modqBulkClear: "modq-bulk-clear",
-  // w5-admin (wave 5): the appeal queue's other ids (docs/testing/b8-selectors.md, "Appeal queue").
-  // `/admin/audit` reads `?actor=&type=&subject=&from=&to=` (UTC `YYYY-MM-DD`, both days included);
-  // `adminHomeTile` carries `data-next-due` (ISO) when its queue has an upcoming deadline.
+} as const;
+
+/**
+ * w5-admin (overhaul wave 5): the appeal queue's other ids (docs/testing/b8-selectors.md, "Appeal
+ * queue"). `/admin/audit` reads `?actor=&type=&subject=&from=&to=` (UTC `YYYY-MM-DD`, both days
+ * included); `adminHomeTile` carries `data-next-due` (ISO) when its queue has an upcoming deadline.
+ */
+export const W5_ADMIN_IDS = {
   appealqCount: "appealq-count",
   appealqItemToggle: "appealq-item-toggle",
   appealqDetail: "appealq-detail",

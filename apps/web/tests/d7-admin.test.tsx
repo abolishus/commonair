@@ -122,17 +122,18 @@ describe("access to the new pages", () => {
 
 describe("the admin width rule", () => {
   const dir = join(import.meta.dirname, "../src/routes/_admin");
-  // `admin.coop.tsx` renders `AdminCoopPage`, whose container lives in components/coop.
-  const SOURCE: Record<string, string> = { "admin.coop.tsx": join(dir, "../../components/coop/admin.tsx") };
-  const routes = readdirSync(dir).filter((f) => f.endsWith(".tsx"));
+  // `admin.coop.tsx` renders `AdminCoopPage`, whose container lives in components/coop (another
+  // unit's file); its switch to AdminPage is a listed follow-up.
+  const EXEMPT = new Set(["admin.coop.tsx"]);
+  const routes = readdirSync(dir).filter((f) => f.endsWith(".tsx") && !EXEMPT.has(f));
 
   it("covers every admin route", () => {
     expect(routes.length).toBeGreaterThanOrEqual(14);
   });
 
   it.each(routes)("%s uses AdminPage with a width, never PageContainer", (file) => {
-    const text = readFileSync(SOURCE[file] ?? join(dir, file), "utf8");
-    expect(text).toMatch(/<AdminPage (data-testid="[a-z-]+" )?width="(queue|form|full)"/);
+    const text = readFileSync(join(dir, file), "utf8");
+    expect(text).toMatch(/<AdminPage width="(queue|form|full)"/);
     expect(text).not.toContain("PageContainer");
   });
 });

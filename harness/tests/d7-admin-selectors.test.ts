@@ -14,7 +14,6 @@ const FILES = [
   "components/admin/audit-log.tsx",
   "components/admin/user-view.tsx",
   "components/safety/mod-queue.tsx",
-  "components/safety/appeal-queue.tsx",
 ];
 const source = FILES.map((f) => readFileSync(join(WEB, f), "utf8")).join("\n");
 
