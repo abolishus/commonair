@@ -1,13 +1,47 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { ChannelAvatar, RelativeTime } from "@commonair/ui";
-import { Notification03Icon } from "@hugeicons/core-free-icons";
+import { ChannelAvatar, MoneyAmount, RelativeTime } from "@commonair/ui";
+import {
+  Agreement01Icon,
+  Download04Icon,
+  Flag02Icon,
+  InformationCircleIcon,
+  LiveStreaming02Icon,
+  Money03Icon,
+  Rocket01Icon,
+  Shield01Icon,
+  UserGroupIcon,
+  UserStar01Icon,
+  Video01Icon,
+  VoteIcon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Link } from "@tanstack/react-router";
 import type * as React from "react";
 import { t } from "../../i18n/index.ts";
-import { type NotificationDto, type NotificationTarget, describeNotification } from "../../lib/notifications.ts";
+import {
+  type NotificationDto,
+  type NotificationTarget,
+  type NotificationType,
+  describeNotification,
+} from "../../lib/notifications.ts";
+
+/** A distinct glyph per type (overhaul wave 4, D7.3; account-admin.md AA-13). */
+const TYPE_ICON: Record<NotificationType, typeof VoteIcon> = {
+  go_live: LiveStreaming02Icon,
+  raid: Rocket01Icon,
+  proposal: Agreement01Icon,
+  vote_open: VoteIcon,
+  export_ready: Download04Icon,
+  payout: Money03Icon,
+  moderation: Shield01Icon,
+  system: InformationCircleIcon,
+  membership: UserGroupIcon,
+  vod_ready: Video01Icon,
+  report_outcome: Flag02Icon,
+  moderator_added: UserStar01Icon,
+};
 
 const ROW = "flex min-w-0 items-start gap-3 px-3 py-2.5 text-start";
 const LINK = `${ROW} outline-none hover:bg-muted focus-visible:bg-muted focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset`;
@@ -28,6 +62,18 @@ function TargetLink({
         <Link
           data-testid="notification-item-link"
           to="/$channel"
+          params={{ channel: target.slug }}
+          className={LINK}
+          onClick={onOpen}
+        >
+          {children}
+        </Link>
+      );
+    case "mod":
+      return (
+        <Link
+          data-testid="notification-item-link"
+          to="/mod/$channel"
           params={{ channel: target.slug }}
           className={LINK}
           onClick={onOpen}
@@ -99,18 +145,31 @@ export function NotificationItem({ notification: n, onOpen }: NotificationItemPr
   const body = (
     <>
       {view.kind === "go_live" ? (
-        <ChannelAvatar name={view.slug} size="sm" decorative className="shrink-0" />
+        <ChannelAvatar name={view.name} src={view.avatarUrl} size="sm" decorative className="shrink-0" />
       ) : (
-        <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
-          <HugeiconsIcon icon={Notification03Icon} strokeWidth={2} aria-hidden className="size-4" />
+        <span
+          data-testid="notification-item-icon"
+          className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground"
+        >
+          <HugeiconsIcon icon={TYPE_ICON[n.type]} strokeWidth={2} aria-hidden className="size-4" />
         </span>
       )}
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className={unread ? "font-medium text-foreground" : "text-muted-foreground"}>
-          {view.kind === "go_live" ? t("notifications.goLive", { channel: view.slug }) : t(view.label)}
+          {view.kind === "go_live" ? t("notifications.goLive", { channel: view.name }) : t(view.label)}
         </span>
         {view.kind === "go_live" && view.title !== "" && (
           <span className="truncate text-muted-foreground">{view.title}</span>
+        )}
+        {view.kind === "generic" && view.context?.kind === "text" && (
+          <span data-testid="notification-item-context" className="truncate text-muted-foreground">
+            {view.context.text}
+          </span>
+        )}
+        {view.kind === "generic" && view.context?.kind === "money" && (
+          <span data-testid="notification-item-context" className="text-muted-foreground">
+            <MoneyAmount value={{ cents: view.context.cents, currency: view.context.currency }} />
+          </span>
         )}
         <RelativeTime date={n.createdAt} tooltip={false} className="text-2xs text-muted-foreground" />
       </span>

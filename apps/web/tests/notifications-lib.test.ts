@@ -42,6 +42,9 @@ describe("describeNotification", () => {
     expect(v).toEqual({
       kind: "go_live",
       slug: "rivertide",
+      // Overhaul wave 4: no joined display name, so the slug names it, with no avatar.
+      name: "rivertide",
+      avatarUrl: null,
       title: "Night <b>run</b>",
       target: { kind: "channel", slug: "rivertide" },
     });
@@ -86,6 +89,8 @@ describe("describeNotification", () => {
       kind: "generic",
       label: "notifications.type.vote_open",
       target: { kind: "proposal", id: PROPOSAL },
+      // Overhaul wave 4: the joined title is the context line; none here.
+      context: null,
     });
     expect(targetPath({ kind: "proposal", id: PROPOSAL })).toBe(`/coop/proposals/${PROPOSAL}`);
     expect(describeNotification({ type: "proposal", payload: { proposalId: "x/../y" } }).target).toBeNull();
@@ -131,6 +136,7 @@ describe("describeNotification", () => {
       kind: "generic",
       label: "notifications.type.vod_ready",
       target: { kind: "vod", slug: "rivertide", id: VOD },
+      context: { kind: "text", text: "Night build" },
     });
     expect(ok.target && targetPath(ok.target)).toBe(`/rivertide/vods/${VOD}`);
     for (const payload of [{}, { vodId: "nope", slug: "rivertide" }, { vodId: VOD, slug: "Not A Slug" }])

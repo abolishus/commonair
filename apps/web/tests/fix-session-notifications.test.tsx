@@ -24,6 +24,8 @@ import type {
   SettingsClient,
 } from "../src/lib/notifications.ts";
 
+// Counting is a network call; these tests do not count.
+vi.mock("../src/lib/ui-metrics.ts", () => ({ trackUi: () => undefined }));
 vi.mock("../src/components/pwa/push-toggle.tsx", () => ({
   PushToggle: () => <span data-testid="fake-push" />,
 }));
@@ -138,9 +140,9 @@ describe("NotificationSettings", () => {
     const client = settingsClient({ preferences });
     wrap(<NotificationSettings client={client} />);
     const error = await screen.findByTestId("notify-defaults-load-error");
-    expect(error.textContent).toContain(loadErrorTitle(en["notifySettings.defaults.title"]));
+    expect(error.textContent).toContain(loadErrorTitle(en["d7Notify.grid.title"]));
     expect(error.textContent).toContain(loadErrorNote("section"));
-    expect(screen.getByRole("heading", { level: 2, name: en["notifySettings.defaults.title"] })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 2, name: en["d7Notify.grid.title"] })).toBeTruthy();
     expect(screen.getByRole("heading", { level: 2, name: en["notifySettings.channels.title"] })).toBeTruthy();
     expect(await screen.findByText(en["notifySettings.channels.empty"])).toBeTruthy();
     preferences.mockResolvedValue(prefs);

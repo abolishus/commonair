@@ -4,7 +4,7 @@
 import { EmptyState, SkeletonGroup, SkeletonText } from "@commonair/ui";
 import { Button } from "@commonair/ui/components/button";
 import { toast } from "@commonair/ui/toast";
-import { Notification03Icon, Settings02Icon, Tick02Icon } from "@hugeicons/core-free-icons";
+import { InboxIcon, Notification03Icon, Settings02Icon, Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Link } from "@tanstack/react-router";
 import * as React from "react";
@@ -158,6 +158,15 @@ export function NotificationInbox({
         >
           <HugeiconsIcon icon={Tick02Icon} strokeWidth={2} aria-hidden data-icon="inline-start" />
           {t("notifications.markAllRead")}
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          nativeButton={false}
+          render={<Link data-testid="notification-see-all" to="/inbox" onClick={onNavigate} />}
+        >
+          <HugeiconsIcon icon={InboxIcon} strokeWidth={2} aria-hidden data-icon="inline-start" />
+          {t("d7Notify.inbox.seeAll")}
         </Button>
         <Button
           variant="ghost"
