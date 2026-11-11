@@ -43,11 +43,13 @@ import { federationHttp } from "./federation/http.ts";
 import { portabilityKeyHistory } from "./lib/portability-keys.ts";
 import {
   matchFederationRoute,
+  matchScheduleFeed,
   TWITCH_IMPORT_CALLBACK_PATH,
   twitchImportAvailable,
   WELL_KNOWN_PATHS,
 } from "./raw-routes.ts";
 import { twitchImportCallback } from "./twitch-import/callback.ts";
+import { scheduleFeed } from "./schedule/feed.ts";
 import { router } from "./router.ts";
 
 const MAX_INTERNAL_BODY = 64 * 1024;
@@ -357,6 +359,13 @@ export function createApp(deps: Deps, opts: AppOptions = {}): ApiApp {
       // A top-level redirect from Twitch: first-party cookies stay (the state is session-bound).
       return twitchImportCallback({ deps, auth, req: await requestInfo(raw, url, server) }, raw, url);
     }
+
+    // Overhaul wave 5: the channel's calendar feed (public, cookies ignored).
+    const feedSlug = matchScheduleFeed(path);
+    if (feedSlug)
+      return withCors(
+        await scheduleFeed(deps, raw, url, feedSlug, (await requestInfo(raw, url, server)).rateLimitHash),
+      );
 
     if (path === "/api/openapi.json" && raw.method === "GET")
       return withCors(json(await openApiDocument(), 200, { "cache-control": "public, max-age=300" }));

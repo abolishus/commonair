@@ -63,6 +63,13 @@ export function matchFederationRoute(path: string): FederationMatch | null {
   }
 }
 
+const SCHEDULE_FEED = /^\/api\/channels\/([a-z0-9_]{3,25})\/schedule\.ics$/;
+
+/** Overhaul wave 5: the channel slug of a calendar feed path (`schedule/feed.ts`), or null. */
+export function matchScheduleFeed(path: string): string | null {
+  return SCHEDULE_FEED.exec(path)?.[1] ?? null;
+}
+
 /** Decision (b): the import exists only with the flag on and both Twitch OAuth credentials set. */
 export const twitchImportAvailable = (
   env: Pick<ApiEnv, "TWITCH_IMPORT_ENABLED" | "OAUTH_TWITCH_CLIENT_ID" | "OAUTH_TWITCH_CLIENT_SECRET">,

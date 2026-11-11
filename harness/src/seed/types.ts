@@ -8,7 +8,17 @@ import type { HarnessEnv } from "../env.ts";
 import type { Rng } from "./prng.ts";
 import type { SeedScale, SeedScaleName } from "./scale.ts";
 
-export const SEED_UNIT_NAMES = ["social", "interact", "money", "coop", "safety", "platform", "media"] as const;
+export const SEED_UNIT_NAMES = [
+  "social",
+  "interact",
+  "money",
+  "coop",
+  "safety",
+  "platform",
+  "media",
+  // Overhaul wave 5.
+  "schedule",
+] as const;
 export type SeedUnitName = (typeof SEED_UNIT_NAMES)[number];
 
 export type SeedAccountKind = "fixed" | "bulk-streamer" | "bulk-viewer" | "bot";

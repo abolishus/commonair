@@ -35,6 +35,8 @@ const CI_SECONDS: Record<SeedUnitName, number> = {
   safety: 99,
   coop: 160,
   platform: 15,
+  // Overhaul wave 5: a handful of rows; not on the nightly yet.
+  schedule: 1,
 };
 
 describe("the seed's dependency graph", () => {
@@ -47,6 +49,7 @@ describe("the seed's dependency graph", () => {
       safety: ["media", "social"],
       coop: ["money", "safety", "social"],
       platform: ["coop", "media", "safety", "social"],
+      schedule: ["platform", "social"],
     });
   });
 
@@ -59,6 +62,7 @@ describe("the seed's dependency graph", () => {
       "safety",
       "coop",
       "platform",
+      "schedule",
     ]);
   });
 
@@ -74,9 +78,9 @@ describe("the seed's dependency graph", () => {
     expect(readyUnits(order, afterSafety, afterSafety)).toEqual(["coop"]);
   });
 
-  test("CI's times: one by one 574 s; money beside media saves its 17 s", () => {
+  test("CI's times: one by one 575 s; money beside media saves its 17 s", () => {
     const serial = Object.values(CI_SECONDS).reduce((a, b) => a + b, 0);
-    expect(serial).toBe(574);
+    expect(serial).toBe(575);
     expect(graphSeconds(SEED_UNITS, CI_SECONDS)).toBe(serial - CI_SECONDS.money);
   });
 });

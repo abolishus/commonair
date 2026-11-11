@@ -9,6 +9,7 @@ import { ChannelSocial, ChannelTheme } from "@commonair/contracts/shapes";
 import { schema } from "@commonair/db";
 import type { Deps } from "../deps.ts";
 import { ownerCoop } from "../channels/owner-coop.ts";
+import { nextStreamAt } from "../schedule/service.ts";
 import { instanceMediaBase } from "./media-ref.ts";
 import { catchingUpCounts, viewerCount, viewerCounts } from "./viewers.ts";
 
@@ -163,7 +164,7 @@ export async function liveSummaries(deps: Deps, chans: readonly ChannelRow[]): P
 }
 
 export async function toChannelDto(deps: Deps, c: ChannelRow): Promise<z.infer<typeof dto.Channel>> {
-  const [owner, category, panels, tiers, live, endedAt, coop] = await Promise.all([
+  const [owner, category, panels, tiers, live, endedAt, coop, nextStream] = await Promise.all([
     loadUserPublic(deps, c.ownerId),
     c.categoryId
       ? deps.db
@@ -181,6 +182,7 @@ export async function toChannelDto(deps: Deps, c: ChannelRow): Promise<z.infer<t
     liveSummary(deps, c),
     lastLiveAt(deps, c.id),
     ownerCoop(deps, c.ownerId),
+    nextStreamAt(deps.db, c, deps.now()),
   ]);
   if (!owner) throw new Error(`channel ${c.id} has no owner row`);
   const theme = channelTheme(c);
@@ -215,8 +217,7 @@ export async function toChannelDto(deps: Deps, c: ChannelRow): Promise<z.infer<t
     movedTo: c.movedTo && c.movedAt ? { url: c.movedTo, at: c.movedAt.toISOString() } : null,
     createdAt: iso(c.createdAt),
     ownerCoop: coop,
-    // Contract step placeholder (overhaul wave 5): w5-schedule reads the schedule's next occurrence.
-    nextStreamAt: null,
+    nextStreamAt: nextStream,
   };
 }
 
