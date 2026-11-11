@@ -46,6 +46,11 @@ export const twoFactorDisabled = defineTemplate("twoFactorDisabled", {
 export interface NewSignInData {
   signedInAt: DateInput;
   /**
+   * Minutes between the sign-in and the send, for the relative time beside the UTC one ("just now"
+   * at 0). The mail goes out right after the sign-in, so it is almost always 0.
+   */
+  minutesAgo?: number;
+  /**
    * Coarse summary of the device, e.g. "Firefox · Linux" (never the raw user agent or IP). Absent
    * when the browser could not be identified: the mail says so in the reader's language.
    */
@@ -60,8 +65,10 @@ export const newSignIn = defineTemplate("newSignIn", {
   subject: (ctx) => ctx.text(ctx.messages.subject),
   body: (ctx, d: NewSignInData) => {
     const m = ctx.messages;
+    const minutes = Math.max(0, Math.floor(d.minutesAgo ?? 0));
+    const relative = minutes === 0 ? ctx.text(m.justNow) : ctx.text(m.minutesAgo, { minutes });
     const facts: [string, string][] = [
-      [m.whenLabel, ctx.dateTime(d.signedInAt)],
+      [m.whenLabel, ctx.text(m.when, { date: ctx.dateTime(d.signedInAt), relative })],
       [m.deviceLabel, d.device ?? ctx.text(m.deviceUnknown)],
     ];
     if (d.approximateLocation) facts.push([m.locationLabel, d.approximateLocation]);

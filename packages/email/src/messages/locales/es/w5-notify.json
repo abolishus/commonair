@@ -1,0 +1,10 @@
+{
+  "newSignIn.preview": "Si no fuiste tú, cierra la sesión en todos los demás dispositivos y cambia tu contraseña.",
+  "newSignIn.heading": "Nuevo inicio de sesión en tu cuenta",
+  "newSignIn.body": "Se acaba de iniciar sesión en tu cuenta de {instance}.",
+  "newSignIn.when": "{date} ({relative})",
+  "newSignIn.justNow": "hace un momento",
+  "newSignIn.minutesAgo": "{minutes, plural, one {hace # minuto} other {hace # minutos}}",
+  "newSignIn.notYou": "Si no fuiste tú, cierra la sesión en todos los demás dispositivos y después cambia tu contraseña.",
+  "newSignIn.action": "Cerrar sesión en todos los demás"
+}

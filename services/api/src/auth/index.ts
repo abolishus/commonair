@@ -29,6 +29,7 @@ import { verifyAltcha } from "./altcha.ts";
 import { authBackground, type AuthBackground } from "./background.ts";
 import { withVerificationCallback } from "./callback.ts";
 import { ageProblem, usernameProblem } from "./identity.ts";
+import { onSessionCreated } from "./new-sign-in.ts";
 
 type Tx = Parameters<Parameters<Database["transaction"]>[0]>[0];
 const authTx = new AsyncLocalStorage<Tx>();
@@ -356,6 +357,27 @@ export function createAuth(deps: Deps, opts: { background?: AuthBackground } = {
                 { changedAt: deps.now(), securityUrl: appUrl(site, SECURITY_SETTINGS_PATH), locale: localeOf(user) },
                 user.email,
               ),
+            );
+          },
+        },
+      },
+      session: {
+        create: {
+          // Wave 5: the "new sign-in" email, decided and sent after the response (new-sign-in.ts).
+          after: async (session, ctx) => {
+            onSessionCreated(
+              { db, valkey: deps.valkey, mailer, site, logger, now: deps.now },
+              background,
+              session,
+              ctx
+                ? {
+                    path: ctx.path,
+                    hasSession: Boolean(ctx.context.session),
+                    sessionCookie: async () =>
+                      (await ctx.getSignedCookie(ctx.context.authCookies.sessionToken.name, ctx.context.secret)) ||
+                      null,
+                  }
+                : null,
             );
           },
         },

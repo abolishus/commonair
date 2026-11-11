@@ -43,7 +43,7 @@ describe("catalogs", () => {
     expect(es.total).toBeGreaterThan(250);
   });
 
-  test("one JSON group per template file, every group in every locale", () => {
+  test("one JSON group per template file (plus wave namespaces), every group in every locale", () => {
     const groups = (lang: string) => namespaces.filter((ns) => ns.lang === lang).map((ns) => ns.name);
     expect(groups("en")).toEqual([
       "account",
@@ -56,6 +56,7 @@ describe("catalogs", () => {
       "receipt",
       "security",
       "trust",
+      "w5-notify",
     ]);
     for (const lang of Object.keys(BUNDLED)) expect(groups(lang)).toEqual(groups("en"));
   });
