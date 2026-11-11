@@ -7,7 +7,8 @@
  * playlist (`#EXT-X-ENDLIST`), record duration/size, mark it `ready` and set its expiry from the
  * channel's retention. A hash match → `moderation.t0` for the VOD, which is never published. A
  * scan that cannot complete throws, so the job retries and nothing is published (fail closed).
- * Idempotent: a finished VOD is left alone.
+ * Idempotent: a finished VOD is left alone. The transition to `ready` also writes the owner's
+ * `vod_ready` inbox row (`ready-notice.ts`), in the same transaction.
  *
  * Placement (ADR 0009 amendment 1): the recording lives under the private `recordings/<id>/`.
  * Once the scan passes, the VOD's placement as it will be once ready decides where it ends up: a
@@ -40,6 +41,7 @@ import { ActiveScratch } from "../recovery.ts";
 import { assembleFromStorage } from "./assemble.ts";
 import { parsePlaylist, renderPlaylist, totalDuration, type PlaylistSegment } from "./playlist.ts";
 import { VOD_PLAYLIST } from "./recorder.ts";
+import { vodReadyNoticeTx } from "./ready-notice.ts";
 
 export const VodFinalizeJob = z.object({ vodId: z.uuid() });
 export type VodFinalizeJob = z.infer<typeof VodFinalizeJob>;
@@ -316,7 +318,10 @@ export async function finalizeVod(
         .where(and(eq(schema.vods.id, vodId), eq(schema.vods.status, "processing")))
         .returning({ id: schema.vods.id }),
     );
-    return changed.length > 0 ? totalSize : null;
+    if (changed.length === 0) return null;
+    // The owner's inbox row, once: only the run that made this transition gets here (ready-notice.ts).
+    if (!leave) await vodReadyNoticeTx(tx, vodId, now);
+    return totalSize;
   });
   if (size === null) {
     // Not ours to publish any more: removed meanwhile (T0, NCII), or a concurrent run of this job
