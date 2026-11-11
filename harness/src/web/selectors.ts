@@ -299,7 +299,7 @@ export const P1_TEST_IDS = {
   playerP2pNotice: "player-p2p-notice",
   playerP2pDialog: "player-p2p-dialog",
   playerP2pToggle: "player-p2p-toggle",
-  /** The switch in the P2P section of `/settings/privacy`. */
+  /** The P2P switch on `/settings/preferences` (Playback; moved from Privacy in D7.1). */
   privacyP2pToggle: "privacy-p2p-toggle",
 } as const;
 
@@ -705,4 +705,37 @@ export const D5_MONEY_IDS = {
   analyticsInsightOpen: "analytics-insight-open",
   analyticsPnl: "analytics-pnl",
   analyticsPnlRow: "analytics-pnl-row",
+} as const;
+
+/**
+ * d7-settings (overhaul wave 4, D7.1, D7.2, D7.4): the settings shell, `/settings/account` and
+ * Privacy & data. `settingsNav` carries `data-current` (the nav item id); each nav link is
+ * `settings-tab-<item>` (from `lg`) and the select below `lg` is `settingsNavSelect`.
+ * `deletionBanner` shows on every settings page while a deletion is scheduled and carries
+ * `data-scheduled-for`; `privacyDelete` is the page's danger zone (`#delete-account`), holding
+ * `deletion-request` or `deletion-status`; each `deletionImpactLine` in the dialog carries
+ * `data-kind` (removed, kept, subscriptions, channelSubscriptions, payout, membership, legalHold).
+ */
+export const D7_SETTINGS_IDS = {
+  settingsNav: "settings-nav",
+  settingsNavSelect: "settings-nav-select",
+  settingsMain: "settings-main",
+  settingsTabAccount: "settings-tab-account",
+  settingsTabPrivacy: "settings-tab-privacy",
+  deletionBanner: "deletion-banner",
+  deletionBannerCancel: "deletion-banner-cancel",
+  accountPage: "account-page",
+  accountDisplayName: "account-display-name",
+  accountDisplayNameSave: "account-display-name-save",
+  accountUsername: "account-username",
+  accountEmailStatus: "account-email-status",
+  accountShareEmail: "account-share-email",
+  accountMature: "account-mature",
+  privacyDownload: "privacy-download",
+  privacyDelete: "privacy-delete",
+  deletionDialog: "deletion-dialog",
+  deletionImpactLine: "deletion-impact-line",
+  deletionDownloaded: "deletion-downloaded",
+  preferencesTheme: "preferences-theme",
+  preferencesPlayback: "preferences-playback",
 } as const;

@@ -67,6 +67,7 @@ import { Route as AppDirectoryIndexRouteImport } from './routes/_app/directory.i
 import { Route as AppDirectoryCategoryRouteImport } from './routes/_app/directory.$category'
 import { Route as AppOauth2AuthorizeRouteImport } from './routes/_app/oauth2.authorize'
 import { Route as AppSettingsIndexRouteImport } from './routes/_app/settings.index'
+import { Route as AppSettingsAccountRouteImport } from './routes/_app/settings.account'
 import { Route as AppSettingsAppealsRouteImport } from './routes/_app/settings.appeals'
 import { Route as AppSettingsConnectionsRouteImport } from './routes/_app/settings.connections'
 import { Route as AppSettingsCopyrightRouteImport } from './routes/_app/settings.copyright'
@@ -378,6 +379,11 @@ const AppSettingsIndexRoute = AppSettingsIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AppSettingsRoute,
 } as any)
+const AppSettingsAccountRoute = AppSettingsAccountRouteImport.update({
+  id: '/account',
+  path: '/account',
+  getParentRoute: () => AppSettingsRoute,
+} as any)
 const AppSettingsAppealsRoute = AppSettingsAppealsRouteImport.update({
   id: '/appeals',
   path: '/appeals',
@@ -553,6 +559,7 @@ export interface FileRoutesByFullPath {
   '/coop/settings': typeof AppCoopSettingsRoute
   '/directory/$category': typeof AppDirectoryCategoryRoute
   '/oauth2/authorize': typeof AppOauth2AuthorizeRoute
+  '/settings/account': typeof AppSettingsAccountRoute
   '/settings/appeals': typeof AppSettingsAppealsRoute
   '/settings/connections': typeof AppSettingsConnectionsRoute
   '/settings/copyright': typeof AppSettingsCopyrightRoute
@@ -632,6 +639,7 @@ export interface FileRoutesByTo {
   '/coop/settings': typeof AppCoopSettingsRoute
   '/directory/$category': typeof AppDirectoryCategoryRoute
   '/oauth2/authorize': typeof AppOauth2AuthorizeRoute
+  '/settings/account': typeof AppSettingsAccountRoute
   '/settings/appeals': typeof AppSettingsAppealsRoute
   '/settings/connections': typeof AppSettingsConnectionsRoute
   '/settings/copyright': typeof AppSettingsCopyrightRoute
@@ -716,6 +724,7 @@ export interface FileRoutesById {
   '/_app/coop/settings': typeof AppCoopSettingsRoute
   '/_app/directory/$category': typeof AppDirectoryCategoryRoute
   '/_app/oauth2/authorize': typeof AppOauth2AuthorizeRoute
+  '/_app/settings/account': typeof AppSettingsAccountRoute
   '/_app/settings/appeals': typeof AppSettingsAppealsRoute
   '/_app/settings/connections': typeof AppSettingsConnectionsRoute
   '/_app/settings/copyright': typeof AppSettingsCopyrightRoute
@@ -798,6 +807,7 @@ export interface FileRouteTypes {
     | '/coop/settings'
     | '/directory/$category'
     | '/oauth2/authorize'
+    | '/settings/account'
     | '/settings/appeals'
     | '/settings/connections'
     | '/settings/copyright'
@@ -877,6 +887,7 @@ export interface FileRouteTypes {
     | '/coop/settings'
     | '/directory/$category'
     | '/oauth2/authorize'
+    | '/settings/account'
     | '/settings/appeals'
     | '/settings/connections'
     | '/settings/copyright'
@@ -960,6 +971,7 @@ export interface FileRouteTypes {
     | '/_app/coop/settings'
     | '/_app/directory/$category'
     | '/_app/oauth2/authorize'
+    | '/_app/settings/account'
     | '/_app/settings/appeals'
     | '/_app/settings/connections'
     | '/_app/settings/copyright'
@@ -1406,6 +1418,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsIndexRouteImport
       parentRoute: typeof AppSettingsRoute
     }
+    '/_app/settings/account': {
+      id: '/_app/settings/account'
+      path: '/account'
+      fullPath: '/settings/account'
+      preLoaderRoute: typeof AppSettingsAccountRouteImport
+      parentRoute: typeof AppSettingsRoute
+    }
     '/_app/settings/appeals': {
       id: '/_app/settings/appeals'
       path: '/appeals'
@@ -1603,6 +1622,7 @@ const AdminRouteChildren: AdminRouteChildren = {
 const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
 
 interface AppSettingsRouteChildren {
+  AppSettingsAccountRoute: typeof AppSettingsAccountRoute
   AppSettingsAppealsRoute: typeof AppSettingsAppealsRoute
   AppSettingsConnectionsRoute: typeof AppSettingsConnectionsRoute
   AppSettingsCopyrightRoute: typeof AppSettingsCopyrightRoute
@@ -1615,6 +1635,7 @@ interface AppSettingsRouteChildren {
 }
 
 const AppSettingsRouteChildren: AppSettingsRouteChildren = {
+  AppSettingsAccountRoute: AppSettingsAccountRoute,
   AppSettingsAppealsRoute: AppSettingsAppealsRoute,
   AppSettingsConnectionsRoute: AppSettingsConnectionsRoute,
   AppSettingsCopyrightRoute: AppSettingsCopyrightRoute,

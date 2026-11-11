@@ -3,7 +3,7 @@
 
 import { EmptyState, RelativeTime, SkeletonGroup, SkeletonText, StatusBadge } from "@commonair/ui";
 import { AlertCallout } from "@commonair/ui/blocks/feedback";
-import { Section } from "@commonair/ui/blocks/headers";
+import { SettingsSection } from "@commonair/ui/blocks/forms";
 import { Button } from "@commonair/ui/components/button";
 import {
   Dialog,
@@ -306,8 +306,8 @@ export function AccountActionList({ actions, appeals, onAppeal }: AccountActionL
       </ItemGroup>
     );
   return (
-    <Section heading={t("appeals.account.title")} description={t("appeals.account.intro")}>
-      {content}
+    <SettingsSection title={t("appeals.account.title")} description={t("appeals.account.intro")}>
+      <div className="px-4 py-4 sm:px-6">{content}</div>
       <Dialog open={appealing !== null} onOpenChange={(open) => !open && setAppealing(null)}>
         {appealing && (
           <DialogContent data-testid="account-appeal-dialog" data-action-id={appealing.id} className="sm:max-w-lg">
@@ -320,7 +320,7 @@ export function AccountActionList({ actions, appeals, onAppeal }: AccountActionL
           </DialogContent>
         )}
       </Dialog>
-    </Section>
+    </SettingsSection>
   );
 }
 
@@ -463,13 +463,15 @@ export function MyAppeals({
         />
       )}
       {/* F39: the third list gets its heading, like the two above it. */}
-      <Section
+      <SettingsSection
         data-testid="appeals-list"
-        heading={t("settings.appeals.listTitle")}
+        title={t("settings.appeals.listTitle")}
         description={t("settings.appeals.listIntro")}
       >
-        <AppealList appeals={data.appeals} />
-      </Section>
+        <div className="px-4 py-4 sm:px-6">
+          <AppealList appeals={data.appeals} />
+        </div>
+      </SettingsSection>
     </>
   );
 }

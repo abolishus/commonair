@@ -3,7 +3,8 @@
 // @vitest-environment happy-dom
 
 /**
- * D5-settings (F36, F37): account deletion is near the top of `/settings/privacy` and "Tell me if
+ * D5-settings (F36, F37; D7.4 for the page order): `/settings/privacy` runs download, who can see
+ * you, then the danger zone, and "Tell me if
  * they move" lives on notifications; the two long follow lists search, page with "Load more", and
  * the move notices turn all on or all off. The privacy page and `PortabilityGrants` run against a
  * stand-in API module (the real one needs a server); `GrantsView` and `NotificationSettings` take
@@ -137,19 +138,17 @@ const shown = () => screen.queryAllByTestId("portability-grant").map((r) => r.da
 // ── F37: the privacy page ─────────────────────────────────────────────────────────────────────
 
 describe("privacy page (F37)", () => {
-  it("puts download and delete first, in their own section, before the long sections", async () => {
+  it("D7.4: download, who can see you, then the danger zone; P2P moved to Preferences", async () => {
     const Page = PrivacyRoute.options.component as React.ComponentType;
     wrap(<Page />);
-    const account = await screen.findByTestId("privacy-account");
-    expect(within(account).getByRole("heading", { level: 2 }).textContent).toBe(t("settings.privacy.accountTitle"));
-    const del = await within(account).findByTestId("deletion-request");
-    expect(del).toBeTruthy();
+    const danger = await screen.findByTestId("privacy-delete");
+    expect(within(danger).getByRole("heading", { level: 2 }).textContent).toBe(t("d7Settings.delete.title"));
+    expect(await within(danger).findByTestId("deletion-request")).toBeTruthy();
     const page = screen.getByTestId("privacy-page");
-    // The first section after the header, ahead of P2P and blocked users.
     const sections = [...page.children].map((el) => el.getAttribute("data-testid") ?? el.tagName.toLowerCase());
-    expect(sections.slice(0, 2)).toEqual(["header", "privacy-account"]);
-    const p2p = screen.getByTestId("privacy-p2p-toggle");
-    expect(account.compareDocumentPosition(p2p) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(sections).toEqual(["header", "privacy-download", "blocked-users", "privacy-delete"]);
+    expect(within(page).getByRole("heading", { level: 1 }).textContent).toBe(t("d7Settings.nav.privacy"));
+    expect(screen.queryByTestId("privacy-p2p-toggle")).toBeNull();
     // The move notices left the page.
     expect(screen.queryByTestId("portability-grants")).toBeNull();
   });

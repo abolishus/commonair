@@ -4,7 +4,7 @@
 import { ChannelAvatar, EmptyState, RelativeTime, SkeletonGroup, SkeletonText } from "@commonair/ui";
 import { AlertCallout } from "@commonair/ui/blocks/feedback";
 import { Button } from "@commonair/ui/components/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@commonair/ui/components/card";
+import { SettingsSection } from "@commonair/ui/blocks/forms";
 import { toast } from "@commonair/ui/toast";
 import { UnavailableIcon } from "@hugeicons/core-free-icons";
 import * as React from "react";
@@ -34,7 +34,8 @@ export const blockedUsersClient = (): BlockedUsersClient => ({
 });
 
 /**
- * The viewer's blocked users on `/settings/privacy` (ADR 0012 amendment 1 decision 8): newest
+ * The viewer's blocked users on `/settings/privacy`, its "Who can see you" section (ADR 0012
+ * amendment 1 decision 8; a `SettingsSection` since D7.4): newest
  * first, paged, each with Unblock. An unblock also shows the person again in this tab's chat at
  * once.
  */
@@ -64,12 +65,13 @@ export function BlockedUsers({ client: clientProp }: { client?: BlockedUsersClie
   };
 
   return (
-    <Card data-testid="blocked-users" className="min-w-0">
-      <CardHeader>
-        <CardTitle>{t("blocks.title")}</CardTitle>
-        <CardDescription>{t("blocks.intro")}</CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3 text-sm">
+    <SettingsSection
+      data-testid="blocked-users"
+      title={t("d7Settings.privacy.who.title")}
+      description={t("blocks.intro")}
+    >
+      <div className="flex flex-col gap-3 px-4 py-4 text-sm sm:px-6">
+        <h3 className="font-medium">{t("blocks.title")}</h3>
         {paged.failed && items === null ? (
           <AlertCallout
             tone="danger"
@@ -137,7 +139,7 @@ export function BlockedUsers({ client: clientProp }: { client?: BlockedUsersClie
             {t("blocks.more")}
           </Button>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </SettingsSection>
   );
 }

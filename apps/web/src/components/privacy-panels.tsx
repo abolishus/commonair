@@ -1,15 +1,19 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+/**
+ * Settings → Privacy & data, the "Download your data" section (D7.4, account-admin.md P6): one
+ * row per kind (account, channel, the moving bundle) with the newest export's status and, while
+ * it is ready, its download. The list is polled every 5 s while an export is queued or running.
+ * The delete dialog reads the same state, so "Download now" there shows up here too.
+ */
+import { RelativeTime, StatusBadge, formatBytes, useLocale } from "@commonair/ui";
 import { AlertCallout } from "@commonair/ui/blocks/feedback";
-import {
-  DeletionPanel,
-  ExportPanel,
-  type DeletionPanelLabels,
-  type ExportPanelLabels,
-} from "@commonair/ui/blocks/privacy";
+import { SettingsRow, SettingsSection } from "@commonair/ui/blocks/forms";
+import { exportStatusTone } from "@commonair/ui/blocks/privacy";
 import { Button } from "@commonair/ui/components/button";
 import { toast } from "@commonair/ui/toast";
+import { Link } from "@tanstack/react-router";
 import * as React from "react";
 import { t } from "../i18n/index.ts";
 import { toastActionError } from "../lib/action-error.ts";
@@ -17,49 +21,15 @@ import { api, errorCode } from "../lib/api.ts";
 import { fillNode } from "../lib/fill.tsx";
 import {
   EXPORTS_POLL_MS,
-  deletionView,
   exportKindOptions,
   exportKinds,
   exportRows,
   shouldPollExports,
   withExport,
-  type DeletionRequestDto,
   type ExportJobDto,
   type RequestableExportKind,
 } from "../lib/privacy.ts";
 import { browserPollEnv, pollWhileVisible, type PollEnv } from "../lib/stream-health.ts";
-import { useLoad } from "./money/use-load.ts";
-
-function exportLabels(): ExportPanelLabels {
-  return {
-    title: t("privacy.export.title"),
-    description: t("privacy.export.intro"),
-    request: t("privacy.export.request"),
-    cooldown: (time) => fillNode(t("privacy.export.cooldown"), "time", time),
-    listLabel: t("privacy.export.list"),
-    emptyTitle: t("privacy.export.empty"),
-    emptyDescription: t("privacy.export.emptyHint"),
-    requested: (time) => fillNode(t("privacy.export.requested"), "time", time),
-    expires: (time) => fillNode(t("privacy.export.expires"), "time", time),
-    download: t("privacy.export.download"),
-  };
-}
-
-function deletionLabels(): DeletionPanelLabels {
-  return {
-    title: t("privacy.deletion.title"),
-    description: t("privacy.deletion.intro"),
-    request: t("privacy.deletion.request"),
-    confirmTitle: t("privacy.deletion.confirmTitle"),
-    confirmDescription: t("privacy.deletion.confirmBody"),
-    confirmLabel: t("privacy.deletion.confirm"),
-    confirmUsername: t("privacy.deletion.confirmUsername"),
-    confirmUsernameHint: (username) => t("privacy.deletion.confirmUsernameHint", { username }),
-    scheduled: (date) => fillNode(t("privacy.deletion.scheduled"), "date", date),
-    canceled: t("privacy.deletion.canceled"),
-    cancel: t("privacy.deletion.cancel"),
-  };
-}
 
 function LoadError({ testId, message, onRetry }: { testId: string; message: string; onRetry: () => void }) {
   return (
@@ -77,21 +47,17 @@ function LoadError({ testId, message, onRetry }: { testId: string; message: stri
   );
 }
 
-/**
- * Data export (`me.exports.*`): one request button per kind, the caller's exports, polled every
- * 5 s while one is queued or running. The download link is the API's presigned URL, shown only
- * while the export is ready and unexpired.
- */
-export function ExportSection({
-  hasChannel,
-  now = Date.now,
-  pollEnv,
-}: {
-  hasChannel: boolean;
-  now?: () => number;
-  /** Tests pass a fake clock and visibility; the browser's otherwise. */
-  pollEnv?: PollEnv;
-}) {
+export interface ExportsState {
+  /** null until the first list arrives. */
+  exports: ExportJobDto[] | null;
+  failed: boolean;
+  load: () => Promise<void>;
+  /** Request an export of `kind`; throws what the API refused with. */
+  request: (kind: RequestableExportKind) => Promise<void>;
+}
+
+/** `me.exports.list`, polled while an export is queued or running; newer answers win. */
+export function useExports({ pollEnv, enabled = true }: { pollEnv?: PollEnv; enabled?: boolean } = {}): ExportsState {
   const [exports, setExports] = React.useState<ExportJobDto[] | null>(null);
   const [failed, setFailed] = React.useState(false);
   const seq = React.useRef({ next: 0, minApplied: 0 });
@@ -113,14 +79,15 @@ export function ExportSection({
   }, []);
 
   React.useEffect(() => {
+    if (!enabled) return;
     const s = seq.current;
     void load();
     return () => {
       s.minApplied = s.next;
     };
-  }, [load]);
+  }, [load, enabled]);
 
-  const polling = exports !== null && shouldPollExports(exports);
+  const polling = enabled && exports !== null && shouldPollExports(exports);
   React.useEffect(() => {
     if (!polling) return;
     let inFlight = false;
@@ -142,72 +109,173 @@ export function ExportSection({
     );
   }, [polling, load, pollEnv]);
 
-  if (exports === null && failed)
-    return (
-      <LoadError testId="export-load-error" message={t("privacy.export.loadFailed")} onRetry={() => void load()} />
-    );
-
-  const request = async (kind: string): Promise<void> => {
-    const chosen = exportKinds(hasChannel).find((k) => k === kind) as RequestableExportKind | undefined;
-    if (!chosen) return;
-    const job = await api().me.exports.create({ kind: chosen });
+  const request = React.useCallback(async (kind: RequestableExportKind): Promise<void> => {
+    const job = await api().me.exports.create({ kind });
     seq.current.minApplied = seq.current.next;
     setExports((list) => withExport(list, job));
     toast.success(t("privacy.export.requestedToast"));
-  };
-  const nowMs = now();
+  }, []);
 
-  return (
-    <ExportPanel
-      kinds={exportKindOptions(exportKinds(hasChannel), exports, nowMs)}
-      exports={exports ? exportRows(exports, nowMs) : null}
-      labels={exportLabels()}
-      onRequest={request}
-      onError={(err) => {
-        if (errorCode(err) === "RATE_LIMITED") {
-          toast.error(t("privacy.export.rateLimited"));
-          // The list shows which export holds the cooldown, so the button disables itself.
-          void load();
-        } else toastActionError(err, t("privacy.export.failed"));
-      }}
-    />
-  );
+  return { exports, failed, load, request };
 }
 
-/** Account deletion (`me.deletion.*`): request with the typed username, status, cancel. */
-export function DeletionSection({ username }: { username: string }) {
-  // Wrapped: `me.deletion.get` answers null for "no request", which `useLoad` uses for "not loaded".
-  const loaded = useLoad("deletion", async () => ({ request: await api().me.deletion.get() }));
-  const [local, setLocal] = React.useState<{ request: DeletionRequestDto | null } | null>(null);
-  const current = local ?? loaded.data;
+/** What a refused request means for the member (a rate limit reloads the list, which shows the cooldown). */
+export function onExportError(state: Pick<ExportsState, "load">, err: unknown): void {
+  if (errorCode(err) === "RATE_LIMITED") {
+    toast.error(t("privacy.export.rateLimited"));
+    void state.load();
+  } else toastActionError(err, t("privacy.export.failed"));
+}
 
-  if (current === null && loaded.failed)
+/**
+ * Download your data: account and channel exports are requested here; the moving bundle is made
+ * on the studio's Move page (`portability.bundle.create`), so its row links there.
+ */
+export function ExportSection({
+  hasChannel,
+  now = Date.now,
+  pollEnv,
+  state: shared,
+}: {
+  hasChannel: boolean;
+  now?: () => number;
+  /** Tests pass a fake clock and visibility; the browser's otherwise. */
+  pollEnv?: PollEnv;
+  /** The page's shared state (the delete dialog reads it too); without it the section loads its own. */
+  state?: ExportsState;
+}): React.JSX.Element {
+  const own = useExports({ pollEnv, enabled: shared === undefined });
+  const state = shared ?? own;
+  const { locale } = useLocale();
+  const [pending, setPending] = React.useState<string | null>(null);
+
+  if (state.exports === null && state.failed)
     return (
-      <LoadError testId="deletion-load-error" message={t("privacy.deletion.loadFailed")} onRetry={loaded.reload} />
+      <LoadError
+        testId="export-load-error"
+        message={t("privacy.export.loadFailed")}
+        onRetry={() => void state.load()}
+      />
     );
 
-  const request = current?.request ?? null;
+  const nowMs = now();
+  const options = exportKindOptions(exportKinds(hasChannel), state.exports, nowMs);
+  const rows = state.exports ? exportRows(state.exports, nowMs) : null;
+  const latest = (kind: string) => rows?.find((r) => r.kind === kind) ?? null;
+  const request = async (kind: RequestableExportKind) => {
+    setPending(kind);
+    try {
+      await state.request(kind);
+    } catch (err) {
+      onExportError(state, err);
+    } finally {
+      setPending(null);
+    }
+  };
 
-  const submit = async (confirmUsername: string): Promise<void> => {
-    const scheduled = await api().me.deletion.request({ confirmUsername });
-    setLocal({ request: scheduled });
-    toast.success(t("privacy.deletion.scheduledToast"));
-  };
-  const cancel = async (): Promise<void> => {
-    await api().me.deletion.cancel();
-    setLocal({ request: request ? { ...request, status: "canceled" } : null });
-    toast.success(t("privacy.deletion.canceledToast"));
-  };
+  const status = (row: NonNullable<ReturnType<typeof latest>>) => (
+    <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+      <StatusBadge tone={exportStatusTone(row.status)}>{row.statusLabel}</StatusBadge>
+      <span>{fillNode(t("privacy.export.requested"), "time", <RelativeTime date={row.createdAt} />)}</span>
+      {row.sizeBytes !== null ? (
+        <span className="tabular-nums" data-size-bytes={row.sizeBytes}>
+          {formatBytes(row.sizeBytes, locale)}
+        </span>
+      ) : null}
+      {row.status === "ready" && row.expiresAt ? (
+        <span>{fillNode(t("privacy.export.expires"), "time", <RelativeTime date={row.expiresAt} />)}</span>
+      ) : null}
+    </span>
+  );
 
   return (
-    <DeletionPanel
-      request={deletionView(request)}
-      loading={current === null}
-      labels={deletionLabels()}
-      username={username}
-      onRequest={submit}
-      onCancel={cancel}
-      onError={(err) => toastActionError(err, t("privacy.deletion.failed"))}
-    />
+    <SettingsSection
+      data-testid="privacy-download"
+      title={t("d7Settings.privacy.download.title")}
+      description={t("privacy.export.intro")}
+    >
+      {options.map((option) => {
+        const row = latest(option.kind);
+        const kind = option.kind as RequestableExportKind;
+        return (
+          <SettingsRow
+            key={option.kind}
+            {...(row
+              ? {
+                  "data-testid": "export-row",
+                  "data-export-id": row.id,
+                  "data-kind": row.kind,
+                  "data-status": row.status,
+                }
+              : {})}
+            label={option.label}
+            hint={
+              <span className="flex flex-col gap-1">
+                <span>{option.description}</span>
+                {rows === null ? null : row ? status(row) : <span>{t("d7Settings.privacy.download.none")}</span>}
+                {option.cooldownUntil ? (
+                  <span data-cooldown-until={option.cooldownUntil}>
+                    {fillNode(t("privacy.export.cooldown"), "time", <RelativeTime date={option.cooldownUntil} />)}
+                  </span>
+                ) : null}
+              </span>
+            }
+          >
+            {row?.downloadUrl ? (
+              <Button
+                size="sm"
+                variant="outline"
+                nativeButton={false}
+                // A signed link: never leak it through Referer.
+                render={<a href={row.downloadUrl} rel="noreferrer noopener" download aria-label={t("privacy.export.download")} />}
+                data-testid="export-download"
+              >
+                {t("privacy.export.download")}
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              data-testid="export-request"
+              data-kind={option.kind}
+              disabled={option.cooldownUntil !== null || pending !== null}
+              aria-busy={pending === option.kind || undefined}
+              onClick={() => void request(kind)}
+            >
+              {t("privacy.export.request")}
+            </Button>
+          </SettingsRow>
+        );
+      })}
+      {hasChannel ? (
+        <SettingsRow
+          label={t("privacy.export.kind.bundle")}
+          hint={
+            <span className="flex flex-col gap-1">
+              <span>{t("d7Settings.privacy.download.bundleHint")}</span>
+              {(() => {
+                const row = latest("bundle");
+                return row ? status(row) : null;
+              })()}
+            </span>
+          }
+        >
+          <Button
+            variant="outline"
+            size="sm"
+            nativeButton={false}
+            render={<Link data-testid="export-bundle-link" to="/move" />}
+          >
+            {t("d7Settings.privacy.download.bundleAction")}
+          </Button>
+        </SettingsRow>
+      ) : null}
+      {rows !== null && rows.length === 0 ? (
+        <p data-testid="export-empty" className="px-4 py-3 text-sm text-muted-foreground sm:px-6">
+          {t("privacy.export.emptyHint")}
+        </p>
+      ) : null}
+    </SettingsSection>
   );
 }

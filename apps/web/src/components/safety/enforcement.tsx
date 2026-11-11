@@ -10,7 +10,7 @@
  */
 import type * as D from "@commonair/contracts/dto";
 import { EmptyState, RelativeTime, SkeletonGroup, SkeletonText, StatusBadge, useRequestNow } from "@commonair/ui";
-import { Section } from "@commonair/ui/blocks/headers";
+import { SettingsSection } from "@commonair/ui/blocks/forms";
 import { Button } from "@commonair/ui/components/button";
 import { Dialog, DialogContent } from "@commonair/ui/components/dialog";
 import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "@commonair/ui/components/item";
@@ -259,8 +259,8 @@ export function EnforcementList({ statements, onAppeal, onMore }: EnforcementLis
       </ItemGroup>
     );
   return (
-    <Section heading={t("safety.enforcement.title")} description={t("safety.enforcement.intro")}>
-      <div data-testid="enforcement-list" className="flex flex-col gap-3">
+    <SettingsSection title={t("safety.enforcement.title")} description={t("safety.enforcement.intro")}>
+      <div data-testid="enforcement-list" className="flex flex-col gap-3 px-4 py-4 sm:px-6">
         {content}
         {onMore && (
           <Button variant="ghost" size="sm" className="self-start" onClick={onMore}>
@@ -286,7 +286,7 @@ export function EnforcementList({ statements, onAppeal, onMore }: EnforcementLis
           </DialogContent>
         )}
       </Dialog>
-    </Section>
+    </SettingsSection>
   );
 }
 
