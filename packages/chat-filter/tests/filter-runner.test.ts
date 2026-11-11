@@ -200,7 +200,11 @@ describe("WorkerFilterRunner", () => {
 
   test("a message waits at most maxQueueWaitMs for a worker", async () => {
     const { r, reasons } = make({ workers: 1, hardTimeoutMs: 2_000, maxQueueWaitMs: 100 });
-    await r.run("warm", typical);
+    // On a loaded runner the new worker can take longer than the 100 ms queue wait to start, so
+    // the warm-up itself is held ("queue_wait", the flake recorded in docs/operators/flakes.md).
+    // Warm until the worker really runs a message, then count only what follows.
+    for (let i = 0; i < 50; i++) if ((await r.run("warm", typical)).action === "pass") break;
+    reasons.length = 0;
     const stuck = r.run(evilBody, evil());
     const started = performance.now();
     expect(await r.run("hello", typical)).toMatchObject(HELD);
