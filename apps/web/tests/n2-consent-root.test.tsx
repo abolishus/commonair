@@ -24,6 +24,9 @@ vi.mock("../src/lib/bootstrap.ts", () => ({
   useBootstrap: () => fake.boot,
 }));
 
+// The banner counts its views (`cookie-banner.test.tsx` checks them); no request here.
+vi.mock("../src/lib/ui-metrics.ts", () => ({ trackUi: () => {} }));
+
 vi.mock("../src/lib/api.ts", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/lib/api.ts")>();
   const client = {

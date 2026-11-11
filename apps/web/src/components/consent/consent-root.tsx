@@ -16,6 +16,7 @@ import {
   type ConsentErrorCode,
   type StoredConsent,
 } from "../../lib/consent.ts";
+import { bannerLayout } from "./banner-placement.ts";
 import { ConsentBanner } from "./consent-banner.tsx";
 import { CookieSettingsDialog } from "./cookie-settings-dialog.tsx";
 
@@ -51,10 +52,11 @@ function choose(preferences: boolean): void {
 }
 
 /**
- * Mounted once in the root: the save-failure notice and the banner in the page flow above every
- * shell, and the cookie settings dialog. Until the client has read its cookie it renders from
- * `Bootstrap.consent`, so the server's HTML and the first client render agree. Nothing on
- * `/overlay/*` or `/embed/*`.
+ * Mounted once in the root, before every shell: the save-failure notice, the banner (floating, or
+ * in the page flow on pages with a player) and the cookie settings dialog. Escape hides the
+ * banner for this page view only: no choice is stored, so it asks again on the next page. Until
+ * the client has read its cookie it renders from `Bootstrap.consent`, so the server's HTML and
+ * the first client render agree. Nothing on `/overlay/*` or `/embed/*`.
  */
 export function ConsentRoot({
   consent,
@@ -66,6 +68,14 @@ export function ConsentRoot({
   pathname: string;
 }): React.JSX.Element | null {
   const state = useConsent();
+  // Escape hides the banner until the next navigation (back to the same path too): the state is
+  // reset while rendering the new path, so its first render already shows the banner again.
+  const [dismissed, setDismissed] = React.useState(false);
+  const [viewPath, setViewPath] = React.useState(pathname);
+  if (viewPath !== pathname) {
+    setViewPath(pathname);
+    setDismissed(false);
+  }
   const excluded = isConsentFreePath(pathname);
   React.useEffect(() => {
     if (!excluded) void initConsent({ signedIn });
@@ -77,9 +87,11 @@ export function ConsentRoot({
   return (
     <>
       {state.error ? <ConsentError code={state.error} /> : null}
-      {prompt ? (
+      {prompt && !dismissed ? (
         <ConsentBanner
           reason={prompt}
+          layout={bannerLayout(pathname)}
+          onDismiss={() => setDismissed(true)}
           onAccept={() => choose(true)}
           onReject={() => choose(false)}
           onCustomize={() => openCookieSettings()}

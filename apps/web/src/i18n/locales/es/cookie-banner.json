@@ -1,0 +1,9 @@
+{
+  "cookieBanner.accept": "Aceptar",
+  "cookieBanner.decline": "Rechazar las no esenciales",
+  "cookieBanner.choose": "Elegir",
+  "cookieBanner.privacyLink": "Política de privacidad",
+  "cookieBanner.privacy.loading": "La política de privacidad se está cargando.",
+  "cookieBanner.privacy.failed": "La política de privacidad no se cargó.",
+  "cookieBanner.privacy.retry": "Reintentar"
+}
