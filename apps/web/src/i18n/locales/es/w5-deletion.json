@@ -19,5 +19,8 @@
   "w5Deletion.treasury.askFailed": "El correo no se envió. Inténtalo de nuevo.",
   "w5Deletion.treasury.askTooSoon": "Se le pidió hace menos de un día. Inténtalo de nuevo mañana.",
   "w5Deletion.treasury.askedToday": "Se pidió hace menos de un día",
-  "w5Deletion.treasury.truncated": "Hay más miembros con aportación de los que esta lista puede revisar a la vez, así que puede faltar aquí alguien que se va. Revisa también las aportaciones «Depositada» de abajo."
+  "w5Deletion.treasury.truncated": "Hay más miembros con aportación de los que esta lista puede revisar a la vez, así que puede faltar aquí alguien que se va. Revisa también las aportaciones «Depositada» de abajo.",
+  "w5Deletion.auditAction.renewalStop": "Renovación detenida por una eliminación",
+  "w5Deletion.auditAction.renewalResume": "Renovación reanudada tras cancelar una eliminación",
+  "w5Deletion.auditAction.refundDetailsRequested": "Datos de reembolso de aportación solicitados"
 }

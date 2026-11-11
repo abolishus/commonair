@@ -249,7 +249,8 @@ describe("a failed load shows coop-load-error; coop-retry loads it again in plac
     failing.names.clear();
     for (const retry of screen.getAllByTestId("coop-retry")) fireEvent.click(retry);
     await waitFor(() => expect(screen.queryAllByTestId("coop-load-error")).toHaveLength(0));
-    expect(calls.counts.get("shares")).toBe(2);
+    // Overhaul wave 5: the tab also loads held shares (members leaving), retried with the rest.
+    expect(calls.counts.get("shares")).toBe(4);
     expect(calls.counts.get("periods")).toBe(2);
   });
 });

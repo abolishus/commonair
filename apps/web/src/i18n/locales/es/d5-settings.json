@@ -4,8 +4,6 @@
   "settings.list.noMatch": "Nada coincide con «{query}»",
   "settings.list.noMatchHint": "Revisa la ortografía o busca solo una parte del nombre.",
   "settings.list.searchLoaded": "{count, plural, one {Buscando en el # canal cargado hasta ahora. Carga más para buscar más allá.} other {Buscando en los # canales cargados hasta ahora. Carga más para buscar más allá.}}",
-  "settings.notifications.bell": "Avisos de directo",
-  "settings.notifications.search": "Buscar canales que sigues",
   "settings.grants.search": "Buscar canales",
   "settings.grants.allOn": "Activar todos",
   "settings.grants.allOff": "Desactivar todos",

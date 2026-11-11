@@ -102,6 +102,10 @@ const ACTION_LABEL: Record<string, MessageKey> = {
   "developer.app.suspend": "d7Admin.action.appSuspend",
   "developer.app.unsuspend": "d7Admin.action.appUnsuspend",
   "payment.confirm": "d7Admin.action.paymentConfirm",
+  // Overhaul wave 5 (w5-deletion, ADR 0042).
+  "subscription.renewal_stop": "w5Deletion.auditAction.renewalStop",
+  "subscription.renewal_resume": "w5Deletion.auditAction.renewalResume",
+  "coop.share.refund_details_requested": "w5Deletion.auditAction.refundDetailsRequested",
 };
 /** The catalogued label, or null when the action has none yet (the page then shows the code alone). */
 export function auditActionLabel(action: string): string | null {

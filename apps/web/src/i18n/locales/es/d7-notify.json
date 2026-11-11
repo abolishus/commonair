@@ -12,7 +12,6 @@
   "d7Notify.row.go_live": "Un canal que sigues empieza a transmitir",
   "d7Notify.row.go_live.hint": "Tu opción para todos los canales. La campana y las opciones de cada canal están más abajo.",
   "d7Notify.row.governance": "Propuestas y votaciones de la cooperativa",
-  "d7Notify.row.governance.hint": "Propuestas nuevas y cuándo se abre la votación de una.",
   "d7Notify.row.payout": "Liquidaciones",
   "d7Notify.row.payout.hint": "Cuando se envía o cambia una liquidación.",
   "d7Notify.row.creator": "Tus videos",

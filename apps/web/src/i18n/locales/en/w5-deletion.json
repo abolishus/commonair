@@ -19,5 +19,8 @@
   "w5Deletion.treasury.askFailed": "The email wasn't sent. Try again.",
   "w5Deletion.treasury.askTooSoon": "They were asked less than a day ago. Try again tomorrow.",
   "w5Deletion.treasury.askedToday": "Asked less than a day ago",
-  "w5Deletion.treasury.truncated": "More members hold a share than this list can check at once, so someone leaving may be missing here. Check the Held shares below too."
+  "w5Deletion.treasury.truncated": "More members hold a share than this list can check at once, so someone leaving may be missing here. Check the Held shares below too.",
+  "w5Deletion.auditAction.renewalStop": "Renewal stopped for a deletion",
+  "w5Deletion.auditAction.renewalResume": "Renewal resumed after a cancelled deletion",
+  "w5Deletion.auditAction.refundDetailsRequested": "Share refund details requested"
 }
