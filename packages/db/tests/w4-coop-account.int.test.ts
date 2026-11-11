@@ -119,7 +119,10 @@ describe("0058 first notification opt-in", () => {
   test("the column is never cleared or moved later", async () => {
     const id = await user();
     await pref(id, "email", true);
-    await refused(t.app.db.execute(sql`update users set first_notify_optin_at = null where id = ${id}`), /never cleared/);
+    await refused(
+      t.app.db.execute(sql`update users set first_notify_optin_at = null where id = ${id}`),
+      /never cleared/,
+    );
     await refused(
       t.app.db.execute(sql`update users set first_notify_optin_at = now() + interval '1 day' where id = ${id}`),
       /never cleared/,
@@ -141,9 +144,7 @@ describe("0058 case assignment", () => {
     const c = await kase();
     const mod = await user("moderator");
     const plain = await user("user");
-    await t.app.db.execute(
-      sql`update moderation_cases set assignee_id = ${mod}, assigned_at = now() where id = ${c}`,
-    );
+    await t.app.db.execute(sql`update moderation_cases set assignee_id = ${mod}, assigned_at = now() where id = ${c}`);
     await refused(
       t.app.db.execute(sql`update moderation_cases set assignee_id = ${plain}, assigned_at = now() where id = ${c}`),
       /assignee_id/,
@@ -168,8 +169,14 @@ describe("0057 setup steps and transparency notes", () => {
   });
 
   test("a note needs a YYYY-MM month and 1 to 2000 characters", async () => {
-    await t.app.db.execute(sql`insert into transparency_notes (month, body) values ('2026-10', 'Costs exceed the 10% today.')`);
-    await expect(t.app.db.execute(sql`insert into transparency_notes (month, body) values ('2026-13', 'x')`)).rejects.toThrow();
-    await expect(t.app.db.execute(sql`insert into transparency_notes (month, body) values ('2026-09', '')`)).rejects.toThrow();
+    await t.app.db.execute(
+      sql`insert into transparency_notes (month, body) values ('2026-10', 'Costs exceed the 10% today.')`,
+    );
+    await expect(
+      t.app.db.execute(sql`insert into transparency_notes (month, body) values ('2026-13', 'x')`),
+    ).rejects.toThrow();
+    await expect(
+      t.app.db.execute(sql`insert into transparency_notes (month, body) values ('2026-09', '')`),
+    ).rejects.toThrow();
   });
 });

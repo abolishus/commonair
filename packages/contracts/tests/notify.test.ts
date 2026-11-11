@@ -4,7 +4,12 @@
 /** N1 contract step: push keys, the Discord URL rule, payloads, settings and the router namespace. */
 import { describe, expect, test } from "vite-plus/test";
 import { contract } from "../src/api/router.ts";
-import { NOTIFICATION_TYPES, PREFERENCE_TYPE_NOTIFICATIONS, PREFERENCE_TYPES, UNSUBSCRIBE_LISTS } from "../src/enums.ts";
+import {
+  NOTIFICATION_TYPES,
+  PREFERENCE_TYPE_NOTIFICATIONS,
+  PREFERENCE_TYPES,
+  UNSUBSCRIBE_LISTS,
+} from "../src/enums.ts";
 import { DiscordJob, GoLiveJob } from "../src/internal.ts";
 import {
   DISCORD_WEBHOOK_URL,

@@ -68,7 +68,8 @@ describe("payloads", () => {
         .success,
     ).toBe(true);
     expect(
-      ReportOutcomeNotificationPayload.safeParse({ reportId: id(1), subjectType: "chat_message", outcome: "banned" }).success,
+      ReportOutcomeNotificationPayload.safeParse({ reportId: id(1), subjectType: "chat_message", outcome: "banned" })
+        .success,
     ).toBe(false);
     expect(
       ModeratorAddedNotificationPayload.safeParse({ channelId: id(1), slug: "streamer1", role: "vip" }).success,
