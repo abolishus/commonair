@@ -213,14 +213,22 @@ describe("StreamInfoEditor", () => {
     );
   });
 
-  it("says so when the info could not be loaded", async () => {
+  it("says so when the info could not be loaded, and Retry loads it again", async () => {
+    let fail = true;
+    const get = vi.fn<StreamInfoClient["get"]>(async () =>
+      fail ? Promise.reject(new Error("x")) : structuredClone(INFO),
+    );
     render(
       <LocaleProvider locale={locale} messages={uiMessages}>
-        <StreamInfoEditor channel="alice" client={client({ get: async () => Promise.reject(new Error("x")) })} />
+        <StreamInfoEditor channel="alice" client={client({ get })} />
       </LocaleProvider>,
     );
-    expect(await screen.findByText(t("studio.info.loadFailed"))).toBeTruthy();
+    expect(await screen.findByTestId("stream-info-error")).toBeTruthy();
     expect(screen.getByTestId("stream-info").getAttribute("aria-busy")).toBe("false");
+    fail = false;
+    fireEvent.click(screen.getByTestId("stream-info-retry"));
+    expect(await screen.findByTestId("stream-info-shown")).toBeTruthy();
+    expect(get).toHaveBeenCalledTimes(2);
   });
 
   it("names an untitled, uncategorised stream as such", async () => {

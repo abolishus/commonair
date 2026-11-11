@@ -25,9 +25,17 @@ export interface CopyFieldProps {
   copiedLabel: string;
   copyLabel: string;
   copyFailedLabel: string;
+  /**
+   * Masks the value until Reveal is pressed. Copy always copies the real value, so a streamer can
+   * paste a key into their encoder without showing it on screen.
+   */
   secret?: boolean;
+  /** The Reveal button's text while masked ("Reveal"). */
   showLabel?: string;
+  /** Its text while shown ("Hide"). */
   hideLabel?: string;
+  /** Called after a successful copy (a checklist marks its step). */
+  onCopied?: () => void;
   hint?: React.ReactNode;
   actions?: readonly CopyAction[];
   valueProps?: React.ComponentProps<typeof InputGroupInput>;
@@ -48,6 +56,7 @@ export function CopyField({
   showLabel = "Show",
   hideLabel = "Hide",
   hint,
+  onCopied,
   actions,
   valueProps,
   copyButtonProps,
@@ -62,6 +71,7 @@ export function CopyField({
       await navigator.clipboard.writeText(value);
       setCopyError(false);
       toast.success(copiedLabel);
+      onCopied?.();
     } catch {
       setCopyError(true);
       toast.error(copyFailedLabel);
@@ -82,12 +92,13 @@ export function CopyField({
         {secret && (
           <InputGroupAddon align="inline-end">
             <InputGroupButton
-              aria-label={visible ? hideLabel : showLabel}
               aria-pressed={visible}
+              aria-controls={inputId}
               data-testid={dataProps["data-reveal-testid"]}
               onClick={() => setVisible((show) => !show)}
             >
               <HugeiconsIcon icon={visible ? EyeOffIcon : EyeIcon} strokeWidth={2} aria-hidden />
+              {visible ? hideLabel : showLabel}
             </InputGroupButton>
           </InputGroupAddon>
         )}

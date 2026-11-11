@@ -13,6 +13,7 @@ import {
 } from "./social/identity.ts";
 import { CHAT_HORIZON_DAYS, planSocial, storeEntries } from "./social/plan.ts";
 import { chatWindowsForStore, writeChat, writeSocialBase } from "./social/write.ts";
+import { seedSetupMarks } from "./social/setup.ts";
 import type { SeedUnit } from "./types.ts";
 
 const TABLES = [
@@ -40,6 +41,8 @@ const TABLES = [
   // Batch 7: move links and portability grants.
   "move_links",
   "follow_portability_grants",
+  // Overhaul wave 3 (d5-dashboard): owner-marked checklist steps.
+  "channel_setup_steps",
 ] as const;
 
 /** What seed-social publishes as `store.extra.social` (the keys its brief names). */
@@ -82,6 +85,8 @@ export const unit: SeedUnit = {
     });
     const portability = await seedPortability(sessions, plan, ctx.signal);
     for (const [table, n] of Object.entries(portability.rows)) rows[table] = (rows[table] ?? 0) + n;
+    const marks = await seedSetupMarks(sessions, plan, ctx.signal);
+    rows.channel_setup_steps = (rows.channel_setup_steps ?? 0) + marks.rows.channel_setup_steps;
 
     // D1-seed: avatars, banners and panels through the upload pipeline (art.ts, decision (d)).
     const identity = planIdentity(ctx.rng.fork("identity"), plan);

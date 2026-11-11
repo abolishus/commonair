@@ -1,0 +1,410 @@
+// SPDX-FileCopyrightText: 2026 CommonAir contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+/**
+ * The stream recap at the top of `/dashboard` after a broadcast (overhaul wave 3, D5.3;
+ * creator-studio P3, voice-copy 4.9), until it is dismissed or the next stream starts. Viewer
+ * numbers appear only once the analytics settle them (24 h after the end); until then the card
+ * says so and shows what is already true: when it ended, and the video. Factual, never hype. It
+ * also carries the one-time "You're a member-owner now" notice when the owner is a co-op member.
+ */
+import {
+  IconButton,
+  MoneyAmount,
+  RelativeTime,
+  SkeletonText,
+  ViewerCount,
+  formatDuration,
+  formatNumber,
+  useLocale,
+} from "@commonair/ui";
+import { AlertCallout } from "@commonair/ui/blocks/feedback";
+import { Button } from "@commonair/ui/components/button";
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@commonair/ui/components/card";
+import { toast } from "@commonair/ui/toast";
+import type { AnalyticsRange } from "@commonair/contracts/dto";
+import { Cancel01Icon } from "@hugeicons/core-free-icons";
+import { Link } from "@tanstack/react-router";
+import * as React from "react";
+import { t } from "../../i18n/index.ts";
+import { api } from "../../lib/api.ts";
+import { fillNode } from "../../lib/fill.tsx";
+import { useRetryingLoad } from "../../lib/retrying-load.ts";
+import { SectionLoadError } from "../../lib/section-load-error.tsx";
+import { trackUi } from "../../lib/ui-metrics.ts";
+import { watchUrl } from "../watch/share.ts";
+import {
+  type Page,
+  RANGE_BEFORE_MS,
+  RECAP_DISMISSED_KEY,
+  averageViewers,
+  clipsDuring,
+  followsDuring,
+  memberNoticeKey,
+  readFlag,
+  recapVideo,
+  recapVisible,
+  recapWindow,
+  settledBroadcast,
+  writeFlag,
+} from "./model.ts";
+
+/** Integer cents with their currency (the contract's `Money`). */
+export interface Money {
+  cents: number;
+  currency: string;
+}
+
+export interface RecapVideo {
+  id: string;
+  status: "recording" | "processing" | "ready" | "failed" | "deleted";
+  createdAt: string;
+}
+
+export interface RecapClient {
+  range: (channel: string, from: string, to: string) => Promise<AnalyticsRange>;
+  vods: (channel: string) => Promise<RecapVideo[]>;
+  /** One newest-first page of the channel's follows. */
+  follows: (channel: string, cursor: string | undefined) => Promise<Page<{ followedAt: string; excluded: boolean }>>;
+  /** One newest-first page of the channel's clips. */
+  clips: (channel: string, cursor: string | undefined) => Promise<Page<{ createdAt: string }>>;
+  revenue: (channel: string, from: string, to: string) => Promise<{ net: Money; gross: Money }>;
+}
+
+export const apiRecapClient: RecapClient = {
+  range: (channel, from, to) => api().analytics.range({ channel, from, to }),
+  vods: async (channel) => (await api().vods.list({ channel, limit: 10 })).items,
+  follows: (channel, cursor) => api().channels.followers({ channel, cursor, limit: 100 }),
+  clips: (channel, cursor) => api().clips.list({ channel, cursor, limit: 100, sort: "recent", range: "all" }),
+  revenue: (channel, from, to) => api().money.revenue({ channel, from, to }),
+};
+
+export interface StreamRecapProps {
+  channel: string;
+  publicUrl: string;
+  /** The channel is live now (the recap waits for the next stream to end). */
+  live: boolean;
+  /** `Channel.lastLiveAt`. */
+  lastLiveAt: string | null;
+  vodEnabled: boolean;
+  /** `Channel.ownerCoop.member`: shows the one-time member-owner notice. */
+  member: boolean;
+  client?: RecapClient;
+  /** For tests. */
+  now?: () => number;
+}
+
+interface RecapData {
+  settled: AnalyticsRange["broadcasts"][number] | null;
+  video: RecapVideo | null;
+  follows: number | null;
+  clips: number | null;
+  net: Money | null;
+}
+
+export function StreamRecap({
+  channel,
+  publicUrl,
+  live,
+  lastLiveAt,
+  vodEnabled,
+  member,
+  client = apiRecapClient,
+  now = Date.now,
+}: StreamRecapProps): React.JSX.Element | null {
+  const [dismissedFor, setDismissedFor] = React.useState<string | null>(() => readFlag(RECAP_DISMISSED_KEY));
+  const [memberSeen, setMemberSeen] = React.useState(() => readFlag(memberNoticeKey(channel)) !== null);
+  const visible = recapVisible({ live, lastLiveAt, dismissedFor }, now());
+  if (!visible || !lastLiveAt) return null;
+  return (
+    <div className="flex min-w-0 flex-col gap-4" data-testid="stream-recap-area">
+      <RecapCard
+        key={lastLiveAt}
+        channel={channel}
+        publicUrl={publicUrl}
+        lastLiveAt={lastLiveAt}
+        vodEnabled={vodEnabled}
+        client={client}
+        now={now}
+        onDismiss={() => {
+          trackUi("studio.recap", "dismiss");
+          writeFlag(RECAP_DISMISSED_KEY, lastLiveAt);
+          setDismissedFor(lastLiveAt);
+        }}
+      />
+      {member && !memberSeen ? (
+        <MemberNotice
+          onSeen={() => {
+            writeFlag(memberNoticeKey(channel), "1");
+            setMemberSeen(true);
+          }}
+        />
+      ) : null}
+      <AlertCallout
+        data-testid="stream-recap-come-back"
+        tone="neutral"
+        title={t("d5Dashboard.recap.comeBack.title")}
+        description={t("d5Dashboard.recap.comeBack.body")}
+        action={
+          <Button
+            variant="outline"
+            size="sm"
+            nativeButton={false}
+            render={<Link to="/dashboard/settings" onClick={() => trackUi("studio.recap", "click", "continue")} />}
+          >
+            {t("d5Dashboard.recap.comeBack.action")}
+          </Button>
+        }
+      />
+    </div>
+  );
+}
+
+function RecapCard({
+  channel,
+  publicUrl,
+  lastLiveAt,
+  vodEnabled,
+  client,
+  now,
+  onDismiss,
+}: {
+  channel: string;
+  publicUrl: string;
+  lastLiveAt: string;
+  vodEnabled: boolean;
+  client: RecapClient;
+  now: () => number;
+  onDismiss: () => void;
+}): React.JSX.Element {
+  const { locale } = useLocale();
+  const load = useRetryingLoad(`recap|${channel}|${lastLiveAt}`, async (): Promise<RecapData> => {
+    const end = Date.parse(lastLiveAt);
+    const [range, vods] = await Promise.all([
+      client.range(channel, new Date(end - RANGE_BEFORE_MS).toISOString(), new Date(now()).toISOString()),
+      client.vods(channel),
+    ]);
+    const settled = settledBroadcast(range.broadcasts, lastLiveAt);
+    const window = recapWindow(lastLiveAt, settled);
+    const video = recapVideo(vods, window);
+    if (!settled) return { settled, video, follows: null, clips: null, net: null };
+    // Counts over the stream's exact span exist only once the span is known.
+    const from = new Date(window.start).toISOString();
+    const to = new Date(window.end).toISOString();
+    const [follows, clips, revenue] = await Promise.all([
+      followsDuring((cursor) => client.follows(channel, cursor), window).catch(() => null),
+      clipsDuring((cursor) => client.clips(channel, cursor), window).catch(() => null),
+      client.revenue(channel, from, to).then(
+        (r) => (r.gross.cents > 0 ? r.net : null),
+        () => null,
+      ),
+    ]);
+    return { settled, video, follows, clips, net: revenue };
+  });
+  React.useEffect(() => {
+    if (load.data) trackUi("studio.recap", "view", load.data.settled ? "live" : "none");
+  }, [load.data]);
+
+  const ended = <RelativeTime date={lastLiveAt} />;
+  const data = load.data;
+  return (
+    <Card data-testid="stream-recap" data-settled={data ? String(data.settled !== null) : undefined}>
+      <CardHeader>
+        <CardTitle>
+          <h2 className="font-display text-lg font-semibold">{t("d5Dashboard.recap.title")}</h2>
+        </CardTitle>
+        <CardDescription>
+          {data?.settled ? `${data.settled.title || t("d5Dashboard.recap.untitled")} · ` : null}
+          {fillNode(t("d5Dashboard.recap.ended"), "time", ended)}
+        </CardDescription>
+        <CardAction>
+          <IconButton
+            data-testid="stream-recap-dismiss"
+            label={t("d5Dashboard.recap.dismiss")}
+            icon={Cancel01Icon}
+            variant="ghost"
+            onClick={onDismiss}
+          />
+        </CardAction>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4">
+        {!data ? (
+          load.state === "failed" ? (
+            <SectionLoadError
+              section={t("d5Dashboard.recap.section")}
+              load={load}
+              headingLevel={3}
+              data-testid="stream-recap-error"
+              retryTestId="stream-recap-retry"
+            />
+          ) : (
+            <div aria-busy="true" aria-label={t("d5Dashboard.recap.loading")}>
+              <SkeletonText lines={3} />
+            </div>
+          )
+        ) : (
+          <>
+            {data.settled ? (
+              <dl
+                data-testid="stream-recap-stats"
+                className="grid grid-cols-2 gap-px bg-border sm:grid-cols-3 xl:grid-cols-6"
+              >
+                <Stat id="duration" label={t("d5Dashboard.recap.stat.duration")}>
+                  {formatDuration(data.settled.durationSeconds)}
+                </Stat>
+                <Stat id="peak" label={t("d5Dashboard.recap.stat.peak")}>
+                  <ViewerCount count={data.settled.totals.peakVerifiedConcurrent} icon={false} />
+                </Stat>
+                <Stat id="average" label={t("d5Dashboard.recap.stat.average")}>
+                  <ViewerCount count={averageViewers(data.settled)} icon={false} />
+                </Stat>
+                {data.follows !== null ? (
+                  <Stat id="followers" label={t("d5Dashboard.recap.stat.followers")}>
+                    {formatNumber(data.follows, locale)}
+                  </Stat>
+                ) : null}
+                {data.net ? (
+                  <Stat id="support" label={t("d5Dashboard.recap.stat.support")}>
+                    <MoneyAmount value={{ cents: data.net.cents, currency: data.net.currency }} />
+                  </Stat>
+                ) : null}
+                {data.clips !== null ? (
+                  <Stat id="clips" label={t("d5Dashboard.recap.stat.clips")}>
+                    {formatNumber(data.clips, locale)}
+                  </Stat>
+                ) : null}
+              </dl>
+            ) : null}
+            <p data-testid="stream-recap-note" className="text-sm text-muted-foreground">
+              {data.settled ? t("d5Dashboard.recap.settled") : t("d5Dashboard.recap.settling")}{" "}
+              <Link
+                to="/analytics"
+                className="underline underline-offset-4"
+                onClick={() => trackUi("studio.recap", "click", "recent")}
+              >
+                {t("d5Dashboard.recap.analytics")}
+              </Link>
+            </p>
+            <RecapVideoRow channel={channel} publicUrl={publicUrl} video={data.video} vodEnabled={vodEnabled} />
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function Stat({ id, label, children }: { id: string; label: string; children: React.ReactNode }): React.JSX.Element {
+  return (
+    // The term comes first for screen readers; the number shows above it.
+    <div data-stat={id} className="flex min-w-0 flex-col-reverse justify-end gap-1 bg-card p-3">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="font-display text-xl font-semibold tabular-nums">{children}</dd>
+    </div>
+  );
+}
+
+function RecapVideoRow({
+  channel,
+  publicUrl,
+  video,
+  vodEnabled,
+}: {
+  channel: string;
+  publicUrl: string;
+  video: RecapVideo | null;
+  vodEnabled: boolean;
+}): React.JSX.Element {
+  if (!video || video.status === "deleted") {
+    return (
+      <div data-testid="stream-recap-video" data-video="off" className="flex flex-wrap items-center gap-2">
+        <p className="text-sm">{vodEnabled ? t("d5Dashboard.recap.video.failed") : t("d5Dashboard.recap.video.off")}</p>
+        {vodEnabled ? null : (
+          <Button variant="outline" size="sm" nativeButton={false} render={<Link to="/dashboard/settings" />}>
+            {t("d5Dashboard.recap.video.turnOn")}
+          </Button>
+        )}
+      </div>
+    );
+  }
+  if (video.status === "failed")
+    return (
+      <p data-testid="stream-recap-video" data-video="failed" className="text-sm">
+        {t("d5Dashboard.recap.video.failed")}
+      </p>
+    );
+  if (video.status !== "ready")
+    return (
+      <p data-testid="stream-recap-video" data-video="processing" className="text-sm">
+        {t("d5Dashboard.recap.video.processing")}
+      </p>
+    );
+  const share = async () => {
+    trackUi("studio.recap", "click", "videos");
+    try {
+      await navigator.clipboard.writeText(watchUrl(publicUrl, "vod", channel, video.id));
+      toast.success(t("d5Dashboard.recap.shareCopied"));
+    } catch {
+      toast.error(t("d5Dashboard.recap.shareFailed"));
+    }
+  };
+  return (
+    <div data-testid="stream-recap-video" data-video="ready" className="flex flex-wrap items-center gap-2">
+      <p className="me-auto text-sm">{t("d5Dashboard.recap.video.ready")}</p>
+      <Button data-testid="stream-recap-share" variant="outline" size="sm" onClick={() => void share()}>
+        {t("d5Dashboard.recap.share")}
+      </Button>
+      <Button
+        data-testid="stream-recap-clip"
+        variant="outline"
+        size="sm"
+        nativeButton={false}
+        render={
+          <Link
+            to="/$channel/vods/$vodId"
+            params={{ channel, vodId: video.id }}
+            onClick={() => trackUi("studio.recap", "click", "clips")}
+          />
+        }
+      >
+        {t("d5Dashboard.recap.clip")}
+      </Button>
+    </div>
+  );
+}
+
+function MemberNotice({ onSeen }: { onSeen: () => void }): React.JSX.Element {
+  React.useEffect(() => {
+    trackUi("studio.recap", "view", "join");
+  }, []);
+  return (
+    <AlertCallout
+      data-testid="stream-recap-member"
+      tone="info"
+      title={t("d5Dashboard.member.title")}
+      description={t("d5Dashboard.member.body")}
+      action={
+        <span className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            nativeButton={false}
+            render={
+              <Link
+                to="/coop/proposals"
+                onClick={() => {
+                  trackUi("studio.recap", "click", "vote");
+                  onSeen();
+                }}
+              />
+            }
+          >
+            {t("d5Dashboard.member.action")}
+          </Button>
+          <Button data-testid="stream-recap-member-dismiss" variant="ghost" size="sm" onClick={onSeen}>
+            {t("d5Dashboard.member.dismiss")}
+          </Button>
+        </span>
+      }
+    />
+  );
+}

@@ -22,6 +22,7 @@ import type { Key as D3Watch } from "./d3-watch.gen.ts";
 import type { Key as D4Chat } from "./d4-chat.gen.ts";
 import type { Key as D4Layout } from "./d4-layout.gen.ts";
 import type { Key as D4Polish } from "./d4-polish.gen.ts";
+import type { Key as D5Dashboard } from "./d5-dashboard.gen.ts";
 import type { Key as D5Settings } from "./d5-settings.gen.ts";
 import type { Key as D5Studio } from "./d5-studio.gen.ts";
 import type { Key as E7Admin } from "./e7-admin.gen.ts";
@@ -97,6 +98,7 @@ export type MessageKey =
   | D4Chat
   | D4Layout
   | D4Polish
+  | D5Dashboard
   | D5Settings
   | D5Studio
   | E7Admin
@@ -171,6 +173,7 @@ export const NAMESPACES = [
   "d4-chat",
   "d4-layout",
   "d4-polish",
+  "d5-dashboard",
   "d5-settings",
   "d5-studio",
   "e7-admin",

@@ -15,7 +15,7 @@ import * as React from "react";
 import { t } from "../../i18n/index.ts";
 import { api } from "../../lib/api.ts";
 import { useBootstrap } from "../../lib/bootstrap.ts";
-import { FormError } from "../form-error.tsx";
+import { SectionLoadError } from "../../lib/section-load-error.tsx";
 import { IngestServerUrl, NewStreamKey } from "../ingest-values.tsx";
 
 interface Ingest {
@@ -27,6 +27,8 @@ export function StreamSetup({ channel }: { channel: string }): React.JSX.Element
   const { config } = useBootstrap();
   const [ingest, setIngest] = React.useState<Ingest | null>(null);
   const [loadError, setLoadError] = React.useState(false);
+  // Retry bumps this to load again.
+  const [attempt, setAttempt] = React.useState(0);
   const [newKey, setNewKey] = React.useState<string | null>(null);
   const [rotating, setRotating] = React.useState(false);
 
@@ -43,7 +45,7 @@ export function StreamSetup({ channel }: { channel: string }): React.JSX.Element
     return () => {
       cancelled = true;
     };
-  }, [channel]);
+  }, [channel, attempt]);
 
   const rotate = async () => {
     setRotating(true);
@@ -72,7 +74,20 @@ export function StreamSetup({ channel }: { channel: string }): React.JSX.Element
       </CardHeader>
       <CardContent>
         <FieldGroup>
-          {loadError && <FormError>{t("dashboard.loadFailed")}</FormError>}
+          {loadError && (
+            <SectionLoadError
+              section={t("dashboard.streamSetup")}
+              load={{
+                reload: () => {
+                  setLoadError(false);
+                  setAttempt((n) => n + 1);
+                },
+              }}
+              headingLevel={3}
+              data-testid="stream-setup-error"
+              retryTestId="stream-setup-retry"
+            />
+          )}
           <IngestServerUrl value={serverUrl} />
           {ingest ? (
             <KeyValueList

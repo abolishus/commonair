@@ -5,21 +5,27 @@ import { PageHeader } from "@commonair/ui/blocks/headers";
 import { Button } from "@commonair/ui/components/button";
 import { PageContainer } from "@commonair/ui/layouts";
 import { Link, Navigate, createFileRoute } from "@tanstack/react-router";
-import type * as React from "react";
+import * as React from "react";
 import { DashboardLabelNotices } from "../../components/safety/appeals.tsx";
+import { parseDashboardSearch } from "../../components/setup-checklist/model.ts";
 import { ControlRoom } from "../../components/studio/control-room.tsx";
+import { DashboardTop } from "../../components/studio/dashboard-top.tsx";
+import { focusStreamInfoTitle } from "../../components/studio/stream-info.tsx";
 import { t } from "../../i18n/index.ts";
 import { getSessionUser, useBootstrap } from "../../lib/bootstrap.ts";
 import { requireSession } from "../../lib/guard.ts";
 import { titleHead } from "../../lib/page-title.ts";
 
 /**
- * `/dashboard`, the stream manager (F21): a control room, not a settings page. The preview plays
- * muted (the player autoplays muted), chat has its moderation actions, and the setup cards live on
- * `/dashboard/settings`. A board: `wide` (F26). Header actions that repeat the sidebar are gone;
- * "View channel" is the one place the sidebar does not go.
+ * `/dashboard`, the stream manager (F21): a control room, not a settings page. Above the board, from
+ * the same channel poll and only while offline: the stream recap after a broadcast and the "Ready to
+ * go live" checklist until setup is done (overhaul wave 3, D5.1 and D5.3; `?intent=stream|import`
+ * opens the right step). The board puts the live numbers and the title editor first (D5.2). A board: `wide` (F26).
+ * "View channel" is the one place the sidebar does not go. The sticky LiveStatusBar belongs to the
+ * studio shell, not this page.
  */
 export const Route = createFileRoute("/_studio/dashboard")({
+  validateSearch: parseDashboardSearch,
   head: () => titleHead(t("pageTitle.studioDashboard")),
   // Server-side guard (SSR and client navigation); the component keeps a client fallback.
   beforeLoad: () => requireSession(() => getSessionUser()),
@@ -27,7 +33,9 @@ export const Route = createFileRoute("/_studio/dashboard")({
 });
 
 function DashboardPage(): React.JSX.Element {
-  const { me } = useBootstrap();
+  const { me, config } = useBootstrap();
+  const { intent } = Route.useSearch();
+  const [infoSaves, setInfoSaves] = React.useState(0);
   if (!me) return <Navigate to="/signin" replace />;
   const slug = me.channelSlug ?? me.username;
   return (
@@ -48,7 +56,23 @@ function DashboardPage(): React.JSX.Element {
         }
       />
       <DashboardLabelNotices />
-      <ControlRoom key={slug} slug={slug} username={me.username} />
+      <ControlRoom
+        key={slug}
+        slug={slug}
+        username={me.username}
+        onInfoSaved={() => setInfoSaves((n) => n + 1)}
+        renderTop={(channel) => (
+          <DashboardTop
+            channel={channel}
+            slug={slug}
+            publicUrl={config.publicUrl}
+            intent={intent}
+            // A save elsewhere on the page, or a stream ending, can tick a step.
+            refreshKey={`${infoSaves}|${channel?.lastLiveAt ?? ""}`}
+            onEditInfo={() => void focusStreamInfoTitle()}
+          />
+        )}
+      />
     </PageContainer>
   );
 }

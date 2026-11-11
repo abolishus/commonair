@@ -586,3 +586,34 @@ function cssEscapeString(v: string): string {
 export function webEmbedUrl(webUrl: string, channel: string): string {
   return new URL(ROUTES.embed(channel), webUrl).toString();
 }
+
+/**
+ * d5-dashboard (overhaul wave 3, D5.1 to D5.3): the go-live checklist and the stream recap on
+ * `/dashboard`. Each checklist step is `[data-step="<StreamSetupStep>"]` inside `setupChecklist`,
+ * with `data-state` done, current or todo; the list carries `data-phase` (setup or after) and
+ * `data-current`. The recap carries `data-settled`, the video row `data-video`. Kept out of
+ * `TEST_IDS`, like the follow-up ids.
+ */
+export const D5_DASHBOARD_IDS = {
+  setupChecklist: "setup-checklist",
+  setupChecklistError: "setup-checklist-error",
+  setupChecklistRetry: "setup-checklist-retry",
+  setupCreateKey: "setup-create-key",
+  setupServerUrl: "setup-server-url",
+  setupStreamKey: "setup-stream-key",
+  setupStreamKeyReveal: "setup-stream-key-reveal",
+  setupEncoderWaiting: "setup-encoder-waiting",
+  setupEncoderSlow: "setup-encoder-slow",
+  encoderGuide: "encoder-guide",
+  encoderGuideObsProfile: "encoder-guide-obs-profile",
+  setupAudience: "setup-audience",
+  setupAudienceChannelCopy: "setup-audience-channel-copy",
+  setupAudienceCreate: "setup-audience-create",
+  setupAudienceDone: "setup-audience-done",
+  streamRecap: "stream-recap",
+  streamRecapStats: "stream-recap-stats",
+  streamRecapVideo: "stream-recap-video",
+  streamRecapDismiss: "stream-recap-dismiss",
+  streamRecapMember: "stream-recap-member",
+  streamPreviewToggle: "stream-preview-toggle",
+} as const;
