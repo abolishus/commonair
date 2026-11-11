@@ -8,7 +8,7 @@
  */
 import { LocaleProvider, TooltipProvider } from "@commonair/ui";
 import { createMemoryHistory, createRootRoute, createRouter, RouterContextProvider } from "@tanstack/react-router";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import * as React from "react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { matchPending, type PendingLegal } from "../src/components/legal-pending.tsx";
@@ -230,6 +230,26 @@ describe("LegalPending", () => {
     const { container } = wrap(<LegalPending />);
     await waitFor(() => expect(calls.meGet).toHaveBeenCalled());
     expect(container.querySelector('[data-testid="legal-pending"]')).toBeNull();
+  });
+
+  it("with the bootstrap's pendingLegal empty, asks the API nothing (the banner is on every page)", async () => {
+    state.me = { ...ALICE, pendingLegal: [] };
+    const { container } = wrap(<LegalPending />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(container.querySelector('[data-testid="legal-pending"]')).toBeNull();
+    expect(calls.meGet).not.toHaveBeenCalled();
+    expect(calls.legalCurrent).not.toHaveBeenCalled();
+  });
+
+  it("with the bootstrap's pendingLegal set, shows it after legal.current alone", async () => {
+    state.me = { ...ALICE, pendingLegal: [{ kind: "terms", version: "2026-10-01" }] };
+    wrap(<LegalPending />);
+    const banner = await screen.findByTestId("legal-pending");
+    expect(banner.getAttribute("data-kinds")).toBe("terms");
+    expect(calls.meGet).not.toHaveBeenCalled();
+    expect(calls.legalCurrent).toHaveBeenCalledTimes(1);
   });
 
   it("lists the pending kinds with links, accepts the matching ids, refreshes and hides", async () => {

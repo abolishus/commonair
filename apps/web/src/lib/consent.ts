@@ -257,13 +257,54 @@ export function dismissConsentError(): void {
 
 let policyRequest: Promise<CookiePolicy | null> | null = null;
 
-/** The current cookie policy (cached; `refresh` asks again, e.g. after a stale-version refusal). */
+/** `sessionStorage`: this tab's copy of the cookie policy, so a page load does not ask again. */
+export const COOKIE_POLICY_CACHE_KEY = "commonair.cookie-policy.v1";
+/**
+ * How long the tab's copy stands. A policy published meanwhile is noticed at the latest this much
+ * later, or at once when recording a choice against the old version is refused (`refresh`).
+ */
+export const COOKIE_POLICY_CACHE_MS = 10 * 60_000;
+
+function cachedPolicy(nowMs: number): CookiePolicy | null {
+  try {
+    const raw = sessionStorage.getItem(COOKIE_POLICY_CACHE_KEY);
+    if (!raw) return null;
+    const entry = JSON.parse(raw) as { at?: unknown; doc?: CookiePolicy } | null;
+    if (!entry || typeof entry.at !== "number" || !entry.doc) return null;
+    const age = nowMs - entry.at;
+    return age >= 0 && age < COOKIE_POLICY_CACHE_MS ? entry.doc : null;
+  } catch {
+    return null;
+  }
+}
+
+function cachePolicy(doc: CookiePolicy, nowMs: number): void {
+  try {
+    sessionStorage.setItem(COOKIE_POLICY_CACHE_KEY, JSON.stringify({ at: nowMs, doc }));
+  } catch {
+    // Storage blocked or full: the in-memory copy still serves this page.
+  }
+}
+
+/**
+ * The current cookie policy: fetched once per tab and kept in `sessionStorage` for
+ * `COOKIE_POLICY_CACHE_MS` (every page loads it, and each load would spend the visitor's rate
+ * limit); `refresh` asks again, e.g. after a stale-version refusal.
+ */
 export function loadCookiePolicy(refresh = false): Promise<CookiePolicy | null> {
+  if (!policyRequest && !refresh) {
+    const cached = cachedPolicy(Date.now());
+    if (cached) {
+      update({ policy: cached });
+      policyRequest = Promise.resolve(cached);
+    }
+  }
   if (!policyRequest || refresh) {
     policyRequest = api()
       .legal.get({ kind: "cookies" })
       .then(
         (doc) => {
+          cachePolicy(doc, Date.now());
           update({ policy: doc });
           return doc;
         },
@@ -434,6 +475,11 @@ export async function initConsent(opts: { signedIn: boolean }): Promise<void> {
 export function resetConsentForTests(): void {
   state = INITIAL;
   policyRequest = null;
+  try {
+    sessionStorage.removeItem(COOKIE_POLICY_CACHE_KEY);
+  } catch {
+    // No storage in this environment.
+  }
   initialized = false;
   saving = null;
   cookieBacked = true;

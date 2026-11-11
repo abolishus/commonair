@@ -28,7 +28,7 @@ export function matchPending<D extends Pick<LegalDoc, "kind" | "version">>(
  */
 export function LegalPending(): React.JSX.Element | null {
   const { me } = useBootstrap();
-  return me ? <LegalPendingBanner key={me.id} /> : null;
+  return me ? <LegalPendingBanner key={me.id} known={me.pendingLegal} /> : null;
 }
 
 interface PendingState {
@@ -39,19 +39,26 @@ interface PendingState {
 
 const NOTHING_PENDING: PendingState = { pending: [], docs: [] };
 
-async function fetchPending(): Promise<PendingState> {
-  const me = await api().me.get();
-  if (me.pendingLegal.length === 0) return NOTHING_PENDING;
-  return { pending: me.pendingLegal, docs: matchPending(me.pendingLegal, await api().legal.current()) };
+/**
+ * What is pending, and the documents behind it. `known` is the bootstrap's own `me.pendingLegal`:
+ * with it, nothing pending costs no call at all (the banner is on every page), and something
+ * pending needs only `legal.current`.
+ */
+export async function fetchPending(known?: readonly PendingLegal[]): Promise<PendingState> {
+  const pending = known ?? (await api().me.get()).pendingLegal;
+  if (pending.length === 0) return NOTHING_PENDING;
+  return { pending: [...pending], docs: matchPending(pending, await api().legal.current()) };
 }
 
-function LegalPendingBanner(): React.JSX.Element | null {
+function LegalPendingBanner({ known }: { known?: readonly PendingLegal[] }): React.JSX.Element | null {
   const [{ pending, docs }, setState] = React.useState<PendingState>(NOTHING_PENDING);
   const [busy, setBusy] = React.useState(false);
+  // The first check only: a later bootstrap with a new array must not trigger another.
+  const knownRef = React.useRef(known);
 
   React.useEffect(() => {
     let live = true;
-    fetchPending()
+    fetchPending(knownRef.current)
       .then((s) => {
         if (live) setState(s);
       })

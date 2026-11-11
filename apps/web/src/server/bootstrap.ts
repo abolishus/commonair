@@ -54,7 +54,14 @@ export function sessionFailure(err: unknown): SessionLookup {
 function signedIn(m: Me): SessionLookup {
   return {
     status: "signedIn",
-    user: { id: m.id, username: m.username, displayName: m.displayName, channelSlug: m.channelSlug, role: m.role },
+    user: {
+      id: m.id,
+      username: m.username,
+      displayName: m.displayName,
+      channelSlug: m.channelSlug,
+      role: m.role,
+      pendingLegal: m.pendingLegal,
+    },
   };
 }
 

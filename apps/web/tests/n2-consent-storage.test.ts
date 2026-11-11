@@ -59,6 +59,9 @@ const {
   parseConsent,
   preferencesAllowed,
   resetConsentForTests,
+  loadCookiePolicy,
+  COOKIE_POLICY_CACHE_KEY,
+  COOKIE_POLICY_CACHE_MS,
   saveConsent,
   serializeConsent,
   withdrawPreferences,
@@ -543,5 +546,58 @@ describe("saving", () => {
     expect(consentSnapshot().signedIn).toBe(true);
     await saveConsent({ preferences: true });
     expect(fake.consent.mock.calls[0]?.[0]).not.toHaveProperty("anonymousId");
+  });
+});
+
+describe("the cookie policy, cached per tab", () => {
+  it("a page load in the same tab reuses the tab's copy instead of asking again", async () => {
+    expect((await loadCookiePolicy())?.version).toBe("v2");
+    expect(fake.get).toHaveBeenCalledTimes(1);
+    // A new page load: the module state is gone, sessionStorage is not.
+    const saved = sessionStorage.getItem(COOKIE_POLICY_CACHE_KEY);
+    resetConsentForTests();
+    if (saved) sessionStorage.setItem(COOKIE_POLICY_CACHE_KEY, saved);
+    expect((await loadCookiePolicy())?.version).toBe("v2");
+    expect(fake.get).toHaveBeenCalledTimes(1);
+    expect(consentSnapshot().policy?.version).toBe("v2");
+  });
+
+  it("an expired copy asks again", async () => {
+    const at = Date.now() - COOKIE_POLICY_CACHE_MS - 1;
+    sessionStorage.setItem(COOKIE_POLICY_CACHE_KEY, JSON.stringify({ at, doc: policy("v1") }));
+    expect((await loadCookiePolicy())?.version).toBe("v2");
+    expect(fake.get).toHaveBeenCalledTimes(1);
+  });
+
+  it("refresh ignores the copy and stores the new one (a stale-version refusal)", async () => {
+    sessionStorage.setItem(COOKIE_POLICY_CACHE_KEY, JSON.stringify({ at: Date.now(), doc: policy("v1") }));
+    expect((await loadCookiePolicy())?.version).toBe("v1");
+    expect(fake.get).not.toHaveBeenCalled();
+    expect((await loadCookiePolicy(true))?.version).toBe("v2");
+    expect(JSON.parse(sessionStorage.getItem(COOKIE_POLICY_CACHE_KEY) ?? "{}").doc.version).toBe("v2");
+  });
+
+  it("a malformed or future-dated copy is ignored", async () => {
+    sessionStorage.setItem(COOKIE_POLICY_CACHE_KEY, "not json");
+    expect((await loadCookiePolicy())?.version).toBe("v2");
+    resetConsentForTests();
+    sessionStorage.setItem(COOKIE_POLICY_CACHE_KEY, JSON.stringify({ at: Date.now() + 60_000, doc: policy("v1") }));
+    expect((await loadCookiePolicy())?.version).toBe("v2");
+    expect(fake.get).toHaveBeenCalledTimes(2);
+  });
+
+  it("storage that throws still loads the policy", async () => {
+    const throwing = () => {
+      throw new Error("blocked");
+    };
+    const storage = Object.getOwnPropertyDescriptor(globalThis, "sessionStorage");
+    Object.defineProperty(globalThis, "sessionStorage", { configurable: true, get: throwing });
+    try {
+      expect((await loadCookiePolicy())?.version).toBe("v2");
+      expect(fake.get).toHaveBeenCalledTimes(1);
+    } finally {
+      if (storage) Object.defineProperty(globalThis, "sessionStorage", storage);
+      else Reflect.deleteProperty(globalThis, "sessionStorage");
+    }
   });
 });

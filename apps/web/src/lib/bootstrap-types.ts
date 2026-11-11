@@ -15,6 +15,11 @@ export interface SessionUser {
   channelSlug: string | null;
   /** Platform role; the web only uses it to show operator pages (the API enforces access). */
   role: Me["role"];
+  /**
+   * Legal documents awaiting acceptance, from the same `me.get` (so the shell's banner needs no
+   * call of its own on every page). Absent where a caller built the user without it.
+   */
+  pendingLegal?: Me["pendingLegal"];
 }
 
 /**

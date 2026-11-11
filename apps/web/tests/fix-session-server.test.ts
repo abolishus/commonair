@@ -39,6 +39,7 @@ const ME = {
   channelSlug: null,
   role: "user",
   locale: null,
+  pendingLegal: [{ kind: "terms", version: "2026-10-01" }],
 };
 
 /** An oRPC error answer, as the API sends one. */
@@ -114,14 +115,15 @@ describe("lookupSession and loadSessionUser (F1)", () => {
     expect(api.meCalls()).toBe(0);
   });
 
-  it("200: signed in", async () => {
+  it("200: signed in, with the pending legal documents for the shell's banner", async () => {
     stubApi(() => Response.json({ json: ME }));
-    expect(await loadSessionUser(COOKIE)).toEqual({
+    expect(await loadSessionUser(COOKIE)).toStrictEqual({
       id: ME.id,
       username: "wren",
       displayName: "Wren",
       channelSlug: null,
       role: "user",
+      pendingLegal: [{ kind: "terms", version: "2026-10-01" }],
     });
   });
 
