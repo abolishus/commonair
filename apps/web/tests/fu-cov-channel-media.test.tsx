@@ -220,9 +220,10 @@ describe("about: platform names", () => {
 });
 
 describe("category page helpers", () => {
-  it("tab search: Live is bare, Videos its tab, Clips adds only non-default filters", () => {
-    expect(categoryTabSearch("live")).toEqual({});
-    expect(categoryTabSearch("live", { sort: "top", range: "7d" })).toEqual({});
+  it("tab search: Overview is bare, Live and Videos their tab, Clips adds only non-default filters", () => {
+    expect(categoryTabSearch("overview")).toEqual({});
+    expect(categoryTabSearch("live")).toEqual({ tab: "live" });
+    expect(categoryTabSearch("live", { sort: "top", range: "7d" })).toEqual({ tab: "live" });
     expect(categoryTabSearch("videos", { sort: "top", range: "7d" })).toEqual({ tab: "videos" });
     expect(categoryTabSearch("clips")).toEqual({ tab: "clips" });
     expect(categoryTabSearch("clips", { sort: "recent", range: "all" })).toEqual({ tab: "clips" });

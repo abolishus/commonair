@@ -2,12 +2,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * `/directory` (F1): every category, busiest first, or every live channel, with a tag filter and
- * "Show more" (a button, not infinite scroll, so the footer stays reachable).
+ * `/directory` (F1, overhaul D3.3): every category or every live channel, with a tag filter and
+ * "Show more" (a button, not infinite scroll, so the footer stays reachable). The categories view
+ * leads with what is live: the busiest live channels, then the categories with live channels, then
+ * every other category with muted art, its videos and never a "0 live" badge.
  */
 import type { Category, StreamCard } from "@commonair/contracts/dto";
 import { EmptyState } from "@commonair/ui";
-import { PageHeader, PageTabs } from "@commonair/ui/blocks/headers";
+import { PageHeader, PageTabs, Section } from "@commonair/ui/blocks/headers";
 import { Button } from "@commonair/ui/components/button";
 import {
   Combobox,
@@ -26,11 +28,14 @@ import * as React from "react";
 import { t } from "../../i18n/index.ts";
 import { RouteSectionLoadError } from "../../lib/section-load-error.tsx";
 import { api } from "../../lib/api.ts";
-import { appendPage, collidingNames, sortCategories, tagOptions } from "../../lib/directory-sections.ts";
-import { DiscoveryCategoryGrid } from "./category-tiles.tsx";
+import { appendPage, collidingNames, sortCategories, splitByLive, tagOptions } from "../../lib/directory-sections.ts";
+import { DiscoveryCategoryGrid, IdleCategoryGrid } from "./category-tiles.tsx";
 import { CATEGORY_PAGE, LIVE_PAGE, type DirectoryPageData, type Page } from "./loaders.ts";
 import type { DirectoryView } from "./search-params.ts";
 import { DiscoveryStreamGrid } from "./stream-cards.tsx";
+
+/** Live channels in the directory's "Live now" strip. */
+export const LIVE_STRIP = 4;
 
 export interface DirectoryPageProps {
   data: DirectoryPageData | null;
@@ -76,7 +81,10 @@ export function DirectoryPage({ data, view, tag }: DirectoryPageProps): React.JS
         <>
           <TagFilter options={tagOptions(data.live.items)} tag={tag} />
           {view === "categories" ? (
-            <CategoriesView key="categories" initial={data.categories} />
+            <>
+              <LiveNowStrip cards={data.live.items} />
+              <CategoriesView key="categories" initial={data.categories} />
+            </>
           ) : (
             <LiveView key={tag ?? ""} initial={(tag ? data.tagged : undefined) ?? data.live} tag={tag} />
           )}
@@ -160,16 +168,59 @@ export function CategoriesView({ initial }: { initial: Page<Category> }): React.
       setBusy(false);
     }
   };
+  const { live, idle } = React.useMemo(() => splitByLive(sorted), [sorted]);
   return (
-    <section aria-label={t("discovery.directory.categories")} className="flex flex-col gap-6">
-      <DiscoveryCategoryGrid
-        data-testid="directory-category-grid"
-        categories={sorted}
-        columns={6}
-        empty={<EmptyState icon={GridViewIcon} title={t("discovery.directory.noCategories")} />}
-      />
+    <section aria-label={t("discovery.directory.categories")} className="flex flex-col gap-8">
+      {sorted.length === 0 ? (
+        <EmptyState icon={GridViewIcon} title={t("discovery.directory.noCategories")} />
+      ) : (
+        <>
+          {live.length > 0 && (
+            <Section data-testid="directory-live-categories" heading={t("d3Browse.directory.liveCategories")}>
+              <DiscoveryCategoryGrid data-testid="directory-category-grid" categories={live} columns={6} />
+            </Section>
+          )}
+          {idle.length > 0 && (
+            <Section
+              data-testid="directory-idle-categories"
+              // With nothing live, the one group needs no second heading.
+              heading={live.length > 0 ? t("d3Browse.directory.allCategories") : undefined}
+            >
+              <IdleCategoryGrid data-testid="directory-idle-grid" categories={idle} />
+            </Section>
+          )}
+        </>
+      )}
       {cursor && <ShowMore onClick={() => void more()} busy={busy} />}
     </section>
+  );
+}
+
+/** Directory v2 "Live now": the busiest live channels above the categories, linking to the full list. */
+export function LiveNowStrip({ cards, tag }: { cards: readonly StreamCard[]; tag?: string }): React.JSX.Element | null {
+  const shown = React.useMemo(() => cards.slice(0, LIVE_STRIP), [cards]);
+  const collisions = React.useMemo(() => collidingNames(shown.map((c) => c.channel)), [shown]);
+  if (shown.length === 0) return null;
+  return (
+    <Section
+      data-testid="directory-live-now"
+      heading={t("d3Browse.directory.liveNow")}
+      action={
+        cards.length > shown.length ? (
+          <Button
+            data-testid="directory-live-now-all"
+            variant="ghost"
+            size="sm"
+            nativeButton={false}
+            render={<Link to="/directory" search={tag ? { view: "live", tag } : { view: "live" }} />}
+          >
+            {t("d3Browse.directory.seeAllLive")}
+          </Button>
+        ) : undefined
+      }
+    >
+      <DiscoveryStreamGrid cards={shown} collisions={collisions} showReason={false} dense />
+    </Section>
   );
 }
 
