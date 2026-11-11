@@ -228,6 +228,22 @@ describe("health numbers", () => {
     expect(screen.getByTestId("empty-state-action").getAttribute("href")).toBe("/dashboard/settings");
   });
 
+  it("a failed load shows the section's load error, and Retry asks again at once", async () => {
+    let calls = 0;
+    const load = async () => {
+      calls += 1;
+      if (calls === 1) throw new Error("down");
+      return liveHealth;
+    };
+    wrap(<StreamHealthCard channel="aurora" load={load} />);
+    await waitFor(() => expect(screen.getByTestId("stream-health-error")).toBeTruthy());
+    expect(screen.getByTestId("stream-health-error").textContent).toContain(t("dashboard.health.title"));
+    fireEvent.click(screen.getByTestId("stream-health-retry"));
+    await waitFor(() => expect(screen.getByTestId("stream-health-numbers")).toBeTruthy());
+    expect(calls).toBe(2);
+    expect(screen.queryByTestId("stream-health-error")).toBeNull();
+  });
+
   it("picks the newest sample whatever the order, and none while offline", () => {
     expect(latestSample(liveHealth)?.at).toBe("2026-11-04T10:01:00.000Z");
     expect(latestSample({ ...liveHealth, live: false })).toBeNull();

@@ -18,8 +18,8 @@ import {
   healthBadge,
   type StreamHealthDto,
 } from "../lib/stream-health.ts";
+import { SectionLoadError } from "../lib/section-load-error.tsx";
 import { formatUptime, uptimeSeconds } from "./channel/channel-data.ts";
-import { FormError } from "./form-error.tsx";
 import { StudioLinkAction } from "./studio/empty-action.tsx";
 
 type Sample = StreamHealthDto["samples"][number];
@@ -141,6 +141,8 @@ export function StreamHealthCard({
   const [now, setNow] = React.useState(() => Date.now());
   const [health, setHealth] = React.useState<StreamHealthDto | null>(null);
   const [failed, setFailed] = React.useState(false);
+  // Retry restarts the poll, which asks again at once.
+  const [attempt, setAttempt] = React.useState(0);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -168,7 +170,8 @@ export function StreamHealthCard({
       cancelled = true;
       stop();
     };
-  }, [channel, load]);
+    // `attempt` only restarts the poll (Retry).
+  }, [channel, load, attempt]);
 
   const state = health ? healthState(health) : undefined;
   const warnings = health ? latestWarnings(health) : [];
@@ -187,7 +190,15 @@ export function StreamHealthCard({
         )}
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        {failed && <FormError>{t("dashboard.health.loadFailed")}</FormError>}
+        {failed && (
+          <SectionLoadError
+            section={t("dashboard.health.title")}
+            load={{ reload: () => setAttempt((n) => n + 1) }}
+            headingLevel={3}
+            data-testid="stream-health-error"
+            retryTestId="stream-health-retry"
+          />
+        )}
         {!health && !failed && <SkeletonText lines={2} />}
         {health && state !== "offline" && <LiveNumbers health={health} startedAt={startedAt} now={now} />}
         {state === "offline" && (

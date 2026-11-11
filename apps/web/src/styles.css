@@ -55,6 +55,10 @@ altcha-widget {
 @utility max-w-viewport-6 {
   max-width: calc(100vw - 3rem);
 }
+/* The studio's 16:9 preview stays under 40% of the viewport's height (D5.2). */
+@utility max-w-preview-cap {
+  max-width: calc(40vh * 16 / 9);
+}
 /* Content and a trailing action column. */
 @utility grid-cols-fill-auto {
   grid-template-columns: minmax(0, 1fr) auto;
