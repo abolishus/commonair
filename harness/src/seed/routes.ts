@@ -141,6 +141,8 @@ export const SEED_ROUTES: Readonly<Record<string, SeedRoute>> = {
   // shows its unavailable state on the default stack (TWITCH_IMPORT_ENABLED off).
   "/move": studio,
   "/import": { as: "streamer3", expectData: true },
+  // Overhaul wave 5 (w5-schedule): streamer1's weekly slots and one-off, from seed-schedule.
+  "/schedule": studio,
   "/developer/": { as: "developer", expectData: true },
   "/developer/bots": { as: "developer", expectData: true },
   "/developer/apps/$appId": { as: "developer", params: { appId: ex("platform", "appId") }, expectData: true },

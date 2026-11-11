@@ -25,6 +25,7 @@ export const N1_TEST_IDS = {
   defaultEmail: "notify-default-email",
   defaultPush: "notify-default-push",
   emailUnverified: "notify-email-unverified",
+  // Per-channel alerts: on /following since overhaul wave 5 (w5-watch), in each live card and offline row.
   channel: "notify-channel",
   channelBell: "notify-channel-bell",
   channelEmail: "notify-channel-email",

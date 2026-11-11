@@ -1086,3 +1086,18 @@ export const W5_STUDIO_IDS = {
   modHeldDetailAllow: "mod-held-detail-allow",
   modHeldDetailDeny: "mod-held-detail-deny",
 } as const;
+
+/**
+ * w5-deletion (overhaul wave 5, ADR 0042): the treasury shares tab's "Members leaving" list.
+ * `treasuryLeavingShare` carries `data-share-id`; `treasuryShareAskRefundDetails` opens
+ * `treasuryShareAskRefundDetailsDialog` and is disabled for a day after each ask;
+ * `treasuryLeavingSharesTruncated` shows when not every held share could be checked.
+ */
+export const W5_DELETION_IDS = {
+  treasuryLeavingShares: "treasury-leaving-shares",
+  treasuryLeavingShare: "treasury-leaving-share",
+  treasuryLeavingShareAsked: "treasury-leaving-share-asked",
+  treasuryLeavingSharesTruncated: "treasury-leaving-shares-truncated",
+  treasuryShareAskRefundDetails: "treasury-share-ask-refund-details",
+  treasuryShareAskRefundDetailsDialog: "treasury-share-ask-refund-details-dialog",
+} as const;
