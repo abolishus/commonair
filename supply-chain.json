@@ -23,6 +23,13 @@
       "package": "minimatch",
       "reason": "minimatch 10.2.6 comes only through the same Storybook docgen plugin's glob, matching patterns written in that plugin and our Storybook config, never user input, so the globparts amplification cannot be triggered. The fix is minimatch 11.0.1 (published 2026-10-27, inside the 7-day cooldown until 2026-11-03) and arrives with the glob 14 upgrade above.",
       "expires": "2026-11-17"
+    },
+    {
+      "id": "GO-2026-6859",
+      "ecosystem": "go",
+      "package": "stdlib",
+      "reason": "Reachable from the relay through net/http on go1.27.3; fixed in go1.27.4, released 2026-11-10 and so inside the 7-day cooldown (ADR 0022). No instance is deployed, so waiting the week exposes nothing. Bump the toolchain, the golang image pins and CI GO_VERSION to 1.27.4 on or after 2026-11-17, then remove this entry.",
+      "expires": "2026-11-18"
     }
   ],
   "trustedDependencies": {}
