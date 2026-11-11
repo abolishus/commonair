@@ -11,7 +11,7 @@ import { GROWTH_METRICS, type GrowthMetric } from "@commonair/contracts/enums";
 import { schema, uuidv7, type Database } from "@commonair/db";
 import { createTestDatabase, type TestDatabase } from "@commonair/db/testing";
 import { createValkey } from "@commonair/service";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { BACKFILL_DAYS, SETTLE_DAYS, computeDay, daysToCompute, runGrowthDaily, utcDay } from "../src/growth/daily.ts";
 import { GROWTH_DAILY_LOCK_KEY, job } from "../src/growth/job.ts";
@@ -104,10 +104,12 @@ beforeAll(async () => {
     },
   ]);
   // Alerts: a turned on email, b registered a browser for push, c turned one off.
+  // Ids are minted at the write time, as the API's upsert does on insert.
+  const t17 = at("17:00:00");
   await owner.insert(schema.notificationPreferences).values([
-    { id: uuidv7(), userId: a.id, type: "go_live", medium: "email", enabled: true, updatedAt: at("17:00:00") },
-    { id: uuidv7(), userId: c.id, type: "go_live", medium: "push", enabled: false, updatedAt: at("17:00:00") },
-    { id: uuidv7(), userId: a.id, type: "go_live", medium: "in_app", enabled: true, updatedAt: at("17:00:00") },
+    { id: uuidv7(t17.getTime()), userId: a.id, type: "go_live", medium: "email", enabled: true, updatedAt: t17 },
+    { id: uuidv7(t17.getTime()), userId: c.id, type: "go_live", medium: "push", enabled: false, updatedAt: t17 },
+    { id: uuidv7(t17.getTime()), userId: a.id, type: "go_live", medium: "in_app", enabled: true, updatedAt: t17 },
   ]);
   await owner.insert(schema.pushSubscriptions).values({
     id: uuidv7(),
@@ -168,6 +170,36 @@ describe("growth metrics for one day", () => {
   });
   test("alerts: email or push turned on, or a browser registered for push", () => {
     expect(values.notify_optin).toBe(2);
+  });
+  test("alerts: a re-save or an off-and-on later counts nobody again and keeps the first day", async () => {
+    const later = "2026-06-12";
+    const [a] = await owner.select().from(schema.users).where(eq(schema.users.username, "growtha"));
+    const [c] = await owner.select().from(schema.users).where(eq(schema.users.username, "growthc"));
+    if (!a || !c) throw new Error("fixture users missing");
+    const pref = (userId: string, medium: "email" | "push") =>
+      and(
+        eq(schema.notificationPreferences.userId, userId),
+        eq(schema.notificationPreferences.type, "go_live"),
+        eq(schema.notificationPreferences.medium, medium),
+      );
+    // a re-saves the email alert that is already on; c turns push on (a row made off on DAY).
+    await owner
+      .update(schema.notificationPreferences)
+      .set({ enabled: true, updatedAt: at("10:00:00", later) })
+      .where(pref(a.id, "email"));
+    await owner
+      .update(schema.notificationPreferences)
+      .set({ enabled: true, updatedAt: at("11:00:00", later) })
+      .where(pref(c.id, "push"));
+    expect((await computeDay(t.app.sql, later)).notify_optin).toBe(0);
+    // c's row dates to when it was made, so DAY gains c; a stays on DAY.
+    expect((await computeDay(t.app.sql, DAY)).notify_optin).toBe(3);
+    // Back as the fixture had it, for the run tests below.
+    await owner
+      .update(schema.notificationPreferences)
+      .set({ enabled: false, updatedAt: at("17:00:00") })
+      .where(pref(c.id, "push"));
+    expect((await computeDay(t.app.sql, DAY)).notify_optin).toBe(2);
   });
   test("streams: a first stream, a return within 14 days (a reconnect is not one), active channels", () => {
     expect(values.first_live).toBe(1);
