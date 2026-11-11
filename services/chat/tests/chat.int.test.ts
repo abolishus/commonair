@@ -450,6 +450,11 @@ describe("moderation commands", () => {
       .from(schema.events)
       .where(and(eq(schema.events.channelId, ch.id), eq(schema.events.type, "channel.moderator.add")));
     expect(evts).toHaveLength(1);
+    // The new moderator gets a notice; the VIP badge sent none.
+    const notices = await t.db.select().from(schema.notifications).where(eq(schema.notifications.userId, viewer.id));
+    expect(notices.map((n) => [n.type, n.payload])).toEqual([
+      ["moderator_added", { channelId: ch.id, slug: ch.slug, role: "moderator" }],
+    ]);
     const roles = await t.db.select().from(schema.channelRoles).where(eq(schema.channelRoles.channelId, ch.id));
     expect(roles.map((r) => r.role).sort()).toEqual(["moderator", "moderator", "vip"]);
     expect((await ownerClient.command(ch.slug, "unmod", [viewer.username])).code).toBe("cmd_success");

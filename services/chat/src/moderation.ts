@@ -10,6 +10,7 @@
  */
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { ChannelChatSettings, type EventPayload, type EventType, type NoticeCode } from "@commonair/contracts";
+import type { ModeratorAddedNotificationPayload } from "@commonair/contracts/notify";
 import type { MOD_ACTIONS } from "@commonair/contracts/enums";
 import { schema, uuidv7, type Database, type Executor } from "@commonair/db";
 import type { Logger } from "@commonair/observability";
@@ -21,7 +22,7 @@ import { canActOn, canManageRoles, canModerate, rankOf, requiredRank } from "./p
 import { channelBanState, platformBanActive } from "./rules.ts";
 import type { ChannelState, Rejection, Standing, UserProfile } from "./types.ts";
 
-const { chatBans, chatMessages, channelRoles, channels, modActions, auditLog, events, users } = schema;
+const { chatBans, chatMessages, channelRoles, channels, modActions, auditLog, events, notifications, users } = schema;
 
 export const MODERATE_SCOPE = "moderator:manage:chat";
 
@@ -373,6 +374,11 @@ export class Moderation {
             .returning({ userId: channelRoles.userId });
       if (rows.length === 0) return false;
       await this.record(tx, actor, channel, { action, audit: `chat.${action}`, target: target.id });
+      // D7 (J5-g): made a moderator from chat, like from the studio, the member hears about it.
+      if (adding && role === "moderator") {
+        const payload: ModeratorAddedNotificationPayload = { channelId: channel.id, slug: channel.slug, role };
+        await tx.insert(notifications).values({ userId: target.id, type: "moderator_added", payload });
+      }
       if (role === "moderator")
         await this.outbox(tx, channel, adding ? "channel.moderator.add" : "channel.moderator.remove", {
           ...this.broadcaster(channel),
