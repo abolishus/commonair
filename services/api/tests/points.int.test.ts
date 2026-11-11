@@ -105,6 +105,7 @@ describe("balance", () => {
       points: 0,
       pointsName: "points",
       enabled: true,
+      accrual: { pointsPerBlock: 10, blockMinutes: 5, dailyCapPerChannel: 1000 },
     });
   });
 
@@ -181,6 +182,7 @@ describe("adjust", () => {
       points: 100,
       pointsName: "points",
       enabled: true,
+      accrual: { pointsPerBlock: 10, blockMinutes: 5, dailyCapPerChannel: 1000 },
     });
     const down = await mod.call("POST", pointsPath(c.slug, v.username), { delta: -40, reason: "penalty" });
     expect(down.status).toBe(200);

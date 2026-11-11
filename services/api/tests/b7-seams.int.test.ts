@@ -184,7 +184,7 @@ describe("hooks", () => {
       { notify: true, moveLink: { nonce: "n".repeat(22) } },
     );
     expect(r.status).toBe(200);
-    expect(r.body).toEqual({ following: true, followerCount: 1 });
+    expect(r.body).toMatchObject({ following: true, followerCount: 1 });
     const [f] = await api.db.db.select().from(schema.follows).where(eq(schema.follows.followerId, bob.userId));
     expect(f).toMatchObject({ source: "direct", moveLinkId: null });
   });

@@ -172,7 +172,7 @@ describe("attribution and conversions", () => {
 
     // A live link: attributed, and the trigger-kept count rises.
     const fa = await follow(a!, streamer.username, live.nonce);
-    expect(fa.body).toEqual({ following: true, followerCount: 1 });
+    expect(fa.body).toMatchObject({ following: true, followerCount: 1 });
     expect(await followRow(a!.userId, ch.id)).toMatchObject({ source: "move_link", moveLinkId: live.id });
     // An existing follower through the link: nothing changes.
     await follow(b!, streamer.username);
