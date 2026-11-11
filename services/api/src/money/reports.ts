@@ -169,6 +169,24 @@ async function revenueGroups(db: Executor, userId: string, currency: string, p: 
 
 const sumNet = (groups: readonly RevenueGroup[]) => groups.reduce((s, g) => s + g.net, 0);
 
+/**
+ * Payouts completed in `[from, to)` (D5.7), from the ledger: money that left the creator's payout
+ * clearing account (`payout`), less Connect transfers that came back (`payout_transfer_reversal`,
+ * owed to the creator again). Reserved-but-unsent payouts are `pendingPayout`, not this.
+ */
+async function paidOutCents(db: Executor, userId: string, currency: string, p: Period): Promise<number> {
+  const [row] = await db.execute<{ cents: string | null }>(sql`
+    select coalesce(sum(e.amount_cents), 0)::text as cents
+    from ledger_entries e
+    join ledger_accounts a on a.id = e.account_id
+    join ledger_transactions t on t.id = e.transaction_id
+    where ((t.kind = 'payout' and a.code = ${storedCode(accounts.payoutClearing(userId), currency)})
+        or (t.kind = 'payout_transfer_reversal' and a.code = ${storedCode(accounts.creator(userId), currency)}))
+      and t.occurred_at >= ${p.from.toISOString()}::timestamptz
+      and t.occurred_at < ${p.to.toISOString()}::timestamptz`);
+  return num(row?.cents);
+}
+
 async function revenueSummary(
   deps: Deps,
   channel: { id: string; ownerId: string },
@@ -178,11 +196,12 @@ async function revenueSummary(
   const currency = deps.env.CURRENCY;
   const p = period(input.from, input.to, deps.now());
   const prev = previousPeriod(p);
-  const [settings, groups, prevGroups, balances, tierRows] = await Promise.all([
+  const [settings, groups, prevGroups, balances, paidOut, tierRows] = await Promise.all([
     loadMoneySettings(db),
     revenueGroups(db, channel.ownerId, currency, p),
     revenueGroups(db, channel.ownerId, currency, prev),
     creatorBalances(db, channel.ownerId, currency),
+    paidOutCents(db, channel.ownerId, currency, p),
     db
       .select({ tier: subscriptions.tier, price: subscriptions.priceCents, n: sql<string>`count(*)::text` })
       .from(subscriptions)
@@ -234,8 +253,7 @@ async function revenueSummary(
     refundsAndChargebacks: money(reversed, currency),
     net: money(sumNet(groups), currency),
     pendingPayout: money(balances.reservedCents, currency),
-    // Contract step placeholder (overhaul wave 3): d5-money sums the period's completed payouts.
-    paidOut: money(0, currency),
+    paidOut: money(paidOut, currency),
     activeSubscriptions: { tier1: activeOf(1), tier2: activeOf(2), tier3: activeOf(3) },
     tips,
     split: { streamerShare: settings.cut.streamerShare, coopShare: settings.cut.coopShare },
