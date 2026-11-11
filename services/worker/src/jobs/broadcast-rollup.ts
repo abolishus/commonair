@@ -9,7 +9,7 @@
  * and emits `analytics.rollup.ready`, which starts the attestation job.
  *
  * What it writes is counts, seconds, bytes and categories only: never a user id, a signal code or
- * a threshold. Rehearsals are skipped outright (decision (f); the 0043 triggers refuse them too).
+ * a threshold. The channel owner's own sessions are left out (ADR 0014 amendment 2026-11-11). Rehearsals are skipped outright (decision (f); the 0043 triggers refuse them too).
  * A broadcast whose per-minute rows aged out (`ANALYTICS_RULES.minuteRetentionDays`) is final and
  * never re-rolled: attestations cite it.
  */
@@ -327,7 +327,14 @@ export async function rollupBroadcast(
         scoredAt: playbackSessions.scoredAt,
       })
       .from(playbackSessions)
-      .where(eq(playbackSessions.broadcastId, b.id));
+      .innerJoin(schema.channels, eq(schema.channels.id, playbackSessions.channelId))
+      // The owner's own viewing is not audience (ADR 0014 amendment 2026-11-11); signed-out sessions are.
+      .where(
+        and(
+          eq(playbackSessions.broadcastId, b.id),
+          sql`${playbackSessions.userId} is distinct from ${schema.channels.ownerId}`,
+        ),
+      );
     const sessions: RollupSession[] = rows.map((r) => ({
       ...r,
       verdict: verdictSchema.parse(r.verdict),

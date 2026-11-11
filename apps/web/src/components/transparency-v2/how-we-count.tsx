@@ -12,14 +12,14 @@ export const HOW_WE_COUNT_ID = "how-we-count";
 const PARTS: readonly { id: string; title: MessageKey; body: MessageKey }[] = [
   { id: "live", title: "d6Transparency.how.liveTitle", body: "d6Transparency.how.live" },
   { id: "settled", title: "d6Transparency.how.settledTitle", body: "d6Transparency.how.settled" },
-  { id: "owner", title: "d6Transparency.how.ownerTitle", body: "d6Transparency.how.owner" },
+  { id: "owner", title: "d6Transparency.how.ownerTitle", body: "w5Viewers.how.owner" },
   { id: "statements", title: "d6Transparency.how.statementsTitle", body: "d6Transparency.how.statements" },
 ];
 
 /**
  * "How we count" (overhaul decision 2, round2/viewer-count.md) in plain words: the live number is
  * the worker's verified count; settled numbers come after the stream and are the only final ones;
- * what the creator's own viewing does today (stated as it is, not as planned); and audience
+ * that the creator's own viewing never counts (ADR 0014 amendment 2026-11-11); and audience
  * statements, with the public verifier.
  */
 export function HowWeCount(): React.JSX.Element {

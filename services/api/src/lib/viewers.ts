@@ -13,16 +13,23 @@ import type { Deps } from "../deps.ts";
 export const VIEWER_STALE_MS = 30_000;
 export const VIEWER_COUNT_TTL_SECONDS = 5;
 
-const { playbackSessions } = schema;
+const { playbackSessions, channels } = schema;
+
+/**
+ * The channel owner's own sessions (studio preview, their channel page) are not viewers (ADR 0014
+ * amendment 2026-11-11). Signed-out sessions have no user id and still count.
+ */
+const notOwnSession = sql`${playbackSessions.userId} is distinct from (select ${channels.ownerId} from ${channels} where ${channels.id} = ${playbackSessions.channelId})`;
 
 /**
  * The public live filter: open sessions on these channels, watching live (DVR viewers are catching
- * up, ADR 0016 decision 6; worker counters.ts), with a heartbeat since `since`. The public count and
+ * up, ADR 0016 decision 6; worker counters.ts), not the owner's own, with a heartbeat since `since`. The public count and
  * the dashboard's health card both read through it, so they cannot disagree (overhaul decision 2).
  */
 export function liveSessionsWhere(channelIds: readonly string[], since: Date): SQL | undefined {
   return and(
     inArray(playbackSessions.channelId, [...channelIds]),
+    notOwnSession,
     isNull(playbackSessions.endedAt),
     eq(playbackSessions.playbackMode, "live"),
     gt(playbackSessions.lastHeartbeatAt, since),
