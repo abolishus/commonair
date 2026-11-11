@@ -445,6 +445,7 @@ describe("grace-window betting from the expanded card", () => {
     user: { id: UUID(50), username: "fan" },
     points: 500,
     pointsName: "acorns",
+    accrual: { pointsPerBlock: 10, blockMinutes: 5, dailyCapPerChannel: 1000 },
     enabled: true,
   };
   const clock: PlayheadClock = {

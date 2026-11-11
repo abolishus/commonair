@@ -306,6 +306,8 @@ export const NOTIFICATION_TYPES = [
   "system",
   /** Overhaul wave 2: co-op membership started (from the payment webhook) or ended. */
   "membership",
+  /** Overhaul wave 3 (D5.3, ux-journeys J2-f): a broadcast's video is ready; in-app only until D7 adds a `creator` preference. */
+  "vod_ready",
 ] as const;
 /** Where a notification can reach someone (`notification_preferences.medium`, ADR 0028 decision 4). */
 export const NOTIFY_MEDIA = ["in_app", "email", "push"] as const;
@@ -800,6 +802,26 @@ export const SIGNUP_INTENTS = [
 ] as const;
 export type SignupIntent = (typeof SIGNUP_INTENTS)[number];
 
+/**
+ * The studio's "Ready to go live" checklist (overhaul wave 3, D5.1), in display order. The ids
+ * double as funnel steps (`UI_METRIC_STEPS`). `stream.setupState` derives each from existing rows,
+ * except the `STREAM_SETUP_MARKABLE` ones, which the owner marks done.
+ */
+export const STREAM_SETUP_STEPS = [
+  "channel_profile",
+  "stream_info",
+  "stream_key",
+  "encoder_connected",
+  "rehearsal",
+  "first_live",
+  "import_twitch",
+  "bring_your_audience",
+] as const;
+export type StreamSetupStep = (typeof STREAM_SETUP_STEPS)[number];
+/** Steps nothing else records, so the owner marks them (`stream.setupMark`, `channel_setup_steps`). */
+export const STREAM_SETUP_MARKABLE = ["bring_your_audience"] as const;
+export type StreamSetupMarkable = (typeof STREAM_SETUP_MARKABLE)[number];
+
 /** `POST /metrics/ui` surfaces: the closed list of on-screen places the web may count (P7 B). */
 export const UI_METRIC_SURFACES = [
   "home.hero",
@@ -824,6 +846,12 @@ export const UI_METRIC_SURFACES = [
   "following",
   "clip.viewer",
   "consent.banner",
+  // Overhaul wave 3 (D4, D5).
+  "watch.firstFollow",
+  "watch.followMenu",
+  "watch.points",
+  "studio.checklist",
+  "studio.recap",
 ] as const;
 /** What happened on a surface. */
 export const UI_METRIC_ACTIONS = [
@@ -858,6 +886,11 @@ export const UI_METRIC_STEPS = [
   "accept",
   "decline",
   "choose",
+  // Overhaul wave 3: the first-follow prompt's answers and the studio checklist's step ids.
+  "push",
+  "email",
+  "install",
+  ...STREAM_SETUP_STEPS,
 ] as const;
 
 /**

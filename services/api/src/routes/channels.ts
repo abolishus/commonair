@@ -192,7 +192,8 @@ export const channelsRoutes = {
           .set({ notify: input.notify })
           .where(and(eq(follows.followerId, caller.user.id), eq(follows.channelId, c.id)));
         const [row] = await tx.select({ n: channels.followerCount }).from(channels).where(eq(channels.id, c.id));
-        return { following: true as const, followerCount: row?.n ?? c.followerCount };
+        // Contract step placeholder (overhaul wave 3): d4-follow sets firstFollow.
+        return { following: true as const, followerCount: row?.n ?? c.followerCount, firstFollow: false };
       }
       // A new follow only: a link's attribution never rewrites an existing follow (decision (k)).
       await attributeFollow(tx, {
@@ -213,7 +214,7 @@ export const channelsRoutes = {
           ...userFields(u),
           followed_at: iso(inserted.createdAt),
         });
-      return { following: true as const, followerCount: row?.n ?? c.followerCount + 1 };
+      return { following: true as const, followerCount: row?.n ?? c.followerCount + 1, firstFollow: false };
     });
     // Followers-only chat depends on follow state.
     await publishControl(deps, c.id, { op: "invalidate", scope: "user", userId: caller.user.id });

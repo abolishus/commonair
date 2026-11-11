@@ -166,6 +166,8 @@ export const vods = pgTable(
     removedReason: text(),
     /** Stable code for why processing failed (status `failed`); never free text or personal data. */
     failedReason: text(),
+    /** Overhaul wave 3 (D5.5): plays counted by `vods.recordView`; a total only, no per-viewer rows. */
+    views: integer().notNull().default(0),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

@@ -201,6 +201,7 @@ const vod: VodDto = {
   channelSlug: "rivertide",
   title: "Tuesday build stream",
   status: "ready",
+  views: 0,
   visibility: "public",
   durationSeconds: 600,
   thumbnailUrl: null,

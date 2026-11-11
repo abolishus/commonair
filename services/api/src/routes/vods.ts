@@ -137,6 +137,7 @@ async function toVod(
     status: v.status,
     visibility: v.visibility,
     durationSeconds: v.durationSeconds,
+    views: v.views,
     thumbnailUrl,
     playlistUrl: v.status === "ready" ? playlistUrl : null,
     createdAt: iso(v.createdAt),

@@ -38,19 +38,22 @@ import { watchRooms } from "./routes/watch-rooms.ts";
 import { adminGrowth, metrics, transparencyNumbers } from "./routes/growth.ts";
 import { clipsRecent, vodsRecent } from "./routes/recent.ts";
 import { usernameRoutes } from "./routes/username.ts";
+import { meModerates } from "./routes/moderates.ts";
+import { streamSetup } from "./routes/setup.ts";
+import { clipViews, vodViews } from "./routes/views.ts";
 
 export const router = base.router({
   instance,
-  me,
+  me: { ...me, ...meModerates },
   users: { ...users, ...usernameRoutes },
   categories: categoriesRoutes,
   directory,
   channels: channelsRoutes,
-  stream,
+  stream: { ...stream, ...streamSetup },
   playback,
   p2p,
-  vods: { ...vods, ...vodsRecent },
-  clips: { ...clips, ...clipsRecent },
+  vods: { ...vods, ...vodsRecent, ...vodViews },
+  clips: { ...clips, ...clipsRecent, ...clipViews },
   chat,
   money,
   developer,

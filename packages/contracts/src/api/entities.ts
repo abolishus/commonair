@@ -16,6 +16,7 @@ import {
   GiveawayEligibility,
   PatronageLine,
   PatronageWeights,
+  PointsAccrualSetting,
   TallyBreakdown,
 } from "../shapes.ts";
 import { SCOPE_NAMES } from "../scopes.ts";
@@ -141,6 +142,12 @@ export const Channel = z.object({
   movedTo: z.object({ url: z.string(), at: Timestamp }).nullable().optional(),
   /** Wave 2 (discovery): when the channel was created ("Streaming here since"). */
   createdAt: Timestamp,
+  /**
+   * Overhaul wave 3 (D4.7 trust marks): the owner is a co-op member-owner now, or holds a council
+   * seat now. Both are public facts about the channel's owner (council seats are listed on
+   * `/coop/council`); nothing else about their membership is exposed.
+   */
+  ownerCoop: z.object({ member: z.boolean(), council: z.boolean() }),
 });
 export type Channel = z.infer<typeof Channel>;
 
@@ -270,6 +277,8 @@ export const Vod = z.object({
   captions: z.array(CaptionTrack),
   /** The broadcast's category when it was recorded; null when it had none. */
   category: Category.pick({ slug: true, name: true }).nullable(),
+  /** Overhaul wave 3 (D5.5): plays counted by `vods.recordView` (at most one per viewer per video per UTC day). */
+  views: z.number().int().nonnegative(),
 });
 export const Clip = z.object({
   id: Id,
@@ -514,6 +523,8 @@ export const RevenueSummary = z.object({
   refundsAndChargebacks: Money,
   net: Money,
   pendingPayout: Money,
+  /** Overhaul wave 3 (D5.7): payouts completed in the period, so the tiles add up. */
+  paidOut: Money,
   activeSubscriptions: z.object({
     tier1: z.number().int(),
     tier2: z.number().int(),
@@ -1067,6 +1078,8 @@ export const LoyaltyBalance = z.object({
   pointsName: z.string(),
   /** The channel's points are on (`BotConfig.loyalty.enabled`); viewers hide the chip and the spend controls when false. */
   enabled: z.boolean(),
+  /** Overhaul wave 3 (D4.5): how points are earned on this instance (the `interact.points.accrual` setting), for "How you earn". */
+  accrual: PointsAccrualSetting,
 });
 
 export const MembershipView = z.object({
@@ -2629,3 +2642,33 @@ export const GrowthNumbers = z.object({
   ),
 });
 export type GrowthNumbers = z.infer<typeof GrowthNumbers>;
+
+// Overhaul wave 3 (D5.1, D5.8) --------------------------------------------------------------
+
+/**
+ * `stream.setupState`: the "Ready to go live" checklist in one call (creator-studio.md P1). Each
+ * step is derived from existing rows except the `STREAM_SETUP_MARKABLE` ones. `import_twitch` is
+ * null unless the owner signed up with `intent=import`; `rehearsal` is optional.
+ */
+export const StreamSetupState = z.object({
+  steps: z.array(
+    z.object({
+      step: z.enum(E.STREAM_SETUP_STEPS),
+      /** null: the step does not apply to this channel (only `import_twitch`). */
+      done: z.boolean().nullable(),
+      optional: z.boolean(),
+    }),
+  ),
+  signupIntent: z.enum(E.SIGNUP_INTENTS).nullable(),
+  /** Every required step is done. */
+  complete: z.boolean(),
+});
+export type StreamSetupState = z.infer<typeof StreamSetupState>;
+
+/** `me.moderates`: a channel the caller holds a moderator or editor role on (not their own). */
+export const ModeratedChannel = z.object({
+  channel: StreamCard.shape.channel,
+  role: z.enum(["moderator", "editor"]),
+  live: z.boolean(),
+});
+export type ModeratedChannel = z.infer<typeof ModeratedChannel>;

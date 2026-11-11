@@ -22,6 +22,7 @@
   "notifications.type.moderation": "Hay una actualización de moderación",
   "notifications.type.system": "Hay un aviso sobre tu cuenta",
   "notifications.type.membership": "Tu membresía de la cooperativa cambió",
+  "notifications.type.vod_ready": "Tu video está listo",
   "notifications.kind.statement": "Hay una declaración de motivos sobre una decisión acerca de tu cuenta o tu contenido",
   "notifications.kind.discordWebhookRemoved": "Tu webhook de Discord dejó de funcionar y se eliminó",
   "notifications.kind.streamKeyLeaked": "Es posible que una de tus claves de transmisión se haya filtrado: renuévala",

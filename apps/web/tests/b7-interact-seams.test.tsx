@@ -170,6 +170,7 @@ function fakeClient(current: () => Promise<GiveawayDto | null>) {
       user: { id: UUID(50), username: "fan" },
       points: 0,
       pointsName: "points",
+      accrual: { pointsPerBlock: 10, blockMinutes: 5, dailyCapPerChannel: 1000 },
       enabled: false,
     }),
     giveawayCurrent,

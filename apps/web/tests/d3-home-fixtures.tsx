@@ -30,6 +30,7 @@ export function video(id: string, slug = "aurora"): VodCard {
     channelSlug: slug,
     title: `${id} title`,
     status: "ready",
+    views: 0,
     visibility: "public",
     durationSeconds: 3_725,
     thumbnailUrl: null,

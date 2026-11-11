@@ -85,7 +85,8 @@ export type NotificationTarget =
   | { kind: "appeals" }
   | { kind: "privacy" }
   | { kind: "dashboard" }
-  | { kind: "membership" };
+  | { kind: "membership" }
+  | { kind: "vod"; slug: string; id: string };
 
 export type NotificationView =
   | { kind: "go_live"; slug: string; title: string; target: NotificationTarget }
@@ -102,6 +103,7 @@ const TYPE_LABEL: Record<NotificationType, MessageKey> = {
   moderation: "notifications.type.moderation",
   system: "notifications.type.system",
   membership: "notifications.type.membership",
+  vod_ready: "notifications.type.vod_ready",
 };
 
 /**
@@ -164,6 +166,16 @@ export function describeNotification(n: Pick<NotificationDto, "type" | "payload"
       return { kind: "generic", label: TYPE_LABEL.system, target: null };
     case "membership":
       return { kind: "generic", label: TYPE_LABEL.membership, target: { kind: "membership" } };
+    case "vod_ready": {
+      // Overhaul wave 3 (D5.3): `{vodId, broadcastId, slug, title}`; links to the video.
+      const slug = str(payload.slug);
+      const id = str(payload.vodId);
+      return {
+        kind: "generic",
+        label: TYPE_LABEL.vod_ready,
+        target: slug && SLUG.test(slug) && id && UUID.test(id) ? { kind: "vod", slug, id } : null,
+      };
+    }
     case "raid":
     case "payout":
       return { kind: "generic", label: TYPE_LABEL[n.type], target: null };
@@ -185,6 +197,8 @@ export function targetPath(target: NotificationTarget): string {
       return "/dashboard";
     case "membership":
       return "/coop/membership";
+    case "vod":
+      return `/${target.slug}/vods/${target.id}`;
   }
 }
 

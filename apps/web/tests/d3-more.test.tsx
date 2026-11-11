@@ -59,6 +59,7 @@ const vodItem = (n: number, over: Partial<VodItem> = {}): VodItem => ({
   channelSlug: "rivertide",
   title: `Broadcast ${n}`,
   status: "ready",
+  views: 0,
   visibility: "public",
   durationSeconds: 600,
   thumbnailUrl: null,

@@ -281,7 +281,13 @@ export function platformCounts(scale: SeedScale) {
   };
 }
 
-const PAYLOAD_KINDS: Record<Exclude<NotificationType, "go_live" | "proposal" | "vote_open">, string[]> = {
+/**
+ * `vod_ready` is left out of the platform inbox: its payload names a real video, and the platform
+ * plan has none (overhaul wave 3 contract step; d5-content seeds it with the media seed's videos).
+ */
+const INBOX_TYPES = NOTIFICATION_TYPES.filter((t) => t !== "vod_ready");
+
+const PAYLOAD_KINDS: Record<Exclude<NotificationType, "go_live" | "proposal" | "vote_open" | "vod_ready">, string[]> = {
   raid: ["raid_incoming"],
   export_ready: ["data_export"],
   payout: ["payout_paid", "payout_held"],
@@ -483,6 +489,8 @@ export function planPlatform(rng: Rng, scale: SeedScale, world: PlatformWorld, n
         return { kind: r.pick(PAYLOAD_KINDS.raid), channel: s1.slug };
       case "membership":
         return { kind: r.pick(PAYLOAD_KINDS.membership), basis: "subscription" };
+      case "vod_ready":
+        return {};
       default:
         return { kind: r.pick(PAYLOAD_KINDS[type]) };
     }
@@ -509,9 +517,9 @@ export function planPlatform(rng: Rng, scale: SeedScale, world: PlatformWorld, n
         });
       }
   };
-  inboxFor(v1.handle, counts.inboxPerType, NOTIFICATION_TYPES);
+  inboxFor(v1.handle, counts.inboxPerType, INBOX_TYPES);
   for (const h of ["viewer2", "streamer1", "member1", "developer"])
-    if (world.users.some((u) => u.handle === h)) inboxFor(h, 1, NOTIFICATION_TYPES);
+    if (world.users.some((u) => u.handle === h)) inboxFor(h, 1, INBOX_TYPES);
   for (const h of bulkViewers) inboxFor(h, 1, ["go_live", "system"]);
 
   // Preferences and go-live sends -------------------------------------------------------------

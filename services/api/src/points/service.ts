@@ -11,9 +11,9 @@ import { and, asc, desc, eq, gt, isNull } from "drizzle-orm";
 import type { z } from "zod";
 import type { LoyaltyBalance as LoyaltyBalanceSchema } from "@commonair/contracts/dto";
 import type { POINTS_ADJUST_REASONS } from "@commonair/contracts/enums";
-import { BotConfig } from "@commonair/contracts/shapes";
+import { BotConfig, type PointsAccrualSetting } from "@commonair/contracts/shapes";
 import { InsufficientPointsError, postPointsInTx, pointsBalance, schema as s, type Executor } from "@commonair/db";
-import { pointsChangePayload } from "@commonair/interact";
+import { DEFAULT_POINTS_ACCRUAL, pointsChangePayload } from "@commonair/interact";
 import { audit } from "../events/audit.ts";
 import { emit } from "../events/outbox.ts";
 import { badRequest, notFound, precondition } from "../lib/errors.ts";
@@ -23,14 +23,18 @@ type ChannelRef = { id: string; ownerId: string; slug: string; displayName: stri
 export type PointsAdjustReason = (typeof POINTS_ADJUST_REASONS)[number];
 
 /** What a channel calls its points and whether they are on (`BotConfig.loyalty`; defaults without a row). */
-export async function loyaltyOf(db: Executor, channelId: string): Promise<{ enabled: boolean; pointsName: string }> {
+export async function loyaltyOf(
+  db: Executor,
+  channelId: string,
+): Promise<{ enabled: boolean; pointsName: string; accrual: PointsAccrualSetting }> {
   const [row] = await db
     .select({ config: s.botConfigs.config })
     .from(s.botConfigs)
     .where(eq(s.botConfigs.channelId, channelId));
   const parsed = BotConfig.safeParse(row?.config ?? {});
   const loyalty = parsed.success ? parsed.data.loyalty : BotConfig.parse({}).loyalty;
-  return { enabled: loyalty.enabled, pointsName: loyalty.pointsName };
+  // Contract step placeholder (overhaul wave 3): d4-chat reads the instance setting (`readPointsAccrual`).
+  return { enabled: loyalty.enabled, pointsName: loyalty.pointsName, accrual: DEFAULT_POINTS_ACCRUAL };
 }
 
 async function channelBySlug(db: Executor, slug: string): Promise<ChannelRef> {

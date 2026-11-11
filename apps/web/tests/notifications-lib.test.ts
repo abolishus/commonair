@@ -122,6 +122,21 @@ describe("describeNotification", () => {
     expect(describeNotification({ type: "payout", payload: {} }).target).toBeNull();
   });
 
+  it("vod_ready links the video when the slug and id are valid, else no link (overhaul wave 3)", () => {
+    const VOD = "0192f000-0000-7000-8000-0000000000d1";
+    const ok = describeNotification(
+      item({ type: "vod_ready", payload: { vodId: VOD, broadcastId: BC, slug: "rivertide", title: "Night build" } }),
+    );
+    expect(ok).toEqual({
+      kind: "generic",
+      label: "notifications.type.vod_ready",
+      target: { kind: "vod", slug: "rivertide", id: VOD },
+    });
+    expect(ok.target && targetPath(ok.target)).toBe(`/rivertide/vods/${VOD}`);
+    for (const payload of [{}, { vodId: "nope", slug: "rivertide" }, { vodId: VOD, slug: "Not A Slug" }])
+      expect(describeNotification(item({ type: "vod_ready", payload })).target).toBeNull();
+  });
+
   it("every type has a label in the catalog", () => {
     const labels = NOTIFICATION_TYPES.map((type) => describeNotification({ type, payload: {} })).flatMap((v) =>
       v.kind === "generic" ? [v.label] : [],

@@ -239,6 +239,7 @@ const balance = (points: number, enabled = true): LoyaltyBalanceDto => ({
   user: { id: UUID(7), username: "viewer" },
   points,
   pointsName: "seeds",
+  accrual: { pointsPerBlock: 10, blockMinutes: 5, dailyCapPerChannel: 1000 },
   enabled,
 });
 

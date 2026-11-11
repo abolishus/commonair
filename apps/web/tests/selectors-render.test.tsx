@@ -589,6 +589,7 @@ describe("composition-rendered selectors", () => {
     periodEnd: "2026-11-01T00:00:00.000Z",
     gross: usd(4000),
     coopCut: usd(600),
+    paidOut: usd(0),
     refundsAndChargebacks: usd(0),
     net: usd(3400),
     pendingPayout: usd(0),

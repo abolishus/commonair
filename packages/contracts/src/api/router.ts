@@ -171,6 +171,15 @@ export const contract = {
       })
       .input(z.object({ documentIds: z.array(Id).min(1) }))
       .output(Ok),
+    /** Overhaul wave 3 (J5-a): channels the caller moderates or edits (never their own), live first. */
+    moderates: user
+      .route({
+        method: "GET",
+        path: "/me/moderates",
+        summary: "Channels you moderate",
+        ...tag("Moderation"),
+      })
+      .output(z.array(D.ModeratedChannel)),
     follows: user
       .meta({ access: "user", scopes: ["user:read:follows"] })
       .route({
@@ -649,7 +658,14 @@ export const contract = {
           moveLink: z.object({ nonce: z.string().min(16).max(64) }).optional(),
         }),
       )
-      .output(z.object({ following: z.literal(true), followerCount: z.number().int() })),
+      .output(
+        z.object({
+          following: z.literal(true),
+          followerCount: z.number().int(),
+          /** Overhaul wave 3 (D4.3): this is the caller's first follow ever, so the web offers go-live alerts once. */
+          firstFollow: z.boolean(),
+        }),
+      ),
     unfollow: user
       .meta({ access: "user", scopes: ["user:manage:follows"] })
       .route({
@@ -776,6 +792,27 @@ export const contract = {
       })
       .input(ChannelRef)
       .output(D.StreamHealth),
+    /** Overhaul wave 3 (D5.1): the "Ready to go live" checklist in one call. */
+    setupState: owner
+      .route({
+        method: "GET",
+        path: "/channels/{channel}/setup",
+        summary: "Go-live checklist state",
+        ...tag("Streaming"),
+      })
+      .input(ChannelRef)
+      .output(D.StreamSetupState),
+    /** Marks a step nothing else records (`STREAM_SETUP_MARKABLE`) done; idempotent. */
+    setupMark: owner
+      .meta({ access: "owner", rateLimit: "write" })
+      .route({
+        method: "PUT",
+        path: "/channels/{channel}/setup/{step}",
+        summary: "Mark a checklist step done",
+        ...tag("Streaming"),
+      })
+      .input(ChannelRef.extend({ step: z.enum(E.STREAM_SETUP_MARKABLE) }))
+      .output(Ok),
     simulcast: {
       list: owner
         .route({
@@ -1026,6 +1063,16 @@ export const contract = {
       .route({ method: "GET", path: "/vods/{id}", summary: "One VOD", ...tag("VODs") })
       .input(z.object({ id: Id }))
       .output(D.Vod),
+    /**
+     * Overhaul wave 3 (D5.5): count one play. At most one per viewer (user id, else a daily-salted
+     * address hash kept only in Valkey) per video per UTC day; never stored per viewer in Postgres.
+     * Ok even when not counted; NOT_FOUND for a video the caller may not watch.
+     */
+    recordView: base
+      .meta({ access: "public", rateLimit: "playback" })
+      .route({ method: "POST", path: "/vods/{id}/views", summary: "Count a video play", ...tag("VODs") })
+      .input(z.object({ id: Id }))
+      .output(Ok),
     update: owner
       .route({
         method: "PATCH",
@@ -1142,6 +1189,12 @@ export const contract = {
       .route({ method: "GET", path: "/clips/{id}", summary: "One clip", ...tag("Clips") })
       .input(z.object({ id: Id }))
       .output(D.Clip),
+    /** Overhaul wave 3: as `vods.recordView`, for `clips.views` (nothing counted them before). */
+    recordView: base
+      .meta({ access: "public", rateLimit: "playback" })
+      .route({ method: "POST", path: "/clips/{id}/views", summary: "Count a clip play", ...tag("Clips") })
+      .input(z.object({ id: Id }))
+      .output(Ok),
     remove: mod
       .route({
         method: "DELETE",

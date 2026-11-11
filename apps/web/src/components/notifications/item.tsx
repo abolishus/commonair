@@ -71,6 +71,18 @@ function TargetLink({
           {children}
         </Link>
       );
+    case "vod":
+      return (
+        <Link
+          data-testid="notification-item-link"
+          to="/$channel/vods/$vodId"
+          params={{ channel: target.slug, vodId: target.id }}
+          className={LINK}
+          onClick={onOpen}
+        >
+          {children}
+        </Link>
+      );
   }
 }
 

@@ -58,6 +58,7 @@ const vod = (n: number, over: Partial<VodCard> = {}): VodCard => ({
   channelSlug: `ch${n}`,
   title: `Stream ${n}`,
   status: "ready",
+  views: 0,
   visibility: "public",
   durationSeconds: 3600,
   thumbnailUrl: null,

@@ -171,6 +171,7 @@ export async function listRecentVods(
         status: r.v.status,
         visibility: r.v.visibility,
         durationSeconds: r.v.durationSeconds,
+        views: r.v.views,
         thumbnailUrl: urls.thumbnailUrl,
         playlistUrl: urls.playlistUrl,
         createdAt: iso(r.v.createdAt),

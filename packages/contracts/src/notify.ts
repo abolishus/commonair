@@ -75,6 +75,18 @@ export const MembershipNotificationPayload = z.object({
 export type MembershipNotificationPayload = z.infer<typeof MembershipNotificationPayload>;
 
 /**
+ * `notifications.payload` of a `vod_ready` row (overhaul wave 3, D5.3): the channel owner's video
+ * of a broadcast finished processing. Ids and the video title only; the inbox links to the video.
+ */
+export const VodReadyNotificationPayload = z.object({
+  vodId: z.uuid(),
+  broadcastId: z.uuid(),
+  slug: Slug,
+  title: z.string().max(140),
+});
+export type VodReadyNotificationPayload = z.infer<typeof VodReadyNotificationPayload>;
+
+/**
  * The plaintext of a push message, encrypted to the browser (RFC 8291) before it leaves the
  * worker. Nothing else goes in it: the vendor's push service relays it (ADR 0028 decision 1).
  * The service worker validates it by hand (it does not bundle zod).

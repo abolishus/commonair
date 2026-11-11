@@ -94,6 +94,7 @@ function vod(n: number, over: Partial<Vod> = {}): Vod {
     channelSlug: "fern",
     title: `Stream ${n}`,
     status: "ready",
+    views: 0,
     visibility: "public",
     durationSeconds: 3600 + n,
     thumbnailUrl: null,

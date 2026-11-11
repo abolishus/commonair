@@ -105,6 +105,7 @@ const balance = (over: Partial<LoyaltyBalanceDto> = {}): LoyaltyBalanceDto => ({
   user: { id: UUID(50), username: "fan" },
   points: 500,
   pointsName: "acorns",
+  accrual: { pointsPerBlock: 10, blockMinutes: 5, dailyCapPerChannel: 1000 },
   enabled: true,
   ...over,
 });

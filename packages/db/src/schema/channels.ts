@@ -22,6 +22,7 @@ import {
   ChannelFederationSettings,
   type ChannelTheme,
 } from "@commonair/contracts/shapes";
+import type { StreamSetupMarkable } from "@commonair/contracts/enums";
 import { users } from "./auth.ts";
 import {
   cents,
@@ -299,5 +300,24 @@ export const followPortabilityGrants = pgTable(
   (t) => [
     primaryKey({ columns: [t.userId, t.channelId] }),
     index("follow_portability_grants_channel_idx").on(t.channelId),
+  ],
+);
+
+/**
+ * Overhaul wave 3 (D5.1): checklist steps the owner marked done (`stream.setupMark`); the other
+ * steps of `stream.setupState` are derived from existing rows. One row per (channel, step).
+ */
+export const channelSetupSteps = pgTable(
+  "channel_setup_steps",
+  {
+    channelId: uuid()
+      .notNull()
+      .references(() => channels.id, { onDelete: "cascade" }),
+    step: text().$type<StreamSetupMarkable>().notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.channelId, t.step] }),
+    check("channel_setup_steps_step", sql`${t.step} IN ('bring_your_audience')`),
   ],
 );

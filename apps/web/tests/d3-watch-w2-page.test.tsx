@@ -71,6 +71,7 @@ const vod = (over: Partial<VodDto> = {}): VodDto => ({
   channelSlug: "rivertide",
   title: "Tuesday build stream",
   status: "ready",
+  views: 0,
   visibility: "public",
   durationSeconds: 1800,
   thumbnailUrl: null,

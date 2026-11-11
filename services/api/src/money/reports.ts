@@ -234,6 +234,8 @@ async function revenueSummary(
     refundsAndChargebacks: money(reversed, currency),
     net: money(sumNet(groups), currency),
     pendingPayout: money(balances.reservedCents, currency),
+    // Contract step placeholder (overhaul wave 3): d5-money sums the period's completed payouts.
+    paidOut: money(0, currency),
     activeSubscriptions: { tier1: activeOf(1), tier2: activeOf(2), tier3: activeOf(3) },
     tips,
     split: { streamerShare: settings.cut.streamerShare, coopShare: settings.cut.coopShare },

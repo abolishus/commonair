@@ -93,6 +93,7 @@ export async function searchVideos(deps: Deps, opts: { q: string; adult: boolean
       status: v.status,
       visibility: v.visibility,
       durationSeconds: v.durationSeconds,
+      views: v.views,
       thumbnailUrl: placed ? mediaUrl(deps, v.thumbnailKey) : null,
       playlistUrl: placed ? mediaUrl(deps, `${v.storagePrefix}${VOD_PLAYLIST}`) : null,
       createdAt: iso(v.createdAt),

@@ -16,6 +16,8 @@ export const BASE_SEEDED: Readonly<Record<string, string>> = {
 
 /** Tables deliberately left empty, each with the reason. Keep this list short. */
 export const NOT_SEEDED: Readonly<Record<string, string>> = {
+  channel_setup_steps:
+    "overhaul wave 3 contract step: written only by d5-dashboard's stream.setupMark; the seed marks steps after that unit merges",
   verifications: "short-lived email-verification and reset tokens; signing up writes them and nothing lists them",
   payout_transfers:
     "batch 8 contract step: written only by M1-connect's transfer service; seed-full seeds it after that unit merges",
