@@ -47,7 +47,12 @@ function sources(dir: string): string[] {
     return /\.tsx?$/.test(name) ? [full] : [];
   });
 }
-const source = [...sources(join(WEB, "components/security")), join(WEB, "routes/_app/signin.tsx")]
+const source = [
+  ...sources(join(WEB, "components/security")),
+  join(WEB, "routes/_app/signin.tsx"),
+  // The page header and its `security-page` wrapper live in the route (the settings page pattern).
+  join(WEB, "routes/_app/settings.security.tsx"),
+]
   .map((f) => readFileSync(f, "utf8"))
   .join("\n");
 
