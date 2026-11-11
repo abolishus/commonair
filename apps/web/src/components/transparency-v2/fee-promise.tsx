@@ -7,7 +7,9 @@ import type * as React from "react";
 import { t, type MessageKey } from "../../i18n/index.ts";
 import { conditionText } from "../creators/fee-calculator.tsx";
 import { COMPETITOR_RATES, RATES_CHECKED, type CompetitorId, type PlatformRate } from "../creators/rates.ts";
+import { SectionLoadError } from "../../lib/section-load-error.tsx";
 import type { CutShares } from "./model.ts";
+import type { LoadStatus } from "./report.tsx";
 
 /** The competitor names and source labels `/creators` already translates (d2-pages). */
 const PLATFORM_NAME: Record<CompetitorId, MessageKey> = {
@@ -32,6 +34,8 @@ export interface FeePromiseProps {
   cut: CutShares | null;
   /** The instance's name (`instance.name`), never a literal. */
   site: string;
+  /** The `coop.settings` load, when it failed and `cut` is null: the promise offers Retry (F3). */
+  failedLoad?: LoadStatus;
 }
 
 /**
@@ -40,7 +44,7 @@ export interface FeePromiseProps {
  * The competitor figures are `/creators`' sourced table (`creators/rates.ts`); nothing here invents
  * a figure or claims the highest share (Kick's 95% needs a status gate, and says so).
  */
-export function FeePromise({ cut, site }: FeePromiseProps): React.JSX.Element {
+export function FeePromise({ cut, site, failedLoad }: FeePromiseProps): React.JSX.Element {
   const { locale } = useLocale();
   const pct = (n: number) => formatPercent(n, locale, { maximumFractionDigits: 1 });
   return (
@@ -55,6 +59,14 @@ export function FeePromise({ cut, site }: FeePromiseProps): React.JSX.Element {
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         {cut && <p className="text-sm">{t("d6Transparency.fee.firstSub")}</p>}
+        {!cut && failedLoad && (
+          <SectionLoadError
+            section={t("d6Transparency.fee.title")}
+            load={failedLoad}
+            headingLevel={3}
+            data-testid="transparency-fee-error"
+          />
+        )}
         <a
           href="#fee-schedule"
           className="self-start text-sm font-medium underline underline-offset-4 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"

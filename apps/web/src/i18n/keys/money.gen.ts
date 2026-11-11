@@ -218,6 +218,7 @@ export type Key =
   | "transparency.period.6"
   | "transparency.period.12"
   | "transparency.loading"
+  | "transparency.loadFailed"
   | "transparency.empty"
   | "transparency.emptyHint"
   | "transparency.stat.revenue"

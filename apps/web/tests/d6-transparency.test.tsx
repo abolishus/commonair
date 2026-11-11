@@ -340,6 +340,48 @@ describe("TransparencyV2", () => {
     expect(screen.queryByTestId("transparency-flow")).toBeNull();
   });
 
+  it("F3: a failed settings load shows Retry in the fee promise and the strip; Retry reloads it", () => {
+    const reload = vi.fn<() => void>();
+    page({ cut: null, settingsLoad: { failed: true, reload, gaveUp: true } });
+    const promise = one("transparency-fee-promise");
+    expect(promise.textContent).toContain(t("d6Transparency.fee.unavailable"));
+    fireEvent.click(within(one("transparency-fee-error")).getByRole("button"));
+    expect(reload).toHaveBeenCalledTimes(1);
+    fireEvent.click(within(one("transparency-numbers-error")).getByRole("button"));
+    expect(reload).toHaveBeenCalledTimes(2);
+    // The books loaded: their figures stay.
+    expect(stat("members")).toBe("8");
+  });
+
+  it("F3: a failed fee schedule load shows Retry in the strip only; one Retry reloads every failed load", () => {
+    const settingsReload = vi.fn<() => void>();
+    const scheduleReload = vi.fn<() => void>();
+    page({ feeChanged: null, scheduleLoad: { failed: true, reload: scheduleReload, gaveUp: true } });
+    expect(screen.queryByTestId("transparency-fee-error")).toBeNull();
+    fireEvent.click(within(one("transparency-numbers-error")).getByRole("button"));
+    expect(scheduleReload).toHaveBeenCalledTimes(1);
+    cleanup();
+    page({
+      cut: null,
+      feeChanged: null,
+      settingsLoad: { failed: true, reload: settingsReload, gaveUp: true },
+      scheduleLoad: { failed: true, reload: scheduleReload, gaveUp: true },
+    });
+    fireEvent.click(within(one("transparency-numbers-error")).getByRole("button"));
+    expect(settingsReload).toHaveBeenCalledTimes(1);
+    expect(scheduleReload).toHaveBeenCalledTimes(2);
+  });
+
+  it("no Retry while the settings and schedule are only loading, or once they loaded", () => {
+    page({ cut: null, feeChanged: null, settingsLoad: { failed: false, reload: vi.fn<() => void>() } });
+    expect(screen.queryByTestId("transparency-numbers-error")).toBeNull();
+    expect(screen.queryByTestId("transparency-fee-error")).toBeNull();
+    cleanup();
+    page({ settingsLoad: { failed: true, reload: vi.fn<() => void>() } });
+    expect(screen.queryByTestId("transparency-numbers-error")).toBeNull();
+    expect(screen.queryByTestId("transparency-fee-error")).toBeNull();
+  });
+
   it("no months yet: the empty state and the commitments", () => {
     page({ books: loaded([]) });
     expect(one("transparency-empty")).toBeTruthy();

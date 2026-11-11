@@ -213,6 +213,7 @@
   "transparency.period.6": "Last 6 months",
   "transparency.period.12": "Last 12 months",
   "transparency.loading": "Loading the books",
+  "transparency.loadFailed": "The books didn't load. Refresh the page to retry.",
   "transparency.empty": "No months yet",
   "transparency.emptyHint": "The books appear here once the co-op has its first revenue.",
   "transparency.stat.revenue": "Revenue",

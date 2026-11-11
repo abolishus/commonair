@@ -76,6 +76,8 @@ function TransparencyPage(): React.JSX.Element {
         books={books}
         cut={cutShares(settings.data)}
         feeChanged={feeLastChanged(schedule.data)}
+        settingsLoad={settings}
+        scheduleLoad={schedule}
         currency={config.currency}
         site={instance.name}
         onSaveNote={isTreasurer(me) ? onSaveNote : undefined}

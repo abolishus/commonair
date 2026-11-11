@@ -27,12 +27,19 @@ import { NumbersStrip } from "./numbers-strip.tsx";
 export type SectionLoad<T> = Pick<RetryStatus, "failed" | "reload"> &
   Partial<Pick<RetryStatus, "retryInMs" | "gaveUp">> & { data: T | null };
 
+/** How a load is failing, for a section that shows a figure derived from it. */
+export type LoadStatus = Omit<SectionLoad<unknown>, "data">;
+
 export interface TransparencyV2Props {
   books: SectionLoad<TransparencyMonthDto[]>;
   /** From `coop.settings` (`cutShares`); null while loading or when it failed. */
   cut: CutShares | null;
   /** `feeLastChanged(coop.feeSchedule)`. */
   feeChanged: FeeChange | null;
+  /** The `coop.settings` load behind `cut`: when it failed, the strip and the fee promise offer Retry (F3). */
+  settingsLoad?: LoadStatus;
+  /** The `coop.feeSchedule` load behind `feeChanged`: when it failed, the strip offers Retry (F3). */
+  scheduleLoad?: LoadStatus;
   /** The instance currency, for figures before the books load. */
   currency: string;
   site: string;
@@ -45,12 +52,15 @@ export interface TransparencyV2Props {
  * promise with its dated comparison, the two bars (revenue split, then co-op spending, each with
  * its table: F4), the deficit note or the treasurer's note, the commitments, the stat cards, the
  * months, then the existing sections. The books failing only replaces the parts that need them
- * (F3): the strip and the fee promise still show what loaded.
+ * (F3): the strip and the fee promise still show what loaded, and a failed settings or fee
+ * schedule load gets its own Retry where its figures would be.
  */
 export function TransparencyV2({
   books,
   cut,
   feeChanged,
+  settingsLoad,
+  scheduleLoad,
   currency,
   site,
   onSaveNote,
@@ -59,8 +69,17 @@ export function TransparencyV2({
   const shown = months?.[0]?.revenue.currency ?? currency;
   return (
     <>
-      <NumbersStrip months={months} cut={cut} feeChanged={feeChanged} currency={shown} />
-      <FeePromise cut={cut} site={site} />
+      <NumbersStrip
+        months={months}
+        cut={cut}
+        feeChanged={feeChanged}
+        currency={shown}
+        failedLoads={[
+          ...(cut === null && settingsLoad?.failed ? [settingsLoad] : []),
+          ...(feeChanged === null && scheduleLoad?.failed ? [scheduleLoad] : []),
+        ]}
+      />
+      <FeePromise cut={cut} site={site} failedLoad={cut === null && settingsLoad?.failed ? settingsLoad : undefined} />
       {months === null ? (
         books.failed ? (
           <SectionLoadError
