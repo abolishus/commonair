@@ -39,7 +39,8 @@ export interface ChatDeps {
 
 export interface ChatEvents {
   onStatus: (status: ChatStatus) => void;
-  onJoined: (me: { canChat: boolean; canModerate: boolean }) => void;
+  /** `badges`: the viewer's own, as `type` or `type/tier` (`subscriber/2`), for the composer gate. */
+  onJoined: (me: { canChat: boolean; canModerate: boolean; badges: readonly string[] }) => void;
   onMessage: (message: ChatMessageFrame) => void;
   /** A message a word filter held (sent to moderators only), for the held queue; never shown in chat. */
   onHeld?: (message: ChatMessageFrame) => void;
@@ -170,7 +171,7 @@ export class ChatConnection {
         if (f.channel !== this.channel) return;
         this.attempt = 0;
         this.setStatus("open");
-        this.events.onJoined({ canChat: f.me.canChat, canModerate: f.me.canModerate });
+        this.events.onJoined({ canChat: f.me.canChat, canModerate: f.me.canModerate, badges: f.me.badges });
         this.events.onSettings?.(f.settings);
         this.events.onSurge?.({ state: f.surge.state, until: f.surge.until });
         return;

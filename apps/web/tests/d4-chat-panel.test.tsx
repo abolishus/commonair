@@ -17,7 +17,7 @@ import {
   createRoute,
   createRouter,
 } from "@tanstack/react-router";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import * as React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { setCalmStorage } from "../src/chat/calm/settings.ts";
@@ -29,6 +29,7 @@ import type { DismissStore } from "../src/chat/pinned/dismissed.ts";
 import { PENDING_INTENT_KEY, savePendingIntent } from "../src/components/auth-gate/pending-intent.ts";
 import type { AccountFactsClient } from "../src/components/chat-gate/account-facts.ts";
 import type { ReportClient } from "../src/components/safety/client.ts";
+import type { SupportClient } from "../src/components/support/support-dialog.tsx";
 import { locale, t, uiMessages } from "../src/i18n/index.ts";
 
 const calls = vi.hoisted(() => ({
@@ -200,7 +201,7 @@ const socket = async () => {
 };
 
 async function join(
-  o: { canModerate?: boolean; canChat?: boolean; settings?: Record<string, unknown> } = {},
+  o: { canModerate?: boolean; canChat?: boolean; settings?: Record<string, unknown>; badges?: string[] } = {},
 ): Promise<FakeSocket> {
   const ws = await socket();
   act(() => {
@@ -210,7 +211,7 @@ async function join(
       channel: CHANNEL,
       channelId: UUID(9),
       settings: o.settings ?? {},
-      me: { badges: [], canModerate: o.canModerate ?? false, canChat: o.canChat ?? true },
+      me: { badges: o.badges ?? [], canModerate: o.canModerate ?? false, canChat: o.canChat ?? true },
       surge: { state: "off", until: null },
     });
   });
@@ -476,8 +477,9 @@ describe("the composer gate (J3-d)", () => {
   });
 
   it("a subscribers-only refusal keeps the reason in the composer until the next join", async () => {
+    // Joined as a subscriber, refused anyway (the sub just lapsed): the refusal is the backstop.
     panel();
-    const ws = await join({ settings: { subscribersOnly: true } });
+    const ws = await join({ settings: { subscribersOnly: true }, badges: ["subscriber/1"] });
     expect(screen.queryByTestId("chat-composer-gate")).toBeNull();
     act(() => ws.push({ op: "notice", channel: CHANNEL, code: "msg_subsonly", text: "subs only" }));
     expect((await screen.findByTestId("chat-composer-gate")).dataset.reason).toBe("subs");
@@ -487,7 +489,7 @@ describe("the composer gate (J3-d)", () => {
         channel: CHANNEL,
         channelId: UUID(9),
         settings: { subscribersOnly: true },
-        me: { badges: [], canModerate: false, canChat: true },
+        me: { badges: ["subscriber/1"], canModerate: false, canChat: true },
         surge: { state: "off", until: null },
       }),
     );
@@ -529,6 +531,37 @@ describe("the composer gate (J3-d)", () => {
     expect((await screen.findByTestId("chat-composer-gate")).dataset.reason).toBe("followers");
     act(() => follow.set?.(true));
     await waitFor(() => expect(screen.queryByTestId("chat-composer-gate")).toBeNull());
+  });
+
+  it("subscribers-only says so before typing, with Sub to chat opening the Support dialog (overhaul wave 5)", async () => {
+    const support = vi.fn<SupportClient["support"]>(() => new Promise(() => {}));
+    panel({ supportClient: { support, checkout: () => new Promise(() => {}) } });
+    await join({ settings: { subscribersOnly: true } });
+    const gate = await screen.findByTestId("chat-composer-gate");
+    expect(gate.dataset.reason).toBe("subs");
+    expect(gate.textContent).toContain(t("d4Chat.gate.subs", { channel: "Indigo" }));
+    expect((screen.getByTestId("chat-input") as HTMLInputElement).disabled).toBe(true);
+    const sub = within(gate).getByTestId("chat-composer-gate-support");
+    expect(sub.textContent).toBe(t("w5Watch.gate.subscribe"));
+    expect(sub.getAttribute("aria-label")).toBe(t("w5Watch.gate.subscribeLabel", { channel: "Indigo" }));
+    fireEvent.click(sub);
+    expect(await screen.findByTestId("support-dialog")).toBeTruthy();
+    expect(support).toHaveBeenCalledWith({ channel: CHANNEL });
+  });
+
+  it("subscribers, VIPs and staff are not gated before typing; the page's subscribed fact counts too", async () => {
+    for (const badges of [["subscriber/2"], ["vip"], ["staff"]]) {
+      panel();
+      await join({ settings: { subscribersOnly: true }, badges });
+      expect(screen.queryByTestId("chat-composer-gate"), badges.join()).toBeNull();
+      expect((screen.getByTestId("chat-input") as HTMLInputElement).disabled).toBe(false);
+      cleanup();
+      FakeSocket.all = [];
+    }
+    // channels.get says subscribed while the chat's own badges lag: no gate on a stale no.
+    panel({ subscribed: true });
+    await join({ settings: { subscribersOnly: true } });
+    expect(screen.queryByTestId("chat-composer-gate")).toBeNull();
   });
 
   it("moderators are never gated and never ask for their account facts", async () => {

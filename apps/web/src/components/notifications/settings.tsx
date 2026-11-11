@@ -2,31 +2,21 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import type { NotifyMedium, PreferenceType } from "@commonair/contracts/enums";
-import { ChannelAvatar, EmptyState, SkeletonGroup, SkeletonText } from "@commonair/ui";
+import { SkeletonGroup, SkeletonText } from "@commonair/ui";
 import { SettingsSection } from "@commonair/ui/blocks/forms";
-import { Label } from "@commonair/ui/components/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@commonair/ui/components/select";
-import { Switch } from "@commonair/ui/components/switch";
 import { toast } from "@commonair/ui/toast";
-import { UserGroupIcon } from "@hugeicons/core-free-icons";
 import { Link } from "@tanstack/react-router";
 import * as React from "react";
 import { t } from "../../i18n/index.ts";
 import { isSessionExpired, toastActionError } from "../../lib/action-error.ts";
 import {
-  type ChannelMedium,
-  type FollowDto,
   type NotificationPreferencesDto,
   type OtherPreferenceType,
-  type OverrideChoice,
   type PreferenceTypesClient,
   type SetPreferenceInput,
   type SettingsClient,
   applyPreference,
-  choiceEnabled,
   copyPreferenceCell,
-  isOverrideChoice,
-  overrideChoice,
   preferenceTypesClient,
   settingsClient,
 } from "../../lib/notifications.ts";
@@ -34,7 +24,6 @@ import { trackUi } from "../../lib/ui-metrics.ts";
 import { objectKey, useRetryingLoad, type LoadState } from "../../lib/retrying-load.ts";
 import { SectionLoadError } from "../../lib/section-load-error.tsx";
 import { PushToggle } from "../pwa/push-toggle.tsx";
-import { ListLoadMore, ListSearch, NoMatch, useListWindow } from "../settings/list-window.tsx";
 import { PreferenceGrid } from "./grid.tsx";
 
 /** The failure toast carries `notify-save-error` so the harness and tests can see it. */
@@ -63,8 +52,9 @@ type OtherPrefs = Partial<Record<OtherPreferenceType, NotificationPreferencesDto
 
 /**
  * `/settings/notifications` (overhaul wave 4, D7.3): the grid of every notification type against
- * In app, Email and Push, this browser's push, and each followed channel's bell and go-live
- * email/push overrides. Every change is optimistic, saves at once and rolls back on failure.
+ * In app, Email and Push, and this browser's push. Every change is optimistic, saves at once and
+ * rolls back on failure. Each channel's own alerts live on `/following` (overhaul wave 5), linked
+ * from here.
  */
 export function NotificationSettings({
   client: given,
@@ -113,18 +103,18 @@ export function NotificationSettings({
   }, [client]);
 
   const change = React.useCallback(
-    async (input: SetPreferenceInput, channel?: { id: string; slug: string; displayName: string }) => {
+    async (input: SetPreferenceInput) => {
       const cell = `${input.channel ?? ""}:${input.medium}`;
       const mine = (seq.current.get(cell) ?? 0) + 1;
       seq.current.set(cell, mine);
       const before = prefsRef.current;
       if (before === null) return;
-      setPrefs((p) => (p ? applyPreference(p, input, channel) : p));
+      setPrefs((p) => (p ? applyPreference(p, input) : p));
       try {
         const answer = await client.setPreference(input);
         // Only this cell: taking the whole answer would undo other cells still being saved.
         if (seq.current.get(cell) === mine) setPrefs((p) => (p ? copyPreferenceCell(p, answer, input) : p));
-        if (input.channel === null) saved(input.medium);
+        saved(input.medium);
       } catch (err) {
         if (seq.current.get(cell) === mine) setPrefs((p) => (p ? copyPreferenceCell(p, before, input) : p));
         saveFailed(err);
@@ -165,7 +155,7 @@ export function NotificationSettings({
           <PushToggle onPushOn={() => void adoptPushDefault()} />
         </div>
       </SettingsSection>
-      <ChannelsSection client={client} prefs={prefs} onChange={(input, channel) => void change(input, channel)} />
+      <ChannelAlertsLink />
     </div>
   );
 }
@@ -261,224 +251,11 @@ function DefaultsFrame({ children }: { children: React.ReactNode }): React.JSX.E
   );
 }
 
-// ------------------------------------------------------------------ channels
-
-function OverrideSelect({
-  medium,
-  channel,
-  value,
-  defaultOn,
-  onChange,
-}: {
-  medium: ChannelMedium;
-  channel: string;
-  value: OverrideChoice;
-  defaultOn: boolean;
-  onChange: (choice: OverrideChoice) => void;
-}): React.JSX.Element {
-  const id = React.useId();
-  const defaultLabel = defaultOn ? t("notifySettings.option.defaultOn") : t("notifySettings.option.defaultOff");
-  const labels: Record<OverrideChoice, string> = {
-    default: defaultLabel,
-    on: t("notifySettings.option.on"),
-    off: t("notifySettings.option.off"),
-  };
+/** Per-channel alerts moved to `/following`, where each followed channel already is. */
+function ChannelAlertsLink(): React.JSX.Element {
   return (
-    <div className="flex min-w-0 flex-col gap-1">
-      <Label htmlFor={id} className="text-xs text-muted-foreground">
-        {medium === "email" ? t("notifySettings.channels.emailLabel") : t("notifySettings.channels.pushLabel")}
-      </Label>
-      <Select<OverrideChoice>
-        value={value}
-        items={labels}
-        onValueChange={(v) => {
-          if (isOverrideChoice(v) && v !== value) onChange(v);
-        }}
-      >
-        {medium === "email" ? (
-          <SelectTrigger
-            id={id}
-            data-testid="notify-channel-email"
-            data-value={value}
-            aria-label={t("notifySettings.channels.email", { channel })}
-            className="w-36"
-          >
-            <SelectValue />
-          </SelectTrigger>
-        ) : (
-          <SelectTrigger
-            id={id}
-            data-testid="notify-channel-push"
-            data-value={value}
-            aria-label={t("notifySettings.channels.push", { channel })}
-            className="w-36"
-          >
-            <SelectValue />
-          </SelectTrigger>
-        )}
-        <SelectContent>
-          {medium === "email" ? (
-            <>
-              <SelectItem data-testid="notify-channel-email-default" value="default">
-                {labels.default}
-              </SelectItem>
-              <SelectItem data-testid="notify-channel-email-on" value="on">
-                {labels.on}
-              </SelectItem>
-              <SelectItem data-testid="notify-channel-email-off" value="off">
-                {labels.off}
-              </SelectItem>
-            </>
-          ) : (
-            <>
-              <SelectItem data-testid="notify-channel-push-default" value="default">
-                {labels.default}
-              </SelectItem>
-              <SelectItem data-testid="notify-channel-push-on" value="on">
-                {labels.on}
-              </SelectItem>
-              <SelectItem data-testid="notify-channel-push-off" value="off">
-                {labels.off}
-              </SelectItem>
-            </>
-          )}
-        </SelectContent>
-      </Select>
-    </div>
-  );
-}
-
-function ChannelRow({
-  follow,
-  prefs,
-  onBell,
-  onChange,
-}: {
-  follow: FollowDto;
-  prefs: NotificationPreferencesDto | null;
-  onBell: (notify: boolean) => void;
-  onChange: (medium: ChannelMedium, choice: OverrideChoice) => void;
-}): React.JSX.Element {
-  const c = follow.channel;
-  const bellId = React.useId();
-  const bellLabelId = `${bellId}-label`;
-  const nameId = `${bellId}-name`;
-  return (
-    <li data-testid="notify-channel" data-slug={c.slug} className="flex flex-col gap-3 py-4">
-      {/* F39: the bell sits on the name line, with a visible label. */}
-      <div className="flex min-w-0 items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-3">
-          <ChannelAvatar name={c.displayName} src={c.avatarUrl} accent={c.accent} size="sm" decorative />
-          <span id={nameId} className="min-w-0 truncate font-medium">
-            {c.displayName}
-          </span>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <Label id={bellLabelId} htmlFor={bellId} className="text-sm font-normal">
-            {t("settings.notifications.bell")}
-          </Label>
-          <Switch
-            id={bellId}
-            data-testid="notify-channel-bell"
-            data-state={follow.notify ? "on" : "off"}
-            // WCAG 2.5.3: the name starts with the visible label, then says which channel.
-            aria-labelledby={`${bellLabelId} ${nameId}`}
-            checked={follow.notify}
-            onCheckedChange={onBell}
-          />
-        </div>
-      </div>
-      {prefs && (
-        <div className="flex flex-wrap items-end gap-4 sm:ps-11">
-          <OverrideSelect
-            medium="email"
-            channel={c.displayName}
-            value={overrideChoice(prefs, c.slug, "email")}
-            defaultOn={prefs.defaults.email}
-            onChange={(choice) => onChange("email", choice)}
-          />
-          <OverrideSelect
-            medium="push"
-            channel={c.displayName}
-            value={overrideChoice(prefs, c.slug, "push")}
-            defaultOn={prefs.defaults.push}
-            onChange={(choice) => onChange("push", choice)}
-          />
-        </div>
-      )}
-    </li>
-  );
-}
-
-function ChannelsSection({
-  client,
-  prefs,
-  onChange,
-}: {
-  client: SettingsClient;
-  prefs: NotificationPreferencesDto | null;
-  onChange: (input: SetPreferenceInput, channel: { id: string; slug: string; displayName: string }) => void;
-}): React.JSX.Element {
-  const first = useRetryingLoad(`follows|${objectKey(client)}`, () => client.follows(null));
-  const [follows, setFollows] = React.useState<FollowDto[]>([]);
-  const [cursor, setCursor] = React.useState<string | null>(null);
-  const [shown, setShown] = React.useState<typeof first.data>(null);
-  const [more, setMore] = React.useState(false);
-  if (first.data !== null && first.data !== shown) {
-    setShown(first.data);
-    setFollows(first.data.items);
-    setCursor(first.data.nextCursor);
-  }
-  const load: LoadState =
-    first.data !== null && first.data === shown ? "loaded" : first.state === "failed" ? "failed" : "loading";
-
-  const loadMore = async () => {
-    if (cursor === null || more) return;
-    setMore(true);
-    try {
-      const page = await client.follows(cursor);
-      setFollows((list) => {
-        const seen = new Set(list.map((f) => f.channel.id));
-        return [...list, ...page.items.filter((f) => !seen.has(f.channel.id))];
-      });
-      setCursor(page.nextCursor);
-    } catch {
-      toast.error(t("notifySettings.loadFailed"));
-    } finally {
-      setMore(false);
-    }
-  };
-
-  const list = useListWindow(follows, (f) => [f.channel.displayName, f.channel.slug], {
-    serverHasMore: cursor !== null,
-    onServerMore: () => void loadMore(),
-  });
-
-  const setNotify = (slug: string, notify: boolean) =>
-    setFollows((list) => list.map((f) => (f.channel.slug === slug ? { ...f, notify } : f)));
-
-  // The latest bell request per channel, and the value before it: as for the preference cells,
-  // an older answer never overwrites a newer click, and a failure restores what the member saw.
-  const bellSeq = React.useRef(new Map<string, number>());
-  const bell = async (follow: FollowDto, notify: boolean) => {
-    const slug = follow.channel.slug;
-    const mine = (bellSeq.current.get(slug) ?? 0) + 1;
-    bellSeq.current.set(slug, mine);
-    const previous = follow.notify;
-    setNotify(slug, notify);
-    try {
-      await client.setBell(slug, notify);
-    } catch (err) {
-      if (bellSeq.current.get(slug) === mine) setNotify(slug, previous);
-      saveFailed(err);
-    }
-  };
-
-  return (
-    <SettingsSection
-      title={t("notifySettings.channels.title")}
-      description={t("notifySettings.channels.intro")}
-      action={
+    <SettingsSection title={t("notifySettings.channels.title")} description={t("w5Watch.settings.channelsIntro")}>
+      <div className="px-4 py-4 sm:px-6">
         <Link
           data-testid="notify-following-link"
           to="/following"
@@ -486,68 +263,6 @@ function ChannelsSection({
         >
           {t("d7Notify.channels.following")}
         </Link>
-      }
-    >
-      <div className="flex flex-col gap-2 px-4 py-4 sm:px-6">
-        {load === "loading" ? (
-          <SkeletonGroup label={t("notifySettings.loading")}>
-            <SkeletonText lines={3} />
-          </SkeletonGroup>
-        ) : load === "failed" ? (
-          <SectionLoadError
-            data-testid="notify-channels-load-error"
-            retryTestId="notify-channels-retry"
-            section={t("notifySettings.channels.title")}
-            load={first}
-            headingLevel={3}
-          />
-        ) : follows.length === 0 ? (
-          <EmptyState
-            icon={UserGroupIcon}
-            title={t("notifySettings.channels.empty")}
-            description={t("notifySettings.channels.emptyBody")}
-            headingLevel={3}
-          />
-        ) : (
-          <>
-            <ListSearch
-              data-testid="notify-channels-search"
-              label={t("settings.notifications.search")}
-              value={list.query}
-              onValueChange={list.setQuery}
-              loadedCount={follows.length}
-              partial={cursor !== null}
-            />
-            {list.matched.length === 0 ? (
-              <NoMatch query={list.query} />
-            ) : (
-              <ul className="flex flex-col divide-y divide-border">
-                {list.shown.map((f) => (
-                  <ChannelRow
-                    key={f.channel.id}
-                    follow={f}
-                    prefs={prefs}
-                    onBell={(notify) => void bell(f, notify)}
-                    onChange={(medium, choice) =>
-                      onChange(
-                        { medium, channel: f.channel.slug, enabled: choiceEnabled(choice) },
-                        { id: f.channel.id, slug: f.channel.slug, displayName: f.channel.displayName },
-                      )
-                    }
-                  />
-                ))}
-              </ul>
-            )}
-            {list.hasMore && (
-              <ListLoadMore
-                data-testid="notify-channels-more"
-                label={t("notifySettings.channels.loadMore")}
-                loading={more}
-                onClick={list.loadMore}
-              />
-            )}
-          </>
-        )}
       </div>
     </SettingsSection>
   );

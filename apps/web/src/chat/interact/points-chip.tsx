@@ -3,6 +3,7 @@
 
 import { formatNumber, useLocale } from "@commonair/ui";
 import { Button } from "@commonair/ui/components/button";
+import { Progress } from "@commonair/ui/components/progress";
 import {
   Popover,
   PopoverContent,
@@ -40,6 +41,51 @@ export function showPointsChip(
   if (!balance?.enabled || o.own) return false;
   if (balance.accrual.dailyCapPerChannel <= 0) return false;
   return balance.points > 0 || o.spendable;
+}
+
+/**
+ * Today's progress toward the daily cap (overhaul wave 5), or null when there is none to show:
+ * the balance is not the caller's own (`earnedToday` null) or accrual is off (a cap of 0).
+ */
+export function pointsToday(
+  earnedToday: number | null,
+  cap: number,
+): { earned: number; cap: number; left: number; percent: number } | null {
+  if (earnedToday === null || cap <= 0) return null;
+  // The worker stops at the cap; a cap lowered mid-day can leave today above it.
+  const earned = Math.min(Math.max(earnedToday, 0), cap);
+  return { earned, cap, left: cap - earned, percent: Math.round((earned / cap) * 100) };
+}
+
+function PointsToday({
+  earnedToday,
+  cap,
+  locale,
+}: {
+  earnedToday: number | null;
+  cap: number;
+  locale: string;
+}): React.JSX.Element | null {
+  const today = pointsToday(earnedToday, cap);
+  if (!today) return null;
+  return (
+    <div
+      data-testid="chat-points-today"
+      data-earned={today.earned}
+      data-cap={today.cap}
+      className="flex flex-col gap-1"
+    >
+      {/* The line below says it in words; the bar is only its picture. */}
+      <Progress value={today.percent} aria-hidden />
+      <p className="text-xs text-muted-foreground tabular-nums">
+        {t("w5Watch.points.today", {
+          earned: formatNumber(today.earned, locale),
+          cap: formatNumber(today.cap, locale),
+        })}{" "}
+        {t("w5Watch.points.todayLeft", { count: today.left })}
+      </p>
+    </div>
+  );
 }
 
 export interface PointsChipProps {
@@ -100,6 +146,7 @@ export function PointsChip({ balance, prediction = null }: PointsChipProps): Rea
         <p data-testid="chat-points-balance" className="text-sm font-semibold tabular-nums">
           {t("d4Chat.points.balance", { balance: text })}
         </p>
+        <PointsToday earnedToday={balance.earnedToday} cap={dailyCapPerChannel} locale={locale} />
         {prediction ? (
           <p data-testid="chat-points-prediction" className="break-words text-xs">
             {t("d4Chat.points.prediction", { title: prediction })}

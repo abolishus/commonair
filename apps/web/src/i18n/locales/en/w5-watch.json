@@ -1,0 +1,14 @@
+{
+  "w5Watch.gate.subscribe": "Sub to chat",
+  "w5Watch.gate.subscribeLabel": "Sub to chat in {channel}",
+  "w5Watch.points.today": "Today: {earned} of {cap}.",
+  "w5Watch.points.todayLeft": "{count, plural, =0 {That's today's most. Watching earns more tomorrow.} one {# more to earn today.} other {# more to earn today.}}",
+  "w5Watch.alerts.options": "Email and push",
+  "w5Watch.alerts.optionsLabel": "Email and push for {channel}",
+  "w5Watch.alerts.title": "Go-live alerts from {channel}",
+  "w5Watch.alerts.intro": "Follow your default, or choose for this channel.",
+  "w5Watch.alerts.loadFailed": "Your alert settings didn't load.",
+  "w5Watch.alerts.retry": "Retry",
+  "w5Watch.alerts.saved": "{medium, select, email {Email} other {Push}} from {channel}: {choice, select, on {on} off {off} other {your default}}.",
+  "w5Watch.settings.channelsIntro": "Each channel's bell, email and push are on the Following page, next to the channel."
+}

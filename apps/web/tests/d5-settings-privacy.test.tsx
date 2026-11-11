@@ -35,7 +35,7 @@ import {
 import { GRANTS_SET_MANY_MAX, chunked, withGrantStates } from "../src/components/portability/lib.ts";
 import { LIST_PAGE_SIZE, foldForSearch, matchesQuery, windowRows } from "../src/components/settings/list-window.tsx";
 import { locale, t, uiMessages } from "../src/i18n/index.ts";
-import type { FollowDto, FollowPage, NotificationPreferencesDto, SettingsClient } from "../src/lib/notifications.ts";
+import type { NotificationPreferencesDto, SettingsClient } from "../src/lib/notifications.ts";
 import { Route as PrivacyRoute } from "../src/routes/_app/settings.privacy.tsx";
 
 configure({ asyncUtilTimeout: 5_000 });
@@ -380,65 +380,32 @@ describe("grant helpers and withMoreFollows", () => {
   });
 });
 
-// ── F36 + F39: channels you follow on notifications ───────────────────────────────────────────
+// ── Overhaul wave 5: channels you follow moved to /following ──────────────────────────────────
 
-describe("Channels you follow (F36, F39)", () => {
-  const prefs: NotificationPreferencesDto = {
+describe("Channels you follow (moved to /following in overhaul wave 5)", () => {
+  const prefs = {
     type: "go_live",
     defaults: { in_app: true, email: false, push: false },
     builtIn: { in_app: true, email: true, push: true },
     channels: [],
     emailVerified: true,
   } as NotificationPreferencesDto;
-  const follow = (i: number, name?: string): FollowDto =>
-    ({
-      channel: {
-        id: `0192f000-0000-7000-8000-${String(i).padStart(12, "0")}`,
-        slug: `ch${String(i).padStart(3, "0")}`,
-        displayName: name ?? `Channel ${String(i).padStart(3, "0")}`,
-        avatarUrl: null,
-        accent: "zinc",
-      },
-      live: null,
-      followedAt: "2026-10-01T00:00:00.000Z",
-      notify: true,
-    }) as FollowDto;
-  const client = (pages: FollowPage[]): SettingsClient => ({
+  const follows = vi.fn<SettingsClient["follows"]>(async () => ({ items: [], nextCursor: null }));
+  const client: SettingsClient = {
     preferences: async () => prefs,
     setPreference: async () => prefs,
-    follows: async (cursor) => pages[cursor ? Number(cursor) : 0] ?? { items: [], nextCursor: null },
+    follows,
     setBell: async () => {},
-  });
-  const rows = () => screen.queryAllByTestId("notify-channel");
+  };
 
-  it("pages the list, loads the server's next page, and searches", async () => {
-    const first = { items: Array.from({ length: 25 }, (_, i) => follow(i)), nextCursor: "1" };
-    const second = { items: [follow(25, "Ádá Lovelace")], nextCursor: null };
-    wrap(<NotificationSettings client={client([first, second])} />);
-    await waitFor(() => expect(rows()).toHaveLength(LIST_PAGE_SIZE));
-    fireEvent.click(screen.getByTestId("notify-channels-more"));
-    await waitFor(() => expect(rows()).toHaveLength(26));
-    expect(screen.queryByTestId("notify-channels-more")).toBeNull();
-    fireEvent.change(screen.getByTestId("notify-channels-search"), { target: { value: "ada" } });
-    expect(rows().map((r) => r.dataset.slug)).toEqual(["ch025"]);
-  });
-
-  it("the bell switch has a visible label on the name line, and its accessible name starts with it", async () => {
-    wrap(<NotificationSettings client={client([{ items: [follow(1, "Ada")], nextCursor: null }])} />);
-    const row = await screen.findByTestId("notify-channel");
-    const bell = within(row).getByTestId("notify-channel-bell");
-    const nameLine = bell.closest("div")?.parentElement;
-    expect(nameLine?.textContent).toContain("Ada");
-    expect(nameLine?.textContent).toContain(t("settings.notifications.bell"));
-    const label = within(row).getByText(t("settings.notifications.bell"));
-    expect(label.className).not.toContain("sr-only");
-    expect(bell.getAttribute("aria-label")).toBeNull();
-    // WCAG 2.5.3 Label in Name: voice control can say the visible text; the channel follows it.
-    const name = (bell.getAttribute("aria-labelledby") ?? "")
-      .split(" ")
-      .map((id) => document.getElementById(id)?.textContent ?? "")
-      .join(" ");
-    expect(name).toBe(`${t("settings.notifications.bell")} Ada`);
-    expect(screen.getByRole("switch", { name: `${t("settings.notifications.bell")} Ada` })).toBe(bell);
+  it("links to /following and lists no channels or follows of its own", async () => {
+    wrap(<NotificationSettings client={client} />);
+    const link = await screen.findByTestId("notify-following-link");
+    expect(link.getAttribute("href")).toBe("/following");
+    expect(link.textContent).toBe(t("d7Notify.channels.following"));
+    expect(screen.getByText(t("notifySettings.channels.title"))).toBeTruthy();
+    expect(screen.queryAllByTestId("notify-channel")).toHaveLength(0);
+    await act(async () => {});
+    expect(follows).not.toHaveBeenCalled();
   });
 });

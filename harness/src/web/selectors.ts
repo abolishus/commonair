@@ -411,6 +411,9 @@ export const D4_CHAT_IDS = {
   chatPointsRate: "chat-points-rate",
   chatPointsBalance: "chat-points-balance",
   chatPointsPrediction: "chat-points-prediction",
+  // Overhaul wave 5 (w5-watch): "Sub to chat" in the subscribers-only gate, and "Today: N of {cap}".
+  chatComposerGateSupport: "chat-composer-gate-support",
+  chatPointsToday: "chat-points-today",
 } as const;
 
 /**
@@ -983,3 +986,21 @@ export const D7_MOD_IDS = {
   chatModWaveDelete: "chat-mod-wave-delete",
   chatModWaveDeleteDialog: "chat-mod-wave-delete-dialog",
 } as const;
+
+/**
+ * w5-watch (overhaul wave 5): per-channel go-live alerts moved from `/settings/notifications` to
+ * `/following`. Each live card and offline row carries the N1 `notify-channel` group (`data-slug`)
+ * with its `notify-channel-bell` (`data-state` on, off; `aria-pressed`); while the bell is on,
+ * `followingAlertOptions` opens `followingAlertPopover` with the N1 `notify-channel-email` and
+ * `notify-channel-push` selects. The preferences load on the first open, once per page.
+ */
+export const W5_WATCH_IDS = {
+  followingAlertOptions: "following-alert-options",
+  followingAlertPopover: "following-alert-popover",
+  followingAlertSaved: "following-alert-saved",
+  followingAlertError: "following-alert-error",
+  followingAlertLoadError: "following-alert-load-error",
+  followingAlertRetry: "following-alert-retry",
+} as const;
+
+export const W5_WATCH_ROUTES = { following: "/following" } as const;

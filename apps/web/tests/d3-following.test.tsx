@@ -125,7 +125,7 @@ describe("signed in", () => {
   it("the bell turns alerts on and off through channels.follow, and rolls back when it fails", async () => {
     fake.follows = async () => ({ items: [row("fern", { notify: false })], nextCursor: null });
     await renderHome(<FollowingPage me={MEMBER} />, "/following");
-    const bell = await screen.findByTestId("following-bell");
+    const bell = await screen.findByTestId("notify-channel-bell");
     expect(bell.getAttribute("aria-pressed")).toBe("false");
     expect(bell.getAttribute("aria-label")).toBe(t("d3Home.followingPage.alertOff", { channel: "fern" }));
     await act(async () => fireEvent.click(bell));
@@ -136,7 +136,7 @@ describe("signed in", () => {
     fake.follow = vi.fn<(input: unknown) => Promise<unknown>>(async () => {
       throw new Error("down");
     });
-    await act(async () => fireEvent.click(screen.getByTestId("following-bell")));
+    await act(async () => fireEvent.click(screen.getByTestId("notify-channel-bell")));
     expect(fake.follow).toHaveBeenCalledWith({ channel: "fern", notify: false });
     await waitFor(() => expect(screen.getByTestId("following-row").getAttribute("data-notify")).toBe("true"));
     expect(fake.toasts).toContain(`err:${t("d3Home.followingPage.alertFailed", { channel: "fern" })}`);

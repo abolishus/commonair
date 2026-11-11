@@ -1,0 +1,14 @@
+{
+  "w5Watch.gate.subscribe": "Suscríbete para chatear",
+  "w5Watch.gate.subscribeLabel": "Suscríbete para chatear en {channel}",
+  "w5Watch.points.today": "Hoy: {earned} de {cap}.",
+  "w5Watch.points.todayLeft": "{count, plural, =0 {Es el máximo de hoy. Mañana ver el directo vuelve a sumar.} one {Puedes ganar # más hoy.} other {Puedes ganar # más hoy.}}",
+  "w5Watch.alerts.options": "Correo y push",
+  "w5Watch.alerts.optionsLabel": "Correo y push de {channel}",
+  "w5Watch.alerts.title": "Avisos de directo de {channel}",
+  "w5Watch.alerts.intro": "Sigue tu opción predeterminada o elige para este canal.",
+  "w5Watch.alerts.loadFailed": "Tus ajustes de avisos no se cargaron.",
+  "w5Watch.alerts.retry": "Reintentar",
+  "w5Watch.alerts.saved": "{medium, select, email {Correo} other {Push}} de {channel}: {choice, select, on {activado} off {desactivado} other {tu opción predeterminada}}.",
+  "w5Watch.settings.channelsIntro": "La campana, el correo y el push de cada canal están en la página Siguiendo, junto al canal."
+}

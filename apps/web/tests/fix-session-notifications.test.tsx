@@ -144,24 +144,20 @@ describe("NotificationSettings", () => {
     expect(error.textContent).toContain(loadErrorNote("section"));
     expect(screen.getByRole("heading", { level: 2, name: en["d7Notify.grid.title"] })).toBeTruthy();
     expect(screen.getByRole("heading", { level: 2, name: en["notifySettings.channels.title"] })).toBeTruthy();
-    expect(await screen.findByText(en["notifySettings.channels.empty"])).toBeTruthy();
+    expect(screen.getByTestId("notify-following-link").getAttribute("href")).toBe("/following");
     preferences.mockResolvedValue(prefs);
     fireEvent.click(within(error).getByTestId("notify-defaults-retry"));
     await waitFor(() => expect(document.querySelector('[data-testid="notify-default-email"]')).not.toBeNull());
     expect(screen.queryByTestId("notify-defaults-load-error")).toBeNull();
   });
 
-  it("failed channels keep the defaults", async () => {
+  it("never loads the follows: per-channel alerts live on /following (overhaul wave 5)", async () => {
     const follows = vi.fn<(cursor: string | null) => Promise<FollowPage>>(async () => {
       throw serverError();
     });
     const client = settingsClient({ follows });
     wrap(<NotificationSettings client={client} />);
-    const error = await screen.findByTestId("notify-channels-load-error");
-    expect(error.textContent).toContain(loadErrorTitle(en["notifySettings.channels.title"]));
     await waitFor(() => expect(document.querySelector('[data-testid="notify-default-email"]')).not.toBeNull());
-    follows.mockResolvedValue(emptyFollows);
-    fireEvent.click(within(error).getByTestId("notify-channels-retry"));
-    expect(await screen.findByText(en["notifySettings.channels.empty"])).toBeTruthy();
+    expect(follows).not.toHaveBeenCalled();
   });
 });

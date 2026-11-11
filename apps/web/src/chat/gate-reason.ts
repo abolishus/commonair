@@ -19,6 +19,15 @@ export interface GateFacts {
   accountCreatedAt?: string;
   /** Whether they follow the channel; null or absent when unknown. */
   following?: boolean | null;
+  /** Whether they subscribe to the channel (`subscribedFact`); null or absent when unknown. */
+  subscribed?: boolean | null;
+  /** A VIP of the channel (the `vip` badge): the server lets them past followers- and subscribers-only. */
+  vip?: boolean;
+  /**
+   * Instance staff (the `staff` badge). The server does not exempt them from subscribers-only, but
+   * the composer does not close on them before they try; a refusal still says why.
+   */
+  staff?: boolean;
 }
 
 /** Refusal notice codes that name a gate the composer can explain. */
@@ -64,15 +73,45 @@ export function composerGate({ settings, facts, refused, privileged, now }: Gate
     if (refused === "msg_account_too_new" && !Number.isFinite(opens))
       return { kind: "accountAge", days: settings.minAccountAgeDays, opensAt: null };
   }
+  // VIPs skip followers- and subscribers-only, as on the server.
+  const vip = facts.vip === true;
   const minutes = settings.followersOnlyMinutes;
   // A refusal stands until the viewer follows or sends again (the panel clears it on each send).
   const followedSince = refused === "msg_followersonly" && !(minutes === 0 && facts.following === true);
-  if (minutes !== null && (facts.following === false || followedSince)) return { kind: "followers", minutes };
-  if (settings.subscribersOnly && refused === "msg_subsonly") return { kind: "subs" };
+  if (minutes !== null && !vip && (facts.following === false || followedSince)) return { kind: "followers", minutes };
+  if (settings.subscribersOnly && !vip) {
+    // Known before typing (J3-d) when the page knows they do not subscribe. A refusal stands until
+    // the next send or join, whatever the page thought.
+    const knownNotSubscribed = facts.subscribed === false && facts.staff !== true;
+    if (knownNotSubscribed || refused === "msg_subsonly") return { kind: "subs" };
+  }
   return null;
 }
 
 /** Whether the viewer's own account facts are worth fetching for these settings. */
 export function needsAccountFacts(settings: ChannelChatSettings | null, privileged: boolean): boolean {
   return settings !== null && !privileged && (settings.requireVerifiedEmail || settings.minAccountAgeDays > 0);
+}
+
+/** What the `joined` frame's badges (`type` or `type/tier`) say about the viewer. */
+export interface JoinedStanding {
+  subscriber: boolean;
+  vip: boolean;
+  staff: boolean;
+}
+
+export function joinedStanding(badges: readonly string[]): JoinedStanding {
+  const types = new Set(badges.map((b) => b.split("/")[0]));
+  return { subscriber: types.has("subscriber"), vip: types.has("vip"), staff: types.has("staff") };
+}
+
+/**
+ * Whether the viewer subscribes, from the page (`Channel.viewer.subscribed`, absent = false) and
+ * the chat's own `joined` badges. Either saying yes is enough, so a gate never shows on a stale
+ * no; a no needs the join (the chat's own view) or the page's answer.
+ */
+export function subscribedFact(page: boolean | null | undefined, joined: JoinedStanding | null): boolean | null {
+  if (page === true || joined?.subscriber === true) return true;
+  if (joined !== null) return false;
+  return page === false ? false : null;
 }

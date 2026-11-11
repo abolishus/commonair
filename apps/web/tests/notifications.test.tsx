@@ -6,7 +6,7 @@
 import { LocaleProvider, NowProvider, TooltipProvider } from "@commonair/ui";
 import { toast } from "@commonair/ui/toast";
 import { createMemoryHistory, createRootRoute, createRouter, RouterContextProvider } from "@tanstack/react-router";
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import type * as React from "react";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { NotificationBell } from "../src/components/notifications/bell.tsx";
@@ -25,7 +25,6 @@ vi.mock("../src/components/pwa/push-toggle.tsx", () => ({
 import { en } from "../src/i18n/en.ts";
 import { locale, uiMessages } from "../src/i18n/index.ts";
 import type {
-  FollowDto,
   FollowPage,
   InboxClient,
   NotificationDto,
@@ -270,21 +269,15 @@ const prefsFixture = (over: Partial<NotificationPreferencesDto> = {}): Notificat
   ...over,
 });
 
-const follow = (slug: string, notify = true): FollowDto => ({
-  channel: { id: CH, slug, displayName: `Display ${slug}`, avatarUrl: null, accent: "zinc" },
-  live: null,
-  followedAt: "2026-10-01T00:00:00.000Z",
-  notify,
-});
-
+// The per-channel bell and overrides moved to /following (overhaul wave 5): w5-following-alerts.test.tsx.
 interface SettingsFixture extends SettingsClient {
   preferences: ReturnType<typeof vi.fn<() => Promise<NotificationPreferencesDto>>>;
   setPreference: ReturnType<typeof vi.fn<(input: SetPreferenceInput) => Promise<NotificationPreferencesDto>>>;
   setBell: ReturnType<typeof vi.fn<(channel: string, notify: boolean) => Promise<void>>>;
 }
 
-function settings(prefs: NotificationPreferencesDto, follows: FollowDto[] = []): SettingsFixture {
-  const page: FollowPage = { items: follows, nextCursor: null };
+function settings(prefs: NotificationPreferencesDto): SettingsFixture {
+  const page: FollowPage = { items: [], nextCursor: null };
   return {
     preferences: vi.fn<() => Promise<NotificationPreferencesDto>>(async () => prefs),
     setPreference: vi.fn<(input: SetPreferenceInput) => Promise<NotificationPreferencesDto>>(async () => prefs),
@@ -415,142 +408,5 @@ describe("NotificationSettings", () => {
     expect(container.querySelector('[data-testid="notify-save-error"]')?.textContent).toBe(
       en["notifySettings.saveFailed"],
     );
-  });
-
-  it("lists followed channels with the bell and the email/push selects", async () => {
-    const client = settings(
-      prefsFixture({
-        channels: [{ channel: { id: CH, slug: "alpha", displayName: "Display alpha" }, media: { push: false } }],
-      }),
-      [follow("alpha"), follow("bravo", false)],
-    );
-    wrap(<NotificationSettings client={client} />);
-    await waitFor(() => expect(allById("notify-channel")).toHaveLength(2));
-    const [alpha, bravo] = allById("notify-channel");
-    expect([alpha?.getAttribute("data-slug"), bravo?.getAttribute("data-slug")]).toEqual(["alpha", "bravo"]);
-    const cell = (row: HTMLElement | undefined, id: string) => row?.querySelector(`[data-testid="${id}"]`);
-    expect(cell(alpha, "notify-channel-bell")?.getAttribute("data-state")).toBe("on");
-    expect(cell(bravo, "notify-channel-bell")?.getAttribute("data-state")).toBe("off");
-    expect(cell(alpha, "notify-channel-email")?.getAttribute("data-value")).toBe("default");
-    expect(cell(alpha, "notify-channel-push")?.getAttribute("data-value")).toBe("off");
-    expect(cell(alpha, "notify-channel-email")?.textContent).toContain(en["notifySettings.option.defaultOff"]);
-  });
-
-  it("the channel bell calls channels.follow with notify, and rolls back on failure", async () => {
-    vi.spyOn(toast, "error").mockImplementation(() => 1);
-    const client = settings(prefsFixture(), [follow("alpha")]);
-    wrap(<NotificationSettings client={client} />);
-    await waitFor(() => expect(byId("notify-channel-bell")).not.toBeNull());
-    fireEvent.click(byId("notify-channel-bell") as HTMLElement);
-    await waitFor(() => expect(client.setBell).toHaveBeenCalledWith("alpha", false));
-    expect(byId("notify-channel-bell")?.getAttribute("data-state")).toBe("off");
-
-    client.setBell.mockRejectedValueOnce(new Error("boom"));
-    fireEvent.click(byId("notify-channel-bell") as HTMLElement);
-    await waitFor(() => expect(client.setBell).toHaveBeenCalledWith("alpha", true));
-    await waitFor(() => expect(byId("notify-channel-bell")?.getAttribute("data-state")).toBe("off"));
-  });
-
-  it("out-of-order bell answers: a late failure of an older click does not undo the newer one", async () => {
-    vi.spyOn(toast, "error").mockImplementation(() => 1);
-    const client = settings(prefsFixture(), [follow("alpha")]);
-    const pending: { resolve: () => void; reject: (e: Error) => void }[] = [];
-    client.setBell.mockImplementation(
-      () =>
-        new Promise<void>((resolve, reject) => {
-          pending.push({ resolve, reject });
-        }),
-    );
-    wrap(<NotificationSettings client={client} />);
-    await waitFor(() => expect(byId("notify-channel-bell")).not.toBeNull());
-    fireEvent.click(byId("notify-channel-bell") as HTMLElement); // on -> off
-    await waitFor(() => expect(byId("notify-channel-bell")?.getAttribute("data-state")).toBe("off"));
-    fireEvent.click(byId("notify-channel-bell") as HTMLElement); // off -> on
-    await waitFor(() => expect(byId("notify-channel-bell")?.getAttribute("data-state")).toBe("on"));
-    fireEvent.click(byId("notify-channel-bell") as HTMLElement); // on -> off
-    await waitFor(() => expect(pending).toHaveLength(3));
-    await act(async () => pending[2]?.resolve());
-    await act(async () => pending[1]?.resolve());
-    // The first click's failure arrives last; rolling it back would turn the bell on again.
-    await act(async () => pending[0]?.reject(new Error("boom")));
-    expect(byId("notify-channel-bell")?.getAttribute("data-state")).toBe("off");
-  });
-
-  it("a failed bell rolls back to the value before the click", async () => {
-    vi.spyOn(toast, "error").mockImplementation(() => 1);
-    const client = settings(prefsFixture(), [follow("alpha", false)]);
-    client.setBell.mockRejectedValueOnce(new Error("boom"));
-    wrap(<NotificationSettings client={client} />);
-    await waitFor(() => expect(byId("notify-channel-bell")).not.toBeNull());
-    fireEvent.click(byId("notify-channel-bell") as HTMLElement);
-    await waitFor(() => expect(client.setBell).toHaveBeenCalledWith("alpha", true));
-    await waitFor(() => expect(byId("notify-channel-bell")?.getAttribute("data-state")).toBe("off"));
-  });
-
-  async function pick(field: string, option: string): Promise<void> {
-    const trigger = byId(field);
-    if (!trigger) throw new Error(`no ${field}`);
-    fireEvent.click(trigger);
-    await waitFor(() => expect(byId(option)).not.toBeNull());
-    // Base UI commits a mouse click only when the press started on the item.
-    const item = byId(option) as HTMLElement;
-    fireEvent.pointerDown(item, { pointerType: "mouse" });
-    fireEvent.click(item);
-  }
-
-  it("a select change calls preferences.set with the right enabled (on, off, default → null)", async () => {
-    const client = settings(prefsFixture(), [follow("alpha")]);
-    const answers: NotificationPreferencesDto[] = [
-      prefsFixture({
-        channels: [{ channel: { id: CH, slug: "alpha", displayName: "Display alpha" }, media: { email: true } }],
-      }),
-      prefsFixture({
-        channels: [
-          { channel: { id: CH, slug: "alpha", displayName: "Display alpha" }, media: { email: true, push: false } },
-        ],
-      }),
-      prefsFixture({
-        channels: [{ channel: { id: CH, slug: "alpha", displayName: "Display alpha" }, media: { push: false } }],
-      }),
-    ];
-    for (const a of answers) client.setPreference.mockResolvedValueOnce(a);
-    wrap(<NotificationSettings client={client} />);
-    await waitFor(() => expect(byId("notify-channel-email")).not.toBeNull());
-
-    await pick("notify-channel-email", "notify-channel-email-on");
-    await waitFor(() =>
-      expect(client.setPreference).toHaveBeenLastCalledWith({ medium: "email", channel: "alpha", enabled: true }),
-    );
-    await waitFor(() => expect(byId("notify-channel-email")?.getAttribute("data-value")).toBe("on"));
-
-    await pick("notify-channel-push", "notify-channel-push-off");
-    await waitFor(() =>
-      expect(client.setPreference).toHaveBeenLastCalledWith({ medium: "push", channel: "alpha", enabled: false }),
-    );
-
-    await pick("notify-channel-email", "notify-channel-email-default");
-    await waitFor(() =>
-      expect(client.setPreference).toHaveBeenLastCalledWith({ medium: "email", channel: "alpha", enabled: null }),
-    );
-    await waitFor(() => expect(byId("notify-channel-email")?.getAttribute("data-value")).toBe("default"));
-    expect(byId("notify-channel-push")?.getAttribute("data-value")).toBe("off");
-  });
-
-  it("a failed select change rolls back", async () => {
-    const error = vi.spyOn(toast, "error").mockImplementation(() => 1);
-    const client = settings(prefsFixture(), [follow("alpha")]);
-    client.setPreference.mockRejectedValueOnce(new Error("boom"));
-    wrap(<NotificationSettings client={client} />);
-    await waitFor(() => expect(byId("notify-channel-email")).not.toBeNull());
-    await pick("notify-channel-email", "notify-channel-email-off");
-    await waitFor(() => expect(error).toHaveBeenCalled());
-    expect(byId("notify-channel-email")?.getAttribute("data-value")).toBe("default");
-  });
-
-  it("no follows: an empty state", async () => {
-    wrap(<NotificationSettings client={settings(prefsFixture())} />);
-    await loaded();
-    await waitFor(() => expect(screen.getByText(en["notifySettings.channels.empty"])).toBeTruthy());
-    expect(within(document.body).queryByTestId("notify-channel")).toBeNull();
   });
 });
