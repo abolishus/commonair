@@ -11,11 +11,14 @@ export interface PayoutSentData {
   sentAt: DateInput;
   reference: string;
   earningsUrl: string;
+  /** Overhaul wave 4 (D7.3): the `payout` list; the payout stays in the inbox either way. */
+  unsubscribeUrl: string;
 }
 
 export const payoutSent = defineTemplate("payoutSent", {
-  links: ["earningsUrl"],
+  links: ["earningsUrl", "unsubscribeUrl"],
   subject: (ctx, d: PayoutSentData) => ctx.text(ctx.messages.subject, { amount: ctx.money(d.amountCents, d.currency) }),
+  unsubscribeUrl: (d: PayoutSentData) => d.unsubscribeUrl,
   body: (ctx, d: PayoutSentData) => {
     const m = ctx.messages;
     const amount = ctx.money(d.amountCents, d.currency);

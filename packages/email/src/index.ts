@@ -9,6 +9,7 @@ export * from "./render.tsx";
 export * from "./samples.ts";
 export type { EmailContext, TemplateDefinition, TemplateId } from "./template.tsx";
 export type * from "./templates/account.tsx";
+export type * from "./templates/digest.tsx";
 export type * from "./templates/governance.tsx";
 export { GO_LIVE_DIGEST_MAX_CHANNELS } from "./templates/notify.tsx";
 export type * from "./templates/notify.tsx";

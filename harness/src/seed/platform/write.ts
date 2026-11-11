@@ -117,7 +117,7 @@ export async function emailDigestMinutes(h: DbHandle): Promise<number> {
 /** Notifications, preferences and go-live send history (plain tables). */
 export async function writeNotificationRows(
   h: DbHandle,
-  plan: Pick<PlatformPlan, "notifications" | "preferences" | "goLiveSends">,
+  plan: Pick<PlatformPlan, "notifications" | "preferences" | "goLiveSends" | "digestSends">,
   ids: ReadonlyMap<string, string>,
   o: WriteOptions = {},
 ): Promise<Record<string, number>> {
@@ -144,7 +144,7 @@ export async function writeNotificationRows(
         chunk.map((p) => ({
           id: uuidv7(),
           userId: idOf(ids, p.user),
-          type: "go_live" as const,
+          type: p.type ?? "go_live",
           channelId: p.channelId,
           medium: p.medium,
           enabled: p.enabled,
@@ -175,7 +175,20 @@ export async function writeNotificationRows(
     },
     o,
   );
-  return { notifications, notification_preferences: prefs, notification_go_live_sends: sends };
+  const digestSends = await insertChunks(
+    plan.digestSends,
+    (chunk) =>
+      db
+        .insert(schema.notificationDigestSends)
+        .values(chunk.map((d) => ({ userId: idOf(ids, d.user), weekStart: d.weekStart }))),
+    o,
+  );
+  return {
+    notifications,
+    notification_preferences: prefs,
+    notification_go_live_sends: sends,
+    notification_digest_sends: digestSends,
+  };
 }
 
 /**

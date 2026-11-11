@@ -4,6 +4,7 @@
 import type { EmailCatalog } from "./messages/en.ts";
 import type { TemplateDefinition, TemplateId } from "./template.tsx";
 import { magicLink, passwordReset, verifyEmail } from "./templates/account.tsx";
+import { vodReady, weeklyDigest } from "./templates/digest.tsx";
 import { councilReviewRequested, governanceResultPublished, governanceVoteOpened } from "./templates/governance.tsx";
 import { goLiveDigest } from "./templates/notify.tsx";
 import { chargebackNotice, payoutSent } from "./templates/payments.tsx";
@@ -39,6 +40,8 @@ export const templates = {
   governanceResultPublished,
   councilReviewRequested,
   goLiveDigest,
+  weeklyDigest,
+  vodReady,
   channelMoved,
   dmcaNoticeReceived,
   dmcaNoticeDecided,

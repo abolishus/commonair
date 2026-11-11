@@ -192,13 +192,24 @@ describe("growth metrics for one day", () => {
       .set({ enabled: true, updatedAt: at("11:00:00", later) })
       .where(pref(c.id, "push"));
     expect((await computeDay(t.app.sql, later)).notify_optin).toBe(0);
-    // c's row dates to when it was made, so DAY gains c; a stays on DAY.
-    expect((await computeDay(t.app.sql, DAY)).notify_optin).toBe(3);
-    // Back as the fixture had it, for the run tests below.
+    // c's first opt-in dates from when it was turned on (the trigger's now(), not either test day);
+    // a stays on DAY.
+    expect((await computeDay(t.app.sql, DAY)).notify_optin).toBe(2);
+    const [cRow] = await owner
+      .select({ at: schema.users.firstNotifyOptinAt })
+      .from(schema.users)
+      .where(eq(schema.users.id, c.id));
+    expect(cRow?.at).not.toBeNull();
+    // Turning it off again never clears a first opt-in.
     await owner
       .update(schema.notificationPreferences)
       .set({ enabled: false, updatedAt: at("17:00:00") })
       .where(pref(c.id, "push"));
+    const [cAfter] = await owner
+      .select({ at: schema.users.firstNotifyOptinAt })
+      .from(schema.users)
+      .where(eq(schema.users.id, c.id));
+    expect(cAfter?.at).toEqual(cRow?.at);
     expect((await computeDay(t.app.sql, DAY)).notify_optin).toBe(2);
   });
   test("streams: a first stream, a return within 14 days (a reconnect is not one), active channels", () => {

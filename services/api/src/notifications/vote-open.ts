@@ -24,6 +24,25 @@ const proposalIdOf = (n: { payload: AnyColumn }) => sql`(${n.payload}->>'proposa
  * copies, from a re-run or a seed, are never shown or counted).
  */
 export function deliveredNotification(): SQL {
+  return sql`(${voteOpenDelivered()} and ${inAppAllowed()})`;
+}
+
+/**
+ * Overhaul wave 4 (D7.3): governance (`proposal`, `vote_open`) and creator (`vod_ready`) rows reach
+ * the inbox unless the member turned that preference's in-app medium off (their default row with
+ * `enabled = false`; `NOTIFY_DEFAULTS` has in-app on for both). Applied when the inbox reads, so
+ * no insert site needs it and turning in-app back on shows the rows again. Go-live in-app is
+ * applied at fan-out; the other types always reach the inbox.
+ */
+export function inAppAllowed(): SQL {
+  return sql`not exists (select 1 from notification_preferences ip
+    where ip.user_id = ${notifications.userId} and ip.channel_id is null and ip.medium = 'in_app'
+      and not ip.enabled
+      and ((ip.type = 'governance' and ${notifications.type} in ('proposal', 'vote_open'))
+        or (ip.type = 'creator' and ${notifications.type} = 'vod_ready')))`;
+}
+
+function voteOpenDelivered(): SQL {
   // The earlier copy is spelled out: drizzle renders an alias inside a raw fragment without its table.
   return sql`(${notifications.type} <> 'vote_open' or (
     exists (select 1 from proposals vp where vp.id::text = ${proposalIdOf(notifications)} and vp.status = 'voting')

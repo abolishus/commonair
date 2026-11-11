@@ -92,22 +92,13 @@ export const COUNTS: Record<GrowthMetric, Count> = {
     one(sql`select count(*)::int as n from (
         select user_id, min(joined_at) as first_at from memberships group by user_id
       ) m where m.first_at >= ${start}::timestamptz and m.first_at < ${end}::timestamptz`),
-  // A member's first opt-in: the first browser registered for push, or the first email or push
-  // alert row they have on. A preference row is dated by its id (UUIDv7, minted on insert and
-  // kept by every later upsert), never `updated_at`, which moves on each re-save: re-saving an
-  // alert that is already on, or turning one off and on again, neither counts the member again
-  // nor moves an earlier opt-in off its day. A row made off and turned on later dates to when it
-  // was made, the closest stable time the table keeps.
+  // A member's first opt-in (an email or push alert turned on, or a browser registered for push):
+  // `users.first_notify_optin_at`, which the 0058 triggers set once and never move later, so a
+  // re-save or an off-and-on neither counts the member again nor moves their day.
   notify_optin: (sql, start, end) =>
-    one(sql`select count(*)::int as n from (
-        select x.user_id, min(x.at) as first_at from (
-          select user_id, to_timestamp(('x' || left(replace(id::text, '-', ''), 12))::bit(48)::bigint / 1000.0) as at
-            from notification_preferences where enabled and medium in ('email', 'push')
-          union all
-          select user_id, created_at as at from push_subscriptions
-        ) x group by x.user_id
-      ) f join users u on u.id = f.user_id
-      where u.account_type = 'human' and f.first_at >= ${start}::timestamptz and f.first_at < ${end}::timestamptz`),
+    one(sql`select count(*)::int as n from users
+      where account_type = 'human'
+        and first_notify_optin_at >= ${start}::timestamptz and first_notify_optin_at < ${end}::timestamptz`),
   first_live: (sql, start, end) =>
     one(sql`select count(*)::int as n from (
         select channel_id, min(started_at) as first_at from broadcasts where kind = 'live' group by channel_id

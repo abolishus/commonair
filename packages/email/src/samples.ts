@@ -69,6 +69,7 @@ export function sampleData(publicUrl: string, v: SampleValues = ENGLISH_SAMPLE_V
       sentAt: at,
       reference: "PO-2026-10-0042",
       earningsUrl: url("/dashboard/earnings"),
+      unsubscribeUrl: url("/api/email/unsubscribe?list=payout&token=sample"),
     },
     chargebackNotice: {
       kind: "chargeback",
@@ -115,6 +116,23 @@ export function sampleData(publicUrl: string, v: SampleValues = ENGLISH_SAMPLE_V
       ],
       settingsUrl: url("/settings/notifications"),
       unsubscribeUrl: url("/api/email/unsubscribe?list=go_live&token=sample"),
+    },
+    weeklyDigest: {
+      items: [
+        { kind: "video", channelName: v.channelName, title: v.contentTitle, url: url("/videos/sample?src=digest") },
+        { kind: "clip", channelName: v.displayName, title: v.contentTitle, url: url("/clips/sample?src=digest") },
+      ],
+      votes: [
+        { title: v.proposalTitle, closesAt: "2026-11-01T18:00:00Z", url: url("/coop/proposals/sample?src=digest") },
+      ],
+      settingsUrl: url("/settings/notifications?src=digest"),
+      unsubscribeUrl: url("/api/email/unsubscribe?list=weekly&token=sample"),
+    },
+    vodReady: {
+      title: v.contentTitle,
+      videoUrl: url("/videos/sample"),
+      settingsUrl: url("/settings/notifications"),
+      unsubscribeUrl: url("/api/email/unsubscribe?list=creator&token=sample"),
     },
     channelMoved: {
       channelName: v.channelName,

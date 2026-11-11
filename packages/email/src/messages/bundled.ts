@@ -7,6 +7,7 @@
  * line here; a test fails when a directory is missing from `BUNDLED`.
  */
 import esAccount from "./locales/es/account.json" with { type: "json" };
+import esDigest from "./locales/es/digest.json" with { type: "json" };
 import esGovernance from "./locales/es/governance.json" with { type: "json" };
 import esLayout from "./locales/es/layout.json" with { type: "json" };
 import esNotify from "./locales/es/notify.json" with { type: "json" };
@@ -24,5 +25,16 @@ const fromGroups = (...groups: Readonly<Record<string, string>>[]): PartialCatal
 /** Catalogs by BCP 47 tag, one per `locales/<lang>/` directory. */
 export const BUNDLED: Readonly<Record<string, PartialCatalog>> = {
   en,
-  es: fromGroups(esAccount, esGovernance, esLayout, esNotify, esPayments, esPrivacy, esReceipt, esSecurity, esTrust),
+  es: fromGroups(
+    esAccount,
+    esDigest,
+    esGovernance,
+    esLayout,
+    esNotify,
+    esPayments,
+    esPrivacy,
+    esReceipt,
+    esSecurity,
+    esTrust,
+  ),
 };

@@ -45,6 +45,8 @@ test("the registry covers every notice the platform sends", () => {
       "governanceResultPublished",
       "councilReviewRequested",
       "goLiveDigest",
+      "weeklyDigest",
+      "vodReady",
       "channelMoved",
       "dmcaNoticeReceived",
       "dmcaNoticeDecided",
@@ -112,7 +114,17 @@ test("only member announcements carry an unsubscribe link", async () => {
       };
     }),
   );
-  const announcements = new Set(["governanceResultPublished", "governanceVoteOpened", "goLiveDigest", "channelMoved"]);
+  // Overhaul wave 4 (D7.3): the payout notice, the weekly digest and the video-ready email have
+  // preference lists of their own.
+  const announcements = new Set([
+    "governanceResultPublished",
+    "governanceVoteOpened",
+    "goLiveDigest",
+    "channelMoved",
+    "payoutSent",
+    "weeklyDigest",
+    "vodReady",
+  ]);
   expect(rows).toEqual(rows.map(({ id }) => ({ id, header: announcements.has(id), footer: announcements.has(id) })));
 });
 

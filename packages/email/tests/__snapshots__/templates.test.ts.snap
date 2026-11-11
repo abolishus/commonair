@@ -680,7 +680,9 @@ You are receiving this email because of your account on Example Air.
 
 Questions? Write to hello@air.example.test.
 
-Example Air runs on free software. Get the source code https://forge.example.test/air/commonair/tree/0123abcd."
+Example Air runs on free software. Get the source code https://forge.example.test/air/commonair/tree/0123abcd.
+
+Unsubscribe from these emails https://air.example.test/api/email/unsubscribe?list=payout&token=sample"
 `;
 
 exports[`streamKeyRevoked > renders accessible HTML and a plain-text alternative 1`] = `
@@ -789,4 +791,63 @@ You are receiving this email because of your account on Example Air.
 Questions? Write to hello@air.example.test.
 
 Example Air runs on free software. Get the source code https://forge.example.test/air/commonair/tree/0123abcd."
+`;
+
+exports[`vodReady > renders accessible HTML and a plain-text alternative 1`] = `
+"Your video is ready: Speedrun night, part 2
+
+Example Air https://air.example.test
+
+
+Your video is ready
+
+Speedrun night, part 2 is saved as a video. You can share it, cut clips from it, or change who can see it.
+
+Open the video https://air.example.test/videos/sample
+
+You turned on emails about your videos on Example Air.
+
+Choose which emails you get https://air.example.test/settings/notifications
+
+----------------------------------------
+
+You are receiving this email because of your account on Example Air.
+
+Questions? Write to hello@air.example.test.
+
+Example Air runs on free software. Get the source code https://forge.example.test/air/commonair/tree/0123abcd.
+
+Unsubscribe from these emails https://air.example.test/api/email/unsubscribe?list=creator&token=sample"
+`;
+
+exports[`weeklyDigest > renders accessible HTML and a plain-text alternative 1`] = `
+"What you missed on Example Air this week
+
+Example Air https://air.example.test
+
+
+What you missed this week
+
+New from channels you follow:
+
+ * ada_plays posted a video: Speedrun night, part 2 https://air.example.test/videos/sample?src=digest
+ * A clip from Ada: Speedrun night, part 2 https://air.example.test/clips/sample?src=digest
+
+Co-op votes open now:
+
+ * Raise the creator share to 85% https://air.example.test/coop/proposals/sample?src=digest, voting closes November 1, 2026 at 6:00 PM UTC
+
+You asked for a weekly email from Example Air. We only send it when there is something new.
+
+Choose which emails you get https://air.example.test/settings/notifications?src=digest
+
+----------------------------------------
+
+You are receiving this email because of your account on Example Air.
+
+Questions? Write to hello@air.example.test.
+
+Example Air runs on free software. Get the source code https://forge.example.test/air/commonair/tree/0123abcd.
+
+Unsubscribe from these emails https://air.example.test/api/email/unsubscribe?list=weekly&token=sample"
 `;
