@@ -17,6 +17,8 @@ export interface SampleValues {
   contentTitle: string;
   device: string;
   location: string;
+  /** The address a member asks to change to (the email-change confirmation). */
+  newEmail: string;
   foundIn: string;
   /** A moderator's note on a DMCA decision. */
   decisionNote: string;
@@ -31,8 +33,9 @@ export const ENGLISH_SAMPLE_VALUES: SampleValues = {
   channelName: "ada_plays",
   proposalTitle: "Raise the creator share to 85%",
   contentTitle: "Speedrun night, part 2",
-  device: "Firefox on Linux",
+  device: "Firefox · Linux",
   location: "Lisbon, Portugal",
+  newEmail: "ada.new@example.org",
   foundIn: "a public code repository",
   decisionNote: "The notice does not identify the copyrighted work.",
   address: "1 Example Street, Springfield",
@@ -52,7 +55,12 @@ export function sampleData(publicUrl: string, v: SampleValues = ENGLISH_SAMPLE_V
       signedInAt: at,
       device: v.device,
       approximateLocation: v.location,
-      sessionsUrl: url("/settings/security/sessions"),
+      sessionsUrl: url("/settings/security#sessions"),
+    },
+    changeEmailConfirm: {
+      newEmail: v.newEmail,
+      confirmUrl: url("/api/auth/verify-email?token=sample"),
+      expiresInMinutes: 60,
     },
     streamKeyRevoked: {
       channelName: v.channelName,

@@ -83,6 +83,33 @@ Recibes este correo por tu cuenta en Example Air.
 Example Air funciona con software libre. Obtén el código fuente https://forge.example.test/air/commonair/tree/0123abcd."
 `;
 
+exports[`changeEmailConfirm in Spanish > renders with lang and dir, and differs from English in subject and body 1`] = `
+"Confirma la nueva dirección de correo de tu cuenta de Example Air
+
+Example Air https://air.example.test
+
+
+Confirma el cambio de correo
+
+Recibimos una solicitud para cambiar la dirección de correo de tu cuenta de Example Air a ada.new@example.org.
+
+Cuando lo confirmes, enviaremos un enlace a la nueva dirección. Tu correo cambia solo después de abrir también ese enlace.
+
+Confirmar el cambio https://air.example.test/api/auth/verify-email?token=sample
+
+Este enlace vence en 60 minutos.
+
+Si no lo pediste, ignora este correo y cambia tu contraseña. Tu correo sigue igual. Dudas: security@air.example.test.
+
+----------------------------------------
+
+Recibes este correo por tu cuenta en Example Air.
+
+¿Tienes preguntas? Escribe a hello@air.example.test.
+
+Example Air funciona con software libre. Obtén el código fuente https://forge.example.test/air/commonair/tree/0123abcd."
+`;
+
 exports[`channelMoved in Spanish > renders with lang and dir, and differs from English in subject and body 1`] = `
 "ada_plays se ha mudado
 
@@ -549,7 +576,7 @@ Cuándo
 
 Dispositivo
 
-Firefox on Linux
+Firefox · Linux
 
 Ubicación aproximada
 
@@ -559,7 +586,7 @@ Si fuiste tú, no tienes que hacer nada.
 
 Si no fuiste tú, cierra esa sesión y cambia tu contraseña.
 
-Revisar las sesiones activas https://air.example.test/settings/security/sessions
+Revisar las sesiones activas https://air.example.test/settings/security#sessions
 
 ----------------------------------------
 
@@ -717,14 +744,14 @@ Example Air funciona con software libre. Obtén el código fuente https://forge.
 `;
 
 exports[`twoFactorDisabled in Spanish > renders with lang and dir, and differs from English in subject and body 1`] = `
-"La autenticación en dos pasos está desactivada
+"El inicio de sesión en dos pasos está desactivado
 
 Example Air https://air.example.test
 
 
-La autenticación en dos pasos está desactivada
+El inicio de sesión en dos pasos está desactivado
 
-Se desactivó la autenticación en dos pasos en tu cuenta de Example Air el 18 de octubre de 2026 a las 14:30 UTC. Ahora tu cuenta está protegida solo por tu contraseña.
+Se desactivó el inicio de sesión en dos pasos (2FA) en tu cuenta de Example Air el 18 de octubre de 2026 a las 14:30 UTC. Ahora tu cuenta está protegida solo por tu contraseña.
 
 Volver a activarla https://air.example.test/settings/security
 
@@ -740,16 +767,16 @@ Example Air funciona con software libre. Obtén el código fuente https://forge.
 `;
 
 exports[`twoFactorEnabled in Spanish > renders with lang and dir, and differs from English in subject and body 1`] = `
-"La autenticación en dos pasos está activada
+"El inicio de sesión en dos pasos está activado
 
 Example Air https://air.example.test
 
 
-La autenticación en dos pasos está activada
+El inicio de sesión en dos pasos está activado
 
-Se activó la autenticación en dos pasos en tu cuenta de Example Air el 18 de octubre de 2026 a las 14:30 UTC. A partir de ahora necesitarás tu app de autenticación o una llave de seguridad para iniciar sesión.
+Se activó el inicio de sesión en dos pasos (2FA) en tu cuenta de Example Air el 18 de octubre de 2026 a las 14:30 UTC. A partir de ahora inicias sesión con tu contraseña y un código de tu app de autenticación.
 
-Guarda tus códigos de recuperación en un lugar seguro. Son la única forma de entrar si pierdes tu dispositivo.
+Guarda tus códigos de respaldo en un lugar seguro. Son la única forma de entrar si pierdes tu teléfono.
 
 Revisar la configuración de seguridad https://air.example.test/settings/security
 

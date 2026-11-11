@@ -13,8 +13,14 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import { admin, magicLink, twoFactor, username } from "better-auth/plugins";
 import { adminAc, userAc } from "better-auth/plugins/admin/access";
-import { and, desc, eq, sql } from "drizzle-orm";
-import { ALTCHA_FIELD, AUTH_BASE_PATH, AUTH_ROUTES } from "@commonair/contracts/auth";
+import { and, desc, eq, ne, sql } from "drizzle-orm";
+import {
+  ALTCHA_FIELD,
+  AUTH_BASE_PATH,
+  AUTH_ROUTES,
+  SECURITY_SETTINGS_PATH,
+  SESSIONS_SETTINGS_PATH,
+} from "@commonair/contracts/auth";
 import { SIGNUP_INTENTS, type SignupIntent } from "@commonair/contracts/enums";
 import { schema, uuidv7, type Database, type Executor } from "@commonair/db";
 import type { Deps } from "../deps.ts";
@@ -28,6 +34,7 @@ import { appUrl, publicLink, sendNotice } from "../mail.ts";
 import { verifyAltcha } from "./altcha.ts";
 import { authBackground, type AuthBackground } from "./background.ts";
 import { withVerificationCallback } from "./callback.ts";
+import { deviceLabel, deviceSummary, earnsNewSignInMail } from "./device.ts";
 import { ageProblem, usernameProblem } from "./identity.ts";
 
 type Tx = Parameters<Parameters<Database["transaction"]>[0]>[0];
@@ -170,6 +177,25 @@ export function createAuth(deps: Deps, opts: { background?: AuthBackground } = {
           input: true,
           returned: false,
           transform: { input: (v) => normalizeSignupIntent(v) },
+        },
+      },
+      // D7.2: a verified member's change mails a confirmation to the CURRENT address first; its
+      // link mails a verification to the new address, and only that second link changes the email.
+      changeEmail: {
+        enabled: true,
+        sendChangeEmailConfirmation: async ({ user, newEmail, url }) => {
+          background.mail("changeEmailConfirm", () =>
+            mailer.send(
+              "changeEmailConfirm",
+              {
+                newEmail,
+                confirmUrl: publicLink(site, withVerificationCallback(url, site.publicUrl)),
+                expiresInMinutes: VERIFY_MINUTES,
+                locale: localeOf(user as unknown as Record<string, unknown>),
+              },
+              user.email,
+            ),
+          );
         },
       },
     },
@@ -334,9 +360,20 @@ export function createAuth(deps: Deps, opts: { background?: AuthBackground } = {
             await sendNotice(logger, "twoFactorEnabled", () =>
               mailer.send(
                 "twoFactorEnabled",
-                { changedAt: deps.now(), securityUrl: appUrl(site, "/settings/security"), locale: localeOf(user) },
+                { changedAt: deps.now(), securityUrl: appUrl(site, SECURITY_SETTINGS_PATH), locale: localeOf(user) },
                 user.email,
               ),
+            );
+          },
+        },
+      },
+      session: {
+        create: {
+          // D7.2: the new-sign-in notice, after the response (the lookups included).
+          after: async (session, ctx) => {
+            const path = ctx?.path;
+            background.mail("newSignIn", () =>
+              sendNewSignInNotice(deps, { ...session, userAgent: session.userAgent ?? null }, path),
             );
           },
         },
@@ -374,6 +411,49 @@ export function createAuth(deps: Deps, opts: { background?: AuthBackground } = {
 }
 
 export type Auth = ReturnType<typeof createAuth>;
+
+/**
+ * The `newSignIn` mail (D7.2) for a session made by signing in from a device none of the member's
+ * other sessions has (`earnsNewSignInMail`). It names the device coarsely (browser and system, never
+ * the user agent or an address) and links the sessions list. Returns whether it sent.
+ */
+export async function sendNewSignInNotice(
+  deps: Pick<Deps, "db" | "mailer" | "site">,
+  session: { id: string; userId: string; userAgent: string | null; createdAt: Date },
+  path: string | undefined,
+): Promise<boolean> {
+  const { db, mailer, site } = deps;
+  const [user] = await db
+    .select({ email: schema.users.email, locale: schema.users.locale, twoFactorEnabled: schema.users.twoFactorEnabled })
+    .from(schema.users)
+    .where(eq(schema.users.id, session.userId));
+  if (!user) return false;
+  const others = await db
+    .select({ userAgent: schema.sessions.userAgent })
+    .from(schema.sessions)
+    .where(and(eq(schema.sessions.userId, session.userId), ne(schema.sessions.id, session.id)));
+  if (
+    !earnsNewSignInMail({
+      path,
+      twoFactorEnabled: user.twoFactorEnabled === true,
+      current: session.userAgent,
+      others: others.map((o) => o.userAgent),
+    })
+  )
+    return false;
+  const device = deviceLabel(deviceSummary(session.userAgent));
+  await mailer.send(
+    "newSignIn",
+    {
+      signedInAt: session.createdAt,
+      ...(device ? { device } : {}),
+      sessionsUrl: appUrl(site, SESSIONS_SETTINGS_PATH),
+      ...(user.locale ? { locale: user.locale } : {}),
+    },
+    user.email,
+  );
+  return true;
+}
 
 /**
  * The `account.created` outbox row (D2.8), written in the sign-up transaction. better-auth runs

@@ -83,6 +83,33 @@ Questions? Write to hello@air.example.test.
 Example Air runs on free software. Get the source code https://forge.example.test/air/commonair/tree/0123abcd."
 `;
 
+exports[`changeEmailConfirm > renders accessible HTML and a plain-text alternative 1`] = `
+"Confirm the new email address for your Example Air account
+
+Example Air https://air.example.test
+
+
+Confirm your email change
+
+We got a request to change the email address on your Example Air account to ada.new@example.org.
+
+Once you confirm, we send a link to the new address. Your email changes only after that link is opened too.
+
+Confirm the change https://air.example.test/api/auth/verify-email?token=sample
+
+This link expires in 60 minutes.
+
+If you did not ask for this, ignore this email and change your password. Your email stays as it is. Questions: security@air.example.test.
+
+----------------------------------------
+
+You are receiving this email because of your account on Example Air.
+
+Questions? Write to hello@air.example.test.
+
+Example Air runs on free software. Get the source code https://forge.example.test/air/commonair/tree/0123abcd."
+`;
+
 exports[`channelMoved > renders accessible HTML and a plain-text alternative 1`] = `
 "ada_plays has moved
 
@@ -549,7 +576,7 @@ October 18, 2026 at 2:30 PM UTC
 
 Device
 
-Firefox on Linux
+Firefox · Linux
 
 Approximate location
 
@@ -559,7 +586,7 @@ If this was you, there is nothing to do.
 
 If this was not you, sign out that session and change your password.
 
-Review active sessions https://air.example.test/settings/security/sessions
+Review active sessions https://air.example.test/settings/security#sessions
 
 ----------------------------------------
 
@@ -717,14 +744,14 @@ Example Air runs on free software. Get the source code https://forge.example.tes
 `;
 
 exports[`twoFactorDisabled > renders accessible HTML and a plain-text alternative 1`] = `
-"Two-factor authentication is off
+"Two-step sign-in is off
 
 Example Air https://air.example.test
 
 
-Two-factor authentication is off
+Two-step sign-in is off
 
-Two-factor authentication was turned off for your Example Air account on October 18, 2026 at 2:30 PM UTC. Your account is now protected by your password alone.
+Two-step sign-in (2FA) was turned off for your Example Air account on October 18, 2026 at 2:30 PM UTC. Your account is now protected by your password alone.
 
 Turn it back on https://air.example.test/settings/security
 
@@ -740,16 +767,16 @@ Example Air runs on free software. Get the source code https://forge.example.tes
 `;
 
 exports[`twoFactorEnabled > renders accessible HTML and a plain-text alternative 1`] = `
-"Two-factor authentication is on
+"Two-step sign-in is on
 
 Example Air https://air.example.test
 
 
-Two-factor authentication is on
+Two-step sign-in is on
 
-Two-factor authentication was turned on for your Example Air account on October 18, 2026 at 2:30 PM UTC. You will now need your authenticator app or a security key to sign in.
+Two-step sign-in (2FA) was turned on for your Example Air account on October 18, 2026 at 2:30 PM UTC. From now on you sign in with your password and a code from your authenticator app.
 
-Keep your recovery codes somewhere safe. They are the only way in if you lose your device.
+Keep your backup codes somewhere safe. They are the only way in if you lose your phone.
 
 Review security settings https://air.example.test/settings/security
 
