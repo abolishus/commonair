@@ -43,6 +43,7 @@ import { Route as StudioOverlaysRouteImport } from './routes/_studio/overlays'
 import { Route as StudioRehearseRouteImport } from './routes/_studio/rehearse'
 import { Route as StudioRelaysRouteImport } from './routes/_studio/relays'
 import { Route as StudioRevenueRouteImport } from './routes/_studio/revenue'
+import { Route as StudioScheduleRouteImport } from './routes/_studio/schedule'
 import { Route as EmbedChannelRouteImport } from './routes/embed.$channel'
 import { Route as OverlayAlertsRouteImport } from './routes/overlay.alerts'
 import { Route as OverlayChatRouteImport } from './routes/overlay.chat'
@@ -262,6 +263,11 @@ const StudioRelaysRoute = StudioRelaysRouteImport.update({
 const StudioRevenueRoute = StudioRevenueRouteImport.update({
   id: '/revenue',
   path: '/revenue',
+  getParentRoute: () => StudioRoute,
+} as any)
+const StudioScheduleRoute = StudioScheduleRouteImport.update({
+  id: '/schedule',
+  path: '/schedule',
   getParentRoute: () => StudioRoute,
 } as any)
 const EmbedChannelRoute = EmbedChannelRouteImport.update({
@@ -568,6 +574,7 @@ export interface FileRoutesByFullPath {
   '/rehearse': typeof StudioRehearseRoute
   '/relays': typeof StudioRelaysRoute
   '/revenue': typeof StudioRevenueRoute
+  '/schedule': typeof StudioScheduleRoute
   '/embed/$channel': typeof EmbedChannelRoute
   '/overlay/alerts': typeof OverlayAlertsRoute
   '/overlay/chat': typeof OverlayChatRoute
@@ -653,6 +660,7 @@ export interface FileRoutesByTo {
   '/rehearse': typeof StudioRehearseRoute
   '/relays': typeof StudioRelaysRoute
   '/revenue': typeof StudioRevenueRoute
+  '/schedule': typeof StudioScheduleRoute
   '/embed/$channel': typeof EmbedChannelRoute
   '/overlay/alerts': typeof OverlayAlertsRoute
   '/overlay/chat': typeof OverlayChatRoute
@@ -742,6 +750,7 @@ export interface FileRoutesById {
   '/_studio/rehearse': typeof StudioRehearseRoute
   '/_studio/relays': typeof StudioRelaysRoute
   '/_studio/revenue': typeof StudioRevenueRoute
+  '/_studio/schedule': typeof StudioScheduleRoute
   '/embed/$channel': typeof EmbedChannelRoute
   '/overlay/alerts': typeof OverlayAlertsRoute
   '/overlay/chat': typeof OverlayChatRoute
@@ -831,6 +840,7 @@ export interface FileRouteTypes {
     | '/rehearse'
     | '/relays'
     | '/revenue'
+    | '/schedule'
     | '/embed/$channel'
     | '/overlay/alerts'
     | '/overlay/chat'
@@ -916,6 +926,7 @@ export interface FileRouteTypes {
     | '/rehearse'
     | '/relays'
     | '/revenue'
+    | '/schedule'
     | '/embed/$channel'
     | '/overlay/alerts'
     | '/overlay/chat'
@@ -1004,6 +1015,7 @@ export interface FileRouteTypes {
     | '/_studio/rehearse'
     | '/_studio/relays'
     | '/_studio/revenue'
+    | '/_studio/schedule'
     | '/embed/$channel'
     | '/overlay/alerts'
     | '/overlay/chat'
@@ -1308,6 +1320,13 @@ declare module '@tanstack/react-router' {
       path: '/revenue'
       fullPath: '/revenue'
       preLoaderRoute: typeof StudioRevenueRouteImport
+      parentRoute: typeof StudioRoute
+    }
+    '/_studio/schedule': {
+      id: '/_studio/schedule'
+      path: '/schedule'
+      fullPath: '/schedule'
+      preLoaderRoute: typeof StudioScheduleRouteImport
       parentRoute: typeof StudioRoute
     }
     '/embed/$channel': {
@@ -1848,6 +1867,7 @@ interface StudioRouteChildren {
   StudioRehearseRoute: typeof StudioRehearseRoute
   StudioRelaysRoute: typeof StudioRelaysRoute
   StudioRevenueRoute: typeof StudioRevenueRoute
+  StudioScheduleRoute: typeof StudioScheduleRoute
   StudioDashboardSettingsRoute: typeof StudioDashboardSettingsRoute
   StudioDeveloperBotsRoute: typeof StudioDeveloperBotsRoute
   StudioModChannelRoute: typeof StudioModChannelRoute
@@ -1870,6 +1890,7 @@ const StudioRouteChildren: StudioRouteChildren = {
   StudioRehearseRoute: StudioRehearseRoute,
   StudioRelaysRoute: StudioRelaysRoute,
   StudioRevenueRoute: StudioRevenueRoute,
+  StudioScheduleRoute: StudioScheduleRoute,
   StudioDashboardSettingsRoute: StudioDashboardSettingsRoute,
   StudioDeveloperBotsRoute: StudioDeveloperBotsRoute,
   StudioModChannelRoute: StudioModChannelRoute,

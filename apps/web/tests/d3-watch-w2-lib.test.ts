@@ -7,7 +7,7 @@
  * event (D3.8), and the video and clip pages' next steps (D3.9).
  */
 import { describe, expect, it } from "vite-plus/test";
-import { offlineHeroState, nextStreamIcs } from "../src/components/channel/offline-hero.tsx";
+import { nextStreamOf, offlineHeroState } from "../src/components/channel/offline-hero.tsx";
 import { parseInline, parsePanelMarkdown } from "../src/components/channel/panels-data.ts";
 import type { VideoTile } from "../src/components/channel/video-grid.tsx";
 import { RESUME_SAVE_MS, resumeOffer, resumePoint, saveDue } from "../src/components/vod-watch/resume-writer.ts";
@@ -312,27 +312,13 @@ describe("the offline Follow hero", () => {
     expect(offlineHeroState(null, null)).toBe("never");
   });
 
-  it("Add to calendar is an iCalendar event, escaped, an hour long without an end", () => {
-    const ics = nextStreamIcs(
-      { startsAt: "2026-11-12T19:00:00.000Z", title: "Campaign night; part 2, finale" },
-      "Rivertide",
-      "https://air.example/rivertide",
-      "rivertide-1",
-    );
-    const lines = ics.split("\r\n");
-    expect(lines[0]).toBe("BEGIN:VCALENDAR");
-    expect(lines).toContain("DTSTART:20261112T190000Z");
-    expect(lines).toContain("DTEND:20261112T200000Z");
-    expect(lines).toContain("SUMMARY:Campaign night\\; part 2\\, finale");
-    expect(lines).toContain("URL:https://air.example/rivertide");
-    expect(ics.endsWith("END:VCALENDAR\r\n")).toBe(true);
-    const untitled = nextStreamIcs(
-      { startsAt: "2026-11-12T19:00:00.000Z", endsAt: "2026-11-12T22:00:00.000Z" },
-      "Rivertide",
-      "https://air.example/rivertide",
-      "u",
-    );
-    expect(untitled).toContain(`SUMMARY:${t("d3Watch.offline.calendarTitle", { name: "Rivertide" })}`);
-    expect(untitled).toContain("DTEND:20261112T220000Z");
+  it("the next stream is Channel.nextStreamAt while it is ahead (the feed builds the calendar event)", () => {
+    const now = Date.parse("2026-11-11T12:00:00.000Z");
+    expect(nextStreamOf("2026-11-12T19:00:00.000Z", now)).toEqual({ startsAt: "2026-11-12T19:00:00.000Z" });
+    expect(nextStreamOf("2026-11-11T12:00:00.000Z", now)).toBeNull();
+    expect(nextStreamOf("2026-11-10T19:00:00.000Z", now)).toBeNull();
+    expect(nextStreamOf(null, now)).toBeNull();
+    expect(nextStreamOf(undefined, now)).toBeNull();
+    expect(nextStreamOf("not a date", now)).toBeNull();
   });
 });

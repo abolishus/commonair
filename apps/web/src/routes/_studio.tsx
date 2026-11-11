@@ -6,6 +6,7 @@ import {
   Analytics01Icon,
   BotIcon,
   BubbleChatSecureIcon,
+  Calendar03Icon,
   ChartBarLineIcon,
   ClosedCaptionIcon,
   DashboardSquare01Icon,
@@ -174,6 +175,13 @@ function studioItem(entry: StudioEntry): NavItem {
         label: t("studio.analytics"),
         icon: <HugeiconsIcon icon={Analytics01Icon} strokeWidth={2} aria-hidden />,
         render: <Link data-testid="studio-analytics-link" to="/analytics" />,
+      };
+    case "schedule":
+      return {
+        ...base,
+        label: t("w5Schedule.nav"),
+        icon: <HugeiconsIcon icon={Calendar03Icon} strokeWidth={2} aria-hidden />,
+        render: <Link data-testid="studio-schedule-link" to="/schedule" />,
       };
     case "revenue":
       return {

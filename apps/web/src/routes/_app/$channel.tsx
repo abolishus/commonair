@@ -37,7 +37,7 @@ import {
   type ClipFilter,
 } from "../../components/channel/clip-filters.tsx";
 import { ChannelNotFoundPage } from "../../components/channel/live-now-shelf.tsx";
-import { OfflineChannelHome } from "../../components/channel/offline-hero.tsx";
+import { nextStreamOf, OfflineChannelHome } from "../../components/channel/offline-hero.tsx";
 import { bannerVisible } from "../../components/channel/panels-data.ts";
 import { getChannelPage, type ChannelPage } from "../../components/channel/panels-loader.ts";
 import { useChannelClips, useChannelVods } from "../../components/channel/use-media-list.ts";
@@ -410,6 +410,7 @@ function ChannelView({
       own={own}
       about={aboutSection(false)}
       publicUrl={config.publicUrl}
+      nextStream={nextStreamOf(page.nextStreamAt, now)}
     />
   ) : (
     // Suspended: the offline card (above) plus the About content.

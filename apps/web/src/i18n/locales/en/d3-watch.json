@@ -58,6 +58,5 @@
   "d3Watch.offline.neverBody": "Follow to catch the first one.",
   "d3Watch.offline.followBody": "Follow to hear when they're back.",
   "d3Watch.offline.latestLabel": "Watch the latest video: {title}",
-  "d3Watch.offline.calendar": "Add to calendar",
-  "d3Watch.offline.calendarTitle": "{name} goes live"
+  "d3Watch.offline.calendar": "Add to calendar"
 }

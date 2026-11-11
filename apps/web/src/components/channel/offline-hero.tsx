@@ -8,18 +8,30 @@
  * - `OfflineHero` (`channel-offline-hero`): the latest VOD in the player's poster state, as one
  *   link to its watch page. Nothing loads or plays here.
  * - `OfflineChannelHome` (`channel-offline-home`): the Follow hero (the latest video beside a
- *   card that says when they were last live, or when the next stream is when it is known, with
- *   Follow and "Add to calendar"), then recent clips, the other videos, About with the panels, and
- *   the Live now shelf at the end so the visitor always has somewhere to go.
+ *   card that says when they were last live, or when the next stream is when it is known
+ *   (`Channel.nextStreamAt`, overhaul wave 5: a date block, the weekday and time in the viewer's
+ *   zone, "Add to calendar" and "Subscribe in calendar"), with Follow), then recent clips, the
+ *   other videos, About with the panels, and the Live now shelf at the end so the visitor always
+ *   has somewhere to go.
  */
-import { SITE } from "@commonair/config/site";
-import { formatDuration, MediaFallback, OverlayBadge, RelativeTime, type Accent } from "@commonair/ui";
+import {
+  formatDuration,
+  MediaFallback,
+  monthNames,
+  OverlayBadge,
+  RelativeTime,
+  useLocale,
+  type Accent,
+} from "@commonair/ui";
 import { Button } from "@commonair/ui/components/button";
-import { Calendar03Icon, PlayIcon } from "@hugeicons/core-free-icons";
+import { cn } from "@commonair/ui/lib/utils";
+import { PlayIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Link } from "@tanstack/react-router";
 import * as React from "react";
 import { t } from "../../i18n/index.ts";
+import { AddToCalendar, SubscribeInCalendar } from "../schedule/calendar-links.tsx";
+import { localHhmm, localIsoWeekday, weekdayKey } from "../schedule/model.ts";
 import { SHELF_SIZE } from "./channel-data.ts";
 import { LiveNowShelf } from "./live-now-shelf.tsx";
 import { MediaShelf, tileTitle, VideoThumbnail, type VideoTile } from "./video-grid.tsx";
@@ -76,40 +88,11 @@ export function offlineHeroState(lastLiveAt: string | null, next: NextStream | n
   return lastLiveAt ? "lastLive" : "never";
 }
 
-const icsTime = (iso: string) =>
-  new Date(iso)
-    .toISOString()
-    .replace(/[-:]/g, "")
-    .replace(/\.\d{3}/, "");
-const icsText = (s: string) =>
-  s
-    .replace(/\\/g, "\\\\")
-    .replace(/\n/g, "\\n")
-    .replace(/([,;])/g, "\\$1");
-
-/**
- * "Add to calendar": the next stream as an iCalendar event (RFC 5545), for a `data:` download.
- * No calendar service is involved. Without an end, the event lasts an hour.
- */
-export function nextStreamIcs(next: NextStream, channelName: string, url: string, uid: string): string {
-  const start = new Date(next.startsAt);
-  const end = next.endsAt ? new Date(next.endsAt) : new Date(start.getTime() + 3600_000);
-  const summary = next.title?.trim() || t("d3Watch.offline.calendarTitle", { name: channelName });
-  return [
-    "BEGIN:VCALENDAR",
-    "VERSION:2.0",
-    `PRODID:-//${icsText(SITE.name)}//Channel schedule//EN`,
-    "BEGIN:VEVENT",
-    `UID:${icsText(uid)}`,
-    `DTSTAMP:${icsTime(start.toISOString())}`,
-    `DTSTART:${icsTime(start.toISOString())}`,
-    `DTEND:${icsTime(end.toISOString())}`,
-    `SUMMARY:${icsText(summary)}`,
-    `URL:${icsText(url)}`,
-    "END:VEVENT",
-    "END:VCALENDAR",
-    "",
-  ].join("\r\n");
+/** `Channel.nextStreamAt` as the hero's next stream; a time already past is no next stream. */
+export function nextStreamOf(nextStreamAt: string | null | undefined, now: number): NextStream | null {
+  if (!nextStreamAt) return null;
+  const at = Date.parse(nextStreamAt);
+  return Number.isNaN(at) || at <= now ? null : { startsAt: nextStreamAt };
 }
 
 export interface OfflineChannelHomeProps {
@@ -125,9 +108,9 @@ export interface OfflineChannelHomeProps {
   own: boolean;
   /** About and the panels (`ChannelAboutSection`). */
   about: React.ReactNode;
-  /** When the next stream is known (no schedule exists yet, so usually null). */
+  /** When the next stream is known (`Channel.nextStreamAt`). */
   nextStream?: NextStream | null;
-  /** The instance's public URL, for the calendar event's link. */
+  /** The instance's public URL, for the calendar feed's `webcal:` link. */
   publicUrl?: string;
   /** The shelf at the end; tests pass their own. */
   liveNow?: React.ReactNode;
@@ -212,7 +195,7 @@ function OfflineFollowHero({
             t("d3Watch.offline.never", { name })
           )}
         </h2>
-        {state === "next" && nextStream?.title ? <p className="text-sm break-words">{nextStream.title}</p> : null}
+        {state === "next" && nextStream ? <NextSlot next={nextStream} accented={channel.accent !== null} /> : null}
         {own ? null : (
           <p className="text-sm text-muted-foreground">
             {state === "never" ? t("d3Watch.offline.neverBody") : t("d3Watch.offline.followBody")}
@@ -226,7 +209,8 @@ function OfflineFollowHero({
           ) : (
             follow
           )}
-          {nextStream ? <AddToCalendar next={nextStream} channel={channel} publicUrl={publicUrl} /> : null}
+          {nextStream ? <AddToCalendar slug={channel.slug} /> : null}
+          {nextStream && publicUrl ? <SubscribeInCalendar slug={channel.slug} publicUrl={publicUrl} /> : null}
         </div>
         {latest ? (
           <p data-testid="channel-offline-latest-meta" className="mt-auto text-xs text-muted-foreground">
@@ -242,32 +226,39 @@ function OfflineFollowHero({
   );
 }
 
-function AddToCalendar({
-  next,
-  channel,
-  publicUrl,
-}: {
-  next: NextStream;
-  channel: { slug: string; displayName: string };
-  publicUrl?: string;
-}): React.JSX.Element {
-  const base = (publicUrl ?? "").replace(/\/+$/, "");
-  const ics = nextStreamIcs(next, channel.displayName, `${base}/${channel.slug}`, `${channel.slug}-${next.startsAt}`);
+const noSubscription = () => () => undefined;
+const onClient = () => true;
+const onServer = () => false;
+
+/**
+ * The next stream as a date block (month and day, in the channel's accent) beside its weekday and
+ * time in the viewer's zone and its title when known. The time is a 24-hour clock, as schedules
+ * are written.
+ */
+function NextSlot({ next, accented }: { next: NextStream; accented: boolean }): React.JSX.Element | null {
+  const { locale } = useLocale();
+  // The viewer's zone is the browser's: the server's render would show its own, so this waits.
+  const hydrated = React.useSyncExternalStore(noSubscription, onClient, onServer);
+  if (!hydrated) return null;
+  const start = new Date(next.startsAt);
   return (
-    <Button
-      data-testid="channel-offline-calendar"
-      variant="ghost"
-      nativeButton={false}
-      render={
-        <a
-          href={`data:text/calendar;charset=utf-8,${encodeURIComponent(ics)}`}
-          download={`${channel.slug}.ics`}
-          aria-label={t("d3Watch.offline.calendar")}
-        />
-      }
-    >
-      <HugeiconsIcon icon={Calendar03Icon} strokeWidth={2} aria-hidden />
-      {t("d3Watch.offline.calendar")}
-    </Button>
+    <div data-testid="channel-next-stream" data-starts-at={next.startsAt} className="flex min-w-0 items-center gap-3">
+      <span
+        aria-hidden
+        className={cn(
+          "flex size-12 shrink-0 flex-col items-center justify-center",
+          accented ? "bg-channel-accent text-channel-accent-foreground" : "bg-muted text-foreground",
+        )}
+      >
+        <span className="text-xs uppercase">{monthNames(locale, "short")[start.getMonth()]}</span>
+        <span className="text-base font-semibold tabular-nums">{start.getDate()}</span>
+      </span>
+      <span className="flex min-w-0 flex-col">
+        {next.title ? <span className="text-sm font-medium break-words">{next.title}</span> : null}
+        <span className="text-sm text-muted-foreground">
+          {t("w5Schedule.card.when", { weekday: t(weekdayKey(localIsoWeekday(start))), time: localHhmm(start) })}
+        </span>
+      </span>
+    </div>
   );
 }

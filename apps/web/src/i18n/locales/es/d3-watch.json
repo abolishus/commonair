@@ -58,6 +58,5 @@
   "d3Watch.offline.neverBody": "Síguele para no perderte la primera.",
   "d3Watch.offline.followBody": "Síguele para saber cuándo vuelve.",
   "d3Watch.offline.latestLabel": "Ver el último video: {title}",
-  "d3Watch.offline.calendar": "Añadir al calendario",
-  "d3Watch.offline.calendarTitle": "{name} transmite en directo"
+  "d3Watch.offline.calendar": "Añadir al calendario"
 }
