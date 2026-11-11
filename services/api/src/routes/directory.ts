@@ -39,8 +39,9 @@ import {
   type ChannelCard,
   type StreamCard,
 } from "../lib/dto.ts";
+import { searchClips, searchVideos } from "../discovery/search-media.ts";
 import { searchTags, topTags } from "../discovery/tags.ts";
-import { vodVisible } from "../media/visibility.ts";
+import { channelCategory, notMatureLabelled, vodVisible } from "../media/visibility.ts";
 import { decodeCursor, encodeCursor, isOffsetCursor } from "../lib/cursor.ts";
 import { notFound } from "../lib/errors.ts";
 import { os } from "../lib/orpc.ts";
@@ -428,9 +429,13 @@ export const directory = {
       deps,
       rows.map((r) => r.c),
     );
-    const catRows = await categoriesWithCounts(deps)
-      .query.where(ilike(categories.name, `%${q.replace(/[\\%_]/g, (m) => `\\${m}`)}%`))
-      .limit(input.limit);
+    const [catRows, videos, clipCards] = await Promise.all([
+      categoriesWithCounts(deps)
+        .query.where(ilike(categories.name, `%${q.replace(/[\\%_]/g, (m) => `\\${m}`)}%`))
+        .limit(input.limit),
+      searchVideos(deps, { q, adult, limit: input.limit }),
+      searchClips(deps, { q, adult, limit: input.limit }),
+    ]);
     return {
       channels: rows
         .map((r) => ({ r, l: live.get(r.c.id) ?? null }))
@@ -443,9 +448,8 @@ export const directory = {
           followerCount: r.c.followerCount,
         })),
       categories: await categoryDtos(deps, catRows),
-      // Contract step placeholders: d3-browse searches video and clip titles.
-      videos: [],
-      clips: [],
+      videos,
+      clips: clipCards,
     };
   }),
 
@@ -459,7 +463,10 @@ type CategoryRow = typeof categories.$inferSelect;
 interface CategoryStats {
   viewerCount: number;
   tags: string[];
+  videoCount: number;
 }
+
+const NO_STATS: CategoryStats = { viewerCount: 0, tags: [], videoCount: 0 };
 
 export function toCategory(deps: Deps, c: CategoryRow, liveChannels: number, stats: CategoryStats) {
   return {
@@ -471,8 +478,7 @@ export function toCategory(deps: Deps, c: CategoryRow, liveChannels: number, sta
     liveChannels,
     viewerCount: stats.viewerCount,
     tags: stats.tags,
-    // Contract step placeholder: d3-browse counts public, ready videos per category.
-    videoCount: 0,
+    videoCount: stats.videoCount,
   };
 }
 
@@ -485,21 +491,15 @@ const listedInCategory = () =>
   and(inLiveDirectory(), eq(broadcasts.mature, false), eq(channels.mature, false), eq(categories.mature, false));
 
 /**
- * Viewers and tags of these categories' listed live streams: one query for the streams and one
- * viewer-count read for all of them (Valkey, then Postgres for misses), however many categories.
+ * Viewers and tags of these categories' listed live streams, and their video counts: one query for
+ * the streams, one grouped query for the videos and one viewer-count read for all of them (Valkey,
+ * then Postgres for misses), however many categories.
  */
 async function categoryStats(deps: Deps, categoryIds: readonly string[]): Promise<Map<string, CategoryStats>> {
   const out = new Map<string, CategoryStats>();
   const ids = [...new Set(categoryIds)];
   if (ids.length === 0) return out;
-  const streams = await deps.db
-    .select({ channelId: channels.id, categoryId: categories.id, tags: channels.tags })
-    .from(channels)
-    .innerJoin(broadcasts, eq(broadcasts.id, channels.liveBroadcastId))
-    .innerJoin(users, eq(users.id, channels.ownerId))
-    .innerJoin(categories, eq(categories.id, broadcasts.categoryId))
-    .where(and(listedInCategory(), inArray(categories.id, ids)))
-    .limit(MAX_LIVE);
+  const [streams, videos] = await Promise.all([liveStreams(deps, ids), videoCounts(deps, ids)]);
   const counts = await viewerCounts(
     deps,
     streams.map((r) => r.channelId),
@@ -513,9 +513,52 @@ async function categoryStats(deps: Deps, categoryIds: readonly string[]): Promis
   }
   for (const id of ids) {
     const agg = byCategory.get(id);
-    out.set(id, { viewerCount: agg?.viewers ?? 0, tags: agg ? topTags(agg.tags) : [] });
+    out.set(id, {
+      viewerCount: agg?.viewers ?? 0,
+      tags: agg ? topTags(agg.tags) : [],
+      videoCount: videos.get(id) ?? 0,
+    });
   }
   return out;
+}
+
+/** The listed live streams of these categories, with their tags. */
+function liveStreams(deps: Deps, ids: readonly string[]) {
+  return deps.db
+    .select({ channelId: channels.id, categoryId: categories.id, tags: channels.tags })
+    .from(channels)
+    .innerJoin(broadcasts, eq(broadcasts.id, channels.liveBroadcastId))
+    .innerJoin(users, eq(users.id, channels.ownerId))
+    .innerJoin(categories, eq(categories.id, broadcasts.categoryId))
+    .where(and(listedInCategory(), inArray(categories.id, [...ids])))
+    .limit(MAX_LIVE);
+}
+
+/**
+ * Videos per category, counted as `vods.listByCategory` lists them by default: recorded in the
+ * category (the broadcast's, not the channel's), visible to the public, the channel not suspended,
+ * and mature-exclusive (a mature category, broadcast, channel or channel category never counts),
+ * like `liveChannels`. One grouped query for every category asked about.
+ */
+async function videoCounts(deps: Deps, ids: readonly string[]): Promise<Map<string, number>> {
+  const rows = await deps.db
+    .select({ categoryId: broadcasts.categoryId, n: sql<number>`count(*)::int` })
+    .from(vods)
+    .innerJoin(broadcasts, eq(broadcasts.id, vods.broadcastId))
+    .innerJoin(channels, eq(channels.id, vods.channelId))
+    .innerJoin(categories, eq(categories.id, broadcasts.categoryId))
+    .leftJoin(channelCategory, eq(channelCategory.id, channels.categoryId))
+    .where(
+      and(
+        inArray(broadcasts.categoryId, [...ids]),
+        vodVisible("public"),
+        isNull(channels.suspendedAt),
+        eq(categories.mature, false),
+        notMatureLabelled(),
+      ),
+    )
+    .groupBy(broadcasts.categoryId);
+  return new Map(rows.flatMap((r) => (r.categoryId ? [[r.categoryId, Number(r.n)] as const] : [])));
 }
 
 /** Category rows with their live counts as DTOs, stats loaded for all of them at once. */
@@ -524,7 +567,7 @@ async function categoryDtos(deps: Deps, rows: readonly { c: CategoryRow; n: numb
     deps,
     rows.map((r) => r.c.id),
   );
-  return rows.map((r) => toCategory(deps, r.c, Number(r.n), stats.get(r.c.id) ?? { viewerCount: 0, tags: [] }));
+  return rows.map((r) => toCategory(deps, r.c, Number(r.n), stats.get(r.c.id) ?? NO_STATS));
 }
 
 /**

@@ -219,7 +219,7 @@ describe("toCategory", () => {
     const row = { id: ID, slug: "art", name: "Art", boxArtKey: null, mature: false } as unknown as Parameters<
       typeof toCategory
     >[1];
-    expect(toCategory(deps, row, 3, { viewerCount: 40, tags: ["a"] })).toEqual({
+    expect(toCategory(deps, row, 3, { viewerCount: 40, tags: ["a"], videoCount: 7 })).toEqual({
       id: ID,
       slug: "art",
       name: "Art",
@@ -228,11 +228,12 @@ describe("toCategory", () => {
       liveChannels: 3,
       viewerCount: 40,
       tags: ["a"],
-      videoCount: 0,
+      videoCount: 7,
     });
-    expect(toCategory(deps, { ...row, boxArtKey: "boxart/art.webp" }, 0, { viewerCount: 0, tags: [] }).boxArtUrl).toBe(
-      `${BASE}/boxart/art.webp`,
-    );
+    expect(
+      toCategory(deps, { ...row, boxArtKey: "boxart/art.webp" }, 0, { viewerCount: 0, tags: [], videoCount: 0 })
+        .boxArtUrl,
+    ).toBe(`${BASE}/boxart/art.webp`);
   });
 });
 
