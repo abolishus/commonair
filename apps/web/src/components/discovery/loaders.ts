@@ -6,12 +6,20 @@
  * bodies stay inside the handlers so the compiler drops `server/env.ts` from the client bundle.
  * "Show more" pages load from the browser (`api()`), not through these.
  */
-import type { Category, StreamCard } from "@commonair/contracts/dto";
+import type { Category, ClipCard, StreamCard, VodCard } from "@commonair/contracts/dto";
 import { createServerFn } from "@tanstack/react-start";
 import { getRequestHeader } from "@tanstack/react-start/server";
 import { serverApi } from "../../lib/api.ts";
 import { loadFailureKind, retryAfterSeconds } from "../../lib/load-failure.ts";
 import { loadWebEnv } from "../../server/env.ts";
+import {
+  creatorShareOf,
+  earnedOf,
+  HOME_CATEGORY_LIMIT,
+  LIVE_NOW_MIN,
+  MEDIA_SHELF,
+  type CoopProof,
+} from "../home/model.ts";
 
 /**
  * A discovery loader's answer (F2): the data, or that the API did not answer it (busy, down, or
@@ -96,17 +104,50 @@ export const getDirectoryPage = createServerFn({ method: "GET" })
     }
   });
 
-/** The home page's Categories shelf: the busiest few. */
+/** The home page's categories: live ones first, then the rest (muted, never "0 live"). */
 export const getHomeCategories = createServerFn({ method: "GET" }).handler(
   async (): Promise<LoaderResult<Category[]>> => {
     try {
       const api = serverApi(loadWebEnv().API_INTERNAL_URL, cookieHeaders(getRequestHeader("cookie")));
-      return loaderOk((await api.categories.list({ limit: 8 })).items);
+      return loaderOk((await api.categories.list({ limit: HOME_CATEGORY_LIMIT })).items);
     } catch (err) {
       return loaderFailed(err);
     }
   },
 );
+
+/** Home v2's media shelves and the co-op proof number; each fails on its own (D3.1). */
+export interface HomeShelves {
+  /** Newest videos: Live now's backfill first, then Catch up. */
+  videos: LoaderResult<VodCard[]>;
+  clips: LoaderResult<ClipCard[]>;
+  coop: LoaderResult<CoopProof>;
+}
+
+/** Enough videos to backfill Live now and still fill Catch up. */
+export const HOME_VIDEOS = LIVE_NOW_MIN + MEDIA_SHELF;
+
+/** One load as a result: a failure is that section's, not the page's. */
+export async function settle<T>(load: () => Promise<T>): Promise<LoaderResult<T>> {
+  try {
+    return loaderOk(await load());
+  } catch (err) {
+    return loaderFailed(err);
+  }
+}
+
+export const getHomeShelves = createServerFn({ method: "GET" }).handler(async (): Promise<HomeShelves> => {
+  const api = serverApi(loadWebEnv().API_INTERNAL_URL, cookieHeaders(getRequestHeader("cookie")));
+  const [videos, clips, coop] = await Promise.all([
+    settle(async () => (await api.vods.listRecent({ limit: HOME_VIDEOS })).items),
+    settle(async () => (await api.clips.listRecent({ limit: MEDIA_SHELF, sort: "recent", range: "all" })).items),
+    settle(async (): Promise<CoopProof> => {
+      const [months, schedule] = await Promise.all([api.coop.transparency({ months: 2 }), api.coop.feeSchedule()]);
+      return { creatorShare: creatorShareOf(schedule), earned: earnedOf(months) };
+    }),
+  ]);
+  return { videos, clips, coop };
+});
 
 /** `/directory/$category`: the category and its live channels; `undefined` when it does not exist. */
 export const getCategoryPage = createServerFn({ method: "GET" })

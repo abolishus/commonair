@@ -13,6 +13,7 @@ import { MEMBER, boot, home, live, offline, renderInRouter } from "./d1-fixtures
 
 const fake = vi.hoisted(() => ({ boot: null as unknown, loader: null as unknown }));
 vi.mock("../src/lib/bootstrap.ts", () => ({ useBootstrap: () => fake.boot }));
+vi.mock("../src/lib/ui-metrics.ts", () => ({ trackUi: () => {} }));
 vi.mock("../src/lib/api.ts", () => ({
   api: () => ({ directory: { home: () => new Promise(() => {}) } }),
   errorCode: () => null,
@@ -30,6 +31,8 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
 });
 
 const { Route } = await import("../src/routes/_app/index.tsx");
+const ok = <T,>(data: T) => ({ status: "ok" as const, data });
+const shelves = { videos: ok([]), clips: ok([]), coop: ok({ creatorShare: 0.9, earned: null }) };
 const { resetHomeFeed } = await import("../src/components/discovery/feed.ts");
 const { t } = await import("../src/i18n/index.ts");
 const options = (
@@ -51,20 +54,22 @@ const cards = () =>
   );
 
 describe("home for a streamer", () => {
-  it("leaves their live channel out of every shelf and shows the You're live row", async () => {
+  it("leaves their live channel out of every shelf and shows the You're live row instead of the feature", async () => {
     fake.boot = boot({ me: STREAMER });
     fake.loader = {
       home: home({
         spotlight: [live("aurora", { viewers: 500 }), live("birch", { viewers: 3 })],
         live: [live("aurora", { viewers: 500 }), live("birch", { viewers: 3 })],
       }),
-      categories: [],
+      categories: ok([]),
+      shelves,
     };
     await renderInRouter(<Home />);
     const row = await screen.findByTestId("home-own-live");
     expect(row.textContent).toContain(t("fixWeb.home.ownLive.title"));
     expect(screen.getByTestId("home-own-live-manager").getAttribute("href")).toBe("/dashboard");
-    expect(screen.getByTestId("home-hero").querySelector("a")?.getAttribute("href")).toBe("/birch");
+    // Wave 2 (D3.1): the status bar takes the feature's place; the featured stream leads Live now.
+    expect(screen.queryByTestId("home-hero")).toBeNull();
     expect(cards()).toContain("/birch");
     expect(cards()).not.toContain("/aurora");
   });
@@ -73,7 +78,8 @@ describe("home for a streamer", () => {
     fake.boot = boot({ me: STREAMER });
     fake.loader = {
       home: home({ live: [live("birch")], recentlyLive: [offline("aurora"), offline("dune")] }),
-      categories: [],
+      categories: ok([]),
+      shelves,
     };
     await renderInRouter(<Home />);
     await screen.findByTestId("directory");
@@ -85,7 +91,7 @@ describe("home for a streamer", () => {
 
   it("a viewer sees every channel and no status row", async () => {
     fake.boot = boot({ me: MEMBER });
-    fake.loader = { home: home({ spotlight: [live("aurora")], live: [live("aurora")] }), categories: [] };
+    fake.loader = { home: home({ spotlight: [live("aurora")], live: [live("aurora")] }), categories: ok([]), shelves };
     await renderInRouter(<Home />);
     await screen.findByTestId("directory");
     expect(screen.queryByTestId("home-own-live")).toBeNull();

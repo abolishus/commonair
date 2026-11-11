@@ -17,6 +17,7 @@ import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppChannelRouteImport } from './routes/_app/$channel'
 import { Route as AppActivateRouteImport } from './routes/_app/activate'
 import { Route as AppDmcaRouteImport } from './routes/_app/dmca'
+import { Route as AppFollowingRouteImport } from './routes/_app/following'
 import { Route as AppSearchRouteImport } from './routes/_app/search'
 import { Route as AppSettingsRouteImport } from './routes/_app/settings'
 import { Route as AppSigninRouteImport } from './routes/_app/signin'
@@ -120,6 +121,11 @@ const AppActivateRoute = AppActivateRouteImport.update({
 const AppDmcaRoute = AppDmcaRouteImport.update({
   id: '/dmca',
   path: '/dmca',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppFollowingRoute = AppFollowingRouteImport.update({
+  id: '/following',
+  path: '/following',
   getParentRoute: () => AppRoute,
 } as any)
 const AppSearchRoute = AppSearchRouteImport.update({
@@ -470,6 +476,7 @@ export interface FileRoutesByFullPath {
   '/$channel': typeof AppChannelRoute
   '/activate': typeof AppActivateRoute
   '/dmca': typeof AppDmcaRoute
+  '/following': typeof AppFollowingRoute
   '/search': typeof AppSearchRoute
   '/settings': typeof AppSettingsRouteWithChildren
   '/signin': typeof AppSigninRoute
@@ -544,6 +551,7 @@ export interface FileRoutesByTo {
   '/$channel': typeof AppChannelRoute
   '/activate': typeof AppActivateRoute
   '/dmca': typeof AppDmcaRoute
+  '/following': typeof AppFollowingRoute
   '/search': typeof AppSearchRoute
   '/signin': typeof AppSigninRoute
   '/signup': typeof AppSignupRoute
@@ -620,6 +628,7 @@ export interface FileRoutesById {
   '/_app/$channel': typeof AppChannelRoute
   '/_app/activate': typeof AppActivateRoute
   '/_app/dmca': typeof AppDmcaRoute
+  '/_app/following': typeof AppFollowingRoute
   '/_app/search': typeof AppSearchRoute
   '/_app/settings': typeof AppSettingsRouteWithChildren
   '/_app/signin': typeof AppSigninRoute
@@ -697,6 +706,7 @@ export interface FileRouteTypes {
     | '/$channel'
     | '/activate'
     | '/dmca'
+    | '/following'
     | '/search'
     | '/settings'
     | '/signin'
@@ -771,6 +781,7 @@ export interface FileRouteTypes {
     | '/$channel'
     | '/activate'
     | '/dmca'
+    | '/following'
     | '/search'
     | '/signin'
     | '/signup'
@@ -846,6 +857,7 @@ export interface FileRouteTypes {
     | '/_app/$channel'
     | '/_app/activate'
     | '/_app/dmca'
+    | '/_app/following'
     | '/_app/search'
     | '/_app/settings'
     | '/_app/signin'
@@ -982,6 +994,13 @@ declare module '@tanstack/react-router' {
       path: '/dmca'
       fullPath: '/dmca'
       preLoaderRoute: typeof AppDmcaRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/following': {
+      id: '/_app/following'
+      path: '/following'
+      fullPath: '/following'
+      preLoaderRoute: typeof AppFollowingRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/search': {
@@ -1519,6 +1538,7 @@ interface AppRouteChildren {
   AppChannelRoute: typeof AppChannelRoute
   AppActivateRoute: typeof AppActivateRoute
   AppDmcaRoute: typeof AppDmcaRoute
+  AppFollowingRoute: typeof AppFollowingRoute
   AppSearchRoute: typeof AppSearchRoute
   AppSettingsRoute: typeof AppSettingsRouteWithChildren
   AppSigninRoute: typeof AppSigninRoute
@@ -1551,6 +1571,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppChannelRoute: AppChannelRoute,
   AppActivateRoute: AppActivateRoute,
   AppDmcaRoute: AppDmcaRoute,
+  AppFollowingRoute: AppFollowingRoute,
   AppSearchRoute: AppSearchRoute,
   AppSettingsRoute: AppSettingsRouteWithChildren,
   AppSigninRoute: AppSigninRoute,
