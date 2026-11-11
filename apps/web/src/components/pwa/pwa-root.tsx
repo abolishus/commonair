@@ -5,6 +5,7 @@ import { Button } from "@commonair/ui/components/button";
 import { useLocation } from "@tanstack/react-router";
 import * as React from "react";
 import { t } from "../../i18n/index.ts";
+import { useBootstrap } from "../../lib/bootstrap.ts";
 import {
   type WaitingWorker,
   type WorkerContainer,
@@ -13,6 +14,7 @@ import {
   registerServiceWorker,
   whenIdle,
 } from "../../pwa/register.ts";
+import { InstallRoot } from "./install-offer.tsx";
 
 /** One registration per page load, whatever the route does afterwards. */
 let registering = false;
@@ -41,11 +43,13 @@ export function UpdatePrompt({ onReload, onDismiss }: { onReload: () => void; on
 /**
  * Mounted once under the root providers: registers the service worker in production builds, after
  * hydration and once the browser is idle, and offers a reload when a new build's worker waits.
+ * It also hosts the install entry's state, the offer in context and the iOS steps (README D7.6).
  * Never on `/overlay/*` or `/embed/*` (they run inside OBS and other sites).
  */
 export function PwaRoot(): React.JSX.Element | null {
   const pathname = useLocation({ select: (location) => location.pathname });
   const excluded = pwaExcludedPath(pathname);
+  const { instance } = useBootstrap();
   const [waiting, setWaiting] = React.useState<WaitingWorker | null>(null);
 
   React.useEffect(() => {
@@ -67,13 +71,18 @@ export function PwaRoot(): React.JSX.Element | null {
     };
   }, [excluded]);
 
-  if (!waiting || excluded) return null;
+  if (excluded) return null;
   return (
-    <UpdatePrompt
-      onReload={() =>
-        applyUpdate(navigator.serviceWorker as unknown as WorkerContainer, waiting, () => window.location.reload())
-      }
-      onDismiss={() => setWaiting(null)}
-    />
+    <>
+      <InstallRoot pathname={pathname} site={instance.name} />
+      {waiting ? (
+        <UpdatePrompt
+          onReload={() =>
+            applyUpdate(navigator.serviceWorker as unknown as WorkerContainer, waiting, () => window.location.reload())
+          }
+          onDismiss={() => setWaiting(null)}
+        />
+      ) : null}
+    </>
   );
 }

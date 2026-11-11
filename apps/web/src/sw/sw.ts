@@ -1,17 +1,21 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// The service worker (ADR 0028 decision 7): app-shell cache, push and notification clicks. Built
+// The service worker (ADR 0028 decision 7): app-shell cache, the offline page (README D7.6), push
+// and notification clicks. Built
 // as a classic script into `/sw.js` by `scripts/vite-pwa.ts`, which defines the two constants
 // below. It stores nothing but the build's own static files: no IndexedDB, cookies or
 // `localStorage`, and nothing personal. The logic lives in the pure modules beside it.
-import { addNetworkRoutes, cacheName, shouldServeFromCache, staleCaches } from "./cache.ts";
+import { addNetworkRoutes, cacheName, isWatchedNavigation, shouldServeFromCache, staleCaches } from "./cache.ts";
+import { type OfflineTheme, offlineResponse } from "./offline.ts";
 import { clickTarget, goLiveNotification, parsePushPayload } from "./push.ts";
 
 /** Same-origin paths of the shell: the entry's scripts and styles, and the icons. */
 declare const __PRECACHE__: readonly string[];
 /** A hash of the precache list: a new build with new files gets a new cache. */
 declare const __VERSION__: string;
+/** The design tokens' colours for the offline page, read from the token source at build time. */
+declare const __OFFLINE_THEME__: OfflineTheme;
 
 const sw = self as unknown as ServiceWorkerGlobalScope;
 const CACHE = cacheName(__VERSION__);
@@ -35,12 +39,35 @@ sw.addEventListener("activate", (event) => {
     caches
       .keys()
       .then((keys) => Promise.all(staleCaches(keys, CACHE).map((key) => caches.delete(key))))
+      // Navigations pass through the worker (for the offline page): preload starts their request
+      // while it boots, so a page never waits on the worker.
+      .then(() => sw.registration.navigationPreload?.enable().catch(() => undefined))
       .then(() => sw.clients.claim()),
   );
 });
 
 sw.addEventListener("fetch", (event) => {
   const { request } = event;
+  if (isWatchedNavigation(request, sw.location.origin)) {
+    // The network's answer, untouched and never cached; only a failed request (offline, DNS, a
+    // dropped connection) gets the offline page, built here from bundled strings and tokens.
+    event.respondWith(
+      (async () => {
+        try {
+          const preloaded = (await event.preloadResponse) as Response | undefined;
+          return preloaded ?? (await fetch(request));
+        } catch {
+          return offlineResponse({
+            languages: sw.navigator.languages,
+            theme: __OFFLINE_THEME__,
+            requestUrl: request.url,
+            origin: sw.location.origin,
+          });
+        }
+      })(),
+    );
+    return;
+  }
   // Not intercepted: the browser handles it exactly as without a worker. Where the Static Routing
   // API exists, such requests never reach this listener at all (`addNetworkRoutes`).
   if (!shouldServeFromCache(request, sw.location.origin, PRECACHE)) return;

@@ -35,6 +35,7 @@ import type { Key as D6Transparency } from "./d6-transparency.gen.ts";
 import type { Key as D7Admin } from "./d7-admin.gen.ts";
 import type { Key as D7Mod } from "./d7-mod.gen.ts";
 import type { Key as D7Notify } from "./d7-notify.gen.ts";
+import type { Key as D7Pwa } from "./d7-pwa.gen.ts";
 import type { Key as D7Security } from "./d7-security.gen.ts";
 import type { Key as D7Settings } from "./d7-settings.gen.ts";
 import type { Key as E7Admin } from "./e7-admin.gen.ts";
@@ -123,6 +124,7 @@ export type MessageKey =
   | D7Admin
   | D7Mod
   | D7Notify
+  | D7Pwa
   | D7Security
   | D7Settings
   | E7Admin
@@ -210,6 +212,7 @@ export const NAMESPACES = [
   "d7-admin",
   "d7-mod",
   "d7-notify",
+  "d7-pwa",
   "d7-security",
   "d7-settings",
   "e7-admin",
