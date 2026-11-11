@@ -13,7 +13,7 @@ import type { LoyaltyBalance as LoyaltyBalanceSchema } from "@commonair/contract
 import type { POINTS_ADJUST_REASONS } from "@commonair/contracts/enums";
 import { BotConfig, type PointsAccrualSetting } from "@commonair/contracts/shapes";
 import { InsufficientPointsError, postPointsInTx, pointsBalance, schema as s, type Executor } from "@commonair/db";
-import { DEFAULT_POINTS_ACCRUAL, pointsChangePayload } from "@commonair/interact";
+import { pointsChangePayload, readPointsAccrual } from "@commonair/interact";
 import { audit } from "../events/audit.ts";
 import { emit } from "../events/outbox.ts";
 import { badRequest, notFound, precondition } from "../lib/errors.ts";
@@ -22,19 +22,22 @@ type LoyaltyBalance = z.infer<typeof LoyaltyBalanceSchema>;
 type ChannelRef = { id: string; ownerId: string; slug: string; displayName: string };
 export type PointsAdjustReason = (typeof POINTS_ADJUST_REASONS)[number];
 
-/** What a channel calls its points and whether they are on (`BotConfig.loyalty`; defaults without a row). */
+/**
+ * What a channel calls its points, whether they are on (`BotConfig.loyalty`; defaults without a
+ * row), and how they are earned: the instance's `interact.points.accrual` setting, the one the
+ * worker's `points-accrue` job applies, so "How you earn" never promises a different rate.
+ */
 export async function loyaltyOf(
   db: Executor,
   channelId: string,
 ): Promise<{ enabled: boolean; pointsName: string; accrual: PointsAccrualSetting }> {
-  const [row] = await db
-    .select({ config: s.botConfigs.config })
-    .from(s.botConfigs)
-    .where(eq(s.botConfigs.channelId, channelId));
+  const [[row], accrual] = await Promise.all([
+    db.select({ config: s.botConfigs.config }).from(s.botConfigs).where(eq(s.botConfigs.channelId, channelId)),
+    readPointsAccrual(db),
+  ]);
   const parsed = BotConfig.safeParse(row?.config ?? {});
   const loyalty = parsed.success ? parsed.data.loyalty : BotConfig.parse({}).loyalty;
-  // Contract step placeholder (overhaul wave 3): d4-chat reads the instance setting (`readPointsAccrual`).
-  return { enabled: loyalty.enabled, pointsName: loyalty.pointsName, accrual: DEFAULT_POINTS_ACCRUAL };
+  return { enabled: loyalty.enabled, pointsName: loyalty.pointsName, accrual };
 }
 
 async function channelBySlug(db: Executor, slug: string): Promise<ChannelRef> {
