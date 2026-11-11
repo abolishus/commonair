@@ -32,7 +32,6 @@ export type Key =
   | "notifications.kind.discordWebhookRemoved"
   | "notifications.kind.streamKeyLeaked"
   | "notifications.kind.giveawayWon"
-  | "notifySettings.title"
   | "notifySettings.loading"
   | "notifySettings.loadFailed"
   | "notifySettings.saveFailed"

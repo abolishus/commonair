@@ -28,7 +28,6 @@ export type Key =
   | "pageTitle.dmca"
   | "pageTitle.home"
   | "pageTitle.moveLanding"
-  | "pageTitle.settingsNotifications"
   | "pageTitle.unsubscribe"
   | "pageTitle.settingsSubscriptions"
   | "pageTitle.signin"

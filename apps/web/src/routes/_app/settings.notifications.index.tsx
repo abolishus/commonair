@@ -13,7 +13,7 @@ import { titleHead } from "../../lib/page-title.ts";
 
 /** Signed in: the notifications grid, browser push and per-channel go-live choices (ADR 0028, D7.3). */
 export const Route = createFileRoute("/_app/settings/notifications/")({
-  head: () => titleHead(t("pageTitle.settingsNotifications")),
+  head: () => titleHead(t("d7Settings.nav.notifications")),
   // Server-side guard (SSR and client navigation); the component keeps a client fallback.
   beforeLoad: () => requireSession(() => getSessionUser()),
   component: NotificationSettingsPage,
@@ -24,7 +24,7 @@ function NotificationSettingsPage(): React.JSX.Element {
   if (!me) return <Navigate to="/signin" replace />;
   return (
     <div data-testid="notifications-page" className="flex min-w-0 flex-col gap-6">
-      <PageHeader title={t("notifySettings.title")} description={t("d7Notify.intro")} />
+      <PageHeader title={t("d7Settings.nav.notifications")} description={t("d7Notify.intro")} />
       <NotificationSettings />
       {/* F37: moved here from privacy; it is a per-channel notice, like the go-live ones above. */}
       <PortabilityGrants />

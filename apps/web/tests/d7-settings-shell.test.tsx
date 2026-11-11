@@ -286,8 +286,8 @@ describe("bare /settings", () => {
 /**
  * The settings page pattern (P1): each route here renders a `PageHeader` whose title is its nav
  * label, and its sections are `SettingsSection`s (in the route or the components listed with it),
- * never cards. Explicit on purpose: Security and Notifications are built by other units in
- * parallel, and integration adds their rows. Subscriptions keeps its own layout for now.
+ * never cards. Explicit on purpose, so a new settings page is added here by hand. Subscriptions
+ * keeps its own layout for now.
  */
 const PAGES: { route: string; item: string; components: string[] }[] = [
   {
@@ -308,6 +308,22 @@ const PAGES: { route: string; item: string; components: string[] }[] = [
       "src/components/blocks/blocked-users.tsx",
       "src/components/settings/delete-account.tsx",
     ],
+  },
+  {
+    route: "src/routes/_app/settings.security.tsx",
+    item: "security",
+    components: [
+      "src/components/security/security-page.tsx",
+      "src/components/security/account-section.tsx",
+      "src/components/security/two-factor-section.tsx",
+      "src/components/security/passkeys-section.tsx",
+      "src/components/security/sessions-section.tsx",
+    ],
+  },
+  {
+    route: "src/routes/_app/settings.notifications.index.tsx",
+    item: "notifications",
+    components: ["src/components/notifications/settings.tsx", "src/components/portability/grants.tsx"],
   },
   {
     route: "src/routes/_app/settings.appeals.tsx",

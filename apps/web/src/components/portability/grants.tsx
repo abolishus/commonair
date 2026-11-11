@@ -8,8 +8,8 @@
  * same switch for a channel's follow menu.
  */
 import { ChannelAvatar, EmptyState, SkeletonGroup, SkeletonText } from "@commonair/ui";
+import { SettingsSection } from "@commonair/ui/blocks/forms";
 import { Button } from "@commonair/ui/components/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@commonair/ui/components/card";
 import { Field, FieldLabel } from "@commonair/ui/components/field";
 import { Switch } from "@commonair/ui/components/switch";
 import { toast } from "@commonair/ui/toast";
@@ -87,14 +87,12 @@ export function GrantsView({
   const bulkHintId = React.useId();
   const scope = { slugs: list.matched.map((r) => r.slug), everything: !searching };
   return (
-    <Card data-testid="portability-grants">
-      <CardHeader>
-        <CardTitle>
-          <h2>{t("portability.grants.title")}</h2>
-        </CardTitle>
-        <CardDescription>{t("portability.grants.intro")}</CardDescription>
-      </CardHeader>
-      <CardContent className="flex min-w-0 flex-col gap-3">
+    <SettingsSection
+      data-testid="portability-grants"
+      title={t("portability.grants.title")}
+      description={t("portability.grants.intro")}
+    >
+      <div className="flex min-w-0 flex-col gap-3 px-4 py-4 sm:px-6">
         {loadFailed ? (
           <FormError>{t("portability.grants.loadFailed")}</FormError>
         ) : rows === null ? (
@@ -178,8 +176,8 @@ export function GrantsView({
             )}
           </>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </SettingsSection>
   );
 }
 

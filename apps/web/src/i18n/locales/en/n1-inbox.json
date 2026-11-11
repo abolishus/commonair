@@ -27,7 +27,6 @@
   "notifications.kind.discordWebhookRemoved": "Your Discord webhook stopped working and was removed",
   "notifications.kind.streamKeyLeaked": "One of your stream keys may have leaked: rotate it",
   "notifications.kind.giveawayWon": "You won a giveaway",
-  "notifySettings.title": "Notifications",
   "notifySettings.loading": "Loading your notification settings",
   "notifySettings.loadFailed": "Your notification settings didn't load. Refresh the page to retry.",
   "notifySettings.saveFailed": "Your change could not be saved. Try again.",

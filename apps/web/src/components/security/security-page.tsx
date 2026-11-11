@@ -8,7 +8,6 @@
  */
 import { SkeletonText } from "@commonair/ui";
 import { AlertCallout } from "@commonair/ui/blocks/feedback";
-import { PageHeader } from "@commonair/ui/blocks/headers";
 import { SettingsSection } from "@commonair/ui/blocks/forms";
 import { Mail01Icon } from "@hugeicons/core-free-icons";
 import * as React from "react";
@@ -47,10 +46,10 @@ export function SecurityPage({ loadAccount = loadMe }: SecurityPageProps): React
   React.useEffect(() => {
     if (data && window.location.hash === "#sessions") document.getElementById("sessions")?.scrollIntoView();
   }, [data]);
-  const title = t("d7Security.title");
+  // The route brings the page header (the settings page pattern, D7.1).
+  const title = t("d7Settings.nav.security");
   return (
-    <div data-testid="security-page" className="flex min-w-0 flex-col gap-6">
-      <PageHeader title={title} description={t("d7Security.intro")} />
+    <div className="flex min-w-0 flex-col gap-6">
       {account.state === "loading" && <SkeletonText lines={4} />}
       {account.state === "failed" && <SectionLoadError section={title} load={account} alone />}
       {data && (

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { PageHeader } from "@commonair/ui/blocks/headers";
 import { Navigate, createFileRoute } from "@tanstack/react-router";
 import type * as React from "react";
 import { SecurityPage } from "../../components/security/security-page.tsx";
@@ -15,7 +16,7 @@ import { titleHead } from "../../lib/page-title.ts";
  */
 export const Route = createFileRoute("/_app/settings/security")({
   beforeLoad: () => requireSession(() => getSessionUser()),
-  head: () => titleHead(t("d7Security.pageTitle")),
+  head: () => titleHead(t("d7Settings.nav.security")),
   component: SecurityRoute,
 });
 
@@ -23,5 +24,10 @@ function SecurityRoute(): React.JSX.Element {
   const { me } = useBootstrap();
   // Client fallback for a session that ended after the guard ran.
   if (!me) return <Navigate to="/signin" replace />;
-  return <SecurityPage />;
+  return (
+    <div data-testid="security-page" className="flex min-w-0 flex-col gap-6">
+      <PageHeader title={t("d7Settings.nav.security")} description={t("d7Security.intro")} />
+      <SecurityPage />
+    </div>
+  );
 }
