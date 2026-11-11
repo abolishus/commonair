@@ -8,7 +8,9 @@ import {
   BankIcon,
   Chart01Icon,
   ChartIncreaseIcon,
+  Clock01Icon,
   CopyrightIcon,
+  DashboardSquare01Icon,
   Globe02Icon,
   JusticeScale01Icon,
   LegalDocument01Icon,
@@ -25,6 +27,7 @@ import {
   isLegal,
   isPlatformModerator,
   isSafetyStaff,
+  isStaff,
   mayOpenAdminPage,
   requireAdminPage,
 } from "../components/safety/access.ts";
@@ -164,6 +167,7 @@ function AdminLayout(): React.JSX.Element {
   // Client fallback for a session that changed after the guard ran.
   if (!mayOpenAdminPage(adminPageFor(pathname), me)) return <AdminNotFound />;
   // Grouped (F22): Safety, Money, Co-op and Platform, each only with the pages the role may open.
+  const path = pathname.replace(/\/+$/, "");
   const groups = adminNavGroups(pathname, {
     treasurer: isTreasurer(me),
     safetyStaff: isSafetyStaff(me),
@@ -171,10 +175,33 @@ function AdminLayout(): React.JSX.Element {
     legal: isLegal(me),
     admin: isAdmin(me),
     federation: instance.federation,
-  }).map((group) => ({ id: group.id, label: t(GROUP_LABEL[group.id]), items: group.items.map(adminItem) }));
+  }).map((group) => {
+    const items = group.items.map(adminItem);
+    // D7.5: the audit log closes the Safety group, for admins (`safety.auditLog` is theirs).
+    if (group.id === "safety" && isAdmin(me))
+      items.push({
+        id: "audit",
+        label: t("d7Admin.nav.audit"),
+        current: path === "/admin/audit",
+        icon: <HugeiconsIcon icon={Clock01Icon} strokeWidth={2} aria-hidden />,
+        render: <Link data-testid="admin-audit-link" to="/admin/audit" />,
+      });
+    return { id: group.id, label: t(GROUP_LABEL[group.id]), items };
+  });
+  // D7.5: the home is at the top of every staff role's nav.
+  const overview: NavItem | undefined = isStaff(me)
+    ? {
+        id: "overview",
+        label: t("d7Admin.nav.overview"),
+        current: path === "/admin",
+        icon: <HugeiconsIcon icon={DashboardSquare01Icon} strokeWidth={2} aria-hidden />,
+        render: <Link data-testid="admin-overview-link" to="/admin" />,
+      }
+    : undefined;
   return (
     <AdminShell
       header={<AppHeader studio />}
+      overview={overview}
       groups={groups}
       sidebarLabel={t("admin.nav")}
       skipLabel={t("nav.skipToContent")}

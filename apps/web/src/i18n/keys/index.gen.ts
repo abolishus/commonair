@@ -29,6 +29,7 @@ import type { Key as D5Money } from "./d5-money.gen.ts";
 import type { Key as D5Settings } from "./d5-settings.gen.ts";
 import type { Key as D5Shell } from "./d5-shell.gen.ts";
 import type { Key as D5Studio } from "./d5-studio.gen.ts";
+import type { Key as D7Admin } from "./d7-admin.gen.ts";
 import type { Key as E7Admin } from "./e7-admin.gen.ts";
 import type { Key as E7Appeals } from "./e7-appeals.gen.ts";
 import type { Key as E7Chat } from "./e7-chat.gen.ts";
@@ -109,6 +110,7 @@ export type MessageKey =
   | D5Settings
   | D5Shell
   | D5Studio
+  | D7Admin
   | E7Admin
   | E7Appeals
   | E7Chat
@@ -188,6 +190,7 @@ export const NAMESPACES = [
   "d5-settings",
   "d5-shell",
   "d5-studio",
+  "d7-admin",
   "e7-admin",
   "e7-appeals",
   "e7-chat",

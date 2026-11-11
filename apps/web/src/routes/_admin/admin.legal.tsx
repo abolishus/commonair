@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { PageHeader } from "@commonair/ui/blocks/headers";
-import { PageContainer } from "@commonair/ui/layouts";
+import { AdminPage } from "@commonair/ui/layouts";
 import { createFileRoute } from "@tanstack/react-router";
 import type * as React from "react";
 import { isLegal } from "../../components/safety/access.ts";
@@ -23,9 +23,9 @@ function LegalPage(): React.JSX.Element {
   // Client fallback: T0 material never renders for anyone but `legal`.
   if (!me || !isLegal(me)) return <NotFoundState />;
   return (
-    <PageContainer width="wide" className="flex flex-col gap-6 py-8">
+    <AdminPage width="queue">
       <PageHeader title={t("safety.legal.title")} description={t("safety.legal.intro")} />
       <LegalQueue meId={me.id} />
-    </PageContainer>
+    </AdminPage>
   );
 }

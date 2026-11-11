@@ -33,6 +33,10 @@ export function isLegal(me: MaybeUser): boolean {
 }
 
 export type AdminPage =
+  /** Overhaul wave 4 (D7.5): the `/admin` home, the audit log and a user's standing. */
+  | "home"
+  | "audit"
+  | "user"
   | "treasury"
   | "moderation"
   | "appeals"
@@ -48,7 +52,13 @@ export type AdminPage =
 
 /** Which platform-tools page a path is (`null` for anything else). Trailing slashes do not matter. */
 export function adminPageFor(pathname: string): AdminPage | null {
-  switch (pathname.replace(/\/+$/, "")) {
+  const path = pathname.replace(/\/+$/, "");
+  if (/^\/admin\/users\/[^/]+$/.test(path)) return "user";
+  switch (path) {
+    case "/admin":
+      return "home";
+    case "/admin/audit":
+      return "audit";
     case "/treasury":
       return "treasury";
     case "/admin/moderation":
@@ -78,8 +88,21 @@ export function adminPageFor(pathname: string): AdminPage | null {
   }
 }
 
+/** Any platform staff role: the `/admin` home shows each one the queues it can open. */
+export function isStaff(me: MaybeUser): boolean {
+  return isSafetyStaff(me) || isTreasurer(me);
+}
+
 export function mayOpenAdminPage(page: AdminPage | null, me: MaybeUser): boolean {
   switch (page) {
+    case "home":
+      return isStaff(me);
+    // `safety.auditLog` is the admin role's (the API enforces it as well).
+    case "audit":
+      return roleOf(me) === "admin";
+    // `admin.user`: moderators, admins and `legal`.
+    case "user":
+      return isSafetyStaff(me);
     case "treasury":
       return isTreasurer(me);
     case "moderation":

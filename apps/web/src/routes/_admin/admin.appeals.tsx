@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { PageHeader } from "@commonair/ui/blocks/headers";
-import { PageContainer } from "@commonair/ui/layouts";
+import { AdminPage } from "@commonair/ui/layouts";
 import { createFileRoute } from "@tanstack/react-router";
 import type * as React from "react";
 import { AppealQueue } from "../../components/safety/appeal-queue.tsx";
@@ -17,9 +17,9 @@ export const Route = createFileRoute("/_admin/admin/appeals")({
 
 function AppealsQueuePage(): React.JSX.Element {
   return (
-    <PageContainer className="flex flex-col gap-6 py-8">
+    <AdminPage width="queue">
       <PageHeader title={t("safety.appealq.title")} description={t("appeals.account.queueIntro")} />
       <AppealQueue />
-    </PageContainer>
+    </AdminPage>
   );
 }

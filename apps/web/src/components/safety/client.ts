@@ -121,7 +121,15 @@ export const accountActionsClient = (): AccountActionsClient => ({
 // ── Staff ────────────────────────────────────────────────────────────────────────────────────
 
 export interface ModerationClient {
-  cases(input: { tier: "t1" | "t2"; status: "open" | "labelled"; cursor?: string }): Promise<Page<ModerationCaseDto>>;
+  cases(input: {
+    tier: "t1" | "t2";
+    status: "open" | "labelled";
+    cursor?: string;
+    /** D7.5: only the caller's claimed cases, or only unclaimed ones. */
+    assignee?: "me" | "unassigned";
+  }): Promise<Page<ModerationCaseDto>>;
+  /** D7.5 claiming (`moderation.assign`): the caller's id to claim, null to release. */
+  assign?: (id: string, assigneeId: string | null) => Promise<ModerationCaseDto>;
   case(id: string): Promise<ModerationCaseDetailDto>;
   frame(flagId: string): Promise<ImageData>;
   review(input: {
@@ -153,6 +161,7 @@ async function userNames(ids: readonly string[]): Promise<ReadonlyMap<string, st
 
 export const moderationClient = (): ModerationClient => ({
   cases: (input) => api().moderation.queue({ ...input, limit: PAGE }),
+  assign: (id, assigneeId) => api().moderation.assign({ id, assigneeId }),
   case: (id) => api().moderation.case({ id }),
   frame: (id) => api().moderation.frame({ id }),
   review: (input) => api().moderation.review(input),

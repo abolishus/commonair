@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { PageHeader } from "@commonair/ui/blocks/headers";
-import { PageContainer } from "@commonair/ui/layouts";
+import { AdminPage } from "@commonair/ui/layouts";
 import { createFileRoute } from "@tanstack/react-router";
 import type * as React from "react";
 import { IntegrityPage } from "../../components/admin/integrity.tsx";
@@ -23,9 +23,9 @@ function IntegrityRoute(): React.JSX.Element {
   // Client fallback for the layout guard.
   if (!mayOpenAdminPage("integrity", me)) return <NotFoundState />;
   return (
-    <PageContainer className="flex flex-col gap-6 py-8">
+    <AdminPage width="queue">
       <PageHeader title={t("admin.integrity.title")} description={t("admin.integrity.intro")} />
       <IntegrityPage />
-    </PageContainer>
+    </AdminPage>
   );
 }

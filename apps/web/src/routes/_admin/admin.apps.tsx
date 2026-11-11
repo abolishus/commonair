@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { PageHeader } from "@commonair/ui/blocks/headers";
-import { PageContainer } from "@commonair/ui/layouts";
+import { AdminPage } from "@commonair/ui/layouts";
 import { createFileRoute } from "@tanstack/react-router";
 import * as React from "react";
 import { AdminAppsPage } from "../../components/developer/admin-apps.tsx";
@@ -25,9 +25,9 @@ function AdminAppsRoute(): React.JSX.Element {
   // Client fallback for the layout guard.
   if (!mayOpenAdminPage("apps", me)) return <NotFoundState />;
   return (
-    <PageContainer className="flex flex-col gap-6 py-8">
+    <AdminPage width="queue">
       <PageHeader title={t("developer.admin.title")} description={t("developer.admin.intro")} />
       <AdminAppsPage client={client} />
-    </PageContainer>
+    </AdminPage>
   );
 }

@@ -46,8 +46,10 @@ import { Route as EmbedChannelRouteImport } from './routes/embed.$channel'
 import { Route as OverlayAlertsRouteImport } from './routes/overlay.alerts'
 import { Route as OverlayChatRouteImport } from './routes/overlay.chat'
 import { Route as OverlayGoalsRouteImport } from './routes/overlay.goals'
+import { Route as AdminAdminIndexRouteImport } from './routes/_admin/admin.index'
 import { Route as AdminAdminAppealsRouteImport } from './routes/_admin/admin.appeals'
 import { Route as AdminAdminAppsRouteImport } from './routes/_admin/admin.apps'
+import { Route as AdminAdminAuditRouteImport } from './routes/_admin/admin.audit'
 import { Route as AdminAdminCoopRouteImport } from './routes/_admin/admin.coop'
 import { Route as AdminAdminDmcaRouteImport } from './routes/_admin/admin.dmca'
 import { Route as AdminAdminEgressRouteImport } from './routes/_admin/admin.egress'
@@ -77,6 +79,7 @@ import { Route as StudioDashboardSettingsRouteImport } from './routes/_studio/da
 import { Route as StudioDeveloperIndexRouteImport } from './routes/_studio/developer.index'
 import { Route as StudioDeveloperBotsRouteImport } from './routes/_studio/developer.bots'
 import { Route as StudioModChannelRouteImport } from './routes/_studio/mod.$channel'
+import { Route as AdminAdminUsersUsernameRouteImport } from './routes/_admin/admin.users.$username'
 import { Route as AppChannelClipsClipIdRouteImport } from './routes/_app/$channel_.clips.$clipId'
 import { Route as AppChannelGiveawaysGiveawayIdRouteImport } from './routes/_app/$channel_.giveaways.$giveawayId'
 import { Route as AppChannelVodsVodIdRouteImport } from './routes/_app/$channel_.vods.$vodId'
@@ -273,6 +276,11 @@ const OverlayGoalsRoute = OverlayGoalsRouteImport.update({
   path: '/overlay/goals',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminAdminIndexRoute = AdminAdminIndexRouteImport.update({
+  id: '/admin/',
+  path: '/admin/',
+  getParentRoute: () => AdminRoute,
+} as any)
 const AdminAdminAppealsRoute = AdminAdminAppealsRouteImport.update({
   id: '/admin/appeals',
   path: '/admin/appeals',
@@ -281,6 +289,11 @@ const AdminAdminAppealsRoute = AdminAdminAppealsRouteImport.update({
 const AdminAdminAppsRoute = AdminAdminAppsRouteImport.update({
   id: '/admin/apps',
   path: '/admin/apps',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminAdminAuditRoute = AdminAdminAuditRouteImport.update({
+  id: '/admin/audit',
+  path: '/admin/audit',
   getParentRoute: () => AdminRoute,
 } as any)
 const AdminAdminCoopRoute = AdminAdminCoopRouteImport.update({
@@ -429,6 +442,11 @@ const StudioModChannelRoute = StudioModChannelRouteImport.update({
   path: '/mod/$channel',
   getParentRoute: () => StudioRoute,
 } as any)
+const AdminAdminUsersUsernameRoute = AdminAdminUsersUsernameRouteImport.update({
+  id: '/admin/users/$username',
+  path: '/admin/users/$username',
+  getParentRoute: () => AdminRoute,
+} as any)
 const AppChannelClipsClipIdRoute = AppChannelClipsClipIdRouteImport.update({
   id: '/$channel_/clips/$clipId',
   path: '/$channel/clips/$clipId',
@@ -537,6 +555,7 @@ export interface FileRoutesByFullPath {
   '/overlay/goals': typeof OverlayGoalsRoute
   '/admin/appeals': typeof AdminAdminAppealsRoute
   '/admin/apps': typeof AdminAdminAppsRoute
+  '/admin/audit': typeof AdminAdminAuditRoute
   '/admin/coop': typeof AdminAdminCoopRoute
   '/admin/dmca': typeof AdminAdminDmcaRoute
   '/admin/egress': typeof AdminAdminEgressRoute
@@ -562,10 +581,12 @@ export interface FileRoutesByFullPath {
   '/dashboard/settings': typeof StudioDashboardSettingsRoute
   '/developer/bots': typeof StudioDeveloperBotsRoute
   '/mod/$channel': typeof StudioModChannelRoute
+  '/admin/': typeof AdminAdminIndexRoute
   '/coop/': typeof AppCoopIndexRoute
   '/directory/': typeof AppDirectoryIndexRoute
   '/settings/': typeof AppSettingsIndexRoute
   '/developer/': typeof StudioDeveloperIndexRoute
+  '/admin/users/$username': typeof AdminAdminUsersUsernameRoute
   '/$channel/clips/$clipId': typeof AppChannelClipsClipIdRoute
   '/$channel/giveaways/$giveawayId': typeof AppChannelGiveawaysGiveawayIdRoute
   '/$channel/vods/$vodId': typeof AppChannelVodsVodIdRoute
@@ -616,6 +637,7 @@ export interface FileRoutesByTo {
   '/overlay/goals': typeof OverlayGoalsRoute
   '/admin/appeals': typeof AdminAdminAppealsRoute
   '/admin/apps': typeof AdminAdminAppsRoute
+  '/admin/audit': typeof AdminAdminAuditRoute
   '/admin/coop': typeof AdminAdminCoopRoute
   '/admin/dmca': typeof AdminAdminDmcaRoute
   '/admin/egress': typeof AdminAdminEgressRoute
@@ -641,10 +663,12 @@ export interface FileRoutesByTo {
   '/dashboard/settings': typeof StudioDashboardSettingsRoute
   '/developer/bots': typeof StudioDeveloperBotsRoute
   '/mod/$channel': typeof StudioModChannelRoute
+  '/admin': typeof AdminAdminIndexRoute
   '/coop': typeof AppCoopIndexRoute
   '/directory': typeof AppDirectoryIndexRoute
   '/settings': typeof AppSettingsIndexRoute
   '/developer': typeof StudioDeveloperIndexRoute
+  '/admin/users/$username': typeof AdminAdminUsersUsernameRoute
   '/$channel/clips/$clipId': typeof AppChannelClipsClipIdRoute
   '/$channel/giveaways/$giveawayId': typeof AppChannelGiveawaysGiveawayIdRoute
   '/$channel/vods/$vodId': typeof AppChannelVodsVodIdRoute
@@ -700,6 +724,7 @@ export interface FileRoutesById {
   '/_app/': typeof AppIndexRoute
   '/_admin/admin/appeals': typeof AdminAdminAppealsRoute
   '/_admin/admin/apps': typeof AdminAdminAppsRoute
+  '/_admin/admin/audit': typeof AdminAdminAuditRoute
   '/_admin/admin/coop': typeof AdminAdminCoopRoute
   '/_admin/admin/dmca': typeof AdminAdminDmcaRoute
   '/_admin/admin/egress': typeof AdminAdminEgressRoute
@@ -725,10 +750,12 @@ export interface FileRoutesById {
   '/_studio/dashboard_/settings': typeof StudioDashboardSettingsRoute
   '/_studio/developer/bots': typeof StudioDeveloperBotsRoute
   '/_studio/mod/$channel': typeof StudioModChannelRoute
+  '/_admin/admin/': typeof AdminAdminIndexRoute
   '/_app/coop/': typeof AppCoopIndexRoute
   '/_app/directory/': typeof AppDirectoryIndexRoute
   '/_app/settings/': typeof AppSettingsIndexRoute
   '/_studio/developer/': typeof StudioDeveloperIndexRoute
+  '/_admin/admin/users/$username': typeof AdminAdminUsersUsernameRoute
   '/_app/$channel_/clips/$clipId': typeof AppChannelClipsClipIdRoute
   '/_app/$channel_/giveaways/$giveawayId': typeof AppChannelGiveawaysGiveawayIdRoute
   '/_app/$channel_/vods/$vodId': typeof AppChannelVodsVodIdRoute
@@ -782,6 +809,7 @@ export interface FileRouteTypes {
     | '/overlay/goals'
     | '/admin/appeals'
     | '/admin/apps'
+    | '/admin/audit'
     | '/admin/coop'
     | '/admin/dmca'
     | '/admin/egress'
@@ -807,10 +835,12 @@ export interface FileRouteTypes {
     | '/dashboard/settings'
     | '/developer/bots'
     | '/mod/$channel'
+    | '/admin/'
     | '/coop/'
     | '/directory/'
     | '/settings/'
     | '/developer/'
+    | '/admin/users/$username'
     | '/$channel/clips/$clipId'
     | '/$channel/giveaways/$giveawayId'
     | '/$channel/vods/$vodId'
@@ -861,6 +891,7 @@ export interface FileRouteTypes {
     | '/overlay/goals'
     | '/admin/appeals'
     | '/admin/apps'
+    | '/admin/audit'
     | '/admin/coop'
     | '/admin/dmca'
     | '/admin/egress'
@@ -886,10 +917,12 @@ export interface FileRouteTypes {
     | '/dashboard/settings'
     | '/developer/bots'
     | '/mod/$channel'
+    | '/admin'
     | '/coop'
     | '/directory'
     | '/settings'
     | '/developer'
+    | '/admin/users/$username'
     | '/$channel/clips/$clipId'
     | '/$channel/giveaways/$giveawayId'
     | '/$channel/vods/$vodId'
@@ -944,6 +977,7 @@ export interface FileRouteTypes {
     | '/_app/'
     | '/_admin/admin/appeals'
     | '/_admin/admin/apps'
+    | '/_admin/admin/audit'
     | '/_admin/admin/coop'
     | '/_admin/admin/dmca'
     | '/_admin/admin/egress'
@@ -969,10 +1003,12 @@ export interface FileRouteTypes {
     | '/_studio/dashboard_/settings'
     | '/_studio/developer/bots'
     | '/_studio/mod/$channel'
+    | '/_admin/admin/'
     | '/_app/coop/'
     | '/_app/directory/'
     | '/_app/settings/'
     | '/_studio/developer/'
+    | '/_admin/admin/users/$username'
     | '/_app/$channel_/clips/$clipId'
     | '/_app/$channel_/giveaways/$giveawayId'
     | '/_app/$channel_/vods/$vodId'
@@ -1259,6 +1295,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OverlayGoalsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_admin/admin/': {
+      id: '/_admin/admin/'
+      path: '/admin'
+      fullPath: '/admin/'
+      preLoaderRoute: typeof AdminAdminIndexRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/_admin/admin/appeals': {
       id: '/_admin/admin/appeals'
       path: '/admin/appeals'
@@ -1271,6 +1314,13 @@ declare module '@tanstack/react-router' {
       path: '/admin/apps'
       fullPath: '/admin/apps'
       preLoaderRoute: typeof AdminAdminAppsRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/_admin/admin/audit': {
+      id: '/_admin/admin/audit'
+      path: '/admin/audit'
+      fullPath: '/admin/audit'
+      preLoaderRoute: typeof AdminAdminAuditRouteImport
       parentRoute: typeof AdminRoute
     }
     '/_admin/admin/coop': {
@@ -1476,6 +1526,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof StudioModChannelRouteImport
       parentRoute: typeof StudioRoute
     }
+    '/_admin/admin/users/$username': {
+      id: '/_admin/admin/users/$username'
+      path: '/admin/users/$username'
+      fullPath: '/admin/users/$username'
+      preLoaderRoute: typeof AdminAdminUsersUsernameRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/_app/$channel_/clips/$clipId': {
       id: '/_app/$channel_/clips/$clipId'
       path: '/$channel/clips/$clipId'
@@ -1574,6 +1631,7 @@ interface AdminRouteChildren {
   AdminTreasuryRoute: typeof AdminTreasuryRoute
   AdminAdminAppealsRoute: typeof AdminAdminAppealsRoute
   AdminAdminAppsRoute: typeof AdminAdminAppsRoute
+  AdminAdminAuditRoute: typeof AdminAdminAuditRoute
   AdminAdminCoopRoute: typeof AdminAdminCoopRoute
   AdminAdminDmcaRoute: typeof AdminAdminDmcaRoute
   AdminAdminEgressRoute: typeof AdminAdminEgressRoute
@@ -1583,12 +1641,15 @@ interface AdminRouteChildren {
   AdminAdminIntegrityRoute: typeof AdminAdminIntegrityRoute
   AdminAdminLegalRoute: typeof AdminAdminLegalRoute
   AdminAdminModerationRoute: typeof AdminAdminModerationRoute
+  AdminAdminIndexRoute: typeof AdminAdminIndexRoute
+  AdminAdminUsersUsernameRoute: typeof AdminAdminUsersUsernameRoute
 }
 
 const AdminRouteChildren: AdminRouteChildren = {
   AdminTreasuryRoute: AdminTreasuryRoute,
   AdminAdminAppealsRoute: AdminAdminAppealsRoute,
   AdminAdminAppsRoute: AdminAdminAppsRoute,
+  AdminAdminAuditRoute: AdminAdminAuditRoute,
   AdminAdminCoopRoute: AdminAdminCoopRoute,
   AdminAdminDmcaRoute: AdminAdminDmcaRoute,
   AdminAdminEgressRoute: AdminAdminEgressRoute,
@@ -1598,6 +1659,8 @@ const AdminRouteChildren: AdminRouteChildren = {
   AdminAdminIntegrityRoute: AdminAdminIntegrityRoute,
   AdminAdminLegalRoute: AdminAdminLegalRoute,
   AdminAdminModerationRoute: AdminAdminModerationRoute,
+  AdminAdminIndexRoute: AdminAdminIndexRoute,
+  AdminAdminUsersUsernameRoute: AdminAdminUsersUsernameRoute,
 }
 
 const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)

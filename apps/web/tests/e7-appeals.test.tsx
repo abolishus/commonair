@@ -254,14 +254,12 @@ describe("appeal queue on /admin/appeals", () => {
     fireEvent.click(toggle(items()[0]!));
     expect(items()[0]!.dataset.open).toBe("true");
     expect(toggle(items()[0]!).getAttribute("aria-expanded")).toBe("true");
-    const detail = within(items()[0]!).getByTestId("appealq-detail");
+    const detail = screen.getByTestId("appealq-detail");
     expect(detail.textContent).toContain(en["appeals.account.effect.accountAction"]);
     fireEvent.click(toggle(items()[1]!));
-    expect(within(items()[1]!).getByTestId("appealq-detail").textContent).toContain(
-      en["appeals.account.effect.moderationAction"],
-    );
+    expect(screen.getByTestId("appealq-detail").textContent).toContain(en["appeals.account.effect.moderationAction"]);
     fireEvent.click(toggle(items()[2]!));
-    expect(items()[2]!.querySelector("[data-effect]")).toBeNull();
+    expect(screen.getByTestId("appealq-detail").querySelector("[data-effect]")).toBeNull();
   });
 
   it("one row is open at a time, so the page has one form", () => {
@@ -282,9 +280,9 @@ describe("appeal queue on /admin/appeals", () => {
     button.focus();
     expect(document.activeElement).toBe(button);
     fireEvent.click(button);
-    const detail = within(items()[0]!).getByTestId("appealq-detail");
+    const detail = screen.getByTestId("appealq-detail");
     expect(button.getAttribute("aria-controls")).toBe(detail.id);
-    expect(within(items()[0]!).getByTestId("appealq-resolution")).toBeTruthy();
+    expect(screen.getByTestId("appealq-resolution")).toBeTruthy();
   });
 
   it("a draft survives closing the row", () => {
@@ -315,7 +313,7 @@ describe("appeal queue on /admin/appeals", () => {
   it("a resolved appeal opens to its text without a form", () => {
     wrap(<AppealQueueList appeals={[appealOf(strike.id, { status: "upheld" })]} onResolve={vi.fn<AppealResolve>()} />);
     fireEvent.click(toggle(items()[0]!));
-    expect(within(items()[0]!).getByTestId("appealq-detail").textContent).toContain("This strike was a mistake.");
+    expect(screen.getByTestId("appealq-detail").textContent).toContain("This strike was a mistake.");
     expect(screen.queryByTestId("appealq-resolution")).toBeNull();
   });
 });
