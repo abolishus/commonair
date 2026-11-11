@@ -88,7 +88,7 @@ function UsernameStatus({ check }: { check: UsernameCheck }): React.JSX.Element 
       data-state={check.state}
       data-reason={check.state === "unavailable" ? check.reason : undefined}
       className={
-        check.state === "unavailable" ? "block text-xs text-destructive" : "block text-xs text-muted-foreground"
+        check.state === "unavailable" ? "block text-sm text-destructive" : "block text-sm text-muted-foreground"
       }
     >
       {text}

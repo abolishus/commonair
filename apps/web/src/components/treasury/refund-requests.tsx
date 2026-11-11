@@ -332,7 +332,7 @@ function ResolveDialog({
         </Field>
       </ConfirmDialog>
       {blockedReason && (
-        <p id={`${id}-blocked`} className="text-xs text-muted-foreground">
+        <p id={`${id}-blocked`} className="text-sm text-muted-foreground">
           {blockedReason}
         </p>
       )}

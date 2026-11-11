@@ -68,7 +68,7 @@ export function GovernanceSettingsList({
               </StatusBadge>
             ) : null}
           </div>
-          {item.description ? <p className="text-xs text-muted-foreground">{item.description}</p> : null}
+          {item.description ? <p className="text-sm text-muted-foreground">{item.description}</p> : null}
           {isFlatRecord(item.value) ? (
             <KeyValueList
               dense

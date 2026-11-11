@@ -332,7 +332,7 @@ export function WatchRoomDrawer({
               <h3 id="watch-room-join-title" className="text-sm font-medium">
                 {t("watchRooms.join.title")}
               </h3>
-              <p className="text-xs text-muted-foreground">{t("watchRooms.join.intro")}</p>
+              <p className="text-sm text-muted-foreground">{t("watchRooms.join.intro")}</p>
               <Button data-testid="watch-room-join" onClick={() => void join(view.invite)} disabled={pending}>
                 {t("watchRooms.join.action")}
               </Button>
@@ -423,15 +423,15 @@ function RoomBody({
   return (
     <>
       <div className="flex flex-col gap-2">
-        <p data-testid="watch-room-band-notice" data-band={room.ageBand} className="text-xs">
+        <p data-testid="watch-room-band-notice" data-band={room.ageBand} className="text-sm">
           {t(room.ageBand === "minor" ? "watchRooms.band.minor" : "watchRooms.band.adult")}
         </p>
         {room.mature && (
-          <p data-testid="watch-room-mature-notice" className="text-xs font-medium">
+          <p data-testid="watch-room-mature-notice" className="text-sm font-medium">
             {t("watchRooms.mature")}
           </p>
         )}
-        <p className="text-xs text-muted-foreground">{t("watchRooms.sync")}</p>
+        <p className="text-sm text-muted-foreground">{t("watchRooms.sync")}</p>
         {!connected && <StatusBadge tone="neutral">{t("watchRooms.status.connecting")}</StatusBadge>}
       </div>
 
@@ -457,7 +457,7 @@ function RoomBody({
               onClick={() => onCopy(view.invite?.url ?? "")}
             />
           </div>
-          <p className="text-xs text-muted-foreground">{t("watchRooms.invite.hint")}</p>
+          <p className="text-sm text-muted-foreground">{t("watchRooms.invite.hint")}</p>
         </div>
       )}
       {hosting && !view.invite && (
@@ -530,7 +530,7 @@ function RoomBody({
           inputProps={{ "data-testid": "watch-room-input" }}
           sendProps={{ "data-testid": "watch-room-send" }}
         />
-        <p className="text-xs text-muted-foreground">{t("watchRooms.retention")}</p>
+        <p className="text-sm text-muted-foreground">{t("watchRooms.retention")}</p>
       </section>
 
       <div className="flex flex-wrap gap-2">
@@ -606,7 +606,7 @@ export function RoomReport({
       />
       {open && (
         <DialogContent data-testid="report-dialog" data-subject-type="watch_room" data-subject-id={roomId}>
-          <p className="text-xs text-muted-foreground">{t("watchRooms.reportDescription")}</p>
+          <p className="text-sm text-muted-foreground">{t("watchRooms.reportDescription")}</p>
           <ReportForm
             onSubmit={async (reason, details) => {
               await client.report({ subjectType: "watch_room", subjectId: roomId, reason, details });

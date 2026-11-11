@@ -96,9 +96,10 @@ describe("the counter-notice receipt (F39)", () => {
   it("the strike note uses the card's note style (F35)", () => {
     const text = readFileSync(join(import.meta.dirname, "../src/components/dmca/copyright.tsx"), "utf8");
     const note = /data-testid="copyright-strike-note" className="([^"]+)"/.exec(text)?.[1] ?? "";
-    expect(note).toContain("text-xs");
+    // The note style is 14 px reading text since D1.
+    expect(note).toContain("text-sm");
     expect(note).toContain("text-muted-foreground");
-    expect(note).not.toContain("text-sm");
+    expect(note).not.toMatch(/\btext-(xs|base|lg)\b/);
   });
 });
 

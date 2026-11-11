@@ -110,7 +110,7 @@ function PrivacyPolicyLink({ load }: { load?: () => Promise<LegalDoc | null> }):
   }, [load]);
   if (!doc) return null;
   return (
-    <p className="text-xs text-muted-foreground">
+    <p className="text-sm text-muted-foreground">
       {t("p2p.dialog.privacyPolicy")} <LegalDocumentLink doc={doc} />
     </p>
   );
@@ -132,7 +132,7 @@ function P2PSwitchRow({
     <div className="flex items-start justify-between gap-4">
       <div className="flex min-w-0 flex-col gap-1">
         <Label htmlFor={id}>{t("p2p.dialog.switch")}</Label>
-        <p id={hint} className="text-xs text-muted-foreground">
+        <p id={hint} className="text-sm text-muted-foreground">
           {t("p2p.disclosure")}
         </p>
       </div>
@@ -208,9 +208,9 @@ export function P2PDialog({ open, onOpenChange, status, loadPrivacyPolicy }: P2P
             checked={checked}
             onCheckedChange={(on) => setP2PPreference(on ? "on" : "off")}
           />
-          <p className="text-xs text-muted-foreground">{t("p2p.dialog.perDevice")}</p>
+          <p className="text-sm text-muted-foreground">{t("p2p.dialog.perDevice")}</p>
           {note && (
-            <output data-testid="player-p2p-dialog-note" className="block text-xs">
+            <output data-testid="player-p2p-dialog-note" className="block text-sm">
               {note}
             </output>
           )}
@@ -238,8 +238,8 @@ export function P2PSettingsSection(): React.JSX.Element {
           checked={checked}
           onCheckedChange={(on) => setP2PPreference(on ? "on" : "off")}
         />
-        <p className="text-xs text-muted-foreground">{t("p2p.settings.perDevice")}</p>
-        <p className="text-xs text-muted-foreground">{t("p2p.settings.nextStart")}</p>
+        <p className="text-sm text-muted-foreground">{t("p2p.settings.perDevice")}</p>
+        <p className="text-sm text-muted-foreground">{t("p2p.settings.nextStart")}</p>
       </CardContent>
     </Card>
   );

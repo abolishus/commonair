@@ -135,7 +135,7 @@ export function StatementView({
                   </span>
                   <MoneyAmount value={line.amount} locale={locale} className="text-xs font-medium" />
                 </div>
-                <p {...explanationProps} className="text-xs text-muted-foreground wrap-anywhere">
+                <p {...explanationProps} className="text-sm text-muted-foreground wrap-anywhere">
                   {line.explanation}
                 </p>
                 <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground tabular-nums">

@@ -103,7 +103,7 @@ export function WatchRoomEvidence({ reportId, evidence, lookup }: WatchRoomEvide
       <h3 id={`watch-room-evidence-${reportId}`} className="text-sm font-medium">
         {t("watchRooms.evidence.title")}
       </h3>
-      <p className="text-xs text-muted-foreground">{t("watchRooms.evidence.intro")}</p>
+      <p className="text-sm text-muted-foreground">{t("watchRooms.evidence.intro")}</p>
       <div className="flex flex-col gap-1">
         <h4 className="text-xs font-medium">{t("watchRooms.evidence.members")}</h4>
         <ul className="flex flex-col gap-1">
@@ -137,10 +137,10 @@ export function WatchRoomEvidence({ reportId, evidence, lookup }: WatchRoomEvide
       <div className="flex flex-col gap-1">
         <h4 className="text-xs font-medium">{t("watchRooms.evidence.messages")}</h4>
         {parsed.truncated && (
-          <p className="text-xs text-muted-foreground">{t("watchRooms.evidence.truncated", { count: parsed.kept })}</p>
+          <p className="text-sm text-muted-foreground">{t("watchRooms.evidence.truncated", { count: parsed.kept })}</p>
         )}
         {parsed.messages.length === 0 ? (
-          <p className="text-xs text-muted-foreground">{t("watchRooms.evidence.empty")}</p>
+          <p className="text-sm text-muted-foreground">{t("watchRooms.evidence.empty")}</p>
         ) : (
           <ol className="flex max-h-96 flex-col gap-1 overflow-y-auto">
             {parsed.messages.map((m) => (

@@ -155,7 +155,7 @@ export function EncoderGuide({ ingest, loadObsConfig, download = downloadJson }:
             </div>
           ))}
         </dl>
-        <p className="mt-2 text-xs text-muted-foreground">
+        <p className="mt-2 text-sm text-muted-foreground">
           {t("d5Dashboard.guide.slowUpload", {
             upload: formatNumber(8, locale),
             kbps60: formatNumber(4500, locale),

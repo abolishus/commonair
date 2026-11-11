@@ -345,7 +345,7 @@ function SubscriptionForm({
           />
           {def ? (
             <>
-              <p className="text-xs text-muted-foreground">
+              <p className="text-sm text-muted-foreground">
                 {def.scopes.length === 0
                   ? t("developer.sub.noScopes")
                   : fillNodes(t("developer.sub.scopes"), {

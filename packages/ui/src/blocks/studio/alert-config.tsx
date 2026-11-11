@@ -197,7 +197,7 @@ export function AlertConfigCard({
           </CardAction>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          {note ? <p className="text-xs text-muted-foreground">{note}</p> : null}
+          {note ? <p className="text-sm text-muted-foreground">{note}</p> : null}
           {preview ? preview(draft) : null}
           <FieldGroup>
             <SwitchField

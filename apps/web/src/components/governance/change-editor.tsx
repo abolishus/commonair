@@ -447,9 +447,9 @@ export function ChangeEditor({
     <div className="flex min-w-0 flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2">
         <ProposalKindBadge data-testid="proposal-kind" kind={kind} label={kindLabel(kind)} />
-        <p className="text-xs text-muted-foreground">{kindHint(kind)}</p>
+        <p className="text-sm text-muted-foreground">{kindHint(kind)}</p>
       </div>
-      {rows.length === 0 ? <p className="text-xs text-muted-foreground">{t("coop.form.changesEmpty")}</p> : null}
+      {rows.length === 0 ? <p className="text-sm text-muted-foreground">{t("coop.form.changesEmpty")}</p> : null}
       {rows.length > 0 ? (
         <ol className="flex flex-col gap-3">
           {rows.map((row, index) => {
@@ -547,7 +547,7 @@ export function ChangeEditor({
                   </div>
                 ) : null}
                 {row.key && !typed && isKnownSetting(row.key) ? (
-                  <p className="text-xs text-muted-foreground">{t("d6Governance.form.jsonFallback")}</p>
+                  <p className="text-sm text-muted-foreground">{t("d6Governance.form.jsonFallback")}</p>
                 ) : null}
                 {row.key && parsed.ok && current(row.key) !== undefined ? (
                   <div className="flex min-w-0 flex-col gap-1.5">

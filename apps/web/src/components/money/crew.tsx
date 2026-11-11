@@ -329,7 +329,7 @@ export function CrewProposeForm({
               </li>
             ))}
           </ul>
-          <p id={`${id}-bps-hint`} className="text-xs text-muted-foreground">
+          <p id={`${id}-bps-hint`} className="text-sm text-muted-foreground">
             {t("splits.bpsHint", { percent: bpsPercent(crewBps, locale) })}
           </p>
           {rows.length < SPLIT_RULES.maxRecipients && (
@@ -376,7 +376,7 @@ export function CrewProposeForm({
             data-example-cents={PREVIEW_EXAMPLE_CENTS}
             data-recipient-cents={preview?.crew[0]?.cents ?? ""}
             aria-live="polite"
-            className="flex flex-col gap-1 rounded-md border border-border p-3 text-xs/relaxed"
+            className="flex flex-col gap-1 rounded-md border border-border p-3 text-sm/relaxed"
           >
             <h3 className="font-medium">{t("splits.preview.title")}</h3>
             {preview ? (

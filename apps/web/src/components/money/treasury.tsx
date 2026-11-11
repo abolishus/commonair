@@ -675,7 +675,7 @@ export function PayoutsPanel({
         <Button data-testid="treasury-run-payouts" disabled={running} aria-busy={running || undefined} onClick={onRun}>
           {t("treasury.payouts.run")}
         </Button>
-        <p className="text-xs text-muted-foreground">{t("treasury.payouts.runHint")}</p>
+        <p className="text-sm text-muted-foreground">{t("treasury.payouts.runHint")}</p>
       </div>
       {result && <PayoutResult result={result} />}
       <DataTable

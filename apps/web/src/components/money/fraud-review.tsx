@@ -394,7 +394,7 @@ function FlagActionDialog({
         </div>
       </ConfirmDialog>
       {/* The button explains itself: a decision always needs a second person. */}
-      <p id={hintId} className="text-xs text-muted-foreground" data-testid="fraud-flag-action-hint">
+      <p id={hintId} className="text-sm text-muted-foreground" data-testid="fraud-flag-action-hint">
         {disabledReason ?? t(review ? "fraud.review.next" : "fraud.decide.secondPerson")}
       </p>
     </div>

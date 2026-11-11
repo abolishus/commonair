@@ -203,7 +203,7 @@ export function EligibilityList({ items, itemProps, className, ...props }: Eligi
                 tone={item.eligible ? "success" : "default"}
               />
             ) : null}
-            {item.detail ? <p className="text-xs text-muted-foreground">{item.detail}</p> : null}
+            {item.detail ? <p className="text-sm text-muted-foreground">{item.detail}</p> : null}
           </li>
         );
       })}
@@ -263,7 +263,7 @@ export function ShareInstructions({
         copiedLabel={copiedLabel}
         copyFailedLabel={copyFailedLabel}
       />
-      <div className="text-xs/relaxed whitespace-pre-line wrap-anywhere text-muted-foreground">{instructions}</div>
+      <div className="text-sm/relaxed whitespace-pre-line wrap-anywhere text-muted-foreground">{instructions}</div>
     </div>
   );
 }
@@ -323,7 +323,7 @@ export function ShareCard({
             <MoneyAmount value={amount} locale={locale} className="text-lg font-semibold" />
           </div>
         ) : null}
-        {note ? <p className="text-xs text-muted-foreground">{note}</p> : null}
+        {note ? <p className="text-sm text-muted-foreground">{note}</p> : null}
         {instructions}
       </CardContent>
       {buy ? (

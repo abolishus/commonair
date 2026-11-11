@@ -339,9 +339,9 @@ export function EvidenceItem({
     >
       <p className="text-sm font-medium">{evidenceKindLabel(evidence.kind)}</p>
       {evidence.storage === "bucket" ? (
-        <p className="text-xs text-muted-foreground">{t("safety.legal.bucketEvidence")}</p>
+        <p className="text-sm text-muted-foreground">{t("safety.legal.bucketEvidence")}</p>
       ) : data && !src ? (
-        <p className="text-xs text-muted-foreground">{t("safety.legal.evidenceNotImage")}</p>
+        <p className="text-sm text-muted-foreground">{t("safety.legal.evidenceNotImage")}</p>
       ) : (
         <FrameTile
           src={src}

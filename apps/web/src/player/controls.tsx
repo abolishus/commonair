@@ -200,7 +200,7 @@ function RadioSection<V extends number>({
           </Field>
         ))}
       </RadioGroup>
-      {note && <p className="text-xs text-muted-foreground">{note}</p>}
+      {note && <p className="text-sm text-muted-foreground">{note}</p>}
     </FieldSet>
   );
 }

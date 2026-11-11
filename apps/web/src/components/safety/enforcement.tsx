@@ -123,7 +123,7 @@ export function EnforcementStatementItem({
           {t("safety.enforcement.applied")} <RelativeTime date={s.createdAt} />
         </ItemDescription>
         {s.noticeIsDraft && (
-          <p data-testid="enforcement-draft-notice" className="text-xs text-muted-foreground">
+          <p data-testid="enforcement-draft-notice" className="text-sm text-muted-foreground">
             {t("safety.enforcement.draft")}
           </p>
         )}
@@ -156,7 +156,7 @@ export function EnforcementStatementItem({
             </Fact>
           )}
         </dl>
-        {s.appeal === null && <p className="text-xs text-muted-foreground">{t("safety.enforcement.noAppeal")}</p>}
+        {s.appeal === null && <p className="text-sm text-muted-foreground">{t("safety.enforcement.noAppeal")}</p>}
       </ItemContent>
       <ItemActions className="flex-row flex-wrap items-center gap-2 sm:flex-col sm:items-end">
         {reversed && <StatusBadge tone="success">{t("safety.enforcement.reversed")}</StatusBadge>}

@@ -53,7 +53,7 @@ export function CommentItem({
           {badge ? <Badge variant="outline">{badge}</Badge> : null}
           <span className="font-normal text-muted-foreground">{time}</span>
         </ItemTitle>
-        <div className="text-xs/relaxed wrap-anywhere">{children}</div>
+        <div className="text-sm/relaxed wrap-anywhere">{children}</div>
       </ItemContent>
       {actions?.length ? (
         <ItemFooter className="justify-start gap-1">

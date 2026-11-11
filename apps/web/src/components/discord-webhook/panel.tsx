@@ -228,7 +228,7 @@ function StatusLine({ status }: { status: DiscordWebhookStatusDto }): React.JSX.
       data-testid="discord-webhook-status"
       data-configured={String(status.configured)}
       data-error={status.lastError ?? ""}
-      className="flex min-w-0 flex-col gap-1 text-xs/relaxed break-words"
+      className="flex min-w-0 flex-col gap-1 text-sm/relaxed break-words"
     >
       <p className={status.configured ? undefined : "text-muted-foreground"}>
         {status.configured ? t("discord.status.on") : t("discord.status.off")}

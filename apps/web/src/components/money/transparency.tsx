@@ -212,7 +212,7 @@ export function SplitBarCard({
         ) : (
           <p className="text-sm text-muted-foreground">{empty}</p>
         )}
-        {note && <p className="text-xs text-muted-foreground">{note}</p>}
+        {note && <p className="text-sm text-muted-foreground">{note}</p>}
       </CardContent>
     </Card>
   );

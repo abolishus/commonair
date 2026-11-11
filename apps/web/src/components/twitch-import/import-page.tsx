@@ -229,7 +229,7 @@ function PreviewBody(
             <Label htmlFor={channelId} className="font-normal">
               {t("twitchImport.preview.channelChoice")}
             </Label>
-            <p className="text-xs text-muted-foreground">{t("twitchImport.fields.hint")}</p>
+            <p className="text-sm text-muted-foreground">{t("twitchImport.fields.hint")}</p>
             <ul className="flex min-w-0 flex-col gap-3" aria-label={t("twitchImport.fields.label")}>
               {CHANNEL_FIELDS.map((field) => (
                 <FieldChoice
@@ -245,8 +245,8 @@ function PreviewBody(
                 />
               ))}
             </ul>
-            <p className="text-xs text-muted-foreground">{t("twitchImport.preview.categoryHint")}</p>
-            <p className="text-xs text-muted-foreground">{t("twitchImport.fields.matureKept")}</p>
+            <p className="text-sm text-muted-foreground">{t("twitchImport.preview.categoryHint")}</p>
+            <p className="text-sm text-muted-foreground">{t("twitchImport.fields.matureKept")}</p>
           </div>
         </div>
         {fields.matureSuggested && (

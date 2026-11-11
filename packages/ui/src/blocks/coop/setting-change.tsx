@@ -177,7 +177,7 @@ export function SettingChangeView({
           ))}
         </ul>
       ) : null}
-      {note ? <p className="text-xs text-muted-foreground">{note}</p> : null}
+      {note ? <p className="text-sm text-muted-foreground">{note}</p> : null}
       <TechnicalDetails
         settingKey={settingKey}
         labels={labels}

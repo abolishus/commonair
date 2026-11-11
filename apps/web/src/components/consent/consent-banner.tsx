@@ -87,10 +87,10 @@ export function ConsentBanner({
         <h2 id={headingId} className="text-sm font-medium">
           {t("consent.banner.title")}
         </h2>
-        <p className="text-xs/relaxed text-muted-foreground">
+        <p className="text-sm/relaxed text-muted-foreground">
           {reason === "policy-changed" ? t("consent.banner.bodyChanged") : t("consent.banner.body")}
         </p>
-        <p className="text-xs text-muted-foreground">
+        <p className="text-sm text-muted-foreground">
           <PrivacyPolicyLink />
         </p>
       </div>

@@ -294,7 +294,7 @@ function FlagCard({
             }),
           ]}
         />
-        {details.length === 0 && <p className="text-xs text-muted-foreground">{t("admin.integrity.noDetails")}</p>}
+        {details.length === 0 && <p className="text-sm text-muted-foreground">{t("admin.integrity.noDetails")}</p>}
         <form
           data-testid="integrityq-decide"
           className="flex flex-col gap-3"

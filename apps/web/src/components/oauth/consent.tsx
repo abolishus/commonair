@@ -282,8 +282,8 @@ export function ConsentCard({
             <span className="sr-only"> ({t("oauth.consent.scopeCount", { count: scopes.length })})</span>
           </p>
           <ScopeList scopes={scopes} labelledBy={listId} />
-          <p className="text-xs text-muted-foreground">{t("oauth.consent.notSee")}</p>
-          <p className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+          <p className="text-sm text-muted-foreground">{t("oauth.consent.notSee")}</p>
+          <p className="flex flex-wrap items-center gap-x-2 text-sm text-muted-foreground">
             <span>{t("oauth.consent.signedInAs", { username: me.username })}</span>
             <Button
               variant="link"
@@ -296,7 +296,7 @@ export function ConsentCard({
             </Button>
           </p>
           {switchFailed && (
-            <p role="alert" className="text-xs text-destructive">
+            <p role="alert" className="text-sm text-destructive">
               {t("oauth.consent.signOutFailed")}
             </p>
           )}
@@ -315,7 +315,7 @@ export function ConsentCard({
               {t(error)}
             </p>
           )}
-          <p className="text-xs text-muted-foreground">{t("oauth.consent.afterwards")}</p>
+          <p className="text-sm text-muted-foreground">{t("oauth.consent.afterwards")}</p>
         </CardFooter>
       </Card>
     </PageContainer>

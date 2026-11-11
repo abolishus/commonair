@@ -141,7 +141,7 @@ export function GiveawayVerifyPage({
           {t("giveaways.verify.winners", { count: v.winners.length, of: v.winnerCount })}
         </h2>
         {v.winners.length === 0 ? (
-          <p className="text-xs text-muted-foreground">{t("giveaways.verify.noWinners")}</p>
+          <p className="text-sm text-muted-foreground">{t("giveaways.verify.noWinners")}</p>
         ) : (
           <ol className="flex min-w-0 flex-col gap-1">
             {v.winners.map((w) => (
@@ -163,8 +163,8 @@ export function GiveawayVerifyPage({
         <h2 id="giveaway-verify-entries" className="text-sm font-semibold">
           {t("giveaways.verify.entries", { count: v.entries.length })}
         </h2>
-        <p className="text-xs text-muted-foreground">{t("giveaways.verify.entriesHint")}</p>
-        {mine !== null ? <p className="text-xs">{t("giveaways.verify.mineHint")}</p> : null}
+        <p className="text-sm text-muted-foreground">{t("giveaways.verify.entriesHint")}</p>
+        {mine !== null ? <p className="text-sm">{t("giveaways.verify.mineHint")}</p> : null}
         <ol className="flex min-w-0 flex-col gap-1">
           {v.entries.map((p, i) => (
             <li
@@ -198,9 +198,9 @@ const PROBLEM_KEYS: Record<"commitment" | "entries" | "winners", MessageKey> = {
 };
 
 export function VerifyResult({ outcome }: { outcome: VerifyOutcome | null }): React.JSX.Element {
-  if (outcome === null) return <p className="text-xs text-muted-foreground">{t("giveaways.verify.checking")}</p>;
-  if (outcome.state === "pending") return <p className="text-xs">{t("giveaways.verify.pending")}</p>;
-  if (outcome.state === "cancelled") return <p className="text-xs">{t("giveaways.verify.cancelled")}</p>;
+  if (outcome === null) return <p className="text-sm text-muted-foreground">{t("giveaways.verify.checking")}</p>;
+  if (outcome.state === "pending") return <p className="text-sm">{t("giveaways.verify.pending")}</p>;
+  if (outcome.state === "cancelled") return <p className="text-sm">{t("giveaways.verify.cancelled")}</p>;
   return (
     <Alert
       data-testid="giveaway-verify-result"

@@ -148,7 +148,7 @@ export function PlaybackSection(): React.JSX.Element {
           }}
         />
       </SettingsRow>
-      <p className="px-4 py-3 text-xs text-muted-foreground sm:px-6">{t("d7Settings.prefs.playback.perDevice")}</p>
+      <p className="px-4 py-3 text-sm text-muted-foreground sm:px-6">{t("d7Settings.prefs.playback.perDevice")}</p>
     </SettingsSection>
   );
 }

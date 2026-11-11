@@ -209,7 +209,7 @@ export function BreakdownTally({
         <h3 className="font-medium">{label}</h3>
         <StatusBadge tone={passed ? "success" : "warning"}>{status}</StatusBadge>
       </header>
-      <p className="text-xs text-muted-foreground">{note}</p>
+      <p className="text-sm text-muted-foreground">{note}</p>
       <BreakdownBar segments={segments} label={label} formatLabel={formatLabel} showLegend={false} />
       <p className="text-xs text-muted-foreground tabular-nums">
         {votesLabel}: {formatNumber(votes, resolved)}
