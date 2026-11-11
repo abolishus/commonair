@@ -5,8 +5,9 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # ADR 0041: Launch at 1,000 concurrent live streams
 
-- Status: proposed 2026-11-11. The target in decision 1 is the maintainer's (2026-11-11); the rest
-  is a draft for acceptance. [Open questions](#open-questions) lists what still needs a decision.
+- Status: proposed 2026-11-11. The target in decision 1 and the answers under
+  [Maintainer's answers](#maintainers-answers-2026-11-11) are the maintainer's; the rest is a draft
+  for acceptance. [Open questions](#open-questions) lists what still needs a decision.
 - Date: 2026-11-11 (code checked at `14c3c83a`)
 - Amends: [ADR 0032](0032-scaling-and-availability.md) §2 (stages and triggers) and §7 (autoscaling
   out of scope). Everything else in 0032 stands: targets, external services, backups, the layer 4
@@ -35,10 +36,13 @@ One `c-4` carried about 100 viewers on one stream, or 60 over 3 streams, and bro
 the network (162 of 1,870 Mbit/s). At these costs moderation alone needs 200–250 cores for 1,000
 streams. Three of the costs look like software, not hardware:
 
-- **Moderation spawns a fresh ffmpeg for every sample** (`services/media/src/moderation/sampler.ts`,
-  `liveCapture`): an RTSP connect, a wait for a keyframe, a decode from it, a 1024 px PNG encode,
-  then a second decode in JS before the classifier, every `MODERATION_SAMPLE_SECONDS` (10 s) per
-  stream. Not profiled.
+- **Moderation spawns two ffmpeg processes for every sample**, every `MODERATION_SAMPLE_SECONDS`
+  (10 s) per stream. `liveCapture` (`services/media/src/moderation/sampler.ts`) connects over
+  RTSP, waits for a keyframe, decodes and encodes a 1024 px PNG; `decodeImage`
+  (`packages/moderation/src/frames.ts`) then runs a second ffmpeg to turn the PNG into raw
+  frames. Hash matching runs in media. The classifier already runs in the worker
+  (`services/worker/src/jobs/moderation-scan.ts`), one frame per job, with each 440 kB frame
+  passed through Valkey. Not profiled, so which half costs more is unknown.
 - **Serving HLS costs about 0.5 core per 100 viewers**, high for static segments. Not profiled.
 - **Ladders are capped per host already** (`TRANSCODE_MAX_LADDERS`: 2 with NVENC, else one per 4
   cores), and NVENC is supported (`TRANSCODE_HWACCEL`). Neither has been measured at fleet scale.
@@ -52,9 +56,9 @@ Launch scale needs a limit increase regardless of design.
 
 - **1,000 concurrent live streams at peak**, with provisioned headroom to 1,500 before admission
   control (decision 6) engages.
-- The concurrent-viewer target is open (see [Open questions](#open-questions)). Until it is set,
-  plans assume 10 viewers per stream on average (10,000 concurrent viewers), with a long tail:
-  most streams below the ladder threshold, a few hundred viewers on the largest.
+- **About 10,000 concurrent viewers at peak** (maintainer, 2026-11-11): 10 per stream on average,
+  with a long tail. Most streams sit below the ladder threshold, with a few hundred viewers on the
+  largest. The largest single stream to plan for is not set; S1-o's rehearsal uses 500.
 - ADR 0032's availability target (99.9% a month) applies unchanged.
 
 ### 2. Launch topology: stages 1, 2 and 3 at once, stage 4 on from day one
@@ -64,7 +68,7 @@ Launch scale needs a limit increase regardless of design.
 | State               | Managed PostgreSQL and Valkey, one standby each    | by hand (node size), as in 0032                                       | as 0032           |
 | App                 | caddy, api, chat, web, worker, origin              | CPU p95 across the pool                                               | 2                 |
 | Media               | MediaMTX + media (ingest, packaging, ladders, VOD) | placed streams and ladders per host against the host's measured limit | 2 + headroom      |
-| Moderation          | live-frame classification, off the media hosts     | sample lag (the oldest unclassified sample's age)                     | 1                 |
+| Moderation          | workers that consume only the moderation queue     | sample lag (the oldest unclassified sample's age)                     | 1                 |
 | Tracker, monitoring | as 0032                                            | not scaled                                                            | 1 each            |
 
 - Stage 4's relays and P1's browser P2P are on from day one, because egress grows with viewers
@@ -76,8 +80,10 @@ Launch scale needs a limit increase regardless of design.
 
 This replaces 0032 §7's "autoscaling before stage 2 has run by hand".
 
-- **A scaler adapter, with a static default.** The platform has a scaler interface (desired size
-  per pool, list hosts, create a host from an image, cordon, drain, destroy). The default
+- **A scaler adapter, with a static default.** The platform has a scaler interface (list a
+  pool's hosts, create a host from an image, destroy one). Cordoning and draining are our own
+  node states, not the provider's. The decision loop runs as a worker job, once per tick
+  cluster-wide. The default
   implementation is **static**: a fixed pool the operator lists, which never creates or destroys
   hosts. Our instance uses a DigitalOcean adapter. No provider is special-cased outside the
   adapter (AGENTS.md non-negotiable 3).
@@ -96,19 +102,25 @@ This replaces 0032 §7's "autoscaling before stage 2 has run by hand".
 - **Boot time is part of the design.** A droplet rebuild plus `selfhost.sh install` took about
   7 minutes (0032 §1). Pools boot from a prebuilt snapshot with images pulled, and keep warm
   spare hosts. Target: a new media host accepting streams within 3 minutes.
+- **A new host gets no long-lived secret from the provider.** Its user data carries only a
+  one-time join token (10 minutes, single use, accepted from the VPC only), which it exchanges
+  with the api for its role's configuration. Snapshots hold no secret and no node identity.
 - **Hard ceilings.** Each pool has a maximum size, from the budget in
   [Open questions](#open-questions). At the ceiling, admission control (decision 6) takes over.
   The scaler never spends past it.
 
 ### 4. Placement (S1-e, moved to launch)
 
-- **Ingest goes through the layer 4 load balancer.**
-  - The host that accepts a publish writes a placement row in Postgres (stream, host, start)
-    and owns the stream.
+- **RTMP ingest goes through its own layer 4 load balancer,** which targets the media pool.
+  The app pool's balancer stops forwarding 1935.
+  - MediaMTX on each media host names its node when it asks the api to authorize a publish and
+    when it reports the stream ready. The api records the node on the broadcast in Postgres, in
+    the transaction that starts it.
   - A media host reports itself unhealthy to the load balancer's health check when it is
     cordoned or at its stream limit, so new connections go elsewhere.
   - RTMP clients don't follow redirects reliably, so the balancer chooses the host.
-  - WHIP may answer with a redirect to a host's own address instead.
+  - WHIP signalling reaches the app pool, which picks the least-loaded node and proxies the
+    request to it over the VPC. The WebRTC media then flows to that node's own public address.
   - S1-e checks that the load balancer keeps existing connections to a host that fails its
     health check.
 - **Origin routes by placement.** Playlist and segment requests reach the app pool. Origin looks
@@ -138,8 +150,8 @@ Nothing is sized until these are measured (S1-i) and, where the targets miss, fi
 
 - **Moderation** keeps its detection guarantees (ADR 0006): same sample interval, same hash
   lists, same classifier. What changes is how a frame reaches the classifier: one long-lived
-  reader per stream, or a frame tap from the packager, instead of an ffmpeg per sample, and
-  batched inference in the moderation pool.
+  reader per stream, or a frame tap from the packager, instead of two ffmpeg processes per sample, batched
+  inference, and workers that can run as a moderation-only pool.
 - **Database connections** grow with hosts. Each pool host's services multiplied by
   `DATABASE_POOL_MAX` passes a managed node's `max_connections` quickly (47 usable on
   `db-s-1vcpu-2gb`). A transaction-mode pooler goes in front of Postgres: the provider's PgBouncer
@@ -151,7 +163,7 @@ Nothing is sized until these are measured (S1-i) and, where the targets miss, fi
 ### 6. Admission control when capacity runs out
 
 - When the media pool is at its ceiling, or scaling has not caught up, **a new go-live is
-  refused** with a "capacity full, retrying" state shown in the creator dashboard and to OBS (the
+  refused** by the api, where publishes are authorized, with a "capacity full, retrying" state shown in the creator dashboard and to OBS (the
   publish is rejected, and the encoder's own retry tries again). Live streams are never
   degraded or cut to make room.
 - Ladders are the first thing given up: past 80% of the pool, new ladders stop starting.
@@ -201,14 +213,24 @@ Nothing is sized until these are measured (S1-i) and, where the targets miss, fi
   capacity. For our instance the trigger to grow a pool is the scaler's, and the pool ceilings
   are the new "move on" number.
 
+## Maintainer's answers (2026-11-11)
+
+- **Viewers:** plan for about 10,000 concurrent at peak (decision 1).
+- **Ladders: raise the threshold.** A stream gets a ladder only above a higher viewer count than
+  today's 50, and only while its host has a free slot (decision 4). The working value is
+  `TRANSCODE_VIEWER_THRESHOLD=200` for our instance. S1-i's cost per ladder and the budget set the
+  final number. The default for self-hosters stays 50.
+- **Launch ramps in waves.** A cap on concurrent go-lives rises in steps, 100, then 300, then 1,000,
+  each step held until the scaler, the cost targets and the alerts have held at that load. The cap
+  is admission control's pool ceiling (decision 6) set by hand, so it needs no second mechanism.
+  The full-size rehearsal (decision 8) gates the last step, not the first.
+- **Budget: decided after measuring.** The monthly ceiling is set once S1-i has costs per stream,
+  per viewer and per ladder. Until then S1-k's pool maximums are parameters with no production
+  values.
+
 ## Open questions
 
-1. **Peak concurrent viewers** (total, and the largest single stream). This sizes the app pool,
-   the origin and egress.
-2. **Ladder policy at launch:** keep `TRANSCODE_VIEWER_THRESHOLD` at 50, raise it, or give
-   ladders only to some channels. This decides most of the media pool's size.
-3. **Monthly budget ceiling**, which sets each pool's maximum size.
-4. **Region and droplet sizes,** after the account limit increase. 0032's NYC3 still stands unless
+1. **Monthly budget ceiling**, which sets each pool's maximum size. Waits for S1-i (above).
+2. **Region and droplet sizes,** after the account limit increase. 0032's NYC3 still stands unless
    the limit forces another region.
-5. **Soft launch:** whether launch can ramp (invite waves or a go-live cap rising over days),
-   which would let the scaler and the numbers be proven at 100, then 300, then 1,000.
+3. **The largest single stream** to plan for, which sizes origin's fan-out for one placement.

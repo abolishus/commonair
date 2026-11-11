@@ -27,9 +27,14 @@ streams at once at peak at launch. [ADR 0041](docs/decisions/0041-launch-scale.m
 our instance with stages 1–3 together, on app, media and moderation pools, with autoscaling, placement,
 admission control and a Postgres pooler as launch requirements, and per-stream cost targets as a gate.
 The reordered S1 plan, with new units S1-i to S1-o, is in
-[S1-scaling.md](.claude/briefs/next/S1-scaling.md#launch-scale-2026-11-11-adr-0041). Waiting on the
-maintainer: the ADR's open questions (peak viewers, ladder policy, budget, region, soft launch),
-approval of S1-i's paid DigitalOcean run, and the droplet-limit request.
+[S1-scaling.md](.claude/briefs/next/S1-scaling.md#launch-scale-2026-11-11-adr-0041). Each unit has a
+full brief in `.claude/briefs/s1/`, in four waves behind a
+[contract step](.claude/briefs/s1/launch-contract-step.md) the orchestrator has not done yet. No
+unit has started. Waiting on the
+maintainer: acceptance of the ADR, the budget ceiling (after S1-i's numbers), the region, approval
+of S1-i's paid DigitalOcean run, and the droplet-limit request. Answered 2026-11-11: about 10,000
+concurrent viewers, a raised ladder threshold (working value 200), launch in waves (100, 300, 1,000
+concurrent go-lives).
 
 **Platform-debt follow-ups (2026-11-06).** The non-UI engineering follow-ups toward `v0.1.0`
 (harness, relay, worker, infra and money), on `main` from `5df97a06` to the docs commit. There were

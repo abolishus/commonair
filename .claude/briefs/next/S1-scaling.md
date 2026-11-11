@@ -103,16 +103,20 @@ Where this section and the ones above differ, this section and ADR 0041 win.
 DigitalOcean check, 2026-11-04), S1-g, S1-h. **Open:** S1-e and S1-f, now launch-critical, and
 the new units below.
 
-| Unit               | Owns                                                                                      | Build                                                                                                                                                                                                                                                                                                                                |
-| ------------------ | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| S1-i stream cost   | `harness/scenarios/load-*.ts`, `docs/operators/capacity.md`                               | the per-stream and per-viewer costs ADR 0041 decision 5 lists, each measured alone: ingest + packaging with no ladder, moderation, origin + Caddy per 100 viewers, one ladder on CPU and on a GPU droplet with NVENC. A CPU profile of moderation and origin under load. **Paid DigitalOcean run: the maintainer approves it first** |
-| S1-j moderation    | `services/media/src/moderation/**`, `packages/moderation/**`, a moderation role           | frames without an ffmpeg per sample (one long-lived reader per stream, or a tap from the packager), classification in its own pool with batched inference, sample lag as a metric. ADR 0006's guarantees unchanged: interval, hash lists, classifier, fail-closed behavior. Target 0.05 core per stream                              |
-| S1-e placement     | orchestrator contract step, then `services/media/**`, `services/origin/**`                | as above, to ADR 0041 decision 4: ingest through the layer 4 load balancer, a placement row written by the accepting host, a health check that fails when cordoned or full, origin routing by placement over the VPC, re-placement on host loss inside the reconnect grace, ladder slots counted per host                            |
-| S1-m admission     | orchestrator contract step, then `services/media/**` (publish auth), `apps/web` dashboard | ADR 0041 decision 6: refuse a new go-live when the media pool is full, show "capacity full, retrying" to the creator, stop new ladders past 80%, count every refusal                                                                                                                                                                 |
-| S1-f load balancer | `infra/caddy/**`, each app service's health route, a pooler under `infra/`                | as above, plus a transaction-mode pooler in front of Postgres (the provider's PgBouncer pools, a bundled PgBouncer for self-hosters), postgres.js without prepared statements, and every session-level Postgres feature the services use found and handled                                                                           |
-| S1-k scaler        | a new `services/scaler` (or a worker job, decided in its contract step), `infra/tofu/**`  | ADR 0041 decision 3: the scaler interface, a static default, a DigitalOcean adapter (first check whether Droplet Autoscale Pools accept a desired size and spare named hosts; otherwise the droplet API), cordon and drain, pool ceilings, prebuilt snapshots and warm spares (a new media host takes streams within 3 minutes)      |
-| S1-n roles         | `scripts/selfhost.sh`, `infra/selfhost/**`, `infra/quadlet/**`                            | `selfhost.sh --role app\|media\|moderation`: each installs only its units, joins the pool, and `upgrade` rolls one host at a time with migrate run once                                                                                                                                                                              |
-| S1-o rehearsal     | `harness/scenarios/**`, `docs/operators/capacity.md`                                      | locally: `placement` and `admission` scenarios, `multi-instance` with two media hosts. On DigitalOcean (each run approved): 100 → 300 streams with the scaler creating and draining hosts, then one full run at 1,000 streams and the viewer target, plus `failover` at that load                                                    |
+Each unit has a full brief in [`.claude/briefs/s1/`](../s1/), and the
+[contract step](../s1/launch-contract-step.md) comes before wave 1: a `cluster_nodes` table, the
+node on each broadcast, the new env keys and the names every unit shares.
+
+| Wave | Unit                                                      | Owns (summary)                                                                                   | Builds                                                                                                                                 |
+| ---- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
+| 0    | [S1-i stream cost](../s1/S1-i-stream-cost.md)             | `harness/src/load/**`, the load scenarios, `docs/operators/capacity.md`                          | a `load-cost` scenario that measures each cost alone, CPU profiles, the GPU ladder runbook. The paid run is the maintainer's           |
+| 1    | [S1-j moderation](../s1/S1-j-moderation.md)               | `services/media/src/moderation/**`, `packages/moderation/**`, the worker's moderation code       | one capture process per sample at most, batched classification, moderation-only workers, a lag metric. ADR 0006 unchanged              |
+| 1    | [S1-e placement](../s1/S1-e-placement.md)                 | `services/media` (not moderation), `services/origin`, `services/api/src/media`, `infra/mediamtx` | node registration, placement on go-live, resume on another node, origin routing by node, WHIP proxy, the `placement` scenario          |
+| 1    | [S1-f balancer and pooler](../s1/S1-f-balancer-pooler.md) | `packages/service`, `infra/caddy`, a new `infra/pgbouncer`, two tofu files                       | a draining state, the balancer's health route, certificates across app hosts, a transaction-mode pooler                                |
+| 1    | [S1-n roles](../s1/S1-n-roles.md)                         | `scripts/selfhost.sh`, `scripts/selfhost/**`, `infra/selfhost`, `infra/quadlet`                  | `--role all\|app\|media\|moderation`, joining with a one-time token, cordon and drain, migrate once, the roles e2e                     |
+| 2    | [S1-m admission](../s1/S1-m-admission.md)                 | `services/api/src/media/admission.ts`, the studio's live-status components                       | refusing a go-live at the cap or with no room, the creator's "capacity full, retrying" state, the ladder stop, the refusal alert       |
+| 2    | [S1-k scaler](../s1/S1-k-scaler.md)                       | a new `packages/scaler`, a worker job, `services/api/src/nodes`, `infra/tofu/digitalocean`       | the planner, static and DigitalOcean adapters, node join, snapshots for a 3-minute boot, pools and the ingest balancer in tofu         |
+| 3    | [S1-o rehearsal](../s1/S1-o-rehearsal.md)                 | `harness/scenarios/{scale,failover,load-launch}.ts`, `docs/operators/launch-rehearsal.md`        | streamers on every generator, a run per launch wave, the committed `failover` tool, the go/no-go table. Paid runs are the maintainer's |
 
 **Start now, outside the code:** ask DigitalOcean for a droplet-limit increase sized to ADR 0041's
 pools. It has the longest lead time of anything here.
@@ -122,15 +126,18 @@ pools. It has the longest lead time of anything here.
 Changed 2026-11-11 by ADR 0041. Each step's numbers gate the next.
 
 1. **S1-i first.** Every size and ceiling depends on it, and it tells S1-j and the origin work
-   whether their targets are reachable. In parallel, the ADR's open questions go to the maintainer
-   (viewers, ladder policy, budget, region, soft launch).
-2. **Then in parallel, on disjoint paths:** S1-j (moderation), the S1-e and S1-m contract step
-   followed by S1-e, S1-f (load balancer and pooler), S1-n (roles). Origin's per-viewer cost is
+   whether their targets are reachable. The maintainer answered on 2026-11-11: about 10,000
+   concurrent viewers, a raised ladder threshold (working value 200), launch in waves of 100, 300
+   and 1,000 concurrent go-lives, and the budget ceiling set from S1-i's numbers. Region and the
+   largest single stream are still open.
+2. **The contract step, then wave 1 in parallel on disjoint paths:** S1-j (moderation), S1-e
+   (placement), S1-f (load balancer and pooler), S1-n (roles). Origin's per-viewer cost is
    profiled in S1-i and fixed in S1-e if it is in origin.
-3. **S1-k** once S1-e's placement and S1-n's roles exist: it needs a cordon to call and a role to
-   boot. S1-m lands with or right after S1-e.
+3. **Wave 2:** S1-k, which needs S1-e's node states and S1-n's roles to boot a host, and S1-m,
+   which changes the publish authorization S1-e touched.
 4. **S1-o** last: the local scenarios join the full harness, then the paid rehearsals, then the
-   full-size run. Launch waits for the full-size run.
+   full-size run. The first launch wave (100 concurrent go-lives) waits for the 100 → 300
+   rehearsal; the 1,000 wave waits for the full-size run.
 
 ### Order before 2026-11-11 (kept for history)
 
