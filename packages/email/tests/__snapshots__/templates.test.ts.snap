@@ -574,13 +574,13 @@ exports[`newSignIn > renders accessible HTML and a plain-text alternative 1`] = 
 Example Air https://air.example.test
 
 
-New sign-in from a new device
+New sign-in to your account
 
-Your Example Air account was signed in to from a device we have not seen before.
+Your Example Air account was just signed in to.
 
 When
 
-October 18, 2026 at 2:30 PM UTC
+October 18, 2026 at 2:30 PM UTC (just now)
 
 Device
 
@@ -592,9 +592,9 @@ Lisbon, Portugal
 
 If this was you, there is nothing to do.
 
-If this was not you, sign out that session and change your password.
+If this was not you, sign out everywhere else, then change your password.
 
-Review active sessions https://air.example.test/settings/security#sessions
+Sign out everywhere else https://air.example.test/settings/security#sessions
 
 ----------------------------------------
 

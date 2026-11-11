@@ -1,0 +1,10 @@
+{
+  "newSignIn.preview": "If this was not you, sign out everywhere else and change your password.",
+  "newSignIn.heading": "New sign-in to your account",
+  "newSignIn.body": "Your {instance} account was just signed in to.",
+  "newSignIn.when": "{date} ({relative})",
+  "newSignIn.justNow": "just now",
+  "newSignIn.minutesAgo": "{minutes, plural, one {# minute ago} other {# minutes ago}}",
+  "newSignIn.notYou": "If this was not you, sign out everywhere else, then change your password.",
+  "newSignIn.action": "Sign out everywhere else"
+}

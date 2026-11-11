@@ -46,6 +46,7 @@ import { job as moneyRenew } from "./money-renew.ts";
 import { job as notifyDiscord } from "./notify-discord.ts";
 import { job as notifyEmailDigest } from "./notify-email-digest.ts";
 import { job as notifyGoLive } from "./notify-go-live.ts";
+import { job as notifyGovernanceEmail } from "./notify-governance-email.ts";
 import { job as notifyPrune } from "./notify-prune.ts";
 import { job as notifyPush } from "./notify-push.ts";
 import { job as notifyVodEmail } from "./notify-vod-email.ts";
@@ -175,4 +176,6 @@ export const JOBS = [
   // Design overhaul wave 4 (D7.3).
   notifyWeeklyDigest,
   notifyVodEmail,
+  // Design overhaul wave 5 (w5-notify).
+  notifyGovernanceEmail,
 ] as readonly JobDefinition[];

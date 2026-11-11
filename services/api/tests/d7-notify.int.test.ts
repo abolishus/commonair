@@ -81,6 +81,32 @@ describe("notifications.preferences for every type", () => {
     expect(stored).toHaveLength(offered);
   });
 
+  test("wave 5: governance email is offered (off by default); payout in-app is not a choice", async () => {
+    const me = await signUpAndSignIn(api);
+    const get = await me.client.call<Prefs>("GET", `${PATH}?type=governance`);
+    expect(get.body.defaults.email).toBe(false);
+    const on = await me.client.call<Prefs>("PUT", PATH, {
+      type: "governance",
+      medium: "email",
+      channel: null,
+      enabled: true,
+    });
+    expect(on.status, JSON.stringify(on.body)).toBe(200);
+    expect(on.body).toMatchObject({ type: "governance", defaults: { email: true }, builtIn: { email: false } });
+    const payout = await me.client.call("PUT", PATH, {
+      type: "payout",
+      medium: "in_app",
+      channel: null,
+      enabled: false,
+    });
+    expect(payout.status).toBe(400);
+    const stored = await db()
+      .select({ type: np.type, medium: np.medium, enabled: np.enabled })
+      .from(np)
+      .where(eq(np.userId, me.userId));
+    expect(stored).toEqual([{ type: "governance", medium: "email", enabled: true }]);
+  });
+
   test("only go-live is set per channel", async () => {
     const me = await signUpAndSignIn(api);
     const ch = await newChannel();

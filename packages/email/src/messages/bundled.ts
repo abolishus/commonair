@@ -17,6 +17,7 @@ import esReceipt from "./locales/es/receipt.json" with { type: "json" };
 import esSecurity from "./locales/es/security.json" with { type: "json" };
 import esTrust from "./locales/es/trust.json" with { type: "json" };
 import esW5Deletion from "./locales/es/w5-deletion.json" with { type: "json" };
+import esW5Notify from "./locales/es/w5-notify.json" with { type: "json" };
 import { en, nestFlat } from "./en.ts";
 import type { PartialCatalog } from "./types.ts";
 
@@ -38,5 +39,6 @@ export const BUNDLED: Readonly<Record<string, PartialCatalog>> = {
     esSecurity,
     esTrust,
     esW5Deletion,
+    esW5Notify,
   ),
 };

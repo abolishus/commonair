@@ -3,7 +3,7 @@
 // @vitest-environment happy-dom
 
 /**
- * Overhaul wave 4, D7.3 (d7-notify): the notifications grid, the `/inbox` page, the inbox rows
+ * Overhaul wave 4, D7.3 (d7-notify; wave 5 w5-notify: governance email, payout in-app always on): the notifications grid, the `/inbox` page, the inbox rows
  * (display names, glyphs, context lines, report outcomes, the mod view link) and `?src=digest`.
  */
 import { NOTIFICATION_TYPES, PREFERENCE_MEDIA, PREFERENCE_TYPES } from "@commonair/contracts/enums";
@@ -118,13 +118,16 @@ function typesClient(fail = false) {
 }
 
 describe("the grid model", () => {
-  it("every offered cell has a test id, nothing else does, and locked cells are offered cells", () => {
+  it("every offered cell has a test id, nothing else does, and locked cells are never offered", () => {
     for (const type of PREFERENCE_TYPES) {
       const ids = PREFERENCE_CELL_TEST_IDS[type];
       const locked = Object.keys(LOCKED_CELLS[type] ?? {});
-      expect(Object.keys(ids).sort()).toEqual(PREFERENCE_MEDIA[type].filter((m) => !locked.includes(m)).sort());
-      for (const m of locked) expect(PREFERENCE_MEDIA[type]).toContain(m);
+      expect(Object.keys(ids).sort()).toEqual([...PREFERENCE_MEDIA[type]].sort());
+      for (const m of locked) expect(PREFERENCE_MEDIA[type]).not.toContain(m);
     }
+    // Wave 5: governance email has its cell; payout in-app is always on.
+    expect(PREFERENCE_CELL_TEST_IDS.governance.email).toBe("notify-pref-governance-email");
+    expect(LOCKED_CELLS.payout).toEqual({ in_app: "d7Notify.locked.payoutInApp" });
   });
 });
 
@@ -138,11 +141,15 @@ describe("NotificationSettings: the grid", () => {
     if (!digest) throw new Error("no digest row");
     expect(within(digest).getAllByTestId("notify-cell-none")).toHaveLength(2);
     expect(byId("notify-pref-digest_weekly-email")?.getAttribute("data-state")).toBe("off");
-    // Governance is in-app only; payout in-app is locked, its email offered.
+    // Governance offers in-app and email (off by default), not push; payout in-app is "always" without
+    // a switch, its email offered.
     const governance = allById("notify-grid-row").find((r) => r.dataset.type === "governance");
-    expect(governance && within(governance).getAllByTestId("notify-cell-none")).toHaveLength(2);
+    expect(governance && within(governance).getAllByTestId("notify-cell-none")).toHaveLength(1);
+    expect(byId("notify-pref-governance-email")?.getAttribute("data-state")).toBe("off");
+    expect(governance?.textContent).toContain(en["w5Notify.row.governance.hint"]);
     const payout = allById("notify-grid-row").find((r) => r.dataset.type === "payout");
     expect(payout && within(payout).getAllByTestId("notify-cell-always")).toHaveLength(1);
+    expect(payout?.querySelectorAll('[role="switch"]')).toHaveLength(1);
     expect(byId("notify-pref-payout-email")?.getAttribute("data-state")).toBe("on");
     // The always rows, each with a reason.
     expect(allById("notify-always-row").map((r) => r.dataset.row)).toEqual([
@@ -174,6 +181,9 @@ describe("NotificationSettings: the grid", () => {
     fireEvent.click(byId("notify-pref-creator-email") as HTMLElement);
     await waitFor(() => expect(set).toHaveBeenCalledWith("creator", "email", true));
     expect(fake.tracked).toContain("settings.notifications|submit|email");
+    fireEvent.click(byId("notify-pref-governance-email") as HTMLElement);
+    await waitFor(() => expect(set).toHaveBeenCalledWith("governance", "email", true));
+    await waitFor(() => expect(byId("notify-pref-governance-email")?.getAttribute("data-state")).toBe("on"));
   });
 
   it("a failed save rolls the cell back and says so", async () => {
@@ -207,7 +217,8 @@ describe("NotificationSettings: the grid", () => {
     const describedBy = byId("notify-pref-creator-email")?.getAttribute("aria-describedby");
     expect(describedBy).toBeTruthy();
     expect(notice?.querySelector(`[id="${describedBy}"]`)?.textContent).toBe(en["notifySettings.emailUnverified"]);
-    expect(byId("notify-pref-governance-in_app")?.getAttribute("aria-describedby")).toBeNull();
+    expect(byId("notify-pref-governance-in_app")?.getAttribute("aria-describedby")).toBe(null);
+    expect(byId("notify-pref-governance-email")?.getAttribute("aria-describedby")).toBe(describedBy);
   });
 });
 

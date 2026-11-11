@@ -3,8 +3,9 @@
 
 /**
  * The notifications grid (overhaul wave 4, D7.3; account-admin.md P4): every preference type
- * against In app, Email and Push, offering only `PREFERENCE_MEDIA[type]` ("–" elsewhere), then the
- * types that always reach the inbox as locked "Always" cells with a tooltip saying why. Below `sm`
+ * against In app, Email and Push, offering only `PREFERENCE_MEDIA[type]` ("–" elsewhere, "Always"
+ * for the `LOCKED_CELLS`, such as payout in-app), then the types that always reach the inbox as
+ * locked "Always" cells with a tooltip saying why. Below `sm`
  * each row stacks into its own card with three labelled cells. Changes save as they are made.
  */
 import { SettingsRow, SettingsSection } from "@commonair/ui/blocks/forms";
@@ -165,6 +166,8 @@ function CellSwitch({ testId, ...props }: SwitchProps & { testId: string }): Rea
       return <Switch data-testid="notify-default-push" {...props} />;
     case "notify-pref-governance-in_app":
       return <Switch data-testid="notify-pref-governance-in_app" {...props} />;
+    case "notify-pref-governance-email":
+      return <Switch data-testid="notify-pref-governance-email" {...props} />;
     case "notify-pref-payout-email":
       return <Switch data-testid="notify-pref-payout-email" {...props} />;
     case "notify-pref-creator-in_app":

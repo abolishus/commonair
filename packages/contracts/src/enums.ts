@@ -336,13 +336,15 @@ export const PREFERENCE_TYPE_NOTIFICATIONS: Readonly<Record<PreferenceType, read
 };
 /**
  * The media the settings grid offers per preference type: only those with a sender today. A
- * medium left out is not offered (`notifications.preferences.set` refuses it). Governance email
- * waits for the governance mailer (wave 5); the digest is email only.
+ * medium left out is not offered (`notifications.preferences.set` refuses it). Governance email is
+ * the governance mailer's (overhaul wave 5: vote opened, result published). Payout in-app is not a
+ * choice: payout notices always reach the inbox as financial records, so the grid shows it as
+ * "always". The digest is email only.
  */
 export const PREFERENCE_MEDIA: Readonly<Record<PreferenceType, readonly NotifyMedium[]>> = {
   go_live: ["in_app", "email", "push"],
-  governance: ["in_app"],
-  payout: ["in_app", "email"],
+  governance: ["in_app", "email"],
+  payout: ["email"],
   creator: ["in_app", "email"],
   digest_weekly: ["email"],
 };

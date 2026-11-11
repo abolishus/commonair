@@ -19,6 +19,7 @@ import receipt from "./locales/en/receipt.json" with { type: "json" };
 import security from "./locales/en/security.json" with { type: "json" };
 import trust from "./locales/en/trust.json" with { type: "json" };
 import w5Deletion from "./locales/en/w5-deletion.json" with { type: "json" };
+import w5Notify from "./locales/en/w5-notify.json" with { type: "json" };
 
 /** Every English JSON group, by file name (the order of `locales/en/`). */
 export const EN_GROUPS = {
@@ -33,6 +34,7 @@ export const EN_GROUPS = {
   security,
   trust,
   "w5-deletion": w5Deletion,
+  "w5-notify": w5Notify,
 } as const;
 
 type Flat = typeof account &
@@ -45,7 +47,8 @@ type Flat = typeof account &
   typeof receipt &
   typeof security &
   typeof trust &
-  typeof w5Deletion;
+  typeof w5Deletion &
+  typeof w5Notify;
 
 type BlockOf<K> = K extends `${infer B}.${string}` ? B : never;
 

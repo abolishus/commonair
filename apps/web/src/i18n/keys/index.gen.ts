@@ -90,6 +90,7 @@ import type { Key as W3Predictions } from "./w3-predictions.gen.ts";
 import type { Key as W3SurgeRaids } from "./w3-surge-raids.gen.ts";
 import type { Key as W3WatchRooms } from "./w3-watch-rooms.gen.ts";
 import type { Key as W5Deletion } from "./w5-deletion.gen.ts";
+import type { Key as W5Notify } from "./w5-notify.gen.ts";
 import type { Key as W5Schedule } from "./w5-schedule.gen.ts";
 import type { Key as W5Studio } from "./w5-studio.gen.ts";
 import type { Key as W5Viewers } from "./w5-viewers.gen.ts";
@@ -184,6 +185,7 @@ export type MessageKey =
   | W3SurgeRaids
   | W3WatchRooms
   | W5Deletion
+  | W5Notify
   | W5Schedule
   | W5Studio
   | W5Viewers
@@ -277,6 +279,7 @@ export const NAMESPACES = [
   "w3-surge-raids",
   "w3-watch-rooms",
   "w5-deletion",
+  "w5-notify",
   "w5-schedule",
   "w5-studio",
   "w5-viewers",
