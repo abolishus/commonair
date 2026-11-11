@@ -792,6 +792,66 @@ The plan as written:
 
 ### Wave 5: cleanup and the deferred decisions
 
+**Shipped 2026-11-11.** The contract step was `6552ef20`, with `790b702d` and `14044f72`. It added:
+
+- the channel schedule: migration 0059 (`channel_schedules`, `channel_schedule_slots`, `channel_schedule_one_offs`) and the 0060 triggers (a known time zone, at most 21 slots and 100 one-offs, a skip names a slot of the same channel);
+- `LoyaltyBalance.earnedToday` (the caller's own balance only), `stream.lastBroadcast`, `Channel.viewer.subscribed`, `Channel.nextStreamAt`;
+- the audit log's `from`/`to`, `AdminQueueCount.nextDueAt`;
+- the deletion marker `subscriptions.renewal_stopped_by_deletion_id`, `coop.shares.askRefundDetails`, and ADR 0042;
+- the new `NOTIFY_JOBS` and UI metric names.
+
+Seven units ran in one workflow pass (w5-viewers, w5-schedule, w5-deletion, w5-watch, w5-studio, w5-notify, w5-admin), merged at `dbfbf7d2`..`be7b7003` with the integration fixes up to `3d04c229`. The 14 px sweep ran after them on the merged result and was merged at `13c70418`. No unit added a dependency or an env var. CI follow-ups were `4f30a430` and `9f1233cc` (two chat flakes fixed at their third occurrence), `b5debc56` and `4b07c7c5`. CI on `__HEAD__` (run **RUN**) was green; every earlier attempt is explained in `docs/operators/flakes.md`.
+
+What shipped:
+
+- **Viewer counts:** the signed-in channel owner is left out of the live count, the health card, the rollup and attestations. ADR 0014 has an amendment.
+- **Schedule:** the studio `/schedule` page (weekly slots in the channel's time zone, one-offs, skips); the offline channel's next-stream card with "Add to calendar" (one `.ics`) and "Subscribe in calendar" (a first-party `webcal:` feed); the weekly schedule on About, fetched only when About opens.
+- **Deletion (ADR 0042):** renewal stops when a deletion is requested; cancelling the deletion turns back on exactly what it turned off; treasurers see members leaving and can have the platform ask them for refund details.
+- **Watch:** the subscribers-only reason before typing (J3-d), "Today: N of {cap}" in the points popover, and the per-channel go-live alerts on `/following`.
+- **Studio:** exact recap counts from `stream.lastBroadcast` (fewer requests than the paging it replaced), the J2-e share prompt on the first encoder connection, and the studio mod view on `QueueLayout`.
+- **Notifications:** the new-sign-in email (at most one per member per 10 minutes, never for refreshes or the first session); the governance mailer (vote opened to the electorate, result published to active members); governance email is offered; payout in-app is always on.
+- **Staff:** audit-log date filters (UTC days, in the URL), "Next due" on the admin queue tiles, `/admin/coop` on the admin width rule, and the b8 selectors doc for `/admin/appeals?case=`.
+- **The 14 px sweep:** reading text (paragraphs, help text, card, dialog, popover and empty-state bodies, form hints) moved to 14 px from the shared primitives out. Tables, key-value lists, metadata, chart captions, keyboard hints, chat and player chrome, and form controls stay at 12 px.
+
+Recorded calls (conservative defaults; the maintainer can revisit):
+
+- **Deletion money (ADR 0042):**
+  - No automatic proration. Renewal stops at the request, so paid time runs out during the 30-day grace; `past_due` subscriptions end at once, as a member's own cancel does.
+  - A provider that cannot stop a renewal refuses the request, so no deletion is ever pending while a card can renew. A provider outage at cancel leaves the subscription ending on both sides and never blocks keeping the account.
+  - A deletion never waits on a share refund. The treasurer asks through the platform (at most once a day per share, audited by id); the member replies to the instance's general contact, since there is no treasury address; after deletion the refund stays owed by share id.
+- **Viewer counts:** only the owner's signed-in sessions are left out; the copy says exactly that. Matching the owner's devices or address is a follow-up in the amendment.
+- **Schedule:** schedule edits are ordinary owner actions (no audit row). The next-stream card shows the time but no category, to add no request. The time zone picker is a curated list (the intl policy forbids `Intl.supportedValuesOf`).
+- **Chat gate:** VIPs are exempt before typing, as the server is; staff are not locked out before typing. The button says "Sub to chat" (voice guide).
+- **Notifications:** governance email is opt-in, and a vote-opened mail is never sent after voting closed. The new-sign-in mail says the account "was just signed in to", since nothing tracks devices.
+- **Studio:** recap chat counts include held and deleted messages (they were sent); `lastBroadcast` skips rehearsals, like `lastLiveAt`.
+
+What was left, and where it went:
+
+- **To the maintainer (browser checks, never run):**
+  - `/schedule` at 320 and 1440 px, the time zone picker, and saving with a one-off in progress;
+  - the offline channel's next-stream card, "Add to calendar" in a real calendar app, and the `webcal:` feed subscription;
+  - the subscribers-only gate and "Sub to chat"; the points popover's "Today" line;
+  - `/following`'s per-channel alerts (the Select inside the Popover) at 320 px;
+  - the share prompt on a first go-live (Copy link, the share sheet on a phone);
+  - the studio mod view on `QueueLayout` at 1024 px and below;
+  - the delete dialog's new copy and the treasury's "Members leaving" panel;
+  - the notifications grid (governance email, payout "Always") at 320 px;
+  - `/admin/audit` date inputs, the queue tiles' "Next due", and `/admin/coop` at its new width;
+  - the 14 px sweep across the app in both themes, above all the studio, admin and money pages.
+- **Small follow-ups (not built):**
+  - Go 1.27.4 for GO-2026-6859, due on or after 2026-11-17: the toolchain, the golang image pins (`bun scripts/pin-images.ts --write`) and CI's `GO_VERSION`, then remove the dated exception in `supply-chain.json`, which expires on 2026-11-18.
+  - A `channel.schedule.updated` event; `browserTimeZone()`/`timeZoneNames()` in `packages/ui` so the picker can list every zone.
+  - A `leaving` filter on `coop.shares.list` (the treasury tab now reads every page of held shares, capped at 50); a treasury contact address (`TREASURY_EMAIL`).
+  - The raid viewer count (`packages/interact/src/raids.ts`) still includes the owner.
+  - `NOTIFY_DEFAULTS.payout.in_app` and `SettingsClient.follows`/`setBell` are unused leftovers.
+  - A member who subscribes mid-session stays gated until the next chat join (the Stripe redirect reloads, so the common path is fine).
+  - The PWA screenshot SVGs are not rendered to PNG at build, and a `beforeinstallprompt` fired before the shell bundle runs is still missed.
+- **Parked by decision:** the interest list and points redemption (decisions 3 and 4).
+
+**The overhaul plan is complete:** waves 1 to 5 have shipped. What remains is the maintainer's browser checks above, the dated Go upgrade, the small follow-ups listed, and the two parked decisions.
+
+The plan as written:
+
 - the app-wide 14 px reading-text sweep;
 - the ADR 0014 amendment, plus leaving the owner out of viewer counts;
 - the `ChannelSchedule` contract (next stream, Add to calendar);
