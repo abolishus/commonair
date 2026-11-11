@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { and, desc, eq, lt, ne, or } from "drizzle-orm";
+import type { ModeratorAddedNotificationPayload } from "@commonair/contracts/notify";
 import { schema, uuidv7 } from "@commonair/db";
 import type { Deps } from "../deps.ts";
 import { broadcasterFields, emit, userFields } from "../events/outbox.ts";
@@ -17,7 +18,6 @@ import { incomingKey, UPLOAD_TYPES } from "../moderation/upload-keys.ts";
 import { commitUpload } from "../moderation/uploads.ts";
 import { attributeFollow } from "../portability/attribution.ts";
 import { restrictedIds, withRestriction } from "../moderation/restriction.ts";
-import { moderatorAddedNoticeTx } from "../channels/moderator-added.ts";
 import { changeRoleInTx } from "../channels/roles.ts";
 import { mediaSettingsOf, updateMediaSettings } from "../channels/media-settings.ts";
 
@@ -340,8 +340,10 @@ async function changeRole(
   const changed = await deps.db.transaction(async (tx) => {
     const done = await changeRoleInTx(tx, { channel: c, target, role: input.role, op, actorId: caller.user.id });
     // D7 (J5-g): a member made a moderator or editor hears about it; a VIP badge is not authority.
-    if (done && op === "add" && (input.role === "moderator" || input.role === "editor"))
-      await moderatorAddedNoticeTx(tx, { channel: c, userId: target.id, role: input.role });
+    if (done && op === "add" && (input.role === "moderator" || input.role === "editor")) {
+      const payload: ModeratorAddedNotificationPayload = { channelId: c.id, slug: c.slug, role: input.role };
+      await tx.insert(schema.notifications).values({ userId: target.id, type: "moderator_added", payload });
+    }
     return done;
   });
   if (changed) await publishControl(deps, c.id, { op: "invalidate", scope: "user", userId: target.id });

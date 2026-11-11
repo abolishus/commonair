@@ -16,8 +16,9 @@
  *   representative `subjectId` among them; every body is kept as evidence, and removing the
  *   content deletes them all. A wave has several senders, so it is never a suspension or ban target.
  */
-import { and, asc, desc, eq, inArray, isNull, lt, or, sql, type SQL } from "drizzle-orm";
-import type { REPORT_REASONS, REPORT_SUBJECTS } from "@commonair/contracts/enums";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, or, sql, type SQL } from "drizzle-orm";
+import { REPORT_SUBJECTS, type REPORT_OUTCOMES, type REPORT_REASONS } from "@commonair/contracts/enums";
+import type { ReportOutcomeNotificationPayload } from "@commonair/contracts/notify";
 import { findClause, MODERATION_CONSTANTS, parseRuleRef } from "@commonair/moderation";
 import { schema, type Executor } from "@commonair/db";
 import type { Deps } from "../deps.ts";
@@ -32,13 +33,23 @@ import { os, requireCaller, requireChannel } from "../lib/orpc.ts";
 import { afterBroadcastEnded, endBroadcastInTx, type EndedBroadcast } from "../moderation/live.ts";
 import { setSuspension } from "../moderation/suspension.ts";
 import { notifyRoles } from "../moderation/notify.ts";
-import { notifyReportOutcomesTx } from "../moderation/report-outcome.ts";
 import { staffActorType } from "../moderation/review.ts";
 import { reportReasonRuleRef, staffRuleRef } from "../transparency/rule-ref.ts";
 import { watchRoomEvidence } from "../watch-rooms/evidence.ts";
 
-const { reports, users, channels, chatMessages, vods, clips, broadcasts, moderationCases, modActions, auditLog } =
-  schema;
+const {
+  reports,
+  users,
+  channels,
+  chatMessages,
+  vods,
+  clips,
+  broadcasts,
+  moderationCases,
+  modActions,
+  auditLog,
+  notifications,
+} = schema;
 type ReportRow = typeof reports.$inferSelect;
 type ReportSubject = (typeof REPORT_SUBJECTS)[number];
 type ReportReason = (typeof REPORT_REASONS)[number];
@@ -54,6 +65,82 @@ export const reportPriority = (reason: ReportReason) =>
 /** Whether a report opens a report-derived case (urgent reasons on content subjects). */
 export const opensCase = (subject: ReportSubject, reason: ReportReason): subject is (typeof CASE_SUBJECTS)[number] =>
   URGENT_REASONS.includes(reason) && (CASE_SUBJECTS as readonly string[]).includes(subject);
+
+/*
+ * `report_outcome` notices (overhaul wave 4, D7; ux-journeys J5-f; DSA Art. 16(5)): a decided
+ * report tells its reporter the outcome in the deciding transaction. Ids and enums only, never the
+ * moderator, the note or the action; the reported person is never told through this type. One row
+ * per report (the dedupe key), so a second decision path never notifies twice.
+ */
+type ReportOutcome = (typeof REPORT_OUTCOMES)[number];
+
+export const reportOutcomeKey = (reportId: string) => `report-outcome-${reportId}`;
+
+interface DecidedReport {
+  id: string;
+  reporterId: string | null;
+  subjectType: ReportSubject;
+}
+
+/** `parties` are the people the reports are about (the subject's account, a wave's senders). */
+export async function notifyReportOutcomesTx(
+  tx: Executor,
+  decided: readonly DecidedReport[],
+  outcome: ReportOutcome,
+  parties: ReadonlySet<string>,
+  now: Date,
+): Promise<number> {
+  const rows = decided.flatMap((r) => {
+    if (!r.reporterId || parties.has(r.reporterId)) return [];
+    const payload: ReportOutcomeNotificationPayload = { reportId: r.id, subjectType: r.subjectType, outcome };
+    return [
+      {
+        userId: r.reporterId,
+        type: "report_outcome" as const,
+        payload,
+        dedupeKey: reportOutcomeKey(r.id),
+        createdAt: now,
+      },
+    ];
+  });
+  if (rows.length === 0) return 0;
+  const inserted = await tx
+    .insert(notifications)
+    .values(rows)
+    .onConflictDoNothing()
+    .returning({ id: notifications.id });
+  return inserted.length;
+}
+
+const isReportSubject = (s: string): s is ReportSubject => (REPORT_SUBJECTS as readonly string[]).includes(s);
+
+/**
+ * A moderation case was decided: only the reports that fed it learn the outcome. Only a
+ * report-derived (`human`) case has reports behind it, and only urgent reports open or join one
+ * (`opensCase`); a non-urgent report on the same subject stays undecided in the reports queue.
+ */
+export async function notifyCaseReportersTx(
+  tx: Executor,
+  c: { origin: string; subjectType: string; subjectId: string },
+  outcome: ReportOutcome,
+  subjectUserId: string | null,
+  now: Date,
+): Promise<number> {
+  if (c.origin !== "human" || !isReportSubject(c.subjectType)) return 0;
+  const fed = await tx
+    .select({ id: reports.id, reporterId: reports.reporterId, subjectType: reports.subjectType })
+    .from(reports)
+    .where(
+      and(
+        eq(reports.subjectType, c.subjectType),
+        eq(reports.subjectId, c.subjectId),
+        eq(reports.status, "open"),
+        inArray(reports.reason, [...URGENT_REASONS]),
+        isNotNull(reports.reporterId),
+      ),
+    );
+  return notifyReportOutcomesTx(tx, fed, outcome, new Set(subjectUserId ? [subjectUserId] : []), now);
+}
 
 interface SubjectInfo {
   channelId: string | null;

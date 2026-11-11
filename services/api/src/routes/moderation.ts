@@ -28,11 +28,11 @@ import { flagsOf, historyOf, refsFor, toCase, toFlag, toHold, toLegalCase, toNcm
 import { openEvidence, openSnapshot } from "../moderation/evidence.ts";
 import { afterBroadcastEnded, endBroadcastInTx, endLiveInTx, type EndedBroadcast } from "../moderation/live.ts";
 import { notifyUser } from "../moderation/notify.ts";
-import { notifyCaseReportersTx } from "../moderation/report-outcome.ts";
 import { planReview, staffActorType } from "../moderation/review.ts";
 import { liftRestrictionInTx } from "../moderation/restriction.ts";
 import { moderationRuntime } from "../moderation/runtime.ts";
 import { caseDecisionRuleRef, caseRuleRefAfter } from "../transparency/rule-ref.ts";
+import { notifyCaseReportersTx } from "./safety.ts";
 
 const { moderationCases, contentLabels, users, channels, evidenceObjects, ncmecReports, legalHolds } = schema;
 const { localHashList, modActions } = schema;

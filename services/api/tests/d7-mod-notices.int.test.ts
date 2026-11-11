@@ -160,6 +160,33 @@ describe("report_outcome", () => {
     expect(await notes(reporter, "report_outcome")).toHaveLength(1);
   });
 
+  test("a case decision tells only the urgent reports behind it; a non-urgent report waits for its own resolve", async () => {
+    const [owner, urgent, spam] = await people(3);
+    if (!owner || !urgent || !spam) throw new Error("signup");
+    const broadcastId = await broadcastOf(owner);
+    const spamReport = await report(spam, { subjectType: "broadcast", subjectId: broadcastId, reason: "spam" });
+    const urgentReport = await report(urgent, {
+      subjectType: "broadcast",
+      subjectId: broadcastId,
+      reason: "minor_safety",
+    });
+    const c = await caseFor(broadcastId);
+    const res = await staff.client.call("POST", `/api/admin/moderation/cases/${c.id}/review`, {
+      decision: "clear",
+      note: "nothing found",
+    });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect((await notes(urgent, "report_outcome")).map((n) => n.payload)).toEqual([
+      { reportId: urgentReport, subjectType: "broadcast", outcome: "no_action" },
+    ]);
+    expect(await notes(spam, "report_outcome")).toEqual([]);
+    // Staff later decide the spam report: its reporter hears that decision.
+    expect((await resolve(spamReport, "actioned")).status).toBe(200);
+    expect((await notes(spam, "report_outcome")).map((n) => n.payload)).toEqual([
+      { reportId: spamReport, subjectType: "broadcast", outcome: "action_taken" },
+    ]);
+  });
+
   test("a case decided warn is action_taken; an escalation decides nothing until legal dismisses it", async () => {
     const [o1, o2, reporter] = await people(3);
     if (!o1 || !o2 || !reporter) throw new Error("signup");
