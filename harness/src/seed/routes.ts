@@ -82,10 +82,15 @@ export const SEED_ROUTES: Readonly<Record<string, SeedRoute>> = {
   "/settings": viewer,
   "/settings/": viewer,
   "/settings/privacy": viewer,
+  // d7-settings and d7-security (overhaul wave 4): the account page, and sign-in methods and sessions.
+  "/settings/account": viewer,
+  "/settings/security": viewer,
   "/settings/connections": viewer,
   "/settings/preferences": viewer,
   "/settings/subscriptions": viewer,
   "/settings/notifications/": viewer,
+  // d7-notify: the full-page inbox (seed-platform writes the notifications).
+  "/inbox": viewer,
   "/settings/notifications/unsubscribe": {
     as: "anonymous",
     query: ex("platform", "unsubscribeQuery"),
@@ -143,6 +148,11 @@ export const SEED_ROUTES: Readonly<Record<string, SeedRoute>> = {
   "/overlay/alerts": { as: "anonymous", query: ex("interact", "overlayAlertsQuery"), expectData: true },
   "/overlay/goals": { as: "anonymous", query: ex("interact", "overlayGoalsQuery"), expectData: true },
 
+  // d7-admin: the console home, the audit log and a person's standing (viewer2 has appeals and
+  // copyright history).
+  "/admin/": admin,
+  "/admin/audit": admin,
+  "/admin/users/$username": { ...admin, params: { username: { fixed: "demo_viewer2" } } },
   "/admin/moderation": admin,
   "/admin/appeals": admin,
   "/admin/integrity": admin,
