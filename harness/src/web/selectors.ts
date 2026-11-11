@@ -725,3 +725,39 @@ export const D5_MONEY_IDS = {
   analyticsPnl: "analytics-pnl",
   analyticsPnlRow: "analytics-pnl-row",
 } as const;
+
+/**
+ * d6-governance (overhaul wave 4, D6.2 and D6.3), beside the E5 ids (`coop-selectors.ts`), which
+ * keep their names. On `/coop/proposals/new` a known setting's row gets typed fields
+ * (`proposalChangeFields`, `data-typed="true"` on `proposal-change`) and its JSON
+ * (`proposal-change-value`) moves under `proposalChangeAdvanced` (kept mounted, hidden until
+ * opened); `proposal-save` stays enabled and carries `data-valid`. `/coop/settings` groups rows by
+ * theme (`settingsGroup`, `data-theme`); `setting-row` keeps `data-key`, `data-protected` and
+ * `data-updated-by`. Result bars carry `data-rule` and `data-passed`; a signed-out voter gets
+ * `voteJoin` instead of the ballot. `/coop/council` keeps every `council-member` tile mounted (past
+ * the top 12 they are `hidden` until `councilShowAll`), so reading their data needs no click.
+ */
+export const D6_GOVERNANCE_IDS = {
+  proposalChangeAdvanced: "proposal-change-advanced",
+  proposalChangeFields: "proposal-change-fields",
+  proposalChangePreview: "proposal-change-preview",
+  proposalFormProblems: "proposal-form-problems",
+  proposalNextStep: "proposal-next-step",
+  proposalParticipation: "proposal-participation",
+  voteJoin: "vote-join",
+  voteJoinCreate: "vote-join-create",
+  voteJoinSignIn: "vote-join-signin",
+  voteJoinMembership: "vote-join-membership",
+  voteResultBars: "vote-result-bars",
+  voteResultBar: "vote-result-bar",
+  voteResultRule: "vote-result-rule",
+  councilShowAll: "council-show-all",
+  councilElections: "council-elections",
+  coopCouncilAll: "coop-council-all",
+  electionDeadline: "election-deadline",
+  electionJoin: "election-join",
+  settingsGroups: "settings-groups",
+  settingsGroup: "settings-group",
+  settingValue: "setting-value",
+  settingChangedBy: "setting-changed-by",
+} as const;

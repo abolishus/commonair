@@ -2,12 +2,20 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import type * as React from "react";
-import { Cancel01Icon, SquareLock01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
+import { Cancel01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
 import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "@commonair/ui/components/item";
 import { cn } from "@commonair/ui/lib/utils";
 import type { DataAttributes } from "../../lib/data-attributes.ts";
 import { TargetLink, type LinkTarget } from "../../lib/link.tsx";
 import { StatusBadge } from "../../primitives/status-badge.tsx";
+import { ProtectedBadge } from "./setting-change.tsx";
+
+/**
+ * A row's one link, stretched over the row (overhaul D6.3: governance lists are rows you tap): the
+ * focus ring is drawn on the stretched area so the whole row shows it.
+ */
+export const STRETCHED =
+  "min-w-0 wrap-anywhere after:absolute after:inset-0 focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-ring";
 
 export interface GovernanceOutcomeItem {
   proposalId: string;
@@ -40,7 +48,7 @@ export interface GovernanceOutcomeListProps extends Omit<React.ComponentProps<"d
   itemProps?: DataAttributes;
 }
 
-/** Proposals decided in a period, with their outcome, kind and reason (transparency, co-op overview). */
+/** Proposals decided in a period, with their outcome, kind and reason (transparency, co-op overview); each row is one link. */
 export function GovernanceOutcomeList({
   items,
   label,
@@ -65,17 +73,14 @@ export function GovernanceOutcomeList({
           data-kind={item.kind}
           data-passed={item.passed === null ? "" : String(item.passed)}
           data-month={item.month}
+          className="relative transition-colors hover:bg-muted/40 motion-reduce:transition-none"
         >
           <ItemContent className="min-w-0">
             <ItemTitle className="flex-wrap">
-              <TargetLink target={item.link} className="min-w-0 wrap-anywhere hover:underline hover:underline-offset-4">
+              <TargetLink target={item.link} className={STRETCHED}>
                 {item.title}
               </TargetLink>
-              {item.kind === "protected" && item.protectedLabel ? (
-                <StatusBadge tone="warning" icon={SquareLock01Icon}>
-                  {item.protectedLabel}
-                </StatusBadge>
-              ) : null}
+              {item.kind === "protected" && item.protectedLabel ? <ProtectedBadge label={item.protectedLabel} /> : null}
             </ItemTitle>
             {item.reason || item.decidedAt ? (
               <ItemDescription>

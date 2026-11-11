@@ -55,6 +55,7 @@ function CoopPage(): React.JSX.Element {
       openProposals={open.data}
       council={council.data}
       months={months.data}
+      settings={settings.data}
       membershipError={
         // The card has no heading of its own on the page, so the error is a section heading.
         sessionUnresolved ? (

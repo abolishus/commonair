@@ -9,17 +9,14 @@ import {
   SkeletonGroup,
   SkeletonText,
   StatusBadge,
-  formatNumber,
   useLocale,
 } from "@commonair/ui";
 import {
   CouncilRespondForm,
   CouncilResponseCard,
-  ProposalChangeSummary,
   ProposalKindBadge,
   TallyTable,
   VotePanel,
-  VoteParticipation,
   proposalStatusTone,
 } from "@commonair/ui/blocks/coop";
 import { Timeline } from "@commonair/ui/blocks/data";
@@ -34,6 +31,11 @@ import { Comment01Icon } from "@hugeicons/core-free-icons";
 import { Link } from "@tanstack/react-router";
 import * as React from "react";
 import { t } from "../../i18n/index.ts";
+import { coopFacts } from "../creators/facts.ts";
+import { ProposalChanges } from "../governance/changes.tsx";
+import { decidingBar, resultBars, voteRule } from "../governance/model.ts";
+import { VoteJoinPrompt } from "../governance/vote-join.tsx";
+import { NextStepText, ParticipationBar, ResultBars, resultRuleText } from "../governance/votes.tsx";
 import { cannotVoteReason } from "./first-vote.tsx";
 import {
   COMMENT_MAX,
@@ -54,6 +56,7 @@ import {
   type CouncilStance,
   type ProposalCommentDto,
   type ProposalDto,
+  type SettingDto,
   type VoteChoice,
 } from "../../lib/coop.ts";
 
@@ -86,6 +89,8 @@ export interface ProposalPageProps {
   memberError?: React.ReactNode;
   /** Shown in place of the council response form when the council failed to load. */
   councilError?: React.ReactNode;
+  /** `coop.settings`: the quorum tick and the join prompt's numbers (null: drawn without them). */
+  settings?: readonly SettingDto[] | null;
 }
 
 function tallyLabels(): React.ComponentProps<typeof TallyTable>["labels"] {
@@ -132,6 +137,7 @@ export function ProposalPage({
   commentsError = null,
   memberError = null,
   councilError = null,
+  settings = null,
 }: ProposalPageProps): React.JSX.Element {
   const { locale } = useLocale();
   const [comment, setComment] = React.useState("");
@@ -147,19 +153,20 @@ export function ProposalPage({
   const composerRef = React.useRef<HTMLDivElement>(null);
   const ballotOpen = votingOpen(p, now) && !votingClosed;
   const participation = p.participation;
+  const rule = voteRule(p.kind, settings);
   const participationView = participation ? (
-    <VoteParticipation
-      data-testid="vote-participation"
-      voted={participation.voted}
-      eligible={participation.eligible}
-      label={t("coop.participation.label")}
-      valueText={t("coop.participation.value", {
-        voted: formatNumber(participation.voted, locale),
-        eligible: formatNumber(participation.eligible, locale),
-      })}
-      note={t("coop.participation.noTally")}
-    />
+    <div className="flex flex-col gap-1.5">
+      <ParticipationBar
+        data-testid="vote-participation"
+        data-voted={String(participation.voted)}
+        data-eligible={String(participation.eligible)}
+        participation={participation}
+        rule={rule}
+      />
+      <p className="text-xs text-muted-foreground">{t("coop.participation.noTally")}</p>
+    </div>
   ) : null;
+  const deciding = p.tally ? decidingBar(resultBars(p.tally, rule), p.tally.passed) : null;
 
   const busy = async (set: (v: boolean) => void, run: () => Promise<void>) => {
     set(true);
@@ -269,16 +276,7 @@ export function ProposalPage({
               <p className="whitespace-pre-line wrap-anywhere">{p.body}</p>
             </Section>
             <Section heading={t("coop.proposal.changes")}>
-              <ProposalChangeSummary
-                items={p.changes.map((c) => ({ key: c.key, from: c.from, to: c.to, protected: c.protected }))}
-                labels={{
-                  from: t("coop.proposal.changeFrom"),
-                  to: t("coop.proposal.changeTo"),
-                  protected: t("coop.form.changeProtected"),
-                  empty: t("coop.proposal.noChanges"),
-                }}
-                itemProps={{ "data-testid": "proposal-change-summary" }}
-              />
+              <ProposalChanges changes={p.changes} />
             </Section>
             {p.councilResponse ? (
               <CouncilResponseCard
@@ -430,7 +428,13 @@ export function ProposalPage({
         aside={
           <div className="flex flex-col gap-4">
             {p.status === "voting" &&
-              (ballotOpen ? (
+              (ballotOpen && meId === null ? (
+                // CT-7: signed out, the ballot is a way in rather than disabled radios.
+                <>
+                  <VoteJoinPrompt signedIn={false} facts={coopFacts(settings).membership} />
+                  {participationView}
+                </>
+              ) : ballotOpen ? (
                 <VotePanel
                   data-testid="vote-panel"
                   title={t("coop.vote.title")}
@@ -472,7 +476,13 @@ export function ProposalPage({
                 <CardHeader>
                   <CardTitle>{t("coop.tally.title")}</CardTitle>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="flex flex-col gap-4">
+                  {deciding ? (
+                    <p data-testid="vote-result-rule" className="text-sm">
+                      {resultRuleText(deciding, locale)}
+                    </p>
+                  ) : null}
+                  <ResultBars tally={p.tally} rule={rule} />
                   <TallyTable
                     data-testid="tally"
                     data-reason={p.tally.reason}
@@ -497,7 +507,10 @@ export function ProposalPage({
               <CardHeader>
                 <CardTitle>{t("coop.timeline.title")}</CardTitle>
               </CardHeader>
-              <CardContent>
+              <CardContent className="flex flex-col gap-3">
+                <p data-testid="proposal-next-step" className="text-sm font-medium">
+                  <NextStepText proposal={p} now={now} />
+                </p>
                 <Timeline
                   data-testid="proposal-timeline"
                   steps={proposalTimeline(p).map((step) => ({

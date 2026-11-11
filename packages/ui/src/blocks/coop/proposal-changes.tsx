@@ -44,12 +44,13 @@ export interface ProposalKindBadgeProps extends Omit<React.ComponentProps<"span"
   label: string;
 }
 
-/** The derived kind of a proposal; protected decisions carry the lock. */
+/** The derived kind of a proposal; protected decisions carry the (neutral) lock. */
 export function ProposalKindBadge({ kind, label, ...props }: ProposalKindBadgeProps): React.JSX.Element {
   return (
     <StatusBadge
       data-kind={kind}
-      tone={kind === "protected" ? "warning" : "neutral"}
+      // Overhaul D6.2: the lock is neutral; a protected rule is not a warning.
+      tone="neutral"
       icon={kind === "protected" ? SquareLock01Icon : undefined}
       {...props}
     >

@@ -13,6 +13,7 @@ import { MoneyAmount, type MoneyValue } from "../../primitives/money-amount.tsx"
 import { StatusBadge } from "../../primitives/status-badge.tsx";
 import { KeyValueList, type KeyValueRow } from "../data/key-value-list.tsx";
 import { StatCard, StatGrid } from "../data/stat-card.tsx";
+import { STRETCHED } from "./governance-outcomes.tsx";
 import { patronageStatusTone } from "./tones.ts";
 
 /** One component of a patronage allocation (`PatronageLine`). */
@@ -222,10 +223,11 @@ export function StatementList({
                 data-period-id={item.periodId}
                 data-status={item.status}
                 data-cents={item.amount.cents}
+                className="relative transition-colors hover:bg-muted/40 motion-reduce:transition-none"
               >
                 <ItemContent className="min-w-0">
                   <ItemTitle>
-                    <TargetLink target={item.link} className="hover:underline hover:underline-offset-4">
+                    <TargetLink target={item.link} className={STRETCHED}>
                       {item.title}
                     </TargetLink>
                   </ItemTitle>

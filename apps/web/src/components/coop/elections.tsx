@@ -10,10 +10,12 @@ import { Checkbox } from "@commonair/ui/components/checkbox";
 import { Field, FieldDescription, FieldLabel } from "@commonair/ui/components/field";
 import { Textarea } from "@commonair/ui/components/textarea";
 import { Tick02Icon } from "@hugeicons/core-free-icons";
+import { Link } from "@tanstack/react-router";
 import * as React from "react";
 import { t } from "../../i18n/index.ts";
 import { classLabel, electionStatusLabel, type ElectionDto, type MemberClass } from "../../lib/coop.ts";
 import { FormError } from "../form-error.tsx";
+import { rich } from "../governance/rich.tsx";
 import { electionRefusal, electionRefusalText, electionRole, toggleApproval } from "./rules.ts";
 
 /** `coop.elections.nominate`'s statement limit. */
@@ -100,6 +102,18 @@ export function ElectionItem({ election: e, meId, classes, onNominate, onVote }:
         </CardAction>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
+        {e.status === "nominating" || e.status === "voting" ? (
+          // D6.3: the deadline that matters now, as a countdown.
+          <p data-testid="election-deadline" className="text-sm font-medium">
+            {e.status === "nominating"
+              ? rich((v) => t("d6Governance.election.nominationsClose", v), {
+                  when: <RelativeTime date={e.nominationsCloseAt} />,
+                })
+              : rich((v) => t("d6Governance.election.votingCloses", v), {
+                  when: <RelativeTime date={e.votingEndsAt} />,
+                })}
+          </p>
+        ) : null}
         <KeyValueList
           dense
           rows={[
@@ -145,6 +159,21 @@ export function ElectionItem({ election: e, meId, classes, onNominate, onVote }:
           <p className="text-xs text-muted-foreground">
             {t("coop.elections.notMember", { class: classLabel(e.class) })}
           </p>
+        )}
+        {(role.kind === "notMember" || (meId === null && (e.status === "nominating" || e.status === "voting"))) && (
+          // The member CTA: a non-member (or a visitor) learns how to get a say.
+          <Button
+            data-testid="election-join"
+            variant="outline"
+            size="sm"
+            className="self-start"
+            nativeButton={false}
+            render={<Link to="/coop/membership" />}
+          >
+            {meId === null
+              ? t("d6Governance.election.joinToVote", { class: classLabel(e.class) })
+              : t("d6Governance.election.becomeMember")}
+          </Button>
         )}
         {role.kind === "standing" && <p className="text-xs">{t("coop.elections.youStand")}</p>}
 

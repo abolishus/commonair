@@ -406,33 +406,49 @@ describe("/coop/proposals/new", () => {
     expect(onSave.mock.calls[0]?.[0]).toMatchObject({ affectsCreators: true });
   });
 
-  it("invalid JSON or a missing key keeps save disabled and says why", () => {
-    form([{ id: "r1", key: "discovery.ranking", value: "{spotlightSlots: 5" }]);
-    expect(id("proposal-save").hasAttribute("disabled")).toBe(true);
+  it("invalid JSON or a missing key: no error while typing; saving shows why and saves nothing", () => {
+    const { onSave } = form([{ id: "r1", key: "discovery.ranking", value: "{spotlightSlots: 5" }]);
+    // D6.2: problems show after a blur or a save attempt, never while typing.
+    expect(id("proposal-form").textContent).not.toContain(en["coop.form.change.invalidJson"]);
+    expect(id("proposal-save").getAttribute("data-valid")).toBe("false");
+    fireEvent.click(id("proposal-save"));
+    expect(onSave).not.toHaveBeenCalled();
     expect(id("proposal-form").textContent).toContain(en["coop.form.change.invalidJson"]);
+    one("proposal-form-problems");
     cleanup();
     form([{ id: "r1", key: "", value: "" }]);
-    expect(id("proposal-save").hasAttribute("disabled")).toBe(true);
     expect(id("proposal-change").hasAttribute("data-protected")).toBe(false);
+    fireEvent.click(id("proposal-save"));
+    expect(id("proposal-form").textContent).toContain(en["coop.form.change.noKey"]);
+  });
+
+  it("an invalid JSON value shows its error once the field is left", () => {
+    form([{ id: "r1", key: "discovery.ranking", value: "{spotlightSlots: 5" }]);
+    fireEvent.blur(id("proposal-change-value"));
+    expect(id("proposal-form").textContent).toContain(en["coop.form.change.invalidJson"]);
   });
 
   it("no changes is a valid ordinary statement; a short title is not", () => {
     form([]);
-    expect(id("proposal-save").hasAttribute("disabled")).toBe(false);
+    expect(id("proposal-save").getAttribute("data-valid")).toBe("true");
     cleanup();
+    const onSave = vi.fn<(input: unknown) => void>();
     wrap(
       <ProposalForm
         mode="new"
         settings={settings}
         draft={{ ...emptyDraft(), title: "Hi", body: "x" }}
         onDraftChange={noop}
-        onSave={noop}
+        onSave={onSave}
         onCancel={noop}
         saving={false}
         error={null}
       />,
     );
-    expect(id("proposal-save").hasAttribute("disabled")).toBe(true);
+    expect(id("proposal-save").getAttribute("data-valid")).toBe("false");
+    fireEvent.click(id("proposal-save"));
+    expect(onSave).not.toHaveBeenCalled();
+    expect(id("proposal-form").textContent).toContain("Use 5 to 140 characters.");
   });
 });
 
@@ -624,7 +640,11 @@ describe("/coop/council and /coop/settings", () => {
       [ME, "1", "41.5"],
       [OTHER, "2", "12"],
     ]);
-    expect(one("council-method").textContent).toContain("windowDays");
+    // CT-4: the method in sentences, never its JSON keys.
+    expect(one("council-method").textContent).toContain(
+      "The 7 seats go to the streamers who contributed most over the last 30 days.",
+    );
+    expect(id("council-method").textContent).not.toContain("windowDays");
     expect(attrs(one("board-seat"), ["data-user-id", "data-class"])).toEqual([OTHER, "viewer"]);
     expect(attrs(one("election-item"), ["data-election-id", "data-class", "data-status"])).toEqual([
       "e1",
@@ -648,10 +668,11 @@ describe("/coop/council and /coop/settings", () => {
   it("settings: protected flags and the decision that last set each", () => {
     wrap(<SettingsPage settings={settings} />);
     one("settings");
+    // Grouped by theme: Money, Membership, then Discovery.
     expect(many("setting-row").map((r) => attrs(r, ["data-key", "data-protected", "data-updated-by"]))).toEqual([
-      ["discovery.ranking", "false", PROPOSAL_ID],
       ["platform.cut", "true", ""],
       ["membership.classes", "true", ""],
+      ["discovery.ranking", "false", PROPOSAL_ID],
     ]);
   });
 });
