@@ -53,7 +53,7 @@ import {
 import { HostSampler } from "../src/load/host.ts";
 import { LOCAL_HOST } from "../src/load/processes.ts";
 import { type CollectedProfile, type ProfileDeps, collectProfiles, startProfiles } from "../src/load/profiles.ts";
-import { remoteSnapshot } from "../src/load/ssh.ts";
+import { remoteSnapshot, sshRunner } from "../src/load/ssh.ts";
 import type { SourceShape } from "../src/load/sweep.ts";
 import { type ScenarioContext, defineScenario } from "../src/scenario.ts";
 
@@ -239,6 +239,8 @@ function failedObservation(cell: CellPlan, err: unknown): CellObservation {
   };
 }
 
+const PROFILE_COLLECT_TIMEOUT_MS = 10 * 60_000;
+
 const round = (v: number | null, digits = 4) => (v === null ? null : Number(v.toFixed(digits)));
 
 function recordCostMetrics(ctx: Pick<ScenarioContext, "metric">, s: CostSummary): void {
@@ -248,6 +250,7 @@ function recordCostMetrics(ctx: Pick<ScenarioContext, "metric">, s: CostSummary)
   ctx.metric("cost.linearity.ratio", round(c.linearity.ratio));
   ctx.metric("cost.packaging.cores_per_stream", round(c.packagingPerStream), "cores");
   ctx.metric("cost.moderation.cores_per_stream", round(c.moderationPerStream.total), "cores");
+  ctx.metric("cost.moderation_2x.cores_per_stream", round(c.moderationPerStream.totalAt2x), "cores");
   ctx.metric("cost.moderation.capture_cores_per_stream", round(c.moderationPerStream.capture), "cores");
   ctx.metric("cost.moderation.classifier_cores_per_stream", round(c.moderationPerStream.classifier), "cores");
   ctx.metric("cost.edge.cores_per_100_viewers", round(c.edgePer100Viewers.onePath), "cores");
@@ -291,6 +294,8 @@ export function loadCostScenario(deps: LoadCostDeps = {}) {
         topo.target && p.profiles.length > 0
           ? {
               run: topo.run,
+              // A long run's profile can be over 100 MB: give the copy minutes, not the runner's 20 s.
+              collect: deps.topology ? topo.run : sshRunner(PROFILE_COLLECT_TIMEOUT_MS),
               target: topo.target,
               sleep,
               ...(deps.writeProfile ? { write: deps.writeProfile } : {}),
@@ -351,7 +356,7 @@ export function loadCostScenario(deps: LoadCostDeps = {}) {
         );
       }
 
-      const summary = summarizeCost(p, rows, { local: !remote, notes });
+      const summary = summarizeCost(p, rows, { local: !remote, notes, profiled: profiling ? p.profiles : [] });
       ctx.data("cost", summary);
       recordCostMetrics(ctx, summary);
       ctx.log.info("cost done", {

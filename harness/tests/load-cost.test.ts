@@ -278,7 +278,16 @@ describe("the subtraction maths", () => {
     expect(s.costs.moderationPerStream.capture).toBeCloseTo(0.15);
     expect(s.costs.moderationPerStream.classifier).toBeCloseTo(0.08);
     expect(s.costs.moderationPerStream.total).toBeCloseTo(0.23);
+    expect(s.costs.moderationPerStream.totalAt2x).toBeCloseTo(0.23);
     expect(s.costs.packagingPerStream).toBeCloseTo(0.025);
+  });
+
+  test("a profiled run judges no target and says why", () => {
+    const prof = summarizeCost(P, cells, { local: false, profiled: ["media", "worker"] });
+    expect(prof.targets.map((t) => t.met)).toEqual([null, null, null]);
+    expect(prof.targets[1]?.value).toBeCloseTo(0.23);
+    expect(prof.notes.some((n) => n.includes("profiled run (media, worker)"))).toBe(true);
+    expect(s.targets.some((t) => t.met !== null)).toBe(true);
   });
 
   test("linear: twice the streams, the same per stream", () => {
@@ -389,6 +398,7 @@ describe("the subtraction maths", () => {
     expect(partial.costs.viewersPerViewer.perService.caddy).toBeCloseTo(0.001);
     expect(partial.costs.ladder.unavailable).toMatch(/partial viewer/);
     expect(partial.targets[2]?.met).toBeNull();
+    expect(partial.costs.edgePer100Viewers.onePath).toBeNull();
   });
 
   test("no idle cell: nothing to subtract", () => {
@@ -519,6 +529,33 @@ describe("judging a cell", () => {
     const thrown = judgeCell(obs(plan("ingest", 1, 0), { error: "c offline: timed out", services: {} }), 0);
     expect(thrown).toMatchObject({ status: "failed", failures: ["c offline: timed out"] });
   });
+
+  test("viewer shortfalls behind a generator limit are inconclusive, not the target's failure", () => {
+    const limited = {
+      inconclusive: true,
+      limits: [{ kind: "cpu" as const, host: "gen1", cpuP95: 95, threshold: 80 }],
+      notes: [],
+    };
+    const short = { reports: 40, sessions: 30, started: 28, errors: 12, heartbeatErrors: 0 };
+    const byCpu = judgeCell(obs(plan("viewers", 1, 40), { generator: limited, viewers: short }), 0);
+    expect(byCpu.status).toBe("inconclusive");
+    expect(byCpu.failures).toEqual([]);
+    expect(byCpu.inconclusive).toContain("30 of 40 viewers got a playback session");
+    // Rate-limited heartbeats count as a generator limit too.
+    const byRate = judgeCell(
+      obs(plan("viewers", 1, 40), {
+        generator: { inconclusive: false, limits: [], notes: [] },
+        viewers: { ...short, heartbeatErrors: 5 },
+      }),
+      0,
+    );
+    expect(byRate.status).toBe("inconclusive");
+    // A stream that went offline still fails, generator limit or not.
+    const offline = judgeCell(obs(plan("viewers", 1, 40), { generator: limited, viewers: short, offline: ["c"] }), 0);
+    expect(offline.status).toBe("failed");
+    // Without a generator limit the same shortfall is the target's.
+    expect(judgeCell(obs(plan("viewers", 1, 40), { viewers: short }), 0).status).toBe("failed");
+  });
 });
 
 describe("profiles", () => {
@@ -571,6 +608,20 @@ describe("profiles", () => {
     ]);
     expect(files.get("/reports/profiles/r1/media/CPU.1.2.0.001.cpuprofile")).toBe('{"nodes":[]}');
     expect(t.commands).toContain(listCommand("commonair-profiles", "r1"));
+  });
+
+  test("profile files are read through the collect runner when one is given", async () => {
+    const t = target();
+    const reads: string[] = [];
+    const collect: CommandRunner = async (dest, c) => {
+      reads.push(c);
+      return t.run(dest, c);
+    };
+    const d = { run: t.run, collect, target: "ops@t", sleep, write: () => undefined };
+    await collectProfiles(d, ["media"], "commonair-profiles", "r1", "/x");
+    expect(reads.length).toBeGreaterThan(0);
+    expect(reads.every((c) => c.startsWith("cat "))).toBe(true);
+    expect(t.commands.filter((c) => c.startsWith("cat "))).toHaveLength(reads.length);
   });
 
   test("a service without the drop-in is refused before anything restarts", async () => {

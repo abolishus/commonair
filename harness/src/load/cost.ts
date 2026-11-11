@@ -487,7 +487,10 @@ export interface CellVerdict {
   inconclusive: string[];
 }
 
-/** Judge one cell. A failure wins over inconclusive. Pure. */
+/**
+ * Judge one cell. A failure wins over inconclusive, except that viewer shortfalls in a cell
+ * whose generator was the limit are inconclusive. Pure.
+ */
 export function judgeCell(o: CellObservation, maxHeartbeatErrors: number): CellVerdict {
   const failures: string[] = [];
   const inconclusive: string[] = [];
@@ -495,14 +498,19 @@ export function judgeCell(o: CellObservation, maxHeartbeatErrors: number): CellV
   if (o.error) failures.push(o.error);
   if (o.offline.length > 0)
     failures.push(`${o.offline.length} of ${p.streams} streams were not live: ${o.offline.join(", ")}`);
+  const heartbeatLimited =
+    p.heartbeats && p.viewers > 0 && o.generator !== null && o.viewers.heartbeatErrors > maxHeartbeatErrors;
+  // When the generator was the limit, viewer shortfalls are its fault, not the target's (as in the sweep).
+  const generatorLimited = Boolean(o.generator?.inconclusive) || heartbeatLimited;
+  const viewerIssues = generatorLimited ? inconclusive : failures;
   if (p.viewers > 0) {
-    if (o.viewers.reports < p.viewers) failures.push(`${o.viewers.reports} of ${p.viewers} viewers reported`);
+    if (o.viewers.reports < p.viewers) viewerIssues.push(`${o.viewers.reports} of ${p.viewers} viewers reported`);
     if (o.viewers.sessions < p.viewers)
-      failures.push(`${o.viewers.sessions} of ${p.viewers} viewers got a playback session`);
+      viewerIssues.push(`${o.viewers.sessions} of ${p.viewers} viewers got a playback session`);
     if (p.fetchSegments && o.viewers.started < p.viewers) {
-      failures.push(`${o.viewers.started} of ${p.viewers} viewers played a segment`);
+      viewerIssues.push(`${o.viewers.started} of ${p.viewers} viewers played a segment`);
     }
-    if (o.viewers.errors > 0) failures.push(`${o.viewers.errors} viewer errors`);
+    if (o.viewers.errors > 0) viewerIssues.push(`${o.viewers.errors} viewer errors`);
   }
   if (p.streams > 0) {
     if (p.expectLadder) {
@@ -513,7 +521,7 @@ export function judgeCell(o: CellObservation, maxHeartbeatErrors: number): CellV
     }
   }
   if (o.generator?.inconclusive) inconclusive.push(...o.generator.limits.map(describeLimit));
-  if (p.heartbeats && p.viewers > 0 && o.generator && o.viewers.heartbeatErrors > maxHeartbeatErrors) {
+  if (heartbeatLimited) {
     inconclusive.push(
       `${o.viewers.heartbeatErrors} failed heartbeats > ${maxHeartbeatErrors}: the generator's address was rate-limited`,
     );
@@ -722,6 +730,8 @@ export interface CostSummary {
       capture: number | null;
       classifier: number | null;
       total: number | null;
+      /** The same sum from the ingest-2x cell, for the linearity check. */
+      totalAt2x: number | null;
       belowNoise: boolean;
     };
     packagingPerStream: number | null;
@@ -750,7 +760,7 @@ const unavailableBecause = (rows: Map<CostCellName, CellRow>, need: readonly Cos
 export function summarizeCost(
   p: Pick<CostParams, "streams" | "viewers" | "manyStreams" | "ladderViewers" | "linearityTolerance">,
   cells: readonly CellRow[],
-  opts: { local: boolean; notes?: readonly string[] },
+  opts: { local: boolean; notes?: readonly string[]; profiled?: readonly string[] },
 ): CostSummary {
   const rows = new Map(cells.map((c) => [c.name, c] as const));
   const idle = rows.get("idle");
@@ -841,6 +851,7 @@ export function summarizeCost(
   const capture = ingest.perService.media ?? null;
   const classifier = ingest.perService.worker ?? null;
   const moderation = sumOf(ingest.perService, MODERATION_GROUP);
+  const moderation2x = sumOf(ingest2x.perService, MODERATION_GROUP);
   const packaging = sumOf(ingest.perService, PACKAGING_GROUP);
   const per100 = (l: CostLine) => (l.total === null ? null : l.total * 100);
   const bytes = (key: "rxBytesPerSecond" | "txBytesPerSecond"): number | null => {
@@ -851,13 +862,20 @@ export function summarizeCost(
   };
   const moderationBelowNoise = MODERATION_GROUP.some((s) => ingest.belowNoise.includes(s));
   const packagingBelowNoise = PACKAGING_GROUP.some((s) => ingest.belowNoise.includes(s));
+  // A profiled run carries the profiler's overhead, so no target is judged from it.
+  const profiled = (opts.profiled ?? []).length > 0;
   const check = (metric: string, value: number | null, target: number, belowNoise: boolean): TargetCheck => ({
     metric,
     value,
     target,
     // A difference inside the idle cell's noise cannot be judged either way.
-    met: value === null || belowNoise ? null : value <= target,
+    met: value === null || belowNoise || profiled ? null : value <= target,
   });
+  const notes = [...(opts.notes ?? [])];
+  if (profiled)
+    notes.push(
+      `profiled run (${(opts.profiled ?? []).join(", ")}): costs include the CPU profiler's overhead, so no target is judged`,
+    );
 
   const outcome: CostSummary["outcome"] = cells.some((c) => c.status === "failed")
     ? "failed"
@@ -872,11 +890,18 @@ export function summarizeCost(
       ingestPerStream: ingest,
       ingest2xPerStream: ingest2x,
       linearity,
-      moderationPerStream: { capture, classifier, total: moderation, belowNoise: moderationBelowNoise },
+      moderationPerStream: {
+        capture,
+        classifier,
+        total: moderation,
+        totalAt2x: moderation2x,
+        belowNoise: moderationBelowNoise,
+      },
       packagingPerStream: packaging,
       viewersPerViewer: viewers,
       viewersManyPerViewer: viewersMany,
-      edgePer100Viewers: { onePath: per100(viewers), manyPaths: per100(viewersMany) },
+      // A partial viewer is not a viewer's edge cost: the raw line stays in viewersPerViewer.
+      edgePer100Viewers: { onePath: partialViewers ? null : per100(viewers), manyPaths: per100(viewersMany) },
       ladder,
       valkeyBytesPerStream: { rx: bytes("rxBytesPerSecond"), tx: bytes("txBytesPerSecond") },
     },
@@ -900,7 +925,7 @@ export function summarizeCost(
         viewers.totalBelowNoise || partialViewers,
       ),
     ],
-    notes: [...(opts.notes ?? [])],
+    notes,
   };
 }
 

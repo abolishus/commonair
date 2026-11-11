@@ -54,6 +54,8 @@ export interface CollectedProfile {
 
 export interface ProfileDeps {
   run: CommandRunner;
+  /** Reads the profile files; large profiles need a longer timeout than `run`'s. Defaults to `run`. */
+  collect?: CommandRunner;
   target: string;
   sleep: (ms: number) => Promise<void>;
   /** Writes one collected file (tests capture it). */
@@ -127,7 +129,7 @@ export async function collectProfiles(
     });
   const out: CollectedProfile[] = [];
   for (const remote of profilePaths(listed.stdout, dir)) {
-    const r = await d.run(d.target, `cat ${shellQuote(remote)}`);
+    const r = await (d.collect ?? d.run)(d.target, `cat ${shellQuote(remote)}`);
     if (r.code !== 0) throw new ProfileError(`could not read ${remote} on the target`);
     const service = remote.slice(dir.length + 1).split("/")[0] ?? "unknown";
     const local = join(localDir, service, basename(remote));
