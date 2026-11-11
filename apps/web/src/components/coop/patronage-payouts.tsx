@@ -125,7 +125,7 @@ function MarkPaid({
           aria-describedby={`${id}-hint`}
           onChange={(e) => setReference(e.target.value)}
         />
-        <p id={`${id}-hint`} className="text-xs text-muted-foreground">
+        <p id={`${id}-hint`} className="text-sm text-muted-foreground">
           {t(connect ? "coopMoney.markPaid.stripe.referenceHint" : "coopMoney.markPaid.referenceHint")}
         </p>
       </div>
@@ -219,7 +219,7 @@ export function PatronagePayoutsPanel({
         <div className="flex flex-col items-start gap-2">
           <StatusBadge tone={STATUS[r.status].tone}>{payoutStatusLabel(r.status)}</StatusBadge>
           {isOutcomeUnknown(r) && (
-            <p data-testid="patronage-payout-outcome-unknown" className="text-xs text-muted-foreground">
+            <p data-testid="patronage-payout-outcome-unknown" className="text-sm text-muted-foreground">
               {t("coopMoney.payouts.outcomeUnknown")}
             </p>
           )}

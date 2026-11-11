@@ -189,9 +189,9 @@ export function SideRail(): React.JSX.Element {
       {status === "loading" ? (
         <RailSkeleton open={open} />
       ) : status === "error" ? (
-        <p className={open ? "px-4 text-xs text-muted-foreground" : "sr-only"}>{t("discovery.rail.loadFailed")}</p>
+        <p className={open ? "px-4 text-sm text-muted-foreground" : "sr-only"}>{t("discovery.rail.loadFailed")}</p>
       ) : sections.length === 0 ? (
-        <p className={open ? "px-4 text-xs text-muted-foreground" : "sr-only"}>{t("discovery.rail.empty")}</p>
+        <p className={open ? "px-4 text-sm text-muted-foreground" : "sr-only"}>{t("discovery.rail.empty")}</p>
       ) : (
         sections.map((section) => (
           <SidebarGroup key={section.id} data-section={section.id}>
@@ -269,7 +269,7 @@ function FollowNudge(): React.JSX.Element {
       <p id="side-rail-nudge-title" className="font-medium">
         {t("d3Home.rail.nudge.title")}
       </p>
-      <p className="text-xs text-muted-foreground">{t("d3Home.rail.nudge.body")}</p>
+      <p className="text-sm text-muted-foreground">{t("d3Home.rail.nudge.body")}</p>
       {/* The sign-up prompt (intent=follow), not a bare link: it says what an account adds first. */}
       <AuthGatePrompt
         intent="follow"

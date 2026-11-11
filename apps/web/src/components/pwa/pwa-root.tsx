@@ -25,7 +25,7 @@ export function UpdatePrompt({ onReload, onDismiss }: { onReload: () => void; on
     <section
       aria-live="polite"
       data-testid="pwa-update-prompt"
-      className="fixed inset-x-4 bottom-4 z-50 mx-auto flex max-w-md flex-wrap items-center justify-between gap-2 border bg-popover p-3 text-xs text-popover-foreground shadow-lg"
+      className="fixed inset-x-4 bottom-4 z-50 mx-auto flex max-w-md flex-wrap items-center justify-between gap-2 border bg-popover p-3 text-sm text-popover-foreground shadow-lg"
     >
       <p className="min-w-0">{t("pwa.update.message")}</p>
       <div className="flex gap-2">

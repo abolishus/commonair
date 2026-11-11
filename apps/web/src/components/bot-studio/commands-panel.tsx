@@ -269,7 +269,7 @@ export function CommandsPanel({
 /** The variables a response can use. The tokens are syntax (never translated); what they become is. */
 function TemplateHelp(): React.JSX.Element {
   return (
-    <details className="text-xs">
+    <details className="text-sm">
       <summary className="cursor-pointer font-medium">{t("bot.variables.help.title")}</summary>
       <dl className="mt-2 flex flex-col gap-1">
         {BOT_TEMPLATE_VARIABLES.map((v) => (

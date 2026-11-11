@@ -82,7 +82,7 @@ export function PredictionPanel({
       title={t("interact.prediction.title")}
       description={t("interact.prediction.intro")}
     >
-      <p data-testid="prediction-team-note" className="text-xs text-muted-foreground">
+      <p data-testid="prediction-team-note" className="text-sm text-muted-foreground">
         {t("fairPrediction.studio.teamNote")}
       </p>
       {prediction ? <PredictionLive prediction={prediction} onAction={act} /> : null}
@@ -306,7 +306,7 @@ export function PredictionForm({ onStart }: { onStart: StartPrediction }): React
           );
         })}
         {errors.outcomes ? (
-          <p role="alert" className="text-xs text-destructive">
+          <p role="alert" className="text-sm text-destructive">
             {errors.outcomes}
           </p>
         ) : null}

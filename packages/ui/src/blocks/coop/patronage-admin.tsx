@@ -210,7 +210,7 @@ export function PatronageRunResult({
     >
       <div>
         <h3 className="text-xs font-medium text-success">{title}</h3>
-        {description ? <p className="text-xs text-muted-foreground">{description}</p> : null}
+        {description ? <p className="text-sm text-muted-foreground">{description}</p> : null}
       </div>
       <StatGrid cols={retained && labels.retained ? 4 : 3}>
         <StatCard size="sm" label={labels.members} value={formatNumber(members, resolved)} />

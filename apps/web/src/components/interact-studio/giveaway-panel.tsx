@@ -178,7 +178,7 @@ function GiveawayLive({
         <h3 className="min-w-0 flex-1 text-sm font-medium break-words">{g.title}</h3>
         <StatusBadge tone={g.status === "open" ? "success" : "neutral"}>{t(STATUS_KEYS[g.status])}</StatusBadge>
       </div>
-      <p className="text-xs break-words">{t("giveaways.card.prize", { prize: g.prize })}</p>
+      <p className="text-sm break-words">{t("giveaways.card.prize", { prize: g.prize })}</p>
       <p className="text-xs text-muted-foreground" aria-live="polite">
         {t("giveaways.card.entries", { count: g.entries })}
       </p>
@@ -320,7 +320,7 @@ export function GiveawayForm({ onOpen }: { onOpen: OpenGiveaway }): React.JSX.El
       />
       <fieldset className="flex min-w-0 flex-col gap-3">
         <legend className="mb-2 text-xs font-medium">{t("giveaways.form.eligibility")}</legend>
-        <p className="text-xs text-muted-foreground">{t("giveaways.form.eligibilityHint")}</p>
+        <p className="text-sm text-muted-foreground">{t("giveaways.form.eligibilityHint")}</p>
         <TextField
           label={t("giveaways.form.minAccountAge")}
           data-testid="giveaway-min-account-age"
@@ -342,7 +342,7 @@ export function GiveawayForm({ onOpen }: { onOpen: OpenGiveaway }): React.JSX.El
           {...field("minWatchSeconds")}
         />
       </fieldset>
-      <p className="text-xs text-muted-foreground">{t("giveaways.form.prizeNote")}</p>
+      <p className="text-sm text-muted-foreground">{t("giveaways.form.prizeNote")}</p>
       <Button type="submit" data-testid="giveaway-open" disabled={pending} className="self-start">
         {t("giveaways.form.open")}
       </Button>

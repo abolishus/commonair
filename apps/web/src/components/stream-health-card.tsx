@@ -116,7 +116,7 @@ export function LiveNumbers({
           </div>
         ))}
       </dl>
-      <p data-testid="stream-health-viewers-hint" className="text-xs text-muted-foreground">
+      <p data-testid="stream-health-viewers-hint" className="text-sm text-muted-foreground">
         {t("fixViewers.health.hint")}
       </p>
     </div>

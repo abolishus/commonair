@@ -163,7 +163,7 @@ export function ProposalPage({
         participation={participation}
         rule={rule}
       />
-      <p className="text-xs text-muted-foreground">{t("coop.participation.noTally")}</p>
+      <p className="text-sm text-muted-foreground">{t("coop.participation.noTally")}</p>
     </div>
   ) : null;
   const deciding = p.tally ? decidingBar(resultBars(p.tally, rule), p.tally.passed) : null;

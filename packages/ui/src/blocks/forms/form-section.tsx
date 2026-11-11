@@ -87,7 +87,7 @@ export function FormSection({
               <h2 id={headingId} className="text-sm font-medium">
                 {title}
               </h2>
-              {description && <p className="mt-1 text-xs text-muted-foreground">{description}</p>}
+              {description && <p className="mt-1 text-sm text-muted-foreground">{description}</p>}
             </div>
             {action}
           </header>

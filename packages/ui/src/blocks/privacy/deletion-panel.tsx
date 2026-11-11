@@ -129,7 +129,7 @@ export function DeletionPanel({
             data-testid="deletion-status"
             data-status={request.status}
             data-scheduled-for={request.scheduledFor}
-            className="flex flex-col items-start gap-3 border border-warning p-3 text-xs"
+            className="flex flex-col items-start gap-3 border border-warning p-3 text-sm"
           >
             {scheduled && date && !Number.isNaN(date.getTime()) ? (
               <p>

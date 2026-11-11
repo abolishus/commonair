@@ -91,8 +91,9 @@ describe("DiscordWebhookPanel", () => {
     const { client } = fake(OFF);
     show(client);
     await waitFor(() => expect(statusEl().getAttribute("data-configured")).toBe("false"));
-    expect(statusEl().className).toMatch(/\btext-xs\b/);
-    expect(statusEl().className).not.toMatch(/\btext-sm\b/);
+    // The hint size is 14 px reading text since D1.
+    expect(statusEl().className).toMatch(/\btext-sm\b/);
+    expect(statusEl().className).not.toMatch(/\btext-(xs|base|lg)\b/);
     const terms = [...document.querySelectorAll("p")].find((p) => p.textContent === t("discord.terms"));
     expect(terms?.dataset.slot).toBe("field-description");
   });

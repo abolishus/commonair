@@ -124,7 +124,7 @@ export function ElectionItem({ election: e, meId, classes, onNominate, onVote }:
         />
         <h3 className="text-xs font-medium">{t("coop.elections.candidates")}</h3>
         {e.candidates.length === 0 ? (
-          <p className="text-xs text-muted-foreground">{t("coop.elections.noCandidates")}</p>
+          <p className="text-sm text-muted-foreground">{t("coop.elections.noCandidates")}</p>
         ) : (
           <ul className="flex flex-col gap-2">
             {e.candidates.map((c) => (
@@ -156,7 +156,7 @@ export function ElectionItem({ election: e, meId, classes, onNominate, onVote }:
         )}
 
         {role.kind === "notMember" && (
-          <p className="text-xs text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             {t("coop.elections.notMember", { class: classLabel(e.class) })}
           </p>
         )}
@@ -175,7 +175,7 @@ export function ElectionItem({ election: e, meId, classes, onNominate, onVote }:
               : t("d6Governance.election.becomeMember")}
           </Button>
         )}
-        {role.kind === "standing" && <p className="text-xs">{t("coop.elections.youStand")}</p>}
+        {role.kind === "standing" && <p className="text-sm">{t("coop.elections.youStand")}</p>}
 
         {role.kind === "canNominate" &&
           (nominating ? (
@@ -223,13 +223,13 @@ export function ElectionItem({ election: e, meId, classes, onNominate, onVote }:
 
         {role.kind === "canVote" &&
           (voted ? (
-            <p data-testid="election-voted" className="text-xs">
+            <p data-testid="election-voted" className="text-sm">
               {t("coop.elections.voted")}
             </p>
           ) : e.candidates.length > 0 ? (
             <fieldset data-testid="election-ballot" className="flex flex-col gap-2">
               <legend className="text-xs font-medium">{t("coop.elections.ballotTitle")}</legend>
-              <p className="text-xs text-muted-foreground">
+              <p className="text-sm text-muted-foreground">
                 {t("coop.elections.ballotHint", { seats: formatNumber(e.seats, locale) })}
               </p>
               {e.candidates.map((c) => {

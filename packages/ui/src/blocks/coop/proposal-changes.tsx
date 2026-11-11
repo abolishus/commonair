@@ -140,10 +140,10 @@ export function ProposalChangeEditor({
       {kind ? (
         <div className="flex flex-wrap items-center gap-2">
           <ProposalKindBadge {...kind.props} kind={kind.kind} label={kind.label} />
-          {kind.description ? <p className="text-xs text-muted-foreground">{kind.description}</p> : null}
+          {kind.description ? <p className="text-sm text-muted-foreground">{kind.description}</p> : null}
         </div>
       ) : null}
-      {rows.length === 0 && labels.empty ? <p className="text-xs text-muted-foreground">{labels.empty}</p> : null}
+      {rows.length === 0 && labels.empty ? <p className="text-sm text-muted-foreground">{labels.empty}</p> : null}
       {rows.length > 0 ? (
         <ol className="flex flex-col gap-3">
           {rows.map((row, index) => {
@@ -251,7 +251,7 @@ export function ProposalChangeSummary({
   className,
   ...props
 }: ProposalChangeSummaryProps): React.JSX.Element {
-  if (items.length === 0 && labels.empty) return <p className="text-xs text-muted-foreground">{labels.empty}</p>;
+  if (items.length === 0 && labels.empty) return <p className="text-sm text-muted-foreground">{labels.empty}</p>;
   return (
     <ul className={cn("flex min-w-0 flex-col gap-3", className)} {...props}>
       {items.map((item) => (

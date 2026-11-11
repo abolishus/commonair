@@ -179,7 +179,7 @@ function FederationNotes(): React.JSX.Element {
       <h3 id={headingId} className="text-sm font-medium">
         {t("federation.notes.title")}
       </h3>
-      <ul className="flex list-disc flex-col gap-1 ps-5 text-xs/relaxed text-muted-foreground">
+      <ul className="flex list-disc flex-col gap-1 ps-5 text-sm/relaxed text-muted-foreground">
         <li data-testid="federation-note-posted">{t("federation.notes.posted")}</li>
         <li data-testid="federation-note-mature">{t("federation.notes.mature")}</li>
         <li data-testid="federation-note-replies">{t("federation.notes.replies")}</li>

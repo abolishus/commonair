@@ -63,7 +63,7 @@ export function CalmControls({ settings }: { settings: CalmSettings }): React.JS
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between gap-2">
               <Label id={rateId}>{t("calmChat.settings.rate")}</Label>
-              <output className="text-muted-foreground tabular-nums">
+              <output className="text-xs text-muted-foreground tabular-nums">
                 {t("calmChat.settings.rateValue", { count: settings.rowsPerSecond })}
               </output>
             </div>
@@ -87,7 +87,7 @@ export function CalmControls({ settings }: { settings: CalmSettings }): React.JS
               onCheckedChange={(on) => writeCalmSettings({ subscriberPriority: on })}
             />
           </div>
-          <div className="flex flex-col gap-1">
+          <div className="flex flex-col gap-1 text-xs">
             <p className="font-medium">{t("calmChat.keys.title")}</p>
             <ul className="flex flex-col gap-1">
               <li className="flex items-center gap-2">

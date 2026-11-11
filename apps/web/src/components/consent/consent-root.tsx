@@ -34,7 +34,7 @@ function ConsentError({ code }: { code: ConsentErrorCode }): React.JSX.Element {
       aria-live="polite"
       data-testid="consent-error"
       data-code={code}
-      className="relative z-20 flex flex-wrap items-center justify-between gap-2 border-b bg-muted px-4 py-2 text-xs text-foreground"
+      className="relative z-20 flex flex-wrap items-center justify-between gap-2 border-b bg-muted px-4 py-2 text-sm text-foreground"
     >
       <p className="min-w-0">{t(ERROR_MESSAGE[code])}</p>
       <Button variant="ghost" size="sm" onClick={() => dismissConsentError()}>

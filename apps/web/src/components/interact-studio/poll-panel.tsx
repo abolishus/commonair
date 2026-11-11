@@ -112,7 +112,7 @@ function PollLive({
         }))}
       />
       {poll.pointsPerExtraVote > 0 ? (
-        <p className="text-xs text-muted-foreground">
+        <p className="text-sm text-muted-foreground">
           {t("interact.poll.extraVotesOn", { points: poll.pointsPerExtraVote })}
         </p>
       ) : null}
@@ -225,7 +225,7 @@ export function PollForm({ onStart }: { onStart: StartPoll }): React.JSX.Element
           );
         })}
         {errors.choices ? (
-          <p role="alert" className="text-xs text-destructive">
+          <p role="alert" className="text-sm text-destructive">
             {errors.choices}
           </p>
         ) : null}

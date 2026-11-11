@@ -40,7 +40,7 @@ const PRESET_KEYS: Record<(typeof DATA_MODE.presetsMbPerHour)[number], MessageKe
  */
 export function DataModeNotice({ reason }: { reason: DataModeNoticeReason }): React.JSX.Element {
   return (
-    <p data-testid="data-mode-notice" data-reason={reason} className="text-xs text-muted-foreground">
+    <p data-testid="data-mode-notice" data-reason={reason} className="text-sm text-muted-foreground">
       {t(NOTICE_KEYS[reason])}
     </p>
   );
@@ -51,7 +51,7 @@ export function DataUsageView({ usage }: { usage: DataUsage | null }): React.JSX
   const { locale } = useLocale();
   if (usage === null)
     return (
-      <p data-testid="data-usage" data-unknown="true" className="text-xs text-muted-foreground">
+      <p data-testid="data-usage" data-unknown="true" className="text-sm text-muted-foreground">
         {t("dataMode.usage.unknown")}
       </p>
     );
@@ -62,7 +62,7 @@ export function DataUsageView({ usage }: { usage: DataUsage | null }): React.JSX
       data-testid="data-usage"
       data-bytes={String(Math.round(usage.bytes))}
       data-mb-per-hour={String(rate)}
-      className="text-xs"
+      className="text-sm"
     >
       <output aria-live="off">
         {usage.mbPerHour > 0
@@ -177,7 +177,7 @@ export function DataModePanel({
           <h2 id={`${id}-title`} className="font-medium">
             {t("dataMode.title")}
           </h2>
-          <p className="text-xs text-muted-foreground">{t("dataMode.intro")}</p>
+          <p className="text-sm text-muted-foreground">{t("dataMode.intro")}</p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <Label htmlFor={`${id}-toggle`}>{t("dataMode.toggle")}</Label>
@@ -194,10 +194,10 @@ export function DataModePanel({
           </span>
         </div>
       </div>
-      <p id={`${id}-toggle-hint`} className="text-xs text-muted-foreground">
+      <p id={`${id}-toggle-hint`} className="text-sm text-muted-foreground">
         {t("dataMode.toggleHint")}
       </p>
-      {suggested && !choice.on && <p className="text-xs">{t("dataMode.suggested")}</p>}
+      {suggested && !choice.on && <p className="text-sm">{t("dataMode.suggested")}</p>}
 
       <FieldSet disabled={!choice.on}>
         <FieldLegend variant="label">{t("dataMode.budget.label")}</FieldLegend>
@@ -242,14 +242,14 @@ export function DataModePanel({
       </FieldSet>
 
       {choice.on && estimate !== null && (
-        <p data-testid="data-mode-estimate" data-mb-per-hour={String(estimate)} className="text-xs">
+        <p data-testid="data-mode-estimate" data-mb-per-hour={String(estimate)} className="text-sm">
           {plan.level?.audioOnly
             ? t("dataMode.estimate.audio", { mb: formatNumber(estimate, locale) })
             : t("dataMode.estimate.video", { mb: formatNumber(estimate, locale) })}
         </p>
       )}
-      {choice.on && plan.overBudget && <p className="text-xs">{t("dataMode.overBudget")}</p>}
-      {wanted !== applied && <output className="block text-xs text-muted-foreground">{t("dataMode.pending")}</output>}
+      {choice.on && plan.overBudget && <p className="text-sm">{t("dataMode.overBudget")}</p>}
+      {wanted !== applied && <output className="block text-sm text-muted-foreground">{t("dataMode.pending")}</output>}
       {usage !== undefined && <DataUsageView usage={usage} />}
       {native && <DataModeNotice reason="native-reload" />}
       {dvr && choice.on && <DataModeNotice reason="dvr" />}

@@ -145,7 +145,7 @@ export function GrantsView({
                       {t("settings.grants.allOff")}
                     </Button>
                   </div>
-                  <p id={bulkHintId} className="text-xs text-muted-foreground">
+                  <p id={bulkHintId} className="text-sm text-muted-foreground">
                     {searching
                       ? t("settings.grants.allScopeSearch", { count: scope.slugs.length })
                       : t("settings.grants.allScopeEvery")}

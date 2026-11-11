@@ -425,7 +425,7 @@ function RangeSummary({
         </StatGrid>
         <div data-testid="analytics-counted" className="flex flex-col gap-2">
           <h3 className="text-sm font-medium">{t("d5Money.analytics.counted.heading")}</h3>
-          <p className="text-xs text-muted-foreground">{t("d5Money.analytics.counted.hint")}</p>
+          <p className="text-sm text-muted-foreground">{t("d5Money.analytics.counted.hint")}</p>
           <StatGrid cols={3}>
             <StatCard
               size="sm"

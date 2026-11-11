@@ -224,8 +224,8 @@ function DeviceConsent({
             {t("oauth.consent.willAbleTo", { app: app.name })}
           </p>
           <ScopeList scopes={scopes} labelledBy={listId} />
-          <p className="text-xs text-muted-foreground">{t("oauth.consent.notSee")}</p>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-sm text-muted-foreground">{t("oauth.consent.notSee")}</p>
+          <p className="text-sm text-muted-foreground">
             {fillNode(t("oauth.device.expires"), "when", <RelativeTime date={consent.expiresAt} />)}
           </p>
         </CardContent>

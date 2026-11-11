@@ -146,7 +146,7 @@ function HoursProgress({ progress, member }: { progress: StreamerProgress; membe
         {text}
       </p>
       <Progress value={progress.percent} aria-label={t("d6Studio.coop.progressLabel")} />
-      <p className="text-xs text-muted-foreground">
+      <p className="text-sm text-muted-foreground">
         {member ? t("d6Studio.coop.keepHint") : t("d6Studio.coop.joinHint")}
       </p>
     </div>

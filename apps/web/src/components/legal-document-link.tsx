@@ -57,7 +57,7 @@ export function LegalDocumentLink({ doc, label }: { doc: LegalDoc; label?: strin
           </DialogDescription>
         </DialogHeader>
         <ScrollArea className="max-h-96">
-          <div className="pe-3 text-xs whitespace-pre-wrap">{doc.body}</div>
+          <div className="pe-3 text-sm whitespace-pre-wrap">{doc.body}</div>
         </ScrollArea>
       </DialogContent>
     </Dialog>

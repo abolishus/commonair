@@ -45,7 +45,7 @@ export function CouncilResponseCard({
         {publishedAt ? <CardDescription>{publishedAt}</CardDescription> : null}
       </CardHeader>
       <CardContent>
-        <div className="text-xs/relaxed whitespace-pre-line wrap-anywhere">{body}</div>
+        <div className="text-sm/relaxed whitespace-pre-line wrap-anywhere">{body}</div>
       </CardContent>
     </Card>
   );

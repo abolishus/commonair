@@ -102,7 +102,7 @@ export function SetupPanel({
                 {t("d5Dashboard.step.stream_key.create")}
               </Button>
             </div>
-            <span className="text-xs text-muted-foreground">{t("d5Dashboard.key.once")}</span>
+            <span className="text-sm text-muted-foreground">{t("d5Dashboard.key.once")}</span>
           </div>
         ) : null}
       </div>

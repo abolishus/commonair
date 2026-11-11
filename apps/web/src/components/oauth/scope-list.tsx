@@ -52,13 +52,13 @@ export function ScopeList({
                   {t(message.title)}
                   {sensitive && <StatusBadge tone="warning">{t("oauth.scope.sensitive")}</StatusBadge>}
                 </span>
-                {detailed && <span className="text-xs text-muted-foreground">{t(message.body)}</span>}
+                {detailed && <span className="text-sm text-muted-foreground">{t(message.body)}</span>}
               </div>
             </li>
           );
         })}
       </ul>
-      {detailed && anySensitive && <p className="text-xs text-muted-foreground">{t("oauth.scope.sensitiveHint")}</p>}
+      {detailed && anySensitive && <p className="text-sm text-muted-foreground">{t("oauth.scope.sensitiveHint")}</p>}
     </div>
   );
 }

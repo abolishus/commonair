@@ -198,7 +198,7 @@ export function SimulcastPanel({
                       {target.platformLabel} · {target.rtmpUrl}
                     </ItemDescription>
                     {target.lastError ? (
-                      <p className="text-xs text-destructive" data-error-code={target.lastError}>
+                      <p className="text-sm text-destructive" data-error-code={target.lastError}>
                         {labels.lastError(target.lastError)}
                       </p>
                     ) : null}
@@ -244,13 +244,13 @@ export function SimulcastPanel({
               role="alert"
               data-testid="simulcast-error"
               data-reason={error.reason}
-              className="text-xs text-destructive"
+              className="text-sm text-destructive"
             >
               {error.message}
             </p>
           ) : null}
           {targets !== null && atLimit ? (
-            <p className="text-xs text-muted-foreground" data-testid="simulcast-limit">
+            <p className="text-sm text-muted-foreground" data-testid="simulcast-limit">
               {labels.limitReached}
             </p>
           ) : (

@@ -151,7 +151,7 @@ export function ElectionCard({
         <h3 className="text-xs font-medium">{labels.candidates}</h3>
         {candidates.length === 0 ? (
           labels.noCandidates ? (
-            <p className="text-xs text-muted-foreground">{labels.noCandidates}</p>
+            <p className="text-sm text-muted-foreground">{labels.noCandidates}</p>
           ) : null
         ) : (
           <ul className="flex flex-col gap-2">

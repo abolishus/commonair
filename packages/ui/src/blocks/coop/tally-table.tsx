@@ -101,7 +101,7 @@ export function TallyTable({
         <StatusBadge tone={passed ? "success" : "danger"} icon={passed ? Tick02Icon : Cancel01Icon}>
           {outcomeLabel}
         </StatusBadge>
-        {reason ? <p className="text-xs text-muted-foreground">{reason}</p> : null}
+        {reason ? <p className="text-sm text-muted-foreground">{reason}</p> : null}
       </div>
       <DataTable
         caption={labels.caption}

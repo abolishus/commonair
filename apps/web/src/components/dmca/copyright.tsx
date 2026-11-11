@@ -249,7 +249,7 @@ function NoticeCard({
           ))}
         </ul>
         {/* F35: the card's one note style (its description's), not body text. */}
-        <p data-testid="copyright-strike-note" className="text-xs/relaxed text-muted-foreground">
+        <p data-testid="copyright-strike-note" className="text-sm/relaxed text-muted-foreground">
           {t("copyright.notice.repeat")}
         </p>
         {notice.counter ? (

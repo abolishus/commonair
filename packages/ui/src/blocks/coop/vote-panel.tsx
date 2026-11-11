@@ -129,11 +129,11 @@ export function VotePanel({
           className="flex flex-col gap-2"
         />
         {blocked && cannotVoteReason ? (
-          <p id={reasonId} className="text-xs text-muted-foreground">
+          <p id={reasonId} className="text-sm text-muted-foreground">
             {cannotVoteReason}
           </p>
         ) : null}
-        {!blocked && myVote && myVoteText ? <p className="text-xs text-muted-foreground">{myVoteText}</p> : null}
+        {!blocked && myVote && myVoteText ? <p className="text-sm text-muted-foreground">{myVoteText}</p> : null}
         {participation}
       </CardContent>
       <CardFooter className="justify-end">

@@ -106,7 +106,7 @@ export function ProposalRow({
           {result.rule ? <span className="text-muted-foreground">{result.rule}</span> : null}
         </div>
       ) : null}
-      {next ? <p className="text-xs text-muted-foreground">{next}</p> : null}
+      {next ? <p className="text-sm text-muted-foreground">{next}</p> : null}
     </article>
   );
 }

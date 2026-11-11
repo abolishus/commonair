@@ -254,7 +254,7 @@ export function OverlayTokenPanel({
             ) : null}
             {active && createdUrls ? (
               <div className="flex min-w-0 flex-col gap-4">
-                {labels.urlHint ? <p className="text-xs text-muted-foreground">{labels.urlHint}</p> : null}
+                {labels.urlHint ? <p className="text-sm text-muted-foreground">{labels.urlHint}</p> : null}
                 {OVERLAY_KINDS.map((kind) => {
                   const { width, height } = OVERLAY_SIZES[kind];
                   const testId = overlayUrlTestId(kind);
@@ -294,7 +294,7 @@ export function OverlayTokenPanel({
               </div>
             ) : (
               <div className="flex min-w-0 flex-col gap-2">
-                {active ? <p className="text-xs text-muted-foreground">{labels.linksHidden}</p> : null}
+                {active ? <p className="text-sm text-muted-foreground">{labels.linksHidden}</p> : null}
                 <ul data-testid="overlay-sizes" className="flex flex-col gap-1 text-sm">
                   {OVERLAY_KINDS.map((kind) => (
                     <li key={kind} data-kind={kind} className="flex flex-wrap justify-between gap-x-2">

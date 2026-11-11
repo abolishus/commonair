@@ -266,7 +266,7 @@ export function VideoGrid({ kind, tiles, list, empty, showChannel }: VideoGridPr
                 {list.loadingMore ? t("channel.tabs.loadingMore") : t("channel.tabs.showMore")}
               </Button>
               {list.moreFailed ? (
-                <output className="text-xs text-muted-foreground">{t("channel.tabs.moreFailed")}</output>
+                <output className="text-sm text-muted-foreground">{t("channel.tabs.moreFailed")}</output>
               ) : null}
             </div>
           ) : null}

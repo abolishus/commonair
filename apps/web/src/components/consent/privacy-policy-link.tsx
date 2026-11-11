@@ -58,7 +58,7 @@ export function PrivacyPolicyLink(): React.JSX.Element {
               </DialogDescription>
             </DialogHeader>
             <ScrollArea className="max-h-96">
-              <div className="pe-3 text-xs whitespace-pre-wrap">{load.doc.body}</div>
+              <div className="pe-3 text-sm whitespace-pre-wrap">{load.doc.body}</div>
             </ScrollArea>
           </>
         ) : (

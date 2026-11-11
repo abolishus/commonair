@@ -311,10 +311,10 @@ describe("the studio section", () => {
     expect(q(container, "federation-note-replies")?.textContent).toBe(t("federation.notes.replies"));
     expect(q(container, "federation-note-delete")?.textContent).toBe(t("federation.notes.delete"));
     expect(q(container, "federation-note-refollow")?.textContent).toBe(t("federation.notes.refollow"));
-    // The card's hint size, not a larger body size (F35).
+    // The card's hint size (14 px reading text since D1), not a larger body size (F35).
     const list = q(container, "federation-note-posted")?.parentElement;
-    expect(list?.className).toMatch(/\btext-xs\b/);
-    expect(list?.className).not.toMatch(/\btext-sm\b/);
+    expect(list?.className).toMatch(/\btext-sm\b/);
+    expect(list?.className).not.toMatch(/\btext-(xs|base|lg)\b/);
   });
 
   it("off: turning it on saves at once, shows the handle and toasts", async () => {

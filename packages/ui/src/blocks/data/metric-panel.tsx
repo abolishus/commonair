@@ -21,7 +21,7 @@ export function MetricPanel({ title, value, caption, body, icon, className, ...p
       <CardContent className="grid gap-1">
         <div className="text-lg font-semibold tabular-nums">{value}</div>
         <p className="text-xs text-muted-foreground">{caption}</p>
-        {body ? <p className="mt-2 text-xs">{body}</p> : null}
+        {body ? <p className="mt-2 text-sm">{body}</p> : null}
       </CardContent>
     </Card>
   );
