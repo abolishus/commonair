@@ -52,7 +52,6 @@ export type Key =
   | "d6Transparency.how.settledTitle"
   | "d6Transparency.how.settled"
   | "d6Transparency.how.ownerTitle"
-  | "d6Transparency.how.owner"
   | "d6Transparency.how.statementsTitle"
   | "d6Transparency.how.statements"
   | "d6Transparency.how.verifyLink"

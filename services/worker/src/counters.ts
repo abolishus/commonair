@@ -9,7 +9,8 @@
  * Only sessions in `live` playback mode are live viewers (ADR 0016 decision 6): verified DVR
  * sessions are "catching up", published beside the live count as KEYS.catchingUpCount and never
  * folded into the peak or the viewer-seconds. Rehearsals are not broadcasts (batch 6 decision
- * (f)): their invitees are never counted.
+ * (f)): their invitees are never counted. The channel owner's own sessions are never counted either
+ * (ADR 0014 amendment 2026-11-11); signed-out sessions are (no user id to compare).
  */
 import { KEYS } from "@commonair/contracts/internal";
 import { schema } from "@commonair/db";
@@ -66,9 +67,11 @@ async function countChannel(ctx: WorkerContext, channelId: string, nowMs: number
   const counts = { verified: 0, excluded: 0, pending: 0, catchingUp: 0 };
   if (members.length > 0) {
     const rows = await ctx.sql<{ verdict: "verified" | "excluded" | "pending"; mode: "live" | "dvr"; n: number }[]>`
-      select verdict, playback_mode as mode, count(*)::int as n from playback_sessions
-       where id = any(${members}::uuid[]) and channel_id = ${channelId} and ended_at is null
-       group by verdict, playback_mode`;
+      select ps.verdict, ps.playback_mode as mode, count(*)::int as n
+        from playback_sessions ps join channels c on c.id = ps.channel_id
+       where ps.id = any(${members}::uuid[]) and ps.channel_id = ${channelId} and ps.ended_at is null
+         and ps.user_id is distinct from c.owner_id
+       group by ps.verdict, ps.playback_mode`;
     for (const r of rows) {
       if (r.mode === "live") counts[r.verdict] += r.n;
       else if (r.verdict === "verified") counts.catchingUp += r.n;

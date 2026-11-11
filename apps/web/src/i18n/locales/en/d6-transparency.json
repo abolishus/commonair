@@ -47,7 +47,6 @@
   "d6Transparency.how.settledTitle": "After the stream",
   "d6Transparency.how.settled": "About two hours after a stream ends, the co-op settles its numbers: peak viewers and watch time, from every session it verified. Settled numbers are the final ones, and the only ones analytics, the stream recap and audience statements use.",
   "d6Transparency.how.ownerTitle": "The creator's own viewing",
-  "d6Transparency.how.owner": "Points and the stream hours that count toward co-op membership never include a creator watching their own stream. Today the live number and the settled viewer figures can still include the creator's own player.",
   "d6Transparency.how.statementsTitle": "Audience statements",
   "d6Transparency.how.statements": "A creator can share a signed audience statement with a sponsor. It carries the settled numbers, signed by this co-op, so anyone can check it hasn't been changed.",
   "d6Transparency.how.verifyLink": "Check an audience statement",

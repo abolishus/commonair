@@ -327,3 +327,40 @@ For the maintainer. Each item is the recommended default; accepting the amendmen
 4. **Versioning:** `v: 2` for new entries from its release; `v: 1` keeps verifying; no re-signing
    of old broadcasts to add the field.
 5. **Build:** batch 9, after acceptance (tokens, vectors, worker, SDK).
+
+## Amendment 2: the channel owner is not their own audience (2026-11-11)
+
+### Context
+
+`round2/viewer-count.md` (design overhaul, decision 2) found that a creator's own playback
+sessions (the studio preview, their own channel page) counted as verified viewers in the live
+count, the running peak (`broadcasts.peak_verified_viewers`) and the settled rollup
+(`broadcast_audience_totals`, `broadcast_audience_minutes`), and so in the statements this ADR
+signs. Points and the stream hours that count toward co-op membership already left the owner
+out. On staging the streamer's own account held two verified sessions on its live broadcast, so
+the dashboard could count the streamer as one of their own viewers.
+
+### A2.1 What changed
+
+A session whose `user_id` is the channel's `owner_id` counts nowhere:
+
+- live: `viewerCounts` and `viewerBreakdown` (`services/api/src/lib/viewers.ts`, one shared
+  filter), and the worker's live counter (`services/worker/src/counters.ts`), which publishes
+  `KEYS.viewerCount`, `KEYS.catchingUpCount` and folds the running peak and viewer-seconds; so
+  `stream.health`, the public `<ViewerCount>` and the CDN-burst threshold leave the owner out;
+- settled: the broadcast rollup's session select (`services/worker/src/jobs/broadcast-rollup.ts`),
+  so analytics, the recap and every attestation built from the totals leave the owner out.
+
+Signed-out sessions have no user id and still count (`user_id is distinct from owner_id`).
+
+### A2.2 Consequences
+
+- **Attested figures change.** A broadcast rolled up after this change attests lower peaks,
+  sessions and viewer-seconds when its owner watched. A re-roll of an older broadcast (a re-score)
+  supersedes its statement under decision 4, as any re-score does.
+- **No migration window.** There are no deployments or attested broadcasts to reconcile, so the
+  change applies at once, with no dual-count period and no statement version bump: the statement's
+  shape is unchanged, only what feeds it.
+- **Follow-up: device and address matching.** An owner watching signed out (or from another
+  account) still counts. Stream hours already match the owner's devices and addresses; doing the
+  same here is left to a later change.
