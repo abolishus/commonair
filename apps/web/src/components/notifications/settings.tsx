@@ -92,8 +92,9 @@ export function NotificationSettings({
   // The latest request per cell: an older answer never overwrites a newer choice.
   const seq = React.useRef(new Map<string, number>());
   // What a failed change rolls its cell back to: the state the member saw when they made it.
+  // A layout effect, so a click right after the load lands (a passive effect may not have run yet).
   const prefsRef = React.useRef(prefs);
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     prefsRef.current = prefs;
   }, [prefs]);
 

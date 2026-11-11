@@ -199,7 +199,8 @@ describe("the rendered step", () => {
     );
     const skip = await screen.findByTestId("setup-step-get_paid-skip");
     expect(skip.textContent).toBe(t("d6Studio.getPaid.notNow"));
-    expect(screen.getByTestId("setup-get-paid").getAttribute("data-state")).toBe("connect");
+    // The payout account loads after the step renders: wait for it rather than read it once.
+    await waitFor(() => expect(screen.getByTestId("setup-get-paid").getAttribute("data-state")).toBe("connect"));
     fireEvent.click(skip);
     await waitFor(() => expect(setup.mark).toHaveBeenCalledWith("aurora", "get_paid"));
     await waitFor(() => expect(screen.queryByTestId("setup-checklist")).toBeNull());

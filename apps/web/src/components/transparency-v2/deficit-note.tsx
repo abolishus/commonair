@@ -41,7 +41,7 @@ export function DeficitNote({ deficit, note }: { deficit: Deficit; note: NotedMo
                   {t("d6Transparency.deficit.noteUpdated")} <RelativeTime date={note.updatedAt} />
                 </span>
               </figcaption>
-              <blockquote className="border-l-2 border-border pl-3 break-words whitespace-pre-line">
+              <blockquote className="border-s-2 border-border ps-3 break-words whitespace-pre-line">
                 {note.body}
               </blockquote>
             </figure>
