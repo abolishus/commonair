@@ -29,6 +29,7 @@ import { type Executor, schema, uuidv7 } from "@commonair/db";
 import { post, shareChargeback, shareChargebackReversal } from "@commonair/ledger";
 import type { StripeAction } from "@commonair/payments";
 import { bookShareTx, membershipEvent, releaseShareTx, shareChargeRefunded, shareEvent } from "../../coop/shares.ts";
+import { membershipNoticeTx, noticeActiveMembershipTx } from "../../coop/membership.ts";
 import { audit } from "../../events/audit.ts";
 import { type AppliedAction, type PreparedAction, StripeProcessingError, feeFor } from "../stripe-events.ts";
 
@@ -77,6 +78,7 @@ export async function shareCheckoutCompleted(
     providerRef: a.paymentIntent,
     refundIfLeft: true,
   });
+  if (outcome === "activated" && payment.userId) await noticeActiveMembershipTx(tx, payment.userId, "viewer", now);
   await audit(tx, {
     actorType: "system",
     actorId: null,
@@ -282,6 +284,8 @@ async function shareDisputeLostTx(
       details: { class: m.class, basis: m.basis, shareId: share.id },
     });
     await membershipEvent(tx, m, now);
+    // Not the member's own exit: the chargeback ended it, so the inbox says so.
+    await membershipNoticeTx(tx, m, "membership_ended", now);
   }
 }
 

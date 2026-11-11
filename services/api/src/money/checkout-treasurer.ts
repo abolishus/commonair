@@ -30,7 +30,7 @@ import { sendPaymentReceipt } from "./receipt.ts";
 import { postPaymentWithSplit } from "./splits.ts";
 import { requestProviderRefund } from "./stripe-refunds.ts";
 import { withCoopErrors } from "../coop/errors.ts";
-import { confirmShareTx } from "../coop/membership.ts";
+import { confirmShareTx, startSubscriptionMembershipTx } from "../coop/membership.ts";
 
 const { payments, subscriptions, tips, channels, disputes, payoutAccounts, payouts, users } = schema;
 type PaymentRow = typeof payments.$inferSelect;
@@ -166,6 +166,9 @@ export async function confirmPaymentTx(
         .returning();
       if (!activated) continue;
       subscribers.push(activated.subscriberId);
+      // A paid sub (never a gift) can make its payer a viewer member now, not at the next sync;
+      // a renewal after a lapse rejoins them. Idempotent, and a no-op for an active member.
+      if (!gift) await startSubscriptionMembershipTx(tx, activated.subscriberId, now);
       if (period.renewal) continue;
       const user = await userEventFields(tx, activated.subscriberId);
       if (user)
