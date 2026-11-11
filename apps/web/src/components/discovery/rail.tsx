@@ -10,6 +10,7 @@
  */
 import type { ChannelCard, StreamCard } from "@commonair/contracts/dto";
 import { ChannelAvatar, IconButton, LiveBadge, RelativeTime, Skeleton, ViewerCount } from "@commonair/ui";
+import { Button } from "@commonair/ui/components/button";
 import {
   SidebarGroup,
   SidebarGroupContent,
@@ -34,7 +35,7 @@ import {
   type RailSection,
 } from "../../lib/directory-sections.ts";
 import { trackUi } from "../../lib/ui-metrics.ts";
-import { SIGNUP_FOLLOW_HREF } from "../following/links.ts";
+import { AuthGatePrompt } from "../auth-gate/auth-gate-prompt.tsx";
 import { feedViewer, useHomeFeed } from "./feed.ts";
 import { ownChannelSlug, withoutOwnChannel } from "./own-channel.ts";
 import { RAIL_KEY, readRail, writeTab } from "./tab-storage.ts";
@@ -269,14 +270,21 @@ function FollowNudge(): React.JSX.Element {
         {t("d3Home.rail.nudge.title")}
       </p>
       <p className="text-xs text-muted-foreground">{t("d3Home.rail.nudge.body")}</p>
-      <a
-        data-testid="side-rail-nudge-signup"
-        href={SIGNUP_FOLLOW_HREF}
-        onClick={() => trackUi("rail.followNudge", "create", "follow")}
-        className="mt-1 inline-flex min-h-10 items-center self-start text-sm font-medium text-brand-text underline underline-offset-4 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+      {/* The sign-up prompt (intent=follow), not a bare link: it says what an account adds first. */}
+      <AuthGatePrompt
+        intent="follow"
+        trigger={
+          <Button
+            type="button"
+            variant="link"
+            data-testid="side-rail-nudge-signup"
+            onClick={() => trackUi("rail.followNudge", "click", "follow")}
+            className="mt-1 h-auto min-h-10 self-start px-0 text-sm font-medium text-brand-text underline hover:text-foreground"
+          />
+        }
       >
         {t("d3Home.rail.nudge.cta")}
-      </a>
+      </AuthGatePrompt>
     </aside>
   );
 }

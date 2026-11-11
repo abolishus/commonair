@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { and, desc, eq, lt, or } from "drizzle-orm";
+import { and, desc, eq, lt, ne, or } from "drizzle-orm";
 import { schema, uuidv7 } from "@commonair/db";
 import type { Deps } from "../deps.ts";
 import { broadcasterFields, emit, userFields } from "../events/outbox.ts";
@@ -192,9 +192,17 @@ export const channelsRoutes = {
           .set({ notify: input.notify })
           .where(and(eq(follows.followerId, caller.user.id), eq(follows.channelId, c.id)));
         const [row] = await tx.select({ n: channels.followerCount }).from(channels).where(eq(channels.id, c.id));
-        // Contract step placeholder (overhaul wave 3): d4-follow sets firstFollow.
         return { following: true as const, followerCount: row?.n ?? c.followerCount, firstFollow: false };
       }
+      // D4.3: the web offers go-live alerts once, after the caller's first follow. Only the row
+      // just inserted may exist; two follows racing in one instant could both say true, which
+      // costs a second prompt and nothing else.
+      const [other] = await tx
+        .select({ channelId: follows.channelId })
+        .from(follows)
+        .where(and(eq(follows.followerId, caller.user.id), ne(follows.channelId, c.id)))
+        .limit(1);
+      const firstFollow = other === undefined;
       // A new follow only: a link's attribution never rewrites an existing follow (decision (k)).
       await attributeFollow(tx, {
         followerId: caller.user.id,
@@ -214,7 +222,7 @@ export const channelsRoutes = {
           ...userFields(u),
           followed_at: iso(inserted.createdAt),
         });
-      return { following: true as const, followerCount: row?.n ?? c.followerCount + 1, firstFollow: false };
+      return { following: true as const, followerCount: row?.n ?? c.followerCount + 1, firstFollow };
     });
     // Followers-only chat depends on follow state.
     await publishControl(deps, c.id, { op: "invalidate", scope: "user", userId: caller.user.id });

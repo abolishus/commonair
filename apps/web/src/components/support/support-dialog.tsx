@@ -39,6 +39,8 @@ import * as React from "react";
 import { t } from "../../i18n/index.ts";
 import { api } from "../../lib/api.ts";
 import { GatedSupportButton } from "../auth-gate/gated-support.tsx";
+import { IntentConfirm, usePendingIntent } from "../auth-gate/intent-confirm.tsx";
+import { FOLLOW_OUTLINE_CLASSES } from "../channel-follow.tsx";
 import { BreakdownEstimate } from "../money/breakdown-estimate.tsx";
 import {
   SUBSCRIPTION_STATUS_VIEW,
@@ -116,13 +118,50 @@ export function SupportButton({
   client = apiSupportClient,
 }: SupportButtonProps): React.JSX.Element {
   const [open, setOpen] = React.useState(false);
+  // Back from sign-up with `intent=support`: a one-tap confirm that only opens the dialog.
+  const intent = usePendingIntent("support", signedIn);
   if (!signedIn) return <GatedSupportButton channel={channel} channelName={channelName} accent={accent} />;
+  const label = (
+    <>
+      <HugeiconsIcon icon={FavouriteIcon} strokeWidth={2} aria-hidden />
+      {t("support.open")}
+    </>
+  );
+  const name = channelName.trim();
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={<AccentButton data-testid="support-open" size="sm" />}>
-        <HugeiconsIcon icon={FavouriteIcon} strokeWidth={2} aria-hidden />
-        {t("support.open")}
-      </DialogTrigger>
+      {intent.pending ? (
+        <IntentConfirm
+          open={!open}
+          message={name ? t("d4Follow.confirm.support", { channel: name }) : t("d4Follow.confirm.supportNoChannel")}
+          onDismiss={intent.dismiss}
+          trigger={
+            <AccentButton
+              data-testid="support-open"
+              size="sm"
+              className={FOLLOW_OUTLINE_CLASSES}
+              onClick={() => setOpen(true)}
+            />
+          }
+          action={
+            <AccentButton
+              data-testid="intent-confirm-support"
+              data-filled-cta=""
+              accent={accent}
+              onClick={() => {
+                intent.confirm();
+                setOpen(true);
+              }}
+            >
+              {label}
+            </AccentButton>
+          }
+        >
+          {label}
+        </IntentConfirm>
+      ) : (
+        <DialogTrigger render={<AccentButton data-testid="support-open" size="sm" />}>{label}</DialogTrigger>
+      )}
       {open && (
         <SupportDialogContent
           channel={channel}

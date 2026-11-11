@@ -97,10 +97,20 @@ describe("rail v2", () => {
     ]);
     const nudge = screen.getByTestId("side-rail-nudge");
     expect(nudge.textContent).toContain(t("d3Home.rail.nudge.title"));
-    expect(screen.getByTestId("side-rail-nudge-signup").getAttribute("href")).toBe("/signup?intent=follow");
+    // The nudge opens the sign-up prompt (intent=follow), not a bare /signup link.
+    const cta = screen.getByTestId("side-rail-nudge-signup");
+    expect(cta.tagName).toBe("BUTTON");
+    expect(cta.getAttribute("href")).toBeNull();
+    expect(cta.getAttribute("data-auth-gate")).toBe("follow");
     expect(fake.tracked).toContain("rail.followNudge|view|none");
-    fireEvent.click(screen.getByTestId("side-rail-nudge-signup"));
-    expect(fake.tracked).toContain("rail.followNudge|create|follow");
+    fireEvent.click(cta);
+    expect(fake.tracked).toContain("rail.followNudge|click|follow");
+    const gate = await screen.findByTestId("auth-gate");
+    expect(gate.getAttribute("data-intent")).toBe("follow");
+    expect(gate.textContent).toContain(t("d2Gate.follow.titleNoChannel"));
+    const create = new URL(screen.getByTestId("auth-gate-create").getAttribute("href") ?? "", "https://x.invalid");
+    expect(create.pathname).toBe("/signup");
+    expect(create.searchParams.get("intent")).toBe("follow");
   });
 
   it("signed out with nobody live still lists who was live lately", async () => {

@@ -28,12 +28,20 @@ export type GateIntent = (typeof GATE_INTENTS)[number];
 export const CHANNEL_INTENTS: ReadonlySet<SignupIntent> = new Set(["follow", "chat", "support", "watch"]);
 
 /**
- * Intents whose page shows a one-tap confirm after verification (`usePendingIntent`). Only Follow
- * has one so far; chat, support, predict, clip and watch still return to their page through the
- * redirect, but are not kept until a confirm exists for them, so nothing is promised or stored
- * that never appears. The creator intents (stream, import, join) land on their own pages.
+ * Intents whose page shows a one-tap confirm after verification (`usePendingIntent`). None acts
+ * on its own: Follow follows on the tap; chat focuses the composer ("Say hi in chat"); support
+ * opens the Support dialog; predict brings the open prediction into view; clip opens the clip
+ * dialog; watch leads to the 18+ confirm. The creator intents (stream, import, join) land on
+ * their own pages.
  */
-export const CONFIRMABLE_INTENTS: ReadonlySet<SignupIntent> = new Set(["follow"]);
+export const CONFIRMABLE_INTENTS: ReadonlySet<SignupIntent> = new Set([
+  "follow",
+  "chat",
+  "support",
+  "predict",
+  "clip",
+  "watch",
+]);
 
 /**
  * `?intent=` for a gate or a link: `vote` counts as `join` and `report` as `none` (no enum change,

@@ -136,12 +136,15 @@ describe("pending intent", () => {
       expect(savePendingIntent({ intent: i, target: "/a" }, NOW, memoryStore())).toBe(true);
   });
 
-  it("keeps only intents that have a confirm (Follow), so nothing waits for one that never shows", () => {
-    expect([...CONFIRMABLE_INTENTS]).toEqual(["follow"]);
+  it("keeps the viewer intents that have a page confirm (wave 3), never the creator ones", () => {
+    expect([...CONFIRMABLE_INTENTS]).toEqual(["follow", "chat", "support", "predict", "clip", "watch"]);
     for (const intent of ["chat", "support", "predict", "clip", "watch"] as const) {
       const store = memoryStore();
-      expect(savePendingIntent({ intent, target: "/rivertide", channel: "rivertide" }, NOW, store), intent).toBe(false);
-      expect(store.map.size).toBe(0);
+      expect(savePendingIntent({ intent, target: "/rivertide", channel: "rivertide" }, NOW, store), intent).toBe(true);
+      expect(readPendingIntent(NOW, store), intent).toMatchObject({ intent, path: "/rivertide" });
+    }
+    for (const intent of ["stream", "import", "join"] as const) {
+      const store = memoryStore();
       store.map.set(PENDING_INTENT_KEY, JSON.stringify({ intent, path: "/rivertide", at: NOW }));
       expect(readPendingIntent(NOW, store), intent).toBeNull();
     }

@@ -15,6 +15,7 @@ import {
   useGateSearch,
   type GateChannel,
 } from "../auth-gate/auth-gate-prompt.tsx";
+import { usePendingIntent } from "../auth-gate/intent-confirm.tsx";
 import { FormError } from "../form-error.tsx";
 import { t } from "../../i18n/index.ts";
 import { trackUi } from "../../lib/ui-metrics.ts";
@@ -107,6 +108,13 @@ export function MatureGate({
   const { pending, notAdult, confirmMature } = useConfirmMature(client, onConfirmed);
   const gateChannel = useGateChannel(channel);
   const search = useGateSearch("watch", gateChannel);
+  // Back from sign-up with `intent=watch`: the 18+ confirm is the one tap; it never confirms alone.
+  const intent = usePendingIntent("watch", signedIn && !checking);
+  const confirmButton = React.useRef<HTMLButtonElement>(null);
+  const confirming = intent.pending !== null;
+  React.useEffect(() => {
+    if (confirming) confirmButton.current?.focus({ preventScroll: true });
+  }, [confirming]);
   if (checking)
     return (
       <SkeletonGroup label={t("safety.mature.checking")}>
@@ -158,16 +166,32 @@ export function MatureGate({
         description={t("safety.mature.confirmHint")}
         action={
           <div className="flex flex-col items-center gap-2">
+            {confirming ? (
+              <output data-testid="intent-confirm" data-intent="watch" className="text-sm text-foreground">
+                {t("d4Follow.confirm.watch")}
+              </output>
+            ) : null}
             {notAdult ? <FormError>{t("safety.mature.notAdult")}</FormError> : null}
-            <Button
-              data-testid="mature-gate-confirm"
-              size="sm"
-              disabled={pending || notAdult}
-              aria-busy={pending || undefined}
-              onClick={() => void confirmMature()}
-            >
-              {t("safety.mature.confirm")}
-            </Button>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <Button
+                ref={confirmButton}
+                data-testid="mature-gate-confirm"
+                size="sm"
+                disabled={pending || notAdult}
+                aria-busy={pending || undefined}
+                onClick={() => {
+                  if (confirming) intent.confirm();
+                  void confirmMature();
+                }}
+              >
+                {t("safety.mature.confirm")}
+              </Button>
+              {confirming ? (
+                <Button data-testid="intent-confirm-dismiss" size="sm" variant="ghost" onClick={intent.dismiss}>
+                  {t("d4Follow.confirm.dismiss")}
+                </Button>
+              ) : null}
+            </div>
           </div>
         }
       />

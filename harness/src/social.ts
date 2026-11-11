@@ -13,7 +13,14 @@ import type { ApiClient } from "./api/client.ts";
 import type { ChatClient } from "./chat-client.ts";
 import { E7_TEST_IDS as E7, e7tid } from "./e7/selectors.ts";
 import { TimeoutError, waitFor } from "./wait.ts";
-import { LIVE_DIRECTORY_SECTIONS, type LiveDirectorySection, ROUTES, TEST_IDS as T, tid } from "./web/selectors.ts";
+import {
+  D4_FOLLOW_TEST_IDS as F,
+  LIVE_DIRECTORY_SECTIONS,
+  type LiveDirectorySection,
+  ROUTES,
+  TEST_IDS as T,
+  tid,
+} from "./web/selectors.ts";
 import { byTestId } from "./web/session.ts";
 
 /** Timeout the moderation menu applies (e2-selectors: `chat-mod-timeout` = 600 s). */
@@ -202,10 +209,19 @@ export class WebActor implements SocialActor {
     const before = await this.followState(b);
     const button = this.followButton();
     await button.click({ timeout: b.timeoutMs });
+    if (before.following) {
+      // d4-follow: Following opens a menu; Unfollow sits behind a confirm.
+      await this.page.locator(followTid(F.followMenuUnfollow)).click({ timeout: b.timeoutMs });
+      await this.page
+        .locator(followTid(F.followUnfollowDialog))
+        .locator(tid(T.confirmDialogConfirm))
+        .click({ timeout: b.timeoutMs });
+    }
     const want = before.following ? before.count - 1 : before.count + 1;
     let last = before;
+    let settled: FollowState;
     try {
-      return await waitFor(
+      settled = await waitFor(
         `follow-button data-following=${!before.following} and follower-count ${want}`,
         async () => {
           if (await button.isDisabled()) return null;
@@ -217,10 +233,26 @@ export class WebActor implements SocialActor {
     } catch (err) {
       throw new Error(`${(err as Error).message}; last seen ${JSON.stringify(last)}`, { cause: err });
     }
+    // The first follow ever offers go-live alerts once (d4-follow); the harness answers Not now.
+    if (!before.following) await this.dismissFirstFollowPrompt();
+    return settled;
   }
 
   async hasFollowControl(): Promise<boolean> {
     return (await byTestId(this.page, T.followButton).count()) > 0;
+  }
+
+  /**
+   * The one-time first-follow alert prompt, if it opened. It renders with the settled follow (the
+   * API's `firstFollow` lands before the follow state does), so a short grace covers the mount.
+   */
+  private async dismissFirstFollowPrompt(): Promise<void> {
+    const shown = await this.page
+      .locator(followTid(F.firstFollowPrompt))
+      .waitFor({ state: "visible", timeout: 500 })
+      .then(() => true)
+      .catch(() => false);
+    if (shown) await this.page.locator(followTid(F.firstFollowDismiss)).click({ timeout: 5_000 });
   }
 
   async send(text: string, b: WaitBudget): Promise<void> {
@@ -309,6 +341,11 @@ function cardIn(section: LiveDirectorySection | "category", channel: string): st
 
 function heroCard(channel: string): string {
   return `${tid(T.homeHero)} ${tid(T.streamCard, { channel })}`;
+}
+
+/** A d4-follow id (`D4_FOLLOW_TEST_IDS` sits outside the documented `TestId` set). */
+function followTid(id: (typeof F)[keyof typeof F]): string {
+  return `[data-testid="${id}"]`;
 }
 
 // ---------------------------------------------------------------- API
