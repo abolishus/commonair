@@ -2,17 +2,21 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * The stream manager as a control room (F21): a `wide` grid with the muted preview, live stats and
- * health, "Edit stream info" on the left; chat, quick actions and the activity feed on the right.
- * Below `lg` it is one column in that order. The preview and chat are slots (the route passes the
- * real `Player` and `ChatPanel`), so this layout renders and tests without a media stack.
+ * The stream manager as a control room (F21), rebalanced for live work (overhaul wave 3, D5.2;
+ * creator-studio P2): on the left the live numbers and health, then "Edit stream info", then the
+ * muted preview (which can be hidden); chat, the activity feed and quick actions on the right.
+ * Below `lg` phone streamers live in chat, so the order is chat, stream info, preview, health,
+ * then activity and quick actions (CSS `order`; the right column dissolves into the grid there).
+ * The preview and chat are slots (the route passes the real `Player` and `ChatPanel`), so this
+ * layout renders and tests without a media stack.
  */
 import { Button } from "@commonair/ui/components/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@commonair/ui/components/card";
 import { ChartBarLineIcon, Settings02Icon, TestTube01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Link } from "@tanstack/react-router";
-import type * as React from "react";
+import { cn } from "@commonair/ui/lib/utils";
+import * as React from "react";
 import { t } from "../../i18n/index.ts";
 import type { StreamHealthDto } from "../../lib/stream-health.ts";
 import { StreamHealthCard } from "../stream-health-card.tsx";
@@ -29,6 +33,8 @@ export interface StreamManagerProps {
   infoClient?: StreamInfoClient;
   healthLoad?: (channel: string) => Promise<StreamHealthDto>;
   activitySource?: ActivitySource;
+  /** After stream info saves (the go-live checklist re-reads its steps). */
+  onInfoSaved?: () => void;
 }
 
 export function StreamManager({
@@ -39,24 +45,65 @@ export function StreamManager({
   infoClient,
   healthLoad,
   activitySource,
+  onInfoSaved,
 }: StreamManagerProps): React.JSX.Element {
   return (
-    <div data-testid="stream-manager" className="grid min-w-0 grid-cols-1 gap-6 lg:grid-cols-3">
-      <div className="flex min-w-0 flex-col gap-6 lg:col-span-2">
-        <section data-testid="stream-preview" aria-label={t("studio.preview.label")} className="min-w-0">
-          {preview}
-        </section>
-        <StreamHealthCard key={channel} channel={channel} startedAt={startedAt} load={healthLoad} />
-        <StreamInfoEditor key={`info:${channel}`} channel={channel} client={infoClient} />
+    <div data-testid="stream-manager" className="grid min-w-0 grid-cols-1 gap-6 lg:grid-cols-3 lg:items-start">
+      <div className="order-2 flex min-w-0 flex-col gap-6 lg:order-none lg:col-span-2">
+        <div data-slot="stream-health" className="order-3 min-w-0 lg:order-1">
+          <StreamHealthCard key={channel} channel={channel} startedAt={startedAt} load={healthLoad} />
+        </div>
+        <div data-slot="stream-info" className="order-1 min-w-0 lg:order-2">
+          <StreamInfoEditor key={`info:${channel}`} channel={channel} client={infoClient} onSaved={onInfoSaved} />
+        </div>
+        <PreviewSection className="order-2 lg:order-3">{preview}</PreviewSection>
       </div>
-      <div className="flex min-w-0 flex-col gap-6">
-        <section data-testid="stream-chat" aria-label={t("studio.chatPanel.label")} className="min-w-0">
+      <div className="contents lg:flex lg:min-w-0 lg:flex-col lg:gap-6">
+        <section
+          data-testid="stream-chat"
+          aria-label={t("studio.chatPanel.label")}
+          className="order-1 min-w-0 lg:order-none"
+        >
           {chat}
         </section>
-        <QuickActions />
-        <ActivityFeed key={`activity:${channel}`} channel={channel} source={activitySource} />
+        <div className="order-3 min-w-0 lg:order-none">
+          <ActivityFeed key={`activity:${channel}`} channel={channel} source={activitySource} />
+        </div>
+        <div className="order-4 min-w-0 lg:order-none">
+          <QuickActions />
+        </div>
       </div>
     </div>
+  );
+}
+
+/** The muted preview with "Hide preview": hiding it unmounts the player, so it stops loading video. */
+function PreviewSection({ children, className }: { children: React.ReactNode; className?: string }): React.JSX.Element {
+  const [shown, setShown] = React.useState(true);
+  const id = React.useId();
+  return (
+    <section
+      data-testid="stream-preview"
+      data-shown={String(shown)}
+      aria-label={t("studio.preview.label")}
+      className={cn("flex min-w-0 flex-col gap-2", className)}
+    >
+      <div className="flex justify-end">
+        <Button
+          data-testid="stream-preview-toggle"
+          variant="ghost"
+          size="sm"
+          aria-expanded={shown}
+          aria-controls={id}
+          onClick={() => setShown((v) => !v)}
+        >
+          {shown ? t("d5Dashboard.preview.hide") : t("d5Dashboard.preview.show")}
+        </Button>
+      </div>
+      <div id={id} className="d5dash-preview-cap min-w-0">
+        {shown ? children : null}
+      </div>
+    </section>
   );
 }
 

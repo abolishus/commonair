@@ -15,7 +15,7 @@ import { t } from "../../i18n/index.ts";
 import { api } from "../../lib/api.ts";
 import { HEALTH_POLL_MS, type PollEnv, browserPollEnv, pollWhileVisible } from "../../lib/stream-health.ts";
 import { Player } from "../../player/player.tsx";
-import { FormError } from "../form-error.tsx";
+import { SectionLoadError } from "../../lib/section-load-error.tsx";
 import { StreamManager, type StreamManagerProps } from "./stream-manager.tsx";
 
 /** What the control room reads of `channels.get`. */
@@ -23,6 +23,10 @@ export interface LiveChannel {
   id: string;
   displayName: string;
   live: { startedAt: string } | null;
+  /** The recap's inputs (d5-dashboard); optional so older fakes still type. */
+  lastLiveAt?: string | null;
+  vodEnabled?: boolean;
+  ownerCoop?: { member: boolean; council: boolean };
 }
 
 export interface LiveChannelState {
@@ -30,6 +34,8 @@ export interface LiveChannelState {
   data: LiveChannel | null;
   /** The first read failed (a later failure keeps the last answer on screen). */
   failed: boolean;
+  /** Read again now (Retry); the poll carries on either way. */
+  reload: () => void;
 }
 
 export type ChatStream = { id: string; live: boolean; slug: string };
@@ -45,11 +51,12 @@ export function useLiveChannel(
   load: (slug: string) => Promise<LiveChannel> = apiLoad,
   env?: PollEnv,
 ): LiveChannelState {
-  const [state, setState] = React.useState<LiveChannelState & { slug: string }>({
+  const [state, setState] = React.useState<Omit<LiveChannelState, "reload"> & { slug: string }>({
     slug,
     data: null,
     failed: false,
   });
+  const tickRef = React.useRef<() => void>(() => undefined);
   React.useEffect(() => {
     let cancelled = false;
     let inFlight = false;
@@ -69,16 +76,24 @@ export function useLiveChannel(
           inFlight = false;
         });
     };
+    tickRef.current = tick;
     const stop = pollWhileVisible(tick, HEALTH_POLL_MS, env ?? browserPollEnv());
     return () => {
       cancelled = true;
+      tickRef.current = () => undefined;
       stop();
     };
   }, [slug, load, env]);
-  return state.slug === slug ? { data: state.data, failed: state.failed } : { data: null, failed: false };
+  const reload = React.useCallback(() => tickRef.current(), []);
+  return state.slug === slug
+    ? { data: state.data, failed: state.failed, reload }
+    : { data: null, failed: false, reload };
 }
 
-export interface ControlRoomProps extends Pick<StreamManagerProps, "infoClient" | "healthLoad" | "activitySource"> {
+export interface ControlRoomProps extends Pick<
+  StreamManagerProps,
+  "infoClient" | "healthLoad" | "activitySource" | "onInfoSaved"
+> {
   slug: string;
   username: string;
   /** `channels.get`; tests pass a fake. */
@@ -88,6 +103,8 @@ export interface ControlRoomProps extends Pick<StreamManagerProps, "infoClient" 
   renderPreview?: (live: boolean) => React.ReactNode;
   /** Chat for the current live state; `ChatPanel` by default. */
   renderChat?: (stream: ChatStream | undefined, channelName: string | undefined) => React.ReactNode;
+  /** Above the board, from the same channel poll: the stream recap and the go-live checklist. */
+  renderTop?: (channel: LiveChannel | null) => React.ReactNode;
 }
 
 export function ControlRoom({
@@ -97,6 +114,7 @@ export function ControlRoom({
   pollEnv,
   renderPreview,
   renderChat,
+  renderTop,
   ...fakes
 }: ControlRoomProps): React.JSX.Element {
   const channel = useLiveChannel(slug, load, pollEnv);
@@ -110,7 +128,13 @@ export function ControlRoom({
   const preview = channel.data ? (
     (renderPreview ?? ((live: boolean) => <Preview slug={slug} live={live} />))(isLive)
   ) : channel.failed ? (
-    <FormError>{t("studio.preview.loadFailed")}</FormError>
+    <SectionLoadError
+      section={t("d5Dashboard.preview.section")}
+      load={{ reload: channel.reload }}
+      headingLevel={3}
+      data-testid="stream-preview-error"
+      retryTestId="stream-preview-retry"
+    />
   ) : (
     <SkeletonGroup label={t("studio.preview.loading")}>
       <Skeleton className="aspect-video w-full" />
@@ -129,13 +153,16 @@ export function ControlRoom({
     />
   );
   return (
-    <StreamManager
-      channel={slug}
-      startedAt={channel.data?.live?.startedAt ?? null}
-      preview={preview}
-      chat={chat}
-      {...fakes}
-    />
+    <>
+      {renderTop?.(channel.data)}
+      <StreamManager
+        channel={slug}
+        startedAt={channel.data?.live?.startedAt ?? null}
+        preview={preview}
+        chat={chat}
+        {...fakes}
+      />
+    </>
   );
 }
 

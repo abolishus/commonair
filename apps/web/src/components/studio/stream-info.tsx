@@ -32,6 +32,7 @@ import * as React from "react";
 import { t } from "../../i18n/index.ts";
 import { toastActionError } from "../../lib/action-error.ts";
 import { api } from "../../lib/api.ts";
+import { SectionLoadError } from "../../lib/section-load-error.tsx";
 import { platformName } from "../channel/about.tsx";
 import { StudioNote } from "./note.tsx";
 
@@ -106,18 +107,35 @@ export function moveItem<T>(list: readonly T[], from: number, by: -1 | 1): T[] {
   return next;
 }
 
+/** The editor's title input, for "Add a title" in the go-live checklist. */
+export const STREAM_INFO_TITLE_ID = "stream-info-title";
+
+/** Moves focus to the editor's title (scrolling it into view); false when it is not on the page. */
+export function focusStreamInfoTitle(doc: Document = document): boolean {
+  const input = doc.getElementById(STREAM_INFO_TITLE_ID);
+  if (!input) return false;
+  input.scrollIntoView({ block: "center", behavior: "smooth" });
+  input.focus({ preventScroll: true });
+  return true;
+}
+
 export function StreamInfoEditor({
   channel,
   client = apiStreamInfoClient,
+  onSaved,
 }: {
   channel: string;
   client?: StreamInfoClient;
+  /** After a save the server accepted (the checklist re-reads its steps). */
+  onSaved?: () => void;
 }): React.JSX.Element {
   const [stored, setStored] = React.useState<StreamInfo | null>(null);
   // What viewers see: the stored info, or the pending save's while it is in flight (optimistic).
   const [shown, setShown] = React.useState<StreamInfo | null>(null);
   const [draft, setDraft] = React.useState<StreamInfo | null>(null);
   const [loadFailed, setLoadFailed] = React.useState(false);
+  // Retry bumps this to load again.
+  const [attempt, setAttempt] = React.useState(0);
   // Each load remounts the links field, so its row keys start from the loaded list.
   const [loads, setLoads] = React.useState(0);
   const [saving, setSaving] = React.useState(false);
@@ -143,7 +161,7 @@ export function StreamInfoEditor({
     return () => {
       live = false;
     };
-  }, [channel, client]);
+  }, [channel, client, attempt]);
 
   // The category list follows what is typed, a beat after typing stops.
   React.useEffect(() => {
@@ -182,6 +200,7 @@ export function StreamInfoEditor({
       setShown(saved);
       setSubmitted(false);
       toast.success(t("studio.info.saved"));
+      onSaved?.();
     } catch (err) {
       // Roll back what viewers are told they see; the form keeps the draft for a retry.
       setShown(before);
@@ -205,7 +224,18 @@ export function StreamInfoEditor({
       </CardHeader>
       <CardContent>
         {loadFailed ? (
-          <StudioNote role="alert">{t("studio.info.loadFailed")}</StudioNote>
+          <SectionLoadError
+            section={t("d5Dashboard.info.section")}
+            load={{
+              reload: () => {
+                setLoadFailed(false);
+                setAttempt((n) => n + 1);
+              },
+            }}
+            headingLevel={3}
+            data-testid="stream-info-error"
+            retryTestId="stream-info-retry"
+          />
         ) : !draft || !shown ? (
           <SkeletonText lines={4} />
         ) : (
@@ -224,9 +254,9 @@ export function StreamInfoEditor({
               </StudioNote>
               <Field>
                 {/* maxLength keeps the title within the limit; the trimmed check is a backstop. */}
-                <FieldLabel htmlFor={`${id}-title`}>{t("studio.info.titleLabel")}</FieldLabel>
+                <FieldLabel htmlFor={STREAM_INFO_TITLE_ID}>{t("studio.info.titleLabel")}</FieldLabel>
                 <Input
-                  id={`${id}-title`}
+                  id={STREAM_INFO_TITLE_ID}
                   data-testid="stream-info-title"
                   value={draft.title}
                   maxLength={STREAM_INFO_LIMITS.titleMax}

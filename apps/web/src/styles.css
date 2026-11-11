@@ -81,3 +81,9 @@ altcha-widget {
     display: inline-flex;
   }
 }
+/* d5-dashboard: the studio preview stays under 40% of the viewport's height (16:9 at that height). */
+@utility d5dash-preview-cap {
+  width: 100%;
+  max-width: calc(40vh * 16 / 9);
+  margin-inline: auto;
+}

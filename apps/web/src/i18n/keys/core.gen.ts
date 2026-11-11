@@ -119,7 +119,6 @@ export type Key =
   | "dashboard.rotateConfirmBody"
   | "dashboard.keyRotated"
   | "dashboard.rotateFailed"
-  | "dashboard.loadFailed"
   | "dashboard.keyTruncated"
   | "appearance.title"
   | "appearance.hint"
