@@ -152,15 +152,13 @@ describe("readSetupState, one step at a time", () => {
       .insert(schema.portabilityImports)
       .values({ userId: imp.userId, channelId: imp.channelId, source: "twitch", status: "failed" });
     expect(doneOf(await state(imp.channelId)).import_twitch).toBe(false);
-    await admin()
-      .insert(schema.portabilityImports)
-      .values({
-        userId: imp.userId,
-        channelId: imp.channelId,
-        source: "twitch",
-        status: "done",
-        finishedAt: new Date(),
-      });
+    await admin().insert(schema.portabilityImports).values({
+      userId: imp.userId,
+      channelId: imp.channelId,
+      source: "twitch",
+      status: "done",
+      finishedAt: new Date(),
+    });
     expect(doneOf(await state(imp.channelId)).import_twitch).toBe(true);
   });
 

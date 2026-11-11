@@ -294,22 +294,10 @@ export function DataSaverChip({ choice }: { choice: DataModeChoice }): React.JSX
   );
 }
 
-/**
- * The settings menu's state and props. The one-time hint is gone (D4.2): `ready`, `hintEnabled`
- * and `suggested` are still accepted from the players and ignored, and `hintOpen` is always false.
- */
-export function useSettings({
-  onOpenChange,
-}: {
-  ready?: boolean;
-  hintEnabled?: boolean;
-  suggested?: boolean;
-  onOpenChange?: (open: boolean) => void;
-}): {
+/** The settings menu's state and props. The one-time hint is gone (D4.2). */
+export function useSettings({ onOpenChange }: { onOpenChange?: (open: boolean) => void }): {
   open: boolean;
   setOpen: (open: boolean) => void;
-  /** Always false: kept so the players' bar hold keeps compiling. */
-  hintOpen: boolean;
   props: (children: React.ReactNode, badge?: React.ReactNode) => Settings;
 } {
   const [open, setOpenState] = React.useState(false);
@@ -323,7 +311,6 @@ export function useSettings({
   return {
     open,
     setOpen,
-    hintOpen: false,
     props: (children, badge) => ({
       label: t("player.settings.label"),
       icon: Settings02Icon,
