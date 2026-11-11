@@ -61,6 +61,10 @@ export const AUTH_ROUTES = {
   passkeyDelete: `${AUTH_BASE_PATH}/passkey/delete-passkey`,
   /** POST `{ id, name }`. */
   passkeyRename: `${AUTH_BASE_PATH}/passkey/update-passkey`,
+  /** GET: the caller's own session (`{ session, user }`), to mark "This device". */
+  getSession: `${AUTH_BASE_PATH}/get-session`,
+  /** POST `{ image?, name? }`: the profile update (`/settings/account`'s picture). */
+  updateUser: `${AUTH_BASE_PATH}/update-user`,
 } as const;
 
 /** Where a two-factor sign-in, the new-sign-in email and the 2FA emails send the member (D7.2). */

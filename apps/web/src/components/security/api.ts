@@ -5,15 +5,12 @@
  * /settings/security's calls on better-auth's own endpoints (D7.2, `AUTH_ROUTES`), all
  * same-origin with the session cookie.
  */
-import { AUTH_BASE_PATH, SECURITY_SETTINGS_PATH } from "@commonair/contracts/auth";
+import { SECURITY_SETTINGS_PATH } from "@commonair/contracts/auth";
 import { AUTH_ROUTES, authRequest } from "../../lib/auth.ts";
 import type { AuthSessionRow } from "./session-summary.ts";
 
-/**
- * better-auth's own "who is this session" (`{ session, user }`), to mark "This device". Not in
- * `AUTH_ROUTES` yet (contract request d7-security: `getSession`).
- */
-export const GET_SESSION_PATH = `${AUTH_BASE_PATH}/get-session`;
+/** better-auth's own "who is this session" (`{ session, user }`), to mark "This device". */
+export const GET_SESSION_PATH = AUTH_ROUTES.getSession;
 
 export async function currentSessionId(): Promise<string | null> {
   const data = await authRequest<{ session?: { id?: unknown } } | null>("GET", GET_SESSION_PATH);

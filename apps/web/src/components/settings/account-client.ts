@@ -8,17 +8,14 @@
  * the profile image through better-auth's `update-user`, which accepts only the member's own
  * committed channel avatar uploads (services/api/src/auth/index.ts `ownAvatarKey`).
  */
-import { AUTH_BASE_PATH } from "@commonair/contracts/auth";
+import { AUTH_ROUTES } from "@commonair/contracts/auth";
 import type { Me } from "@commonair/contracts/dto";
 import { api } from "../../lib/api.ts";
 import { AuthRequestError, resendVerificationEmail } from "../../lib/auth.ts";
 import { uploadClient, type UploadClient } from "../safety/upload.ts";
 
-/**
- * better-auth's profile update, mounted by services/api but not in `AUTH_ROUTES` yet (contract
- * request: `AUTH_ROUTES.updateUser`).
- */
-export const UPDATE_USER_PATH = `${AUTH_BASE_PATH}/update-user`;
+/** better-auth's profile update, mounted by services/api. */
+export const UPDATE_USER_PATH = AUTH_ROUTES.updateUser;
 
 export type MeUpdate = {
   displayName?: string;
