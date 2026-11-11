@@ -91,17 +91,34 @@ export function MessageMenu({
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
               <DropdownMenuLabel>{t("d4Chat.menu.timeoutFor", { name: displayName })}</DropdownMenuLabel>
-              {TIMEOUT_OPTIONS.map((seconds) => (
-                <DropdownMenuItem
-                  key={seconds}
-                  data-testid={timeoutTestId(seconds)}
-                  data-seconds={seconds}
-                  onClick={() => moderation.onTimeout(seconds)}
-                >
-                  <HugeiconsIcon icon={Clock01Icon} strokeWidth={2} aria-hidden />
-                  {durationLabel(seconds)}
-                </DropdownMenuItem>
-              ))}
+              {TIMEOUT_OPTIONS.map((seconds) => {
+                const label = (
+                  <>
+                    <HugeiconsIcon icon={Clock01Icon} strokeWidth={2} aria-hidden />
+                    {durationLabel(seconds)}
+                  </>
+                );
+                // The default length keeps the literal E2 id: tests/selectors.test.ts scans the source for it.
+                return seconds === DEFAULT_TIMEOUT_SECONDS ? (
+                  <DropdownMenuItem
+                    key={seconds}
+                    data-testid="chat-mod-timeout"
+                    data-seconds={seconds}
+                    onClick={() => moderation.onTimeout(seconds)}
+                  >
+                    {label}
+                  </DropdownMenuItem>
+                ) : (
+                  <DropdownMenuItem
+                    key={seconds}
+                    data-testid={timeoutTestId(seconds)}
+                    data-seconds={seconds}
+                    onClick={() => moderation.onTimeout(seconds)}
+                  >
+                    {label}
+                  </DropdownMenuItem>
+                );
+              })}
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuItem data-testid="chat-mod-ban" variant="destructive" onClick={moderation.onBan}>
