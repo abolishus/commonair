@@ -14,7 +14,9 @@ import type * as React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import {
   FirstVoteNote,
+  NEW_MEMBER_DAYS,
   cannotVoteReason,
+  isNewMember,
   opensAt,
   pickFirstVote,
   type FirstVoteChoice,
@@ -31,7 +33,12 @@ import {
   pitchFacts,
   type PitchFacts,
 } from "../src/components/coop/membership.tsx";
-import { SubMemberNotice, subMakesMember, subMemberRule } from "../src/components/support/member-notice.tsx";
+import {
+  SubMemberNotice,
+  subMakesMember,
+  subMemberRule,
+  subMemberRuleFor,
+} from "../src/components/support/member-notice.tsx";
 import { SupportForm, type SupportFormProps } from "../src/components/support/support-dialog.tsx";
 import { en } from "../src/i18n/en.ts";
 import { locale, t, uiMessages } from "../src/i18n/index.ts";
@@ -139,7 +146,7 @@ describe("pickFirstVote", () => {
       ],
       NOW,
     );
-    expect(choice).toMatchObject({ kind: "vote", proposal: { id: "soon" }, closesAt: iso(5) });
+    expect(choice).toMatchObject({ kind: "vote", proposal: { id: "soon" }, closesAt: iso(5), votedBefore: true });
   });
 
   it("with no ballot open to the caller: the next proposal to open, soonest known date first", () => {
@@ -152,15 +159,43 @@ describe("pickFirstVote", () => {
       ],
       NOW,
     );
-    expect(choice).toEqual({ kind: "next", proposal: expect.objectContaining({ id: "review" }), opensAt: iso(24) });
+    expect(choice).toEqual({
+      kind: "next",
+      proposal: expect.objectContaining({ id: "review" }),
+      opensAt: iso(24),
+      votedBefore: false,
+      votedAllOpen: false,
+    });
   });
 
   it("a next proposal without a future date is named without one; nothing open or coming is none", () => {
     expect(
       pickFirstVote([p("old", { status: "discussion", timeline: timeline({ discussionEndsAt: iso(-5) }) })], NOW),
     ).toMatchObject({ kind: "next", proposal: { id: "old" }, opensAt: null });
-    expect(pickFirstVote([], NOW)).toEqual({ kind: "none" });
-    expect(pickFirstVote([p("done", { status: "passed", canVote: false })], NOW)).toEqual({ kind: "none" });
+    const none = { kind: "none", votedBefore: false, votedAllOpen: false };
+    expect(pickFirstVote([], NOW)).toEqual(none);
+    expect(pickFirstVote([p("done", { status: "passed", canVote: false })], NOW)).toEqual(none);
+  });
+
+  it("voted on every ballot open to them: votedAllOpen, with the next proposal when there is one", () => {
+    const voted = p("v", {
+      status: "voting",
+      canVote: true,
+      myVote: "yes",
+      timeline: timeline({ votingEndsAt: iso(5) }),
+    });
+    expect(pickFirstVote([voted], NOW)).toEqual({ kind: "none", votedBefore: true, votedAllOpen: true });
+    expect(
+      pickFirstVote([voted, p("n", { status: "discussion", timeline: timeline({ discussionEndsAt: iso(3) }) })], NOW),
+    ).toMatchObject({ kind: "next", proposal: { id: "n" }, votedBefore: true, votedAllOpen: true });
+    // A closed-out ballot the caller voted on is history, not an open one.
+    const past = p("old", {
+      status: "voting",
+      canVote: true,
+      myVote: "no",
+      timeline: timeline({ votingEndsAt: iso(-1) }),
+    });
+    expect(pickFirstVote([past], NOW)).toEqual({ kind: "none", votedBefore: true, votedAllOpen: false });
   });
 
   it("opensAt: voting start when known, else the end of the current stage", () => {
@@ -176,14 +211,34 @@ describe("pickFirstVote", () => {
   });
 });
 
+describe("isNewMember", () => {
+  const m = (status: "active" | "exited" | "lapsed", days: number) => ({
+    status,
+    joinedAt: new Date(NOW - days * 86_400_000).toISOString(),
+  });
+  it("new while the earliest active membership is within NEW_MEMBER_DAYS", () => {
+    expect(isNewMember([m("active", 2)], NOW)).toBe(true);
+    expect(isNewMember([m("active", NEW_MEMBER_DAYS)], NOW)).toBe(true);
+    expect(isNewMember([m("active", NEW_MEMBER_DAYS + 1)], NOW)).toBe(false);
+    // A long-standing member who just gained another class is not new.
+    expect(isNewMember([m("active", 400), m("active", 1)], NOW)).toBe(false);
+    // An old exit does not age a fresh membership.
+    expect(isNewMember([m("exited", 400), m("active", 1)], NOW)).toBe(true);
+    expect(isNewMember([m("exited", 1)], NOW)).toBe(false);
+    expect(isNewMember([], NOW)).toBe(false);
+    expect(isNewMember(null, NOW)).toBe(false);
+  });
+});
+
 describe("FirstVoteNote and MemberVoteCard", () => {
   const open: FirstVoteChoice = {
     kind: "vote",
     proposal: p("a", { title: "Weekly office hours", status: "voting", canVote: true }),
     closesAt: iso(30),
+    votedBefore: false,
   };
   it("vote: 'Your first vote' with the proposal's link and its closing time", () => {
-    wrap(<MemberVoteCard choice={open} />);
+    wrap(<MemberVoteCard choice={open} newMember />);
     const note = screen.getByTestId("first-vote");
     expect(note.dataset.kind).toBe("vote");
     expect(note.textContent).toContain(en["d2Membership.firstVote.open"]);
@@ -194,7 +249,13 @@ describe("FirstVoteNote and MemberVoteCard", () => {
   it("next: votes from now on, the next proposal and when it opens; none: nothing open", () => {
     wrap(
       <FirstVoteNote
-        choice={{ kind: "next", proposal: p("b", { title: "Clip length", status: "discussion" }), opensAt: iso(48) }}
+        choice={{
+          kind: "next",
+          proposal: p("b", { title: "Clip length", status: "discussion" }),
+          opensAt: iso(48),
+          votedBefore: false,
+          votedAllOpen: false,
+        }}
       />,
     );
     const note = screen.getByTestId("first-vote");
@@ -202,11 +263,52 @@ describe("FirstVoteNote and MemberVoteCard", () => {
     expect(note.textContent).toContain("Clip length");
     expect(note.textContent).toContain(en["d2Membership.firstVote.opens"]);
     cleanup();
-    wrap(<FirstVoteNote choice={{ kind: "none" }} />);
+    wrap(<FirstVoteNote choice={{ kind: "none", votedBefore: false, votedAllOpen: false }} />);
     expect(screen.getByTestId("first-vote").textContent).toContain(en["d2Membership.firstVote.nothingOpen"]);
     cleanup();
-    const { container } = wrap(<MemberVoteCard choice={null} />);
+    const { container } = wrap(<MemberVoteCard choice={null} newMember />);
     expect(container.textContent).toBe("");
+  });
+
+  it("an established member: 'Open for your vote', never 'first' or 'from now on'", () => {
+    wrap(<MemberVoteCard choice={open} newMember={false} />);
+    const note = screen.getByTestId("first-vote");
+    expect(note.dataset.first).toBe("false");
+    expect(note.textContent).toContain(en["d2Membership.firstVote.openForYou"]);
+    expect(note.textContent).not.toContain(en["d2Membership.firstVote.open"]);
+    cleanup();
+    wrap(<MemberVoteCard choice={{ kind: "none", votedBefore: false, votedAllOpen: false }} newMember={false} />);
+    const none = screen.getByTestId("first-vote");
+    expect(none.textContent).not.toContain(en["d2Membership.firstVote.fromNow"]);
+    expect(none.textContent).toContain(en["d2Membership.firstVote.nothingOpen"]);
+  });
+
+  it("a new member who already voted is not told 'first'", () => {
+    wrap(<MemberVoteCard choice={{ ...open, votedBefore: true }} newMember />);
+    expect(screen.getByTestId("first-vote").textContent).toContain(en["d2Membership.firstVote.openForYou"]);
+  });
+
+  it("voted on everything open: says so, without the joined-late or nothing-open lines", () => {
+    wrap(<MemberVoteCard choice={{ kind: "none", votedBefore: true, votedAllOpen: true }} newMember />);
+    const note = screen.getByTestId("first-vote");
+    expect(note.textContent).toBe(en["d2Membership.firstVote.votedAll"]);
+    cleanup();
+    wrap(
+      <MemberVoteCard
+        choice={{
+          kind: "next",
+          proposal: p("b", { title: "Clip length", status: "discussion" }),
+          opensAt: iso(48),
+          votedBefore: true,
+          votedAllOpen: true,
+        }}
+        newMember={false}
+      />,
+    );
+    const next = screen.getByTestId("first-vote");
+    expect(next.textContent).toContain(en["d2Membership.firstVote.votedAll"]);
+    expect(next.textContent).toContain("Clip length");
+    expect(next.textContent).not.toContain(en["d2Membership.firstVote.fromNow"]);
   });
 });
 
@@ -412,6 +514,70 @@ describe("Support: the co-op line", () => {
     expect(subMakesMember(rule, 299)).toBe(false);
     expect(subMakesMember({ qualifies: false, minSubscriptionCents: 0 }, 999)).toBe(false);
     expect(subMakesMember(null, 999)).toBe(false);
+  });
+
+  it("subMemberRuleFor: no claim for an active viewer member, a latest exit, or an unread membership", () => {
+    const viewer = (status: "active" | "exited" | "lapsed", joinedAt: string, id = "v") => ({
+      id,
+      class: "viewer" as const,
+      status,
+      basis: "subscription" as const,
+      joinedAt,
+    });
+    const streamer = membershipView().memberships[0];
+    expect(subMemberRuleFor(rule, { memberships: [] })).toEqual(rule);
+    expect(subMemberRuleFor(rule, { memberships: [streamer!] })).toEqual(rule);
+    expect(subMemberRuleFor(rule, { memberships: [viewer("lapsed", "2026-10-01T00:00:00.000Z")] })).toEqual(rule);
+    expect(subMemberRuleFor(rule, { memberships: [viewer("active", "2026-10-01T00:00:00.000Z")] })).toBeNull();
+    expect(subMemberRuleFor(rule, { memberships: [viewer("exited", "2026-10-01T00:00:00.000Z")] })).toBeNull();
+    // An exit older than a later lapse is history: the latest row decides.
+    expect(
+      subMemberRuleFor(rule, {
+        memberships: [viewer("exited", "2026-01-01T00:00:00.000Z", "a"), viewer("lapsed", "2026-10-01T00:00:00.000Z")],
+      }),
+    ).toEqual(rule);
+    expect(
+      subMemberRuleFor(rule, {
+        memberships: [viewer("lapsed", "2026-01-01T00:00:00.000Z", "a"), viewer("exited", "2026-10-01T00:00:00.000Z")],
+      }),
+    ).toBeNull();
+    expect(subMemberRuleFor(rule, null)).toBeNull();
+    expect(subMemberRuleFor(null, { memberships: [] })).toBeNull();
+  });
+
+  it("an exited or already-member caller (rule narrowed to null): no line, and the transfer makes no promise", async () => {
+    const instructions: CheckoutResult = {
+      kind: "instructions",
+      paymentId: "0192f000-0000-7000-8000-0000000000ab",
+      reference: "CA-7K2M9QXB",
+      instructions: "Pay the co-op by bank transfer.",
+      amount: { cents: 499, currency: "usd" },
+    };
+    for (const view of [
+      membershipView(),
+      {
+        memberships: [
+          { id: "x", class: "viewer" as const, status: "exited" as const, basis: "share" as const, joinedAt: iso(-48) },
+        ],
+      },
+    ]) {
+      const onInstructions = vi.fn<SupportFormProps["onInstructions"]>();
+      wrap(
+        <SupportForm
+          channel="rivertide"
+          info={supportInfo()}
+          checkout={async () => instructions}
+          memberRule={subMemberRuleFor(rule, view)}
+          onInstructions={onInstructions}
+        />,
+      );
+      expect(screen.queryByTestId("support-member-notice")).toBeNull();
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("support-submit"));
+      });
+      await waitFor(() => expect(onInstructions).toHaveBeenCalledWith(instructions, false));
+      cleanup();
+    }
   });
 
   it("on the Subscribe tab: the line with the minimum, counted once; bank transfer says when membership starts", async () => {

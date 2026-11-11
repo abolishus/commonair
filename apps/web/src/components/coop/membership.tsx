@@ -789,8 +789,17 @@ export function MembershipPitchLead(props: MembershipPitchProps): React.JSX.Elem
   );
 }
 
-/** For a member, above today's panel: their first vote from the real electorate. */
-export function MemberVoteCard({ choice }: { choice: FirstVoteChoice | null }): React.JSX.Element | null {
+/**
+ * For a member, above today's panel: what is open for their vote, from the real electorate. Only a
+ * new member (`isNewMember`) is told it is their first vote.
+ */
+export function MemberVoteCard({
+  choice,
+  newMember,
+}: {
+  choice: FirstVoteChoice | null;
+  newMember: boolean;
+}): React.JSX.Element | null {
   if (!choice) return null;
   return (
     <Card data-testid="membership-first-vote" size="sm">
@@ -800,7 +809,7 @@ export function MemberVoteCard({ choice }: { choice: FirstVoteChoice | null }): 
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <FirstVoteNote choice={choice} />
+        <FirstVoteNote choice={choice} newMember={newMember} />
       </CardContent>
     </Card>
   );

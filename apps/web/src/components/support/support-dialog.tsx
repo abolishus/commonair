@@ -65,19 +65,32 @@ import {
   type TipDraft,
 } from "../../lib/support.ts";
 import { safeHttpUrl } from "../../lib/url.ts";
-import { SubMemberNotice, subMakesMember, subMemberRule, type SubMemberRule } from "./member-notice.tsx";
+import {
+  SubMemberNotice,
+  subMakesMember,
+  subMemberRule,
+  subMemberRuleFor,
+  type SubMemberRule,
+} from "./member-notice.tsx";
 
 /** The calls the dialog makes; tests pass a stub, the app the oRPC client. */
 export interface SupportClient {
   support: (input: { channel: string }) => Promise<SupportInfo>;
   checkout: (request: CheckoutRequest) => Promise<CheckoutResult>;
-  /** The co-op's sub rule (`membership.classes`) for the member line; omitted or failed: no line. */
+  /**
+   * The co-op's sub rule (`membership.classes`) for the member line, already narrowed to the
+   * caller (`subMemberRuleFor`); omitted, failed or null: no line.
+   */
   memberRule?: () => Promise<SubMemberRule | null>;
 }
 
 export const apiSupportClient: SupportClient = {
   support: (input) => api().money.support(input),
-  memberRule: async () => subMemberRule(await api().coop.settings()),
+  // The dialog is signed in only, so the caller's own membership is always readable.
+  memberRule: async () => {
+    const [settings, view] = await Promise.all([api().coop.settings(), api().coop.membership()]);
+    return subMemberRuleFor(subMemberRule(settings), view);
+  },
   checkout: (request) =>
     request.kind === "tip" ? api().money.tip(request.input) : api().money.subscribe(request.input),
 };

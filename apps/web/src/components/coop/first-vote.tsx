@@ -6,7 +6,9 @@
  * electorate is frozen when its voting opens (`packages/governance`), so a new member cannot vote
  * on one already open: `canVote` from the API is the only honest signal. The note names the first
  * open proposal the caller can still vote on; otherwise it says votes come with the proposals that
- * open from now on, naming the next one to open when its date is known.
+ * open from now on, naming the next one to open when its date is known. Only a new member who has
+ * not voted yet is told "first" and "from now on"; anyone else gets the neutral wording, and someone
+ * who voted on every ballot open to them is told so instead of the joined-late line.
  */
 import { RelativeTime } from "@commonair/ui";
 import { Link } from "@tanstack/react-router";
@@ -18,13 +20,21 @@ import { useCoopLoad } from "./use-coop.ts";
 
 type Proposal = Pick<ProposalDto, "id" | "title" | "status" | "canVote" | "myVote" | "timeline">;
 
-export type FirstVoteChoice =
+export type FirstVoteChoice = {
+  /** The caller has a recorded vote on one of the proposals read, so no vote of theirs is a first. */
+  votedBefore: boolean;
+} &
   /** Open now, and the caller is in its electorate and has not voted yet. */
-  | { kind: "vote"; proposal: Proposal; closesAt: string | null }
-  /** Nothing to vote on yet: the next proposal to open, with its opening time when known. */
-  | { kind: "next"; proposal: Proposal; opensAt: string | null }
-  /** Nothing open and nothing coming. */
-  | { kind: "none" };
+  (
+    | { kind: "vote"; proposal: Proposal; closesAt: string | null }
+    /**
+     * Nothing to vote on yet: the next proposal to open, with its opening time when known.
+     * `votedAllOpen`: some ballot is open to the caller and they voted on every one.
+     */
+    | { kind: "next"; proposal: Proposal; opensAt: string | null; votedAllOpen: boolean }
+    /** Nothing open to the caller and nothing coming. */
+    | { kind: "none"; votedAllOpen: boolean }
+  );
 
 const time = (iso: string | null): number => (iso ? Date.parse(iso) : Number.NaN);
 
@@ -41,12 +51,16 @@ export function opensAt(p: Pick<ProposalDto, "status" | "timeline">): string | n
  * known opening first (a past or unknown date sorts last and shows no date).
  */
 export function pickFirstVote(proposals: readonly Proposal[], nowMs: number): FirstVoteChoice {
-  const open = proposals
-    .filter((p) => p.status === "voting" && p.canVote && p.myVote === null)
-    .filter((p) => !(time(p.timeline.votingEndsAt) <= nowMs))
+  const votedBefore = proposals.some((p) => p.myVote !== null);
+  const ballots = proposals
+    .filter((p) => p.status === "voting" && p.canVote)
+    .filter((p) => !(time(p.timeline.votingEndsAt) <= nowMs));
+  const open = ballots
+    .filter((p) => p.myVote === null)
     .toSorted((a, b) => (time(a.timeline.votingEndsAt) || Infinity) - (time(b.timeline.votingEndsAt) || Infinity));
   const first = open[0];
-  if (first) return { kind: "vote", proposal: first, closesAt: first.timeline.votingEndsAt };
+  if (first) return { kind: "vote", proposal: first, closesAt: first.timeline.votingEndsAt, votedBefore };
+  const votedAllOpen = ballots.length > 0;
   const upcoming = proposals
     .filter((p) => p.status === "discussion" || p.status === "council_review")
     .map((p) => {
@@ -56,8 +70,8 @@ export function pickFirstVote(proposals: readonly Proposal[], nowMs: number): Fi
     })
     .toSorted((a, b) => a.ms - b.ms);
   const next = upcoming[0];
-  if (next) return { kind: "next", proposal: next.p, opensAt: next.at };
-  return { kind: "none" };
+  if (next) return { kind: "next", proposal: next.p, opensAt: next.at, votedBefore, votedAllOpen };
+  return { kind: "none", votedBefore, votedAllOpen };
 }
 
 /**
@@ -114,18 +128,46 @@ const proposalLink = (p: Proposal) => (
   </Link>
 );
 
-/** The note itself; nothing while `choice` is null. */
+/** Members who joined this recently still count as new on the membership page. */
+export const NEW_MEMBER_DAYS = 30;
+
+/**
+ * Whether the caller's membership is new at `nowMs` (pure): their earliest active membership began
+ * within `NEW_MEMBER_DAYS`. A long-standing member who later gained another class is not new.
+ */
+export function isNewMember(
+  memberships: readonly { status: string; joinedAt: string }[] | null | undefined,
+  nowMs: number,
+): boolean {
+  const joined = (memberships ?? []).filter((m) => m.status === "active").map((m) => Date.parse(m.joinedAt));
+  if (joined.length === 0) return false;
+  return nowMs - Math.min(...joined) <= NEW_MEMBER_DAYS * 86_400_000;
+}
+
+/**
+ * The note itself; nothing while `choice` is null. `newMember` (the welcome always is) allows the
+ * "first vote" and "from now on" wording; it is dropped once the caller has voted.
+ */
 export function FirstVoteNote({
   choice,
+  newMember = true,
   ...props
-}: { choice: FirstVoteChoice | null } & React.ComponentProps<"div">): React.JSX.Element | null {
+}: { choice: FirstVoteChoice | null; newMember?: boolean } & React.ComponentProps<"div">): React.JSX.Element | null {
   if (!choice) return null;
+  const first = newMember && !choice.votedBefore;
   return (
-    <div data-testid="first-vote" data-kind={choice.kind} className="flex flex-col gap-1 text-sm" {...props}>
+    <div
+      data-testid="first-vote"
+      data-kind={choice.kind}
+      data-first={first ? "true" : "false"}
+      className="flex flex-col gap-1 text-sm"
+      {...props}
+    >
       {choice.kind === "vote" ? (
         <>
           <p>
-            {t("d2Membership.firstVote.open")} {proposalLink(choice.proposal)}
+            {t(first ? "d2Membership.firstVote.open" : "d2Membership.firstVote.openForYou")}{" "}
+            {proposalLink(choice.proposal)}
           </p>
           {choice.closesAt && (
             <p className="text-muted-foreground">
@@ -135,7 +177,11 @@ export function FirstVoteNote({
         </>
       ) : (
         <>
-          <p>{t("d2Membership.firstVote.fromNow")}</p>
+          {choice.votedAllOpen ? (
+            <p>{t("d2Membership.firstVote.votedAll")}</p>
+          ) : (
+            first && <p>{t("d2Membership.firstVote.fromNow")}</p>
+          )}
           {choice.kind === "next" ? (
             <>
               <p className="text-muted-foreground">
@@ -148,7 +194,7 @@ export function FirstVoteNote({
               )}
             </>
           ) : (
-            <p className="text-muted-foreground">{t("d2Membership.firstVote.nothingOpen")}</p>
+            !choice.votedAllOpen && <p className="text-muted-foreground">{t("d2Membership.firstVote.nothingOpen")}</p>
           )}
         </>
       )}

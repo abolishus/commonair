@@ -5,14 +5,16 @@
  * The Support dialog's co-op line (overhaul wave 2, D2.6): "a {minSub}+ monthly sub also makes you
  * a co-op member", read from `membership.classes` (never a literal: the co-op votes on it). Shown
  * on the Subscribe tab only (a gift makes nobody a member, a tip neither), never to the channel's
- * owner, and not at all when the co-op does not count subscriptions or its rule did not load.
+ * owner, and not at all when the co-op does not count subscriptions or its rule did not load. Nor
+ * is it shown when the claim is untrue for the caller: already a viewer member, or a viewer member
+ * who left (a voluntary exit is respected: no sub re-enrols them, the same rule as `coopOutcome`).
  */
 import { formatMoney, useLocale } from "@commonair/ui";
 import { Link } from "@tanstack/react-router";
 import * as React from "react";
 import { z } from "zod";
 import { t } from "../../i18n/index.ts";
-import type { SettingDto } from "../../lib/coop.ts";
+import type { MembershipViewDto, SettingDto } from "../../lib/coop.ts";
 import { trackUi } from "../../lib/ui-metrics.ts";
 
 /** The part of `membership.classes` a sub needs (the governance defaults when a field is missing). */
@@ -37,6 +39,24 @@ export function subMemberRule(settings: readonly Pick<SettingDto, "key" | "value
     qualifies: parsed.data.viewer.activeSubscriptionQualifies,
     minSubscriptionCents: parsed.data.viewer.minSubscriptionCents,
   };
+}
+
+/**
+ * `rule` for this caller (pure): null when a sub would not make them a member whatever its price,
+ * because a viewer membership is active or their latest viewer membership ended in an exit. An
+ * unreadable membership (`view` null) is null too: the line is a promise, so it needs the facts.
+ */
+export function subMemberRuleFor(
+  rule: SubMemberRule | null,
+  view: Pick<MembershipViewDto, "memberships"> | null,
+): SubMemberRule | null {
+  if (!rule || !view) return null;
+  const viewer = view.memberships
+    .filter((m) => m.class === "viewer")
+    .toSorted((a, b) => Date.parse(b.joinedAt) - Date.parse(a.joinedAt));
+  if (viewer.some((m) => m.status === "active")) return null;
+  if (viewer[0]?.status === "exited") return null;
+  return rule;
 }
 
 /** Whether a self sub at `cents` makes its payer a member under `rule` (pure; gifts never do). */

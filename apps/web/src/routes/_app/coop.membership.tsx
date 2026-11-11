@@ -6,7 +6,7 @@ import { PageContainer } from "@commonair/ui/layouts";
 import { toast } from "@commonair/ui/toast";
 import { createFileRoute } from "@tanstack/react-router";
 import * as React from "react";
-import { useFirstVote } from "../../components/coop/first-vote.tsx";
+import { isNewMember, useFirstVote } from "../../components/coop/first-vote.tsx";
 import { CoopLoadGate, CoopSectionError } from "../../components/coop/load-error.tsx";
 import {
   MemberVoteCard,
@@ -62,6 +62,9 @@ function MembershipPage(): React.JSX.Element {
   const card = cardSharesAllowed(instance.data?.features.payments ?? null, settings.data);
   const member = isMember(membership.data);
   const firstVote = useFirstVote(member, me?.id ?? "-");
+  // The clock is read once per mount, so a render never flips the wording.
+  const [mountedAt] = React.useState(() => Date.now());
+  const newMember = isNewMember(membership.data?.memberships, mountedAt);
   const [instructions, setInstructions] = React.useState<ShareInstructionsDto | null>(null);
   const [buying, setBuying] = React.useState(false);
   const facts = pitchFacts(settings.data);
@@ -156,7 +159,7 @@ function MembershipPage(): React.JSX.Element {
           showPitch ? (
             <MembershipPitchLead {...pitch} signedIn />
           ) : member ? (
-            <MemberVoteCard choice={firstVote} />
+            <MemberVoteCard choice={firstVote} newMember={newMember} />
           ) : null
         }
       />
