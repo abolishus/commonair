@@ -29,20 +29,28 @@ export class AuthRequestError extends Error {
   }
 }
 
-async function post(path: string, body: unknown): Promise<void> {
+/**
+ * One better-auth call: the parsed JSON body (null when there is none), or an `AuthRequestError`
+ * with better-auth's error code. A GET sends no body.
+ */
+export async function authRequest<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T | null> {
   const res = await fetch(path, {
-    method: "POST",
+    method,
     credentials: "same-origin",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
+    ...(method === "POST" ? { headers: { "content-type": "application/json" }, body: JSON.stringify(body ?? {}) } : {}),
   });
-  if (res.ok) return;
-  const data = (await res.json().catch(() => null)) as { code?: unknown; message?: unknown } | null;
+  const data = (await res.json().catch(() => null)) as unknown;
+  if (res.ok) return data as T | null;
+  const err = (data ?? {}) as { code?: unknown; message?: unknown };
   throw new AuthRequestError(
     res.status,
-    typeof data?.code === "string" ? data.code : null,
-    typeof data?.message === "string" ? data.message : `HTTP ${res.status}`,
+    typeof err.code === "string" ? err.code : null,
+    typeof err.message === "string" ? err.message : `HTTP ${res.status}`,
   );
+}
+
+async function post(path: string, body: unknown): Promise<void> {
+  await authRequest("POST", path, body);
 }
 
 /**
@@ -76,8 +84,24 @@ export function resendVerificationEmail(email: string, callbackURL = DEFAULT_LAN
   return post(AUTH_ROUTES.sendVerificationEmail, { email, callbackURL });
 }
 
-export function signIn(email: string, password: string): Promise<void> {
-  return post(AUTH_ROUTES.signIn, { email, password });
+/** What the password step says: signed in, or a second step (two-step sign-in) comes next. */
+export interface SignInResult {
+  twoFactorRedirect: boolean;
+}
+
+export async function signIn(email: string, password: string): Promise<SignInResult> {
+  const data = await authRequest<{ twoFactorRedirect?: unknown }>("POST", AUTH_ROUTES.signIn, { email, password });
+  return { twoFactorRedirect: data?.twoFactorRedirect === true };
+}
+
+/** The second step of a two-step sign-in (or the last step of setting it up): a 6-digit code. */
+export function verifyTotp(code: string): Promise<void> {
+  return post(AUTH_ROUTES.twoFactorVerifyTotp, { code });
+}
+
+/** The second step of a two-step sign-in with one of the backup codes (each works once). */
+export function verifyBackupCode(code: string): Promise<void> {
+  return post(AUTH_ROUTES.twoFactorVerifyBackupCode, { code });
 }
 
 export function signOut(): Promise<void> {

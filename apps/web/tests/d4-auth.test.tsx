@@ -26,7 +26,8 @@ import {
   validateBirthDate,
   type DateParts,
 } from "../src/lib/birth-date.ts";
-import { PASSWORD_RESET_ROUTES, RESET_LANDING } from "../src/lib/password-reset.ts";
+import { AUTH_ROUTES } from "../src/lib/auth.ts";
+import { RESET_LANDING } from "../src/lib/password-reset.ts";
 import { Route as SignInRoute } from "../src/routes/_app/signin.tsx";
 import { Route as SignUpRoute } from "../src/routes/_app/signup.tsx";
 
@@ -308,7 +309,7 @@ describe("forgot password", () => {
     fireEvent.submit(form);
     await screen.findByTestId("signin-reset-sent");
     const [url, init] = fetch.mock.calls[0] ?? [];
-    expect(url).toBe(PASSWORD_RESET_ROUTES.request);
+    expect(url).toBe(AUTH_ROUTES.requestPasswordReset);
     expect(JSON.parse(init?.body as string)).toEqual({ email: "a@example.test", redirectTo: RESET_LANDING });
   });
 
@@ -323,7 +324,7 @@ describe("forgot password", () => {
     fireEvent.submit(form);
     await screen.findByTestId("signin-notice");
     const [url, init] = fetch.mock.calls[0] ?? [];
-    expect(url).toBe(PASSWORD_RESET_ROUTES.reset);
+    expect(url).toBe(AUTH_ROUTES.resetPassword);
     expect(JSON.parse(init?.body as string)).toEqual({ token: "abcDEF123456", newPassword: "a much longer password" });
     expect(screen.getByTestId("signin-email")).toBeTruthy();
   });
