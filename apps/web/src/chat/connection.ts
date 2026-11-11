@@ -242,6 +242,21 @@ export class ChatConnection {
     return this.raw(frame);
   }
 
+  /**
+   * A moderator command (`/slow 30`, `/delete <id>` …) as a `command` frame; false when not
+   * connected. The server authorizes it like the REST API and answers with a notice.
+   */
+  command(name: string, args: readonly string[] = []): boolean {
+    if (this.status !== "open") return false;
+    return this.raw({
+      op: "command",
+      channel: this.channel,
+      command: name,
+      args: [...args],
+      nonce: `c${++this.nonce}`,
+    });
+  }
+
   stop(): void {
     this.stopped = true;
     this.clearTimer(this.reconnectTimer);

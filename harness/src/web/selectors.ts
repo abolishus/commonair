@@ -362,6 +362,39 @@ export const D_TEST_IDS = {
 } as const;
 
 /**
+ * Overhaul wave 3, d4-chat: the moderator's chat modes (header menu on the channel page, toolbar
+ * in the mod view), the per-message Delete, timeout lengths and Report, the incoming-raid alert,
+ * the viewer's mode chips and composer gate, and the points popover. `chat-mod-timeout` (E2) stays
+ * the 10-minute item; the other lengths are `chatModTimeoutFor(seconds)`. Kept out of `TEST_IDS`.
+ */
+export const D4_CHAT_IDS = {
+  chatModes: "chat-modes",
+  chatModesToolbar: "chat-modes-toolbar",
+  chatModeSlow: "chat-mode-slow",
+  chatModeSlowOption: (seconds: number) => `chat-mode-slow-${seconds}`,
+  chatModeFollowers: "chat-mode-followers",
+  chatModeFollowersOption: (minutes: number | "off") => `chat-mode-followers-${minutes}`,
+  chatModeSubs: "chat-mode-subs",
+  chatModeEmote: "chat-mode-emote",
+  chatModeClear: "chat-mode-clear",
+  chatModeClearDialog: "chat-mode-clear-dialog",
+  chatModeChips: "chat-mode-chips",
+  chatModeChip: "chat-mode-chip",
+  chatModDelete: "chat-mod-delete",
+  chatModTimeoutFor: (seconds: number) => (seconds === 600 ? "chat-mod-timeout" : `chat-mod-timeout-${seconds}`),
+  chatMessageReport: "chat-message-report",
+  chatRaidAlert: "chat-raid-alert",
+  chatRaidFollowers: "chat-raid-followers",
+  chatRaidSlow: "chat-raid-slow",
+  chatRaidDismiss: "chat-raid-dismiss",
+  chatComposerGate: "chat-composer-gate",
+  chatPointsPopover: "chat-points-popover",
+  chatPointsRate: "chat-points-rate",
+  chatPointsBalance: "chat-points-balance",
+  chatPointsPrediction: "chat-points-prediction",
+} as const;
+
+/**
  * The follow-up ids (data-testid) on the channel page: About's social links and the Clips tab's
  * sort and range filter. Kept out of `TEST_IDS` because the range and sort ids are built per value.
  */

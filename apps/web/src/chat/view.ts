@@ -38,10 +38,14 @@ function badgeLabel(type: ChatBadgeKind): string {
 
 const SHOWN: readonly ChatBadgeKind[] = ["broadcaster", "moderator", "vip", "subscriber", "member"];
 
-/** The visible `ChatMessage` badges (kinds the composition draws; bot/staff stay attribute-only). */
+/**
+ * The visible `ChatMessage` badge: the sender's highest one only, so a line carries at most one
+ * (D4.4, a calmer column). Every badge stays in `data-badges`; bot/staff stay attribute-only.
+ */
 export function visibleBadges(badges: readonly { type: WireBadge }[]): { kind: ChatBadgeKind; label: string }[] {
   const kinds = new Set(badges.map((b) => b.type));
-  return SHOWN.filter((kind) => kinds.has(kind)).map((kind) => ({ kind, label: badgeLabel(kind) }));
+  const top = SHOWN.find((kind) => kinds.has(kind));
+  return top ? [{ kind: top, label: badgeLabel(top) }] : [];
 }
 
 export function chatStatusView(status: ChatStatus): { label: string; tone: StatusTone } {

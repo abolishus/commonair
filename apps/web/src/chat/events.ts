@@ -118,6 +118,7 @@ export function chatEventText(view: ChatEventView): string {
   if (view.type === "channel.subscription.gift") {
     return view.name ? t("chat.event.gift", vars) : t("chat.event.giftAnonymous", vars);
   }
-  if (view.type === "channel.raid") return t("chatRaid.incoming", { name: view.name ?? "", count: view.viewers ?? 0 });
+  if (view.type === "channel.raid")
+    return t("d4Chat.raid.incoming", { channel: view.name ?? "", count: view.viewers ?? 0 });
   return view.name ? t("chat.event.tip", vars) : t("chat.event.tipAnonymous");
 }

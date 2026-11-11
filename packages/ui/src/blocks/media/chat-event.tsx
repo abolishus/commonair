@@ -50,6 +50,7 @@ export interface ChatEventProps extends Omit<React.ComponentProps<"article">, "c
 /**
  * A platform event inline in the chat log (subscriptions, gift subs, tips). An `article` like
  * `ChatMessage`, so the log reads it as one entry; the entrance fade only runs with motion allowed.
+ * One accent edge and no box, so events sit quietly between messages (D4.4).
  */
 export function ChatEvent({
   icon,
@@ -66,7 +67,7 @@ export function ChatEvent({
       data-slot="chat-event"
       data-tone={tone ?? "accent"}
       className={cn(
-        "my-0.5 flex min-w-0 items-start gap-2 border-s-2 bg-muted px-2 py-1.5 motion-safe:animate-in motion-safe:fade-in-0",
+        "my-0.5 flex min-w-0 items-start gap-2 border-s-2 px-2 py-1 motion-safe:animate-in motion-safe:fade-in-0",
         chatEventEdge({ tone }),
         className,
       )}

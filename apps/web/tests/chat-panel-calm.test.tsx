@@ -244,15 +244,20 @@ describe("MessageMenu", () => {
   });
 
   it("a moderator gets timeout and ban as before, and Block", async () => {
-    const onTimeout = vi.fn<() => void>();
+    const onTimeout = vi.fn<(seconds: number) => void>();
     const onBan = vi.fn<() => void>();
-    render(wrap(<MessageMenu displayName="Troll" onBlock={() => {}} moderation={{ onTimeout, onBan }} />));
+    render(
+      wrap(
+        <MessageMenu displayName="Troll" onBlock={() => {}} moderation={{ onDelete: () => {}, onTimeout, onBan }} />,
+      ),
+    );
     expect(one("chat-message-actions").getAttribute("aria-label")).toBe(t("chat.mod.actionsFor", { name: "Troll" }));
     expect(one("chat-message-actions").dataset.moderation).toBe("true");
     await open();
     one("chat-mod-ban");
+    // The plain `chat-mod-timeout` item is still the 10-minute one (e2-selectors).
     fireEvent.click(one("chat-mod-timeout"));
-    expect(onTimeout).toHaveBeenCalledTimes(1);
+    expect(onTimeout).toHaveBeenCalledWith(600);
   });
 });
 

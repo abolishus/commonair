@@ -8,9 +8,13 @@ import { cn } from "@commonair/ui/lib/utils";
 import { Alert02Icon, Message01Icon, UnavailableIcon, UserBlock01Icon } from "@hugeicons/core-free-icons";
 import { useNavigate } from "@tanstack/react-router";
 import * as React from "react";
+import { Dialog, DialogContent } from "@commonair/ui/components/dialog";
 import { ChatSignUpPrompt } from "../components/auth-gate/chat-prompt.tsx";
+import { useAccountFacts, type AccountFactsClient } from "../components/chat-gate/account-facts.ts";
+import { ComposerGate } from "../components/chat-gate/composer-gate.tsx";
 import { LegalDocumentLink, type LegalDoc } from "../components/legal-document-link.tsx";
-import type { ReportClient } from "../components/safety/client.ts";
+import { reportClient as defaultReportClient, type ReportClient } from "../components/safety/client.ts";
+import { ReportForm } from "../components/safety/report-dialog.tsx";
 import { HeldQueue } from "../components/mod/held-queue.tsx";
 import { WatchRoomDrawer } from "../components/watch-room/drawer.tsx";
 import { EMPTY_HELD, heldReducer } from "../components/mod/held-state.ts";
@@ -33,13 +37,19 @@ import { ChatConnection, type ChatMessageFrame, type ChatStatus } from "./connec
 import { chatEventView } from "./events.ts";
 import { browserInteractClient, withPlayhead, type InteractClient } from "./interact/client.ts";
 import { GiveawayCard } from "./interact/giveaway-card.tsx";
-import { PointsChip } from "./interact/points-chip.tsx";
+import { PointsChip, showPointsChip } from "./interact/points-chip.tsx";
 import { ChatPollCard } from "./interact/poll-card.tsx";
 import { ChatPredictionCard, type PredictionChannel } from "./interact/prediction-card.tsx";
 import { RaidBanner } from "./interact/raid-banner.tsx";
 import { useChatInteract } from "./interact/use-chat-interact.ts";
+import { composerGate, isGateRefusal, needsAccountFacts, type GateRefusal } from "./gate-reason.ts";
+import { useBusyLog } from "./live-region.ts";
 import { errorMessage, noticeMessage } from "./messages.ts";
-import { MessageMenu, TIMEOUT_SECONDS } from "./mod-menu.tsx";
+import { ModeChips } from "./mode-chips.tsx";
+import { deleteCommand, durationLabel, type ChatCommand } from "./modes.ts";
+import { MessageMenu } from "./mod-menu.tsx";
+import { ChatModesMenu, ChatModesToolbar } from "./mod-tools/chat-modes.tsx";
+import { RaidAlert, incomingRaidOf, type IncomingRaid } from "./mod-tools/raid-alert.tsx";
 import { useDismissed, type DismissStore } from "./pinned/dismissed.ts";
 import { pinnedItems, undismissed, type PinnedItem } from "./pinned/model.ts";
 import { PinnedStrip, usePinnedAnnouncement } from "./pinned/strip.tsx";
@@ -73,6 +83,18 @@ export interface ChatPanelProps {
   reportClient?: ReportClient;
   /** Where the pinned strip remembers dismissals (this tab's `sessionStorage`); tests pass a fake. */
   dismissStore?: DismissStore;
+  /**
+   * Where a moderator's chat modes live: a menu in the chat header (the channel page), or a
+   * toolbar row above the log (the mod view, where there is room for every mode at once).
+   */
+  modTools?: "menu" | "toolbar";
+  /**
+   * Whether the viewer follows the channel, when the page knows (the Follow button's state), so a
+   * followers-only chat says so before they type (J3-d). Unknown leaves it to the server's refusal.
+   */
+  following?: boolean | null;
+  /** `me.get` for the composer gate's email and account-age reasons; tests pass a fake. */
+  accountFactsClient?: AccountFactsClient;
 }
 
 interface ModTarget {
@@ -181,9 +203,32 @@ export function ChatPanel({
   blocksClient,
   reportClient,
   dismissStore,
+  modTools = "menu",
+  following = null,
+  accountFactsClient,
 }: ChatPanelProps): React.JSX.Element {
   const [status, setStatus] = React.useState<ChatStatus>("connecting");
   const [rows, dispatch] = React.useReducer(chatReducer, EMPTY_ROWS);
+  // One tick per new row (never for a trim), for the "N new messages" pill and the busy log.
+  const [rowSeq, bumpRowSeq] = React.useReducer((n: number) => n + 1, 0);
+  // Kept with its channel, so a channel change drops it without a reset.
+  const [raidAlert, setIncomingRaid] = React.useState<(IncomingRaid & { channel: string }) | null>(null);
+  const incomingRaid = raidAlert?.channel === channel ? raidAlert : null;
+  // Read once: the gate's "you can chat here in 5 days" needs a day's precision, not a ticking clock.
+  const [mountedAt] = React.useState(() => Date.now());
+  // The last gate refusal since the (re)join, so the composer keeps saying why (J3-d).
+  const [refused, setRefused] = React.useState<GateRefusal | null>(null);
+  // A follow (or unfollow) changes what the server would say, so the old refusal no longer stands.
+  // Adjusted during render (React's "storing information from previous renders"), not in an effect.
+  const [refusedFollowing, setRefusedFollowing] = React.useState(following);
+  if (refusedFollowing !== following) {
+    setRefusedFollowing(following);
+    setRefused(null);
+  }
+  const [reportTarget, setReportTarget] = React.useState<{ open: boolean; id: string | null }>({
+    open: false,
+    id: null,
+  });
   const [canChat, setCanChat] = React.useState(false);
   const [canModerate, setCanModerate] = React.useState(false);
   const [held, heldDispatch] = React.useReducer(heldReducer, EMPTY_HELD);
@@ -226,6 +271,8 @@ export function ChatPanel({
   // The connection keeps the handlers it was given; they reach the latest state through this.
   const interactRef = React.useRef(interact);
   const selfRef = React.useRef(selfUsername);
+  // Set at the join, before any event of that session reaches `onEvent`.
+  const canModerateRef = React.useRef(false);
   React.useEffect(() => {
     interactRef.current = interact;
     selfRef.current = selfUsername;
@@ -252,6 +299,8 @@ export function ChatPanel({
         onJoined: (me) => {
           setCanChat(me.canChat);
           setCanModerate(me.canModerate);
+          canModerateRef.current = me.canModerate;
+          setRefused(null);
           // A (re)join starts over: the gate is checked again on the next send.
           gateDispatch({ type: "joined" });
         },
@@ -265,7 +314,9 @@ export function ChatPanel({
             { kind: "chat", mediaTs: message.mediaTs ?? null, own: isOwn(message, selfRef.current) },
             () => {
               // Moderation may have come while the queue held the line.
-              if (!tombstones.hides(message, arrived)) dispatch({ type: "message", message });
+              if (tombstones.hides(message, arrived)) return;
+              dispatch({ type: "message", message });
+              bumpRowSeq();
             },
           );
         },
@@ -287,6 +338,7 @@ export function ChatPanel({
         // Notices answer something the viewer did, so they belong inline; socket errors stay toasts.
         onNotice: (code, kind) => {
           if (code === "msg_verified_watch") gateDispatch({ type: "denied" });
+          if (isGateRefusal(code)) setRefused(code);
           if (kind === "error") toast.error(errorMessage(code));
           else dispatch({ type: "notice", id: `notice-${++noticeSeq.current}`, code });
         },
@@ -296,7 +348,14 @@ export function ChatPanel({
           const event = chatEventView(type, data);
           if (!event) return;
           const id = `event-${++noticeSeq.current}`;
-          queue.present({ kind: "alert", mediaTs: null, own: false }, () => dispatch({ type: "event", id, event }));
+          // An arriving raid also alerts the room's moderators and the broadcaster (J5-c), at once.
+          const raid = incomingRaidOf(id, event);
+          const staff = canModerateRef.current || selfRef.current?.toLowerCase() === channel.toLowerCase();
+          if (raid && staff) setIncomingRaid({ ...raid, channel });
+          queue.present({ kind: "alert", mediaTs: null, own: false }, () => {
+            dispatch({ type: "event", id, event });
+            bumpRowSeq();
+          });
         },
         onRaid: (raid) => interactRef.current.onRaid(raid),
       },
@@ -312,18 +371,30 @@ export function ChatPanel({
 
   const send = () => {
     if (!draft.trim()) return;
+    // Every send asks the server again, so a gate the viewer has since met (a follow, a subscription,
+    // a verified email) stops showing once the server lets the message through.
+    setRefused(null);
     if (connection.current?.send(draft)) setDraft("");
     else toast.error(t("chat.notConnected"));
   };
 
   // Timeouts act at once (Twitch parity); bans go through a ConfirmDialog.
-  const timeout = async (target: ModTarget) => {
+  const timeout = async (target: ModTarget, seconds: number) => {
     try {
-      await api().chat.bans.ban({ channel, username: target.username, durationSeconds: TIMEOUT_SECONDS });
-      toast.success(t("chat.mod.timedOut", { name: target.displayName }));
+      await api().chat.bans.ban({ channel, username: target.username, durationSeconds: seconds });
+      toast.success(t("d4Chat.menu.timedOut", { name: target.displayName, duration: durationLabel(seconds) }));
     } catch (err) {
       toastActionError(err, t("chat.mod.failed"));
     }
+  };
+
+  // Chat modes and Delete message are the server's own commands (J5-b, J5-d); it answers with a notice.
+  const runCommand = React.useCallback(
+    (command: ChatCommand) => connection.current?.command(command.command, command.args) ?? false,
+    [],
+  );
+  const deleteMessage = (messageId: string) => {
+    if (!runCommand(deleteCommand(messageId))) toast.error(t("chat.notConnected"));
   };
 
   const ban = async (target: ModTarget) => {
@@ -359,6 +430,31 @@ export function ChatPanel({
   const inputDisabled = status !== "open" || !canChat;
   const isBroadcaster = self !== null && self === channel.toLowerCase();
   const { poll, prediction, giveaway, goals, points, raid } = interact;
+  // A busy log stops announcing every line (D4.1); Calm Chat's digest speaks for it when on.
+  const busy = useBusyLog(rowSeq);
+  // Moderators and the broadcaster skip chat modes, so they have no composer gate.
+  const privileged = canModerate || isBroadcaster;
+  const account = useAccountFacts(signedIn && needsAccountFacts(settings, privileged), accountFactsClient);
+  const gateInput = {
+    settings,
+    facts: {
+      ...(account ? { emailVerified: account.emailVerified, accountCreatedAt: account.createdAt } : {}),
+      following,
+    },
+    privileged,
+    now: mountedAt,
+  };
+  const gate = signedIn ? composerGate({ ...gateInput, refused }) : null;
+  // Only a gate the page knows from facts closes the input. One known only from a refusal leaves it
+  // open, so the viewer can try again once they have followed, subscribed or verified.
+  const gateLocks = signedIn && composerGate({ ...gateInput, refused: null }) !== null;
+  // The points chip and its "How you earn" popover (D4.5): hidden on your own channel, when points
+  // cannot be earned, and at zero with nothing to spend them on.
+  const openPrediction = prediction?.status === "active" ? prediction.title : null;
+  const spendable = openPrediction !== null || (poll?.status === "active" && poll.pointsPerExtraVote > 0);
+  const pointsChip = showPointsChip(points, { own: isBroadcaster, spendable }) ? (
+    <PointsChip balance={points} prediction={openPrediction} />
+  ) : undefined;
   // The banner area opens only when there is something to say, so an empty bordered box never shows.
   const surgeActive = surge !== null && surge.state !== "off";
   // The viewer's gate hint (ADR 0015); the banner checks features.watchGate and renders nothing otherwise.
@@ -433,9 +529,21 @@ export function ChatPanel({
     if (goal) return <GoalCard key={goal.id} goal={goal} item={item} />;
     return null;
   };
+  const toolbar = canModerate && modTools === "toolbar";
   const pinned =
-    raid || shownPinned.length > 0 || surgeActive || gateDenied || gated ? (
+    toolbar || incomingRaid || raid || shownPinned.length > 0 || surgeActive || gateDenied || gated ? (
       <div className="grid gap-2">
+        {toolbar && <ChatModesToolbar settings={settings} onCommand={runCommand} />}
+        {incomingRaid && privileged && (
+          <RaidAlert
+            key={incomingRaid.id}
+            raid={incomingRaid}
+            onCommand={runCommand}
+            onDismiss={() => setIncomingRaid(null)}
+            followersOn={(settings?.followersOnlyMinutes ?? null) !== null}
+            slowOn={(settings?.slowModeSeconds ?? 0) > 0}
+          />
+        )}
         <SurgeBanner
           channel={channel}
           canModerate={canModerate}
@@ -497,9 +605,14 @@ export function ChatPanel({
             <MessageMenu
               displayName={user.displayName}
               onBlock={() => setBlockDialog({ open: true, target })}
+              onReport={() => setReportTarget({ open: true, id: row.id })}
               moderation={
                 canModerate
-                  ? { onTimeout: () => void timeout(target), onBan: () => setBanDialog({ open: true, target }) }
+                  ? {
+                      onDelete: () => deleteMessage(row.id),
+                      onTimeout: (seconds) => void timeout(target, seconds),
+                      onBan: () => setBanDialog({ open: true, target }),
+                    }
                   : null
               }
             />
@@ -588,15 +701,18 @@ export function ChatPanel({
   return (
     <ChatPanelShell
       data-testid="chat"
-      logLive={calmOn ? "off" : "polite"}
+      logLive={calmOn || busy ? "off" : "polite"}
       data-state={status}
+      data-busy={busy ? "true" : undefined}
       aria-label={t("chat.title")}
       title={t("chat.title")}
       logLabel={t("chat.log")}
-      newMessagesLabel={t("chat.newMessages")}
+      newMessagesLabel={(count) => t("d4Chat.newMessages", { count })}
+      rowSeq={rowSeq}
       pinned={pinned}
       viewersAction={
         <>
+          {canModerate && modTools === "menu" && <ChatModesMenu settings={settings} onCommand={runCommand} />}
           {canModerate && <HeldQueue channel={channel} state={held} dispatch={heldDispatch} />}
           {!canModerate && <CalmControls settings={calmSettings} />}
           {/* W3-watch-rooms: the room trigger and its drawer (ADR 0017); renders nothing until that unit lands. */}
@@ -632,9 +748,16 @@ export function ChatPanel({
               maxLength={500}
               placeholder={t("chat.placeholder")}
               sendLabel={t("chat.send")}
-              disabled={inputDisabled}
+              // A known gate closes the input with its reason above it, before any typing (J3-d).
+              disabled={inputDisabled || gateLocks}
+              modeNote={
+                <>
+                  {!toolbar && <ModeChips settings={settings} channelName={name} />}
+                  {gate && <ComposerGate reason={gate} channelName={name} email={account?.email} now={mountedAt} />}
+                </>
+              }
               // The viewer's points sit in the input row, as on Twitch (design review F6).
-              pointsAction={points ? <PointsChip balance={points} /> : undefined}
+              pointsAction={pointsChip}
               inputProps={{ "data-testid": "chat-input" }}
               sendProps={{ "data-testid": "chat-send" }}
             />
@@ -685,6 +808,36 @@ export function ChatPanel({
             : toastActionError(err, t("blocks.failed"))
         }
       />
+      {/* Report message (J5-d): one chat message as the subject; the form says when it went. */}
+      <Dialog
+        open={reportTarget.open}
+        onOpenChange={(open) => {
+          if (!open) setReportTarget((r) => ({ ...r, open: false }));
+        }}
+      >
+        {reportTarget.open && reportTarget.id && (
+          <DialogContent
+            data-testid="report-dialog"
+            data-subject-type="chat_message"
+            data-subject-id={reportTarget.id}
+            className="max-h-svh overflow-y-auto sm:max-w-lg"
+          >
+            <ReportForm
+              onSubmit={async (reason, details) => {
+                const subjectId = reportTarget.id;
+                if (!subjectId) return;
+                await (reportClient ?? defaultReportClient()).report({
+                  subjectType: "chat_message",
+                  subjectId,
+                  reason,
+                  details,
+                });
+                setReportTarget((r) => ({ ...r, open: false }));
+              }}
+            />
+          </DialogContent>
+        )}
+      </Dialog>
     </ChatPanelShell>
   );
 }
