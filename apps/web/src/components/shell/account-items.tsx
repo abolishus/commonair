@@ -11,6 +11,7 @@ import {
   Logout03Icon,
   Settings02Icon,
   Shield01Icon,
+  ShieldUserIcon,
   Tv01Icon,
   UserGroupIcon,
 } from "@hugeicons/core-free-icons";
@@ -24,6 +25,7 @@ import { isTreasurer } from "../../lib/money.ts";
 import { accountMenu, type AccountEntry } from "../../lib/nav.ts";
 import { forgetPushSubscription } from "../pwa/push-client.ts";
 import { isLegal, isSafetyStaff } from "../safety/access.ts";
+import { useModerates } from "../studio-shell/moderates.ts";
 
 export async function onSignOut(): Promise<void> {
   try {
@@ -60,6 +62,19 @@ export function accountItem(entry: AccountEntry): UserMenuItem {
         label: t("studio.nav"),
         icon: icon(DashboardSquare01Icon),
         render: <Link data-testid="account-studio-link" to="/dashboard" />,
+      };
+    case "modView":
+      return {
+        id: entry.id,
+        label: t("d5Shell.menu.modView"),
+        icon: icon(ShieldUserIcon),
+        render: (
+          <Link
+            data-testid="account-mod-view-link"
+            to="/mod/$channel"
+            params={{ channel: entry.params?.channel ?? "" }}
+          />
+        ),
       };
     case "following":
       return {
@@ -124,9 +139,13 @@ export function accountItem(entry: AccountEntry): UserMenuItem {
   }
 }
 
-/** The signed-in member's account entries as menu items (none for a visitor). */
+/**
+ * The signed-in member's account entries as menu items (none for a visitor). "Mod view" joins once
+ * `me.moderates` answers with a channel (J5-a).
+ */
 export function useAccountItems(): UserMenuItem[] {
   const { me } = useBootstrap();
+  const moderates = useModerates(me?.id ?? null);
   if (!me) return [];
   return accountMenu(true, {
     channel: me.channelSlug,
@@ -134,5 +153,6 @@ export function useAccountItems(): UserMenuItem[] {
     safetyStaff: isSafetyStaff(me),
     legal: isLegal(me),
     admin: isAdmin(me),
+    moderates: moderates.map((m) => m.channel.slug),
   }).map(accountItem);
 }

@@ -2,34 +2,106 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * D5-studio F22: the studio and admin sidebars are grouped. The studio: Stream, Community, Content,
- * Money and Tools, in that order, each with its pages in order (feature-gated pages only when the
- * instance offers them), and the mod view linking the member's own channel. Admin: Safety, Money,
- * Co-op and Platform, each only with the pages the role may open.
+ * D5-studio F22, regrouped by the overhaul's D5.8: the studio has Home, Set up, Community,
+ * Channels you moderate (J5-a, only with a role elsewhere), Content, Money, Grow and Co-op & tools,
+ * in that order, each with its pages in order (feature-gated pages only when the instance offers
+ * them), and the mod view linking the member's own channel. Admin: Safety, Money, Co-op and
+ * Platform, each only with the pages the role may open.
  */
 import { describe, expect, it } from "vite-plus/test";
 import { t } from "../src/i18n/index.ts";
-import { adminNavGroups, studioNavGroups } from "../src/lib/nav.ts";
+import { SETUP_CHECKLIST_ANCHOR, adminNavGroups, studioNav, studioNavGroups } from "../src/lib/nav.ts";
 
 const ids = (groups: { id: string; items: { id: string }[] }[]) =>
   groups.map((g) => [g.id, g.items.map((i) => i.id)] as const);
 
 describe("studio groups", () => {
-  it("orders the groups and their pages (every feature on)", () => {
+  it("orders the groups and their pages (every feature on, D5.8)", () => {
     const groups = studioNavGroups("/dashboard", { chatSafety: true, twitchImport: true, channel: "aurora" });
     expect(ids(groups)).toEqual([
-      ["stream", ["streamManager", "streamSettings", "rehearse", "overlays", "captions", "relays"]],
-      ["community", ["chat", "bot", "interact", "modView"]],
-      ["content", ["content", "analytics"]],
+      ["home", ["streamManager"]],
+      ["setup", ["streamSettings", "overlays", "rehearse", "captions"]],
+      ["community", ["modView", "chat", "bot", "interact"]],
+      ["content", ["content"]],
       ["money", ["revenue", "crew"]],
-      ["tools", ["move", "import", "developer"]],
+      ["grow", ["audience", "analytics", "move", "import"]],
+      ["coopTools", ["relays", "developer"]],
     ]);
+  });
+
+  it("keeps every studio page reachable", () => {
+    const linked = new Set(
+      studioNavGroups("/", { chatSafety: true, twitchImport: true, channel: "aurora" })
+        .flatMap((g) => g.items)
+        .map((i) => i.to),
+    );
+    for (const entry of studioNav("/", { chatSafety: true, twitchImport: true }))
+      expect(linked.has(entry.to), entry.to).toBe(true);
+    expect(linked.has("/dashboard/settings")).toBe(true);
+    expect(linked.has("/mod/$channel")).toBe(true);
   });
 
   it("leaves out chat safety and import when the instance does not offer them", () => {
     const groups = studioNavGroups("/dashboard", { channel: "aurora" });
-    expect(groups.find((g) => g.id === "community")?.items.map((i) => i.id)).toEqual(["bot", "interact", "modView"]);
-    expect(groups.find((g) => g.id === "tools")?.items.map((i) => i.id)).toEqual(["move", "developer"]);
+    expect(groups.find((g) => g.id === "community")?.items.map((i) => i.id)).toEqual(["modView", "bot", "interact"]);
+    expect(groups.find((g) => g.id === "grow")?.items.map((i) => i.id)).toEqual(["audience", "analytics", "move"]);
+  });
+
+  it("links Bring your audience to the dashboard checklist, never current", () => {
+    for (const path of ["/dashboard", "/move", "/"]) {
+      const audience = studioNavGroups(path, { channel: "aurora" })
+        .flatMap((g) => g.items)
+        .find((i) => i.id === "audience");
+      expect(audience).toEqual({ id: "audience", to: "/dashboard", hash: SETUP_CHECKLIST_ANCHOR, current: false });
+    }
+    expect(SETUP_CHECKLIST_ANCHOR).toBe("go-live-checklist");
+  });
+
+  describe("channels you moderate (J5-a)", () => {
+    const moderates = [
+      { slug: "birch", displayName: "Birch" },
+      { slug: "aurora", displayName: "Aurora" },
+      { slug: "cedar", displayName: "Cedar" },
+    ];
+
+    it("adds a group after Community, one mod view link per channel in order, never the own channel", () => {
+      const groups = studioNavGroups("/dashboard", { channel: "aurora", moderates });
+      expect(groups.map((g) => g.id)).toEqual([
+        "home",
+        "setup",
+        "community",
+        "moderates",
+        "content",
+        "money",
+        "grow",
+        "coopTools",
+      ]);
+      expect(groups.find((g) => g.id === "moderates")?.items).toEqual([
+        { id: "moderated", to: "/mod/$channel", params: { channel: "birch" }, label: "Birch", current: false },
+        { id: "moderated", to: "/mod/$channel", params: { channel: "cedar" }, label: "Cedar", current: false },
+      ]);
+    });
+
+    it("has no group when the list is empty or only the own channel", () => {
+      for (const list of [[], [{ slug: "aurora", displayName: "Aurora" }]])
+        expect(studioNavGroups("/", { channel: "aurora", moderates: list }).some((g) => g.id === "moderates")).toBe(
+          false,
+        );
+    });
+
+    it.each([
+      ["/mod/birch", ["moderated:birch"]],
+      ["/mod/cedar/", ["moderated:cedar"]],
+      ["/mod/aurora", ["modView"]],
+      ["/mod/elsewhere", ["modView"]],
+      ["/mod/birch/x", []],
+    ])("on %s marks %j current", (path, want) => {
+      const current = studioNavGroups(path, { channel: "aurora", moderates })
+        .flatMap((g) => g.items)
+        .filter((i) => i.current)
+        .map((i) => (i.id === "moderated" ? `moderated:${i.params?.channel}` : i.id));
+      expect(current).toEqual(want);
+    });
   });
 
   it("links the mod view to the member's own channel", () => {
@@ -66,9 +138,17 @@ describe("studio groups", () => {
   });
 
   it("has a label for every group, in English and as a real string", () => {
-    expect(
-      ["stream", "community", "content", "money", "tools"].map((g) => t(`studio.group.${g}` as "studio.group.stream")),
-    ).toEqual(["Stream", "Community", "Content", "Money", "Tools"]);
+    expect([
+      t("d5Shell.group.home"),
+      t("d5Shell.group.setup"),
+      t("studio.group.community"),
+      t("d5Shell.group.moderates"),
+      t("studio.group.content"),
+      t("studio.group.money"),
+      t("d5Shell.group.grow"),
+      t("d5Shell.group.coopTools"),
+    ]).toEqual(["Home", "Set up", "Community", "Channels you moderate", "Content", "Money", "Grow", "Co-op & tools"]);
+    expect(t("d5Shell.item.audience")).toBe("Bring your audience");
     expect(t("studio.chat")).toBe("Chat safety");
     expect(t("studio.item.modView")).toBe("Mod view");
     expect(t("studio.item.streamSettings")).toBe("Stream settings");

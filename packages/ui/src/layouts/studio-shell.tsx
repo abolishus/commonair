@@ -11,7 +11,17 @@ export interface StudioShellProps {
   skipLabel: string;
   children: React.ReactNode;
   footer?: React.ReactNode;
+  /**
+   * The LiveStatusBar (overhaul D5.2), first in `main` on every studio page. It brings its own
+   * stickiness (under the 56 px header), so the page scrolls beneath it.
+   */
+  statusBar?: React.ReactNode;
 }
-export function StudioShell(props: StudioShellProps): React.JSX.Element {
-  return <DashboardShell {...props} />;
+export function StudioShell({ statusBar, children, ...props }: StudioShellProps): React.JSX.Element {
+  return (
+    <DashboardShell {...props}>
+      {statusBar}
+      {children}
+    </DashboardShell>
+  );
 }

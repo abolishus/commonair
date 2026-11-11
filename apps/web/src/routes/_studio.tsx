@@ -17,24 +17,27 @@ import {
   Settings02Icon,
   ShieldUserIcon,
   SourceCodeIcon,
+  Share08Icon,
   TestTube01Icon,
   UserGroupIcon,
   Video01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Link, Outlet, createFileRoute, useLocation, type ErrorComponentProps } from "@tanstack/react-router";
-import type * as React from "react";
+import * as React from "react";
 import { ErrorState, NotFoundState, ShellFallback } from "../components/not-found.tsx";
 import { AppFooter, AppHeader } from "../components/site-chrome.tsx";
+import { LiveStatusSlotProvider, StudioLiveStatusBar } from "../components/studio-shell/live-status.tsx";
+import { useModerates } from "../components/studio-shell/moderates.ts";
 import { t, type MessageKey } from "../i18n/index.ts";
 import { useBootstrap } from "../lib/bootstrap.ts";
 import { studioNavGroups, type StudioEntry, type StudioGroupId } from "../lib/nav.ts";
 
 /**
- * Creator tools in the studio sidebar, grouped (F22): Stream (stream manager, stream settings,
- * rehearsal, overlays, captions, relays), Community (chat safety, bot, polls and raids, mod view),
- * Content (videos and clips, analytics), Money (revenue, crew) and Tools (move, import, developer).
- * Each page guards its own session.
+ * Creator tools in the studio sidebar, grouped (overhaul D5.8): Home, Set up, Community, Channels
+ * you moderate (only for a member with a role elsewhere, J5-a), Content, Money, Grow and Co-op &
+ * tools. The sticky LiveStatusBar (D5.2) heads every studio page; a page can put a one-off prompt
+ * in its slot with `<LiveStatusSlot>`. Each page guards its own session.
  */
 export const Route = createFileRoute("/_studio")({
   component: StudioLayout,
@@ -76,6 +79,32 @@ function studioItem(entry: StudioEntry): NavItem {
         label: t("studio.item.streamSettings"),
         icon: <HugeiconsIcon icon={Settings02Icon} strokeWidth={2} aria-hidden />,
         render: <Link data-testid="studio-stream-settings-link" to="/dashboard/settings" />,
+      };
+    case "moderated": {
+      const channel = entry.params?.channel ?? "";
+      const name = entry.label ?? channel;
+      return {
+        ...base,
+        // One per channel, so the slug keeps ids (and test ids) unique on the page.
+        id: `moderated-${channel}`,
+        label: name,
+        icon: <HugeiconsIcon icon={ShieldUserIcon} strokeWidth={2} aria-hidden />,
+        render: (
+          <Link
+            data-testid={`studio-moderated-link-${channel}`}
+            aria-label={t("d5Shell.item.moderated", { channel: name })}
+            to="/mod/$channel"
+            params={{ channel }}
+          />
+        ),
+      };
+    }
+    case "audience":
+      return {
+        ...base,
+        label: t("d5Shell.item.audience"),
+        icon: <HugeiconsIcon icon={Share08Icon} strokeWidth={2} aria-hidden />,
+        render: <Link data-testid="studio-audience-link" to="/dashboard" hash={entry.hash} />,
       };
     case "modView":
       return {
@@ -192,21 +221,27 @@ function studioItem(entry: StudioEntry): NavItem {
 }
 
 const GROUP_LABEL: Record<StudioGroupId, MessageKey> = {
-  stream: "studio.group.stream",
+  home: "d5Shell.group.home",
+  setup: "d5Shell.group.setup",
   community: "studio.group.community",
+  moderates: "d5Shell.group.moderates",
   content: "studio.group.content",
   money: "studio.group.money",
-  tools: "studio.group.tools",
+  grow: "d5Shell.group.grow",
+  coopTools: "d5Shell.group.coopTools",
 };
 
 function StudioLayout(): React.JSX.Element {
   const pathname = useLocation({ select: (location) => location.pathname });
   const { instance, me } = useBootstrap();
   const channel = me ? (me.channelSlug ?? me.username) : "";
+  const moderates = useModerates(me?.id ?? null);
+  const [slotHost, setSlotHost] = React.useState<HTMLSpanElement | null>(null);
   const groups = studioNavGroups(pathname, {
     chatSafety: instance.chatSafety,
     twitchImport: instance.twitchImport,
     channel,
+    moderates: moderates.map((m) => ({ slug: m.channel.slug, displayName: m.channel.displayName })),
   })
     // Signed out, the page redirects; the mod view has no channel to open until then.
     .map((group) => ({ ...group, items: channel ? group.items : group.items.filter((i) => i.id !== "modView") }))
@@ -218,8 +253,11 @@ function StudioLayout(): React.JSX.Element {
       sidebarLabel={t("studio.nav")}
       skipLabel={t("nav.skipToContent")}
       footer={<AppFooter />}
+      statusBar={<StudioLiveStatusBar slug={channel || null} pathname={pathname} slotRef={setSlotHost} />}
     >
-      <Outlet />
+      <LiveStatusSlotProvider host={slotHost}>
+        <Outlet />
+      </LiveStatusSlotProvider>
     </StudioShell>
   );
 }
