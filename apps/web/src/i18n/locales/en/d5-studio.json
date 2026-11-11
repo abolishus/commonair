@@ -95,9 +95,6 @@
   "studio.trend.day": "Day",
   "studio.trend.dayLabel": "{month} {day}",
   "studio.trend.showTable": "Show the days as a table",
-  "studio.trend.revenueTitle": "Revenue by day",
-  "studio.trend.revenueHint": "Gross and net for each day of the month.",
-  "studio.trend.revenueLabel": "Gross and net revenue by day",
   "studio.trend.revenueEmpty": "No revenue this month",
   "studio.trend.revenueEmptyHint": "Subscriptions, gifts and tips show here day by day.",
   "studio.delta.up": "Up {percent} on the previous period",
@@ -113,6 +110,5 @@
   "studio.empty.proposeSplit": "Propose a split",
   "studio.empty.setUpTiers": "Set up subscription tiers",
   "studio.empty.subscribersHint": "Viewers can subscribe once your tiers have a name and a price.",
-  "studio.empty.payoutHint": "The instance has not set up payouts yet. Your earnings are kept until it does.",
   "studio.empty.turnOnCaptions": "Turn on captions"
 }

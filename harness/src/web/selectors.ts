@@ -635,3 +635,31 @@ export const D5_DASHBOARD_IDS = {
   streamRecapMember: "stream-recap-member",
   streamPreviewToggle: "stream-preview-toggle",
 } as const;
+
+/**
+ * d5-money (overhaul wave 3, D5.6 and D5.7): `/revenue` and `/analytics`. `revenuePaidOut` carries
+ * `data-cents`; each `revenueReconcileRow` carries `data-term` (gross, coopCut, refunds, other,
+ * net) and signed `data-cents`, and the rows above net sum to it; `revenueReconcilePayouts`
+ * carries `data-paid-out` and `data-pending`; `revenueShareLine` carries `data-share`
+ * (`platform.cut`'s streamer share); `revenuePayoutAccount` (E4b) now also carries `data-state`
+ * (ready, connect, manual, waiting). `revenueSetup` shows only while tiers or payouts are missing.
+ * On `/analytics`, each `analyticsInsight` carries `data-insight` and `data-ready`, and
+ * `analyticsPnlRow` carries `data-broadcast-id`, `data-revenue` and `data-cost` (cents).
+ */
+export const D5_MONEY_IDS = {
+  revenuePaidOut: "revenue-paid-out",
+  revenueShareLine: "revenue-share-line",
+  revenueFeeHistory: "revenue-fee-history",
+  revenueReconcile: "revenue-reconcile",
+  revenueReconcileRow: "revenue-reconcile-row",
+  revenueReconcilePayouts: "revenue-reconcile-payouts",
+  revenueSetup: "revenue-setup",
+  revenueTrend: "revenue-trend",
+  analyticsRangeEarned: "analytics-range-earned",
+  analyticsCounted: "analytics-counted",
+  analyticsInsights: "analytics-insights",
+  analyticsInsight: "analytics-insight",
+  analyticsInsightOpen: "analytics-insight-open",
+  analyticsPnl: "analytics-pnl",
+  analyticsPnlRow: "analytics-pnl-row",
+} as const;

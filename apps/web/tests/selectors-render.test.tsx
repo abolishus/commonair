@@ -774,7 +774,8 @@ describe("composition-rendered selectors", () => {
         <PayoutAccountCard
           account={{
             provider: "stripe",
-            payoutsEnabled: true,
+            // The API hands out an onboarding link only while payouts are not enabled.
+            payoutsEnabled: false,
             onboardingUrl: "https://connect.example.org/x",
             instructions: null,
           }}
@@ -782,7 +783,7 @@ describe("composition-rendered selectors", () => {
       ),
       '[data-testid="revenue-payout-account"]',
     );
-    expect(attrs(stripe, ["data-provider", "data-enabled"])).toEqual(["stripe", "true"]);
+    expect(attrs(stripe, ["data-provider", "data-enabled", "data-state"])).toEqual(["stripe", "false", "connect"]);
     expect(stripe.querySelector('a[href="https://connect.example.org/x"]')).not.toBeNull();
 
     const doc = render(

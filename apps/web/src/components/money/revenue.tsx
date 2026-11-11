@@ -13,16 +13,15 @@ import {
   useLocale,
 } from "@commonair/ui";
 import {
+  BarChart,
   BreakdownBar,
   DataTable,
   FilterBar,
   KeyValueList,
   StatCard,
   StatGrid,
-  TrendChart,
   type DataTableColumn,
 } from "@commonair/ui/blocks/data";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@commonair/ui/components/collapsible";
 import { AmountField, FormSection } from "@commonair/ui/blocks/forms";
 import { Section } from "@commonair/ui/blocks/headers";
 import { Button } from "@commonair/ui/components/button";
@@ -52,7 +51,8 @@ import {
   type SubTierDto,
   type TierDraft,
 } from "../../lib/money.ts";
-import { safeHttpUrl } from "../../lib/url.ts";
+import { payoutView } from "../studio-money/payout.ts";
+import { ledgerReference } from "../studio-money/reconcile.ts";
 import { ResponsiveRows, type StackedRow } from "../studio/stacked-rows.tsx";
 import { formatDayLabel, revenueTrend } from "../studio/trends.ts";
 import { BreakdownOpenButton } from "./breakdown-dialog.tsx";
@@ -98,13 +98,33 @@ export function RevenueStatsSkeleton(): React.JSX.Element {
   );
 }
 
+/**
+ * The month's tiles (CS-9): what was earned and paid out this month, then the balances now
+ * (available toward the payout minimum, held, and owed in the destructive tone, not amber).
+ * `RevenueReconcile` beside them shows how earned adds up.
+ */
 export function RevenueStats({ summary }: { summary: RevenueSummaryDto }): React.JSX.Element {
   const { locale } = useLocale();
   const { available, held, owed, minimumPayout, holdDays } = summary.balance;
   const delta = earnedDelta(summary.net, summary.previousNet, locale);
   const minimum = formatMoney(minimumPayout.cents, minimumPayout.currency, locale);
   return (
-    <StatGrid cols={owed.cents > 0 ? 4 : 3}>
+    <StatGrid cols={owed.cents > 0 ? 3 : 4}>
+      <StatCard
+        data-testid="revenue-earned"
+        data-cents={summary.net.cents}
+        data-previous={summary.previousNet.cents}
+        label={t("revenue.earned")}
+        value={<MoneyAmount value={summary.net} colorNegative />}
+        delta={delta}
+      />
+      <StatCard
+        data-testid="revenue-paid-out"
+        data-cents={summary.paidOut.cents}
+        label={t("d5Money.revenue.paidOut")}
+        value={<MoneyAmount value={summary.paidOut} />}
+        hint={t("d5Money.revenue.paidOutHint")}
+      />
       <StatCard
         data-testid="revenue-available"
         data-cents={available.cents}
@@ -130,87 +150,46 @@ export function RevenueStats({ summary }: { summary: RevenueSummaryDto }): React
         <StatCard
           data-testid="revenue-owed"
           data-cents={owed.cents}
-          tone="warning"
+          tone="destructive"
           label={t("revenue.owed")}
           value={<MoneyAmount value={owed} />}
           hint={t("revenue.owedHint")}
         />
       )}
-      <StatCard
-        data-testid="revenue-earned"
-        data-cents={summary.net.cents}
-        data-previous={summary.previousNet.cents}
-        label={t("revenue.earned")}
-        value={<MoneyAmount value={summary.net} colorNegative />}
-        delta={delta}
-      />
     </StatGrid>
   );
 }
 
 /**
- * The month's revenue by day (F24): gross and net lines, told apart by stroke as well as colour,
- * with a table of the same numbers for screen readers and anyone who wants the figures.
+ * The month's earnings by day as bars (D5.6: sparse daily money is bars, not lines), whole
+ * currency units on the axis, with the same figures in a table behind a toggle.
  */
 export function RevenueTrend({ summary }: { summary: RevenueSummaryDto }): React.JSX.Element {
   const { locale } = useLocale();
   const currency = summary.net.currency;
-  const rows = revenueTrend({ from: summary.periodStart, to: summary.periodEnd }, summary.daily).map((d) => ({
-    ...d,
-    day: formatDayLabel(d.date, locale),
-  }));
+  const rows = revenueTrend({ from: summary.periodStart, to: summary.periodEnd }, summary.daily);
   const any = rows.some((r) => r.gross !== 0 || r.net !== 0);
-  type Row = (typeof rows)[number];
-  const columns: DataTableColumn<Row>[] = [
-    { id: "day", header: t("studio.trend.day"), cell: ({ row }) => row.original.day },
-    {
-      id: "gross",
-      header: t("revenue.ledger.gross"),
-      align: "numeric",
-      cell: ({ row }) => formatMoney(row.original.gross, currency, locale),
-    },
-    {
-      id: "net",
-      header: t("revenue.ledger.net"),
-      align: "numeric",
-      cell: ({ row }) => formatMoney(row.original.net, currency, locale),
-    },
-  ];
   return (
     <Card data-testid="revenue-trend" data-days={rows.length}>
       <CardHeader>
-        <CardTitle>{t("studio.trend.revenueTitle")}</CardTitle>
-        <CardDescription>{t("studio.trend.revenueHint")}</CardDescription>
+        <CardTitle>{t("d5Money.trend.title")}</CardTitle>
+        <CardDescription>{t("d5Money.trend.hint")}</CardDescription>
       </CardHeader>
-      <CardContent className="flex flex-col gap-3">
+      <CardContent>
         {any ? (
-          <>
-            <TrendChart
-              data={rows}
-              xKey="day"
-              legend="bottom"
-              directLabels
-              ariaLabel={t("studio.trend.revenueLabel")}
-              formatValue={(cents) => formatMoney(cents, currency, locale)}
-              series={[
-                { key: "gross", label: t("revenue.ledger.gross"), color: "--chart-2", dash: "dashed" },
-                { key: "net", label: t("revenue.ledger.net"), color: "--chart-1", dash: "solid" },
-              ]}
-            />
-            <Collapsible>
-              <CollapsibleTrigger render={<Button variant="outline" size="sm" />}>
-                {t("studio.trend.showTable")}
-              </CollapsibleTrigger>
-              <CollapsibleContent className="pt-3">
-                <DataTable
-                  caption={t("studio.trend.revenueTitle")}
-                  columns={columns}
-                  rows={rows}
-                  getRowId={(r) => r.date}
-                />
-              </CollapsibleContent>
-            </Collapsible>
-          </>
+          <BarChart
+            data={rows.map((r) => ({ key: r.date, label: formatDayLabel(r.date, locale), value: r.net }))}
+            ariaLabel={t("d5Money.trend.title")}
+            seriesLabel={t("d5Money.trend.series")}
+            formatValue={(cents) => formatMoney(cents, currency, locale)}
+            minStep={100}
+            locale={locale}
+            table={{
+              caption: t("d5Money.trend.title"),
+              categoryHeader: t("studio.trend.day"),
+              showLabel: t("studio.trend.showTable"),
+            }}
+          />
         ) : (
           <EmptyState
             icon={Invoice01Icon}
@@ -526,58 +505,81 @@ function ledgerStackedRow(line: RevenueLineDto): StackedRow {
   };
 }
 
-function ledgerDetail(line: RevenueLineDto): string {
+/**
+ * Supporter, tier and quantity, then the reference: "Card payment" for a processor payment (its
+ * id stays in the breakdown dialog), a short bank or payout reference, never a raw `pi_…` id.
+ */
+export function ledgerDetail(line: RevenueLineDto): string {
   const who = line.from?.displayName ?? (line.type === "payout" ? "" : t("revenue.ledger.anonymous"));
+  const ref = ledgerReference(line);
   const parts = [
     who,
     line.tier !== null ? t("money.tierName", { tier: line.tier }) : "",
     line.quantity > 1 ? t("revenue.ledger.quantity", { count: line.quantity }) : "",
-    line.reference ?? "",
+    ref === null
+      ? ""
+      : ref.kind === "card"
+        ? t("d5Money.ledger.cardPayment")
+        : t("d5Money.ledger.reference", { reference: ref.text }),
   ];
   return parts.filter((p) => p !== "").join(t("money.detailSeparator"));
 }
 
-export function PayoutAccountCard({ account }: { account: PayoutAccountDto }): React.JSX.Element {
-  const onboarding = safeHttpUrl(account.onboardingUrl);
+/** The payout card's id, so the setup section can point at it. */
+export const PAYOUT_CARD_ID = "revenue-payout-account";
+
+/**
+ * The payout account (CS-9): one status, one explanation, at most one action. Ready says payouts
+ * are on; an unfinished Connect account offers "Set up payouts"; a manual arrangement shows the
+ * treasurer's instructions; otherwise it says the treasurer sets it up. `minimum` is the payout
+ * minimum, formatted, once the summary has loaded.
+ */
+export function PayoutAccountCard({
+  account,
+  minimum,
+}: {
+  account: PayoutAccountDto;
+  minimum?: string;
+}): React.JSX.Element {
+  const view = payoutView(account);
+  const explanation = {
+    ready: minimum ? t("d5Money.payout.readyMinimum", { minimum }) : t("d5Money.payout.ready"),
+    connect: t("d5Money.payout.connect"),
+    manual: t("d5Money.payout.manual"),
+    waiting: t("d5Money.payout.waiting"),
+  }[view.state];
   return (
     <Card
+      id={PAYOUT_CARD_ID}
       data-testid="revenue-payout-account"
       data-provider={account.provider}
       data-enabled={String(account.payoutsEnabled)}
+      data-state={view.state}
     >
       <CardHeader>
         <CardTitle>{t("revenue.payout.title")}</CardTitle>
-        <CardDescription>{t("revenue.payout.hint")}</CardDescription>
+        <CardDescription>{explanation}</CardDescription>
         <CardAction>
-          <StatusBadge tone={account.payoutsEnabled ? "success" : "warning"}>
-            {account.payoutsEnabled ? t("revenue.payout.enabled") : t("revenue.payout.notEnabled")}
-          </StatusBadge>
+          <StatusBadge tone={view.tone}>{t(view.status)}</StatusBadge>
         </CardAction>
       </CardHeader>
-      <CardContent className="flex flex-col gap-3">
-        {account.instructions && <p className="text-sm whitespace-pre-line">{account.instructions}</p>}
-        {onboarding && (
-          <div>
-            <Button
-              variant="outline"
-              size="sm"
-              nativeButton={false}
-              render={<a href={onboarding} rel="noopener" aria-label={t("revenue.payout.onboard")} />}
-            >
-              {t("revenue.payout.onboard")}
-            </Button>
-          </div>
-        )}
-        {!account.instructions && !onboarding && (
-          <EmptyState
-            data-testid="revenue-payout-none"
-            icon={Invoice01Icon}
-            title={t("revenue.payout.none")}
-            description={t("studio.empty.payoutHint")}
-            headingLevel={3}
-          />
-        )}
-      </CardContent>
+      {view.instructions || view.onboardingUrl ? (
+        <CardContent className="flex flex-col gap-3">
+          {view.instructions && <p className="text-sm whitespace-pre-line">{view.instructions}</p>}
+          {view.onboardingUrl && (
+            <div>
+              <Button
+                variant="outline"
+                size="sm"
+                nativeButton={false}
+                render={<a href={view.onboardingUrl} rel="noopener" aria-label={t("revenue.payout.onboard")} />}
+              >
+                {t("revenue.payout.onboard")}
+              </Button>
+            </div>
+          )}
+        </CardContent>
+      ) : null}
     </Card>
   );
 }

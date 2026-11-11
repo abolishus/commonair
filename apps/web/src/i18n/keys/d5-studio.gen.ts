@@ -100,9 +100,6 @@ export type Key =
   | "studio.trend.day"
   | "studio.trend.dayLabel"
   | "studio.trend.showTable"
-  | "studio.trend.revenueTitle"
-  | "studio.trend.revenueHint"
-  | "studio.trend.revenueLabel"
   | "studio.trend.revenueEmpty"
   | "studio.trend.revenueEmptyHint"
   | "studio.delta.up"
@@ -118,5 +115,4 @@ export type Key =
   | "studio.empty.proposeSplit"
   | "studio.empty.setUpTiers"
   | "studio.empty.subscribersHint"
-  | "studio.empty.payoutHint"
   | "studio.empty.turnOnCaptions";
