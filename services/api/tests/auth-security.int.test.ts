@@ -3,15 +3,12 @@
 
 /**
  * D7.2 (/settings/security) on the server, against Mailpit: a change of email mails a confirmation
- * to the CURRENT address and changes nothing until both links are followed; a sign-in from a new
- * device mails `newSignIn` linking `/settings/security#sessions`, a known device does not; and a
- * member with two-step sign-in on finishes signing in with a TOTP code (the password step makes no
- * session and sends no new-device mail).
+ * to the CURRENT address and changes nothing until both links are followed; and a member with
+ * two-step sign-in on finishes signing in with a TOTP code (the password step makes no session).
  */
 import { createHmac } from "node:crypto";
 import { sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vite-plus/test";
-import { SESSIONS_SETTINGS_PATH } from "@commonair/contracts/auth";
 import { Jar, mailTo, signUpAndSignIn, startApi, waitFor, type TestApi } from "./harness.ts";
 
 let api: TestApi;
@@ -26,7 +23,6 @@ const MAIL_WAIT_MS = 20_000;
 vi.setConfig({ testTimeout: 90_000 });
 const linkIn = (text: string) => /https?:\/\/\S+verify-email\?\S+/.exec(text)?.[0] ?? "";
 
-const FIREFOX_LINUX = "Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0";
 const SAFARI_IPHONE =
   "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1";
 
@@ -111,36 +107,8 @@ describe("change email", () => {
   });
 });
 
-describe("new sign-in mail", () => {
-  test("a new device mails newSignIn with the sessions anchor; the same device does not", async () => {
-    const me = await signUpAndSignIn(api);
-    const firefox = new Jar();
-    const first = await browserCall(firefox, FIREFOX_LINUX, "POST", "/api/auth/sign-in/email", {
-      email: me.email,
-      password: me.password,
-    });
-    expect(first.status).toBe(200);
-    const mail = await waitFor(async () => {
-      const m = await mailTo(me.email);
-      return m && m.text.includes("#sessions") ? m : null;
-    }, MAIL_WAIT_MS);
-    expect(mail.text).toContain(new URL(SESSIONS_SETTINGS_PATH, `${api.deps.site.publicUrl}/`).toString());
-    expect(mail.text).toContain("Firefox · Linux");
-    expect(mail.text).not.toContain("rv:140.0");
-
-    const count = (await subjectsTo(me.email)).length;
-    const again = await browserCall(new Jar(), FIREFOX_LINUX, "POST", "/api/auth/sign-in/email", {
-      email: me.email,
-      password: me.password,
-    });
-    expect(again.status).toBe(200);
-    await Bun.sleep(1_500);
-    expect((await subjectsTo(me.email)).length).toBe(count);
-  });
-});
-
 describe("two-step sign-in", () => {
-  test("enable with a code, then a sign-in needs the code; the password step sends no mail", async () => {
+  test("enable with a code, then a sign-in needs the code", async () => {
     const me = await signUpAndSignIn(api);
     const enable = await me.client.call<{ totpURI: string; backupCodes: string[] }>(
       "POST",
@@ -162,7 +130,6 @@ describe("two-step sign-in", () => {
     expect(notice.text).toContain(`${api.deps.site.publicUrl}/settings/security`);
 
     const phone = new Jar();
-    const before = (await subjectsTo(me.email)).length;
     const password = await browserCall(phone, SAFARI_IPHONE, "POST", "/api/auth/sign-in/email", {
       email: me.email,
       password: me.password,
@@ -179,9 +146,5 @@ describe("two-step sign-in", () => {
     });
     expect(code.status).toBe(200);
     expect((await browserCall(phone, SAFARI_IPHONE, "GET", "/api/me")).status).toBe(200);
-    // One new-device mail, for the code step's session only.
-    await waitFor(async () => ((await subjectsTo(me.email)).length === before + 1 ? true : null), MAIL_WAIT_MS);
-    await Bun.sleep(1_000);
-    expect((await subjectsTo(me.email)).length).toBe(before + 1);
   });
 });

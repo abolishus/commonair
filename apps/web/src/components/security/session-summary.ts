@@ -4,8 +4,7 @@
 /**
  * A session's device, coarsely, from its user agent, parsed in the browser (D7.2): the browser
  * family, the system and whether it is a phone, a tablet or a computer. Never a version, a model or
- * a network address (the API keeps none). services/api's new-sign-in mail parses the same way
- * (`auth/device.ts`), so the mail and this list name a device alike.
+ * a network address (the API keeps none).
  */
 import { t } from "../../i18n/index.ts";
 
