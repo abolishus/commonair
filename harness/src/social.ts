@@ -185,8 +185,13 @@ export class WebActor implements SocialActor {
     await this.openChannel(channel, { ...b, timeoutMs: 20_000 });
   }
 
+  /** The header's Follow. An offline channel's home repeats it in the hero; both share one state. */
+  private followButton() {
+    return byTestId(this.page, T.followButton).first();
+  }
+
   async followState(b: WaitBudget): Promise<FollowState> {
-    const button = byTestId(this.page, T.followButton);
+    const button = this.followButton();
     await button.waitFor({ timeout: b.timeoutMs });
     const following = await button.getAttribute("data-following", { timeout: b.timeoutMs });
     const count = await byTestId(this.page, T.followerCount).getAttribute("data-count", { timeout: b.timeoutMs });
@@ -195,7 +200,7 @@ export class WebActor implements SocialActor {
 
   async toggleFollow(b: WaitBudget): Promise<FollowState> {
     const before = await this.followState(b);
-    const button = byTestId(this.page, T.followButton);
+    const button = this.followButton();
     await button.click({ timeout: b.timeoutMs });
     const want = before.following ? before.count - 1 : before.count + 1;
     let last = before;

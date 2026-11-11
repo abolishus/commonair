@@ -4,6 +4,7 @@
 /** The W2 job stubs are registered on their queues (batch 6 contract step §5). */
 import { ANALYTICS_JOBS, QUEUES, REHEARSAL_JOBS, analyticsJobId } from "@commonair/contracts/internal";
 import { describe, expect, test } from "vite-plus/test";
+import { GROWTH_DAILY_JOB } from "../src/growth/job.ts";
 import { JOBS } from "../src/jobs/index.ts";
 import { buildRegistry, scheduledJobs } from "../src/runtime/registry.ts";
 import { rehearsalDriverJobId } from "../src/w2/outbox-jobs.ts";
@@ -12,15 +13,18 @@ describe("W2 jobs", () => {
   const reg = buildRegistry(JOBS);
 
   test("every analytics and rehearsal job has a handler", () => {
-    expect([...(reg.get(QUEUES.analytics)?.keys() ?? [])].sort()).toEqual(Object.values(ANALYTICS_JOBS).sort());
+    expect([...(reg.get(QUEUES.analytics)?.keys() ?? [])].sort()).toEqual(
+      [...Object.values(ANALYTICS_JOBS), GROWTH_DAILY_JOB].sort(),
+    );
     expect([...(reg.get(QUEUES.rehearsal)?.keys() ?? [])]).toEqual([REHEARSAL_JOBS.driver]);
   });
 
-  test("the retention pass and the attestation reconciler run daily; the per-broadcast jobs are event-driven", () => {
+  test("the retention pass, the attestation reconciler and the growth rollup run daily; the per-broadcast jobs are event-driven", () => {
     const scheduled = scheduledJobs(reg).filter((j) => j.queue === QUEUES.analytics || j.queue === QUEUES.rehearsal);
     expect(scheduled.map((j) => [j.name, j.schedule])).toEqual([
       [ANALYTICS_JOBS.broadcastRollupRetention, { pattern: "23 4 * * *" }],
       [ANALYTICS_JOBS.attestationReconcile, { pattern: "41 4 * * *" }],
+      [GROWTH_DAILY_JOB, { pattern: "35 0 * * *", tz: "UTC" }],
     ]);
   });
 
