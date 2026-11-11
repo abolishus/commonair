@@ -168,6 +168,25 @@ export async function validateScheduleInput(db: Executor, input: ChannelSchedule
   }
 }
 
+/**
+ * Ids for `wanted`, reusing an `existing` id whose key matches (each id once), else a new
+ * UUIDv7. The feed's UIDs are built from these ids, so a save that keeps a slot (or one-off) where
+ * it was keeps its calendar events: subscribed calendars update them instead of dropping and
+ * re-creating every event with the viewer's alarms and notes. Pure, unit-tested.
+ */
+export function keepIds<T>(
+  existing: readonly { id: string; key: string }[],
+  wanted: readonly T[],
+  keyOf: (item: T) => string,
+): string[] {
+  const free = new Map<string, string[]>();
+  for (const e of existing) free.set(e.key, [...(free.get(e.key) ?? []), e.id]);
+  return wanted.map((item) => free.get(keyOf(item))?.shift() ?? uuidv7());
+}
+
+const slotKey = (s: { weekday: number; startLocal: string }) => `${s.weekday}-${s.startLocal}`;
+const oneOffKey = (startsAt: Date) => startsAt.toISOString();
+
 /** Replace the whole schedule in one transaction; the caller validated `input`. */
 export async function replaceSchedule(
   db: Executor,
@@ -175,9 +194,34 @@ export async function replaceSchedule(
   input: ChannelScheduleInput,
   now: Date,
 ): Promise<void> {
-  const slotIds = input.slots.map(() => uuidv7());
   try {
     await db.transaction(async (tx) => {
+      const oldSlots = await tx
+        .select({
+          id: channelScheduleSlots.id,
+          weekday: channelScheduleSlots.weekday,
+          startLocal: channelScheduleSlots.startLocal,
+        })
+        .from(channelScheduleSlots)
+        .where(sql`${channelScheduleSlots.channelId} = ${channelId}`);
+      const oldOneOffs = await tx
+        .select({ id: channelScheduleOneOffs.id, startsAt: channelScheduleOneOffs.startsAt })
+        .from(channelScheduleOneOffs)
+        .where(
+          sql`${channelScheduleOneOffs.channelId} = ${channelId} and ${channelScheduleOneOffs.cancelsSlotId} is null`,
+        );
+      const slotIds = keepIds(
+        // Postgres `time` reads back as "HH:MM:SS"; the input is "HH:MM".
+        oldSlots.map((s) => ({ id: s.id, key: slotKey({ weekday: s.weekday, startLocal: s.startLocal.slice(0, 5) }) })),
+        input.slots,
+        slotKey,
+      );
+      // Skips add no feed event, so only one-offs that add a stream keep their ids.
+      const oneOffIds = keepIds(
+        oldOneOffs.map((o) => ({ id: o.id, key: oneOffKey(o.startsAt) })),
+        input.oneOffs,
+        (o) => (o.cancelsSlot === null ? oneOffKey(new Date(o.startsAt)) : "skip"),
+      );
       await tx
         .insert(channelSchedules)
         .values({ channelId, timezone: input.timezone, updatedAt: now })
@@ -199,7 +243,8 @@ export async function replaceSchedule(
         );
       if (input.oneOffs.length > 0)
         await tx.insert(channelScheduleOneOffs).values(
-          input.oneOffs.map((o) => ({
+          input.oneOffs.map((o, i) => ({
+            id: oneOffIds[i],
             channelId,
             startsAt: new Date(o.startsAt),
             durationMinutes: o.durationMinutes,

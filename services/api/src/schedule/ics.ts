@@ -5,8 +5,8 @@
  * The channel's calendar feed (RFC 5545): one VCALENDAR with a VEVENT per upcoming occurrence.
  * Times are UTC (`Z`), so no VTIMEZONE is needed; each occurrence is its own event, so a skipped
  * week simply has none. The UID of a slot's occurrence is the slot id plus its start, stable
- * across fetches, so a subscribed calendar updates the event instead of duplicating it. Pure,
- * unit-tested.
+ * across fetches and across saves that keep the slot (`keepIds` in service.ts), so a subscribed
+ * calendar updates the event instead of duplicating it. Pure, unit-tested.
  */
 import type { Occurrence } from "./expand.ts";
 

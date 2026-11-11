@@ -10,7 +10,7 @@ import { SCHEDULE_RULES } from "@commonair/contracts/enums";
 import { matchScheduleFeed } from "../src/raw-routes.ts";
 import { expandSchedule, isSlotOccurrence, type OneOffRule, type SlotRule } from "../src/schedule/expand.ts";
 import { buildFeed, escapeText, foldLine, icsDateTime, occurrenceUid } from "../src/schedule/ics.ts";
-import { scheduleFeedPath } from "../src/schedule/service.ts";
+import { keepIds, scheduleFeedPath } from "../src/schedule/service.ts";
 import {
   addDays,
   isKnownTimeZone,
@@ -363,5 +363,23 @@ describe("feed path", () => {
     expect(matchScheduleFeed("/api/channels/SLY/schedule.ics")).toBeNull();
     expect(matchScheduleFeed("/api/channels/ab/schedule.ics")).toBeNull();
     expect(matchScheduleFeed("/api/channels/a/b/schedule.ics")).toBeNull();
+  });
+});
+
+describe("saving keeps ids (and so the feed's UIDs)", () => {
+  test("a matching key reuses its id once; anything else gets a new UUIDv7", () => {
+    const existing = [
+      { id: "a", key: "5-19:30" },
+      { id: "b", key: "2-23:30" },
+      { id: "c", key: "5-19:30" },
+    ];
+    const ids = keepIds(existing, ["2-23:30", "5-19:30", "5-19:30", "5-19:30", "1-08:00"], (k) => k);
+    expect(ids.slice(0, 3)).toEqual(["b", "a", "c"]);
+    // The third Friday 19:30 and the Monday slot are new.
+    for (const id of ids.slice(3))
+      expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(keepIds([], [], (k: string) => k)).toEqual([]);
+    expect(keepIds(existing, [], (k: string) => k)).toEqual([]);
   });
 });

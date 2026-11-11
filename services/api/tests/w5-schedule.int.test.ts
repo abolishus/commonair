@@ -125,6 +125,9 @@ describe("channels.schedule", () => {
       ],
     });
     expect(withSkip.status).toBe(200);
+    // A save keeps the ids of slots and one-offs that stay where they were.
+    expect(withSkip.body.slots.map((s) => s.id)).toEqual(set.body.slots.map((s) => s.id));
+    expect(withSkip.body.oneOffs.find((o) => o.cancelsSlotId === null)?.id).toBe(set.body.oneOffs[0]?.id);
     const newFriday = withSkip.body.slots.find((s) => s.weekday === 5);
     expect(withSkip.body.oneOffs.find((o) => o.cancelsSlotId !== null)).toMatchObject({
       startsAt: firstFriday.startsAt,
@@ -145,7 +148,26 @@ describe("channels.schedule", () => {
     expect(text).toContain(`URL:`);
     const next = await fetch(`${api.url}${withSkip.body.feedPath}?next=1`);
     expect(next.headers.get("content-disposition")).toContain("attachment");
-    expect((await next.text()).match(/BEGIN:VEVENT/g)).toHaveLength(1);
+    const nextText = await next.text();
+    expect(nextText.match(/BEGIN:VEVENT/g)).toHaveLength(1);
+
+    // Saving again (new titles, same days and times) keeps every event's UID, so subscribed
+    // calendars update the events and a downloaded next event still matches the feed's.
+    const uids = (ics: string) => [...ics.matchAll(/^UID:(.+)$/gm)].map((m) => m[1]);
+    const nextUid = uids(nextText)[0];
+    expect(uids(text)).toContain(nextUid);
+    const retitled = await owner.client.call<Schedule>("PUT", path, {
+      ...body,
+      slots: slots.map((s) => ({ ...s, title: "Renamed" })),
+      oneOffs: [
+        { ...special, title: "Renamed special" },
+        { startsAt: firstFriday.startsAt, durationMinutes: 180, title: null, categoryId: null, cancelsSlot: 0 },
+      ],
+    });
+    expect(retitled.status).toBe(200);
+    const again = await (await fetch(`${api.url}${withSkip.body.feedPath}`)).text();
+    expect(again).toContain("SUMMARY:Renamed special");
+    expect(uids(again)).toEqual(uids(text));
     expect((await fetch(`${api.url}${withSkip.body.feedPath}`, { method: "POST" })).status).toBe(405);
     expect((await fetch(`${api.url}/api/channels/nobody_here_x/schedule.ics`)).status).toBe(404);
 

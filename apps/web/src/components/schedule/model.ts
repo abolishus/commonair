@@ -242,6 +242,11 @@ export interface OneOffDraft {
   durationMinutes: number;
   title: string;
   categoryId: string | null;
+  /**
+   * As saved. A saved one-off that has started but not ended is still listed; it keeps its
+   * start unless the creator moves it, so it never blocks saving the rest of the schedule.
+   */
+  saved: { startsAt: string; startsAtLocal: string } | null;
 }
 
 /** A skipped occurrence of a saved slot (`ScheduleOneOff.cancelsSlotId`). */
@@ -287,6 +292,7 @@ export function draftFromSchedule(s: ChannelSchedule | null, fallbackZone: strin
         durationMinutes: o.durationMinutes,
         title: o.title ?? "",
         categoryId: o.category?.id ?? null,
+        saved: { startsAt: o.startsAt, startsAtLocal: toLocalInput(o.startsAt) },
       })),
     skips: s.oneOffs.flatMap((o) =>
       o.cancelsSlotId === null
@@ -315,8 +321,13 @@ export const newOneOff = (now: Date): OneOffDraft => {
     durationMinutes: 120,
     title: "",
     categoryId: null,
+    saved: null,
   };
 };
+
+/** The saved start while the one-off has not been moved (an in-progress one may stay), else null. */
+const unmovedStart = (o: OneOffDraft): string | null =>
+  o.saved !== null && o.saved.startsAtLocal === o.startsAtLocal ? o.saved.startsAt : null;
 
 /** The skips that still name an occurrence: the slot is unchanged and the zone too. */
 export function liveSkips(d: ScheduleDraft): { skip: SkipDraft; slotIndex: number }[] {
@@ -345,7 +356,8 @@ export function draftErrors(d: ScheduleDraft, now: Date, zones: readonly string[
   for (const o of d.oneOffs) {
     const at = fromLocalInput(o.startsAtLocal);
     if (at === null) errors[`${o.key}.startsAt`] = "w5Schedule.error.startsAt";
-    else if (Date.parse(at) <= now.getTime()) errors[`${o.key}.startsAt`] = "w5Schedule.error.past";
+    else if (unmovedStart(o) === null && Date.parse(at) <= now.getTime())
+      errors[`${o.key}.startsAt`] = "w5Schedule.error.past";
     if (o.title.trim().length > SCHEDULE_RULES.titleMax) errors[`${o.key}.title`] = "w5Schedule.error.title";
   }
   return errors;
@@ -366,7 +378,8 @@ export function draftToInput(d: ScheduleDraft): ChannelScheduleInput {
     })),
     oneOffs: [
       ...d.oneOffs.map((o) => ({
-        startsAt: fromLocalInput(o.startsAtLocal) ?? "",
+        // Unmoved: the saved instant itself, not a minute-precision round trip.
+        startsAt: unmovedStart(o) ?? fromLocalInput(o.startsAtLocal) ?? "",
         durationMinutes: o.durationMinutes,
         title: titleOrNull(o.title),
         categoryId: o.categoryId,

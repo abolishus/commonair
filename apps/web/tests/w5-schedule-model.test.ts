@@ -255,6 +255,19 @@ describe("the editor's draft", () => {
     });
     // A new one-off is tomorrow at 19:00 and passes.
     expect(draftErrors({ ...d, oneOffs: [newOneOff(NOW)] }, NOW, TIME_ZONES)).toEqual({});
+    // A saved one-off that started ten minutes ago is still on: it stays, unless it is moved.
+    const startsAt = new Date(NOW.getTime() - 10 * 60_000).toISOString();
+    const running = {
+      ...newOneOff(NOW),
+      startsAtLocal: toLocalInput(startsAt),
+      saved: { startsAt, startsAtLocal: toLocalInput(startsAt) },
+    };
+    expect(draftErrors({ ...d, oneOffs: [running] }, NOW, TIME_ZONES)).toEqual({});
+    expect(draftToInput({ ...d, oneOffs: [running] }).oneOffs[0]?.startsAt).toBe(startsAt);
+    const moved = { ...running, startsAtLocal: toLocalInput("2026-11-10T12:00:00.000Z") };
+    expect(draftErrors({ ...d, oneOffs: [moved] }, NOW, TIME_ZONES)).toEqual({
+      [`${moved.key}.startsAt`]: "w5Schedule.error.past",
+    });
   });
 
   it("blank titles are null; titles are trimmed", () => {

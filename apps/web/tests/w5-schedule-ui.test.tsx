@@ -169,6 +169,33 @@ describe("the schedule editor", () => {
     ]);
   });
 
+  it("a saved one-off that is on now does not block saving; moving it into the past does", async () => {
+    // Started ten minutes ago, still running: the API still lists it.
+    const live = {
+      id: uuid(50),
+      startsAt: "2026-11-11T11:50:00.000Z",
+      durationMinutes: 120,
+      title: "Launch day",
+      category: null,
+      cancelsSlotId: null,
+    };
+    const { client, sets } = fakeClient(schedule({ oneOffs: [live] }));
+    wrap(<ScheduleEditor channel="rivertide" client={client} now={() => NOW} />);
+    await waitFor(() => expect(byId("schedule-one-off-starts-at")).not.toBeNull());
+    change(byId("schedule-slot-title"), "Campaign night 2");
+    fireEvent.click(byId("schedule-save") as Element);
+    await waitFor(() => expect(sets).toHaveLength(1));
+    expect(byId("schedule-error-summary")).toBeNull();
+    expect(sets[0]?.oneOffs).toEqual([
+      { startsAt: live.startsAt, durationMinutes: 120, title: "Launch day", categoryId: null, cancelsSlot: null },
+    ]);
+    change(byId("schedule-one-off-starts-at"), "2026-11-10T10:00");
+    fireEvent.click(byId("schedule-save") as Element);
+    await waitFor(() => expect(byId("schedule-error-summary")).not.toBeNull());
+    expect(document.body.textContent).toContain(t("w5Schedule.error.past"));
+    expect(sets).toHaveLength(1);
+  });
+
   it("skips one stream of a saved weekly slot", async () => {
     const { client, sets } = fakeClient(schedule());
     wrap(<ScheduleEditor channel="rivertide" client={client} now={() => NOW} />);
