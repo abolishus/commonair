@@ -1,0 +1,20 @@
+{
+  "w5Studio.recap.stat.peakSoFar": "Pico hasta ahora",
+  "w5Studio.recap.provisional": "{count} · provisional",
+  "w5Studio.recap.stat.chat": "Mensajes de chat",
+  "w5Studio.share.title": "Estás en directo: cuéntaselo a la gente",
+  "w5Studio.share.copy": "Copiar enlace",
+  "w5Studio.share.share": "Compartir",
+  "w5Studio.share.shareTitle": "Estoy en directo",
+  "w5Studio.share.copied": "Enlace del canal copiado",
+  "w5Studio.share.copyFailed": "No se pudo copiar el enlace del canal.",
+  "w5Studio.share.dismiss": "Descartar",
+  "w5Studio.mod.detail": "Mensaje seleccionado",
+  "w5Studio.mod.pick": "Elige un mensaje retenido para revisarlo aquí.",
+  "w5Studio.mod.none": "No hay nada pendiente de revisión.",
+  "w5Studio.mod.back": "Volver a los mensajes retenidos",
+  "w5Studio.mod.open": "Revisar",
+  "w5Studio.mod.openLabel": "Revisar el mensaje de {name}",
+  "w5Studio.mod.allow": "Permitir",
+  "w5Studio.mod.deny": "Rechazar"
+}

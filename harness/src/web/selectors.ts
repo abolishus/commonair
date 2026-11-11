@@ -983,3 +983,20 @@ export const D7_MOD_IDS = {
   chatModWaveDelete: "chat-mod-wave-delete",
   chatModWaveDeleteDialog: "chat-mod-wave-delete-dialog",
 } as const;
+
+/**
+ * w5-studio (overhaul wave 5): the first stream's share prompt in the studio LiveStatusBar's slot
+ * (J2-e; `studioShareNative` only where the browser has the Web Share API), and the mod view's held
+ * queue on QueueLayout (`modHeldOpen` per row opens `modHeldDetail`, which carries `data-id`).
+ */
+export const W5_STUDIO_IDS = {
+  studioSharePrompt: "studio-share-prompt",
+  studioShareCopy: "studio-share-copy",
+  studioShareNative: "studio-share-native",
+  studioShareDismiss: "studio-share-dismiss",
+  modHeldQueue: "mod-held-queue",
+  modHeldOpen: "mod-held-open",
+  modHeldDetail: "mod-held-detail",
+  modHeldDetailAllow: "mod-held-detail-allow",
+  modHeldDetailDeny: "mod-held-detail-deny",
+} as const;

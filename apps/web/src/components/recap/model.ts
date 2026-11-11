@@ -4,7 +4,9 @@
 /**
  * The stream recap's rules (overhaul wave 3, D5.3; creator-studio P3), pure: when it shows, which
  * broadcast and video it is about, and the numbers it may state. Viewer numbers come only from the
- * settled analytics (`analytics.range` lists a broadcast 24 h after it ends), never estimated.
+ * settled analytics (`analytics.range` lists a broadcast 24 h after it ends), never estimated; until
+ * then only the running peak, marked provisional. Follows, clips and chat come exact from
+ * `stream.lastBroadcast` (overhaul wave 5), so nothing pages a list.
  * Dismissing the recap and seeing the member-owner notice are remembered in this browser only
  * (`localStorage`, a per-viewer convenience: losing it shows the card once more, nothing worse).
  */
@@ -82,62 +84,34 @@ export function recapVideo<V extends { createdAt: string }>(vods: readonly V[], 
   return best;
 }
 
-/** One newest-first page of a cursor list (the contract's `page()`). */
-export interface Page<T> {
-  items: readonly T[];
-  nextCursor: string | null;
+/**
+ * `stream.lastBroadcast` when it is the stream that ended at `lastLiveAt` (it ended within
+ * `END_MATCH_MS` of it), else null: the recap then states no counts rather than another stream's.
+ */
+export function matchLastBroadcast<L extends { endedAt: string }>(last: L | null, lastLiveAt: string): L | null {
+  if (!last) return null;
+  const gap = Math.abs(Date.parse(last.endedAt) - Date.parse(lastLiveAt));
+  return gap <= END_MATCH_MS ? last : null;
 }
 
-export type PageFetch<T> = (cursor: string | undefined) => Promise<Page<T>>;
-
-/** How many pages a recap count reads before it gives up rather than guess. */
-export const MAX_COUNT_PAGES = 10;
+/** The stream's exact span from `stream.lastBroadcast`. */
+export const lastBroadcastWindow = (last: { startedAt: string; endedAt: string }): RecapWindow => ({
+  start: Date.parse(last.startedAt),
+  end: Date.parse(last.endedAt),
+});
 
 /**
- * Counts the items made during the stream across a newest-first list, paging until the list
- * reaches back past the stream's start. Items made after the stream push the stream's own off the
- * first page, so one page is not enough. Null when the list is still newer than the start after
- * `maxPages`: the recap then shows no number rather than an undercount.
+ * The stream's video: the one `stream.lastBroadcast` names (none when it names none), found in
+ * the channel's newest videos for its status; without the broadcast, the newest made in the window.
  */
-export async function countDuring<T>(
-  next: PageFetch<T>,
-  at: (item: T) => string,
+export function pickRecapVideo<V extends { id: string; createdAt: string }>(
+  vods: readonly V[],
+  last: { vodId: string | null } | null,
   w: RecapWindow,
-  counts: (item: T) => boolean = () => true,
-  maxPages = MAX_COUNT_PAGES,
-): Promise<number | null> {
-  let n = 0;
-  let cursor: string | undefined;
-  for (let pages = 0; pages < maxPages; pages++) {
-    const page = await next(cursor);
-    let oldest = Number.POSITIVE_INFINITY;
-    for (const item of page.items) {
-      const x = Date.parse(at(item));
-      if (x < oldest) oldest = x;
-      if (inWindow(at(item), w) && counts(item)) n++;
-    }
-    if (page.nextCursor === null || oldest < w.start) return n;
-    cursor = page.nextCursor;
-  }
-  return null;
-}
-
-/** Follows during the stream, not counting excluded ones (they never count anywhere). */
-export function followsDuring(
-  next: PageFetch<{ followedAt: string; excluded: boolean }>,
-  w: RecapWindow,
-): Promise<number | null> {
-  return countDuring(
-    next,
-    (f) => f.followedAt,
-    w,
-    (f) => !f.excluded,
-  );
-}
-
-/** Clips made during the stream. */
-export function clipsDuring(next: PageFetch<{ createdAt: string }>, w: RecapWindow): Promise<number | null> {
-  return countDuring(next, (c) => c.createdAt, w);
+): V | null {
+  if (!last) return recapVideo(vods, w);
+  if (last.vodId === null) return null;
+  return vods.find((v) => v.id === last.vodId) ?? recapVideo(vods, w);
 }
 
 type StorageLike = Pick<Storage, "getItem" | "setItem">;

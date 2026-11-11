@@ -4,7 +4,8 @@
 /**
  * The studio's sticky LiveStatusBar (overhaul wave 3, D5.2) wired to the member's own channel,
  * the compact row the signed-in home shows while they are live, and the slot a studio page can
- * put a one-off prompt in (`<LiveStatusSlot>`, the first connection's share offer, J2-e).
+ * put a one-off prompt in (`<LiveStatusSlot>`). The slot also carries the first stream's share
+ * prompt (J2-e, `components/share-prompt`), from the status the bar already reads: no request.
  */
 import type { StreamCard } from "@commonair/contracts/dto";
 import { RelativeTime } from "@commonair/ui";
@@ -16,6 +17,8 @@ import { Link } from "@tanstack/react-router";
 import * as React from "react";
 import { createPortal } from "react-dom";
 import { t } from "../../i18n/index.ts";
+import { sharePromptDismissed, sharePromptVisible } from "../share-prompt/model.ts";
+import { SharePrompt } from "../share-prompt/share-prompt.tsx";
 import { healthSummary, liveStatusState, verifiedViewers } from "./model.ts";
 import { useLiveStatus, type LiveStatusLoader, type StatusPollEnv } from "./use-live-status.ts";
 
@@ -103,6 +106,7 @@ export function StudioLiveStatusBar({
       health={healthSummary(health)}
       detail={detail}
       slotRef={slotRef}
+      slot={<FirstStreamShare channel={slug} live={Boolean(channel?.live)} lastLiveAt={lastLiveAt} />}
       notice={
         status.failed ? (
           <>
@@ -140,6 +144,26 @@ export function StudioLiveStatusBar({
       }
     />
   );
+}
+
+/** The J2-e share prompt, in the bar's slot (beside what pages put there) while the first stream is on. */
+function FirstStreamShare({
+  channel,
+  live,
+  lastLiveAt,
+}: {
+  channel: string;
+  live: boolean;
+  lastLiveAt: string | null;
+}): React.ReactNode {
+  const [dismissed, setDismissed] = React.useState(() => sharePromptDismissed(channel));
+  const [dismissedFor, setDismissedFor] = React.useState(channel);
+  if (dismissedFor !== channel) {
+    setDismissedFor(channel);
+    setDismissed(sharePromptDismissed(channel));
+  }
+  if (!sharePromptVisible({ live, lastLiveAt, dismissed })) return null;
+  return <SharePrompt channel={channel} onDismiss={() => setDismissed(true)} />;
 }
 
 /**
