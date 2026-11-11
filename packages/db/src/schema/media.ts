@@ -174,6 +174,8 @@ export const vods = pgTable(
     index("vods_expiry_idx").on(t.expiresAt),
     // Clip backstop and "remove a VOD's clips" look VODs up by broadcast.
     index("vods_broadcast_idx").on(t.broadcastId),
+    // Video title search (`search-media.ts`): the expression must match the query's byte for byte.
+    index("vods_title_search_idx").using("gin", sql`to_tsvector('simple', ${t.title})`),
   ],
 );
 
@@ -202,6 +204,8 @@ export const clips = pgTable(
     index("clips_channel_idx").on(t.channelId, t.createdAt),
     // NCII broadcast hashing and DMCA broadcast items look clips up by broadcast.
     index("clips_broadcast_idx").on(t.broadcastId),
+    // Clip title search (`search-media.ts`): the expression must match the query's byte for byte.
+    index("clips_title_search_idx").using("gin", sql`to_tsvector('simple', ${t.title})`),
   ],
 );
 

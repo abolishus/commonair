@@ -1,0 +1,2 @@
+CREATE INDEX "clips_title_search_idx" ON "clips" USING gin (to_tsvector('simple', "title"));--> statement-breakpoint
+CREATE INDEX "vods_title_search_idx" ON "vods" USING gin (to_tsvector('simple', "title"));
