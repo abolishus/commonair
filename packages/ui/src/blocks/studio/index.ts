@@ -48,3 +48,11 @@ export {
   type ClipRowData,
   type VodUpdate,
 } from "./content-board.tsx";
+
+export {
+  SetupChecklist,
+  type SetupChecklistProps,
+  type SetupChecklistStep,
+  type SetupChecklistLabels,
+  type SetupStepState,
+} from "./setup-checklist.tsx";
