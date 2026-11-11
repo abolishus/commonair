@@ -120,3 +120,35 @@ export async function rateLimitSpend(url: string, key: string): Promise<{ proced
     client.close();
   }
 }
+
+/**
+ * Every live rate-limit bucket (`rl:*`) with its size and top spenders, fullest first: which
+ * subject is at its ceiling when a page stalls on 429s. Subjects are user ids or address hashes.
+ */
+export async function rateLimitBuckets(
+  url: string,
+  limit = 15,
+): Promise<{ key: string; size: number; top: { procedure: string; count: number }[] }[]> {
+  const client = new RedisClient(url);
+  try {
+    await client.connect();
+    const keys: string[] = [];
+    let cursor = "0";
+    do {
+      const [next, batch] = (await client.send("SCAN", [cursor, "MATCH", "rl:*", "COUNT", "500"])) as [
+        string,
+        string[],
+      ];
+      cursor = String(next);
+      keys.push(...batch.map(String));
+    } while (cursor !== "0");
+    const rows = [];
+    for (const key of keys) {
+      const members = ((await client.send("ZRANGE", [key, "0", "-1"])) as unknown[]).map(String);
+      rows.push({ key, size: members.length, top: spendByProcedure(members).slice(0, 5) });
+    }
+    return rows.sort((a, b) => b.size - a.size).slice(0, limit);
+  } finally {
+    client.close();
+  }
+}

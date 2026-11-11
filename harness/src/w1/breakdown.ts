@@ -17,7 +17,7 @@
 import { KEYS } from "@commonair/contracts/internal";
 import type { Page } from "playwright";
 import type { ApiClient } from "../api/client.ts";
-import { rateLimitSpend } from "../multi/valkey.ts";
+import { rateLimitBuckets, rateLimitSpend } from "../multi/valkey.ts";
 import { valkeyUrl } from "../multi/replicas.ts";
 import { isNotFound } from "../safety.ts";
 import { stripeEvent, stripeId } from "../stripe.ts";
@@ -251,6 +251,10 @@ export async function stepBreakdown(ext: MoneyExtension): Promise<void> {
 
   const payerSession = await openSession(ext, "payer A", payers.a);
   await ctx.step("payer A: /settings/subscriptions breakdown dialogs show the API's numbers", async () => {
+    // Before the load: which rate-limit buckets are already near their ceiling (a 429 stall's cause).
+    const before = await rateLimitBuckets(valkeyUrl(process.env)).catch((e: unknown) => String(e));
+    ctx.log.info("rate-limit buckets before the payer's load", { before });
+    ctx.data("w1.breakdown.bucketsBefore", before);
     const p = await payerSession.goto(W1_ROUTES.subscriptions);
     // No reload: a busy first load must recover by itself (its 429s are logged by the session).
     try {
@@ -259,8 +263,9 @@ export async function stepBreakdown(ext: MoneyExtension): Promise<void> {
       // Name what spent the payer's read budget, so a 429 stall points at its cause.
       const key = KEYS.rateLimit("default", `u:${payers.a.id}`);
       const spend = await rateLimitSpend(valkeyUrl(process.env), key).catch((e: unknown) => String(e));
-      ctx.log.warn("payer A's default rate-limit bucket", { spend });
-      ctx.data("w1.breakdown.payerSpend", spend);
+      const buckets = await rateLimitBuckets(valkeyUrl(process.env)).catch((e: unknown) => String(e));
+      ctx.log.warn("payer A's default rate-limit bucket", { spend, buckets });
+      ctx.data("w1.breakdown.payerSpend", { spend, buckets });
       throw err;
     }
     for (const [name, paymentId] of Object.entries(ids)) {
