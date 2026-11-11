@@ -38,20 +38,25 @@ describe("preference types", () => {
   });
 
   test("a default is on only for a medium the type offers", () => {
-    for (const t of PREFERENCE_TYPES)
-      for (const [medium, on] of Object.entries(NOTIFY_DEFAULTS[t]))
-        if (on) expect(PREFERENCE_MEDIA[t], `${t}.${medium}`).toContain(medium);
+    const onButNotOffered = PREFERENCE_TYPES.flatMap((t) =>
+      Object.entries(NOTIFY_DEFAULTS[t])
+        .filter(([medium, on]) => on && !(PREFERENCE_MEDIA[t] as readonly string[]).includes(medium))
+        .map(([medium]) => `${t}.${medium}`),
+    );
+    expect(onButNotOffered).toEqual([]);
     expect(Object.values(NOTIFY_DEFAULTS.digest_weekly).some(Boolean)).toBe(false);
   });
 
   test("every unsubscribe list but moved turns off an email the type offers", () => {
-    for (const list of UNSUBSCRIBE_LISTS) {
-      const type = UNSUBSCRIBE_LIST_PREFERENCE[list];
-      if (list === "moved") expect(type).toBeNull();
-      // The governance list predates its mailer (wave 5); its email-off rows are kept for it.
-      else if (list === "governance") expect(type).toBe("governance");
-      else expect(type !== null && PREFERENCE_MEDIA[type].includes("email"), list).toBe(true);
-    }
+    // `moved` has no preference; the governance list predates its mailer (wave 5) and keeps its rows.
+    const target = Object.fromEntries(UNSUBSCRIBE_LISTS.map((l) => [l, UNSUBSCRIBE_LIST_PREFERENCE[l]]));
+    expect(target).toMatchObject({ moved: null, governance: "governance" });
+    const others = UNSUBSCRIBE_LISTS.filter((l) => l !== "moved" && l !== "governance");
+    const withoutEmail = others.filter((l) => {
+      const type = UNSUBSCRIBE_LIST_PREFERENCE[l];
+      return type === null || !PREFERENCE_MEDIA[type].includes("email");
+    });
+    expect(withoutEmail).toEqual([]);
   });
 });
 

@@ -56,17 +56,19 @@ const pref = (userId: string, medium: string, enabled: boolean, id = uuidv7()) =
 
 describe("0057 notification preference types", () => {
   test("the column takes preference types, not notification types", async () => {
+    expect.hasAssertions();
     const id = await user();
     await t.app.db.execute(
       sql`insert into notification_preferences (id, user_id, type, channel_id, medium, enabled)
           values (${uuidv7()}, ${id}, 'governance', null, 'in_app', false)`,
     );
-    await expect(
+    await refused(
       t.app.db.execute(
         sql`insert into notification_preferences (id, user_id, type, channel_id, medium, enabled)
             values (${uuidv7()}, ${id}, 'vote_open', null, 'email', false)`,
       ),
-    ).rejects.toThrow();
+      /invalid input value for enum/,
+    );
   });
 
   test("notification_type has the wave 4 types", async () => {
@@ -119,6 +121,7 @@ describe("0058 first notification opt-in", () => {
   test("the column is never cleared or moved later", async () => {
     const id = await user();
     await pref(id, "email", true);
+    expect(await firstOptin(id)).not.toBeNull();
     await refused(
       t.app.db.execute(sql`update users set first_notify_optin_at = null where id = ${id}`),
       /never cleared/,
@@ -141,6 +144,7 @@ describe("0058 case assignment", () => {
   }
 
   test("a moderator can be assigned with a time; a plain user or a missing time cannot", async () => {
+    expect.hasAssertions();
     const c = await kase();
     const mod = await user("moderator");
     const plain = await user("user");
@@ -149,9 +153,10 @@ describe("0058 case assignment", () => {
       t.app.db.execute(sql`update moderation_cases set assignee_id = ${plain}, assigned_at = now() where id = ${c}`),
       /assignee_id/,
     );
-    await expect(
+    await refused(
       t.app.db.execute(sql`update moderation_cases set assigned_at = null where id = ${c}`),
-    ).rejects.toThrow();
+      /moderation_cases_assigned_at_set/,
+    );
     await t.app.db.execute(sql`update moderation_cases set assignee_id = null, assigned_at = null where id = ${c}`);
   });
 });
@@ -169,14 +174,17 @@ describe("0057 setup steps and transparency notes", () => {
   });
 
   test("a note needs a YYYY-MM month and 1 to 2000 characters", async () => {
+    expect.hasAssertions();
     await t.app.db.execute(
       sql`insert into transparency_notes (month, body) values ('2026-10', 'Costs exceed the 10% today.')`,
     );
-    await expect(
+    await refused(
       t.app.db.execute(sql`insert into transparency_notes (month, body) values ('2026-13', 'x')`),
-    ).rejects.toThrow();
-    await expect(
+      /transparency_notes_month_format/,
+    );
+    await refused(
       t.app.db.execute(sql`insert into transparency_notes (month, body) values ('2026-09', '')`),
-    ).rejects.toThrow();
+      /transparency_notes_body_length/,
+    );
   });
 });
