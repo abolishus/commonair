@@ -550,6 +550,31 @@ Lessons from wave 1, for every brief and the integration step:
 
 ### Wave 2: acquisition and content (D2 + D3)
 
+**Shipped 2026-11-11.** The contract step was `1a737cb1`. The eight units and their integration were merged at
+`8ff06f86`. The CI follow-ups were `cf8f47f5`, `df296ec5`, `e24ceb33`, `4bd85b5b`, `3785caad` and `05b41857`. CI on
+`05b41857` (run 42982878240, dispatched on a branch while wave 3 merged on `main`) passed static,
+unit, relay and every harness shard that ran, `core` with `e4b-money` among them. The rest are
+explained in `docs/operators/flakes.md`. What the CI follow-ups changed:
+
+- the wave's pages now meet the source and intl policies, through named `@utility` classes in
+  `apps/web/src/styles.css`;
+- every page load makes two fewer API calls. `e4b-money` had stalled on 429s because ordinary page
+  traffic filled a member's 120-a-minute `default` bucket;
+- rate-limit bucket entries now name their procedure, which helps diagnose the next 429 stall.
+
+What was left, and where it went:
+
+- **To wave 3 (in its brief):**
+  - one-tap confirms after sign-up for the chat, support, predict, clip and watch intents
+    (`CONFIRMABLE_INTENTS` holds only follow);
+  - AuthGatePrompt on the rail's signed-out follow;
+  - a browser check of the signed-out Clip button and of the second Follow on an offline channel.
+- **To wave 4:**
+  - an opt-in history, so that `notify_optin` counts first opt-ins exactly;
+  - a test for `apiSupportClient.memberRule` against the API.
+- **To wave 5:** Go 1.27.4 for GO-2026-6859. Its dated exception in `supply-chain.json` expires on
+  2026-11-18.
+
 - **Sign-up and the gate:**
   - the AuthGatePrompt for every signed-out action (follow, chat, support, predict, clip, 18+,
     report);
@@ -607,11 +632,13 @@ Lessons from wave 1, for every brief and the integration step:
 ### Wave 4: the co-op, account and staff (D6 + D7)
 
 - **D6, the co-op:**
+  - from wave 2: a test for `apiSupportClient.memberRule` (the support dialog's member line) against the API;
   - transparency v2;
   - plain-language governance (no JSON, "90% → 85%", proposal cards, vote bars, timelines);
   - council pages;
   - the studio co-op card.
 - **D7, account and admin:**
+  - from wave 2: an opt-in history (or a first-opt-in column), so that the `notify_optin` growth metric counts first opt-ins exactly;
   - the settings shell and `/settings/account`;
   - `/settings/security` (two-factor, passkeys, sessions; this also closes the dead email link);
   - the notifications grid, `/inbox` and the weekly digest;
@@ -627,7 +654,9 @@ Lessons from wave 1, for every brief and the integration step:
 - the `ChannelSchedule` contract (next stream, Add to calendar);
 - a proration policy for unused paid time at deletion;
 - how treasurers reach deleted members to refund bank-transfer shares;
-- the interest list and points redemption stay parked until their triggers (decisions 3 and 4).
+- the interest list and points redemption stay parked until their triggers (decisions 3 and 4);
+- from wave 2: Go 1.27.4 for GO-2026-6859 on or after 2026-11-17, for the toolchain, the golang image
+  pins and CI's `GO_VERSION`; then remove the dated exception in `supply-chain.json`.
 
 ## What these passes did not cover
 
