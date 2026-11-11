@@ -84,9 +84,9 @@ export function StudioLiveStatusBar({
   const onManager = pathname.replace(/\/+$/, "") === "/dashboard";
   const lastLiveAt = channel?.lastLiveAt ?? null;
   const detail =
-    state !== "offline" ? (
+    state === "checking" ? undefined : state !== "offline" ? (
       channel?.live?.title || undefined
-    ) : channel === null ? undefined : lastLiveAt ? (
+    ) : lastLiveAt ? (
       <>
         {t("d5Shell.status.lastLive")} <RelativeTime date={lastLiveAt} />
       </>

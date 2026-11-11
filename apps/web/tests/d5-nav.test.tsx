@@ -10,7 +10,7 @@
  */
 import { describe, expect, it } from "vite-plus/test";
 import { t } from "../src/i18n/index.ts";
-import { SETUP_CHECKLIST_ANCHOR, adminNavGroups, studioNav, studioNavGroups } from "../src/lib/nav.ts";
+import { adminNavGroups, studioNav, studioNavGroups } from "../src/lib/nav.ts";
 
 const ids = (groups: { id: string; items: { id: string }[] }[]) =>
   groups.map((g) => [g.id, g.items.map((i) => i.id)] as const);
@@ -47,14 +47,18 @@ describe("studio groups", () => {
     expect(groups.find((g) => g.id === "grow")?.items.map((i) => i.id)).toEqual(["audience", "analytics", "move"]);
   });
 
-  it("links Bring your audience to the dashboard checklist, never current", () => {
-    for (const path of ["/dashboard", "/move", "/"]) {
-      const audience = studioNavGroups(path, { channel: "aurora" })
-        .flatMap((g) => g.items)
-        .find((i) => i.id === "audience");
-      expect(audience).toEqual({ id: "audience", to: "/dashboard", hash: SETUP_CHECKLIST_ANCHOR, current: false });
+  it("links Bring your audience to /move whatever the setup or live state, never current", () => {
+    // The dashboard checklist (and its audience step) is gone once live or once setup is done, so
+    // the entry never points at it: /move always holds the move and follow links.
+    for (const path of ["/dashboard", "/move", "/", "/dashboard/settings"]) {
+      const items = studioNavGroups(path, { channel: "aurora" }).flatMap((g) => g.items);
+      const audience = items.find((i) => i.id === "audience");
+      expect(audience).toEqual({ id: "audience", to: "/move", current: false });
+      expect(items.some((i) => i.to === "/dashboard" && "hash" in i)).toBe(false);
     }
-    expect(SETUP_CHECKLIST_ANCHOR).toBe("go-live-checklist");
+    // On /move the Move channel entry is the current one, not both.
+    const onMove = studioNavGroups("/move", { channel: "aurora" }).flatMap((g) => g.items);
+    expect(onMove.filter((i) => i.current).map((i) => i.id)).toEqual(["move"]);
   });
 
   describe("channels you moderate (J5-a)", () => {

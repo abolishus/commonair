@@ -22,10 +22,12 @@ export type StatusHealth = Pick<StreamHealthDto, "live" | "samples" | "viewers">
 /**
  * `live` once the channel is live and the encoder has sent its first stats; `starting` while
  * either says live but the first health sample has not landed (the encoder just connected);
- * `offline` otherwise. Before the first answer the bar says offline rather than guessing.
+ * `offline` otherwise. Without a channel answer (not in yet, or the read failed) it is `checking`:
+ * the bar claims no state it has not read, so a live creator never sees "Offline" on first load.
  */
 export function liveStatusState(channel: StatusChannel | null, health: StatusHealth | null): LiveStatusState {
-  const channelLive = (channel?.live ?? null) !== null;
+  if (channel === null) return "checking";
+  const channelLive = channel.live !== null;
   const healthLive = health?.live === true;
   if (!channelLive && !healthLive) return "offline";
   if (health && healthLive && health.samples.length === 0) return "starting";

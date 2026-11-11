@@ -107,8 +107,6 @@ export interface StudioEntry {
     | "/developer";
   /** `modView` and `moderated`: the channel the mod view opens (the member's own, or one they moderate). */
   params?: { channel: string };
-  /** `audience` only: the dashboard checklist's anchor. */
-  hash?: string;
   /** `moderated` only: the channel's display name, for the label. */
   label?: string;
   current: boolean;
@@ -351,9 +349,6 @@ export interface StudioNavGroupOptions extends StudioNavOptions {
   moderates?: readonly ModeratedNavChannel[];
 }
 
-/** The id of the go-live checklist on `/dashboard`, where "Bring your audience" lives. */
-export const SETUP_CHECKLIST_ANCHOR = "go-live-checklist";
-
 /** `/mod/<slug>` exactly (not `/mod` or `/mod/<slug>/more`), as the slug. */
 function modViewSlug(path: string): string | null {
   const parts = path.split("/");
@@ -365,8 +360,11 @@ function modViewSlug(path: string): string | null {
  * (stream settings, alerts and overlays, rehearsal, captions), Community (mod view, chat safety,
  * bot, polls and raids), Channels you moderate (a mod view link each, J5-a), Content (videos and
  * clips), Money (revenue, crew), Grow (bring your audience, analytics, move, import) and Co-op &
- * tools (relays, developer). The stream manager is current only on `/dashboard` itself; "Bring
- * your audience" is an anchor on it and never current. A moderated channel's link is current on
+ * tools (relays, developer). The stream manager is current only on `/dashboard` itself. "Bring
+ * your audience" opens `/move` (move and follow links), the one page that always holds the
+ * audience tools: the dashboard checklist shows that step only before the first stream, while
+ * offline and for some sign-ups, so an anchor there would often land nowhere. "Move channel"
+ * stays the entry marked current on `/move`. A moderated channel's link is current on
  * its `/mod/<channel>`; any other `/mod/<x>` marks the own mod view current.
  */
 export function studioNavGroups(pathname: string, options: StudioNavGroupOptions): StudioGroup[] {
@@ -391,7 +389,7 @@ export function studioNavGroups(pathname: string, options: StudioNavGroupOptions
     params: { channel: options.channel },
     current: modSlug !== null && !onModerated,
   };
-  const audience: StudioEntry = { id: "audience", to: "/dashboard", hash: SETUP_CHECKLIST_ANCHOR, current: false };
+  const audience: StudioEntry = { id: "audience", to: "/move", current: false };
   const groups: StudioGroup[] = [
     { id: "home", items: pick("streamManager") },
     { id: "setup", items: [streamSettings, ...pick("overlays", "rehearse", "captions")] },

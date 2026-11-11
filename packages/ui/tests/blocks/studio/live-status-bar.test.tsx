@@ -39,6 +39,25 @@ describe("LiveStatusBar", () => {
     expect(bar().className).toContain("sticky");
   });
 
+  test("checking: a skeleton badge, an empty live region, no state word or numbers", () => {
+    render(
+      <LiveStatusBar
+        state="checking"
+        labels={labels}
+        startedAt={new Date().toISOString()}
+        viewers={5}
+        health="healthy"
+      />,
+    );
+    expect(bar().getAttribute("data-state")).toBe("checking");
+    expect(screen.getByRole("status").textContent).toBe("");
+    expect(bar().querySelector('[data-slot="live-status-checking"]')).not.toBeNull();
+    for (const word of [labels.offline, labels.starting, labels.live]) expect(bar().textContent).not.toContain(word);
+    expect(bar().querySelector('[data-slot="live-status-uptime"]')).toBeNull();
+    expect(bar().querySelector('[data-slot="live-status-viewers"]')).toBeNull();
+    expect(bar().querySelector('[data-slot="live-status-health"]')).toBeNull();
+  });
+
   test("starting: an icon badge and the uptime, no viewers or health yet", () => {
     render(
       <LiveStatusBar

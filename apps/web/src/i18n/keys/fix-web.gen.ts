@@ -32,6 +32,7 @@ export type Key =
   | "fixWeb.transparency.deficit.body"
   | "fixWeb.home.ownLive.label"
   | "fixWeb.home.ownLive.title"
+  | "fixWeb.home.ownLive.uptime"
   | "fixWeb.home.ownLive.manager"
   | "fixWeb.checkout.pending"
   | "fixWeb.checkout.slow"

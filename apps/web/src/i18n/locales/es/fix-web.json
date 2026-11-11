@@ -27,6 +27,7 @@
   "fixWeb.transparency.deficit.body": "En estos meses la cooperativa gastó más que su parte de las suscripciones y propinas. La columna de superávit de abajo muestra la diferencia mes a mes.",
   "fixWeb.home.ownLive.label": "Tu emisión",
   "fixWeb.home.ownLive.title": "Estás en directo",
+  "fixWeb.home.ownLive.uptime": "En directo desde hace",
   "fixWeb.home.ownLive.manager": "Abrir el gestor de emisión",
   "fixWeb.checkout.pending": "Pago recibido. Confirmando con {channel}…",
   "fixWeb.checkout.slow": "Sigue confirmándose. Recibirás un recibo por correo cuando se complete; no hace falta pagar de nuevo.",

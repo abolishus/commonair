@@ -7,7 +7,8 @@
  * how many verified viewers watch and how healthy the encoder feed is. State is never shown by
  * colour alone: the live badge, an icon plus a word for the others, and a health word beside its
  * bars. Only the state word is a live region, so the ticking uptime and the polled numbers do not
- * chatter at a screen reader.
+ * chatter at a screen reader. `checking` (no answer yet, or the read failed) claims nothing: a
+ * skeleton where the badge goes and an empty live region, so the first real state is announced once.
  *
  * `compact` is the signed-in home's row (discovery): no stickiness, a card ring, smaller gaps.
  * `slot` sits before the actions, for one-off prompts (the first connection's share offer, J2-e).
@@ -25,11 +26,13 @@ import {
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { LiveBadge } from "../../primitives/live-badge.tsx";
 import { RelativeTime } from "../../primitives/relative-time.tsx";
+import { Skeleton } from "../../primitives/skeletons.tsx";
 import { StatusBadge, type StatusTone } from "../../primitives/status-badge.tsx";
 import { ViewerCount } from "../../primitives/viewer-count.tsx";
 import { cn } from "../../lib/utils.ts";
 
-export type LiveStatusState = "offline" | "starting" | "live";
+/** `checking`: the state is not known (the first read has not answered, or it failed). */
+export type LiveStatusState = "checking" | "offline" | "starting" | "live";
 /** `unknown`: live, but no health answer (yet, or the last read failed). */
 export type LiveStatusHealth = "healthy" | "warning" | "unknown";
 
@@ -76,7 +79,7 @@ const HEALTH: Record<LiveStatusHealth, { icon: IconSvgElement; tone: StatusTone 
   unknown: { icon: SignalNoIcon, tone: "neutral" },
 };
 
-const STATE_BADGE: Record<Exclude<LiveStatusState, "live">, { icon: IconSvgElement; tone: StatusTone }> = {
+const STATE_BADGE: Record<Exclude<LiveStatusState, "live" | "checking">, { icon: IconSvgElement; tone: StatusTone }> = {
   offline: { icon: StopCircleIcon, tone: "neutral" },
   starting: { icon: Loading03Icon, tone: "info" },
 };
@@ -97,7 +100,7 @@ export function LiveStatusBar({
   ...props
 }: LiveStatusBarProps): React.JSX.Element {
   const live = state === "live";
-  const word = labels[state];
+  const word = state === "checking" ? null : labels[state];
   return (
     <section
       aria-label={labels.region}
@@ -114,15 +117,17 @@ export function LiveStatusBar({
       {...props}
     >
       <output className="sr-only">{word}</output>
-      <span className="flex items-center gap-2" aria-hidden>
-        {live ? (
-          <LiveBadge label={word} />
+      <div className="flex items-center gap-2" aria-hidden>
+        {state === "checking" ? (
+          <Skeleton data-slot="live-status-checking" className="h-5 w-16" />
+        ) : live ? (
+          <LiveBadge label={labels.live} />
         ) : (
           <StatusBadge tone={STATE_BADGE[state].tone} icon={STATE_BADGE[state].icon}>
-            {word}
+            {labels[state]}
           </StatusBadge>
         )}
-      </span>
+      </div>
       {(live || state === "starting") && startedAt ? (
         <span data-slot="live-status-uptime" className="font-medium whitespace-nowrap tabular-nums">
           <span className="sr-only">{labels.uptime} </span>

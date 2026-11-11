@@ -104,7 +104,7 @@ function studioItem(entry: StudioEntry): NavItem {
         ...base,
         label: t("d5Shell.item.audience"),
         icon: <HugeiconsIcon icon={Share08Icon} strokeWidth={2} aria-hidden />,
-        render: <Link data-testid="studio-audience-link" to="/dashboard" hash={entry.hash} />,
+        render: <Link data-testid="studio-audience-link" to="/move" />,
       };
     case "modView":
       return {

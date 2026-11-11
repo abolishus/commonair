@@ -81,7 +81,9 @@ afterEach(() => {
 
 describe("liveStatusState", () => {
   it.each([
-    ["nothing yet", null, null, "offline"],
+    ["nothing yet", null, null, "checking"],
+    ["channel failed, health offline", null, health(false), "checking"],
+    ["channel failed, health live", null, health(true, [sample()]), "checking"],
     ["offline", offlineChannel, health(false), "offline"],
     ["live, no samples yet", liveChannel, health(true), "starting"],
     ["live with samples", liveChannel, health(true, [sample()]), "live"],
@@ -180,6 +182,36 @@ describe("StudioLiveStatusBar", () => {
     await flush();
     expect(screen.queryByTestId("studio-status-bar")).toBeNull();
     expect(channel).not.toHaveBeenCalled();
+  });
+
+  it("before the first answer: checking, never Offline, and an empty live region", async () => {
+    const loader = {
+      channel: () => new Promise<StatusChannel>(() => undefined),
+      health: () => new Promise<StatusHealth>(() => undefined),
+    };
+    await renderInRouter(<StudioLiveStatusBar slug="aurora" pathname="/content" loader={loader} env={fakeEnv().env} />);
+    await flush();
+    expect(barEl().getAttribute("data-state")).toBe("checking");
+    expect(barEl().textContent).not.toContain(t("d5Shell.status.offline"));
+    expect(barEl().querySelector("output")?.textContent).toBe("");
+    expect(barEl().querySelector('[data-slot="live-status-checking"]')).not.toBeNull();
+    expect(barEl().querySelector('[data-slot="live-status-detail"]')).toBeNull();
+  });
+
+  it("a failed first read: the failure notice alone, never Offline", async () => {
+    const loader = {
+      channel: async (): Promise<StatusChannel> => {
+        throw busy();
+      },
+      health: async () => health(false),
+    };
+    await renderInRouter(<StudioLiveStatusBar slug="aurora" pathname="/content" loader={loader} env={fakeEnv().env} />);
+    await flush();
+    expect(barEl().getAttribute("data-state")).toBe("checking");
+    expect(barEl().textContent).not.toContain(t("d5Shell.status.offline"));
+    expect(barEl().textContent).not.toContain(t("d5Shell.status.neverLive"));
+    expect(barEl().querySelector("output")?.textContent).toBe("");
+    expect(screen.getByTestId("studio-status-error").textContent).toBe(t("d5Shell.status.loadFailed"));
   });
 
   it("offline: says so, never-live line, and links the stream manager (current here) and the channel", async () => {

@@ -27,6 +27,7 @@
   "fixWeb.transparency.deficit.body": "The co-op spent more than its share of subscriptions and tips in these months. The surplus column below shows the gap month by month.",
   "fixWeb.home.ownLive.label": "Your stream",
   "fixWeb.home.ownLive.title": "You're live",
+  "fixWeb.home.ownLive.uptime": "Live for",
   "fixWeb.home.ownLive.manager": "Open stream manager",
   "fixWeb.checkout.pending": "Payment received. Confirming with {channel}…",
   "fixWeb.checkout.slow": "Still confirming. You'll get a receipt by email once it's through; you don't need to pay again.",
