@@ -263,7 +263,7 @@ describe("two-factor authentication (TOTP)", () => {
     expect(after?.twoFactorEnabled).toBe(true);
     const notice = await waitFor(async () => {
       const m = await mailTo(s.email);
-      return m && /two-factor|2fa|authenticat/i.test(m.subject) ? m : null;
+      return m && /two-step|two-factor|2fa|authenticat/i.test(m.subject) ? m : null;
     });
     expect(notice.subject).toBeTruthy();
 
