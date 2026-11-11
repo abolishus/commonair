@@ -108,7 +108,6 @@ export type Key =
   | "content.vods"
   | "content.clips"
   | "content.vodsEmpty"
-  | "content.vodsEmptyHint"
   | "content.clipsEmpty"
   | "content.clipsEmptyHint"
   | "content.vodTitle"

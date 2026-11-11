@@ -103,7 +103,6 @@
   "content.vods": "Videos",
   "content.clips": "Clips",
   "content.vodsEmpty": "No videos yet",
-  "content.vodsEmptyHint": "Save videos of your streams and they show up here.",
   "content.clipsEmpty": "No clips yet",
   "content.clipsEmptyHint": "Clips you or your viewers make show up here.",
   "content.vodTitle": "Title",
