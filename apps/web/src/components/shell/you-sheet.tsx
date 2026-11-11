@@ -50,7 +50,7 @@ export function YouSheet({
         <ul className="flex flex-col">
           {before.map((item) => (
             <li key={item.id}>
-              <SheetRow item={item} />
+              <SheetRow item={item} onClose={() => onOpenChange(false)} />
             </li>
           ))}
         </ul>
@@ -60,7 +60,7 @@ export function YouSheet({
         {after.map((item) => (
           <React.Fragment key={item.id}>
             {item.separatorBefore ? <Separator /> : null}
-            <SheetRow item={item} />
+            <SheetRow item={item} onClose={() => onOpenChange(false)} />
           </React.Fragment>
         ))}
       </SheetContent>
@@ -68,7 +68,7 @@ export function YouSheet({
   );
 }
 
-function SheetRow({ item }: { item: UserMenuItem }): React.JSX.Element {
+function SheetRow({ item, onClose }: { item: UserMenuItem; onClose: () => void }): React.JSX.Element {
   const className = cn(ROW, item.destructive && "text-destructive");
   const content = (
     <>
@@ -96,7 +96,11 @@ function SheetRow({ item }: { item: UserMenuItem }): React.JSX.Element {
       variant="ghost"
       className={cn(className, "h-auto justify-start rounded-none")}
       data-testid={`you-${item.id}`}
-      onClick={item.onSelect}
+      onClick={() => {
+        // An action (Install opens the browser's dialog or the iOS steps) leaves the sheet first.
+        onClose();
+        item.onSelect?.();
+      }}
     >
       {content}
     </Button>

@@ -6,6 +6,7 @@ import { toast } from "@commonair/ui/toast";
 import {
   BankIcon,
   DashboardSquare01Icon,
+  Download04Icon,
   FavouriteIcon,
   LegalDocument01Icon,
   Logout03Icon,
@@ -23,6 +24,9 @@ import { useBootstrap } from "../../lib/bootstrap.ts";
 import { isAdmin } from "../../lib/coop.ts";
 import { isTreasurer } from "../../lib/money.ts";
 import { accountMenu, type AccountEntry } from "../../lib/nav.ts";
+import { installApp } from "../pwa/install-offer.tsx";
+import type { InstallMode } from "../pwa/install-rule.ts";
+import { useInstall } from "../pwa/install-store.ts";
 import { forgetPushSubscription } from "../pwa/push-client.ts";
 import { isLegal, isSafetyStaff } from "../safety/access.ts";
 import { useModerates } from "../studio-shell/moderates.ts";
@@ -140,14 +144,37 @@ export function accountItem(entry: AccountEntry): UserMenuItem {
 }
 
 /**
+ * "Install {site}" (README D7.6): only where this browser can install the app or add it to the
+ * Home Screen, and never once it runs installed. It sits last before Sign out.
+ */
+export function installItem(mode: InstallMode, site: string): UserMenuItem | null {
+  if (mode === "none") return null;
+  return {
+    id: "install",
+    label: t("d7Pwa.install.menu", { site }),
+    icon: icon(Download04Icon),
+    testId: "account-install",
+    onSelect: () => installApp(site),
+  };
+}
+
+/** Put the install entry before the entries after the rule (Sign out), or last. */
+export function withInstallItem(items: UserMenuItem[], install: UserMenuItem | null): UserMenuItem[] {
+  if (!install) return items;
+  const split = items.findIndex((item) => item.separatorBefore);
+  return split < 0 ? [...items, install] : [...items.slice(0, split), install, ...items.slice(split)];
+}
+
+/**
  * The signed-in member's account entries as menu items (none for a visitor). "Mod view" joins once
- * `me.moderates` answers with a channel (J5-a).
+ * `me.moderates` answers with a channel (J5-a); "Install {site}" where the browser can install.
  */
 export function useAccountItems(): UserMenuItem[] {
-  const { me } = useBootstrap();
+  const { me, instance } = useBootstrap();
   const moderates = useModerates(me?.id ?? null);
+  const { mode } = useInstall();
   if (!me) return [];
-  return accountMenu(true, {
+  const items = accountMenu(true, {
     channel: me.channelSlug,
     treasurer: isTreasurer(me),
     safetyStaff: isSafetyStaff(me),
@@ -155,4 +182,5 @@ export function useAccountItems(): UserMenuItem[] {
     admin: isAdmin(me),
     moderates: moderates.map((m) => m.channel.slug),
   }).map(accountItem);
+  return withInstallItem(items, mode === "none" ? null : installItem(mode, instance.name));
 }
