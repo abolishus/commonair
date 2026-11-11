@@ -183,7 +183,6 @@ export function FirstFollowPrompt({
               data-testid="first-follow-push"
               data-filled-cta=""
               variant="brand"
-              size="sm"
               disabled={busy !== null}
               aria-busy={busy === "push" || undefined}
               onClick={() => void choosePush()}
@@ -196,7 +195,6 @@ export function FirstFollowPrompt({
             data-testid="first-follow-email"
             {...(showPush ? {} : { "data-filled-cta": "" })}
             variant={showPush ? "outline" : "brand"}
-            size="sm"
             disabled={busy !== null}
             aria-busy={busy === "email" || undefined}
             onClick={() => void chooseEmail()}
@@ -207,7 +205,6 @@ export function FirstFollowPrompt({
           <Button
             data-testid="first-follow-dismiss"
             variant="ghost"
-            size="sm"
             className="ms-auto"
             disabled={busy !== null}
             onClick={dismiss}

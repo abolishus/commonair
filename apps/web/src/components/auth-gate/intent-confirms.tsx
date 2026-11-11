@@ -68,16 +68,10 @@ export function IntentConfirmCard({
     >
       <output className="text-foreground">{message}</output>
       <div className="flex flex-wrap items-center gap-2">
-        <Button
-          data-testid={`intent-confirm-${intent}`}
-          data-filled-cta=""
-          variant="brand"
-          size="sm"
-          onClick={handle.confirm}
-        >
+        <Button data-testid={`intent-confirm-${intent}`} data-filled-cta="" variant="brand" onClick={handle.confirm}>
           {actionLabel}
         </Button>
-        <Button data-testid="intent-confirm-dismiss" variant="ghost" size="sm" onClick={handle.dismiss}>
+        <Button data-testid="intent-confirm-dismiss" variant="ghost" onClick={handle.dismiss}>
           {t("d4Follow.confirm.dismiss")}
         </Button>
       </div>
