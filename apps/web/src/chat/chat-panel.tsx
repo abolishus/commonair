@@ -34,9 +34,11 @@ import {
   type BlocksClient,
 } from "./blocks.ts";
 import { CalmControls, CALM_KEYS, useCalmSettings } from "./calm/calm-controls.tsx";
-import { isForMe, isOwn, withoutBlocked } from "./calm/reducer.ts";
+import { isForMe, isOwn, withoutBlocked, type Wave } from "./calm/reducer.ts";
 import { useCalm } from "./calm/use-calm.ts";
 import { WaveRow } from "./calm/wave-row.tsx";
+import { ModWaveRow, type WaveModClient } from "./calm/wave-mod.tsx";
+import { modWaves } from "./calm/wave-mod-model.ts";
 import { ChatEventRow } from "./chat-event-row.tsx";
 import { ChatConnection, type ChatMessageFrame, type ChatStatus } from "./connection.ts";
 import { chatEventView } from "./events.ts";
@@ -100,6 +102,8 @@ export interface ChatPanelProps {
   following?: boolean | null;
   /** `me.get` for the composer gate's email and account-age reasons; tests pass a fake. */
   accountFactsClient?: AccountFactsClient;
+  /** A moderator's wave actions (`chat.bans.bulk`, delete); tests pass a fake. */
+  waveModClient?: WaveModClient;
 }
 
 interface ModTarget {
@@ -196,6 +200,8 @@ function onListKey(list: HTMLElement, e: KeyboardEvent, setActive: (id: string |
   next.focus();
 }
 
+const NO_MOD_WAVES: ReadonlyMap<string, Wave> = new Map();
+
 export function ChatPanel({
   channel,
   stream,
@@ -211,6 +217,7 @@ export function ChatPanel({
   modTools = "menu",
   following = null,
   accountFactsClient,
+  waveModClient,
 }: ChatPanelProps): React.JSX.Element {
   const [status, setStatus] = React.useState<ChatStatus>("connecting");
   const [rows, dispatch] = React.useReducer(chatReducer, EMPTY_ROWS);
@@ -431,6 +438,11 @@ export function ChatPanel({
     subscriberPriority: calmSettings.subscriberPriority,
     self,
   });
+  // Moderators see raw chat; each wave gets their row of bulk actions under its latest copy (J5-d).
+  const modWaveAt = React.useMemo(
+    () => (canModerate ? modWaves(visible, self) : NO_MOD_WAVES),
+    [canModerate, visible, self],
+  );
   const statusView = chatStatusView(status);
   const inputDisabled = status !== "open" || !canChat;
   const isBroadcaster = self !== null && self === channel.toLowerCase();
@@ -691,7 +703,13 @@ export function ChatPanel({
           />
         ),
       )
-    : visible.map((r) => renderRow(r, true));
+    : visible.flatMap((r) => {
+        const row = renderRow(r, true);
+        const wave = modWaveAt.get(r.id);
+        return wave
+          ? [row, <ModWaveRow key={`mod-wave-${wave.id}`} channel={channel} wave={wave} client={waveModClient} />]
+          : [row];
+      });
 
   const name = channelName ?? channel;
   if (ageGated)

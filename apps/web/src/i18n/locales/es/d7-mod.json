@@ -1,0 +1,18 @@
+{
+  "d7Mod.wave.label": "Mensaje repetido: {body}",
+  "d7Mod.wave.summary": "Repetido {count, plural, one {# vez} other {# veces}} por {senders, plural, one {# persona} other {# personas}}",
+  "d7Mod.wave.timeoutAll": "{senders, plural, one {Expulsar temporalmente a # remitente} other {Expulsar temporalmente a los # remitentes}}",
+  "d7Mod.wave.timeoutFor": "Expulsar durante",
+  "d7Mod.wave.deleteAll": "Eliminar todo",
+  "d7Mod.timeout.title": "{senders, plural, one {¿Expulsar temporalmente a # remitente durante {duration}?} other {¿Expulsar temporalmente a los # remitentes durante {duration}?}}",
+  "d7Mod.timeout.body": "No podrán escribir aquí hasta que termine la expulsión. Quedan fuera el dueño del canal, los moderadores, el personal y quien ya tenga una expulsión más larga.",
+  "d7Mod.timeout.alsoDelete": "{count, plural, one {Eliminar también el mensaje} other {Eliminar también los # mensajes}}",
+  "d7Mod.timeout.confirm": "Expulsar",
+  "d7Mod.timeout.done": "{timedOut, plural, =0 {No se expulsó a nadie} one {Se expulsó temporalmente a # remitente} other {Se expulsó temporalmente a # remitentes}}{deleted, plural, =0 {} one { y se eliminó # mensaje} other { y se eliminaron # mensajes}}{skipped, plural, =0 {.} one {. # quedó fuera.} other {. # quedaron fuera.}}",
+  "d7Mod.delete.title": "{count, plural, one {¿Eliminar el mensaje?} other {¿Eliminar los # mensajes?}}",
+  "d7Mod.delete.body": "Se quitan del chat para todos. No se expulsa a nadie.",
+  "d7Mod.delete.confirm": "Eliminar todo",
+  "d7Mod.delete.done": "{deleted, plural, one {Se eliminó # mensaje.} other {Se eliminaron # mensajes.}}",
+  "d7Mod.delete.partial": "{deleted, plural, one {Se eliminó # mensaje} other {Se eliminaron # mensajes}}, pero {failed, plural, one {# no se pudo eliminar} other {# no se pudieron eliminar}}. Inténtalo de nuevo.",
+  "d7Mod.failed": "No funcionó. Inténtalo de nuevo."
+}

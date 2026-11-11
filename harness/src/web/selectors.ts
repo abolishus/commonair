@@ -706,3 +706,19 @@ export const D5_MONEY_IDS = {
   analyticsPnl: "analytics-pnl",
   analyticsPnlRow: "analytics-pnl-row",
 } as const;
+
+/**
+ * d7-mod (overhaul wave 4, J5-d): a moderator's wave row in raw chat, under the latest copy of a
+ * wave of three or more. `chatModWave` carries `data-id`, `data-count` and `data-senders`; each
+ * `chatModWaveTimeoutOption` carries `data-seconds` (60, 600, 3600, 86400) and opens
+ * `chatModWaveTimeoutDialog`, whose `chatModWaveAlsoDelete` checkbox starts ticked.
+ */
+export const D7_MOD_IDS = {
+  chatModWave: "chat-mod-wave",
+  chatModWaveTimeout: "chat-mod-wave-timeout",
+  chatModWaveTimeoutOption: "chat-mod-wave-timeout-option",
+  chatModWaveTimeoutDialog: "chat-mod-wave-timeout-dialog",
+  chatModWaveAlsoDelete: "chat-mod-wave-also-delete",
+  chatModWaveDelete: "chat-mod-wave-delete",
+  chatModWaveDeleteDialog: "chat-mod-wave-delete-dialog",
+} as const;

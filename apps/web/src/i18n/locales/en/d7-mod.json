@@ -1,0 +1,18 @@
+{
+  "d7Mod.wave.label": "Repeated message: {body}",
+  "d7Mod.wave.summary": "Repeated {count, plural, one {# time} other {# times}} by {senders, plural, one {# person} other {# people}}",
+  "d7Mod.wave.timeoutAll": "{senders, plural, one {Time out # sender} other {Time out all # senders}}",
+  "d7Mod.wave.timeoutFor": "Time out for",
+  "d7Mod.wave.deleteAll": "Delete all",
+  "d7Mod.timeout.title": "{senders, plural, one {Time out # sender for {duration}?} other {Time out all # senders for {duration}?}}",
+  "d7Mod.timeout.body": "They can't chat here until the timeout ends. The channel owner, moderators, staff and anyone already timed out for longer are left out.",
+  "d7Mod.timeout.alsoDelete": "{count, plural, one {Also delete the message} other {Also delete all # messages}}",
+  "d7Mod.timeout.confirm": "Time out",
+  "d7Mod.timeout.done": "{timedOut, plural, =0 {No one was timed out} one {Timed out # sender} other {Timed out # senders}}{deleted, plural, =0 {} one { and deleted # message} other { and deleted # messages}}{skipped, plural, =0 {.} one {. # was left out.} other {. # were left out.}}",
+  "d7Mod.delete.title": "{count, plural, one {Delete the message?} other {Delete all # messages?}}",
+  "d7Mod.delete.body": "They're removed from chat for everyone. No one is timed out.",
+  "d7Mod.delete.confirm": "Delete all",
+  "d7Mod.delete.done": "{deleted, plural, one {Deleted # message.} other {Deleted # messages.}}",
+  "d7Mod.delete.partial": "{deleted, plural, one {Deleted # message} other {Deleted # messages}}, but {failed, plural, one {# couldn't be deleted} other {# couldn't be deleted}}. Try again.",
+  "d7Mod.failed": "That didn't work. Try again."
+}
