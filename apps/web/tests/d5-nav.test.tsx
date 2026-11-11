@@ -90,7 +90,7 @@ describe("admin groups", () => {
       ["safety", ["moderation", "appeals", "dmca", "legal"]],
       ["money", ["treasury"]],
       ["coop", ["coop"]],
-      ["platform", ["integrity", "egress", "incidents", "apps", "federation"]],
+      ["platform", ["integrity", "egress", "incidents", "growth", "apps", "federation"]],
     ]);
   });
 

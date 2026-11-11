@@ -8,7 +8,7 @@
  * clip), and the clip page's "Watch from this moment" when the API links the clip to its video.
  */
 import { LocaleProvider, TooltipProvider } from "@commonair/ui";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type * as React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import type { ReplayPage } from "../src/chat/replay/model.ts";
@@ -171,10 +171,16 @@ describe("the video page", () => {
     expect(bar.querySelector('[data-testid="clip-button"]')?.getAttribute("data-signed-in")).toBe("true");
   });
 
-  it("signed out, the Clip button is a sign-in link", async () => {
+  it("signed out, the Clip button opens the sign-up prompt with intent clip", async () => {
     wrap(<VodWatchPage channel="rivertide" vodId={VOD_ID} viewer={null} client={client()} />);
     await waitFor(() => expect(byId("clip-button")).not.toBeNull());
-    expect(byId("clip-button")?.getAttribute("href")).toContain("intent=clip");
+    act(() => {
+      fireEvent.click(byId("clip-button") as HTMLElement);
+    });
+    const gate = await screen.findByTestId("auth-gate");
+    expect(gate.getAttribute("data-intent")).toBe("clip");
+    const create = new URL(screen.getByTestId("auth-gate-create").getAttribute("href") ?? "", "https://x.invalid");
+    expect(create.searchParams.get("intent")).toBe("clip");
   });
 });
 

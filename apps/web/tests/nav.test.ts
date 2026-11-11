@@ -277,7 +277,7 @@ describe("footer columns", () => {
     expect(footerColumns().map((c) => [c.id, c.links.map((l) => l.to)])).toEqual([
       ["create", ["/creators", "/dashboard"]],
       ["coop", ["/coop", "/coop/membership", "/coop/proposals", "/transparency"]],
-      ["legal", ["/dmca", "/takedown", "/attestations/verify"]],
+      ["legal", ["/terms", "/privacy", "/guidelines", "/dmca", "/takedown", "/attestations/verify"]],
     ]);
   });
 
@@ -289,6 +289,14 @@ describe("footer columns", () => {
   it("keeps the public transparency, attestation, takedown and DMCA pages", () => {
     const ids = footerColumns().flatMap((c) => c.links.map((l) => l.id));
     for (const id of ["transparency", "attestations", "takedown", "dmca"] as const) expect(ids).toContain(id);
+  });
+
+  it("puts the terms, privacy policy and community guidelines first under Legal", () => {
+    expect(
+      footerColumns()[2]
+        ?.links.slice(0, 3)
+        .map((l) => l.id),
+    ).toEqual(["terms", "privacy", "guidelines"]);
   });
 });
 
@@ -308,13 +316,14 @@ describe("trust and safety navigation", () => {
       { id: "integrity", to: "/admin/integrity", current: false },
       { id: "egress", to: "/admin/egress", current: false },
       { id: "incidents", to: "/admin/incidents", current: false },
+      { id: "growth", to: "/admin/growth", current: false },
       { id: "apps", to: "/admin/apps", current: false },
       { id: "federation", to: "/admin/federation", current: false },
     ]);
     expect(adminNav("/admin/coop", moderator).map((entry) => entry.id)).not.toContain("coop");
   });
 
-  it("orders the platform tools moderation, appeals, dmca, legal, coop, integrity, egress, incidents, apps, federation", () => {
+  it("orders the platform tools moderation, appeals, dmca, legal, coop, integrity, egress, incidents, growth, apps, federation", () => {
     const everything = {
       treasurer: false,
       safetyStaff: true,
@@ -332,6 +341,7 @@ describe("trust and safety navigation", () => {
       ["integrity", false],
       ["egress", false],
       ["incidents", false],
+      ["growth", false],
       ["apps", false],
       ["federation", false],
     ]);
@@ -387,6 +397,22 @@ describe("batch 7 platform tools access", () => {
     expect(adminNav("/admin/federation", { admin: true, federation: true }).find((e) => e.current)?.id).toBe(
       "federation",
     );
+  });
+});
+
+describe("overhaul wave 2 platform tools access", () => {
+  const as = (role: string) => ({ id: "u", username: "a", displayName: "A", channelSlug: null, role });
+  it("maps /admin/growth, opens it to admins only and lists it for them", () => {
+    expect(adminPageFor("/admin/growth")).toBe("growth");
+    expect(adminPageFor("/admin/growth/")).toBe("growth");
+    expect(mayOpenAdminPage("growth", as("admin"))).toBe(true);
+    for (const role of ["moderator", "legal", "treasurer", "user"])
+      expect(mayOpenAdminPage("growth", as(role))).toBe(false);
+    expect(mayOpenAdminPage("growth", null)).toBe(false);
+    expect(adminNav("/admin/growth", { admin: true }).find((e) => e.current)?.id).toBe("growth");
+    expect(
+      adminNav("/admin/moderation", { safetyStaff: true, platformModerator: true }).map((e) => e.id),
+    ).not.toContain("growth");
   });
 });
 

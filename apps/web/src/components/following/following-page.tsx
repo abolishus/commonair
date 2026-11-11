@@ -4,8 +4,8 @@
 /**
  * `/following` (D3.5): the channels the viewer follows, Live now first, then the offline ones as
  * rows, each with its go-live alert bell (`channels.follow` with `notify`). Nobody followed yet:
- * an empty state that points to Browse. Signed out: sign in or create an account (the
- * AuthGatePrompt replaces this once it lands).
+ * an empty state that points to Browse. Signed out: the sign-up prompt's buttons (intent follow,
+ * back to `/following`).
  */
 import { ChannelAvatar, EmptyState, IconButton, RelativeTime, Skeleton } from "@commonair/ui";
 import { Section } from "@commonair/ui/blocks/headers";
@@ -24,10 +24,10 @@ import { useRetryingLoad } from "../../lib/retrying-load.ts";
 import { loadErrorTitle } from "../../lib/load-copy.ts";
 import { SectionLoadError } from "../../lib/section-load-error.tsx";
 import { trackUi } from "../../lib/ui-metrics.ts";
+import { AuthGateActions } from "../auth-gate/auth-gate-prompt.tsx";
 import { feedViewer, useHomeFeed } from "../discovery/feed.ts";
 import { DiscoveryStreamCard } from "../discovery/stream-cards.tsx";
 import { CardGrid } from "@commonair/ui/blocks/media";
-import { SIGNUP_FOLLOWING_HREF } from "./links.ts";
 import { FOLLOWS_PAGE, followingView, withNotify, type FollowRow, type OfflineFollow } from "./model.ts";
 
 export function FollowingPage({ me }: { me: SessionUser | null }): React.JSX.Element {
@@ -43,6 +43,7 @@ export function FollowingPage({ me }: { me: SessionUser | null }): React.JSX.Ele
 }
 
 function SignedOut(): React.JSX.Element {
+  // The sign-up prompt's own buttons (d2-gate): intent follow, and back here after either.
   return (
     <EmptyState
       data-testid="following-signed-out"
@@ -51,25 +52,11 @@ function SignedOut(): React.JSX.Element {
       title={t("d3Home.followingPage.signedOut.title")}
       description={t("d3Home.followingPage.signedOut.body")}
       action={
-        <Button
-          data-testid="following-signin"
-          nativeButton={false}
-          render={<Link to="/signin" search={{ redirect: "/following" }} />}
-          onClick={() => trackUi("following", "signin", "follow")}
-        >
-          {t("d3Home.followingPage.signedOut.signIn")}
-        </Button>
-      }
-      secondaryAction={
-        <Button
-          data-testid="following-signup"
-          variant="outline"
-          nativeButton={false}
-          render={<a href={SIGNUP_FOLLOWING_HREF} aria-label={t("d3Home.followingPage.signedOut.create")} />}
-          onClick={() => trackUi("following", "create", "follow")}
-        >
-          {t("d3Home.followingPage.signedOut.create")}
-        </Button>
+        <AuthGateActions
+          intent="follow"
+          className="flex flex-wrap justify-center gap-2"
+          testIds={{ create: "following-signup", signIn: "following-signin" }}
+        />
       }
     />
   );

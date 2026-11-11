@@ -225,11 +225,20 @@ const FOOTER_HEADING: Record<
   legal: "shell.footer.legal",
 };
 
-/** `/creators` is not a route yet (the acquisition batch adds it): a plain link until then. */
+/** The public legal pages' names (d2-pages), without pulling the legal page itself into the shell. */
+const FOOTER_LEGAL = {
+  terms: "d2Pages.legal.terms",
+  privacy: "d2Pages.legal.privacy",
+  guidelines: "d2Pages.legal.guidelines",
+} as const;
+
 function footerLink(entry: FooterEntry, instanceName: string): FooterLink {
   switch (entry.id) {
     case "creators":
-      return { label: t("shell.footer.creators", { name: instanceName }), href: "/creators" };
+      return {
+        label: t("shell.footer.creators", { name: instanceName }),
+        render: <Link data-testid="footer-creators-link" to="/creators" />,
+      };
     case "studio":
       return { label: t("studio.nav"), render: <Link data-testid="footer-studio-link" to="/dashboard" /> };
     case "import":
@@ -260,6 +269,13 @@ function footerLink(entry: FooterEntry, instanceName: string): FooterLink {
       return { label: t("footer.takedown"), render: <Link data-testid="footer-takedown-link" to="/takedown" /> };
     case "dmca":
       return { label: t("footer.dmca"), render: <Link data-testid="footer-dmca-link" to="/dmca" /> };
+    case "terms":
+    case "privacy":
+    case "guidelines":
+      return {
+        label: t(FOOTER_LEGAL[entry.id]),
+        render: <Link data-testid={`footer-${entry.id}-link`} to={entry.to} />,
+      };
   }
 }
 

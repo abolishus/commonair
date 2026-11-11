@@ -443,9 +443,13 @@ describe("the footer", () => {
     expect(hrefs).toEqual([
       ["/creators", "/dashboard"],
       ["/coop", "/coop/membership", "/coop/proposals", "/transparency"],
-      ["/dmca", "/takedown", "/attestations/verify"],
+      ["/terms", "/privacy", "/guidelines", "/dmca", "/takedown", "/attestations/verify"],
     ]);
     expect(within(columns[0] as HTMLElement).getByText("Stream on Test Air")).toBeTruthy();
+    expect(within(footer).getByTestId("footer-creators-link")).toBeTruthy();
+    expect(within(columns[2] as HTMLElement).getByTestId("footer-privacy-link").textContent).toBe("Privacy policy");
+    expect(within(footer).getByTestId("footer-terms-link").textContent).toBe("Terms of service");
+    expect(within(footer).getByTestId("footer-guidelines-link").textContent).toBe("Community guidelines");
     expect(within(footer).getByTestId("footer-transparency-link")).toBeTruthy();
     expect(within(footer).getByTestId("footer-dmca-link")).toBeTruthy();
     expect(within(footer).getByTestId("footer-takedown-link")).toBeTruthy();

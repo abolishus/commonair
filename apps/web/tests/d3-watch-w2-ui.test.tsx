@@ -93,17 +93,19 @@ const CLIP_ID = "01900000-0000-7000-8000-0000000000c9";
 const VOD_ID = "01900000-0000-7000-8000-0000000000d9";
 
 describe("ClipButton", () => {
-  it("signed out: a link to sign in that comes back here with the clip intent, counted", () => {
-    window.history.replaceState(null, "", "/rivertide?tab=home");
+  it("signed out: opens the sign-up prompt with the clip intent, counted", async () => {
     wrap(<ClipButton target={{ kind: "live", channel: "rivertide" }} signedIn={false} />);
-    const a = byId("clip-button") as HTMLAnchorElement;
-    expect(a.tagName).toBe("A");
-    expect(a.getAttribute("href")).toBe(
-      `/signin?${new URLSearchParams({ redirect: "/rivertide?tab=home", intent: "clip" }).toString()}`,
-    );
-    expect(a.getAttribute("aria-label")).toBe(t("d3Watch.clip.label"));
-    fireEvent.click(a);
-    expect(metrics.calls).toEqual([["clip.viewer", "signin", "clip"]]);
+    const button = byId("clip-button") as HTMLButtonElement;
+    expect([button.tagName, button.getAttribute("data-auth-gate")]).toEqual(["BUTTON", "clip"]);
+    expect(button.getAttribute("aria-label")).toBe(t("d3Watch.clip.label"));
+    act(() => {
+      fireEvent.click(button);
+    });
+    await waitFor(() => expect(byId("auth-gate")?.getAttribute("data-intent")).toBe("clip"));
+    const create = new URL(byId("auth-gate-create")?.getAttribute("href") ?? "", "https://x.invalid");
+    expect([create.pathname, create.searchParams.get("intent")]).toEqual(["/signup", "clip"]);
+    expect(metrics.calls).toContainEqual(["clip.viewer", "signin", "clip"]);
+    expect(metrics.calls).toContainEqual(["authGate", "view", "clip"]);
   });
 
   it("live: the last 30 seconds, a title, then a toast with the clip's link", async () => {

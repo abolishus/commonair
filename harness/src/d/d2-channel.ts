@@ -88,7 +88,8 @@ export async function steps(ctx: DContext): Promise<void> {
     const hero = page.locator(tid(T.channelOfflineHero));
     await hero.waitFor({ timeout: UI_TIMEOUT_MS });
     s.check("the hero is the latest VOD", (await hero.getAttribute("data-vod")) === target.vod, target);
-    const href = await hero.locator("a").first().getAttribute("href");
+    // D3.8: the hero is the link itself, inside the offline content page's Follow hero.
+    const href = await hero.getAttribute("href");
     s.check("the hero links to the VOD page", href === `/${target.slug}/vods/${target.vod}`, { href });
   });
 

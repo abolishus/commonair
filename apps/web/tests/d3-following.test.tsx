@@ -67,13 +67,16 @@ describe("signed out", () => {
     await renderHome(<FollowingPage me={null} />, "/following");
     const box = screen.getByTestId("following-signed-out");
     expect(box.textContent).toContain(t("d3Home.followingPage.signedOut.title"));
-    expect(screen.getByTestId("following-signin").getAttribute("href")).toBe("/signin?redirect=%2Ffollowing");
-    expect(screen.getByTestId("following-signup").getAttribute("href")).toBe(
-      "/signup?intent=follow&redirect=%2Ffollowing",
-    );
+    // The sign-up prompt's buttons: create leads, both carry intent follow and come back here.
+    const params = (id: string) => {
+      const url = new URL(screen.getByTestId(id).getAttribute("href") ?? "", "https://x.invalid");
+      return [url.pathname, Object.fromEntries(url.searchParams)];
+    };
+    expect(params("following-signup")).toEqual(["/signup", { intent: "follow", redirect: "/following" }]);
+    expect(params("following-signin")).toEqual(["/signin", { intent: "follow", redirect: "/following" }]);
     expect(fake.tracked).toContain("following|view|follow");
     fireEvent.click(screen.getByTestId("following-signup"));
-    expect(fake.tracked).toContain("following|create|follow");
+    expect(fake.tracked).toContain("authGate|create|follow");
   });
 });
 

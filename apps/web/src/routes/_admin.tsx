@@ -7,6 +7,7 @@ import {
   AppStoreIcon,
   BankIcon,
   Chart01Icon,
+  ChartIncreaseIcon,
   CopyrightIcon,
   Globe02Icon,
   JusticeScale01Icon,
@@ -44,7 +45,7 @@ const GROUP_LABEL: Record<AdminGroupId, MessageKey> = {
 /**
  * Platform tools: the treasury (treasurers), the mod queue (moderators, admins, `legal`), the
  * appeals and DMCA queues (moderators, admins), the legal queue (`legal` only), and co-op
- * administration, integrity flags, egress, incidents, OAuth apps and federation (admins). Anyone without the page's
+ * administration, integrity flags, egress, incidents, growth, OAuth apps and federation (admins). Anyone without the page's
  * role, signed out included, gets the not-found page, decided in `beforeLoad` (on the server
  * during SSR) so neither the tools nor their sidebar ever render for them.
  */
@@ -145,6 +146,14 @@ function adminItem(entry: AdminEntry): NavItem {
         current: entry.current,
         icon: icon(Globe02Icon),
         render: <Link data-testid="admin-federation-link" to="/admin/federation" />,
+      };
+    case "growth":
+      return {
+        id: entry.id,
+        label: t("nav.adminGrowth"),
+        current: entry.current,
+        icon: icon(ChartIncreaseIcon),
+        render: <Link data-testid="admin-growth-link" to="/admin/growth" />,
       };
   }
 }

@@ -147,7 +147,10 @@ export interface FooterEntry {
     | "transparency"
     | "attestations"
     | "takedown"
-    | "dmca";
+    | "dmca"
+    | "terms"
+    | "privacy"
+    | "guidelines";
   to:
     | "/creators"
     | "/dashboard"
@@ -158,7 +161,10 @@ export interface FooterEntry {
     | "/transparency"
     | "/attestations/verify"
     | "/takedown"
-    | "/dmca";
+    | "/dmca"
+    | "/terms"
+    | "/privacy"
+    | "/guidelines";
 }
 
 /** The footer's three link columns, in order. */
@@ -202,7 +208,8 @@ export interface AdminEntry {
     | "egress"
     | "incidents"
     | "apps"
-    | "federation";
+    | "federation"
+    | "growth";
   to:
     | "/treasury"
     | "/admin/moderation"
@@ -214,7 +221,8 @@ export interface AdminEntry {
     | "/admin/egress"
     | "/admin/incidents"
     | "/admin/apps"
-    | "/admin/federation";
+    | "/admin/federation"
+    | "/admin/growth";
   current: boolean;
 }
 
@@ -369,7 +377,7 @@ export function adminNavGroups(pathname: string, options: AdminNavOptions): Admi
     { id: "safety", items: pick("moderation", "appeals", "dmca", "legal") },
     { id: "money", items: pick("treasury") },
     { id: "coop", items: pick("coop") },
-    { id: "platform", items: pick("integrity", "egress", "incidents", "apps", "federation") },
+    { id: "platform", items: pick("integrity", "egress", "incidents", "growth", "apps", "federation") },
   ];
   return groups.filter((group) => group.items.length > 0);
 }
@@ -390,8 +398,9 @@ export function coopNav(): CoopEntry[] {
 
 /**
  * The footer's columns: Create (the creators pitch, the studio, Twitch import where offered),
- * Co-op (how it works, membership, proposals, transparency) and Legal (the public legal pages
- * that exist: copyright, intimate-image takedown, the viewer count proof verifier).
+ * Co-op (how it works, membership, proposals, transparency) and Legal (the terms, privacy policy
+ * and community guidelines, then copyright, intimate-image takedown and the viewer count proof
+ * verifier).
  */
 export function footerColumns(options: FooterOptions = {}): FooterColumnEntry[] {
   return [
@@ -415,6 +424,9 @@ export function footerColumns(options: FooterOptions = {}): FooterColumnEntry[] 
     {
       id: "legal",
       links: [
+        { id: "terms", to: "/terms" },
+        { id: "privacy", to: "/privacy" },
+        { id: "guidelines", to: "/guidelines" },
         { id: "dmca", to: "/dmca" },
         { id: "takedown", to: "/takedown" },
         { id: "attestations", to: "/attestations/verify" },
@@ -445,7 +457,7 @@ const STUDIO_ROOTS = new Set([
   "mod",
 ]);
 const ADMIN_ROOTS = new Set(["admin", "treasury"]);
-const PAGE_ROOTS = new Set(["dmca", "takedown", "attestations", "embed", "overlay"]);
+const PAGE_ROOTS = new Set(["dmca", "takedown", "attestations", "embed", "overlay", "terms", "privacy", "guidelines"]);
 /** A channel's sub-pages that are watch pages too. */
 const WATCH_CHILDREN = new Set(["vods", "clips", "giveaways"]);
 
@@ -513,6 +525,7 @@ export function adminNav(pathname: string, options: AdminNavOptions): AdminEntry
           { id: "integrity", to: "/admin/integrity" },
           { id: "egress", to: "/admin/egress" },
           { id: "incidents", to: "/admin/incidents" },
+          { id: "growth", to: "/admin/growth" },
           { id: "apps", to: "/admin/apps" },
         ] as const)
       : []),

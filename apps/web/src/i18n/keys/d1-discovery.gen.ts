@@ -65,8 +65,6 @@ export type Key =
   | "discovery.search.title"
   | "discovery.search.titleFor"
   | "discovery.sheet.categories"
-  | "discovery.welcome.dismiss"
-  | "discovery.welcome.label"
   | "pageTitle.category"
   | "pageTitle.directory"
   | "pageTitle.search"

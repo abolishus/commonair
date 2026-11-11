@@ -332,7 +332,11 @@ async function e2eBasic(ctx: ScenarioContext, sessions: WebSession[], check: Sce
   await Promise.all(
     watchers.map((w) =>
       ctx.step(`${w.who} (${w.engine}): offline state`, () =>
-        byTestId(w.page, T.offlineState).waitFor({ state: "visible", timeout: OFFLINE_TIMEOUT_MS }),
+        // The player's offline card, until the page's poll swaps in the offline content page (D3.8).
+        w.page
+          .locator(`${tid(T.offlineState)}, ${tid(T.channelOfflineHome)}`)
+          .first()
+          .waitFor({ state: "visible", timeout: OFFLINE_TIMEOUT_MS }),
       ),
     ),
   );

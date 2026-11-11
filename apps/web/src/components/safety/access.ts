@@ -43,7 +43,8 @@ export type AdminPage =
   | "incidents"
   | "integrity"
   | "apps"
-  | "federation";
+  | "federation"
+  | "growth";
 
 /** Which platform-tools page a path is (`null` for anything else). Trailing slashes do not matter. */
 export function adminPageFor(pathname: string): AdminPage | null {
@@ -70,6 +71,8 @@ export function adminPageFor(pathname: string): AdminPage | null {
       return "apps";
     case "/admin/federation":
       return "federation";
+    case "/admin/growth":
+      return "growth";
     default:
       return null;
   }
@@ -91,7 +94,8 @@ export function mayOpenAdminPage(page: AdminPage | null, me: MaybeUser): boolean
     // The DMCA queue: platform moderators and admins.
     case "dmca":
       return isPlatformModerator(me);
-    // Integrity flags, egress, status-page incidents, OAuth apps and federation: admins only.
+    // Integrity flags, egress, status-page incidents, OAuth apps, federation and growth: admins only.
+    case "growth":
     case "egress":
     case "incidents":
     case "integrity":

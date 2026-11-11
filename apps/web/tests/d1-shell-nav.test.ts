@@ -43,6 +43,10 @@ describe("shellArea", () => {
     ["/admin/moderation", "admin"],
     ["/treasury", "admin"],
     ["/dmca", "page"],
+    // The public legal pages (d2-pages) are pages, not channels.
+    ["/terms", "page"],
+    ["/privacy", "page"],
+    ["/guidelines", "page"],
     ["/takedown", "page"],
     ["/attestations/verify", "page"],
     ["/rivertide/unknown", "page"],

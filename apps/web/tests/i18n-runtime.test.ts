@@ -25,7 +25,7 @@ describe("t() and activeLocale()", () => {
   it("is English outside a request", () => {
     expect(activeLocale()).toBe("en");
     expect(t("nav.signIn")).toBe("Sign in");
-    expect(t("home.title", { name: "Test Air" })).toBe("Welcome to Test Air");
+    expect(t("channel.offline", { name: "Test Air" })).toBe("Test Air is offline");
   });
 
   it("follows the client translator once one is set", async () => {
@@ -44,7 +44,7 @@ describe("en-XA", () => {
   it("pseudo-localizes every message, keeping placeholders and plurals working", async () => {
     const xa = await loadLocale("en-XA");
     expect(xa.locale).toBe("en-XA");
-    expect(xa.t("home.title", { name: "Test Air" })).toMatch(/^\[Ŵéļçöɱé ţö Test Air~+\]$/);
+    expect(xa.t("channel.offline", { name: "Test Air" })).toMatch(/^\[Test Air îš öƒƒļîñé~+\]$/);
     expect(xa.t("follow.count", { count: 1234 })).toMatch(/^\[1,234 ƒöļļöŵéŕš~+\]$/);
     expect(xa.t("follow.count", { count: 1 })).toMatch(/^\[1 ƒöļļöŵéŕ~+\]$/);
     expect(xa.t("legal.version", {})).toMatch(/\{version\}/);

@@ -3,11 +3,13 @@
 // @vitest-environment happy-dom
 
 /**
- * D2-channel (F2): an offline channel is no longer a dead end. With a playable VOD it shows the
- * banner on top, "Last live <time> · <category>", the latest VOD as the hero (a poster linking to
- * its watch page, `channel-offline-hero`) and the rest as a Videos shelf; without one it keeps
- * today's offline card plus the About content. "Last live" is `Channel.lastLiveAt` (polled with
- * the summary), with or without a VOD. Going live swaps the hero for the player.
+ * D2-channel (F2) and D3.8: an offline channel is a content page (`channel-offline-home`). The
+ * banner is on top, then "Last live <time> · <category>", then the Follow hero with the latest
+ * playable VOD (a poster linking to its watch page, `channel-offline-hero`), the other videos and
+ * About. With no playable VOD the hero says when they were last live, or that they never were. A
+ * suspended channel keeps the player's offline card. "Last live" is `Channel.lastLiveAt` (polled
+ * with the summary), with or without a VOD. Going live swaps the content page for the player,
+ * which carries the viewer's Clip button.
  */
 import { LocaleProvider, TooltipProvider } from "@commonair/ui";
 import {
@@ -34,9 +36,12 @@ vi.mock("../src/lib/bootstrap.ts", () => ({
 }));
 vi.mock("../src/lib/use-channel.ts", () => ({ useChannel: (_slug: string, initial: unknown) => initial }));
 vi.mock("../src/player/player.tsx", () => ({
-  Player: ({ live, offline }: { live: boolean; offline?: React.ReactNode }) => (
+  Player: ({ live, offline, clip }: { live: boolean; offline?: React.ReactNode; clip?: { signedIn: boolean } }) => (
     <div data-testid="player" data-live={String(live)}>
       {live ? null : offline}
+      {live && clip ? (
+        <button type="button" aria-label="Clip" data-testid="clip-button" data-signed-in={String(clip.signedIn)} />
+      ) : null}
     </div>
   ),
 }));
@@ -137,15 +142,17 @@ describe("playableVods", () => {
 describe("the offline page with VODs", () => {
   it("banner on top, last live with the category, the latest VOD as the hero, then the rest", async () => {
     const { container } = renderPage(page());
-    const hero = await screen.findByTestId("channel-offline-hero");
+    const home = await screen.findByTestId("channel-offline-home");
+    const hero = screen.getByTestId("channel-offline-hero");
+    expect(home.contains(hero)).toBe(true);
     expect(hero.getAttribute("data-vod")).toBe(uuid(101));
-    const link = hero.querySelector("a");
-    expect(link?.getAttribute("href")).toBe(`/fern/vods/${uuid(101)}`);
+    expect([hero.tagName, hero.getAttribute("href")]).toEqual(["A", `/fern/vods/${uuid(101)}`]);
     expect(hero.textContent).toContain("Latest video");
-    expect(hero.textContent).toContain("Stream 1");
+    expect(screen.getByTestId("channel-offline-latest-meta").textContent).toContain("Stream 1");
     expect(hero.querySelector("img")?.getAttribute("src")).toBe("https://media.example.test/vods/1.jpg");
-    // The hero replaces the offline card: no player.
+    // The content page replaces the offline card: no player, and the old standalone hero is gone.
     expect(screen.queryByTestId("player")).toBeNull();
+    expect(container.querySelector('section[data-testid="channel-offline-hero"]')).toBeNull();
 
     const last = screen.getByTestId("channel-last-live");
     expect(last.textContent).toMatch(/^Last live /);
@@ -158,6 +165,7 @@ describe("the offline page with VODs", () => {
     expect(banner.compareDocumentPosition(header as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByText("Offline")).toBeTruthy();
 
+    // No clips: only the Videos shelf, with the rest of the VODs.
     const shelf = screen.getByTestId("channel-shelf");
     expect(shelf.textContent).toContain("More videos");
     const shelfIds = [...shelf.querySelectorAll('[data-testid="channel-video-card"]')].map((c) =>
@@ -166,10 +174,12 @@ describe("the offline page with VODs", () => {
     expect(shelfIds).toEqual([uuid(102), uuid(103)]);
   });
 
-  it("a VOD that is not ready is no hero: the offline card and About show instead", async () => {
+  it("a VOD that is not ready is no hero: the Follow hero says when they were last live", async () => {
     renderPage(page({ vods: { items: [vod(1, { status: "processing" })], nextCursor: null } }));
-    await screen.findByTestId("offline-state");
+    const follow = await screen.findByTestId("channel-offline-follow-hero");
+    expect(follow.getAttribute("data-state")).toBe("lastLive");
     expect(screen.queryByTestId("channel-offline-hero")).toBeNull();
+    expect(screen.queryByTestId("offline-state")).toBeNull();
     // Still "last live": the broadcast happened.
     expect(screen.getByTestId("channel-last-live")).toBeTruthy();
   });
@@ -187,6 +197,9 @@ describe("the offline page with VODs", () => {
     };
     renderPage(live);
     await waitFor(() => expect(screen.getByTestId("player").getAttribute("data-live")).toBe("true"));
+    // Live viewers get the Clip button (D3.7), signed out too (it opens the sign-up prompt).
+    expect(screen.getByTestId("clip-button").getAttribute("data-signed-in")).toBe("false");
+    expect(screen.queryByTestId("channel-offline-home")).toBeNull();
     expect(screen.queryByTestId("channel-offline-hero")).toBeNull();
     expect(screen.queryByTestId("channel-last-live")).toBeNull();
     // Live, the banner sits in About so the player comes first.
@@ -195,12 +208,14 @@ describe("the offline page with VODs", () => {
 });
 
 describe("the offline page with no VODs", () => {
-  it("keeps today's offline card plus the About content on Home", async () => {
+  it("never live: the Follow hero says so, then the About content", async () => {
     const never = page({ vods: { items: [], nextCursor: null } });
     never.summary.lastLiveAt = null;
     renderPage(never);
-    const offline = await screen.findByTestId("offline-state");
-    expect(offline.textContent).toContain("Fernsby is offline");
+    const follow = await screen.findByTestId("channel-offline-follow-hero");
+    expect(follow.getAttribute("data-state")).toBe("never");
+    expect(follow.textContent).toContain("Fernsby is offline");
+    expect(screen.queryByTestId("offline-state")).toBeNull();
     expect(screen.queryByTestId("channel-offline-hero")).toBeNull();
     expect(screen.queryByTestId("channel-last-live")).toBeNull();
     const about = screen.getByTestId("channel-about");
@@ -235,6 +250,21 @@ describe("the offline page with no VODs", () => {
     await screen.findByTestId("channel-about");
     expect(screen.queryByTestId("channel-banner")).toBeNull();
     expect(screen.queryByTestId("channel-panels")).toBeNull();
+    // Suspended keeps the player's offline card, not the content page.
+    expect(screen.getByTestId("offline-state")).toBeTruthy();
+    expect(screen.queryByTestId("channel-offline-home")).toBeNull();
+  });
+
+  it("About states when the channel was created when the page has it", async () => {
+    renderPage(page({ since: "2025-03-01T12:00:00.000Z" }));
+    const since = await screen.findByTestId("channel-about-since");
+    expect(since.querySelector("time")?.getAttribute("datetime")).toBe("2025-03-01T12:00:00.000Z");
+  });
+
+  it("About leaves the created date out when the page has none", async () => {
+    renderPage(page());
+    await screen.findByTestId("channel-about");
+    expect(screen.queryByTestId("channel-about-since")).toBeNull();
   });
 });
 

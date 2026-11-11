@@ -5,8 +5,8 @@
  * The viewer's Clip button (overhaul wave 2, D3.7; watch.md P4) in the live and video player bars.
  * `clips.create` cuts the last 30 seconds of a live stream, or the 30 seconds of a video that end
  * at the playhead. A small dialog asks for the title, then a toast carries the clip's link. Signed
- * out, the button is a link to sign in with `intent=clip` that brings the viewer back here
- * (d2-gate's AuthGatePrompt replaces it at integration). Counted as `clip.viewer` (closed lists).
+ * out, the button opens the sign-up prompt (d2-gate, intent `clip`), which brings the viewer back
+ * here. Counted as `clip.viewer` (closed lists).
  */
 import { formatDuration, IconButton } from "@commonair/ui";
 import { Button } from "@commonair/ui/components/button";
@@ -26,6 +26,7 @@ import * as React from "react";
 import { t } from "../../i18n/index.ts";
 import { api, errorCode } from "../../lib/api.ts";
 import { trackUi } from "../../lib/ui-metrics.ts";
+import { AuthGatePrompt } from "../auth-gate/auth-gate-prompt.tsx";
 import { isMatureGate } from "../safety/client.ts";
 import { watchUrl } from "./share.ts";
 
@@ -70,15 +71,6 @@ export function vodClipRange(position: number | null, durationSeconds: number): 
   }
   return { startOffset: 0, durationSeconds: Math.min(VIEWER_CLIP_SECONDS, length) };
 }
-
-/** The sign-in link for a signed-out viewer: back to this page, with the clip intent. */
-export function clipSignInHref(path: string): string {
-  const back = path.startsWith("/") && !path.startsWith("//") ? path : "/";
-  return `/signin?${new URLSearchParams({ redirect: back, intent: "clip" }).toString()}`;
-}
-
-const currentPath = (fallback: string) =>
-  typeof window === "undefined" ? fallback : `${window.location.pathname}${window.location.search}`;
 
 /** What `clips.create` is sent. */
 export type ClipCreateInput = { channel: string; title: string; durationSeconds: number } & Partial<{
@@ -152,16 +144,21 @@ export function ClipButton({
 
   if (!signedIn)
     return (
-      <IconButton
-        data-testid="clip-button"
-        data-signed-in="false"
-        label={t("d3Watch.clip.label")}
-        tooltip={t("d3Watch.clip.signInTooltip")}
-        icon={Scissor01Icon}
-        nativeButton={false}
-        render={<a href={clipSignInHref(currentPath(`/${target.channel}`))} aria-label={t("d3Watch.clip.label")} />}
-        onClick={() => trackUi("clip.viewer", "signin", "clip")}
-        className="text-overlay-foreground"
+      <AuthGatePrompt
+        intent="clip"
+        side="top"
+        align="end"
+        trigger={
+          <IconButton
+            data-testid="clip-button"
+            data-signed-in="false"
+            label={t("d3Watch.clip.label")}
+            tooltip={t("d3Watch.clip.signInTooltip")}
+            icon={Scissor01Icon}
+            onClick={() => trackUi("clip.viewer", "signin", "clip")}
+            className="text-overlay-foreground"
+          />
+        }
       />
     );
 

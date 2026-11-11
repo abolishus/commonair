@@ -513,9 +513,7 @@ describe("going offline", () => {
     });
     await waitFor(() => expect(vods).toHaveBeenCalledTimes(1));
     await waitFor(() =>
-      expect(screen.getByTestId("channel-offline-hero").querySelector("a")?.getAttribute("href")).toBe(
-        `/fern/vods/${uuid(101)}`,
-      ),
+      expect(screen.getByTestId("channel-offline-hero").getAttribute("href")).toBe(`/fern/vods/${uuid(101)}`),
     );
   });
 });

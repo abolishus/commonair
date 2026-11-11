@@ -37,7 +37,7 @@ import {
   type ClipFilter,
 } from "../../components/channel/clip-filters.tsx";
 import { ChannelNotFoundPage } from "../../components/channel/live-now-shelf.tsx";
-import { OfflineHero } from "../../components/channel/offline-hero.tsx";
+import { OfflineChannelHome } from "../../components/channel/offline-hero.tsx";
 import { bannerVisible } from "../../components/channel/panels-data.ts";
 import { getChannelPage, type ChannelPage as ChannelPageData } from "../../components/channel/panels-loader.ts";
 import { useChannelClips, useChannelVods } from "../../components/channel/use-media-list.ts";
@@ -195,14 +195,16 @@ function ChannelView({
     setGateHit(false);
   };
   const panels = extras.suspended ? [] : extras.panels;
-  // Offline with a playable VOD: the latest one is the hero instead of the offline card (F2).
-  const hero = !live && stage === "player" ? (videoTiles[0] ?? null) : null;
+  // Offline (D3.8): Home is the content page (the Follow hero with the latest video, clips, videos,
+  // About) instead of the player's offline card. A suspended channel keeps the card.
+  const offlineHome = !live && stage === "player" && !extras.suspended;
   const lastLive = live ? null : channel.lastLiveAt;
 
   const player = (
     <Player
       channel={channel.slug}
       live={live}
+      clip={{ signedIn, publicUrl: config.publicUrl }}
       onStartError={(err) => {
         if (isMatureGate(err)) setGateHit(true);
       }}
@@ -227,7 +229,7 @@ function ChannelView({
       <RestrictedStream signedIn={signedIn} confirmed={maturity.confirmed} onConfirmed={onConfirmed} client={client}>
         {stage === "restricted-player" ? player : <div className="aspect-video w-full bg-muted" />}
       </RestrictedStream>
-    ) : hero ? null : (
+    ) : offlineHome ? null : (
       player
     );
 
@@ -308,8 +310,8 @@ function ChannelView({
     />
   );
 
-  const videosShelf = (heading: string, tiles = videoTiles) => (
-    <MediaShelf kind="vods" heading={heading} tiles={tiles.slice(0, SHELF_SIZE)} channel={channel.slug} />
+  const videosShelf = (heading: string) => (
+    <MediaShelf kind="vods" heading={heading} tiles={videoTiles.slice(0, SHELF_SIZE)} channel={channel.slug} />
   );
   const aboutSection = (withBanner: boolean) => (
     <ChannelAboutSection
@@ -324,6 +326,7 @@ function ChannelView({
       }
       panels={panels}
       banner={withBanner ? banner : null}
+      since={page.since}
     />
   );
   // Live, the player and chat stay above the tabs on every tab, so switching never restarts the stream.
@@ -342,13 +345,24 @@ function ChannelView({
         />
       </div>
     )
-  ) : hero ? (
-    <div className="flex min-w-0 flex-col gap-8">
-      <OfflineHero tile={hero} />
-      {videosShelf(t("channel.tabs.moreVideos"), videoTiles.slice(1))}
-    </div>
+  ) : offlineHome ? (
+    <OfflineChannelHome
+      channel={{
+        slug: channel.slug,
+        displayName: channel.displayName,
+        accent: channel.accent ?? null,
+        avatarUrl: channel.avatarUrl ?? null,
+      }}
+      lastLiveAt={channel.lastLiveAt}
+      videos={videoTiles}
+      clips={clipTileList}
+      follow={<FollowButton signedIn={signedIn} state={follow.state} onToggle={follow.toggle} />}
+      own={own}
+      about={aboutSection(false)}
+      publicUrl={config.publicUrl}
+    />
   ) : (
-    // No VODs: today's offline card (above) plus the About content.
+    // Suspended: the offline card (above) plus the About content.
     aboutSection(false)
   );
   const tabs = (

@@ -50,10 +50,26 @@ async function open(c: SupportClient) {
 }
 
 describe("Support dialog", () => {
-  it("signed out, support-open is a link to /signin", () => {
-    wrap(<SupportButton channel="rivertide" channelName="Rivertide" signedIn={false} />);
-    const link = id("support-open");
-    expect([link.tagName, link.getAttribute("href")]).toEqual(["A", "/signin"]);
+  it("signed out, support-open opens the sign-up prompt with intent support", async () => {
+    // The prompt reads the public split; an unreachable API leaves it without a number.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("{}", { status: 503 })),
+    );
+    try {
+      wrap(<SupportButton channel="rivertide" channelName="Rivertide" signedIn={false} />);
+      const trigger = id("support-open");
+      expect(trigger.tagName).toBe("BUTTON");
+      act(() => {
+        fireEvent.click(trigger);
+      });
+      const gate = await screen.findByTestId("auth-gate");
+      expect(gate.getAttribute("data-intent")).toBe("support");
+      const create = new URL(id("auth-gate-create").getAttribute("href") ?? "", "https://x.invalid");
+      expect(create.searchParams.get("intent")).toBe("support");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("loads money.support on open and subscribes to the chosen tier", async () => {

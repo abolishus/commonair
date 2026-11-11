@@ -13,7 +13,6 @@ import type { VideoTile } from "../src/components/channel/video-grid.tsx";
 import { RESUME_SAVE_MS, resumeOffer, resumePoint, saveDue } from "../src/components/vod-watch/resume-writer.ts";
 import {
   clipErrorMessage,
-  clipSignInHref,
   MIN_CLIP_SECONDS,
   VIEWER_CLIP_SECONDS,
   vodClipRange,
@@ -52,20 +51,6 @@ describe("vodClipRange", () => {
     expect(vodClipRange(Number.NaN, 600)).toBeNull();
     expect(vodClipRange(10, Number.POSITIVE_INFINITY)).toBeNull();
     expect(vodClipRange(-10, 600)).toEqual({ startOffset: 0, durationSeconds: 30 });
-  });
-});
-
-describe("clipSignInHref", () => {
-  it("returns to the page with the clip intent", () => {
-    expect(clipSignInHref("/rivertide")).toBe("/signin?redirect=%2Frivertide&intent=clip");
-    expect(clipSignInHref("/rivertide/vods/x?t=90")).toBe(
-      "/signin?redirect=%2Frivertide%2Fvods%2Fx%3Ft%3D90&intent=clip",
-    );
-  });
-
-  it("never redirects off the site", () => {
-    expect(clipSignInHref("//evil.example")).toBe("/signin?redirect=%2F&intent=clip");
-    expect(clipSignInHref("https://evil.example")).toBe("/signin?redirect=%2F&intent=clip");
   });
 });
 

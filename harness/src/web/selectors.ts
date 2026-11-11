@@ -331,6 +331,7 @@ export const D_TEST_IDS = {
   channelTabClips: "channel-tab-clips",
   channelTabAbout: "channel-tab-about",
   channelOfflineHero: "channel-offline-hero",
+  channelOfflineHome: "channel-offline-home",
   channelVideoGrid: "channel-video-grid",
   channelMetaCategory: "channel-meta-category",
   channelMetaUptime: "channel-meta-uptime",

@@ -79,8 +79,6 @@ export type Key =
   | "d3Home.followingPage.empty.action"
   | "d3Home.followingPage.signedOut.title"
   | "d3Home.followingPage.signedOut.body"
-  | "d3Home.followingPage.signedOut.signIn"
-  | "d3Home.followingPage.signedOut.create"
   | "d3Home.followingPage.alertOn"
   | "d3Home.followingPage.alertOff"
   | "d3Home.followingPage.alertOnToast"

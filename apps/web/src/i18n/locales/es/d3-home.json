@@ -74,8 +74,6 @@
   "d3Home.followingPage.empty.action": "Ver directos",
   "d3Home.followingPage.signedOut.title": "Inicia sesión para ver a quién sigues",
   "d3Home.followingPage.signedOut.body": "Los canales que sigues aparecen aquí, primero los que están en directo, con avisos de directo.",
-  "d3Home.followingPage.signedOut.signIn": "Iniciar sesión",
-  "d3Home.followingPage.signedOut.create": "Crear cuenta gratis",
   "d3Home.followingPage.alertOn": "Avisos de directo activados para {channel}. Desactivar",
   "d3Home.followingPage.alertOff": "Avisos de directo desactivados para {channel}. Activar",
   "d3Home.followingPage.alertOnToast": "Te avisaremos cuando {channel} empiece un directo.",

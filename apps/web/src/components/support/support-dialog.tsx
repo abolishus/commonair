@@ -35,10 +35,10 @@ import { ToggleGroup, ToggleGroupItem } from "@commonair/ui/components/toggle-gr
 import { toast } from "@commonair/ui/toast";
 import { Alert02Icon, Copy01Icon, FavouriteIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Link } from "@tanstack/react-router";
 import * as React from "react";
 import { t } from "../../i18n/index.ts";
 import { api } from "../../lib/api.ts";
+import { GatedSupportButton } from "../auth-gate/gated-support.tsx";
 import { BreakdownEstimate } from "../money/breakdown-estimate.tsx";
 import {
   SUBSCRIPTION_STATUS_VIEW,
@@ -105,8 +105,8 @@ export interface SupportButtonProps {
 }
 
 /**
- * The channel's Support call to action (`support-open`). Signed out it is a link to /signin;
- * signed in it opens the Support dialog, which loads `money.support` when it opens.
+ * The channel's Support call to action (`support-open`). Signed out it opens the sign-up prompt
+ * (intent support, with the creator's real share); signed in it opens the Support dialog, which loads `money.support` when it opens.
  */
 export function SupportButton({
   channel,
@@ -116,13 +116,7 @@ export function SupportButton({
   client = apiSupportClient,
 }: SupportButtonProps): React.JSX.Element {
   const [open, setOpen] = React.useState(false);
-  if (!signedIn)
-    return (
-      <AccentButton data-testid="support-open" size="sm" nativeButton={false} render={<Link to="/signin" />}>
-        <HugeiconsIcon icon={FavouriteIcon} strokeWidth={2} aria-hidden />
-        {t("support.open")}
-      </AccentButton>
-    );
+  if (!signedIn) return <GatedSupportButton channel={channel} channelName={channelName} accent={accent} />;
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger render={<AccentButton data-testid="support-open" size="sm" />}>

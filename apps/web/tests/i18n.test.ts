@@ -126,7 +126,7 @@ describe("message catalogs", () => {
   });
 
   it("fills placeholders and keeps unknown ones", () => {
-    expect(t("home.title", { name: "Test Air" })).toBe("Welcome to Test Air");
+    expect(t("channel.offline", { name: "Test Air" })).toBe("Test Air is offline");
     expect(t("legal.version", {})).toBe("Version {version}");
     expect(t("nav.signIn")).toBe("Sign in");
   });

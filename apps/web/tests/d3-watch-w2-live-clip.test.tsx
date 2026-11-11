@@ -78,10 +78,12 @@ describe("the live Clip button", () => {
     expect(screen.getByTestId("player-controls").contains(screen.getByTestId("clip-button"))).toBe(true);
   });
 
-  it("signed out, it links to sign in", async () => {
+  it("signed out, it is the trigger of the sign-up prompt (intent clip)", async () => {
     wrap(<Player channel="rivertide" live clip={{ signedIn: false }} />);
     await play();
-    expect(screen.getByTestId("clip-button").getAttribute("href")).toContain("intent=clip");
+    const button = screen.getByTestId("clip-button");
+    expect([button.tagName, button.getAttribute("data-signed-in")]).toEqual(["BUTTON", "false"]);
+    expect(button.getAttribute("data-auth-gate")).toBe("clip");
   });
 
   it("never in the embed, and not without the page asking for it", async () => {

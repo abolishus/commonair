@@ -74,8 +74,6 @@
   "d3Home.followingPage.empty.action": "Browse live",
   "d3Home.followingPage.signedOut.title": "Sign in to see who you follow",
   "d3Home.followingPage.signedOut.body": "The channels you follow show up here, live first, with go-live alerts.",
-  "d3Home.followingPage.signedOut.signIn": "Sign in",
-  "d3Home.followingPage.signedOut.create": "Create free account",
   "d3Home.followingPage.alertOn": "Go-live alerts on for {channel}. Turn off",
   "d3Home.followingPage.alertOff": "Go-live alerts off for {channel}. Turn on",
   "d3Home.followingPage.alertOnToast": "You'll hear when {channel} goes live.",
