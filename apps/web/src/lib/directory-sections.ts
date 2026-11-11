@@ -257,6 +257,16 @@ export function sortCategories<T extends Pick<Category, "name" | "liveChannels" 
   );
 }
 
+/** Directory v2's two groups, order kept: categories with someone live, then the rest. */
+export function splitByLive<T extends Pick<Category, "liveChannels">>(
+  categories: readonly T[],
+): { live: T[]; idle: T[] } {
+  const live: T[] = [];
+  const idle: T[] = [];
+  for (const c of categories) (c.liveChannels > 0 ? live : idle).push(c);
+  return { live, idle };
+}
+
 /** The tag filter's options: every tag on the loaded live channels, most used first. */
 export function tagOptions(live: readonly StreamCard[]): string[] {
   return rankTags(live.flatMap((c) => c.tags));

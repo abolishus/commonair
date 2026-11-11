@@ -12,16 +12,19 @@ import {
   parseCategorySearch,
   type CategoryTab,
 } from "../../components/discovery/category-page.tsx";
-import { getCategoryPage, type CategoryPageData } from "../../components/discovery/loaders.ts";
 import { DiscoveryPending } from "../../components/discovery/pending.tsx";
 import { t } from "../../i18n/index.ts";
+import { getCategoryOverviewPage, type CategoryPageV2Data } from "../../lib/directory.ts";
 import { titleHead } from "../../lib/page-title.ts";
 
-/** `/directory/$category` (F1): one category's header, then its live channels, videos and clips (`?tab=`). */
+/**
+ * `/directory/$category` (F1, D3.2): one category's header, then its Overview (the bare URL), live
+ * channels, videos and clips (`?tab=`).
+ */
 export const Route = createFileRoute("/_app/directory/$category")({
   validateSearch: parseCategorySearch,
   loader: async ({ params }) => {
-    const page = await getCategoryPage({ data: { slug: params.category } });
+    const page = await getCategoryOverviewPage({ data: { slug: params.category } });
     if (!page) throw notFound();
     return page;
   },
@@ -46,11 +49,11 @@ function Category(): React.JSX.Element {
   return <CategoryLoaded {...page.data} />;
 }
 
-function CategoryLoaded({ category, live }: CategoryPageData): React.JSX.Element {
+function CategoryLoaded({ category, live, overview }: CategoryPageV2Data): React.JSX.Element {
   // Parsed again: unvalidated keys from the raw URL reach `useSearch` beside the validated ones.
   const search = parseCategorySearch(Route.useSearch());
   const { tab: picked } = search;
-  const tab: CategoryTab = picked ?? "live";
+  const tab: CategoryTab = picked ?? "overview";
   const { sort, range } = clipFilterFrom(search);
   const clipFilter = React.useMemo<ClipFilter>(() => ({ sort, range }), [sort, range]);
   const navigate = Route.useNavigate();
@@ -67,6 +70,7 @@ function CategoryLoaded({ category, live }: CategoryPageData): React.JSX.Element
       key={category.id}
       category={category}
       live={live}
+      overview={overview}
       tab={tab}
       clipFilter={clipFilter}
       onTabChange={onTabChange}

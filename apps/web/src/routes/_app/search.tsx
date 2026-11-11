@@ -3,17 +3,20 @@
 
 import { createFileRoute } from "@tanstack/react-router";
 import type * as React from "react";
-import { getSearch } from "../../components/discovery/loaders.ts";
 import { searchSearch } from "../../components/discovery/search-params.ts";
 import { SearchPage } from "../../components/discovery/search-page.tsx";
 import { t } from "../../i18n/index.ts";
+import { getSearchPage } from "../../lib/directory.ts";
 import { titleHead } from "../../lib/page-title.ts";
 
-/** `/search?q=` (F1): channels and categories matching the query. An empty query asks nothing. */
+/**
+ * `/search?q=` (F1, D3.4): live channels, channels, videos, clips and categories matching the
+ * query. An empty query gets its own page: recent searches, live channels, popular categories.
+ */
 export const Route = createFileRoute("/_app/search")({
   validateSearch: searchSearch,
   loaderDeps: ({ search }) => ({ q: search.q }),
-  loader: ({ deps }) => getSearch({ data: { q: deps.q } }),
+  loader: ({ deps }) => getSearchPage({ data: { q: deps.q } }),
   head: ({ match }) =>
     titleHead(match.search.q ? t("pageTitle.searchFor", { q: match.search.q }) : t("pageTitle.search")),
   // No pending component: typing re-runs the loader, and the page (with the focused box) must stay.
@@ -22,7 +25,7 @@ export const Route = createFileRoute("/_app/search")({
 
 function Search(): React.JSX.Element {
   const result = Route.useLoaderData();
-  const results = result.status === "ok" ? result.data : null;
+  const data = result.status === "ok" ? result.data : null;
   const { q } = Route.useSearch();
-  return <SearchPage q={q ?? ""} results={results} />;
+  return <SearchPage q={q ?? ""} data={data} />;
 }

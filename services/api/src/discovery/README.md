@@ -49,11 +49,16 @@ deterministic: every API replica shows the same spotlight in the same window.
 - **Following** (signed in): live channels you follow, by the blended score.
 - **Random** (`/directory/random`): uniform over live channels matching the filters.
 - **Search**: Postgres full-text search on channel name, title and description (the
-  `channels_search_idx` expression) plus category names.
+  `channels_search_idx` expression), live streams' titles and tags (live channels first, viewer
+  accounts with no followers and no stream last), plus category names. Videos and clips match on
+  their title (full-text, every word in any order: [`search-media.ts`](search-media.ts)):
+  public, ready videos newest first; ready clips, no more visible than their source, most viewed
+  first. Anyone who has not confirmed 18+ gets no mature-labelled video or clip at all.
 - **Categories**: `liveChannels`, `viewerCount` (the sum of verified viewers) and `tags` (the ten
   most used, ties by name: [`tags.ts`](tags.ts)) all count the same streams, the ones the default
   `directory.live?category=<slug>` lists: by the live broadcast's category, never restricted, and
-  mature-exclusive.
+  mature-exclusive. `videoCount` counts what the default `vods.listByCategory` lists: public,
+  ready videos recorded in the category, mature-exclusive, in one grouped query.
 - **Recently live / following offline**: each card's `latestVod` is the channel's newest ready,
   public VOD; a mature one's thumbnail goes only to confirmed adults.
 

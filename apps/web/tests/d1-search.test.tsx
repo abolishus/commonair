@@ -127,34 +127,46 @@ const results = {
     { slug: "demo_streamer2", displayName: "Demo Two", avatarUrl: null, live: null, followerCount: 1 },
   ],
   categories: [category(ART, 1)],
+  videos: [],
+  clips: [],
 };
 
 describe("the results", () => {
-  it("groups channels and categories, linking each", async () => {
+  it("groups live channels, channels and categories, linking each", async () => {
     await renderInRouter(<SearchResults q="demo" results={results} />, "/search?q=demo");
+    const liveGroup = screen.getByTestId("search-results-live");
     const channels = screen.getByTestId("search-results-channels");
     const categories = screen.getByTestId("search-results-categories");
-    expect([...channels.querySelectorAll('[data-testid="search-channel"]')].map((a) => a.getAttribute("href"))).toEqual(
-      ["/demo_streamer1", "/demo_streamer2"],
-    );
+    const hrefs = (el: HTMLElement) =>
+      [...el.querySelectorAll('[data-testid="search-channel"]')].map((a) => a.getAttribute("href"));
+    // Every channel in the API's order (live first); the live ones again as stream cards.
+    expect(hrefs(channels)).toEqual(["/demo_streamer1", "/demo_streamer2"]);
+    expect(
+      [...liveGroup.querySelectorAll('[data-testid="stream-card"]')].map((el) => el.getAttribute("data-channel")),
+    ).toEqual(["demo_streamer1"]);
     expect(categories.querySelector("a")?.getAttribute("href")).toBe("/directory/art");
     // Live channels show the live state; offline ones their followers.
-    expect(channels.querySelector('[data-slot="live-badge"]')).not.toBeNull();
+    expect(channels.querySelectorAll('[data-slot="live-badge"]')).toHaveLength(1);
     expect(screen.getByText("1 follower")).toBeTruthy();
   });
 
   it("leaves out an empty group", async () => {
-    await renderInRouter(<SearchResults q="art" results={{ channels: [], categories: [category(ART, 0)] }} />);
+    await renderInRouter(
+      <SearchResults q="art" results={{ channels: [], categories: [category(ART, 0)], videos: [], clips: [] }} />,
+    );
     expect(screen.queryByTestId("search-results-channels")).toBeNull();
     expect(screen.getByTestId("search-results-categories")).toBeTruthy();
   });
 
   it("announces the count once, politely, and nothing for an empty query", async () => {
-    const view = await renderInRouter(<SearchResults q="" results={{ channels: [], categories: [] }} />);
+    const view = await renderInRouter(
+      <SearchResults q="" results={{ channels: [], categories: [], videos: [], clips: [] }} />,
+    );
     const region = screen.getByTestId("search-announcement");
     expect(region.getAttribute("aria-live")).toBe("polite");
     expect(region.textContent).toBe("");
-    expect(screen.getByText("Type a channel or category name to search.")).toBeTruthy();
+    // The empty query's page is `SearchStart` (d3-browse tests), not a results state.
+    expect(screen.queryByTestId("search-empty")).toBeNull();
     view.unmount();
 
     await renderInRouter(<SearchResults q="demo" results={results} />);
@@ -162,7 +174,7 @@ describe("the results", () => {
     expect(document.querySelectorAll('[aria-live="polite"]')).toHaveLength(1);
     cleanup();
 
-    await renderInRouter(<SearchResults q="zzz" results={{ channels: [], categories: [] }} />);
+    await renderInRouter(<SearchResults q="zzz" results={{ channels: [], categories: [], videos: [], clips: [] }} />);
     expect(screen.getByTestId("search-announcement").textContent).toBe("No results for zzz");
     expect(screen.getByTestId("search-empty")).toBeTruthy();
   });

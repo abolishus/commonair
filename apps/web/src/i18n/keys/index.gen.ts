@@ -15,6 +15,7 @@ import type { Key as D2Membership } from "./d2-membership.gen.ts";
 import type { Key as D2Metrics } from "./d2-metrics.gen.ts";
 import type { Key as D2Pages } from "./d2-pages.gen.ts";
 import type { Key as D2Player } from "./d2-player.gen.ts";
+import type { Key as D3Browse } from "./d3-browse.gen.ts";
 import type { Key as D3Home } from "./d3-home.gen.ts";
 import type { Key as D3Watch } from "./d3-watch.gen.ts";
 import type { Key as D4Polish } from "./d4-polish.gen.ts";
@@ -86,6 +87,7 @@ export type MessageKey =
   | D2Metrics
   | D2Pages
   | D2Player
+  | D3Browse
   | D3Home
   | D3Watch
   | D4Polish
@@ -156,6 +158,7 @@ export const NAMESPACES = [
   "d2-metrics",
   "d2-pages",
   "d2-player",
+  "d3-browse",
   "d3-home",
   "d3-watch",
   "d4-polish",

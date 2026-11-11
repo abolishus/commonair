@@ -75,6 +75,7 @@ function client(over: Partial<MediaClient> = {}): MediaClient {
 
 const ART_CATEGORY: Category = category(ART, 2, { viewerCount: 1234, tags: ["cozy", "Watercolor"] });
 const DEFAULT: ClipFilter = { sort: "recent", range: "all" };
+const NO_OVERVIEW = { recentlyLive: [], videos: [], clips: [], elsewhere: [] };
 
 /** The page with its tab and filter in local state, as the route keeps them in the URL. */
 function Harness({
@@ -94,6 +95,7 @@ function Harness({
     <CategoryPage
       category={cat}
       live={EMPTY}
+      overview={NO_OVERVIEW}
       tab={tab}
       clipFilter={filter}
       onTabChange={(next) => {
@@ -113,10 +115,11 @@ async function renderCategory(node: React.ReactNode, media: MediaClient = client
 }
 
 describe("parseCategorySearch", () => {
-  it("keeps Videos and Clips, Live is the bare URL, and anything else is Live", () => {
+  it("keeps Live, Videos and Clips, Overview is the bare URL, and anything else is the Overview", () => {
+    expect(parseCategorySearch({ tab: "live" })).toEqual({ tab: "live" });
     expect(parseCategorySearch({ tab: "videos" })).toEqual({ tab: "videos" });
     expect(parseCategorySearch({ tab: "clips" })).toEqual({ tab: "clips" });
-    for (const bad of ["live", "VIDEOS", "", 1, null, undefined, ["clips"]])
+    for (const bad of ["overview", "VIDEOS", "", 1, null, undefined, ["clips"]])
       expect(parseCategorySearch({ tab: bad })).toEqual({});
   });
 
@@ -132,7 +135,8 @@ describe("parseCategorySearch", () => {
   });
 
   it("categoryTabSearch drops the defaults", () => {
-    expect(categoryTabSearch("live")).toEqual({});
+    expect(categoryTabSearch("overview")).toEqual({});
+    expect(categoryTabSearch("live")).toEqual({ tab: "live" });
     expect(categoryTabSearch("videos")).toEqual({ tab: "videos" });
     expect(categoryTabSearch("clips", DEFAULT)).toEqual({ tab: "clips" });
     expect(categoryTabSearch("clips", { sort: "top", range: "30d" })).toEqual({
@@ -164,7 +168,9 @@ describe("the category header", () => {
     await renderCategory(<Harness cat={category(ART, 0)} />);
     expect(screen.queryByTestId("category-viewer-count")).toBeNull();
     expect(screen.queryByTestId("category-tags")).toBeNull();
-    expect(screen.getByTestId("category-live-count").textContent).toBe("0 channels live");
+    // No "0 live" anywhere.
+    expect(screen.queryByTestId("category-live-count")).toBeNull();
+    expect(screen.queryByText(/0 channels live/)).toBeNull();
   });
 });
 
@@ -172,11 +178,9 @@ describe("the category tabs", () => {
   it("Live, Videos and Clips; only the active one loads", async () => {
     const categoryVods = vi.fn<MediaClient["categoryVods"]>(async () => EMPTY);
     await renderCategory(<Harness />, client({ categoryVods }));
-    expect(["live", "videos", "clips"].map((id) => screen.getByTestId(`category-tab-${id}`).textContent)).toEqual([
-      "Live channels",
-      "Videos",
-      "Clips",
-    ]);
+    expect(
+      ["overview", "live", "videos", "clips"].map((id) => screen.getByTestId(`category-tab-${id}`).textContent),
+    ).toEqual(["Overview", "Live channels", "Videos", "Clips"]);
     expect(screen.getByTestId("category-page").getAttribute("data-tab")).toBe("live");
     expect(categoryVods).not.toHaveBeenCalled();
   });
