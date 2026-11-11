@@ -22,6 +22,15 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
 
 ## In flight
 
+**Launch scale (2026-11-11, drafted, not accepted).** The maintainer expects more than 1,000 live
+streams at once at peak at launch. [ADR 0041](docs/decisions/0041-launch-scale.md) (proposed) launches
+our instance with stages 1–3 together, on app, media and moderation pools, with autoscaling, placement,
+admission control and a Postgres pooler as launch requirements, and per-stream cost targets as a gate.
+The reordered S1 plan, with new units S1-i to S1-o, is in
+[S1-scaling.md](.claude/briefs/next/S1-scaling.md#launch-scale-2026-11-11-adr-0041). Waiting on the
+maintainer: the ADR's open questions (peak viewers, ladder policy, budget, region, soft launch),
+approval of S1-i's paid DigitalOcean run, and the droplet-limit request.
+
 **Platform-debt follow-ups (2026-11-06).** The non-UI engineering follow-ups toward `v0.1.0`
 (harness, relay, worker, infra and money), on `main` from `5df97a06` to the docs commit. There were
 two waves of six units each, run in parallel worktrees. Every unit was reviewed independently

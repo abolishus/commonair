@@ -7,7 +7,8 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 - Status: accepted (2026-10-27; see [Decisions at acceptance](#decisions-at-acceptance-2026-10-27));
   amended 2026-11-02 for U4 ([Decisions at acceptance (2026-11-02)](#decisions-at-acceptance-2026-11-02))
-  and S1-d's findings (§3, §4)
+  and S1-d's findings (§3, §4); §2 and §7 amended by [ADR 0041](0041-launch-scale.md) (proposed
+  2026-11-11: launch at 1,000 concurrent streams, autoscaling a launch requirement)
 - Date: 2026-10-26 (provider facts checked on 2026-10-26)
 
 ## Context
@@ -273,7 +274,8 @@ and images go through ADR 0002 and ADR 0022 like any dependency.
 - **Kubernetes:** a second deployment path beside Quadlet, for a team this size.
 - **Multi-region active-active:** Postgres has one primary; HLS tolerates distance, and relays
   sit near viewers.
-- **Autoscaling** before stage 2 has run by hand.
+- **Autoscaling** before stage 2 has run by hand. Superseded for our instance by
+  [ADR 0041](0041-launch-scale.md) decision 3 (proposed): autoscaling is a launch requirement.
 - **Read replicas for the app:** no query load needs them yet. DigitalOcean's Advanced edition
   also allows no reads from standbys.
 

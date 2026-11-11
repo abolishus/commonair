@@ -92,7 +92,47 @@ orchestrator's contract step.
 | S1-f load balancer | `infra/caddy/**`, each app service's health route                          | stage 2: Caddy accepts PROXY protocol only from the load balancer, so rate limits keep real addresses; health checks the load balancer can use; connection draining so `upgrade` can roll one droplet at a time                                                                                                                                                             |
 | S1-g IaC           | `infra/tofu/digitalocean/**`                                               | OpenTofu for stages 0–2 (droplets, VPC, cloud firewall, volumes, Spaces, reserved IP, load balancer, managed databases if chosen); `digitalocean/digitalocean` provider vetted at the pinned version (ADR 0002, ADR 0022). Also delivers L1 checklist item 8                                                                                                                |
 
+## Launch scale (2026-11-11, ADR 0041)
+
+The maintainer expects **more than 1,000 live streams at once at peak** at launch. [ADR
+0041](../../../docs/decisions/0041-launch-scale.md) (proposed) launches our instance with stages 1, 2 and
+3 together, on scaled pools (app, media, moderation), and makes autoscaling a launch requirement.
+Where this section and the ones above differ, this section and ADR 0041 win.
+
+**Done before this change:** S1-a (one size measured: `c-4`), S1-b, S1-c, S1-d (with the
+DigitalOcean check, 2026-11-04), S1-g, S1-h. **Open:** S1-e and S1-f, now launch-critical, and
+the new units below.
+
+| Unit               | Owns                                                                                      | Build                                                                                                                                                                                                                                                                                                                                |
+| ------------------ | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| S1-i stream cost   | `harness/scenarios/load-*.ts`, `docs/operators/capacity.md`                               | the per-stream and per-viewer costs ADR 0041 decision 5 lists, each measured alone: ingest + packaging with no ladder, moderation, origin + Caddy per 100 viewers, one ladder on CPU and on a GPU droplet with NVENC. A CPU profile of moderation and origin under load. **Paid DigitalOcean run: the maintainer approves it first** |
+| S1-j moderation    | `services/media/src/moderation/**`, `packages/moderation/**`, a moderation role           | frames without an ffmpeg per sample (one long-lived reader per stream, or a tap from the packager), classification in its own pool with batched inference, sample lag as a metric. ADR 0006's guarantees unchanged: interval, hash lists, classifier, fail-closed behavior. Target 0.05 core per stream                              |
+| S1-e placement     | orchestrator contract step, then `services/media/**`, `services/origin/**`                | as above, to ADR 0041 decision 4: ingest through the layer 4 load balancer, a placement row written by the accepting host, a health check that fails when cordoned or full, origin routing by placement over the VPC, re-placement on host loss inside the reconnect grace, ladder slots counted per host                            |
+| S1-m admission     | orchestrator contract step, then `services/media/**` (publish auth), `apps/web` dashboard | ADR 0041 decision 6: refuse a new go-live when the media pool is full, show "capacity full, retrying" to the creator, stop new ladders past 80%, count every refusal                                                                                                                                                                 |
+| S1-f load balancer | `infra/caddy/**`, each app service's health route, a pooler under `infra/`                | as above, plus a transaction-mode pooler in front of Postgres (the provider's PgBouncer pools, a bundled PgBouncer for self-hosters), postgres.js without prepared statements, and every session-level Postgres feature the services use found and handled                                                                           |
+| S1-k scaler        | a new `services/scaler` (or a worker job, decided in its contract step), `infra/tofu/**`  | ADR 0041 decision 3: the scaler interface, a static default, a DigitalOcean adapter (first check whether Droplet Autoscale Pools accept a desired size and spare named hosts; otherwise the droplet API), cordon and drain, pool ceilings, prebuilt snapshots and warm spares (a new media host takes streams within 3 minutes)      |
+| S1-n roles         | `scripts/selfhost.sh`, `infra/selfhost/**`, `infra/quadlet/**`                            | `selfhost.sh --role app\|media\|moderation`: each installs only its units, joins the pool, and `upgrade` rolls one host at a time with migrate run once                                                                                                                                                                              |
+| S1-o rehearsal     | `harness/scenarios/**`, `docs/operators/capacity.md`                                      | locally: `placement` and `admission` scenarios, `multi-instance` with two media hosts. On DigitalOcean (each run approved): 100 → 300 streams with the scaler creating and draining hosts, then one full run at 1,000 streams and the viewer target, plus `failover` at that load                                                    |
+
+**Start now, outside the code:** ask DigitalOcean for a droplet-limit increase sized to ADR 0041's
+pools. It has the longest lead time of anything here.
+
 ## Order
+
+Changed 2026-11-11 by ADR 0041. Each step's numbers gate the next.
+
+1. **S1-i first.** Every size and ceiling depends on it, and it tells S1-j and the origin work
+   whether their targets are reachable. In parallel, the ADR's open questions go to the maintainer
+   (viewers, ladder policy, budget, region, soft launch).
+2. **Then in parallel, on disjoint paths:** S1-j (moderation), the S1-e and S1-m contract step
+   followed by S1-e, S1-f (load balancer and pooler), S1-n (roles). Origin's per-viewer cost is
+   profiled in S1-i and fixed in S1-e if it is in origin.
+3. **S1-k** once S1-e's placement and S1-n's roles exist: it needs a cordon to call and a role to
+   boot. S1-m lands with or right after S1-e.
+4. **S1-o** last: the local scenarios join the full harness, then the paid rehearsals, then the
+   full-size run. Launch waits for the full-size run.
+
+### Order before 2026-11-11 (kept for history)
 
 1. With R0: the ADR, S1-a (it needs only a droplet and the existing scenario), S1-c, S1-g for
    stage 0. These are what L1 needs: a launch size, the targets, and IaC.
@@ -123,3 +163,6 @@ orchestrator's contract step.
 - `docs/self-hosting/managed-services.md` lets an operator point a self-hosted instance at
   managed Postgres, Valkey and S3 from any provider that meets the requirements. Stage 3 is designed and, if its trigger is not near,
   not built.
+- **Launch scale (ADR 0041):** ADR 0041 accepted; S1-e, S1-f, S1-i, S1-j, S1-k, S1-m, S1-n built;
+  the local `placement` and `admission` scenarios pass in the full harness; the 1,000-stream run
+  on DigitalOcean meets ADR 0032's targets, and `capacity.md` records it.
