@@ -12,8 +12,8 @@
  * - `ModViewButton` (`channel-mod-view`) and `useModerates`: for a moderator or editor who does not
  *   own it (both may open the mod view).
  * - `TrustBadge`: the owner's co-op standing, one neutral mark (council outranks member-owner).
- * - `VerifiedViewers`: "Verified viewers" beside the live count. The "How we count" link waits for
- *   a page that explains verified-viewer counting (none exists yet).
+ * - `VerifiedViewers`: "Verified viewers · How we count" beside the live count; the link opens
+ *   `/transparency#how-we-count`, the explainer (D6.1).
  *
  * The phone layout itself is CSS (`watch-layout.css`, keyed on `data-watch-*`), so the server
  * render is already right on a phone and nothing remounts when the viewport crosses `lg`.
@@ -207,14 +207,25 @@ export function TrustBadge({
   );
 }
 
-/** "Verified viewers", beside the live count. */
+/** "Verified viewers · How we count", beside the live count; the link opens `/transparency#how-we-count`. */
 export function VerifiedViewers({
   className,
   ...props
 }: { className?: string } & { [key: `data-${string}`]: string | undefined }): React.JSX.Element {
   return (
-    <span className={cn("inline-flex min-w-0 items-center", className)} {...props}>
-      {t("d4Layout.viewers.verified")}
+    <span className={cn("inline-flex min-w-0 flex-wrap items-center gap-x-1.5", className)} {...props}>
+      <span data-slot="verified-label">{t("d4Layout.viewers.verified")}</span>
+      <span aria-hidden className="text-muted-foreground">
+        {t("d6Transparency.how.separator")}
+      </span>
+      <Link
+        to="/transparency"
+        hash="how-we-count"
+        data-slot="how-we-count"
+        className="underline underline-offset-2 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      >
+        {t("d6Transparency.how.linkLabel")}
+      </Link>
     </span>
   );
 }

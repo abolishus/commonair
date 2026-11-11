@@ -213,7 +213,6 @@
   "transparency.period.6": "Últimos 6 meses",
   "transparency.period.12": "Últimos 12 meses",
   "transparency.loading": "Cargando las cuentas",
-  "transparency.loadFailed": "No se pudieron cargar las cuentas. Actualiza la página para reintentar.",
   "transparency.empty": "Aún no hay meses",
   "transparency.emptyHint": "Las cuentas aparecen aquí cuando la cooperativa tenga sus primeros ingresos.",
   "transparency.stat.revenue": "Ingresos",

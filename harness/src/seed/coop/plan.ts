@@ -969,3 +969,21 @@ export function inRevenuePeriod(window: { start: Date; end: Date }, revenuePerio
     new Date(window.end.getTime() - 1).toISOString().slice(0, 7) === revenuePeriod
   );
 }
+
+// ---------------------------------------------------------------- transparency note
+
+/**
+ * The treasurer's note seed-coop writes on one transparency month (overhaul D6.1): money's revenue
+ * month when it is a `YYYY-MM` (it has ledger activity, so `/transparency` lists it), else the UTC
+ * month of `now`. Public text with no personal data, marked as seed data.
+ */
+export function transparencyNotePlan(now: Date, revenuePeriod: string | null): { month: string; body: string } {
+  const month =
+    revenuePeriod !== null && /^\d{4}-(0[1-9]|1[0-2])$/.test(revenuePeriod)
+      ? revenuePeriod
+      : now.toISOString().slice(0, 7);
+  return {
+    month,
+    body: "Seed data: the treasurer's note on this month's books, for example how a gap between costs and the co-op's share is covered.",
+  };
+}

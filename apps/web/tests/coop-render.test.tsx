@@ -852,8 +852,9 @@ describe("/admin/coop and /transparency", () => {
         attrs(g, ["data-proposal-id", "data-status", "data-kind", "data-passed", "data-month"]),
       ),
     ).toEqual([
-      ["pa", "applied", "ordinary", "true", "2026-10"],
+      // The most recent decision first (D6.1: capped at 10, then "All decisions").
       ["pb", "rejected", "protected", "false", "2026-10"],
+      ["pa", "applied", "ordinary", "true", "2026-10"],
     ]);
     expect(attrs(one("transparency-patronage"), ["data-month", "data-cents"])).toEqual(["2026-10", "9000"]);
   });

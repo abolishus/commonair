@@ -9,8 +9,8 @@
  *   (live) or About (offline); from `lg` (1440 px) both show side by side;
  * - exactly one `follow-button` on the live and the offline page at 375 and 1440 px;
  * - the owner's Stream manager and Edit channel, a moderator's or editor's Mod view, nobody else's;
- * - the neutral trust mark from `Channel.ownerCoop`, and "Verified viewers" (the "How we count"
- *   link waits for an explainer page);
+ * - the neutral trust mark from `Channel.ownerCoop`, and "Verified viewers" with its "How we count"
+ *   link to `/transparency#how-we-count`;
  * - the portability switch is no longer on the page (d4-follow puts it in the Following menu).
  *
  * happy-dom has no layout engine, so "visible at a width" reads the responsive classes the page
@@ -485,13 +485,14 @@ describe("verified viewers (D4.7)", () => {
   it("live: Verified viewers, beside the count from lg and in About below it", async () => {
     renderPage(page({ live: true, viewers: 12 }));
     const note = await screen.findByTestId("channel-verified-viewers");
-    expect(note.textContent).toBe("Verified viewers");
-    // No "How we count" link until a page explains verified-viewer counting (never the verifier).
-    expect(note.querySelector("a")).toBeNull();
+    expect(note.querySelector('[data-slot="verified-label"]')?.textContent).toBe("Verified viewers");
+    // "How we count" opens the transparency page's explainer (D6.1), never the verifier.
+    const link = note.querySelector("a");
+    expect([link?.textContent, link?.getAttribute("href")]).toEqual(["How we count", "/transparency#how-we-count"]);
     expect([shownAt(note, 375), shownAt(note, 1440)]).toEqual([false, true]);
     const mobile = screen.getByTestId("channel-verified-viewers-mobile");
-    expect(mobile.textContent).toBe("Verified viewers");
-    expect(mobile.querySelector("a")).toBeNull();
+    expect(mobile.querySelector('[data-slot="verified-label"]')?.textContent).toBe("Verified viewers");
+    expect(mobile.querySelector("a")?.getAttribute("href")).toBe("/transparency#how-we-count");
   });
 
   it("just started (no count shown) or offline: no note", async () => {

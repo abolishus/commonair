@@ -168,6 +168,25 @@ export const E4B_TEST_IDS = {
   transparencyEmpty: "transparency-empty",
 } as const;
 
+/** Overhaul D6.1: transparency v2 on `/transparency` (apps/web/tests/d6-transparency.test.tsx renders each). */
+export const D6_TRANSPARENCY_TEST_IDS = {
+  transparencyNumbers: "transparency-numbers",
+  transparencyFeePromise: "transparency-fee-promise",
+  transparencyFeeCompareRow: "transparency-fee-compare-row",
+  transparencySpending: "transparency-spending",
+  transparencyDeficit: "transparency-deficit",
+  transparencyDeficitNote: "transparency-deficit-note",
+  transparencyTreasurerNote: "transparency-treasurer-note",
+  transparencyCommitments: "transparency-commitments",
+  transparencyMonthCard: "transparency-month-card",
+  transparencyAllDecisions: "transparency-all-decisions",
+  transparencyLoadError: "transparency-load-error",
+  transparencyHowWeCount: "transparency-how-we-count",
+  transparencyNoteEditor: "transparency-note-editor",
+  transparencyNoteBody: "transparency-note-body",
+  transparencyNoteSave: "transparency-note-save",
+} as const;
+
 /** Ids the E4b document names inside another element's description (dialog parts, toggle items). */
 export const E4B_NESTED_TEST_IDS = {
   supportGiftRecipientRandom: "support-gift-recipient-random",
