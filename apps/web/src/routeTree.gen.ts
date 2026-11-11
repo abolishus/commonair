@@ -51,6 +51,7 @@ import { Route as AdminAdminCoopRouteImport } from './routes/_admin/admin.coop'
 import { Route as AdminAdminDmcaRouteImport } from './routes/_admin/admin.dmca'
 import { Route as AdminAdminEgressRouteImport } from './routes/_admin/admin.egress'
 import { Route as AdminAdminFederationRouteImport } from './routes/_admin/admin.federation'
+import { Route as AdminAdminGrowthRouteImport } from './routes/_admin/admin.growth'
 import { Route as AdminAdminIncidentsRouteImport } from './routes/_admin/admin.incidents'
 import { Route as AdminAdminIntegrityRouteImport } from './routes/_admin/admin.integrity'
 import { Route as AdminAdminLegalRouteImport } from './routes/_admin/admin.legal'
@@ -296,6 +297,11 @@ const AdminAdminFederationRoute = AdminAdminFederationRouteImport.update({
   path: '/admin/federation',
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminAdminGrowthRoute = AdminAdminGrowthRouteImport.update({
+  id: '/admin/growth',
+  path: '/admin/growth',
+  getParentRoute: () => AdminRoute,
+} as any)
 const AdminAdminIncidentsRoute = AdminAdminIncidentsRouteImport.update({
   id: '/admin/incidents',
   path: '/admin/incidents',
@@ -528,6 +534,7 @@ export interface FileRoutesByFullPath {
   '/admin/dmca': typeof AdminAdminDmcaRoute
   '/admin/egress': typeof AdminAdminEgressRoute
   '/admin/federation': typeof AdminAdminFederationRoute
+  '/admin/growth': typeof AdminAdminGrowthRoute
   '/admin/incidents': typeof AdminAdminIncidentsRoute
   '/admin/integrity': typeof AdminAdminIntegrityRoute
   '/admin/legal': typeof AdminAdminLegalRoute
@@ -605,6 +612,7 @@ export interface FileRoutesByTo {
   '/admin/dmca': typeof AdminAdminDmcaRoute
   '/admin/egress': typeof AdminAdminEgressRoute
   '/admin/federation': typeof AdminAdminFederationRoute
+  '/admin/growth': typeof AdminAdminGrowthRoute
   '/admin/incidents': typeof AdminAdminIncidentsRoute
   '/admin/integrity': typeof AdminAdminIntegrityRoute
   '/admin/legal': typeof AdminAdminLegalRoute
@@ -687,6 +695,7 @@ export interface FileRoutesById {
   '/_admin/admin/dmca': typeof AdminAdminDmcaRoute
   '/_admin/admin/egress': typeof AdminAdminEgressRoute
   '/_admin/admin/federation': typeof AdminAdminFederationRoute
+  '/_admin/admin/growth': typeof AdminAdminGrowthRoute
   '/_admin/admin/incidents': typeof AdminAdminIncidentsRoute
   '/_admin/admin/integrity': typeof AdminAdminIntegrityRoute
   '/_admin/admin/legal': typeof AdminAdminLegalRoute
@@ -767,6 +776,7 @@ export interface FileRouteTypes {
     | '/admin/dmca'
     | '/admin/egress'
     | '/admin/federation'
+    | '/admin/growth'
     | '/admin/incidents'
     | '/admin/integrity'
     | '/admin/legal'
@@ -844,6 +854,7 @@ export interface FileRouteTypes {
     | '/admin/dmca'
     | '/admin/egress'
     | '/admin/federation'
+    | '/admin/growth'
     | '/admin/incidents'
     | '/admin/integrity'
     | '/admin/legal'
@@ -925,6 +936,7 @@ export interface FileRouteTypes {
     | '/_admin/admin/dmca'
     | '/_admin/admin/egress'
     | '/_admin/admin/federation'
+    | '/_admin/admin/growth'
     | '/_admin/admin/incidents'
     | '/_admin/admin/integrity'
     | '/_admin/admin/legal'
@@ -1270,6 +1282,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminAdminFederationRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/_admin/admin/growth': {
+      id: '/_admin/admin/growth'
+      path: '/admin/growth'
+      fullPath: '/admin/growth'
+      preLoaderRoute: typeof AdminAdminGrowthRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/_admin/admin/incidents': {
       id: '/_admin/admin/incidents'
       path: '/admin/incidents'
@@ -1540,6 +1559,7 @@ interface AdminRouteChildren {
   AdminAdminDmcaRoute: typeof AdminAdminDmcaRoute
   AdminAdminEgressRoute: typeof AdminAdminEgressRoute
   AdminAdminFederationRoute: typeof AdminAdminFederationRoute
+  AdminAdminGrowthRoute: typeof AdminAdminGrowthRoute
   AdminAdminIncidentsRoute: typeof AdminAdminIncidentsRoute
   AdminAdminIntegrityRoute: typeof AdminAdminIntegrityRoute
   AdminAdminLegalRoute: typeof AdminAdminLegalRoute
@@ -1554,6 +1574,7 @@ const AdminRouteChildren: AdminRouteChildren = {
   AdminAdminDmcaRoute: AdminAdminDmcaRoute,
   AdminAdminEgressRoute: AdminAdminEgressRoute,
   AdminAdminFederationRoute: AdminAdminFederationRoute,
+  AdminAdminGrowthRoute: AdminAdminGrowthRoute,
   AdminAdminIncidentsRoute: AdminAdminIncidentsRoute,
   AdminAdminIntegrityRoute: AdminAdminIntegrityRoute,
   AdminAdminLegalRoute: AdminAdminLegalRoute,

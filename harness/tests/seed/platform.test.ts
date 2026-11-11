@@ -117,8 +117,10 @@ describe("seed-platform unit", () => {
     // coop: the proposal notifications link its proposals.
     expect(unit.after).toEqual(["social", "media", "safety", "coop"]);
     expect(unit.pending).toEqual([]);
-    expect(unit.tables).toHaveLength(21);
+    expect(unit.tables).toHaveLength(23);
     expect(unit.tables).toContain("federation_actor_keys");
+    expect(unit.tables).toContain("ui_counters");
+    expect(unit.tables).toContain("growth_daily");
     expect(unit.tables).toContain("portability_signing_keys");
   });
 

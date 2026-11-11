@@ -10,6 +10,7 @@ import * as React from "react";
 import { FormError } from "../../components/form-error.tsx";
 import { TransparencyReport } from "../../components/money/transparency.tsx";
 import { EnforcementReport } from "../../components/transparency/enforcement-report.tsx";
+import { GrowthNumbers } from "../../components/transparency/growth-numbers.tsx";
 import { JuryResults } from "../../components/transparency/jury-results.tsx";
 import { useLoad } from "../../components/money/use-load.ts";
 import { t } from "../../i18n/index.ts";
@@ -17,7 +18,7 @@ import { api } from "../../lib/api.ts";
 import { parseTransparencyPeriod, transparencyPeriodOptions, type TransparencyPeriod } from "../../lib/money.ts";
 import { titleHead } from "../../lib/page-title.ts";
 
-/** Public: the co-op's books by month, from the ledger, the open enforcement report (ADR 0019) and the advisory jury's results (ADR 0038). */
+/** Public: the co-op's books by month, from the ledger, accounts, members and active streamers by month (D2.8), the open enforcement report (ADR 0019) and the advisory jury's results (ADR 0038). */
 export const Route = createFileRoute("/_app/transparency")({
   head: () => titleHead(t("pageTitle.transparency")),
   component: TransparencyPage,
@@ -58,6 +59,7 @@ function TransparencyPage(): React.JSX.Element {
           </SkeletonGroup>
         )
       )}
+      <GrowthNumbers />
       <EnforcementReport />
       <JuryResults />
     </PageContainer>

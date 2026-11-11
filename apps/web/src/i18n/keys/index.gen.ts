@@ -12,6 +12,7 @@ import type { Key as D2Channel } from "./d2-channel.gen.ts";
 import type { Key as D2Chat } from "./d2-chat.gen.ts";
 import type { Key as D2Gate } from "./d2-gate.gen.ts";
 import type { Key as D2Membership } from "./d2-membership.gen.ts";
+import type { Key as D2Metrics } from "./d2-metrics.gen.ts";
 import type { Key as D2Pages } from "./d2-pages.gen.ts";
 import type { Key as D2Player } from "./d2-player.gen.ts";
 import type { Key as D3Watch } from "./d3-watch.gen.ts";
@@ -81,6 +82,7 @@ export type MessageKey =
   | D2Chat
   | D2Gate
   | D2Membership
+  | D2Metrics
   | D2Pages
   | D2Player
   | D3Watch
@@ -149,6 +151,7 @@ export const NAMESPACES = [
   "d2-chat",
   "d2-gate",
   "d2-membership",
+  "d2-metrics",
   "d2-pages",
   "d2-player",
   "d3-watch",
