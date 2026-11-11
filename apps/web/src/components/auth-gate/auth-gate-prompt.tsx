@@ -235,7 +235,7 @@ export function AuthGatePrompt({
         side={side}
         align={align}
         sideOffset={8}
-        className="relative w-80 max-w-[calc(100vw-2rem)] gap-3 p-4 motion-reduce:animate-none"
+        className="relative w-80 max-w-viewport-4 gap-3 p-4 motion-reduce:animate-none"
       >
         <IconButton
           data-testid="auth-gate-close"

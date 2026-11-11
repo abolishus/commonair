@@ -9,6 +9,7 @@ import {
   SkeletonGroup,
   formatMoney,
   formatNumber,
+  formatPercent,
   useLocale,
 } from "@commonair/ui";
 import {
@@ -371,7 +372,7 @@ export function pitchFacts(settings: readonly Pick<SettingDto, "key" | "value">[
 
 /** A share (0 to 1) as a percentage in `locale`: 0.9 → "90%", 2/3 → "66.7%". */
 export function formatShare(share: number, locale: string): string {
-  return new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: 1 }).format(share);
+  return formatPercent(share, locale, { maximumFractionDigits: 1 });
 }
 
 /** Whether `view` holds any active membership (members keep the full page; others see the pitch). */
@@ -444,7 +445,7 @@ export function PitchHero({
     <section
       data-testid="membership-pitch-hero"
       aria-labelledby="membership-pitch-title"
-      className="grid gap-6 rounded-xl border border-border bg-card p-6 md:p-10 lg:grid-cols-[3fr_2fr]"
+      className="grid gap-6 rounded-xl border border-border bg-card p-6 md:p-10 lg:grid-cols-pitch-split"
     >
       <div className="flex min-w-0 flex-col gap-4">
         <p className="text-sm font-medium text-brand-text">{t("d2Membership.pitch.eyebrow", { site: siteName })}</p>
@@ -474,7 +475,7 @@ export function PitchHero({
           <dl
             data-testid="membership-pitch-stats"
             aria-label={t("d2Membership.pitch.stats.label")}
-            className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-3"
+            className="grid grid-cols-stats gap-3"
           >
             {total !== null && (
               <Stat

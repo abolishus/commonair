@@ -109,7 +109,7 @@ function MdInlines({ nodes }: { nodes: readonly MdInline[] }): React.JSX.Element
             );
           case "code":
             return (
-              <code key={i} className="bg-muted px-1 font-mono text-[0.9em]">
+              <code key={i} className="bg-muted px-1 font-mono">
                 {n.text}
               </code>
             );

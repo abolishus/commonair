@@ -174,7 +174,7 @@ function OfflineFollowHero({
       data-state={state}
       data-accent={channel.accent ?? undefined}
       aria-labelledby={headingId}
-      className="grid min-w-0 grid-cols-1 gap-0 bg-card ring-1 ring-foreground/10 md:grid-cols-[minmax(0,62fr)_minmax(0,38fr)]"
+      className="grid min-w-0 grid-cols-1 gap-0 bg-card ring-1 ring-foreground/10 md:grid-cols-hero-split"
     >
       {latest ? (
         <Link

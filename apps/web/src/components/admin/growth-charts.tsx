@@ -23,13 +23,16 @@ export function flooredText(value: number | null, locale: string): string {
  * values (a null breaks the line), scaled to the series' own maximum. A single known point draws
  * a short flat stroke so it stays visible.
  */
+/** SVG coordinates to two decimals (path data, not display text). */
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
 export function sparkSegments(values: readonly (number | null)[], width = 100, height = 24): string[] {
   const known = values.filter((v): v is number => v !== null);
   if (known.length === 0) return [];
   const max = Math.max(...known, 1);
   const step = values.length > 1 ? width / (values.length - 1) : width;
-  const y = (v: number) => Number((height - 1 - (v / max) * (height - 2)).toFixed(2));
-  const x = (i: number) => Number((i * step).toFixed(2));
+  const y = (v: number) => round2(height - 1 - (v / max) * (height - 2));
+  const x = (i: number) => round2(i * step);
   const out: string[] = [];
   let run: string[] = [];
   values.forEach((v, i) => {

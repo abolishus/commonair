@@ -146,8 +146,6 @@ const REM = 16;
 const TAB_BAR_PX = TAB_BAR_HEIGHT; // `BottomTabBar`'s `h-14`, checked against its source below
 
 function remOf(utility: string): number {
-  const calc = /\[calc\(([\d.]+)rem/.exec(utility);
-  if (calc) return Number(calc[1]);
   const step = /-(\d+(?:\.\d+)?)$/.exec(utility);
   return step ? Number(step[1]) / 4 : Number.NaN;
 }
@@ -182,8 +180,8 @@ describe("where the banner sits", () => {
     expect(source).toMatch(/fixed inset-x-0 bottom-0 z-30 .*md:hidden/);
   });
 
-  const GUTTER = "bottom-[calc(1rem_+_env(safe-area-inset-bottom))]";
-  const ABOVE_BAR = "bottom-[calc(4.5rem_+_env(safe-area-inset-bottom))]";
+  const GUTTER = "bottom-safe-gutter";
+  const ABOVE_BAR = "bottom-safe-tab-bar";
   const VIEWPORTS = [
     { width: 320, insetX: "inset-x-4", end: undefined, w: undefined, browseBottom: ABOVE_BAR, settingsBottom: GUTTER },
     { width: 375, insetX: "inset-x-4", end: undefined, w: undefined, browseBottom: ABOVE_BAR, settingsBottom: GUTTER },
@@ -213,8 +211,8 @@ describe("where the banner sits", () => {
       return { left: gutter, right: width - gutter };
     }
     const w = remOf(winner(utilities, (u) => u.startsWith("w-")) ?? "") * REM;
-    // `max-w-[calc(100vw_-_3rem)]` caps the card at the viewport less both 24 px offsets.
-    const capped = utilities.includes("max-w-[calc(100vw_-_3rem)]") ? Math.min(w, width - 3 * REM) : w;
+    // `max-w-viewport-6` (styles.css) caps the card at the viewport less both 24 px offsets.
+    const capped = utilities.includes("max-w-viewport-6") ? Math.min(w, width - 3 * REM) : w;
     const end = remOf(winner(utilities, (u) => u.startsWith("end-")) ?? "") * REM;
     return { left: width - end - capped, right: width - end };
   }
@@ -267,8 +265,16 @@ describe("where the banner sits", () => {
 
   it("sits a full gutter above the tab bar's 56 px", () => {
     // The bar and the sheet both stand on the same safe-area inset, so the rem part is the gap.
-    expect(remOf(ABOVE_BAR) * REM).toBe(TAB_BAR_PX + 16);
-    expect(remOf(GUTTER) * REM).toBe(16);
+    // Both are named utilities in styles.css (the source policy bans arbitrary calc() values).
+    const css = readFileSync(join(import.meta.dirname, "../src/styles.css"), "utf8");
+    const bottomRem = (utility: string) => {
+      const m = new RegExp(
+        `@utility ${utility} \\{\\s*bottom: calc\\(([\\d.]+)rem \\+ env\\(safe-area-inset-bottom\\)\\);`,
+      ).exec(css);
+      return m ? Number(m[1]) : Number.NaN;
+    };
+    expect(bottomRem(ABOVE_BAR) * REM).toBe(TAB_BAR_PX + 16);
+    expect(bottomRem(GUTTER) * REM).toBe(16);
   });
 });
 

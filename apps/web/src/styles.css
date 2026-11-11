@@ -31,3 +31,53 @@ altcha-widget {
   --altcha-spinner-color: var(--primary);
   --altcha-max-width: 100%;
 }
+
+/*
+ * Named layout utilities for values the source policy bans as arbitrary Tailwind values
+ * (tests/source-policy.test.ts). Layered like any utility, so `md:` and friends still apply.
+ */
+
+/* Above the bottom safe-area inset: the 16 px gutter, or the 56 px tab bar plus that gutter. */
+@utility bottom-safe-gutter {
+  bottom: calc(1rem + env(safe-area-inset-bottom));
+}
+@utility bottom-safe-tab-bar {
+  bottom: calc(4.5rem + env(safe-area-inset-bottom));
+}
+/* A floating sheet keeps most of a short phone's screen. */
+@utility max-h-sheet {
+  max-height: 60dvh;
+}
+/* The viewport less a gutter on each side: 16 px (popovers) or 24 px (the floating banner). */
+@utility max-w-viewport-4 {
+  max-width: calc(100vw - 2rem);
+}
+@utility max-w-viewport-6 {
+  max-width: calc(100vw - 3rem);
+}
+/* Content and a trailing action column. */
+@utility grid-cols-fill-auto {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+/* The offline channel hero: latest video and the follow column, 62/38. */
+@utility grid-cols-hero-split {
+  grid-template-columns: minmax(0, 62fr) minmax(0, 38fr);
+}
+/* The membership pitch: copy and the stats card, 3/2. */
+@utility grid-cols-pitch-split {
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+}
+/* Three stats in a row from 420 px, stacked below. */
+@utility grid-cols-stats {
+  grid-template-columns: minmax(0, 1fr);
+  @media (width >= 26.25rem) {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+/* An optional inline item that only fits from 480 px. */
+@utility inline-flex-from-xs {
+  display: none;
+  @media (width >= 30rem) {
+    display: inline-flex;
+  }
+}

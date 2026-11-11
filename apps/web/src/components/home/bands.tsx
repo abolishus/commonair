@@ -106,7 +106,7 @@ export function StreamBand({ site, creatorShare }: { site: string; creatorShare:
     <section
       data-testid="home-stream-band"
       aria-labelledby="home-stream-title"
-      className="relative grid min-w-0 gap-4 overflow-hidden bg-muted/40 px-6 py-8 ring-1 ring-border md:grid-cols-[1fr_auto] md:items-center md:p-10"
+      className="relative grid min-w-0 gap-4 overflow-hidden bg-muted/40 px-6 py-8 ring-1 ring-border md:grid-cols-fill-auto md:items-center md:p-10"
     >
       <Arcs className="pointer-events-none absolute -end-12 top-1/2 hidden w-48 -translate-y-1/2 text-muted-foreground opacity-10 md:block" />
       <div className="relative flex min-w-0 flex-col gap-2">

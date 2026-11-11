@@ -90,7 +90,7 @@ export function IntentConfirm({
         side="bottom"
         align="start"
         sideOffset={8}
-        className="w-80 max-w-[calc(100vw-2rem)] gap-3 p-4 motion-reduce:animate-none"
+        className="w-80 max-w-viewport-4 gap-3 p-4 motion-reduce:animate-none"
       >
         <PopoverDescription className="text-sm/relaxed text-foreground">
           <output>{message}</output>

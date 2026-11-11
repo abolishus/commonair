@@ -26,15 +26,15 @@ export function bannerLayout(pathname: string): BannerLayout {
 
 // The tab bar is 56 px (`h-14`) plus the bottom safe-area inset (`BottomTabBar`); the sheet keeps
 // the 16 px gutter above it, or above the inset where there is no bar. From `md` the bar is gone.
-const BOTTOM_CLEAR = "bottom-[calc(1rem_+_env(safe-area-inset-bottom))]";
-const BOTTOM_ABOVE_TAB_BAR = "bottom-[calc(4.5rem_+_env(safe-area-inset-bottom))]";
+const BOTTOM_CLEAR = "bottom-safe-gutter";
+const BOTTOM_ABOVE_TAB_BAR = "bottom-safe-tab-bar";
 
 /**
  * Over the bottom tab bar (`z-30`), under dialogs and sheets (`z-50`). The height is capped so
  * a short phone keeps most of the page; the card scrolls inside itself if it must.
  */
 const FLOATING =
-  "fixed inset-x-4 z-40 max-h-[60dvh] overflow-y-auto md:inset-x-auto md:end-6 md:bottom-6 md:w-96 md:max-w-[calc(100vw_-_3rem)]";
+  "fixed inset-x-4 z-40 max-h-sheet overflow-y-auto md:inset-x-auto md:end-6 md:bottom-6 md:w-96 md:max-w-viewport-6";
 const INLINE = "relative z-20 mx-4 mt-4 lg:mx-auto lg:max-w-3xl";
 
 /** The position classes for a layout (the surface and motion classes are the banner's own). */

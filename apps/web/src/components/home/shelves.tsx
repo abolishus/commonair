@@ -19,6 +19,7 @@ import {
 import { CardGrid, MediaCard } from "@commonair/ui/blocks/media";
 import { Section } from "@commonair/ui/blocks/headers";
 import { Button } from "@commonair/ui/components/button";
+import { Progress } from "@commonair/ui/components/progress";
 import { toast } from "@commonair/ui/toast";
 import { ArrowRight01Icon, Cancel01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -221,13 +222,12 @@ function ContinueWatchingRow({
               render={<Link to="/$channel/vods/$vodId" params={{ channel: point.channelSlug, vodId: point.vodId }} />}
             />
             <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 block aspect-video">
-              <span className="absolute inset-x-0 bottom-0 block h-1 bg-foreground/20">
-                <span
-                  data-testid="home-continue-progress"
-                  className="block h-full bg-brand"
-                  style={{ width: `${Math.round(watchedShare(point) * 100)}%` }}
-                />
-              </span>
+              <Progress
+                value={Math.round(watchedShare(point) * 100)}
+                data-testid="home-continue-progress"
+                data-percent={Math.round(watchedShare(point) * 100)}
+                className="absolute inset-x-0 bottom-0"
+              />
             </span>
             <IconButton
               data-testid="home-continue-remove"

@@ -158,7 +158,7 @@ function PromiseStrip({ coop, share }: { coop: CoopProof | null; share: string |
               data-promise={item.key}
               className={
                 item.optional
-                  ? "hidden items-center gap-1.5 text-muted-foreground min-[480px]:inline-flex"
+                  ? "inline-flex-from-xs items-center gap-1.5 text-muted-foreground"
                   : "inline-flex items-center gap-1.5 font-medium"
               }
             >

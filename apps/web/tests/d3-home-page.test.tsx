@@ -109,9 +109,9 @@ describe("signed out at 9 live", () => {
     expect(earned.textContent).toContain("$4,294.80");
     expect(earned.textContent).toContain("earned by creators in");
     expect(earned.textContent).not.toMatch(/paid/i);
-    // The optional items hide below 480 px; the owned and share items always show.
-    expect(strip.querySelector('[data-promise="fees"]')?.className).toContain("hidden");
-    expect(strip.querySelector('[data-promise="share"]')?.className).not.toContain("hidden");
+    // The optional items hide below 480 px (`inline-flex-from-xs`, styles.css); the owned and share items always show.
+    expect(strip.querySelector('[data-promise="fees"]')?.className).toContain("inline-flex-from-xs");
+    expect(strip.querySelector('[data-promise="share"]')?.className).not.toContain("inline-flex-from-xs");
   });
 
   it("counts the hero, each shelf, the bands and the CTA click", async () => {
@@ -271,7 +271,7 @@ describe("Continue watching", () => {
     expect(items[0]?.querySelector('a[href="/aurora/vods/r1"]')).not.toBeNull();
     expect(items[0]?.textContent).toContain("2:30 of 10:00");
     const progress = items[0]?.querySelector<HTMLElement>('[data-testid="home-continue-progress"]');
-    expect(progress?.style.width).toBe("25%");
+    expect(progress?.getAttribute("data-percent")).toBe("25");
     expect(tracked.calls).toContain("home.shelf|view|continue");
     fireEvent.click(
       within(items[0] as HTMLElement).getByRole("button", { name: t("d3Home.continue.remove", { title: "r1 title" }) }),
