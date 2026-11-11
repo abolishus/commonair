@@ -137,7 +137,4 @@ export type Key =
   | "d5Dashboard.member.title"
   | "d5Dashboard.member.body"
   | "d5Dashboard.member.action"
-  | "d5Dashboard.member.dismiss"
-  | "d5Dashboard.step.get_paid.title"
-  | "d5Dashboard.step.get_paid.hint"
-  | "d5Dashboard.step.get_paid.summary";
+  | "d5Dashboard.member.dismiss";

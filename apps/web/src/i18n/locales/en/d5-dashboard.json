@@ -132,8 +132,5 @@
   "d5Dashboard.member.title": "You're a member-owner now",
   "d5Dashboard.member.body": "Your streaming hours made you a member of the co-op. You can vote on proposals and stand for the council.",
   "d5Dashboard.member.action": "See what's open for a vote",
-  "d5Dashboard.member.dismiss": "Got it",
-  "d5Dashboard.step.get_paid.title": "Get paid",
-  "d5Dashboard.step.get_paid.hint": "Add your payout details so your earnings can reach you.",
-  "d5Dashboard.step.get_paid.summary": "Your payout details are set up."
+  "d5Dashboard.member.dismiss": "Got it"
 }

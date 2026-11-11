@@ -40,7 +40,6 @@
   "dmca.error.signature": "Sign the notice by typing your full name.",
   "dmca.error.rejected": "The notice could not be accepted. Check the fields and try again.",
   "dmca.error.failed": "The notice wasn't sent. Try again.",
-  "copyright.title": "Copyright notices",
   "copyright.intro": "Copyright (DMCA) notices about your content. If material was removed by mistake or misidentification, you can send a counter-notice.",
   "copyright.loading": "Loading copyright notices",
   "copyright.loadFailed": "Your copyright notices didn't load.",

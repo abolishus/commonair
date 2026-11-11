@@ -132,8 +132,5 @@
   "d5Dashboard.member.title": "Ahora eres socio-propietario",
   "d5Dashboard.member.body": "Tus horas de transmisión te han hecho socio de la cooperativa. Puedes votar propuestas y presentarte al consejo.",
   "d5Dashboard.member.action": "Ver qué está abierto a votación",
-  "d5Dashboard.member.dismiss": "Entendido",
-  "d5Dashboard.step.get_paid.title": "Cobra",
-  "d5Dashboard.step.get_paid.hint": "Agrega tus datos de pago para que tus ganancias te lleguen.",
-  "d5Dashboard.step.get_paid.summary": "Tus datos de pago están listos."
+  "d5Dashboard.member.dismiss": "Entendido"
 }

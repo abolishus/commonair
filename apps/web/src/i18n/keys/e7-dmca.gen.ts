@@ -45,7 +45,6 @@ export type Key =
   | "dmca.error.signature"
   | "dmca.error.rejected"
   | "dmca.error.failed"
-  | "copyright.title"
   | "copyright.intro"
   | "copyright.loading"
   | "copyright.loadFailed"

@@ -1,5 +1,4 @@
 {
-  "nav.appeals": "Apelaciones",
   "nav.moderation": "Moderación",
   "nav.appealQueue": "Cola de apelaciones",
   "nav.legal": "Legal",
@@ -74,7 +73,6 @@
   "safety.takedown.receipt.body": "Alguien del equipo de moderación la revisará. Si es válida, retiramos el contenido e impedimos que se vuelva a subir.",
   "safety.takedown.receipt.deadline": "Actuaremos a más tardar",
   "safety.takedown.receipt.reference": "Referencia: {id}",
-  "safety.appeals.title": "Apelaciones",
   "safety.appeals.intro": "Decisiones sobre tu cuenta o tu canal que nos pediste revisar de nuevo.",
   "safety.appeals.empty": "No hay apelaciones",
   "safety.appeals.emptyHint": "Si tomamos alguna medida sobre tu canal, puedes apelarla aquí.",

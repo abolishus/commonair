@@ -80,7 +80,6 @@
   "oauth.device.approvedBody": "Return to your device. It will finish signing in by itself.",
   "oauth.device.denied": "Device not connected",
   "oauth.device.deniedBody": "The device was refused and cannot use your account.",
-  "oauth.connections.pageTitle": "Connections",
   "oauth.connections.intro": "Apps and bots you have allowed to use your account.",
   "oauth.connections.introWithCount": "Apps and bots you have allowed to use your account. {count, plural, one {# app} other {# apps}}.",
   "oauth.connections.loading": "Loading your connections",

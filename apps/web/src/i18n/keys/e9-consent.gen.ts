@@ -85,7 +85,6 @@ export type Key =
   | "oauth.device.approvedBody"
   | "oauth.device.denied"
   | "oauth.device.deniedBody"
-  | "oauth.connections.pageTitle"
   | "oauth.connections.intro"
   | "oauth.connections.introWithCount"
   | "oauth.connections.loading"

@@ -1,5 +1,4 @@
 {
-  "nav.appeals": "Appeals",
   "nav.moderation": "Moderation",
   "nav.appealQueue": "Appeals queue",
   "nav.legal": "Legal",
@@ -74,7 +73,6 @@
   "safety.takedown.receipt.body": "A moderator will review it. If it is valid we remove the content and keep it from being uploaded again.",
   "safety.takedown.receipt.deadline": "We will act on it by",
   "safety.takedown.receipt.reference": "Reference: {id}",
-  "safety.appeals.title": "Appeals",
   "safety.appeals.intro": "Decisions about your account or channel that you asked us to look at again.",
   "safety.appeals.empty": "No appeals",
   "safety.appeals.emptyHint": "If we take action on your channel, you can appeal it here.",

@@ -40,7 +40,6 @@
   "dmca.error.signature": "Firma el aviso escribiendo tu nombre completo.",
   "dmca.error.rejected": "No se pudo aceptar el aviso. Revisa los campos e inténtalo de nuevo.",
   "dmca.error.failed": "No se pudo enviar el aviso. Inténtalo de nuevo.",
-  "copyright.title": "Avisos de derechos de autor",
   "copyright.intro": "Avisos de derechos de autor (DMCA) sobre tu contenido. Si se retiró material por error o por una identificación equivocada, puedes enviar un contraaviso.",
   "copyright.loading": "Cargando avisos de derechos de autor",
   "copyright.loadFailed": "No se pudieron cargar tus avisos de derechos de autor.",

@@ -80,7 +80,6 @@
   "oauth.device.approvedBody": "Vuelve a tu dispositivo. Terminará de iniciar sesión por sí solo.",
   "oauth.device.denied": "Dispositivo no conectado",
   "oauth.device.deniedBody": "Se rechazó el dispositivo y no puede usar tu cuenta.",
-  "oauth.connections.pageTitle": "Conexiones",
   "oauth.connections.intro": "Aplicaciones y bots a los que permitiste usar tu cuenta.",
   "oauth.connections.introWithCount": "Aplicaciones y bots a los que permitiste usar tu cuenta. {count, plural, one {# aplicación} other {# aplicaciones}}.",
   "oauth.connections.loading": "Cargando tus conexiones",

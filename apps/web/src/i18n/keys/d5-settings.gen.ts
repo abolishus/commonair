@@ -5,15 +5,10 @@
 
 export type Key =
   | "settings.title"
-  | "settings.nav.label"
-  | "settings.nav.select"
   | "settings.list.loadMore"
   | "settings.list.noMatch"
   | "settings.list.noMatchHint"
   | "settings.list.searchLoaded"
-  | "settings.privacy.accountTitle"
-  | "settings.privacy.accountIntro"
-  | "settings.preferences.intro"
   | "settings.notifications.bell"
   | "settings.notifications.search"
   | "settings.grants.search"
