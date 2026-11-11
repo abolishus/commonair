@@ -228,6 +228,7 @@ describe("toCategory", () => {
       liveChannels: 3,
       viewerCount: 40,
       tags: ["a"],
+      videoCount: 0,
     });
     expect(toCategory(deps, { ...row, boxArtKey: "boxart/art.webp" }, 0, { viewerCount: 0, tags: [] }).boxArtUrl).toBe(
       `${BASE}/boxart/art.webp`,

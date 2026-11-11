@@ -162,7 +162,7 @@ describe("planPlatform", () => {
 
   test("the largest preset's counts, computed without writing", () => {
     const l = platformCounts(SEED_SCALES.large);
-    expect(l.inboxPerType * NOTIFICATION_TYPES.length).toBe(816);
+    expect(l.inboxPerType).toBe(102);
     expect(l.bulkPreferenceUsers).toBe(1_000);
     expect(l.appsPerBulkOwner).toBe(OAUTH_LIMITS.appsPerUser);
     expect(l.testEvents).toBe(12);

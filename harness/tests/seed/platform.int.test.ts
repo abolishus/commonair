@@ -8,6 +8,7 @@
  * satisfy their constraints and point only at local hosts. The API-driven steps (apps, grants,
  * EventSub, push, federation, imports) are exercised by `seed full` live.
  */
+import { NOTIFICATION_TYPES } from "@commonair/contracts/enums";
 import { NOTIFY_SECRET_PURPOSES } from "@commonair/contracts/notify";
 import { normalizeUserCode } from "@commonair/contracts/oauth";
 import { schema, uuidv7 } from "@commonair/db";
@@ -189,7 +190,7 @@ describe("direct-insert writers", () => {
   test("viewer1's inbox: every type, read and unread, none predating the account", async () => {
     const rows = await t.app.db.select().from(schema.notifications);
     const v1 = rows.filter((n) => n.userId === ids.get("viewer1"));
-    expect(new Set(v1.map((n) => n.type)).size).toBe(8);
+    expect(new Set(v1.map((n) => n.type)).size).toBe(NOTIFICATION_TYPES.length);
     expect(v1.some((n) => n.readAt === null)).toBe(true);
     expect(v1.some((n) => n.readAt !== null)).toBe(true);
     const users = await t.app.db.select().from(schema.users);
