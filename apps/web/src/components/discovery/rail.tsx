@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * The left rail (F7) and its mobile twin in the header's sheet (F18). Signed out it lists the
- * channels live now; signed in, the channels the viewer follows, live first. From `lg` it is
+ * The left rail (F7, rail v2 D3.5) and its mobile twin in the header's sheet (F18). Signed out it
+ * lists the channels live now, then recently live ones, then a sign-up nudge; signed in, the
+ * channels the viewer follows, live first. While loading it draws rows of the real height. From `lg` it is
  * expanded, on `md` it collapses to avatars, and below `md` its sections live in the sheet. The
  * viewer's own collapse choice is remembered for the tab (`tab-storage.ts`).
  */
@@ -28,9 +29,12 @@ import {
   collidingNames,
   displayLabel,
   railSections,
+  type DirectoryHome,
   type RailEntry,
   type RailSection,
 } from "../../lib/directory-sections.ts";
+import { trackUi } from "../../lib/ui-metrics.ts";
+import { SIGNUP_FOLLOW_HREF } from "../following/links.ts";
 import { feedViewer, useHomeFeed } from "./feed.ts";
 import { ownChannelSlug, withoutOwnChannel } from "./own-channel.ts";
 import { RAIL_KEY, readRail, writeTab } from "./tab-storage.ts";
@@ -38,8 +42,43 @@ import { RAIL_KEY, readRail, writeTab } from "./tab-storage.ts";
 /** Expanded by default from here (Tailwind's `lg`); collapsed to avatars below it. */
 export const RAIL_EXPANDED_QUERY = "(min-width: 1024px)";
 
-function sectionLabel(id: RailSection["id"]): string {
-  return id === "followed" ? t("discovery.rail.followed") : t("discovery.rail.liveNow");
+/** A rail group: the followed or live channels (`railSections`), or, signed out, Recently live. */
+export interface RailGroup {
+  id: RailSection["id"] | "recent";
+  entries: RailEntry[];
+}
+
+function sectionLabel(id: RailGroup["id"]): string {
+  switch (id) {
+    case "followed":
+      return t("discovery.rail.followed");
+    case "live":
+      return t("discovery.rail.liveNow");
+    case "recent":
+      return t("d3Home.rail.recent");
+  }
+}
+
+/** Recently live rows on the signed-out rail: fewer when Live now is already long (rail v2, D3.5). */
+export const RAIL_RECENT_LONG = 7;
+export const RAIL_RECENT_SHORT = 4;
+
+/**
+ * Rail v2 (D3.5): signed in, as before (followed, else Live now). Signed out, Live now and then
+ * Recently live, so the rail never ends in grey; no channel twice.
+ */
+export function railGroups(home: DirectoryHome, signedIn: boolean): RailGroup[] {
+  const groups: RailGroup[] = railSections(home, signedIn);
+  if (signedIn) return groups;
+  const shown = new Set(
+    [...home.spotlight, ...home.newAndLive, ...home.live, ...home.following].map((c) => c.channel.id),
+  );
+  const liveRows = groups.find((g) => g.id === "live")?.entries.length ?? 0;
+  const recent = home.recentlyLive
+    .filter((card) => !shown.has(card.channel.id))
+    .slice(0, liveRows > RAIL_RECENT_SHORT ? RAIL_RECENT_SHORT : RAIL_RECENT_LONG)
+    .map((card) => ({ kind: "offline" as const, card }));
+  return recent.length > 0 ? [...groups, { id: "recent", entries: recent }] : groups;
 }
 
 function entryChannel(entry: RailEntry): StreamCard["channel"] {
@@ -50,15 +89,20 @@ function entryCategory(entry: RailEntry): string | null {
   return (entry.kind === "live" ? entry.card.broadcast.category?.name : entry.card.category?.name) ?? null;
 }
 
-/** The rail's sections from the shared feed, with the names that need a `@handle`. */
-function useRail(): { status: "loading" | "ready" | "error"; sections: RailSection[]; collisions: Set<string> } {
+/** The rail's groups from the shared feed, with the names that need a `@handle`. */
+function useRail(): {
+  status: "loading" | "ready" | "error";
+  sections: RailGroup[];
+  collisions: Set<string>;
+  signedIn: boolean;
+} {
   const { me } = useBootstrap();
   const feed = useHomeFeed({ viewer: feedViewer(me) });
   return React.useMemo(() => {
     // F7: never the viewer's own channel (a streamer who follows nobody saw only themselves).
-    const sections = feed.home ? railSections(withoutOwnChannel(feed.home, ownChannelSlug(me)).home, me !== null) : [];
+    const sections = feed.home ? railGroups(withoutOwnChannel(feed.home, ownChannelSlug(me)).home, me !== null) : [];
     const collisions = collidingNames(sections.flatMap((s) => s.entries.map(entryChannel)));
-    return { status: feed.status, sections, collisions };
+    return { status: feed.status, sections, collisions, signedIn: me !== null };
   }, [feed, me]);
 }
 
@@ -119,7 +163,7 @@ function useRailOpenState(): { open: boolean; toggle: () => void } {
 
 /** The rail inside AppShell's sidebar (`sidebarPlacement="below"`); needs its `SidebarProvider`. */
 export function SideRail(): React.JSX.Element {
-  const { status, sections, collisions } = useRail();
+  const { status, sections, collisions, signedIn } = useRail();
   const { open, toggle } = useRailOpenState();
   return (
     <nav
@@ -174,20 +218,66 @@ export function SideRail(): React.JSX.Element {
           </SidebarGroup>
         ))
       )}
+      {status !== "loading" && !signedIn && open && <FollowNudge />}
     </nav>
   );
 }
 
+/** Rows the loading rail draws: the height of a real first screen, so nothing jumps when it fills. */
+export const RAIL_SKELETON_ROWS = 7;
+
+/**
+ * Steady loading rows (rail v2): the same group padding, label height and 48 px rows as the real
+ * list, so the list replaces it in place.
+ */
 function RailSkeleton({ open }: { open: boolean }): React.JSX.Element {
   return (
-    <div aria-hidden className="flex flex-col gap-3 p-2">
-      {Array.from({ length: 6 }, (_, i) => (
-        <div key={i} className="flex items-center gap-2">
-          <Skeleton className="size-8 shrink-0 rounded-full" />
-          {open && <Skeleton className="h-3 flex-1" />}
-        </div>
-      ))}
-    </div>
+    <SidebarGroup data-testid="side-rail-loading" aria-busy>
+      <span className="sr-only">{t("d3Home.rail.loading")}</span>
+      <div aria-hidden className="flex h-8 items-center px-2">
+        {open && <Skeleton className="h-3 w-20" />}
+      </div>
+      <div aria-hidden className="flex flex-col gap-1">
+        {Array.from({ length: RAIL_SKELETON_ROWS }, (_, i) => (
+          <div key={i} data-testid="side-rail-skeleton-row" className="flex h-12 items-center gap-2 p-2">
+            <Skeleton className="size-8 shrink-0 rounded-full" />
+            {open && (
+              <span className="flex min-w-0 flex-1 flex-col gap-1.5">
+                <Skeleton className="h-3 w-3/4" />
+                <Skeleton className="h-2.5 w-1/2" />
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
+    </SidebarGroup>
+  );
+}
+
+/** Signed out, under the rows: what an account adds here (rail v2, `rail.followNudge`). */
+function FollowNudge(): React.JSX.Element {
+  React.useEffect(() => {
+    trackUi("rail.followNudge", "view");
+  }, []);
+  return (
+    <aside
+      data-testid="side-rail-nudge"
+      aria-labelledby="side-rail-nudge-title"
+      className="m-2 mt-4 flex flex-col gap-1 bg-card p-3 text-sm ring-1 ring-border"
+    >
+      <p id="side-rail-nudge-title" className="font-medium">
+        {t("d3Home.rail.nudge.title")}
+      </p>
+      <p className="text-xs text-muted-foreground">{t("d3Home.rail.nudge.body")}</p>
+      <a
+        data-testid="side-rail-nudge-signup"
+        href={SIGNUP_FOLLOW_HREF}
+        onClick={() => trackUi("rail.followNudge", "create", "follow")}
+        className="mt-1 inline-flex min-h-10 items-center self-start text-sm font-medium text-brand-text underline underline-offset-4 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        {t("d3Home.rail.nudge.cta")}
+      </a>
+    </aside>
   );
 }
 

@@ -36,7 +36,10 @@ export function cardLinkSlots(card: StreamCardData): Pick<StreamCardProps, "cate
   };
 }
 
-export interface DiscoveryStreamCardProps extends Pick<StreamCardProps, "headingLevel" | "lazy" | "showReason"> {
+export interface DiscoveryStreamCardProps extends Pick<
+  StreamCardProps,
+  "headingLevel" | "lazy" | "showReason" | "size" | "ctaLabel" | "aria-label"
+> {
   card: StreamCardData;
   collisions?: ReadonlySet<string>;
   className?: string;
