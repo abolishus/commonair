@@ -17,7 +17,7 @@ import {
   turnout,
   voteRule,
 } from "../src/components/governance/model.ts";
-import type { CouncilDto, ElectionDto } from "../src/lib/coop.ts";
+import type { ElectionDto } from "../src/lib/coop.ts";
 import { NOW, council, elections, proposal, rejectedProtected, votingProposal } from "./coop-fixtures.ts";
 
 const settings = [
@@ -166,35 +166,45 @@ describe("excerpt", () => {
 });
 
 describe("contributionShare", () => {
-  const term = (
-    scores: number[],
-    weights: unknown = { revenue: 0.5, streamingHours: 0.2, relayBandwidth: 0.2, viewerHours: 0.1 },
-  ) =>
-    ({
-      members: scores.map((s, i) => ({
-        user: { id: `u${i}`, username: `u${i}`, displayName: `U${i}` },
-        rank: i + 1,
-        contributionScore: s,
-      })),
-      method: { weights },
-    }) as Pick<CouncilDto, "members" | "method">;
+  const W = { revenue: 0.5, streamingHours: 0.2, relayBandwidth: 0.2, viewerHours: 0.1 };
+  const T = { revenueCents: 10_000, eligibleHours: 400, relayBytes: 5e9, viewerHours: 900 };
+  const term = (weights: unknown = W, totals: unknown = T) => ({ method: { weights, totals } });
 
-  it("the score is a weighted share of the eligible total: divide by the weights' sum", () => {
-    expect(contributionShare(0.0347, term([0.0347, 0.02]))).toBeCloseTo(0.0347);
-    expect(contributionShare(0.2, term([0.2], { revenue: 0.25, streamingHours: 0.25 }))).toBeCloseTo(0.4);
+  it("every component contributed: the score is the share of the whole", () => {
+    expect(contributionShare(0.0347, term())).toBeCloseTo(0.0347);
+    expect(contributionShare(1, term())).toBe(1);
   });
 
-  it("without readable weights, or a score past the whole, a share of the seated scores", () => {
-    expect(contributionShare(41.5, council)).toBeCloseTo(41.5 / 53.5);
-    expect(contributionShare(1, term([1, 3], null))).toBe(0.25);
-    expect(contributionShare(1, term([1, 3], { revenue: "x" }))).toBe(0.25);
+  it("a component with a 0 eligible total leaves its weight out of the whole", () => {
+    // No relay traffic: a lone streamer scores 0.5 + 0.2 + 0.1 = 0.8, all of the contribution.
+    const noRelay = term(W, { ...T, relayBytes: 0 });
+    expect(contributionShare(0.8, noRelay)).toBeCloseTo(1);
+    expect(contributionShare(0.4, noRelay)).toBeCloseTo(0.5);
+    // Only streaming hours counted.
+    const hoursOnly = term(W, { revenueCents: 0, eligibleHours: 50, relayBytes: 0, viewerHours: 0 });
+    expect(contributionShare(0.05, hoursOnly)).toBeCloseTo(0.25);
+    // A missing weight on a component that contributed nothing does not matter.
+    expect(contributionShare(0.2, term({ ...W, relayBandwidth: "x" }, { ...T, relayBytes: 0 }))).toBeCloseTo(0.25);
   });
 
-  it("null for nothing to divide by or a bad score", () => {
-    expect(contributionShare(0, term([0, 0], null))).toBeNull();
-    expect(contributionShare(Number.NaN, council)).toBeNull();
-    expect(contributionShare(-1, council)).toBeNull();
+  it("null without readable weights or totals: no share of the council under the same label", () => {
+    expect(contributionShare(0.2, term(null))).toBeNull();
+    expect(contributionShare(0.2, term({ ...W, revenue: "x" }))).toBeNull();
+    expect(contributionShare(0.2, term({ revenue: 0.5 }))).toBeNull();
+    expect(contributionShare(0.2, term(W, null))).toBeNull();
+    expect(contributionShare(0.2, term(W, { ...T, viewerHours: undefined }))).toBeNull();
+    expect(contributionShare(0.2, { method: { weights: W } })).toBeNull();
+    expect(contributionShare(0.2, term({ ...W, revenue: -0.1 }))).toBeNull();
+  });
+
+  it("null for nothing contributed, a bad score or a score past the whole", () => {
+    expect(contributionShare(0, term(W, { revenueCents: 0, eligibleHours: 0, relayBytes: 0, viewerHours: 0 }))).toBeNull();
+    expect(contributionShare(0, term({ revenue: 0, streamingHours: 0, relayBandwidth: 0, viewerHours: 0 }))).toBeNull();
+    expect(contributionShare(Number.NaN, term())).toBeNull();
+    expect(contributionShare(-1, term())).toBeNull();
+    expect(contributionShare(1.5, term())).toBeNull();
     expect(contributionShare(1, null)).toBeNull();
+    expect(contributionShare(0, term())).toBe(0);
   });
 });
 

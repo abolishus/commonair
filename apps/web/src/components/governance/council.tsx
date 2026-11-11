@@ -13,20 +13,20 @@ import { COUNCIL_GRID, contributionShare, seatingFacts } from "./model.ts";
 
 /**
  * The seated council as avatar tiles linked to each channel (overhaul D6.3, CT-8): the top
- * `COUNCIL_GRID`, then "Show all". Each tile reads "Rank 2" and its share of contribution.
+ * `COUNCIL_GRID`, then "Show all". Each tile reads "Rank 2" and its share of contribution. The
+ * seats past the grid stay mounted but hidden, so every seat's data attributes are in the DOM.
  */
 export function CouncilSeats({ council }: { council: CouncilDto }): React.JSX.Element {
   const { locale } = useLocale();
   const [all, setAll] = React.useState(false);
   const listId = React.useId();
-  const shown = all ? council.members : council.members.slice(0, COUNCIL_GRID);
   return (
     <div className="flex min-w-0 flex-col gap-3">
       <SeatGrid
         id={listId}
         label={t("coop.council.title")}
         itemProps={{ "data-testid": "council-member" }}
-        items={shown.map((m) => {
+        items={council.members.map((m, i) => {
           const share = contributionShare(m.contributionScore, council);
           return {
             userId: m.user.id,
@@ -35,6 +35,7 @@ export function CouncilSeats({ council }: { council: CouncilDto }): React.JSX.El
             eyebrow: t("coop.council.rank", { rank: m.rank }),
             meta: share === null ? undefined : t("d6Governance.council.share", { share: percentText(share, locale) }),
             attributes: { "data-rank": m.rank, "data-score": m.contributionScore },
+            hidden: !all && i >= COUNCIL_GRID,
           };
         })}
       />

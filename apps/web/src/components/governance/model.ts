@@ -239,34 +239,41 @@ export const COUNCIL_GRID = 12;
 /** How many the `/coop` overview shows. */
 export const COUNCIL_PREVIEW = 5;
 
+/** Each score component in the term's `totals`, with the weight that blends it (`seatCouncil`). */
+const SHARE_COMPONENTS = [
+  ["revenueCents", "revenue"],
+  ["eligibleHours", "streamingHours"],
+  ["relayBytes", "relayBandwidth"],
+  ["viewerHours", "viewerHours"],
+] as const;
+
 /**
- * A seat's share of contribution. The council score is already a weighted share of the eligible
- * streamers' total (`normalization: share_of_eligible_total` in the term's method: revenue,
- * streaming hours, relay bandwidth and viewer hours, each as that streamer's share of the eligible
- * total, blended by the weights), so dividing by the weights' sum gives the share of the whole:
- * a score of 0.0347 with weights summing to 1 is 3.47% of contribution. Without readable weights,
- * or with a score outside that range, the share is of the seated members' combined score instead.
- * Null when there is nothing to divide by.
+ * A seat's share of contribution. The council score blends each component (revenue, streaming
+ * hours, relay bandwidth, viewer hours) as that streamer's share of the eligible total, by the
+ * term's weights; a component whose eligible total is 0 adds nothing (`seatCouncil`). So the
+ * eligible scores sum to the weights of the components with a total above 0, and dividing by that
+ * sum gives the share of all eligible streamers' contribution: with no relay traffic and a 0.2
+ * relay weight, a lone streamer's 0.8 is 100%. Null when the term's weights or totals cannot be
+ * read, or nothing was contributed: a share of the seated members alone would be a different
+ * number under the same label.
  */
-export function contributionShare(
-  score: number,
-  council: Pick<CouncilDto, "members" | "method"> | null,
-): number | null {
+export function contributionShare(score: number, council: Pick<CouncilDto, "method"> | null): number | null {
   if (!Number.isFinite(score) || score < 0) return null;
   const weights = at(council?.method, "weights");
-  const sum =
-    typeof weights === "object" && weights !== null
-      ? Object.values(weights).reduce<number | null>(
-          (acc, w) => (acc === null || num(w) === null ? null : acc + (w as number)),
-          0,
-        )
-      : null;
-  if (sum !== null && sum > 0 && score / sum <= 1) return score / sum;
-  const total = (council?.members ?? []).reduce(
-    (acc, m) => acc + (Number.isFinite(m.contributionScore) ? Math.max(0, m.contributionScore) : 0),
-    0,
-  );
-  return total > 0 ? score / total : null;
+  const totals = at(council?.method, "totals");
+  let sum = 0;
+  for (const [component, weight] of SHARE_COMPONENTS) {
+    const total = num(at(totals, component));
+    if (total === null) return null;
+    if (total <= 0) continue;
+    const w = num(at(weights, weight));
+    if (w === null || w < 0) return null;
+    sum += w;
+  }
+  if (sum <= 0) return null;
+  const share = score / sum;
+  // Floating-point sums can land a hair past 1; anything clearly past is not this method's score.
+  return share <= 1 + 1e-9 ? Math.min(share, 1) : null;
 }
 
 export interface SeatingFacts {

@@ -398,6 +398,61 @@ describe("the typed change editor", () => {
     expect(id("proposal-change").getAttribute("data-typed")).toBe("true");
   });
 
+  it("an amount that does not parse blocks the save, though the JSON keeps its last good value", () => {
+    const payout: SettingDto = {
+      ...cut,
+      key: "payout.rules",
+      protected: false,
+      value: { minimumCents: 2500, schedule: "monthly", holdDays: 7, currency: "usd" },
+    };
+    const onSave = vi.fn<(input: unknown) => void>();
+    wrap(<StatefulForm initial={draft("payout.rules", payout.value)} list={[payout]} onSave={onSave} />);
+    const minimum = within(id("proposal-change")).getByLabelText(
+      en["d6Governance.field.payoutMinimum"],
+    ) as HTMLInputElement;
+    expect(id("proposal-save").getAttribute("data-valid")).toBe("true");
+    for (const text of ["", "abc", "1.234"]) {
+      fireEvent.change(minimum, { target: { value: text } });
+      expect(JSON.parse((id("proposal-change-value") as HTMLTextAreaElement).value).minimumCents).toBe(2500);
+      expect(id("proposal-save").getAttribute("data-valid"), text).toBe("false");
+      fireEvent.click(id("proposal-save"));
+      expect(onSave).not.toHaveBeenCalled();
+      expect(id("proposal-form-problems")).toBeTruthy();
+    }
+    // A good amount saves again, with the new value.
+    fireEvent.change(minimum, { target: { value: "30" } });
+    expect(id("proposal-save").getAttribute("data-valid")).toBe("true");
+    fireEvent.click(id("proposal-save"));
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({ changes: [{ key: "payout.rules", value: expect.objectContaining({ minimumCents: 3000 }) }] }),
+    );
+  });
+
+  it("removing a row whose amount does not parse unblocks the save", () => {
+    const payout: SettingDto = {
+      ...cut,
+      key: "payout.rules",
+      protected: false,
+      value: { minimumCents: 2500, schedule: "monthly", holdDays: 7, currency: "usd" },
+    };
+    const onSave = vi.fn<(input: unknown) => void>();
+    const initial = draft("payout.rules", payout.value);
+    wrap(
+      <StatefulForm
+        initial={{ ...initial, rows: [...initial.rows, { id: "r2", key: "platform.cut", value: JSON.stringify(cut.value) }] }}
+        list={[payout, cut]}
+        onSave={onSave}
+      />,
+    );
+    const [payoutRow] = all("proposal-change");
+    fireEvent.change(within(payoutRow!).getByLabelText(en["d6Governance.field.payoutMinimum"]), {
+      target: { value: "" },
+    });
+    expect(id("proposal-save").getAttribute("data-valid")).toBe("false");
+    fireEvent.click(within(payoutRow!).getByTestId("proposal-change-remove"));
+    expect(id("proposal-save").getAttribute("data-valid")).toBe("true");
+  });
+
   it("periods are an amount in their unit, stored as seconds", () => {
     const ordinary = rules[0]!;
     wrap(<StatefulForm initial={draft("governance.ordinary", ordinary.value)} list={rules} onSave={noop} />);
@@ -479,6 +534,7 @@ describe("/coop/council with people on it", () => {
       eligibilityWindowDays: 90,
       minStreamingHours: 10,
       weights: { revenue: 0.5, streamingHours: 0.2, relayBandwidth: 0.2, viewerHours: 0.1 },
+      totals: { revenueCents: 50_000, eligibleHours: 900, relayBytes: 1e9, viewerHours: 4_000 },
       eligible: 20,
       candidates: 31,
     },
@@ -486,8 +542,12 @@ describe("/coop/council with people on it", () => {
 
   it("the top 12 as tiles linked to their channels, then Show all; a contribution share, not a score", () => {
     wrap(<CouncilPage council={big} board={board} elections={[]} />);
+    // Every seat is in the DOM (the harness reads them all); past the top 12 they are hidden.
     const tiles = all("council-member");
-    expect(tiles).toHaveLength(12);
+    expect(tiles).toHaveLength(14);
+    expect(tiles.map((t) => t.getAttribute("data-user-id"))).toEqual(members(14).map((m) => m.user.id));
+    expect(tiles.filter((t) => !t.hidden)).toHaveLength(12);
+    expect(tiles.slice(12).every((t) => t.hidden)).toBe(true);
     expect(tiles[0]?.getAttribute("data-rank")).toBe("1");
     expect(tiles[0]?.getAttribute("data-score")).toBe("0.05");
     expect(within(tiles[0]!).getByRole("link").getAttribute("href")).toBe("/streamer0");
@@ -497,7 +557,7 @@ describe("/coop/council with people on it", () => {
     expect(more.textContent).toBe("Show all 14");
     expect(more.getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(more);
-    expect(all("council-member")).toHaveLength(14);
+    expect(all("council-member").filter((t) => !t.hidden)).toHaveLength(14);
     expect(more.textContent).toBe(en["d6Governance.council.showFewer"]);
     expect(within(id("board-seat")).getByRole("link").getAttribute("href")).toBe("/ohmslaw");
   });
@@ -548,7 +608,11 @@ describe("/coop council preview", () => {
         signedIn={false}
         membership={null}
         openProposals={[]}
-        council={{ ...council, members: members(8), method: { weights: { revenue: 1 } } }}
+        council={{ ...council, members: members(8), method: {
+            weights: { revenue: 1, streamingHours: 0, relayBandwidth: 0, viewerHours: 0 },
+            totals: { revenueCents: 100, eligibleHours: 10, relayBytes: 0, viewerHours: 0 },
+          },
+        }}
         months={[]}
       />,
     );

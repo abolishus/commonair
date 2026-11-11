@@ -18,6 +18,11 @@ export interface SeatGridItem {
   meta?: React.ReactNode;
   /** Set on the tile besides `data-user-id` (e.g. `data-rank`, `data-score`). */
   attributes?: DataAttributes;
+  /**
+   * Kept in the DOM but not shown (past a "Show all"), so every seat stays readable by its data
+   * attributes however many are on screen.
+   */
+  hidden?: boolean;
 }
 
 export interface SeatGridProps extends Omit<React.ComponentProps<"ul">, "children"> {
@@ -58,6 +63,7 @@ export function SeatGrid({
           {...item.attributes}
           key={item.userId}
           data-user-id={item.userId}
+          hidden={item.hidden}
           className={cn("relative min-w-0", layout === "rows" && "border-t first:border-t-0")}
         >
           <div

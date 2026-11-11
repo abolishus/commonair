@@ -715,7 +715,8 @@ export const D5_MONEY_IDS = {
  * opened); `proposal-save` stays enabled and carries `data-valid`. `/coop/settings` groups rows by
  * theme (`settingsGroup`, `data-theme`); `setting-row` keeps `data-key`, `data-protected` and
  * `data-updated-by`. Result bars carry `data-rule` and `data-passed`; a signed-out voter gets
- * `voteJoin` instead of the ballot.
+ * `voteJoin` instead of the ballot. `/coop/council` keeps every `council-member` tile mounted (past
+ * the top 12 they are `hidden` until `councilShowAll`), so reading their data needs no click.
  */
 export const D6_GOVERNANCE_IDS = {
   proposalChangeAdvanced: "proposal-change-advanced",

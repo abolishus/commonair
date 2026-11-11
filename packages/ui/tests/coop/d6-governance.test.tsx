@@ -228,6 +228,22 @@ describe("SeatGrid", () => {
     render(<SeatGrid label="Board" items={items} layout="rows" />);
     expect(screen.getByRole("list", { name: "Board" }).className).toContain("flex-col");
   });
+
+  test("a hidden seat stays in the DOM with its data, out of the accessible list", () => {
+    render(
+      <SeatGrid
+        label="Creator council"
+        items={[items[0]!, { ...items[1]!, hidden: true }]}
+        itemProps={{ "data-testid": "seat" }}
+      />,
+    );
+    const seats = screen.getAllByTestId("seat");
+    expect(seats.map((s) => [s.getAttribute("data-user-id"), s.hidden])).toEqual([
+      ["u1", false],
+      ["u2", true],
+    ]);
+    expect(screen.getAllByRole("link").map((l) => l.getAttribute("href"))).toEqual(["/aurora"]);
+  });
 });
 
 describe("whole-row governance lists", () => {

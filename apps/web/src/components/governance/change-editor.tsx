@@ -112,6 +112,8 @@ interface FieldEditorProps {
   /** Show this field's problem (after blur or a save attempt). */
   showError: boolean;
   onBlur: () => void;
+  /** Whether the field's text parses (an amount's stale `value` must not save while it does not). */
+  onValidity: (valid: boolean) => void;
 }
 
 /** A number typed into a field, kept as text while it does not parse so typing "8." is not lost. */
@@ -198,6 +200,7 @@ function FieldEditor({
   disabled,
   showError,
   onBlur,
+  onValidity,
 }: FieldEditorProps): React.JSX.Element | null {
   const { locale } = useLocale();
   const id = React.useId();
@@ -258,6 +261,7 @@ function FieldEditor({
           rangeError={error ?? problemText(spec, "tooLow", locale)}
           formatError={t("d6Governance.form.error.notNumber")}
           onValueChange={(cents) => set(cents)}
+          onValidityChange={onValidity}
           inputProps={{ disabled, onBlur }}
         />
       );
@@ -390,6 +394,11 @@ export interface ChangeEditorProps {
   kind: ProposalKind;
   /** The member tried to save: show every problem, touched or not. */
   submitted: boolean;
+  /**
+   * A typed field's text started or stopped parsing (`rowId:fieldId`). An amount that does not
+   * parse leaves the draft's JSON at its last good value, so the form must not save meanwhile.
+   */
+  onFieldValidity?: (field: string, valid: boolean) => void;
 }
 
 let rowSeq = 0;
@@ -409,6 +418,7 @@ export function ChangeEditor({
   disabled,
   kind,
   submitted,
+  onFieldValidity,
 }: ChangeEditorProps): React.JSX.Element {
   const baseId = React.useId();
   const [touched, setTouched] = React.useState<ReadonlySet<string>>(() => new Set());
@@ -529,6 +539,7 @@ export function ChangeEditor({
                             disabled={disabled}
                             showError={submitted || touched.has(`${row.id}:${spec.id}`)}
                             onBlur={() => touch(`${row.id}:${spec.id}`)}
+                            onValidity={(valid) => onFieldValidity?.(`${row.id}:${spec.id}`, valid)}
                             onChange={(next) => update(row.id, { value: JSON.stringify(next, null, 2) })}
                           />
                         </div>

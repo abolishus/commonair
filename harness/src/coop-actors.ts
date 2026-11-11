@@ -19,7 +19,6 @@ import {
 } from "./coop-selectors.ts";
 import { type Choice, type MemberClass, datetimeLocalUtc, utcMonthOf } from "./coop.ts";
 import { E7_TEST_IDS as T7 } from "./e7/selectors.ts";
-import { D6_GOVERNANCE_IDS as D6 } from "./web/selectors.ts";
 import { parseCents } from "./money.ts";
 import type { WaitBudget } from "./social.ts";
 import type { SignedInUser } from "./users.ts";
@@ -515,20 +514,10 @@ export class WebCoop implements CoopDriver {
         async () => (await row.getAttribute("data-protected")) !== null || null,
         { timeoutMs: 5_000, intervalMs: 100, signal: b.signal },
       ).catch(() => undefined);
-      // D6.2: a known setting is edited in typed fields, its JSON under "Edit as JSON" (hidden
-      // until opened); the scenario writes whole values, so it opens the JSON editor.
-      const value = byCoopId(row, T.proposalChangeValue);
-      if (!(await value.isVisible())) await byCoopId(row, D6.proposalChangeAdvanced).click(ui);
-      await value.fill(JSON.stringify(change.value, null, 2), ui);
+      await byCoopId(row, T.proposalChangeValue).fill(JSON.stringify(change.value, null, 2), ui);
     }
     const kindEl = byCoopId(page, T.proposalKind).first();
     const save = byCoopId(page, T.proposalSave);
-    // Save stays enabled (it shows the form's problems); `data-valid` says the draft would save.
-    await waitFor(
-      "proposal-save data-valid",
-      async () => ((await save.getAttribute("data-valid")) === "false" ? null : true),
-      { timeoutMs: b.timeoutMs, intervalMs: 100, signal: b.signal },
-    );
     await waitFor("proposal-save enabled", async () => (await save.isEnabled()) || null, {
       timeoutMs: b.timeoutMs,
       intervalMs: 100,

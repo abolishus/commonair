@@ -52,7 +52,19 @@ export function ProposalForm({
 }: ProposalFormProps): React.JSX.Element {
   const kind = settings ? deriveKind(draft.rows, settings) : "ordinary";
   const isProtected = kind === "protected";
-  const input = typedProblems(draft.rows).size > 0 ? null : proposalInput(draft, kind);
+  // Typed fields whose text does not parse (an amount keeps its last good value in the draft).
+  const [unparsed, setUnparsed] = React.useState<ReadonlySet<string>>(() => new Set());
+  const onFieldValidity = React.useCallback((field: string, valid: boolean) => {
+    setUnparsed((s) => {
+      if (valid !== s.has(field)) return s;
+      const next = new Set(s);
+      if (valid) next.delete(field);
+      else next.add(field);
+      return next;
+    });
+  }, []);
+  const input =
+    unparsed.size > 0 || typedProblems(draft.rows).size > 0 ? null : proposalInput(draft, kind);
   const set = (patch: Partial<ProposalDraft>) => onDraftChange({ ...draft, ...patch });
   const [submitted, setSubmitted] = React.useState(false);
   const [titleTouched, setTitleTouched] = React.useState(false);
@@ -151,6 +163,7 @@ export function ProposalForm({
                 kind={kind}
                 disabled={saving}
                 submitted={submitted}
+                onFieldValidity={onFieldValidity}
                 onRowsChange={(rows) => set({ rows })}
               />
             </Section>
