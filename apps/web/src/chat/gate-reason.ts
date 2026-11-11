@@ -65,7 +65,7 @@ export function composerGate({ settings, facts, refused, privileged, now }: Gate
       return { kind: "accountAge", days: settings.minAccountAgeDays, opensAt: null };
   }
   const minutes = settings.followersOnlyMinutes;
-  // A refusal stands until the viewer follows; with a follow age it stands until the next join.
+  // A refusal stands until the viewer follows or sends again (the panel clears it on each send).
   const followedSince = refused === "msg_followersonly" && !(minutes === 0 && facts.following === true);
   if (minutes !== null && (facts.following === false || followedSince)) return { kind: "followers", minutes };
   if (settings.subscribersOnly && refused === "msg_subsonly") return { kind: "subs" };

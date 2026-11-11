@@ -218,6 +218,13 @@ export function ChatPanel({
   const [mountedAt] = React.useState(() => Date.now());
   // The last gate refusal since the (re)join, so the composer keeps saying why (J3-d).
   const [refused, setRefused] = React.useState<GateRefusal | null>(null);
+  // A follow (or unfollow) changes what the server would say, so the old refusal no longer stands.
+  // Adjusted during render (React's "storing information from previous renders"), not in an effect.
+  const [refusedFollowing, setRefusedFollowing] = React.useState(following);
+  if (refusedFollowing !== following) {
+    setRefusedFollowing(following);
+    setRefused(null);
+  }
   const [reportTarget, setReportTarget] = React.useState<{ open: boolean; id: string | null }>({
     open: false,
     id: null,
@@ -364,6 +371,9 @@ export function ChatPanel({
 
   const send = () => {
     if (!draft.trim()) return;
+    // Every send asks the server again, so a gate the viewer has since met (a follow, a subscription,
+    // a verified email) stops showing once the server lets the message through.
+    setRefused(null);
     if (connection.current?.send(draft)) setDraft("");
     else toast.error(t("chat.notConnected"));
   };
@@ -425,18 +435,19 @@ export function ChatPanel({
   // Moderators and the broadcaster skip chat modes, so they have no composer gate.
   const privileged = canModerate || isBroadcaster;
   const account = useAccountFacts(signedIn && needsAccountFacts(settings, privileged), accountFactsClient);
-  const gate = signedIn
-    ? composerGate({
-        settings,
-        facts: {
-          ...(account ? { emailVerified: account.emailVerified, accountCreatedAt: account.createdAt } : {}),
-          following,
-        },
-        refused,
-        privileged,
-        now: mountedAt,
-      })
-    : null;
+  const gateInput = {
+    settings,
+    facts: {
+      ...(account ? { emailVerified: account.emailVerified, accountCreatedAt: account.createdAt } : {}),
+      following,
+    },
+    privileged,
+    now: mountedAt,
+  };
+  const gate = signedIn ? composerGate({ ...gateInput, refused }) : null;
+  // Only a gate the page knows from facts closes the input. One known only from a refusal leaves it
+  // open, so the viewer can try again once they have followed, subscribed or verified.
+  const gateLocks = signedIn && composerGate({ ...gateInput, refused: null }) !== null;
   // The points chip and its "How you earn" popover (D4.5): hidden on your own channel, when points
   // cannot be earned, and at zero with nothing to spend them on.
   const openPrediction = prediction?.status === "active" ? prediction.title : null;
@@ -738,7 +749,7 @@ export function ChatPanel({
               placeholder={t("chat.placeholder")}
               sendLabel={t("chat.send")}
               // A known gate closes the input with its reason above it, before any typing (J3-d).
-              disabled={inputDisabled || gate !== null}
+              disabled={inputDisabled || gateLocks}
               modeNote={
                 <>
                   {!toolbar && <ModeChips settings={settings} channelName={name} />}

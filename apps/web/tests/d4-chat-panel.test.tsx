@@ -18,6 +18,7 @@ import {
   createRouter,
 } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import * as React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { setCalmStorage } from "../src/chat/calm/settings.ts";
 import { ChatPanel, type ChatPanelProps } from "../src/chat/chat-panel.tsx";
@@ -154,19 +155,31 @@ const verified: AccountFactsClient = {
   me: async () => ({ email: "fan@example.test", emailVerified: true, createdAt: "2020-01-01T00:00:00.000Z" }),
 };
 
-function panel(props: Partial<ChatPanelProps> = {}) {
-  const Page = () => (
-    <ChatPanel
-      channel={CHANNEL}
-      channelName="Indigo"
-      signedIn
-      selfUsername="fan"
-      interactClient={interact()}
-      dismissStore={memoryStore()}
-      accountFactsClient={verified}
-      {...props}
-    />
-  );
+/** Lets a test change `following` after mount, as the Follow button would. */
+interface FollowHandle {
+  set?: (following: boolean | null) => void;
+}
+
+function panel(props: Partial<ChatPanelProps> = {}, follow?: FollowHandle) {
+  const Page = () => {
+    const [following, setFollowing] = React.useState<boolean | null | undefined>(props.following);
+    React.useEffect(() => {
+      if (follow) follow.set = setFollowing;
+    }, []);
+    return (
+      <ChatPanel
+        channel={CHANNEL}
+        channelName="Indigo"
+        signedIn
+        selfUsername="fan"
+        interactClient={interact()}
+        dismissStore={memoryStore()}
+        accountFactsClient={verified}
+        {...props}
+        following={following ?? null}
+      />
+    );
+  };
   const root = createRootRoute({ component: () => <Outlet /> });
   const route = createRoute({ getParentRoute: () => root, path: "/", component: Page });
   const router = createRouter({ routeTree: root.addChildren([route]), history: createMemoryHistory() });
@@ -476,6 +489,43 @@ describe("the composer gate (J3-d)", () => {
         surge: { state: "off", until: null },
       }),
     );
+    await waitFor(() => expect(screen.queryByTestId("chat-composer-gate")).toBeNull());
+  });
+
+  it("a refusal-only gate keeps the input open, and the next send asks the server again", async () => {
+    // A viewer refused as a non-follower then follows: nothing on the page knows, so only a new
+    // send can find out. The input stays usable and the old reason clears on that send.
+    panel();
+    const ws = await join({ settings: { followersOnlyMinutes: 10 } });
+    act(() => ws.push({ op: "notice", channel: CHANNEL, code: "msg_followersonly", text: "followers only" }));
+    expect((await screen.findByTestId("chat-composer-gate")).dataset.reason).toBe("followers");
+    const input = screen.getByTestId("chat-input") as HTMLInputElement;
+    expect(input.disabled).toBe(false);
+    fireEvent.change(input, { target: { value: "hello" } });
+    fireEvent.click(screen.getByTestId("chat-send"));
+    await waitFor(() => expect(screen.queryByTestId("chat-composer-gate")).toBeNull());
+    expect(ws.sent.some((f) => f.op === "send")).toBe(true);
+  });
+
+  it("an email refusal clears on the next send even when the account facts say verified", async () => {
+    panel();
+    const ws = await join({ settings: { requireVerifiedEmail: true } });
+    act(() => ws.push({ op: "notice", channel: CHANNEL, code: "msg_verified_email", text: "verify" }));
+    expect((await screen.findByTestId("chat-composer-gate")).dataset.reason).toBe("verifiedEmail");
+    const input = screen.getByTestId("chat-input") as HTMLInputElement;
+    expect(input.disabled).toBe(false);
+    fireEvent.change(input, { target: { value: "verified now" } });
+    fireEvent.click(screen.getByTestId("chat-send"));
+    await waitFor(() => expect(screen.queryByTestId("chat-composer-gate")).toBeNull());
+  });
+
+  it("a follow clears a followers-only refusal", async () => {
+    const follow: FollowHandle = {};
+    panel({}, follow);
+    const ws = await join({ settings: { followersOnlyMinutes: 0 } });
+    act(() => ws.push({ op: "notice", channel: CHANNEL, code: "msg_followersonly", text: "followers only" }));
+    expect((await screen.findByTestId("chat-composer-gate")).dataset.reason).toBe("followers");
+    act(() => follow.set?.(true));
     await waitFor(() => expect(screen.queryByTestId("chat-composer-gate")).toBeNull());
   });
 
