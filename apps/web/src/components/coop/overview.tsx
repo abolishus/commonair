@@ -52,6 +52,8 @@ export interface CoopOverviewProps {
    * `decisions` and `byClass` both come from the months load.
    */
   sectionErrors?: Partial<Record<OverviewSection, React.ReactNode>>;
+  /** The join band (D2.5), under the header: for visitors and accounts that aren't members yet. */
+  joinBand?: React.ReactNode;
 }
 
 /** The overview's sections that load on their own. */
@@ -105,6 +107,7 @@ export function CoopOverview({
   months,
   membershipError = null,
   sectionErrors = {},
+  joinBand = null,
 }: CoopOverviewProps): React.JSX.Element {
   const { locale } = useLocale();
   const counts = membersByClass(months);
@@ -113,6 +116,7 @@ export function CoopOverview({
   return (
     <PageContainer data-testid="coop" width="wide" className="flex flex-col gap-6 py-8">
       <PageHeader title={t("coop.title")} description={t("coop.intro")} tabs={<CoopTabs current="overview" />} />
+      {joinBand}
       <SplitLayout
         asideWidth="lg"
         main={

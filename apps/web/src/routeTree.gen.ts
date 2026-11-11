@@ -16,12 +16,16 @@ import { Route as AdminTreasuryRouteImport } from './routes/_admin/treasury'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppChannelRouteImport } from './routes/_app/$channel'
 import { Route as AppActivateRouteImport } from './routes/_app/activate'
+import { Route as AppCreatorsRouteImport } from './routes/_app/creators'
 import { Route as AppDmcaRouteImport } from './routes/_app/dmca'
+import { Route as AppGuidelinesRouteImport } from './routes/_app/guidelines'
+import { Route as AppPrivacyRouteImport } from './routes/_app/privacy'
 import { Route as AppSearchRouteImport } from './routes/_app/search'
 import { Route as AppSettingsRouteImport } from './routes/_app/settings'
 import { Route as AppSigninRouteImport } from './routes/_app/signin'
 import { Route as AppSignupRouteImport } from './routes/_app/signup'
 import { Route as AppTakedownRouteImport } from './routes/_app/takedown'
+import { Route as AppTermsRouteImport } from './routes/_app/terms'
 import { Route as AppTransparencyRouteImport } from './routes/_app/transparency'
 import { Route as StudioAnalyticsRouteImport } from './routes/_studio/analytics'
 import { Route as StudioBotRouteImport } from './routes/_studio/bot'
@@ -117,9 +121,24 @@ const AppActivateRoute = AppActivateRouteImport.update({
   path: '/activate',
   getParentRoute: () => AppRoute,
 } as any)
+const AppCreatorsRoute = AppCreatorsRouteImport.update({
+  id: '/creators',
+  path: '/creators',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppDmcaRoute = AppDmcaRouteImport.update({
   id: '/dmca',
   path: '/dmca',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppGuidelinesRoute = AppGuidelinesRouteImport.update({
+  id: '/guidelines',
+  path: '/guidelines',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppPrivacyRoute = AppPrivacyRouteImport.update({
+  id: '/privacy',
+  path: '/privacy',
   getParentRoute: () => AppRoute,
 } as any)
 const AppSearchRoute = AppSearchRouteImport.update({
@@ -145,6 +164,11 @@ const AppSignupRoute = AppSignupRouteImport.update({
 const AppTakedownRoute = AppTakedownRouteImport.update({
   id: '/takedown',
   path: '/takedown',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppTermsRoute = AppTermsRouteImport.update({
+  id: '/terms',
+  path: '/terms',
   getParentRoute: () => AppRoute,
 } as any)
 const AppTransparencyRoute = AppTransparencyRouteImport.update({
@@ -469,12 +493,16 @@ export interface FileRoutesByFullPath {
   '/treasury': typeof AdminTreasuryRoute
   '/$channel': typeof AppChannelRoute
   '/activate': typeof AppActivateRoute
+  '/creators': typeof AppCreatorsRoute
   '/dmca': typeof AppDmcaRoute
+  '/guidelines': typeof AppGuidelinesRoute
+  '/privacy': typeof AppPrivacyRoute
   '/search': typeof AppSearchRoute
   '/settings': typeof AppSettingsRouteWithChildren
   '/signin': typeof AppSigninRoute
   '/signup': typeof AppSignupRoute
   '/takedown': typeof AppTakedownRoute
+  '/terms': typeof AppTermsRoute
   '/transparency': typeof AppTransparencyRoute
   '/analytics': typeof StudioAnalyticsRoute
   '/bot': typeof StudioBotRoute
@@ -543,11 +571,15 @@ export interface FileRoutesByTo {
   '/treasury': typeof AdminTreasuryRoute
   '/$channel': typeof AppChannelRoute
   '/activate': typeof AppActivateRoute
+  '/creators': typeof AppCreatorsRoute
   '/dmca': typeof AppDmcaRoute
+  '/guidelines': typeof AppGuidelinesRoute
+  '/privacy': typeof AppPrivacyRoute
   '/search': typeof AppSearchRoute
   '/signin': typeof AppSigninRoute
   '/signup': typeof AppSignupRoute
   '/takedown': typeof AppTakedownRoute
+  '/terms': typeof AppTermsRoute
   '/transparency': typeof AppTransparencyRoute
   '/analytics': typeof StudioAnalyticsRoute
   '/bot': typeof StudioBotRoute
@@ -619,12 +651,16 @@ export interface FileRoutesById {
   '/_admin/treasury': typeof AdminTreasuryRoute
   '/_app/$channel': typeof AppChannelRoute
   '/_app/activate': typeof AppActivateRoute
+  '/_app/creators': typeof AppCreatorsRoute
   '/_app/dmca': typeof AppDmcaRoute
+  '/_app/guidelines': typeof AppGuidelinesRoute
+  '/_app/privacy': typeof AppPrivacyRoute
   '/_app/search': typeof AppSearchRoute
   '/_app/settings': typeof AppSettingsRouteWithChildren
   '/_app/signin': typeof AppSigninRoute
   '/_app/signup': typeof AppSignupRoute
   '/_app/takedown': typeof AppTakedownRoute
+  '/_app/terms': typeof AppTermsRoute
   '/_app/transparency': typeof AppTransparencyRoute
   '/_studio/analytics': typeof StudioAnalyticsRoute
   '/_studio/bot': typeof StudioBotRoute
@@ -696,12 +732,16 @@ export interface FileRouteTypes {
     | '/treasury'
     | '/$channel'
     | '/activate'
+    | '/creators'
     | '/dmca'
+    | '/guidelines'
+    | '/privacy'
     | '/search'
     | '/settings'
     | '/signin'
     | '/signup'
     | '/takedown'
+    | '/terms'
     | '/transparency'
     | '/analytics'
     | '/bot'
@@ -770,11 +810,15 @@ export interface FileRouteTypes {
     | '/treasury'
     | '/$channel'
     | '/activate'
+    | '/creators'
     | '/dmca'
+    | '/guidelines'
+    | '/privacy'
     | '/search'
     | '/signin'
     | '/signup'
     | '/takedown'
+    | '/terms'
     | '/transparency'
     | '/analytics'
     | '/bot'
@@ -845,12 +889,16 @@ export interface FileRouteTypes {
     | '/_admin/treasury'
     | '/_app/$channel'
     | '/_app/activate'
+    | '/_app/creators'
     | '/_app/dmca'
+    | '/_app/guidelines'
+    | '/_app/privacy'
     | '/_app/search'
     | '/_app/settings'
     | '/_app/signin'
     | '/_app/signup'
     | '/_app/takedown'
+    | '/_app/terms'
     | '/_app/transparency'
     | '/_studio/analytics'
     | '/_studio/bot'
@@ -977,11 +1025,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppActivateRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/creators': {
+      id: '/_app/creators'
+      path: '/creators'
+      fullPath: '/creators'
+      preLoaderRoute: typeof AppCreatorsRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/dmca': {
       id: '/_app/dmca'
       path: '/dmca'
       fullPath: '/dmca'
       preLoaderRoute: typeof AppDmcaRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/guidelines': {
+      id: '/_app/guidelines'
+      path: '/guidelines'
+      fullPath: '/guidelines'
+      preLoaderRoute: typeof AppGuidelinesRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/privacy': {
+      id: '/_app/privacy'
+      path: '/privacy'
+      fullPath: '/privacy'
+      preLoaderRoute: typeof AppPrivacyRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/search': {
@@ -1017,6 +1086,13 @@ declare module '@tanstack/react-router' {
       path: '/takedown'
       fullPath: '/takedown'
       preLoaderRoute: typeof AppTakedownRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/terms': {
+      id: '/_app/terms'
+      path: '/terms'
+      fullPath: '/terms'
+      preLoaderRoute: typeof AppTermsRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/transparency': {
@@ -1518,12 +1594,16 @@ const AppSettingsRouteWithChildren = AppSettingsRoute._addFileChildren(
 interface AppRouteChildren {
   AppChannelRoute: typeof AppChannelRoute
   AppActivateRoute: typeof AppActivateRoute
+  AppCreatorsRoute: typeof AppCreatorsRoute
   AppDmcaRoute: typeof AppDmcaRoute
+  AppGuidelinesRoute: typeof AppGuidelinesRoute
+  AppPrivacyRoute: typeof AppPrivacyRoute
   AppSearchRoute: typeof AppSearchRoute
   AppSettingsRoute: typeof AppSettingsRouteWithChildren
   AppSigninRoute: typeof AppSigninRoute
   AppSignupRoute: typeof AppSignupRoute
   AppTakedownRoute: typeof AppTakedownRoute
+  AppTermsRoute: typeof AppTermsRoute
   AppTransparencyRoute: typeof AppTransparencyRoute
   AppIndexRoute: typeof AppIndexRoute
   AppAttestationsVerifyRoute: typeof AppAttestationsVerifyRoute
@@ -1550,12 +1630,16 @@ interface AppRouteChildren {
 const AppRouteChildren: AppRouteChildren = {
   AppChannelRoute: AppChannelRoute,
   AppActivateRoute: AppActivateRoute,
+  AppCreatorsRoute: AppCreatorsRoute,
   AppDmcaRoute: AppDmcaRoute,
+  AppGuidelinesRoute: AppGuidelinesRoute,
+  AppPrivacyRoute: AppPrivacyRoute,
   AppSearchRoute: AppSearchRoute,
   AppSettingsRoute: AppSettingsRouteWithChildren,
   AppSigninRoute: AppSigninRoute,
   AppSignupRoute: AppSignupRoute,
   AppTakedownRoute: AppTakedownRoute,
+  AppTermsRoute: AppTermsRoute,
   AppTransparencyRoute: AppTransparencyRoute,
   AppIndexRoute: AppIndexRoute,
   AppAttestationsVerifyRoute: AppAttestationsVerifyRoute,
