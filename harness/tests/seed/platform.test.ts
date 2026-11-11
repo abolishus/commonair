@@ -4,7 +4,7 @@
 import { readFileSync } from "node:fs";
 import { NOTIFICATION_TYPES } from "@commonair/contracts/enums";
 
-/** vod_ready waits for d5-content's media-backed seed (plan.ts INBOX_TYPES). */
+/** vod_ready comes from seed-media's recordings, not this plan (plan.ts INBOX_TYPES). */
 const INBOX_TYPES = NOTIFICATION_TYPES.filter((t) => t !== "vod_ready");
 import { EVENTS } from "@commonair/contracts/events";
 import { GoLiveNotificationPayload } from "@commonair/contracts/notify";

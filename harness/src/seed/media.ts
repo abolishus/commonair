@@ -13,6 +13,7 @@ import { buildMediaExtra } from "./media/extra.ts";
 import { type ChatWindowRef, MEMBER_HOURS_DAYS, planHistory, planRecordings } from "./media/plan.ts";
 import { MediaSessions, opsHook, recordAll } from "./media/record.ts";
 import { channelsWithoutMemberHours, linkChat, writeHistory } from "./media/write.ts";
+import { vodNoticeProblems, vodReadyNotices } from "./media/vod-ready.ts";
 import type { SeedContext, SeedUnit } from "./types.ts";
 
 const TABLES = [
@@ -191,6 +192,10 @@ export const unit: SeedUnit = {
       await platform.close();
     }
     const after = await countRows(ctx, API_TABLES);
+    // d5-content: the stack wrote each ready VOD's `vod_ready` inbox row (media/vod-ready.ts).
+    const recordedVods = results.flatMap((r) => (r.vodId ? [r.vodId] : []));
+    const noticeProblems = vodNoticeProblems(await vodReadyNotices(ctx.db, recordedVods));
+    if (noticeProblems.length > 0) throw new Error(`seed-media: ${noticeProblems.join("; ")}`);
     const missingHours = await ownersWithoutMemberHours(ctx);
     if (missingHours.length > 0)
       notes.push(
@@ -216,6 +221,7 @@ export const unit: SeedUnit = {
         ...notes,
         `seed-media: ${history.broadcasts.length} backdated broadcasts over seed-social's chat windows; ${linked} backdated chat lines now carry their broadcast_id (their VOD-less replay is still empty: no VOD exists for a backdated broadcast)`,
         `seed-media: ${results.length} real recordings (${chat} chat lines, ${room} watch-room messages); VODs, clips, rollups, captions, rooms and relay rows carry today's times`,
+        `seed-media: ${recordedVods.length} vod_ready inbox rows (one per recorded VOD, streamer1's included), written by the media service as each VOD turned ready; seed-platform owns the table and counts them`,
         "seed-media: /analytics shows only the recorded broadcasts (rollups exist only for them), not the backdated history",
         "seed-media: the analytics display bypass for the fixed channels lasts 1 h (ANALYTICS_DISPLAY_BYPASS_TTL_SECONDS); after that, today's rollups wait out the 24 h display delay",
         "seed-media: streamer1's simulcast target points at a local RTMP sink that stops with the seed; it is left disabled so later lives do not retry it",

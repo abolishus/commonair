@@ -635,3 +635,26 @@ export const D5_DASHBOARD_IDS = {
   streamRecapMember: "stream-recap-member",
   streamPreviewToggle: "stream-preview-toggle",
 } as const;
+
+/**
+ * d5-content (overhaul wave 3, D5.4 and D5.5), beside the E6 ids (`e6/selectors.ts`), which keep
+ * their names: on `/content` a video card (`vod-row`) opens `vodEditSheet` (`data-vod-id`) with
+ * its Edit button; `vod-title`, `vod-visibility` and `vod-save` are inside the sheet now, not the
+ * card. On `/overlays` one save bar (`alertSaveBar`, `data-dirty` = changed types) holds the only
+ * `alert-save`; each type is a tab. The token panel shows all three links: `overlay-url` (alerts)
+ * and `overlayUrlChat` / `overlayUrlGoals`, each with `data-url`, `data-width` and `data-height`.
+ */
+export const D5_CONTENT_IDS = {
+  vodEdit: "vod-edit",
+  vodEditSheet: "vod-edit-sheet",
+  vodCopyLink: "vod-copy-link",
+  clipCopyLink: "clip-copy-link",
+  contentSort: "content-sort",
+  alertSaveBar: "alert-save-bar",
+  alertDiscard: "alert-discard",
+  alertTab: (type: "tip" | "follow" | "subscription" | "raid") => `alert-tab-${type}`,
+  overlayUrlChat: "overlay-url-chat",
+  overlayUrlGoals: "overlay-url-goals",
+  overlaySizes: "overlay-sizes",
+  overlayObsHelp: "overlay-obs-help",
+} as const;

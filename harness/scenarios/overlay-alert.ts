@@ -121,7 +121,8 @@ async function overlayAlert(ctx: ScenarioContext, kit: Kit): Promise<void> {
       await byE6Id(card, E.alertDuration).fill(String(DURATION_MS / 1000), { timeout: UI_TIMEOUT_MS });
       const ms = await byE6Id(card, E.alertDuration).getAttribute("data-ms");
       ctx.check("1 alert-duration reports 5000 ms", ms === String(DURATION_MS), { ms });
-      await byE6Id(card, E.alertSave).click({ timeout: UI_TIMEOUT_MS });
+      // d5-content: one save bar for every alert type.
+      await byE6Id(page, E.alertSave).click({ timeout: UI_TIMEOUT_MS });
       await byE6Id(page, E.alertConfig, { type: "tip", enabled: "true" }).waitFor({ timeout: UI_TIMEOUT_MS });
     } else {
       await s.api.client.interact.alerts.set({
