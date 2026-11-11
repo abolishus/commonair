@@ -24,7 +24,7 @@ function OverlaysPage(): React.JSX.Element {
   const channel = me.channelSlug ?? me.username;
   return (
     <PageContainer width="wide" data-testid="overlays-page" className="flex flex-col gap-6 py-8">
-      <PageHeader title={t("overlays.title")} description={t("overlays.intro")} />
+      <PageHeader title={t("overlays.title")} description={t("d5Content.overlays.intro")} />
       <OverlaysStudio key={channel} channel={channel} currency={config.currency} />
     </PageContainer>
   );

@@ -3,6 +3,7 @@
 
 import * as React from "react";
 import { Button } from "@commonair/ui/components/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@commonair/ui/components/collapsible";
 import {
   Card,
   CardAction,
@@ -75,6 +76,24 @@ export function resolveOverlayExpiry(
   return { ok: true, expiresAt: new Date(nowMs + days * DAY_MS).toISOString() };
 }
 
+/** The three OBS browser sources one token opens (`interact.overlays.token`'s URLs). */
+export const OVERLAY_KINDS = ["alerts", "chat", "goals"] as const;
+export type OverlayKind = (typeof OVERLAY_KINDS)[number];
+
+/** Recommended OBS browser-source size per overlay, in pixels (creator-studio.md P4). */
+export const OVERLAY_SIZES: Readonly<Record<OverlayKind, { width: number; height: number }>> = {
+  alerts: { width: 800, height: 600 },
+  chat: { width: 400, height: 800 },
+  goals: { width: 800, height: 120 },
+};
+
+/** The URLs from the create response; held by the page only until revoke or leaving it. */
+export type OverlayLinkUrls = Record<OverlayKind, string>;
+
+/** `overlay-url` (alerts, the E6 id) and `overlay-url-chat` / `overlay-url-goals`. */
+export const overlayUrlTestId = (kind: OverlayKind): string =>
+  kind === "alerts" ? "overlay-url" : `overlay-url-${kind}`;
+
 export interface OverlayTokenStatusView {
   active: boolean;
   createdAt: string | null;
@@ -102,8 +121,17 @@ export interface OverlayTokenLabels {
   rotate: string;
   rotateTitle: React.ReactNode;
   rotateDescription?: React.ReactNode;
-  url: string;
+  /** Per overlay: its name ("Alerts") and what it shows. */
+  links: Record<OverlayKind, { name: string; hint: React.ReactNode }>;
+  /** "800 × 600 px" (the page formats the numbers). */
+  size: (width: number, height: number) => React.ReactNode;
+  /** Shown once beside the links: copy now, keep them off stream. */
   urlHint?: React.ReactNode;
+  /** While a link exists but was shown on an earlier visit: it cannot be shown again. */
+  linksHidden: React.ReactNode;
+  /** "How to add a link in OBS" and its steps, in order. */
+  obsTitle: string;
+  obsSteps: readonly React.ReactNode[];
   /** Reveal / hide the masked URL (it holds the token; keep it off a captured screen). */
   showUrl: string;
   hideUrl: string;
@@ -119,10 +147,10 @@ export interface OverlayTokenPanelProps extends Omit<React.ComponentProps<"div">
   /** `interact.overlays.status`; `null` while loading. */
   status: OverlayTokenStatusView | null;
   /**
-   * The alerts URL from the create response: shown once (masked until revealed), never refetched,
-   * and only while `status.active`. The page must clear it on revoke so it is not kept around.
+   * The three URLs from the create response: shown once (masked until revealed), never
+   * refetched, and only while `status.active`. The page must clear them on revoke.
    */
-  createdUrl?: string | null;
+  createdUrls?: OverlayLinkUrls | null;
   labels: OverlayTokenLabels;
   /** Gets `null` (no expiry) or the ISO instant from `resolveOverlayExpiry`. */
   onCreate: (expiresAt: string | null) => void | Promise<void>;
@@ -133,14 +161,17 @@ export interface OverlayTokenPanelProps extends Omit<React.ComponentProps<"div">
 }
 
 /**
- * The overlay URL: status with expiry, expiry choice (quick picks or an exact date), create or
- * rotate (confirmed when a token is active), the once-shown URL and revoke. Renders the spec's
+ * The overlay links: status with expiry, expiry choice (quick picks or an exact date), create or
+ * rotate (confirmed when a token is active), the three once-shown links (alerts, chat, goals),
+ * each with its OBS browser-source size, OBS steps, and revoke. Renders the spec's
  * `overlay-token`, `overlay-expiry`, `overlay-expiry-date`, `overlay-token-create`, `overlay-url`
- * and `overlay-token-revoke` (docs/testing/e6-selectors.md).
+ * (alerts) and `overlay-token-revoke` (docs/testing/e6-selectors.md), plus `overlay-url-chat`,
+ * `overlay-url-goals` (each with `data-url`, `data-width`, `data-height`), `overlay-sizes` (the
+ * sizes while no link is on screen) and `overlay-obs-help`.
  */
 export function OverlayTokenPanel({
   status,
-  createdUrl,
+  createdUrls,
   labels,
   onCreate,
   onRevoke,
@@ -221,24 +252,73 @@ export function OverlayTokenPanel({
                 </span>
               </p>
             ) : null}
-            {active && createdUrl ? (
-              // `data-url` lets e2e read the URL without revealing it on screen.
-              <div data-testid="overlay-url" data-url={createdUrl} className="min-w-0">
-                <CopyField
-                  data-value-testid="overlay-url-value"
-                  data-reveal-testid="overlay-url-reveal"
-                  label={labels.url}
-                  value={createdUrl}
-                  secret
-                  showLabel={labels.showUrl}
-                  hideLabel={labels.hideUrl}
-                  hint={labels.urlHint}
-                  copyLabel={labels.copy}
-                  copiedLabel={labels.copied}
-                  copyFailedLabel={labels.copyFailed}
-                />
+            {active && createdUrls ? (
+              <div className="flex min-w-0 flex-col gap-4">
+                {labels.urlHint ? <p className="text-xs text-muted-foreground">{labels.urlHint}</p> : null}
+                {OVERLAY_KINDS.map((kind) => {
+                  const { width, height } = OVERLAY_SIZES[kind];
+                  const testId = overlayUrlTestId(kind);
+                  return (
+                    // `data-url` lets e2e read the URL without revealing it on screen.
+                    <div
+                      key={kind}
+                      data-testid={testId}
+                      data-kind={kind}
+                      data-url={createdUrls[kind]}
+                      data-width={width}
+                      data-height={height}
+                      className="min-w-0"
+                    >
+                      <CopyField
+                        data-value-testid={`${testId}-value`}
+                        data-reveal-testid={`${testId}-reveal`}
+                        label={labels.links[kind].name}
+                        value={createdUrls[kind]}
+                        secret
+                        showLabel={labels.showUrl}
+                        hideLabel={labels.hideUrl}
+                        hint={
+                          <>
+                            <span className="tabular-nums">{labels.size(width, height)}</span>
+                            <span aria-hidden> · </span>
+                            {labels.links[kind].hint}
+                          </>
+                        }
+                        copyLabel={labels.copy}
+                        copiedLabel={labels.copied}
+                        copyFailedLabel={labels.copyFailed}
+                      />
+                    </div>
+                  );
+                })}
               </div>
-            ) : null}
+            ) : (
+              <div className="flex min-w-0 flex-col gap-2">
+                {active ? <p className="text-xs text-muted-foreground">{labels.linksHidden}</p> : null}
+                <ul data-testid="overlay-sizes" className="flex flex-col gap-1 text-sm">
+                  {OVERLAY_KINDS.map((kind) => (
+                    <li key={kind} data-kind={kind} className="flex flex-wrap justify-between gap-x-2">
+                      <span>{labels.links[kind].name}</span>
+                      <span className="text-muted-foreground tabular-nums">
+                        {labels.size(OVERLAY_SIZES[kind].width, OVERLAY_SIZES[kind].height)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            <Collapsible data-testid="overlay-obs-help">
+              <CollapsibleTrigger render={<Button type="button" variant="link" size="sm" className="px-0" />}>
+                {labels.obsTitle}
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <ol className="flex list-decimal flex-col gap-1 ps-5 text-sm text-muted-foreground">
+                  {labels.obsSteps.map((step, i) => (
+                    <li key={i}>{step}</li>
+                  ))}
+                </ol>
+              </CollapsibleContent>
+            </Collapsible>
             <div className="grid gap-4 sm:grid-cols-2">
               <SelectField
                 label={labels.expiry}

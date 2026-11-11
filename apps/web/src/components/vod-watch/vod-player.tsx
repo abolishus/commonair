@@ -90,6 +90,11 @@ export interface VodPlayerProps {
   onPlayhead?: (wallclock: Date | null) => void;
   /** The playhead in media seconds, on every time update and on pause (Continue watching). */
   onProgress?: (progress: PlayerProgress) => void;
+  /**
+   * Once per source, when playback actually starts (the first `playing` event, after any
+   * buffering): the page counts a play (`vods.recordView` / `clips.recordView`, D5.5).
+   */
+  onPlaybackStart?: () => void;
   /** Videos only: the viewer's Clip button in the bar (D3.7). */
   clip?: { channel: string; vodId: string; signedIn: boolean; publicUrl?: string };
   handleRef?: React.Ref<WatchPlayerHandle>;
@@ -142,6 +147,7 @@ export function VodPlayer({
   captions,
   onPlayhead,
   onProgress,
+  onPlaybackStart,
   clip,
   handleRef,
 }: VodPlayerProps): React.JSX.Element {
@@ -163,6 +169,10 @@ export function VodPlayer({
   React.useEffect(() => {
     onProgressRef.current = onProgress;
   }, [onProgress]);
+  const onPlaybackStartRef = React.useRef(onPlaybackStart);
+  React.useEffect(() => {
+    onPlaybackStartRef.current = onPlaybackStart;
+  }, [onPlaybackStart]);
   const knownDuration = React.useRef(durationSeconds);
   React.useEffect(() => {
     knownDuration.current = durationSeconds;
@@ -248,6 +258,13 @@ export function VodPlayer({
       report();
     };
     const onPlay = () => setPlaying(true);
+    // `playing`, not `play`: a play that never gets a frame (a stalled load) does not count.
+    let started = false;
+    const onPlaying = () => {
+      if (started) return;
+      started = true;
+      onPlaybackStartRef.current?.();
+    };
     const onPause = () => {
       setPlaying(false);
       progress();
@@ -260,6 +277,7 @@ export function VodPlayer({
       ["loadedmetadata", onMeta],
       ["durationchange", onMeta],
       ["play", onPlay],
+      ["playing", onPlaying],
       ["pause", onPause],
       ["ended", onPause],
       ["error", onError],

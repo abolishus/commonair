@@ -4,7 +4,7 @@
 import * as React from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { OverlayTokenPanel, type OverlayTokenStatusView } from "../../src/blocks/studio/index.ts";
-import { overlayStatus, overlayTokenLabels, overlayUrl } from "../e6-fixtures.tsx";
+import { overlayStatus, overlayTokenLabels, overlayUrl, overlayUrls } from "../e6-fixtures.tsx";
 
 const meta = { title: "Blocks/Studio/OverlayTokenPanel" } satisfies Meta;
 export default meta;
@@ -20,19 +20,19 @@ function Example({
   url?: string | null;
 }): React.JSX.Element {
   const [status, setStatus] = React.useState(initial);
-  const [createdUrl, setCreatedUrl] = React.useState(url);
+  const [createdUrls, setCreatedUrls] = React.useState(url ? overlayUrls : null);
   return (
     <OverlayTokenPanel
       status={status}
-      createdUrl={createdUrl}
+      createdUrls={createdUrls}
       labels={overlayTokenLabels}
       onCreate={(expiresAt) => {
         setStatus({ active: true, createdAt: new Date().toISOString(), expiresAt });
-        setCreatedUrl(overlayUrl);
+        setCreatedUrls(overlayUrls);
       }}
       onRevoke={() => {
         setStatus(inactive);
-        setCreatedUrl(null);
+        setCreatedUrls(null);
       }}
     />
   );

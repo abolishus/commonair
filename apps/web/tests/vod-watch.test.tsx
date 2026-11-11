@@ -509,3 +509,35 @@ describe("clip watch page", () => {
     expect(current).toBe(5);
   });
 });
+
+describe("counting a play (d5-content, D5.5)", () => {
+  it.each([
+    ["video", "vod", VOD_ID],
+    ["clip", "clip", CLIP_ID],
+  ] as const)("a %s counts once playback starts, not on load, and once", async (_label, kind, id) => {
+    const recordView = vi.fn<NonNullable<WatchClient["recordView"]>>(async () => ({ ok: true }));
+    const c = client({ recordView });
+    const page =
+      kind === "vod" ? (
+        <VodWatchPage channel="rivertide" vodId={id} viewer={null} client={c} />
+      ) : (
+        <ClipWatchPage channel="rivertide" clipId={id} viewer={null} client={c} />
+      );
+    const { container } = wrap(page);
+    await waitFor(() => expect(container.querySelector("video")).not.toBeNull());
+    const video = container.querySelector("video") as HTMLVideoElement;
+    // Loading, metadata and a `play` that never gets a frame do not count.
+    await act(async () => {
+      video.dispatchEvent(new Event("loadedmetadata"));
+      video.dispatchEvent(new Event("play"));
+    });
+    expect(recordView).not.toHaveBeenCalled();
+    await act(async () => {
+      video.dispatchEvent(new Event("playing"));
+      video.dispatchEvent(new Event("pause"));
+      video.dispatchEvent(new Event("playing"));
+    });
+    await waitFor(() => expect(recordView).toHaveBeenCalledTimes(1));
+    expect(recordView).toHaveBeenCalledWith(kind, id);
+  });
+});
