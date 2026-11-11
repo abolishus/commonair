@@ -35,6 +35,7 @@ import {
   tipEventId,
   webhookDeliveryExists,
 } from "../src/e6/db.ts";
+import { D7_SETTINGS_IDS } from "../src/web/selectors.ts";
 import { download, exportMailLink, requestExport, waitExportReady } from "../src/e6/exports.ts";
 import {
   type Kit,
@@ -149,6 +150,8 @@ async function accountDeletion(ctx: ScenarioContext, kit: Kit): Promise<void> {
     if (session) {
       const page = await session.goto(E6_ROUTES.privacy);
       await byE6Id(page, E.deletionRequest).click({ timeout: UI_TIMEOUT_MS });
+      // Overhaul wave 4 (D7.4): the dialog's step 2, "I downloaded my data or don't need it".
+      await page.locator(`[data-testid="${D7_SETTINGS_IDS.deletionDownloaded}"]`).click({ timeout: UI_TIMEOUT_MS });
       await byE6Id(page, E.deletionConfirmUsername).fill(u.username, { timeout: UI_TIMEOUT_MS });
       await confirmDialog(page, UI_TIMEOUT_MS);
       const d = await dataOf(byE6Id(page, E.deletionStatus, { status: "scheduled" }), UI_TIMEOUT_MS);
