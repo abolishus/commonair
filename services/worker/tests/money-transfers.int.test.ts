@@ -192,7 +192,7 @@ describe("payout-transfers", () => {
     expect(calls).toHaveLength(2);
   });
 
-  test("the payout email carries the payout unsubscribe list, and follows the payout preference", async () => {
+  test("the payout email follows the payout preference", async () => {
     const on = await payee();
     const off = await payee();
     await db()
@@ -207,9 +207,6 @@ describe("payout-transfers", () => {
     for (const p of payouts) expect((await payoutOf(p.id))?.status).toBe("paid");
     const sent = mails.slice(before).filter((m) => m.template === "payoutSent");
     expect(sent.map((m) => m.to)).toEqual([on.email]);
-    expect(String(sent[0]?.props.unsubscribeUrl)).toMatch(
-      /^https:\/\/example\.test\/api\/email\/unsubscribe\?list=payout&token=v1\./,
-    );
   });
 
   test("the manual adapter moves nothing and opens no row", async () => {

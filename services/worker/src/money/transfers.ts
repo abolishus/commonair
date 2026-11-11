@@ -43,7 +43,7 @@ import {
 } from "@commonair/ledger";
 import { type PaymentAdapter, StripeRequestError, type TransferResult, createAdapter } from "@commonair/payments";
 import type { WorkerContext } from "../context.ts";
-import { preferenceEnabled, unsubscribeUrl } from "../notify/email/prefs.ts";
+import { preferenceEnabled } from "../notify/email/prefs.ts";
 
 type TransferRow = typeof schema.payoutTransfers.$inferSelect;
 
@@ -315,7 +315,6 @@ async function payoutSentMail(ctx: WorkerContext, t: TransferRow, reference: str
         sentAt: ctx.now(),
         reference,
         earningsUrl: `${ctx.site.publicUrl.replace(/\/+$/, "")}/revenue`,
-        unsubscribeUrl: await unsubscribeUrl(ctx.site.publicUrl, ctx.webhooks.authSecret, row.userId, "payout"),
         locale: row.locale,
       },
       row.email,

@@ -126,6 +126,29 @@ describe("the weekly digest", () => {
     expect(claims).toEqual([expect.objectContaining({ weekStart: weekStartOf(now) })]);
   });
 
+  test("removed, private or restricted media is left out, and clips follow their source VOD", async () => {
+    const now = sendTime();
+    const m = await member();
+    const shown = await followedWithContent(m.id, now);
+    const removed = await followedWithContent(m.id, now);
+    const priv = await followedWithContent(m.id, now);
+    const restricted = await followedWithContent(m.id, now);
+    await db().update(schema.vods).set({ removedReason: "owner" }).where(eq(schema.vods.id, removed.vod.id));
+    await db().update(schema.vods).set({ visibility: "private" }).where(eq(schema.vods.id, priv.vod.id));
+    await db()
+      .update(schema.broadcasts)
+      .set({ restrictedAt: now })
+      .where(eq(schema.broadcasts.id, restricted.vod.broadcastId));
+    await runWeeklyDigest(context(mailer, now));
+    const [mail] = mailsTo(m.email);
+    expect(mail?.text).toContain(`Video of ${shown.channel.slug}`);
+    expect(mail?.text).toContain(`Clip of ${shown.channel.slug}`);
+    for (const hidden of [removed, priv, restricted]) {
+      expect(mail?.text).not.toContain(`Video of ${hidden.channel.slug}`);
+      expect(mail?.text).not.toContain(`Clip of ${hidden.channel.slug}`);
+    }
+  });
+
   test("once per week: a second run, or a replica racing it, sends nothing more", async () => {
     const now = sendTime();
     const m = await member();

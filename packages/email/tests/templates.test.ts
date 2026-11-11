@@ -114,14 +114,13 @@ test("only member announcements carry an unsubscribe link", async () => {
       };
     }),
   );
-  // Overhaul wave 4 (D7.3): the payout notice, the weekly digest and the video-ready email have
-  // preference lists of their own.
+  // Overhaul wave 4 (D7.3): the weekly digest and the video-ready email have preference lists of
+  // their own.
   const announcements = new Set([
     "governanceResultPublished",
     "governanceVoteOpened",
     "goLiveDigest",
     "channelMoved",
-    "payoutSent",
     "weeklyDigest",
     "vodReady",
   ]);

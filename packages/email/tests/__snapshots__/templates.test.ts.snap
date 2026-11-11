@@ -680,9 +680,7 @@ You are receiving this email because of your account on Example Air.
 
 Questions? Write to hello@air.example.test.
 
-Example Air runs on free software. Get the source code https://forge.example.test/air/commonair/tree/0123abcd.
-
-Unsubscribe from these emails https://air.example.test/api/email/unsubscribe?list=payout&token=sample"
+Example Air runs on free software. Get the source code https://forge.example.test/air/commonair/tree/0123abcd."
 `;
 
 exports[`streamKeyRevoked > renders accessible HTML and a plain-text alternative 1`] = `

@@ -24,6 +24,7 @@ import { schema, type Database } from "@commonair/db";
 import type { WeeklyDigestItem, WeeklyDigestVote } from "@commonair/email";
 import { and, asc, desc, eq, gte, isNull, lt, notExists, notInArray, or, sql } from "drizzle-orm";
 import type { WorkerContext } from "../../context.ts";
+import { clipPublic, vodPublic } from "../../media-state.ts";
 import { unsubscribeUrl } from "../email/prefs.ts";
 
 const DAY_MS = 86_400_000;
@@ -195,8 +196,10 @@ export async function digestContent(
     .innerJoin(follows, and(eq(follows.channelId, vods.channelId), followed))
     .where(
       and(
-        eq(vods.status, "ready"),
-        eq(vods.visibility, "public"),
+        // The servable rule the API and media-state events share (ready, public, not removed),
+        // plus no open T1 restriction on the broadcast.
+        vodPublic,
+        isNull(broadcasts.restrictedAt),
         eq(broadcasts.kind, "live"),
         isNull(channels.suspendedAt),
         gte(vods.createdAt, since),
@@ -221,8 +224,9 @@ export async function digestContent(
     .leftJoin(broadcasts, eq(broadcasts.id, clips.broadcastId))
     .where(
       and(
-        eq(clips.status, "ready"),
-        isNull(clips.removedReason),
+        // Never more visible than its source: no private, removed or DMCA'd VOD of its content.
+        clipPublic,
+        isNull(broadcasts.restrictedAt),
         isNull(channels.suspendedAt),
         gte(clips.createdAt, since),
         lt(clips.createdAt, now),

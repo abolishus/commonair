@@ -69,7 +69,6 @@ export function sampleData(publicUrl: string, v: SampleValues = ENGLISH_SAMPLE_V
       sentAt: at,
       reference: "PO-2026-10-0042",
       earningsUrl: url("/dashboard/earnings"),
-      unsubscribeUrl: url("/api/email/unsubscribe?list=payout&token=sample"),
     },
     chargebackNotice: {
       kind: "chargeback",
