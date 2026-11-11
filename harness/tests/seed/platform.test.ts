@@ -3,6 +3,9 @@
 
 import { readFileSync } from "node:fs";
 import { NOTIFICATION_TYPES } from "@commonair/contracts/enums";
+
+/** vod_ready waits for d5-content's media-backed seed (plan.ts INBOX_TYPES). */
+const INBOX_TYPES = NOTIFICATION_TYPES.filter((t) => t !== "vod_ready");
 import { EVENTS } from "@commonair/contracts/events";
 import { GoLiveNotificationPayload } from "@commonair/contracts/notify";
 import { OAUTH_LIMITS, PKCE_CHALLENGE, USER_CODE_ALPHABET, redirectUriProblem } from "@commonair/contracts/oauth";
@@ -176,7 +179,7 @@ describe("planPlatform", () => {
     expect(p.apps.filter((a) => a.kind === "bulk")).toHaveLength(0);
     expect(p.apps.some((a) => a.suspend)).toBe(false);
     expect(p.portability.bundle).toBeNull();
-    expect(p.notifications.filter((n) => n.user === "viewer1").length).toBe(3 * NOTIFICATION_TYPES.length);
+    expect(p.notifications.filter((n) => n.user === "viewer1").length).toBe(3 * INBOX_TYPES.length);
     expect(p.triggers.followers.length).toBeGreaterThan(0);
     expect(p.emailQueue.length).toBeGreaterThan(0);
   });
@@ -281,7 +284,7 @@ describe("planPlatform", () => {
 
   test("viewer1's inbox has every type, read and unread, and go-live payloads the web parses", () => {
     const v1 = P.notifications.filter((n) => n.user === "viewer1");
-    for (const type of NOTIFICATION_TYPES) {
+    for (const type of INBOX_TYPES) {
       const of = v1.filter((n) => n.type === type);
       expect(of.length, type).toBe(platformCounts(small).inboxPerType);
       expect(
