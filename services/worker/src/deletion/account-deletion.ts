@@ -28,7 +28,13 @@ import { dmcaHiddenKey } from "../dmca/objects.ts";
 import { thumbnailPrefix } from "../moderation/objects.ts";
 import { vodObjectPrefixes } from "../vod/prefixes.ts";
 import { deleteRoomData } from "./watch-rooms.ts";
-import { endMoneyAndMembership, RenewalCancelError, type RenewalPort, stopProviderRenewals } from "./money.ts";
+import {
+  endMoneyAndMembership,
+  RenewalCancelError,
+  type RenewalPort,
+  type ShareRefundOwed,
+  stopProviderRenewals,
+} from "./money.ts";
 import { publishBadgeInvalidations, type EndedSubscription } from "../money/ends.ts";
 import { captureRetiredActor, deleteFederationData, type RetiredActor, sendRetiredActorDelete } from "./federation.ts";
 import { federationConfig } from "../federation/config.ts";
@@ -195,6 +201,8 @@ interface Completed {
   activeHold: boolean;
   completedAt: Date;
   notice: Notice | null;
+  /** The share the deletion made `refund_pending` (ids and cents only), for the completed notice. */
+  shareRefund: ShareRefundOwed | null;
   /** The user's OAuth apps the deletion removed (with every other user's grants of them). */
   deletedAppIds: string[];
   /** Actor `Delete`s to send after commit (federation, ADR 0030); never before, so a rollback sends nothing. */
@@ -236,6 +244,7 @@ export async function completeDeletion(ctx: WorkerContext, deletionId: string): 
     const deletedAppIds: string[] = [];
     const retiredActors: RetiredActor[] = [];
     let notice: Notice | null = null;
+    let shareRefund: ShareRefundOwed | null = null;
     const endedSubscriptions: EndedSubscription[] = [];
     let identity: DeletedIdentity | null = null;
     if (user) {
@@ -243,6 +252,7 @@ export async function completeDeletion(ctx: WorkerContext, deletionId: string): 
       // and the user leaves the co-op (`deletion/money.ts`). Their end events name the user (as
       // subscriber or broadcaster), so the outbox scrub below removes them with the rest.
       const money = await endMoneyAndMembership(tx, userId, now);
+      shareRefund = money.shareRefund;
       endedSubscriptions.push(...money.ended);
       counts.subscriptions_ended = money.ended.length;
       counts.subscriptions_incomplete_expired = money.incompleteExpired;
@@ -724,6 +734,7 @@ export async function completeDeletion(ctx: WorkerContext, deletionId: string): 
       activeHold: activeHold !== undefined,
       completedAt: now,
       notice,
+      shareRefund,
       deletedAppIds,
       retiredActors,
       endedSubscriptions,
@@ -766,7 +777,18 @@ async function afterCommit(ctx: WorkerContext, c: Completed) {
     try {
       await ctx.mailer.send(
         "accountDeletionCompleted",
-        { deletedAt: c.completedAt, locale: c.notice.locale },
+        {
+          deletedAt: c.completedAt,
+          // ADR 0042 decision 6: the refund stays owed by reference after the account is gone.
+          shareRefund: c.shareRefund
+            ? {
+                amountCents: c.shareRefund.amountCents,
+                currency: c.shareRefund.currency,
+                reference: c.shareRefund.reference,
+              }
+            : null,
+          locale: c.notice.locale,
+        },
         c.notice.email,
       );
     } catch (err) {

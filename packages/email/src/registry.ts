@@ -11,6 +11,7 @@ import { chargebackNotice, payoutSent } from "./templates/payments.tsx";
 import { channelMoved } from "./templates/portability.tsx";
 import { accountDeletionCompleted, accountDeletionScheduled, dataExportReady } from "./templates/privacy.tsx";
 import { paymentReceipt } from "./templates/receipt.tsx";
+import { shareRefundDetails } from "./templates/share-refund.tsx";
 import {
   changeEmailConfirm,
   newSignIn,
@@ -56,6 +57,7 @@ export const templates = {
   contentRestored,
   appealDecided,
   enforcementStatement,
+  shareRefundDetails,
 } satisfies {
   [K in TemplateId]: Omit<TemplateDefinition<never, EmailCatalog[K]>, "links" | "linkLists"> & {
     links: readonly string[];

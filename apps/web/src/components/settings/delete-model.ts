@@ -13,6 +13,7 @@ export type ImpactLine =
   | { kind: "kept" }
   | { kind: "subscriptions"; count: number }
   | { kind: "channelSubscriptions"; count: number }
+  | { kind: "endingEarly"; count: number }
   | { kind: "payout"; amount: { cents: number; currency: string } }
   | { kind: "membership"; share: { cents: number; currency: string } | null }
   | { kind: "legalHold" };
@@ -23,6 +24,8 @@ export function impactLines(preview: DeletionPreview | null): ImpactLine[] {
   if (preview.activeSubscriptions > 0) lines.push({ kind: "subscriptions", count: preview.activeSubscriptions });
   if (preview.channelSubscriptions > 0)
     lines.push({ kind: "channelSubscriptions", count: preview.channelSubscriptions });
+  // ADR 0042: renewal stops at the request; only time paid past the date ends early, unrefunded.
+  if (preview.endingBeforePaidThrough > 0) lines.push({ kind: "endingEarly", count: preview.endingBeforePaidThrough });
   if (preview.pendingPayout && preview.pendingPayout.cents > 0)
     lines.push({ kind: "payout", amount: preview.pendingPayout });
   if (preview.memberships.length > 0) {

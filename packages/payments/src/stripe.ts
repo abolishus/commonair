@@ -89,6 +89,9 @@ export function stripeAdapter(opts: StripeAdapterOptions): PaymentAdapter {
       if (o.atPeriodEnd) await client.cancelSubscriptionAtPeriodEnd(ref, o.idempotencyKey);
       else await client.cancelSubscriptionNow(ref, o.idempotencyKey);
     },
+    async resumeSubscription(ref, o) {
+      await client.resumeSubscription(ref, o.idempotencyKey);
+    },
     async refund(r: RefundRequest) {
       if (!r.providerRef.startsWith("pi_")) throw new RangeError("this payment has no Stripe PaymentIntent to refund");
       const refund = await client.createRefund(

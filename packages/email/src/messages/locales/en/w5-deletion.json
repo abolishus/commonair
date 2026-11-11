@@ -1,0 +1,12 @@
+{
+  "shareRefundDetails.subject": "Your {amount} {instance} member share: where should we send it?",
+  "shareRefundDetails.preview": "Reply to the co-op's treasury so we can refund your member share.",
+  "shareRefundDetails.heading": "Let's refund your member share",
+  "shareRefundDetails.body": "Your {amount} member share is due back to you. The co-op's treasury needs to know where to send it.",
+  "shareRefundDetails.amountLabel": "Amount",
+  "shareRefundDetails.referenceLabel": "Share reference",
+  "shareRefundDetails.deleteAtLabel": "Your account will be deleted on",
+  "shareRefundDetails.reply": "Write to {contact} from this address, quote the share reference, and say how you'd like the refund sent. The treasury replies with the next step.",
+  "shareRefundDetails.afterDeletion": "If your account is deleted first, the refund is still owed: quote the share reference when you write.",
+  "shareRefundDetails.safety": "We never ask for card numbers or passwords by email."
+}

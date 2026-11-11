@@ -10,6 +10,10 @@ Se eliminó tu cuenta
 
 Tu cuenta de Example Air se eliminó el 18 de octubre de 2026. Se borraron tus datos personales.
 
+Las suscripciones que seguían activas terminaron con la cuenta. No se cobrará nada más.
+
+Todavía se te debe tu aportación de 5,00 US$. Para reclamarla, escribe a hello@air.example.test con la referencia de la aportación CA-7KQ2M9X4.
+
 Los registros que la ley nos obliga a conservar, como los registros de pagos, se guardan sin tus datos personales.
 
 Gracias por ser parte de Example Air.
@@ -33,7 +37,11 @@ La eliminación de tu cuenta está programada
 
 Nos pediste eliminar tu cuenta de Example Air. Se eliminará de forma permanente el 17 de noviembre de 2026.
 
-¿Cambiaste de opinión? Cancela en cualquier momento antes de esa fecha y todo quedará como está.
+Tus suscripciones, y las suscripciones de pago a tu canal, dejaron de renovarse. El tiempo ya pagado dura hasta su fecha de fin habitual y no se cobra nada más. Lo que siga pagado después del 17 de noviembre de 2026 termina con la cuenta, sin reembolso automático.
+
+Tu aportación de 5,00 US$ se te devuelve. La tesorería de la cooperativa te escribirá antes del 17 de noviembre de 2026 para preguntarte adónde enviarla. Después de esa fecha, todavía puedes reclamarla escribiendo a hello@air.example.test con la referencia de la aportación CA-7KQ2M9X4.
+
+¿Cambiaste de opinión? Cancela en cualquier momento antes de esa fecha: tu cuenta se queda y las suscripciones que se detuvieron vuelven a renovarse.
 
 Cancelar la eliminación https://air.example.test/settings/account/deletion
 
@@ -710,6 +718,43 @@ Recibes este correo por tu cuenta en Example Air.
 Example Air funciona con software libre. Obtén el código fuente https://forge.example.test/air/commonair/tree/0123abcd.
 
 Darte de baja de estos correos https://air.example.test/api/email/unsubscribe?list=payout&token=sample"
+`;
+
+exports[`shareRefundDetails in Spanish > renders with lang and dir, and differs from English in subject and body 1`] = `
+"Tu aportación de 5,00 US$ en Example Air: ¿adónde la enviamos?
+
+Example Air https://air.example.test
+
+
+Vamos a reembolsar tu aportación
+
+Se te debe devolver tu aportación de 5,00 US$. La tesorería de la cooperativa necesita saber adónde enviarla.
+
+Importe
+
+5,00 US$
+
+Referencia de la aportación
+
+CA-7KQ2M9X4
+
+Tu cuenta se eliminará el
+
+17 de noviembre de 2026
+
+Escribe a hello@air.example.test desde esta dirección, indica la referencia de la aportación y cuéntanos cómo quieres recibir el reembolso. La tesorería te responderá con el siguiente paso.
+
+Si tu cuenta se elimina antes, el reembolso se te sigue debiendo: indica la referencia de la aportación cuando escribas.
+
+Nunca pedimos números de tarjeta ni contraseñas por correo.
+
+----------------------------------------
+
+Recibes este correo por tu cuenta en Example Air.
+
+¿Tienes preguntas? Escribe a hello@air.example.test.
+
+Example Air funciona con software libre. Obtén el código fuente https://forge.example.test/air/commonair/tree/0123abcd."
 `;
 
 exports[`streamKeyRevoked in Spanish > renders with lang and dir, and differs from English in subject and body 1`] = `

@@ -33,7 +33,7 @@ import { iso, isoOrNull } from "../lib/dto.ts";
 import { badRequest, conflict, forbidden, notFound, precondition } from "../lib/errors.ts";
 import { os, requireCaller } from "../lib/orpc.ts";
 import { withCoopErrors, withCoopErrorsRetrying } from "./errors.ts";
-import { deletionScheduledAmong } from "../moderation/deletion.ts";
+import { deletionDatesAmong, deletionScheduledAmong } from "../moderation/deletion.ts";
 import { checkoutReturnUrls } from "../money/return-urls.ts";
 import { MEMBER, STAFF, money, unknownUser, userPicks } from "./shared.ts";
 import {
@@ -544,14 +544,13 @@ export const membershipHandlers = {
         )
         .orderBy(desc(membershipShares.id))
         .limit(input.limit + 1);
-      const people = await userPicks(
-        deps.db,
-        rows.map((r) => r.userId),
-      );
+      const ids = rows.map((r) => r.userId);
+      // ADR 0042: members leaving show their deletion date, so the treasury can ask in time.
+      const [people, leaving] = await Promise.all([userPicks(deps.db, ids), deletionDatesAmong(deps.db, ids)]);
       return pageOf(
         rows,
         input.limit,
-        (r) => shareView(r, people),
+        (r) => shareView(r, people, leaving),
         (last) => encodeCursor({ t: iso(last.createdAt), id: last.id }),
       );
     }),
@@ -636,7 +635,13 @@ export const membershipHandlers = {
   },
 };
 
-function shareView(r: ShareRow, people: Map<string, { id: string; username: string; displayName: string }>) {
+/** `ShareView`; `leaving` maps members to their scheduled deletion (`deletionDatesAmong`). */
+export function shareView(
+  r: ShareRow,
+  people: Map<string, { id: string; username: string; displayName: string }>,
+  leaving: ReadonlyMap<string, Date> = new Map(),
+) {
+  const deletionAt = leaving.get(r.userId);
   return {
     id: r.id,
     user: people.get(r.userId) ?? unknownUser(r.userId),
@@ -646,8 +651,7 @@ function shareView(r: ShareRow, people: Map<string, { id: string; username: stri
     purchasedAt: isoOrNull(r.purchasedAt),
     refundedAt: isoOrNull(r.refundedAt),
     createdAt: iso(r.createdAt),
-    // Contract step placeholder (overhaul wave 5): w5-deletion joins the scheduled deletion.
-    deletionScheduledFor: null,
+    deletionScheduledFor: deletionAt ? iso(deletionAt) : null,
     refundDetailsRequestedAt: isoOrNull(r.refundDetailsRequestedAt),
   };
 }

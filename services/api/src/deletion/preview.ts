@@ -6,8 +6,10 @@
  * caller's own rows, so the settings dialog says what really happens (fix F0,
  * services/worker/src/deletion/money.ts) before the member asks for it:
  *
- * - subscriptions the member pays for, and paid ones on the member's channel, gifts excepted, end
- *   when the deletion completes (the worker cancels them at the provider and locally);
+ * - subscriptions the member pays for, and paid ones on the member's channel, gifts excepted, stop
+ *   renewing when the deletion is requested and end when it completes (ADR 0042); the ones paid
+ *   past the deletion date are counted (`endingBeforePaidThrough`): they end early, with no
+ *   automatic refund;
  * - earnings not yet paid out stay owed and follow the payout rules (the ledger is append-only);
  * - every active co-op membership exits, and a held share goes to the treasurer as
  *   `refund_pending` only when the bylaws make the viewer share refundable on exit (ADR 0020);
@@ -39,16 +41,21 @@ export function unpaidCents(b: { availableCents: number; holdCents: number; rese
   return Math.max(0, b.availableCents) + Math.max(0, b.holdCents) + Math.max(0, b.reservedCents);
 }
 
-/** One query: paid subscriptions the member pays for, and those paid on the member's channels. */
+/**
+ * One query: paid subscriptions the member pays for, those paid on the member's channels, and of
+ * all of them the ones whose paid period runs past `deleteAt` (they end early, ADR 0042).
+ */
 async function subscriptionCounts(
   db: Executor,
   userId: string,
-): Promise<{ activeSubscriptions: number; channelSubscriptions: number }> {
+  deleteAt: Date,
+): Promise<{ activeSubscriptions: number; channelSubscriptions: number; endingBeforePaidThrough: number }> {
   const owned = db.select({ id: s.channels.id }).from(s.channels).where(eq(s.channels.ownerId, userId));
   const [row] = await db
     .select({
       paying: sql<number>`count(*) filter (where ${s.subscriptions.subscriberId} = ${userId})::int`,
       onChannel: sql<number>`count(*) filter (where ${s.subscriptions.channelId} in ${owned})::int`,
+      paidPast: sql<number>`count(*) filter (where ${s.subscriptions.currentPeriodEnd} > ${deleteAt.toISOString()}::timestamptz)::int`,
     })
     .from(s.subscriptions)
     .where(
@@ -60,12 +67,24 @@ async function subscriptionCounts(
         isNull(s.subscriptions.giftPaymentId),
       ),
     );
-  return { activeSubscriptions: Number(row?.paying ?? 0), channelSubscriptions: Number(row?.onChannel ?? 0) };
+  return {
+    activeSubscriptions: Number(row?.paying ?? 0),
+    channelSubscriptions: Number(row?.onChannel ?? 0),
+    endingBeforePaidThrough: Number(row?.paidPast ?? 0),
+  };
 }
 
-export async function deletionPreview(db: Executor, userId: string, currency: string): Promise<DeletionPreview> {
-  const [subs, balances, memberships, share, holds, scheduled] = await Promise.all([
-    subscriptionCounts(db, userId),
+export async function deletionPreview(
+  db: Executor,
+  userId: string,
+  currency: string,
+  now: Date = new Date(),
+): Promise<DeletionPreview> {
+  // The deletion's date: the scheduled one, or the date a request made now would get.
+  const scheduled = await scheduledDeletion(db, userId);
+  const deleteAt = scheduled?.scheduledFor ?? new Date(now.getTime() + DELETION_GRACE_DAYS * 86_400_000);
+  const [subs, balances, memberships, share, holds] = await Promise.all([
+    subscriptionCounts(db, userId, deleteAt),
     creatorBalances(db, userId, currency),
     db
       .select({ class: s.memberships.class })
@@ -87,7 +106,6 @@ export async function deletionPreview(db: Executor, userId: string, currency: st
           inArray(s.legalHolds.reasonCode, [...DISCLOSED_HOLDS]),
         ),
       ),
-    scheduledDeletion(db, userId),
   ]);
   const held = share[0];
   // Settings are read only when there is a share to judge (as the deletion job does).
@@ -97,8 +115,6 @@ export async function deletionPreview(db: Executor, userId: string, currency: st
   return {
     graceDays: DELETION_GRACE_DAYS,
     ...subs,
-    // Contract step placeholder (overhaul wave 5): w5-deletion counts subscriptions paid past the date.
-    endingBeforePaidThrough: 0,
     pendingPayout: pending > 0 ? { cents: pending, currency } : null,
     memberships: memberships.map((m) => ({
       class: m.class,

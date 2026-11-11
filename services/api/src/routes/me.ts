@@ -3,7 +3,7 @@
 
 import { and, count, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import type { Scope } from "@commonair/contracts/scopes";
-import { schema, type Executor } from "@commonair/db";
+import { schema, uuidv7, type Executor } from "@commonair/db";
 import { randomTokenSecret, sha256Hex } from "@commonair/tokens";
 import { isAdult, usernameProblem } from "../auth/identity.ts";
 import { insertBotAccount } from "../auth/bot-account.ts";
@@ -25,13 +25,23 @@ import { audit } from "../events/audit.ts";
 import {
   currentDeletion,
   DELETION_GRACE_DAYS,
+  endPastDue,
+  invalidateEnded,
   lockUser,
+  markRenewalsStopped,
+  RenewalStopError,
+  renewalAdapter,
+  restoreManualRenewals,
+  resumeAtProvider,
   scheduledDeletion,
+  stopRenewalsAtProvider,
   toDeletion,
+  type StoppedRenewals,
 } from "../moderation/deletion.ts";
 import { restrictedIds, withRestriction } from "../moderation/restriction.ts";
 import { appUrl, sendNotice } from "../mail.ts";
 import { createExport, listExports } from "../privacy/exports.ts";
+import { refundableShareOf } from "../coop/refund-details.ts";
 import { meBlocks } from "./me-blocks.ts";
 import { meEnforcement } from "./me-enforcement.ts";
 import { withChannelFaces } from "../notifications/faces.ts";
@@ -125,10 +135,16 @@ async function sendDeletionScheduled(deps: Deps, userId: string, deleteAt: Date)
     .from(users)
     .where(eq(users.id, userId));
   if (!u || u.accountType !== "human") return;
-  await sendNotice(deps.logger, "accountDeletionScheduled", () =>
+  await sendNotice(deps.logger, "accountDeletionScheduled", async () =>
     deps.mailer.send(
       "accountDeletionScheduled",
-      { deleteAt, cancelUrl: appUrl(deps.site, "/settings/privacy"), locale: u.locale },
+      {
+        deleteAt,
+        cancelUrl: appUrl(deps.site, "/settings/privacy"),
+        // ADR 0042: how the share comes back, with the reference to quote after the account is gone.
+        share: await refundableShareOf(deps.db, userId),
+        locale: u.locale,
+      },
       u.email,
     ),
   );
@@ -317,32 +333,69 @@ export const me = {
       const { deps } = context;
       if (input.confirmUsername.toLowerCase() !== caller.user.username.toLowerCase())
         throw badRequest("Type your username to confirm");
+      const already = await scheduledDeletion(deps.db, caller.user.id);
+      if (already) return toDeletion(already);
       const now = deps.now();
+      // ADR 0042: renewal stops when the deletion is requested. The provider first, so a provider
+      // that cannot be reached refuses the request instead of leaving a card charging.
+      const deletionId = uuidv7();
+      const adapter = renewalAdapter(deps.env);
+      let stopped: StoppedRenewals;
+      try {
+        stopped = await stopRenewalsAtProvider(deps.db, adapter, caller.user.id, deletionId, deps.logger);
+      } catch (err) {
+        if (err instanceof RenewalStopError)
+          throw precondition(
+            "payment_provider",
+            "Your subscriptions could not be stopped from renewing, so nothing was scheduled. Try again in a few minutes.",
+          );
+        throw err;
+      }
       let created = false;
-      const row = await deps.db.transaction(async (tx) => {
-        await lockUser(tx, caller.user.id);
-        const existing = await scheduledDeletion(tx, caller.user.id);
-        if (existing) return existing;
-        created = true;
-        const [d] = await tx
-          .insert(schema.accountDeletions)
-          .values({
-            userId: caller.user.id,
-            requestedAt: now,
-            scheduledFor: new Date(now.getTime() + DELETION_GRACE_DAYS * 86_400_000),
-          })
-          .returning();
-        if (!d) throw new Error("deletion insert returned no row");
-        await audit(tx, {
-          actorType: "user",
-          actorId: caller.user.id,
-          action: "account.deletion.request",
-          subjectType: "user",
-          subjectId: caller.user.id,
-          details: { deletionId: d.id },
+      let row: typeof schema.accountDeletions.$inferSelect;
+      let ended = new Map<string, string[]>();
+      try {
+        row = await deps.db.transaction(async (tx) => {
+          await lockUser(tx, caller.user.id);
+          const existing = await scheduledDeletion(tx, caller.user.id);
+          const mark = async (id: string) => {
+            const input = { userId: caller.user.id, deletionId: id, actorId: caller.user.id, now };
+            // past_due ones end now (their period is over), the rest at period end.
+            ended = await endPastDue(tx, { ...input, providerEnded: stopped.endedIds });
+            await markRenewalsStopped(tx, { ...input, providerStopped: stopped.ids });
+          };
+          if (existing) {
+            // A concurrent request scheduled it first; what this one stopped is marked with it.
+            await mark(existing.id);
+            return existing;
+          }
+          created = true;
+          const [d] = await tx
+            .insert(schema.accountDeletions)
+            .values({
+              id: deletionId,
+              userId: caller.user.id,
+              requestedAt: now,
+              scheduledFor: new Date(now.getTime() + DELETION_GRACE_DAYS * 86_400_000),
+            })
+            .returning();
+          if (!d) throw new Error("deletion insert returned no row");
+          await audit(tx, {
+            actorType: "user",
+            actorId: caller.user.id,
+            action: "account.deletion.request",
+            subjectType: "user",
+            subjectId: caller.user.id,
+            details: { deletionId: d.id },
+          });
+          await mark(d.id);
+          return d;
         });
-        return d;
-      });
+      } catch (err) {
+        await stopped.undo();
+        throw err;
+      }
+      await invalidateEnded(deps, ended);
       if (created) await sendDeletionScheduled(deps, caller.user.id, row.scheduledFor);
       return toDeletion(row);
     }),
@@ -350,7 +403,7 @@ export const me = {
       const caller = requireCaller(context);
       const { deps } = context;
       const now = deps.now();
-      await deps.db.transaction(async (tx) => {
+      const restored = await deps.db.transaction(async (tx) => {
         await lockUser(tx, caller.user.id);
         const d = await scheduledDeletion(tx, caller.user.id);
         if (!d) throw notFound("No deletion is scheduled");
@@ -368,7 +421,13 @@ export const me = {
           subjectId: caller.user.id,
           details: { deletionId: d.id },
         });
+        // ADR 0042: exactly what this deletion turned off renews again (manual rows here).
+        const input = { deletionId: d.id, actorId: caller.user.id, now };
+        return { input, providerRows: await restoreManualRenewals(tx, input) };
       });
+      // Provider rows after commit: a provider that is down never keeps the account from staying.
+      if (restored.providerRows.length > 0)
+        await resumeAtProvider(deps.db, renewalAdapter(deps.env), restored.providerRows, restored.input, deps.logger);
       return { ok: true as const };
     }),
     get: os.me.deletion.get.handler(async ({ context }) => {

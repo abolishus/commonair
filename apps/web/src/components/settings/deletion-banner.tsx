@@ -47,7 +47,7 @@ export function DeletionBanner(): React.JSX.Element | null {
       data-scheduled-for={scheduled.scheduledFor}
       tone="warning"
       title={fillNode(t("d7Settings.banner.title"), "date", <DeletionDate iso={scheduled.scheduledFor} />)}
-      description={t("d7Settings.banner.body")}
+      description={t("w5Deletion.banner.body")}
       action={
         <Button
           type="button"

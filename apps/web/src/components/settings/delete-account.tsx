@@ -22,6 +22,7 @@ import * as React from "react";
 import { t } from "../../i18n/index.ts";
 import { toastActionError } from "../../lib/action-error.ts";
 import { api } from "../../lib/api.ts";
+import { errorRequirement } from "../../lib/coop.ts";
 import { fillNode } from "../../lib/fill.tsx";
 import { exportRows } from "../../lib/privacy.ts";
 import { trackUi } from "../../lib/ui-metrics.ts";
@@ -32,6 +33,16 @@ import { canConfirm, impactLines, type ImpactLine } from "./delete-model.ts";
 
 /** The configured grace when the preview has not answered (services/api `DELETION_GRACE_DAYS`). */
 const FALLBACK_GRACE_DAYS = 30;
+
+/**
+ * Why the request failed: the provider could not stop a subscription renewing (ADR 0042), so
+ * nothing was scheduled; anything else is the general failure.
+ */
+export function deletionRequestErrorText(err: unknown): string {
+  return errorRequirement(err) === "payment_provider"
+    ? t("w5Deletion.renewalStopFailed")
+    : t("privacy.deletion.failed");
+}
 
 export type PreviewLoader = () => Promise<DeletionPreview>;
 const loadPreview: PreviewLoader = () => Promise.resolve().then(() => api().me.deletion.preview());
@@ -45,19 +56,21 @@ function ImpactItem({ line }: { line: ImpactLine }): React.JSX.Element {
     case "subscriptions":
       return (
         <>
-          {t("d7Settings.delete.impact.subscriptions", { count: line.count })}{" "}
+          {t("w5Deletion.impact.subscriptions", { count: line.count })}{" "}
           <Link to="/settings/subscriptions" className="underline underline-offset-4">
-            {t("d7Settings.delete.impact.subscriptionsLink")}
+            {t("w5Deletion.impact.subscriptionsLink")}
           </Link>
         </>
       );
     case "channelSubscriptions":
-      return <>{t("d7Settings.delete.impact.channelSubscriptions", { count: line.count })}</>;
+      return <>{t("w5Deletion.impact.channelSubscriptions", { count: line.count })}</>;
+    case "endingEarly":
+      return <>{t("w5Deletion.impact.endingEarly", { count: line.count })}</>;
     case "payout":
       return <>{fillNode(t("d7Settings.delete.impact.payout"), "amount", <MoneyAmount value={line.amount} />)}</>;
     case "membership":
       return line.share ? (
-        <>{fillNode(t("d7Settings.delete.impact.share"), "amount", <MoneyAmount value={line.share} />)}</>
+        <>{fillNode(t("w5Deletion.impact.share"), "amount", <MoneyAmount value={line.share} />)}</>
       ) : (
         <>{t("d7Settings.delete.impact.membership")}</>
       );
@@ -231,7 +244,7 @@ export function DeleteAccountSection({
             onConfirm={() => deletion.schedule(typed.trim())}
             onError={(err) => {
               trackUi("deletion", "error");
-              toastActionError(err, t("privacy.deletion.failed"));
+              toastActionError(err, deletionRequestErrorText(err));
             }}
             contentProps={{ "data-testid": "deletion-dialog" }}
           >

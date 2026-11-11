@@ -78,6 +78,8 @@ export interface StripeClient {
   createCheckoutSession(params: FormObject, idempotencyKey: string): Promise<{ id: string; url: string }>;
   /** `cancel_at_period_end=true`. */
   cancelSubscriptionAtPeriodEnd(subscriptionId: string, idempotencyKey: string): Promise<void>;
+  /** `cancel_at_period_end=false`: renewal back on. */
+  resumeSubscription(subscriptionId: string, idempotencyKey: string): Promise<void>;
   /** Ends the subscription now. */
   cancelSubscriptionNow(subscriptionId: string, idempotencyKey: string): Promise<void>;
   createRefund(params: FormObject, idempotencyKey: string): Promise<{ id: string; status: string | null }>;
@@ -241,6 +243,9 @@ export function stripeClient(opts: StripeClientOptions): StripeClient {
     },
     async cancelSubscriptionAtPeriodEnd(subscriptionId, key) {
       await request("POST", `/v1/subscriptions/${pathId(subscriptionId)}`, { cancel_at_period_end: true }, key);
+    },
+    async resumeSubscription(subscriptionId, key) {
+      await request("POST", `/v1/subscriptions/${pathId(subscriptionId)}`, { cancel_at_period_end: false }, key);
     },
     async cancelSubscriptionNow(subscriptionId, key) {
       await request("DELETE", `/v1/subscriptions/${pathId(subscriptionId)}`, undefined, key);

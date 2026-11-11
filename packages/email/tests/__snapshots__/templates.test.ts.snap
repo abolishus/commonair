@@ -10,6 +10,10 @@ Your account has been deleted
 
 Your Example Air account was deleted on October 18, 2026. Your personal data has been removed.
 
+Subscriptions that were still running ended with the account. Nothing more will be charged.
+
+Your $5.00 member share is still owed to you. To claim it, write to hello@air.example.test and quote the share reference CA-7KQ2M9X4.
+
 Records the law requires us to keep, such as payment records, are kept without your personal details.
 
 Thank you for being part of Example Air.
@@ -33,7 +37,11 @@ Your account is scheduled for deletion
 
 You asked us to delete your Example Air account. It will be deleted permanently on November 17, 2026.
 
-Changed your mind? Cancel any time before then and everything stays as it is.
+Your subscriptions, and paid subscriptions to your channel, have stopped renewing. Time already paid for runs until its usual end date, and nothing is charged again. Anything still paid past November 17, 2026 ends with the account, without an automatic refund.
+
+Your $5.00 member share comes back to you. The co-op's treasury will email you before November 17, 2026 to ask where to send it. After that, you can still claim it by writing to hello@air.example.test and quoting the share reference CA-7KQ2M9X4.
+
+Changed your mind? Cancel any time before then: your account stays, and the subscriptions this stopped renew again.
 
 Cancel deletion https://air.example.test/settings/account/deletion
 
@@ -710,6 +718,43 @@ Questions? Write to hello@air.example.test.
 Example Air runs on free software. Get the source code https://forge.example.test/air/commonair/tree/0123abcd.
 
 Unsubscribe from these emails https://air.example.test/api/email/unsubscribe?list=payout&token=sample"
+`;
+
+exports[`shareRefundDetails > renders accessible HTML and a plain-text alternative 1`] = `
+"Your $5.00 Example Air member share: where should we send it?
+
+Example Air https://air.example.test
+
+
+Let's refund your member share
+
+Your $5.00 member share is due back to you. The co-op's treasury needs to know where to send it.
+
+Amount
+
+$5.00
+
+Share reference
+
+CA-7KQ2M9X4
+
+Your account will be deleted on
+
+November 17, 2026
+
+Write to hello@air.example.test from this address, quote the share reference, and say how you'd like the refund sent. The treasury replies with the next step.
+
+If your account is deleted first, the refund is still owed: quote the share reference when you write.
+
+We never ask for card numbers or passwords by email.
+
+----------------------------------------
+
+You are receiving this email because of your account on Example Air.
+
+Questions? Write to hello@air.example.test.
+
+Example Air runs on free software. Get the source code https://forge.example.test/air/commonair/tree/0123abcd."
 `;
 
 exports[`streamKeyRevoked > renders accessible HTML and a plain-text alternative 1`] = `

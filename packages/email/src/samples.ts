@@ -69,8 +69,21 @@ export function sampleData(publicUrl: string, v: SampleValues = ENGLISH_SAMPLE_V
       streamKeysUrl: url("/dashboard/stream-keys"),
     },
     dataExportReady: { downloadUrl: url("/settings/privacy/exports/sample"), expiresAt: "2026-10-25T14:30:00Z" },
-    accountDeletionScheduled: { deleteAt: "2026-11-17T00:00:00Z", cancelUrl: url("/settings/account/deletion") },
-    accountDeletionCompleted: { deletedAt: at },
+    accountDeletionScheduled: {
+      deleteAt: "2026-11-17T00:00:00Z",
+      cancelUrl: url("/settings/account/deletion"),
+      share: { amountCents: 500, currency: "USD", reference: "CA-7KQ2M9X4" },
+    },
+    accountDeletionCompleted: {
+      deletedAt: at,
+      shareRefund: { amountCents: 500, currency: "USD", reference: "CA-7KQ2M9X4" },
+    },
+    shareRefundDetails: {
+      amountCents: 500,
+      currency: "USD",
+      reference: "CA-7KQ2M9X4",
+      deleteAt: "2026-11-17T00:00:00Z",
+    },
     payoutSent: {
       amountCents: 123_456,
       currency: "EUR",

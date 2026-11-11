@@ -1,0 +1,23 @@
+{
+  "w5Deletion.impact.subscriptions": "{count, plural, one {La # suscripción que pagas deja de renovarse ahora.} other {Las # suscripciones que pagas dejan de renovarse ahora.}} El tiempo que ya pagaste dura como siempre y no se cobra nada más.",
+  "w5Deletion.impact.subscriptionsLink": "Míralas en tu página de suscripciones.",
+  "w5Deletion.impact.channelSubscriptions": "{count, plural, one {# suscripción de pago a tu canal deja de renovarse ahora.} other {# suscripciones de pago a tu canal dejan de renovarse ahora.}} Quienes se suscribieron conservan el tiempo que pagaron.",
+  "w5Deletion.impact.endingEarly": "{count, plural, one {# suscripción está pagada más allá de la fecha de eliminación. Termina con tu cuenta, sin reembolso automático.} other {# suscripciones están pagadas más allá de la fecha de eliminación. Terminan con tu cuenta, sin reembolso automático.}}",
+  "w5Deletion.impact.share": "Tu membresía de la cooperativa termina y tu aportación de {amount} se te devuelve según los estatutos. La tesorería de la cooperativa te escribe antes de la fecha de eliminación para preguntarte adónde enviarla. Después, todavía puedes reclamarla con la referencia de la aportación que viene en ese correo. Los votos que ya emitiste siguen contando.",
+  "w5Deletion.banner.body": "Tus suscripciones dejaron de renovarse, así que no se cobra nada más. Cancela en cualquier momento antes de esa fecha para conservar tu cuenta y volver a activar las renovaciones.",
+  "w5Deletion.renewalStopFailed": "No pudimos detener la renovación de tus suscripciones, así que no se programó nada. Inténtalo de nuevo en unos minutos.",
+  "w5Deletion.treasury.title": "Miembros que se van",
+  "w5Deletion.treasury.intro": "Estos miembros tienen una aportación y pidieron eliminar su cuenta. Pregúntales adónde enviar el reembolso antes de la fecha: después, la plataforma ya no puede contactarlos.",
+  "w5Deletion.treasury.deletesOn": "Cuenta eliminada",
+  "w5Deletion.treasury.lastAsked": "Última solicitud",
+  "w5Deletion.treasury.neverAsked": "Aún no se pidió",
+  "w5Deletion.treasury.ask": "Pedir datos para el reembolso",
+  "w5Deletion.treasury.askTitle": "¿Escribir a {name} para pedir los datos del reembolso?",
+  "w5Deletion.treasury.askBody": "Enviamos un correo al miembro para que escriba a la dirección de contacto de la cooperativa indicando adónde enviar su aportación de {amount}, con su referencia. No verás su dirección. Puedes pedirlo una vez al día.",
+  "w5Deletion.treasury.askConfirm": "Enviar el correo",
+  "w5Deletion.treasury.asked": "Correo enviado. Su respuesta llega a la dirección de contacto de la cooperativa.",
+  "w5Deletion.treasury.askFailed": "El correo no se envió. Inténtalo de nuevo.",
+  "w5Deletion.treasury.askTooSoon": "Se le pidió hace menos de un día. Inténtalo de nuevo mañana.",
+  "w5Deletion.treasury.askedToday": "Se pidió hace menos de un día",
+  "w5Deletion.treasury.truncated": "Hay más miembros con aportación de los que esta lista puede revisar a la vez, así que puede faltar aquí alguien que se va. Revisa también las aportaciones «Depositada» de abajo."
+}

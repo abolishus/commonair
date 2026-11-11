@@ -40,6 +40,7 @@ function lazyStripeAdapter(env: PaymentsEnvLike): PaymentAdapter {
     provider: "stripe",
     startCheckout: async (r) => (await get()).startCheckout(r),
     cancelSubscription: async (ref, o) => (await get()).cancelSubscription?.(ref, o),
+    resumeSubscription: async (ref, o) => (await get()).resumeSubscription?.(ref, o),
     refund: async (r) => {
       const a = await get();
       if (!a.refund) throw new AdapterUnavailableError("refunds are not supported");
