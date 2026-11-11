@@ -15,7 +15,8 @@ export interface StatCardProps extends Omit<React.ComponentProps<"div">, "title"
   /** Under the value and hint, inside the card: a progress bar, a link, a small breakdown. */
   footer?: React.ReactNode;
   size?: "default" | "sm";
-  tone?: "default" | "accent" | "success" | "warning";
+  /** `destructive` for money the creator owes (not amber: art direction keeps amber for the brand). */
+  tone?: "default" | "accent" | "success" | "warning" | "destructive";
 }
 
 export function StatCard({
@@ -41,6 +42,7 @@ export function StatCard({
     accent: "bg-channel-accent text-channel-accent-foreground",
     success: "bg-success/10",
     warning: "bg-warning/10",
+    destructive: "bg-destructive/10",
   }[tone];
   return (
     <Card size={size} data-tone={tone} className={cn("min-w-0", toneClass, className)} {...props}>
