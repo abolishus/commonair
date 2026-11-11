@@ -23,6 +23,16 @@ export {
   type PendingIntentState,
 } from "./intent-confirm.tsx";
 export {
+  ChatIntentConfirm,
+  IntentConfirmCard,
+  PredictionIntentConfirm,
+  revealAndFocus,
+  useIntentConfirm,
+  type ConfirmableIntent,
+  type IntentConfirmCardProps,
+  type IntentConfirmHandle,
+} from "./intent-confirms.tsx";
+export {
   CHANNEL_INTENTS,
   CONFIRMABLE_INTENTS,
   GATE_INTENTS,

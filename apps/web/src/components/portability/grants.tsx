@@ -330,9 +330,35 @@ export function PortabilityGrants(): React.JSX.Element {
   );
 }
 
+export type SetGrant = (channel: string, enabled: boolean) => Promise<{ enabled: boolean }>;
+
+const apiSetGrant: SetGrant = (channel, enabled) => api().portability.grants.set({ channel, enabled });
+
 /**
- * The same switch for one channel, for its follow menu (shown only to a follower). Mounted by the
- * channel page's follow control (a contract request: `components/channel-follow.tsx`).
+ * One channel's grant: the Following menu's "Email me if they move" item and `FollowGrantToggle`.
+ * Mount it with `key` on the channel and the polled value, so a new `initial` is a new state.
+ */
+export function useFollowGrant(
+  channel: string,
+  initial: boolean,
+  setGrant: SetGrant = apiSetGrant,
+): { on: boolean; busy: boolean; set: (next: boolean) => void } {
+  const [on, setOn] = React.useState(initial);
+  const [busy, setBusy] = React.useState(false);
+  const set = (next: boolean) => {
+    if (busy) return;
+    setBusy(true);
+    setGrant(channel, next)
+      .then((r) => setOn(r.enabled))
+      .catch((err: unknown) => toastActionError(err, t("portability.grants.saveFailed")))
+      .finally(() => setBusy(false));
+  };
+  return { on, busy, set };
+}
+
+/**
+ * The same switch for one channel as a settings row. The channel page's Following menu has its
+ * own item (`components/follow/following-menu.tsx`) built on `useFollowGrant`.
  */
 export function FollowGrantToggle({
   channel,
@@ -344,21 +370,12 @@ export function FollowGrantToggle({
   /** `Channel.viewer.portabilityGrant`. */
   initial: boolean;
 }): React.JSX.Element {
-  // Mounted with `key` on the channel, so a new `initial` is a new component.
-  const [on, setOn] = React.useState(initial);
-  const [busy, setBusy] = React.useState(false);
+  const grant = useFollowGrant(channel, initial);
   return (
     <GrantSwitch
-      row={{ slug: channel, displayName, avatarUrl: null, on }}
-      busy={busy}
-      onToggle={(_, next) => {
-        setBusy(true);
-        api()
-          .portability.grants.set({ channel, enabled: next })
-          .then((r) => setOn(r.enabled))
-          .catch((err: unknown) => toastActionError(err, t("portability.grants.saveFailed")))
-          .finally(() => setBusy(false));
-      }}
+      row={{ slug: channel, displayName, avatarUrl: null, on: grant.on }}
+      busy={grant.busy}
+      onToggle={(_, next) => grant.set(next)}
     />
   );
 }

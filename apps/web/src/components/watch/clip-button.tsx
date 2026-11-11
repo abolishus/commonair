@@ -22,11 +22,13 @@ import { Field, FieldDescription, FieldLabel } from "@commonair/ui/components/fi
 import { Input } from "@commonair/ui/components/input";
 import { toast } from "@commonair/ui/toast";
 import { Scissor01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import * as React from "react";
 import { t } from "../../i18n/index.ts";
 import { api, errorCode } from "../../lib/api.ts";
 import { trackUi } from "../../lib/ui-metrics.ts";
 import { AuthGatePrompt } from "../auth-gate/auth-gate-prompt.tsx";
+import { IntentConfirm, usePendingIntent } from "../auth-gate/intent-confirm.tsx";
 import { isMatureGate } from "../safety/client.ts";
 import { watchUrl } from "./share.ts";
 
@@ -141,6 +143,17 @@ export function ClipButton({
     setOpenState(next);
     onOpenChange?.(next);
   };
+  // Back from sign-up with `intent=clip`: a one-tap confirm that only opens the clip dialog.
+  const intent = usePendingIntent("clip", signedIn);
+  const confirming = intent.pending !== null && !open;
+  // The player bar stays up while the confirm is showing; Not now lets it hide again.
+  const barOpen = React.useRef(onOpenChange);
+  React.useEffect(() => {
+    barOpen.current = onOpenChange;
+  });
+  React.useEffect(() => {
+    if (confirming) barOpen.current?.(true);
+  }, [confirming]);
 
   if (!signedIn)
     return (
@@ -225,16 +238,45 @@ export function ClipButton({
           })
         : t("d3Watch.clip.tooShort");
 
+  const button = (
+    <IconButton
+      data-testid="clip-button"
+      data-signed-in="true"
+      label={t("d3Watch.clip.label")}
+      icon={Scissor01Icon}
+      onClick={start}
+      className="text-overlay-foreground"
+    />
+  );
   return (
     <>
-      <IconButton
-        data-testid="clip-button"
-        data-signed-in="true"
-        label={t("d3Watch.clip.label")}
-        icon={Scissor01Icon}
-        onClick={start}
-        className="text-overlay-foreground"
-      />
+      {confirming ? (
+        <IntentConfirm
+          open
+          message={t("d4Follow.confirm.clip")}
+          onDismiss={() => {
+            intent.dismiss();
+            onOpenChange?.(false);
+          }}
+          trigger={button}
+          action={
+            <Button
+              data-testid="intent-confirm-clip"
+              data-filled-cta=""
+              variant="brand"
+              onClick={() => {
+                intent.confirm();
+                start();
+              }}
+            >
+              <HugeiconsIcon icon={Scissor01Icon} strokeWidth={2} aria-hidden />
+              {t("d4Follow.confirm.clipAction")}
+            </Button>
+          }
+        />
+      ) : (
+        button
+      )}
       <Dialog open={open} onOpenChange={(next) => !pending && setOpen(next)}>
         <DialogContent data-testid="clip-dialog" data-kind={target.kind}>
           <form className="flex min-w-0 flex-col gap-4" onSubmit={(e) => void submit(e)}>

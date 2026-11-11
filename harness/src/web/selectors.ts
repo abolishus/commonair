@@ -524,6 +524,24 @@ function cssEscapeString(v: string): string {
   return v.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
 }
 
+/**
+ * Overhaul wave 3, d4-follow (README D4.3): the Following split button, whose menu trigger keeps
+ * `follow-button` (`data-following="true"`), and the one-time first-follow alert prompt.
+ */
+export const D4_FOLLOW_TEST_IDS = {
+  followBell: "follow-bell",
+  followMenu: "follow-menu",
+  followMenuAlertsAll: "follow-menu-alerts-all",
+  followMenuAlertsOff: "follow-menu-alerts-off",
+  followMenuMove: "follow-menu-move",
+  followMenuUnfollow: "follow-menu-unfollow",
+  followUnfollowDialog: "follow-unfollow-dialog",
+  firstFollowPrompt: "first-follow-prompt",
+  firstFollowPush: "first-follow-push",
+  firstFollowEmail: "first-follow-email",
+  firstFollowDismiss: "first-follow-dismiss",
+} as const;
+
 /** Absolute URL of the web app's embed route for a channel (what `--player web` opens). */
 export function webEmbedUrl(webUrl: string, channel: string): string {
   return new URL(ROUTES.embed(channel), webUrl).toString();
