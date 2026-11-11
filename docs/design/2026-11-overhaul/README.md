@@ -613,6 +613,51 @@ What was left, and where it went:
 
 ### Wave 3: watching and creating (D4 + D5)
 
+**Shipped 2026-11-11.** The contract step was `277cf3b6`: `stream.setupState`/`setupMark`,
+`me.moderates`, `vods.recordView`/`clips.recordView`, the `vod_ready` notification, migration 0056
+(`vods.views`, `channel_setup_steps`), and the fields `firstFollow`, `Channel.ownerCoop`,
+`RevenueSummary.paidOut` and `LoyaltyBalance.accrual`. Seven units ran in two workflow passes,
+because three worktrees failed to start the first time. The first four (d4-layout, d4-chat, d4-follow,
+d5-dashboard) were integrated at `2c2730b7`, which added `Channel.viewer.notify` for the bell. The
+other three (d5-shell, d5-content, d5-money) were integrated at `10007dbf`. CI follow-ups were
+`562b4cd4`, `a6164f5c`, `fa49fee3` and `629faceb`. CI on `629faceb` (run 42993074762) was green on
+rerun: attempt 1 failed only on the known `multi-instance` network settle. Recorded calls:
+
+- `Channel.ownerCoop` makes public only that the owner is a member-owner now, or holds a council
+  seat now.
+- Views count at most once per viewer per item per UTC day. Signed-out viewers are deduplicated by a
+  daily-salted address hash that lives only in Valkey. Views are not integrity-checked, so they are
+  labelled "views", never "verified".
+- `vod_ready` is in-app only until D7 adds a `creator` preference. The media seed seeds it, so the
+  platform inbox seed keeps skipping it.
+- Bulk wave moderation and points redemption stayed out of the wave.
+
+What was left, and where it went:
+
+- **To the maintainer (browser checks, never run):**
+  - the sticky player at 320 × 568;
+  - focus after Follow, Unfollow and the intent confirms;
+  - the signed-out Clip button's prompt;
+  - the offline channel's single Follow;
+  - the studio preview's 40 vh cap.
+
+  Unit tests cover each one in happy-dom, which has no layout engine.
+
+- **To wave 4:**
+  - a "How we count" page for verified viewers (D6 transparency v2), then the link from
+    `VerifiedViewers` (`components/watch-layout`);
+  - bulk wave moderation, `chat.bans.bulk` (J5-d), with an audit and outbox row per target and
+    capped at the wave size;
+  - a `Get paid` checklist step from an `instance.features.payouts` bootstrap flag (J2-h).
+- **To wave 5:**
+  - the subscribers-only chat reason before typing (J3-d; the panel has no "subscribed" fact);
+  - `LoyaltyBalance.earnedToday` for "Today: N of {cap}";
+  - `stream.lastBroadcast`, for exact recap counts (the recap stops after 1000 items);
+  - the J2-e share prompt on the first encoder connection, through the LiveStatusBar's
+    `LiveStatusSlot`.
+
+The plan as written:
+
 - **D4, the watch page:**
   - the mobile watch layout (a sticky player, Chat | About);
   - the Following split-button menu, and the one-time first-follow alert prompt (on iPhone before
@@ -633,7 +678,9 @@ What was left, and where it went:
 
 - **D6, the co-op:**
   - from wave 2: a test for `apiSupportClient.memberRule` (the support dialog's member line) against the API;
-  - transparency v2;
+  - transparency v2, with a "How we count" section for verified viewers (from wave 3: the watch
+    page's `VerifiedViewers` links to it once it exists);
+  - from wave 3: a `Get paid` checklist step from an `instance.features.payouts` flag (J2-h);
   - plain-language governance (no JSON, "90% → 85%", proposal cards, vote bars, timelines);
   - council pages;
   - the studio co-op card.
@@ -645,7 +692,8 @@ What was left, and where it went:
   - the deletion preview;
   - the admin home, QueueLayout, `/admin/audit` and `/admin/users/$username`;
   - the installable app: the manifest, the offline page and the install offer;
-  - report outcomes and the made-moderator notice.
+  - report outcomes and the made-moderator notice;
+  - from wave 3: bulk wave moderation, `chat.bans.bulk` (J5-d).
 
 ### Wave 5: cleanup and the deferred decisions
 
@@ -654,6 +702,8 @@ What was left, and where it went:
 - the `ChannelSchedule` contract (next stream, Add to calendar);
 - a proration policy for unused paid time at deletion;
 - how treasurers reach deleted members to refund bank-transfer shares;
+- from wave 3: the subscribers-only chat reason before typing (J3-d), `LoyaltyBalance.earnedToday`,
+  `stream.lastBroadcast` for exact recap counts, and the J2-e first-connection share prompt;
 - the interest list and points redemption stay parked until their triggers (decisions 3 and 4);
 - from wave 2: Go 1.27.4 for GO-2026-6859 on or after 2026-11-17, for the toolchain, the golang image
   pins and CI's `GO_VERSION`; then remove the dated exception in `supply-chain.json`.
