@@ -896,6 +896,13 @@ describe.skipIf(!storage)("account deletion (E6)", () => {
         { userId: S.user.id, endpointHash: uuidv7(), subscription: "enc" },
         { userId: G.user.id, endpointHash: uuidv7(), subscription: "enc" },
       ]);
+    // Overhaul wave 4 (D7.3): the weekly digest's claims.
+    await app()
+      .insert(schema.notificationDigestSends)
+      .values([
+        { userId: S.user.id, weekStart: "2026-11-09" },
+        { userId: G.user.id, weekStart: "2026-11-09" },
+      ]);
     await app()
       .insert(schema.discordWebhooks)
       .values([
@@ -930,6 +937,11 @@ describe.skipIf(!storage)("account deletion (E6)", () => {
       .from(schema.pushSubscriptions)
       .where(inArray(schema.pushSubscriptions.userId, users));
     expect(subs.map((r) => r.userId)).toEqual([G.user.id]);
+    const digestClaims = await db()
+      .select()
+      .from(schema.notificationDigestSends)
+      .where(inArray(schema.notificationDigestSends.userId, users));
+    expect(digestClaims.map((r) => r.userId)).toEqual([G.user.id]);
     const hooks = await db()
       .select()
       .from(schema.discordWebhooks)

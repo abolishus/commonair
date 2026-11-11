@@ -852,3 +852,44 @@ export const D7_SECURITY_IDS = {
 } as const;
 
 export const D7_SECURITY_ROUTES = { security: "/settings/security" } as const;
+
+/**
+ * d7-notify (overhaul wave 4, D7.3): the notifications grid on `/settings/notifications` and the
+ * `/inbox` page. Each `notifyGridRow` carries `data-type` (a preference type); each
+ * `notifyAlwaysRow` carries `data-row`; switches carry `data-state` (on, off) and `data-builtin`.
+ * The go-live cells keep their N1 ids (`notify-default-*`). Each `inboxGroup` carries
+ * `data-group` (today, week, earlier).
+ */
+export const D7_NOTIFY_IDS = {
+  notifyGrid: "notify-grid",
+  notifyGridRow: "notify-grid-row",
+  notifyAlwaysRow: "notify-always-row",
+  notifyCellNone: "notify-cell-none",
+  notifyCellAlways: "notify-cell-always",
+  notifyGovernanceInApp: "notify-pref-governance-in_app",
+  notifyPayoutEmail: "notify-pref-payout-email",
+  notifyCreatorInApp: "notify-pref-creator-in_app",
+  notifyCreatorEmail: "notify-pref-creator-email",
+  notifyDigestEmail: "notify-pref-digest_weekly-email",
+  notifyTypesLoadError: "notify-types-load-error",
+  notifySaved: "notify-saved",
+  notifyFollowingLink: "notify-following-link",
+  notificationSeeAll: "notification-see-all",
+  notificationItemIcon: "notification-item-icon",
+  notificationItemContext: "notification-item-context",
+  inboxPage: "inbox-page",
+  inboxFilters: "inbox-filters",
+  inboxFilterAll: "inbox-filter-all",
+  inboxFilterLive: "inbox-filter-live",
+  inboxFilterCoop: "inbox-filter-coop",
+  inboxFilterAccount: "inbox-filter-account",
+  inboxGroup: "inbox-group",
+  inboxMarkAllRead: "inbox-mark-all-read",
+  inboxLoadMore: "inbox-load-more",
+  inboxEmpty: "inbox-empty",
+  inboxEmptyDirectory: "inbox-empty-directory",
+  inboxEmptyFiltered: "inbox-empty-filtered",
+  inboxShowAll: "inbox-show-all",
+  inboxSettingsLink: "inbox-settings-link",
+  inboxLoadError: "inbox-load-error",
+} as const;

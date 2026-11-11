@@ -13,6 +13,8 @@ import { NotificationBell } from "../src/components/notifications/bell.tsx";
 import { NotificationSettings } from "../src/components/notifications/settings.tsx";
 
 // The real switch needs a browser's push stack; this one only reports "turned on".
+// Counting is a network call; these tests do not count.
+vi.mock("../src/lib/ui-metrics.ts", () => ({ trackUi: () => undefined }));
 vi.mock("../src/components/pwa/push-toggle.tsx", () => ({
   PushToggle: ({ onPushOn }: { onPushOn?: () => void }) => (
     <button type="button" data-testid="fake-push-on" onClick={() => onPushOn?.()}>

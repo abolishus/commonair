@@ -32,6 +32,7 @@ import type { Key as D5Studio } from "./d5-studio.gen.ts";
 import type { Key as D6Governance } from "./d6-governance.gen.ts";
 import type { Key as D6Studio } from "./d6-studio.gen.ts";
 import type { Key as D6Transparency } from "./d6-transparency.gen.ts";
+import type { Key as D7Notify } from "./d7-notify.gen.ts";
 import type { Key as D7Security } from "./d7-security.gen.ts";
 import type { Key as D7Settings } from "./d7-settings.gen.ts";
 import type { Key as E7Admin } from "./e7-admin.gen.ts";
@@ -117,6 +118,7 @@ export type MessageKey =
   | D6Governance
   | D6Studio
   | D6Transparency
+  | D7Notify
   | D7Security
   | D7Settings
   | E7Admin
@@ -201,6 +203,7 @@ export const NAMESPACES = [
   "d6-governance",
   "d6-studio",
   "d6-transparency",
+  "d7-notify",
   "d7-security",
   "d7-settings",
   "e7-admin",

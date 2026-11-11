@@ -43,6 +43,7 @@ import {
 } from "@commonair/ledger";
 import { type PaymentAdapter, StripeRequestError, type TransferResult, createAdapter } from "@commonair/payments";
 import type { WorkerContext } from "../context.ts";
+import { preferenceEnabled } from "../notify/email/prefs.ts";
 
 type TransferRow = typeof schema.payoutTransfers.$inferSelect;
 
@@ -292,11 +293,19 @@ function isCheckViolation(err: unknown): boolean {
 async function payoutSentMail(ctx: WorkerContext, t: TransferRow, reference: string): Promise<void> {
   if (!ctx.mailer || !ctx.site) return;
   const [row] = await ctx.db
-    .select({ email: schema.users.email, locale: schema.users.locale, accountType: schema.users.accountType })
+    .select({
+      userId: schema.users.id,
+      email: schema.users.email,
+      locale: schema.users.locale,
+      accountType: schema.users.accountType,
+    })
     .from(schema.payouts)
     .innerJoin(schema.users, eq(schema.users.id, schema.payouts.userId))
     .where(eq(schema.payouts.id, t.payoutId));
   if (!row || row.accountType !== "human") return;
+  // Overhaul wave 4 (D7.3): the email follows the member's payout preference (on by default). The
+  // payout is a financial record: its inbox and earnings entries never depend on this.
+  if (!(await preferenceEnabled(ctx.db, row.userId, "payout", "email"))) return;
   try {
     await ctx.mailer.send(
       "payoutSent",

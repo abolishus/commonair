@@ -16,6 +16,7 @@ import {
   afterReadingOne,
   inboxClient,
 } from "../../lib/notifications.ts";
+import { useEmailSource } from "./email-source.tsx";
 import { NotificationInbox } from "./inbox.tsx";
 
 /**
@@ -97,6 +98,8 @@ export function NotificationBell({ client: given }: NotificationBellProps = {}):
   const { locale } = useLocale();
   const { unread, setUnread, refresh } = useUnreadCount(client);
   const [open, setOpen] = React.useState(false);
+  // The header's bell is on every signed-in page: it counts and strips `?src=digest` (D7.3).
+  useEmailSource();
   // Remounts the list on every open, so it always starts from the newest page.
   const [openCount, setOpenCount] = React.useState(0);
 

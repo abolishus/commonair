@@ -1,0 +1,19 @@
+{
+  "weeklyDigest.subject": "What you missed on {instance} this week",
+  "weeklyDigest.preview": "New videos, clips and open co-op votes from your week on {instance}.",
+  "weeklyDigest.heading": "What you missed this week",
+  "weeklyDigest.itemsHeading": "New from channels you follow:",
+  "weeklyDigest.video": "{channel} posted a video: {title}",
+  "weeklyDigest.clip": "A clip from {channel}: {title}",
+  "weeklyDigest.votesHeading": "Co-op votes open now:",
+  "weeklyDigest.vote": "{title}, voting closes {closesAt}",
+  "weeklyDigest.why": "You asked for a weekly email from {instance}. We only send it when there is something new.",
+  "weeklyDigest.settings": "Choose which emails you get",
+  "vodReady.subject": "Your video is ready: {title}",
+  "vodReady.preview": "Your broadcast is saved as a video on {instance}.",
+  "vodReady.heading": "Your video is ready",
+  "vodReady.body": "{title} is saved as a video. You can share it, cut clips from it, or change who can see it.",
+  "vodReady.action": "Open the video",
+  "vodReady.why": "You turned on emails about your videos on {instance}.",
+  "vodReady.settings": "Choose which emails you get"
+}

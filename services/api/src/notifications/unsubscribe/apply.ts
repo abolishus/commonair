@@ -10,6 +10,7 @@ import { UNSUBSCRIBE_LIST_PREFERENCE, UNSUBSCRIBE_LISTS, type PreferenceType } f
 import { schema, uuidv7, type Database } from "@commonair/db";
 import { verifyUnsubscribeToken } from "@commonair/tokens";
 import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { recordDigestConsent } from "../preferences/consent.ts";
 
 export type UnsubscribeList = (typeof UNSUBSCRIBE_LISTS)[number];
 /**
@@ -82,6 +83,8 @@ export async function applyUnsubscribe(
           eq(np.enabled, true),
         ),
       );
+    // The weekly digest's consent history records the withdrawal too (`preferences/consent.ts`).
+    if (list === "weekly") await recordDigestConsent(tx, userId, false, "unsubscribe", new Date());
     // Batch 7 decision (l): leaving the `moved` list withdraws every remaining "tell me if they move".
     if (list === "moved")
       await tx.delete(schema.followPortabilityGrants).where(eq(schema.followPortabilityGrants.userId, userId));

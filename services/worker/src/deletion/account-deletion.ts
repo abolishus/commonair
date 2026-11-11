@@ -339,6 +339,14 @@ export async function completeDeletion(ctx: WorkerContext, deletionId: string): 
           .where(eq(s.notificationEmailQueue.userId, userId))
           .returning({ u: s.notificationEmailQueue.userId }),
       );
+      // Overhaul wave 4 (D7.3): the weekly digest's per-week claims.
+      await del(
+        "notification_digest_sends",
+        tx
+          .delete(s.notificationDigestSends)
+          .where(eq(s.notificationDigestSends.userId, userId))
+          .returning({ u: s.notificationDigestSends.userId }),
+      );
       await del(
         "push_subscriptions",
         tx

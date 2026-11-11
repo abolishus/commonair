@@ -47,6 +47,7 @@ describe("catalogs", () => {
     const groups = (lang: string) => namespaces.filter((ns) => ns.lang === lang).map((ns) => ns.name);
     expect(groups("en")).toEqual([
       "account",
+      "digest",
       "governance",
       "layout",
       "notify",

@@ -120,7 +120,8 @@ describe("seed-platform unit", () => {
     // coop: the proposal notifications link its proposals.
     expect(unit.after).toEqual(["social", "media", "safety", "coop"]);
     expect(unit.pending).toEqual([]);
-    expect(unit.tables).toHaveLength(23);
+    expect(unit.tables).toHaveLength(24);
+    expect(unit.tables).toContain("notification_digest_sends");
     expect(unit.tables).toContain("federation_actor_keys");
     expect(unit.tables).toContain("ui_counters");
     expect(unit.tables).toContain("growth_daily");
@@ -354,7 +355,7 @@ describe("planPlatform", () => {
       expect(q.user).toBe("viewer1");
       expect(W.broadcasts.find((b) => b.id === q.broadcastId)?.channelId).toBe(q.channelId);
     }
-    const prefKeys = P.preferences.map((p) => `${p.user}/${p.medium}/${p.channelId ?? ""}`);
+    const prefKeys = P.preferences.map((p) => `${p.user}/${p.type ?? "go_live"}/${p.medium}/${p.channelId ?? ""}`);
     expect(new Set(prefKeys).size).toBe(prefKeys.length);
   });
 

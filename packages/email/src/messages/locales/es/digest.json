@@ -1,0 +1,19 @@
+{
+  "weeklyDigest.subject": "Lo que te perdiste esta semana en {instance}",
+  "weeklyDigest.preview": "Videos y clips nuevos, y votaciones abiertas de la cooperativa, de tu semana en {instance}.",
+  "weeklyDigest.heading": "Lo que te perdiste esta semana",
+  "weeklyDigest.itemsHeading": "Novedades de los canales que sigues:",
+  "weeklyDigest.video": "{channel} publicó un video: {title}",
+  "weeklyDigest.clip": "Un clip de {channel}: {title}",
+  "weeklyDigest.votesHeading": "Votaciones de la cooperativa abiertas ahora:",
+  "weeklyDigest.vote": "{title}, la votación cierra el {closesAt}",
+  "weeklyDigest.why": "Pediste un correo semanal de {instance}. Solo lo enviamos cuando hay algo nuevo.",
+  "weeklyDigest.settings": "Elige qué correos recibes",
+  "vodReady.subject": "Tu video está listo: {title}",
+  "vodReady.preview": "Tu transmisión quedó guardada como video en {instance}.",
+  "vodReady.heading": "Tu video está listo",
+  "vodReady.body": "{title} quedó guardado como video. Puedes compartirlo, cortar clips o cambiar quién puede verlo.",
+  "vodReady.action": "Abrir el video",
+  "vodReady.why": "Activaste los correos sobre tus videos en {instance}.",
+  "vodReady.settings": "Elige qué correos recibes"
+}

@@ -180,6 +180,7 @@ describe("direct-insert writers", () => {
     expect(written.notifications).toBe(want.notifications);
     expect(written.notification_preferences).toBe(want.notification_preferences);
     expect(written.notification_go_live_sends).toBe(want.notification_go_live_sends);
+    expect(written.notification_digest_sends).toBe(want.notification_digest_sends);
     expect(discordRows).toBe(want.discord_webhooks);
     expect(queued).toBe(want.notification_email_queue);
     expect(have).toEqual(want);

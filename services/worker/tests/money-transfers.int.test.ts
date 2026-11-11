@@ -192,6 +192,23 @@ describe("payout-transfers", () => {
     expect(calls).toHaveLength(2);
   });
 
+  test("the payout email follows the payout preference", async () => {
+    const on = await payee();
+    const off = await payee();
+    await db()
+      .insert(schema.notificationPreferences)
+      .values({ userId: off.id, type: "payout", channelId: null, medium: "email", enabled: false });
+    const payouts = await run([on, off]);
+    const { adapter } = fakeAdapter(okAnswer);
+    const before = mails.length;
+    for (const p of payouts)
+      expect(await runPayoutTransfer(ctx(), { adapter }, p.id, NOT_LAST)).toMatchObject({ outcome: "created" });
+    // Both are paid; only the member who kept payout email gets one.
+    for (const p of payouts) expect((await payoutOf(p.id))?.status).toBe("paid");
+    const sent = mails.slice(before).filter((m) => m.template === "payoutSent");
+    expect(sent.map((m) => m.to)).toEqual([on.email]);
+  });
+
   test("the manual adapter moves nothing and opens no row", async () => {
     const u = await payee();
     const [p] = await run([u]);

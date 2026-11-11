@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { and, count, desc, eq, isNull, lt, or, sql } from "drizzle-orm";
+import { and, count, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import type { Scope } from "@commonair/contracts/scopes";
 import { schema, type Executor } from "@commonair/db";
 import { randomTokenSecret, sha256Hex } from "@commonair/tokens";
@@ -34,6 +34,7 @@ import { appUrl, sendNotice } from "../mail.ts";
 import { createExport, listExports } from "../privacy/exports.ts";
 import { meBlocks } from "./me-blocks.ts";
 import { meEnforcement } from "./me-enforcement.ts";
+import { withChannelFaces } from "../notifications/faces.ts";
 import { deliveredNotification, markedByIds, withProposalTitles } from "../notifications/vote-open.ts";
 
 const { users, channels, follows, memberships, notifications, oauthTokens, botConfigs } = schema;
@@ -215,6 +216,7 @@ export const me = {
         and(
           eq(notifications.userId, caller.user.id),
           input.unreadOnly ? isNull(notifications.readAt) : undefined,
+          input.types ? inArray(notifications.type, input.types) : undefined,
           deliveredNotification(),
           cur
             ? or(
@@ -227,7 +229,7 @@ export const me = {
       .orderBy(desc(notifications.createdAt), desc(notifications.id))
       .limit(input.limit + 1);
     return pageOf(
-      await withProposalTitles(context.deps.db, rows),
+      await withChannelFaces(context.deps, await withProposalTitles(context.deps.db, rows)),
       input.limit,
       (n) => ({ id: n.id, type: n.type, payload: n.payload, readAt: isoOrNull(n.readAt), createdAt: iso(n.createdAt) }),
       (last) => encodeCursor({ t: iso(last.createdAt), id: last.id }),

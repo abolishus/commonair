@@ -1,14 +1,15 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import type { NotifyMedium, PreferenceType } from "@commonair/contracts/enums";
 import { ChannelAvatar, EmptyState, SkeletonGroup, SkeletonText } from "@commonair/ui";
-import { Alert, AlertDescription } from "@commonair/ui/components/alert";
+import { SettingsSection } from "@commonair/ui/blocks/forms";
 import { Label } from "@commonair/ui/components/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@commonair/ui/components/select";
 import { Switch } from "@commonair/ui/components/switch";
 import { toast } from "@commonair/ui/toast";
-import { MailAtSign01Icon, UserGroupIcon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
+import { UserGroupIcon } from "@hugeicons/core-free-icons";
+import { Link } from "@tanstack/react-router";
 import * as React from "react";
 import { t } from "../../i18n/index.ts";
 import { isSessionExpired, toastActionError } from "../../lib/action-error.ts";
@@ -16,7 +17,9 @@ import {
   type ChannelMedium,
   type FollowDto,
   type NotificationPreferencesDto,
+  type OtherPreferenceType,
   type OverrideChoice,
+  type PreferenceTypesClient,
   type SetPreferenceInput,
   type SettingsClient,
   applyPreference,
@@ -24,12 +27,15 @@ import {
   copyPreferenceCell,
   isOverrideChoice,
   overrideChoice,
+  preferenceTypesClient,
   settingsClient,
 } from "../../lib/notifications.ts";
+import { trackUi } from "../../lib/ui-metrics.ts";
 import { objectKey, useRetryingLoad, type LoadState } from "../../lib/retrying-load.ts";
 import { SectionLoadError } from "../../lib/section-load-error.tsx";
 import { PushToggle } from "../pwa/push-toggle.tsx";
 import { ListLoadMore, ListSearch, NoMatch, useListWindow } from "../settings/list-window.tsx";
+import { PreferenceGrid } from "./grid.tsx";
 
 /** The failure toast carries `notify-save-error` so the harness and tests can see it. */
 function saveFailed(err: unknown): void {
@@ -40,14 +46,38 @@ function saveFailed(err: unknown): void {
 export interface NotificationSettingsProps {
   /** Tests pass a fixture client; the app uses the API. */
   client?: SettingsClient;
+  /**
+   * The other preference types (governance, payout, creator, the weekly digest). The app uses the
+   * API; a test that passes only `client` gets the go-live row alone.
+   */
+  typesClient?: PreferenceTypesClient | null;
 }
 
+const OTHER_TYPES = [
+  "governance",
+  "payout",
+  "creator",
+  "digest_weekly",
+] as const satisfies readonly OtherPreferenceType[];
+type OtherPrefs = Partial<Record<OtherPreferenceType, NotificationPreferencesDto>>;
+
 /**
- * `/settings/notifications`: go-live defaults per medium, this browser's push, and each followed
- * channel's bell and email/push overrides. Every change is optimistic and rolls back on failure.
+ * `/settings/notifications` (overhaul wave 4, D7.3): the grid of every notification type against
+ * In app, Email and Push, this browser's push, and each followed channel's bell and go-live
+ * email/push overrides. Every change is optimistic, saves at once and rolls back on failure.
  */
-export function NotificationSettings({ client: given }: NotificationSettingsProps = {}): React.JSX.Element {
+export function NotificationSettings({
+  client: given,
+  typesClient: givenTypes,
+}: NotificationSettingsProps = {}): React.JSX.Element {
   const client = React.useMemo(() => given ?? settingsClient(), [given]);
+  const typesClient = React.useMemo(
+    () => (givenTypes !== undefined ? givenTypes : given ? null : preferenceTypesClient()),
+    [given, givenTypes],
+  );
+  React.useEffect(() => {
+    trackUi("settings.notifications", "view");
+  }, []);
   // The defaults retry by itself on a busy API and have their own Retry (F3); the rest of the page stays.
   const loaded = useRetryingLoad(`prefs|${objectKey(client)}`, () => client.preferences());
   const [prefs, setPrefs] = React.useState<NotificationPreferencesDto | null>(null);
@@ -93,6 +123,7 @@ export function NotificationSettings({ client: given }: NotificationSettingsProp
         const answer = await client.setPreference(input);
         // Only this cell: taking the whole answer would undo other cells still being saved.
         if (seq.current.get(cell) === mine) setPrefs((p) => (p ? copyPreferenceCell(p, answer, input) : p));
+        if (input.channel === null) saved(input.medium);
       } catch (err) {
         if (seq.current.get(cell) === mine) setPrefs((p) => (p ? copyPreferenceCell(p, before, input) : p));
         saveFailed(err);
@@ -101,126 +132,131 @@ export function NotificationSettings({ client: given }: NotificationSettingsProp
     [client],
   );
 
+  const others = useOtherTypes(typesClient);
+
   return (
-    <div className="flex flex-col gap-8">
+    <div className="flex flex-col gap-6">
       {load === "loading" ? (
         <SkeletonGroup label={t("notifySettings.loading")}>
-          <SkeletonText lines={4} />
+          <SkeletonText lines={6} />
         </SkeletonGroup>
       ) : load === "failed" || prefs === null ? (
         <DefaultsFrame>
           <SectionLoadError
             data-testid="notify-defaults-load-error"
             retryTestId="notify-defaults-retry"
-            section={t("notifySettings.defaults.title")}
+            section={t("d7Notify.grid.title")}
             load={loaded}
             headingLevel={3}
           />
         </DefaultsFrame>
       ) : (
-        <DefaultsSection
-          prefs={prefs}
-          onChange={(medium, enabled) => void change({ medium, channel: null, enabled })}
+        <PreferenceGrid
+          goLive={prefs}
+          onGoLive={(medium, enabled) => void change({ medium, channel: null, enabled })}
+          others={others.prefs}
+          onOther={(type, medium, enabled) => void others.change(type, medium, enabled)}
+          othersStatus={others.status}
         />
       )}
-      <section aria-labelledby="notify-push-title" className="flex flex-col gap-3">
-        <h2 id="notify-push-title" className="text-base font-medium">
-          {t("notifySettings.push.title")}
-        </h2>
-        <PushToggle onPushOn={() => void adoptPushDefault()} />
-      </section>
+      <SettingsSection title={t("notifySettings.push.title")}>
+        <div className="px-4 py-4 sm:px-6">
+          <PushToggle onPushOn={() => void adoptPushDefault()} />
+        </div>
+      </SettingsSection>
       <ChannelsSection client={client} prefs={prefs} onChange={(input, channel) => void change(input, channel)} />
     </div>
   );
 }
 
-// ------------------------------------------------------------------ defaults
-
-function DefaultSwitch({
-  medium,
-  prefs,
-  onChange,
-}: {
-  medium: "in_app" | "email" | "push";
-  prefs: NotificationPreferencesDto;
-  onChange: (medium: "in_app" | "email" | "push", enabled: boolean) => void;
-}): React.JSX.Element {
-  const id = React.useId();
-  const hint = `${id}-hint`;
-  const checked = prefs.defaults[medium];
-  const builtIn = prefs.builtIn[medium];
-  const common = {
-    id,
-    "aria-describedby": hint,
-    checked,
-    "data-state": checked ? "on" : "off",
-    "data-builtin": builtIn ? "true" : "false",
-    onCheckedChange: (on: boolean) => onChange(medium, on),
-  };
-  return (
-    <div className="flex items-start justify-between gap-4 py-3">
-      <div className="flex min-w-0 flex-col gap-1">
-        <Label htmlFor={id}>
-          {medium === "in_app"
-            ? t("notifySettings.medium.in_app")
-            : medium === "email"
-              ? t("notifySettings.medium.email")
-              : t("notifySettings.medium.push")}
-        </Label>
-        <p id={hint} className="text-xs text-muted-foreground">
-          {medium === "in_app"
-            ? t("notifySettings.medium.in_app.hint")
-            : medium === "email"
-              ? t("notifySettings.medium.email.hint")
-              : t("notifySettings.medium.push.hint")}
-          {builtIn && <span className="ms-1">{t("notifySettings.builtIn")}</span>}
-        </p>
-      </div>
-      {medium === "in_app" ? (
-        <Switch data-testid="notify-default-in_app" {...common} />
-      ) : medium === "email" ? (
-        <Switch data-testid="notify-default-email" {...common} />
-      ) : (
-        <Switch data-testid="notify-default-push" {...common} />
-      )}
-    </div>
+/** The autosave confirmation, and the step the metric counts (the digest opt-in is its own). */
+function saved(medium: NotifyMedium, type: PreferenceType = "go_live"): void {
+  toast.success(<span data-testid="notify-saved">{t("d7Notify.saved")}</span>);
+  trackUi(
+    "settings.notifications",
+    "submit",
+    type === "digest_weekly" ? "weekly" : medium === "email" ? "email" : medium === "push" ? "push" : "none",
   );
 }
 
-/** The defaults' heading and intro, with the switches or their load error. */
+/**
+ * The other types' defaults: loaded together (one Retry for all), each cell optimistic with its
+ * own request order, as for go-live.
+ */
+function useOtherTypes(typesClient: PreferenceTypesClient | null): {
+  prefs: OtherPrefs | null;
+  status: React.ReactNode;
+  change: (type: OtherPreferenceType, medium: NotifyMedium, enabled: boolean) => Promise<void>;
+} {
+  const loaded = useRetryingLoad(`types|${typesClient ? objectKey(typesClient) : "none"}`, async () => {
+    if (typesClient === null) return null;
+    const all = await Promise.all(OTHER_TYPES.map((type) => typesClient.get(type)));
+    const out: OtherPrefs = {};
+    OTHER_TYPES.forEach((type, i) => {
+      const p = all[i];
+      if (p) out[type] = p;
+    });
+    return out;
+  });
+  const [prefs, setPrefs] = React.useState<OtherPrefs | null>(null);
+  const [shown, setShown] = React.useState<OtherPrefs | null>(null);
+  if (loaded.data !== null && loaded.data !== shown) {
+    setShown(loaded.data);
+    setPrefs(loaded.data);
+  }
+  const seq = React.useRef(new Map<string, number>());
+  const change = async (type: OtherPreferenceType, medium: NotifyMedium, enabled: boolean) => {
+    if (typesClient === null) return;
+    const cell = `${type}:${medium}`;
+    const mine = (seq.current.get(cell) ?? 0) + 1;
+    seq.current.set(cell, mine);
+    const setCell = (value: boolean, builtIn: boolean) =>
+      setPrefs((all) => {
+        const p = all?.[type];
+        if (!all || !p) return all;
+        return {
+          ...all,
+          [type]: {
+            ...p,
+            defaults: { ...p.defaults, [medium]: value },
+            builtIn: { ...p.builtIn, [medium]: builtIn },
+          },
+        };
+      });
+    const before = prefs?.[type];
+    setCell(enabled, false);
+    try {
+      const answer = await typesClient.set(type, medium, enabled);
+      if (seq.current.get(cell) === mine) setCell(answer.defaults[medium], answer.builtIn[medium]);
+      saved(medium, type);
+    } catch (err) {
+      if (seq.current.get(cell) === mine && before) setCell(before.defaults[medium], before.builtIn[medium]);
+      saveFailed(err);
+    }
+  };
+  const status =
+    typesClient === null || loaded.data !== null ? null : loaded.state === "failed" ? (
+      <SectionLoadError
+        data-testid="notify-types-load-error"
+        retryTestId="notify-types-retry"
+        section={t("d7Notify.grid.title")}
+        load={loaded}
+        headingLevel={3}
+      />
+    ) : (
+      <SkeletonGroup label={t("notifySettings.loading")}>
+        <SkeletonText lines={4} />
+      </SkeletonGroup>
+    );
+  return { prefs, status, change };
+}
+
+/** The defaults' heading and intro, with their load error. */
 function DefaultsFrame({ children }: { children: React.ReactNode }): React.JSX.Element {
   return (
-    <section aria-labelledby="notify-defaults-title" className="flex flex-col gap-2">
-      <h2 id="notify-defaults-title" className="text-base font-medium">
-        {t("notifySettings.defaults.title")}
-      </h2>
-      <p className="text-sm text-muted-foreground">{t("notifySettings.defaults.intro")}</p>
-      {children}
-    </section>
-  );
-}
-
-function DefaultsSection({
-  prefs,
-  onChange,
-}: {
-  prefs: NotificationPreferencesDto;
-  onChange: (medium: "in_app" | "email" | "push", enabled: boolean) => void;
-}): React.JSX.Element {
-  return (
-    <DefaultsFrame>
-      <div className="flex flex-col divide-y divide-border">
-        <DefaultSwitch medium="in_app" prefs={prefs} onChange={onChange} />
-        <DefaultSwitch medium="email" prefs={prefs} onChange={onChange} />
-        <DefaultSwitch medium="push" prefs={prefs} onChange={onChange} />
-      </div>
-      {!prefs.emailVerified && (
-        <Alert data-testid="notify-email-unverified">
-          <HugeiconsIcon icon={MailAtSign01Icon} strokeWidth={2} aria-hidden />
-          <AlertDescription>{t("notifySettings.emailUnverified")}</AlertDescription>
-        </Alert>
-      )}
-    </DefaultsFrame>
+    <SettingsSection title={t("d7Notify.grid.title")} description={t("d7Notify.grid.intro")}>
+      <div className="px-4 py-4 sm:px-6">{children}</div>
+    </SettingsSection>
   );
 }
 
@@ -438,70 +474,80 @@ function ChannelsSection({
   };
 
   return (
-    <section aria-labelledby="notify-channels-title" className="flex flex-col gap-2">
-      <h2 id="notify-channels-title" className="text-base font-medium">
-        {t("notifySettings.channels.title")}
-      </h2>
-      <p className="text-sm text-muted-foreground">{t("notifySettings.channels.intro")}</p>
-      {load === "loading" ? (
-        <SkeletonGroup label={t("notifySettings.loading")}>
-          <SkeletonText lines={3} />
-        </SkeletonGroup>
-      ) : load === "failed" ? (
-        <SectionLoadError
-          data-testid="notify-channels-load-error"
-          retryTestId="notify-channels-retry"
-          section={t("notifySettings.channels.title")}
-          load={first}
-          headingLevel={3}
-        />
-      ) : follows.length === 0 ? (
-        <EmptyState
-          icon={UserGroupIcon}
-          title={t("notifySettings.channels.empty")}
-          description={t("notifySettings.channels.emptyBody")}
-          headingLevel={3}
-        />
-      ) : (
-        <>
-          <ListSearch
-            data-testid="notify-channels-search"
-            label={t("settings.notifications.search")}
-            value={list.query}
-            onValueChange={list.setQuery}
-            loadedCount={follows.length}
-            partial={cursor !== null}
+    <SettingsSection
+      title={t("notifySettings.channels.title")}
+      description={t("notifySettings.channels.intro")}
+      action={
+        <Link
+          data-testid="notify-following-link"
+          to="/following"
+          className="text-sm text-primary underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+        >
+          {t("d7Notify.channels.following")}
+        </Link>
+      }
+    >
+      <div className="flex flex-col gap-2 px-4 py-4 sm:px-6">
+        {load === "loading" ? (
+          <SkeletonGroup label={t("notifySettings.loading")}>
+            <SkeletonText lines={3} />
+          </SkeletonGroup>
+        ) : load === "failed" ? (
+          <SectionLoadError
+            data-testid="notify-channels-load-error"
+            retryTestId="notify-channels-retry"
+            section={t("notifySettings.channels.title")}
+            load={first}
+            headingLevel={3}
           />
-          {list.matched.length === 0 ? (
-            <NoMatch query={list.query} />
-          ) : (
-            <ul className="flex flex-col divide-y divide-border">
-              {list.shown.map((f) => (
-                <ChannelRow
-                  key={f.channel.id}
-                  follow={f}
-                  prefs={prefs}
-                  onBell={(notify) => void bell(f, notify)}
-                  onChange={(medium, choice) =>
-                    onChange(
-                      { medium, channel: f.channel.slug, enabled: choiceEnabled(choice) },
-                      { id: f.channel.id, slug: f.channel.slug, displayName: f.channel.displayName },
-                    )
-                  }
-                />
-              ))}
-            </ul>
-          )}
-          {list.hasMore && (
-            <ListLoadMore
-              data-testid="notify-channels-more"
-              label={t("notifySettings.channels.loadMore")}
-              loading={more}
-              onClick={list.loadMore}
+        ) : follows.length === 0 ? (
+          <EmptyState
+            icon={UserGroupIcon}
+            title={t("notifySettings.channels.empty")}
+            description={t("notifySettings.channels.emptyBody")}
+            headingLevel={3}
+          />
+        ) : (
+          <>
+            <ListSearch
+              data-testid="notify-channels-search"
+              label={t("settings.notifications.search")}
+              value={list.query}
+              onValueChange={list.setQuery}
+              loadedCount={follows.length}
+              partial={cursor !== null}
             />
-          )}
-        </>
-      )}
-    </section>
+            {list.matched.length === 0 ? (
+              <NoMatch query={list.query} />
+            ) : (
+              <ul className="flex flex-col divide-y divide-border">
+                {list.shown.map((f) => (
+                  <ChannelRow
+                    key={f.channel.id}
+                    follow={f}
+                    prefs={prefs}
+                    onBell={(notify) => void bell(f, notify)}
+                    onChange={(medium, choice) =>
+                      onChange(
+                        { medium, channel: f.channel.slug, enabled: choiceEnabled(choice) },
+                        { id: f.channel.id, slug: f.channel.slug, displayName: f.channel.displayName },
+                      )
+                    }
+                  />
+                ))}
+              </ul>
+            )}
+            {list.hasMore && (
+              <ListLoadMore
+                data-testid="notify-channels-more"
+                label={t("notifySettings.channels.loadMore")}
+                loading={more}
+                onClick={list.loadMore}
+              />
+            )}
+          </>
+        )}
+      </div>
+    </SettingsSection>
   );
 }

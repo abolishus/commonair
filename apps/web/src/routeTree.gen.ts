@@ -20,6 +20,7 @@ import { Route as AppCreatorsRouteImport } from './routes/_app/creators'
 import { Route as AppDmcaRouteImport } from './routes/_app/dmca'
 import { Route as AppFollowingRouteImport } from './routes/_app/following'
 import { Route as AppGuidelinesRouteImport } from './routes/_app/guidelines'
+import { Route as AppInboxRouteImport } from './routes/_app/inbox'
 import { Route as AppPrivacyRouteImport } from './routes/_app/privacy'
 import { Route as AppSearchRouteImport } from './routes/_app/search'
 import { Route as AppSettingsRouteImport } from './routes/_app/settings'
@@ -143,6 +144,11 @@ const AppFollowingRoute = AppFollowingRouteImport.update({
 const AppGuidelinesRoute = AppGuidelinesRouteImport.update({
   id: '/guidelines',
   path: '/guidelines',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppInboxRoute = AppInboxRouteImport.update({
+  id: '/inbox',
+  path: '/inbox',
   getParentRoute: () => AppRoute,
 } as any)
 const AppPrivacyRoute = AppPrivacyRouteImport.update({
@@ -521,6 +527,7 @@ export interface FileRoutesByFullPath {
   '/dmca': typeof AppDmcaRoute
   '/following': typeof AppFollowingRoute
   '/guidelines': typeof AppGuidelinesRoute
+  '/inbox': typeof AppInboxRoute
   '/privacy': typeof AppPrivacyRoute
   '/search': typeof AppSearchRoute
   '/settings': typeof AppSettingsRouteWithChildren
@@ -603,6 +610,7 @@ export interface FileRoutesByTo {
   '/dmca': typeof AppDmcaRoute
   '/following': typeof AppFollowingRoute
   '/guidelines': typeof AppGuidelinesRoute
+  '/inbox': typeof AppInboxRoute
   '/privacy': typeof AppPrivacyRoute
   '/search': typeof AppSearchRoute
   '/signin': typeof AppSigninRoute
@@ -687,6 +695,7 @@ export interface FileRoutesById {
   '/_app/dmca': typeof AppDmcaRoute
   '/_app/following': typeof AppFollowingRoute
   '/_app/guidelines': typeof AppGuidelinesRoute
+  '/_app/inbox': typeof AppInboxRoute
   '/_app/privacy': typeof AppPrivacyRoute
   '/_app/search': typeof AppSearchRoute
   '/_app/settings': typeof AppSettingsRouteWithChildren
@@ -772,6 +781,7 @@ export interface FileRouteTypes {
     | '/dmca'
     | '/following'
     | '/guidelines'
+    | '/inbox'
     | '/privacy'
     | '/search'
     | '/settings'
@@ -854,6 +864,7 @@ export interface FileRouteTypes {
     | '/dmca'
     | '/following'
     | '/guidelines'
+    | '/inbox'
     | '/privacy'
     | '/search'
     | '/signin'
@@ -937,6 +948,7 @@ export interface FileRouteTypes {
     | '/_app/dmca'
     | '/_app/following'
     | '/_app/guidelines'
+    | '/_app/inbox'
     | '/_app/privacy'
     | '/_app/search'
     | '/_app/settings'
@@ -1099,6 +1111,13 @@ declare module '@tanstack/react-router' {
       path: '/guidelines'
       fullPath: '/guidelines'
       preLoaderRoute: typeof AppGuidelinesRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/inbox': {
+      id: '/_app/inbox'
+      path: '/inbox'
+      fullPath: '/inbox'
+      preLoaderRoute: typeof AppInboxRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/privacy': {
@@ -1680,6 +1699,7 @@ interface AppRouteChildren {
   AppDmcaRoute: typeof AppDmcaRoute
   AppFollowingRoute: typeof AppFollowingRoute
   AppGuidelinesRoute: typeof AppGuidelinesRoute
+  AppInboxRoute: typeof AppInboxRoute
   AppPrivacyRoute: typeof AppPrivacyRoute
   AppSearchRoute: typeof AppSearchRoute
   AppSettingsRoute: typeof AppSettingsRouteWithChildren
@@ -1717,6 +1737,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppDmcaRoute: AppDmcaRoute,
   AppFollowingRoute: AppFollowingRoute,
   AppGuidelinesRoute: AppGuidelinesRoute,
+  AppInboxRoute: AppInboxRoute,
   AppPrivacyRoute: AppPrivacyRoute,
   AppSearchRoute: AppSearchRoute,
   AppSettingsRoute: AppSettingsRouteWithChildren,

@@ -51,6 +51,8 @@ const TABLES = [
   "notification_preferences",
   "notification_go_live_sends",
   "notification_email_queue",
+  // Overhaul wave 4 (D7.3): the weekly digest's claims.
+  "notification_digest_sends",
   "push_subscriptions",
   "discord_webhooks",
   // Batch 7: portability imports and keys, federation.

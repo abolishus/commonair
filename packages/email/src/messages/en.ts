@@ -9,6 +9,7 @@
  * `NOTES.md`.
  */
 import account from "./locales/en/account.json" with { type: "json" };
+import digest from "./locales/en/digest.json" with { type: "json" };
 import governance from "./locales/en/governance.json" with { type: "json" };
 import layout from "./locales/en/layout.json" with { type: "json" };
 import notify from "./locales/en/notify.json" with { type: "json" };
@@ -19,9 +20,21 @@ import security from "./locales/en/security.json" with { type: "json" };
 import trust from "./locales/en/trust.json" with { type: "json" };
 
 /** Every English JSON group, by file name (the order of `locales/en/`). */
-export const EN_GROUPS = { account, governance, layout, notify, payments, privacy, receipt, security, trust } as const;
+export const EN_GROUPS = {
+  account,
+  digest,
+  governance,
+  layout,
+  notify,
+  payments,
+  privacy,
+  receipt,
+  security,
+  trust,
+} as const;
 
 type Flat = typeof account &
+  typeof digest &
   typeof governance &
   typeof layout &
   typeof notify &

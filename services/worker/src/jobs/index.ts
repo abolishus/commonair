@@ -48,6 +48,8 @@ import { job as notifyEmailDigest } from "./notify-email-digest.ts";
 import { job as notifyGoLive } from "./notify-go-live.ts";
 import { job as notifyPrune } from "./notify-prune.ts";
 import { job as notifyPush } from "./notify-push.ts";
+import { job as notifyVodEmail } from "./notify-vod-email.ts";
+import { job as notifyWeeklyDigest } from "./notify-weekly-digest.ts";
 import { job as moderationNciiClock } from "./moderation-ncii-clock.ts";
 import { job as moderationNciiHash } from "./moderation-ncii-hash.ts";
 import { job as moderationScan } from "./moderation-scan.ts";
@@ -170,4 +172,7 @@ export const JOBS = [
   patronagePayout,
   // Design overhaul wave 2 (D2.8).
   growthDaily,
+  // Design overhaul wave 4 (D7.3).
+  notifyWeeklyDigest,
+  notifyVodEmail,
 ] as readonly JobDefinition[];

@@ -9,7 +9,12 @@
  * scale give the same plan. The writers (`write.ts`, `api.ts`, `federation.ts`, `portability.ts`)
  * turn it into rows. No row predates the account or follow it references.
  */
-import { NOTIFICATION_TYPES, type APP_SUSPENSION_REASONS, type NOTIFY_MEDIA } from "@commonair/contracts/enums";
+import {
+  NOTIFICATION_TYPES,
+  type APP_SUSPENSION_REASONS,
+  type NOTIFY_MEDIA,
+  type PreferenceType,
+} from "@commonair/contracts/enums";
 import { EVENTS } from "@commonair/contracts/events";
 import { NOTIFY_RULES } from "@commonair/contracts/notify";
 import { OAUTH_LIMITS } from "@commonair/contracts/oauth";
@@ -151,11 +156,19 @@ export interface NotificationSpec {
 
 export interface PreferenceSpec {
   user: string;
+  /** Overhaul wave 4 (D7.3): the preference type; absent means `go_live`. */
+  type?: PreferenceType;
   /** null: the member's default for the medium. */
   channelId: string | null;
   medium: NotifyMedium;
   enabled: boolean;
   updatedAt: Date;
+}
+
+export interface DigestSendSpec {
+  user: string;
+  /** The UTC Monday (`YYYY-MM-DD`) of the week the digest covered. */
+  weekStart: string;
 }
 
 export interface GoLiveSendSpec {
@@ -225,6 +238,8 @@ export interface PlatformPlan {
   notifications: NotificationSpec[];
   preferences: PreferenceSpec[];
   goLiveSends: GoLiveSendSpec[];
+  /** Overhaul wave 4 (D7.3): weekly digests already sent (`notification_digest_sends`). */
+  digestSends: DigestSendSpec[];
   emailQueue: EmailQueueSpec[];
   push: PushSpec[];
   discord: DiscordSpec[];
@@ -569,6 +584,28 @@ export function planPlatform(rng: Rng, scale: SeedScale, world: PlatformWorld, n
       updatedAt: prefAt(h),
     });
 
+  // Overhaul wave 4 (D7.3): the wider preference types. viewer1 opted in to the weekly digest
+  // (and got last week's); streamer1 asked for video-ready email and kept payout email on.
+  preferences.push({
+    user: "viewer1",
+    type: "digest_weekly",
+    channelId: null,
+    medium: "email",
+    enabled: true,
+    updatedAt: prefAt("viewer1"),
+  });
+  if (world.users.some((u) => u.handle === "streamer1"))
+    for (const type of ["creator", "payout"] as const)
+      preferences.push({
+        user: "streamer1",
+        type,
+        channelId: null,
+        medium: "email",
+        enabled: true,
+        updatedAt: prefAt("streamer1"),
+      });
+  const digestSends: DigestSendSpec[] = [{ user: "viewer1", weekStart: utcMondayOf(new Date(t - 7 * 86_400_000)) }];
+
   const gr = rng.fork("goLiveSends");
   const goLiveSends: GoLiveSendSpec[] = [];
   const sendFor = (h: string, f: WorldFollow) => {
@@ -648,6 +685,7 @@ export function planPlatform(rng: Rng, scale: SeedScale, world: PlatformWorld, n
     notifications,
     preferences,
     goLiveSends,
+    digestSends,
     emailQueue,
     push,
     discord,
@@ -656,12 +694,19 @@ export function planPlatform(rng: Rng, scale: SeedScale, world: PlatformWorld, n
   };
 }
 
+/** The UTC date (`YYYY-MM-DD`) of the Monday starting `d`'s ISO week. */
+export function utcMondayOf(d: Date): string {
+  const back = (d.getUTCDay() + 6) % 7;
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - back)).toISOString().slice(0, 10);
+}
+
 /** Counts per table the plan's direct inserts write (the API-driven tables are counted live). */
 export function plannedDirectRows(plan: PlatformPlan): Record<string, number> {
   return {
     notifications: plan.notifications.length,
     notification_preferences: plan.preferences.length,
     notification_go_live_sends: plan.goLiveSends.length,
+    notification_digest_sends: plan.digestSends.length,
     notification_email_queue: plan.emailQueue.length,
     discord_webhooks: plan.discord.length,
   };

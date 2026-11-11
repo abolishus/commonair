@@ -817,3 +817,62 @@ Recibes este correo por tu cuenta en Example Air.
 
 Example Air funciona con software libre. Obtén el código fuente https://forge.example.test/air/commonair/tree/0123abcd."
 `;
+
+exports[`vodReady in Spanish > renders with lang and dir, and differs from English in subject and body 1`] = `
+"Tu video está listo: Speedrun night, part 2
+
+Example Air https://air.example.test
+
+
+Tu video está listo
+
+Speedrun night, part 2 quedó guardado como video. Puedes compartirlo, cortar clips o cambiar quién puede verlo.
+
+Abrir el video https://air.example.test/videos/sample
+
+Activaste los correos sobre tus videos en Example Air.
+
+Elige qué correos recibes https://air.example.test/settings/notifications
+
+----------------------------------------
+
+Recibes este correo por tu cuenta en Example Air.
+
+¿Tienes preguntas? Escribe a hello@air.example.test.
+
+Example Air funciona con software libre. Obtén el código fuente https://forge.example.test/air/commonair/tree/0123abcd.
+
+Darte de baja de estos correos https://air.example.test/api/email/unsubscribe?list=creator&token=sample"
+`;
+
+exports[`weeklyDigest in Spanish > renders with lang and dir, and differs from English in subject and body 1`] = `
+"Lo que te perdiste esta semana en Example Air
+
+Example Air https://air.example.test
+
+
+Lo que te perdiste esta semana
+
+Novedades de los canales que sigues:
+
+ * ada_plays publicó un video: Speedrun night, part 2 https://air.example.test/videos/sample?src=digest
+ * Un clip de Ada: Speedrun night, part 2 https://air.example.test/clips/sample?src=digest
+
+Votaciones de la cooperativa abiertas ahora:
+
+ * Raise the creator share to 85% https://air.example.test/coop/proposals/sample?src=digest, la votación cierra el 1 de noviembre de 2026 a las 18:00 UTC
+
+Pediste un correo semanal de Example Air. Solo lo enviamos cuando hay algo nuevo.
+
+Elige qué correos recibes https://air.example.test/settings/notifications?src=digest
+
+----------------------------------------
+
+Recibes este correo por tu cuenta en Example Air.
+
+¿Tienes preguntas? Escribe a hello@air.example.test.
+
+Example Air funciona con software libre. Obtén el código fuente https://forge.example.test/air/commonair/tree/0123abcd.
+
+Darte de baja de estos correos https://air.example.test/api/email/unsubscribe?list=weekly&token=sample"
+`;

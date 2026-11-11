@@ -11,7 +11,7 @@ import { getSessionUser, useBootstrap } from "../../lib/bootstrap.ts";
 import { requireSession } from "../../lib/guard.ts";
 import { titleHead } from "../../lib/page-title.ts";
 
-/** Signed in: go-live notification preferences and browser push (ADR 0028). */
+/** Signed in: the notifications grid, browser push and per-channel go-live choices (ADR 0028, D7.3). */
 export const Route = createFileRoute("/_app/settings/notifications/")({
   head: () => titleHead(t("pageTitle.settingsNotifications")),
   // Server-side guard (SSR and client navigation); the component keeps a client fallback.
@@ -23,8 +23,8 @@ function NotificationSettingsPage(): React.JSX.Element {
   const { me } = useBootstrap();
   if (!me) return <Navigate to="/signin" replace />;
   return (
-    <div data-testid="notifications-page" className="flex flex-col gap-6">
-      <PageHeader title={t("notifySettings.title")} description={t("notifySettings.intro")} />
+    <div data-testid="notifications-page" className="flex min-w-0 flex-col gap-6">
+      <PageHeader title={t("notifySettings.title")} description={t("d7Notify.intro")} />
       <NotificationSettings />
       {/* F37: moved here from privacy; it is a per-channel notice, like the go-live ones above. */}
       <PortabilityGrants />
