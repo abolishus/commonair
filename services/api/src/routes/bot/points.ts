@@ -6,7 +6,9 @@ import { os, requireCaller, requireChannel } from "../../lib/orpc.ts";
 import { adjust, balanceOf, leaderboard } from "../../points/service.ts";
 
 export const points = {
-  balance: os.bot.points.balance.handler(({ context, input }) => balanceOf(context.deps.db, input)),
+  balance: os.bot.points.balance.handler(({ context, input }) =>
+    balanceOf(context.deps.db, input, context.caller?.user.id ?? null),
+  ),
 
   leaderboard: os.bot.points.leaderboard.handler(({ context, input }) => leaderboard(context.deps.db, input)),
 

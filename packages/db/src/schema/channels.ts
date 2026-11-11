@@ -12,6 +12,7 @@ import {
   primaryKey,
   smallint,
   text,
+  time,
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
@@ -319,5 +320,64 @@ export const channelSetupSteps = pgTable(
   (t) => [
     primaryKey({ columns: [t.channelId, t.step] }),
     check("channel_setup_steps_step", sql`${t.step} IN ('bring_your_audience', 'get_paid')`),
+  ],
+);
+
+/**
+ * Overhaul wave 5: the channel's schedule (`channels.schedule.*`). Weekly slots are in the channel's
+ * time zone (`channel_schedules.timezone`, an IANA name the database checks); one-offs are instants.
+ * Limits (`SCHEDULE_RULES`) and the time zone are enforced by triggers (0060).
+ */
+export const channelSchedules = pgTable("channel_schedules", {
+  channelId: uuid()
+    .primaryKey()
+    .references(() => channels.id, { onDelete: "cascade" }),
+  timezone: text().notNull().default("UTC"),
+  updatedAt: updatedAt(),
+});
+
+export const channelScheduleSlots = pgTable(
+  "channel_schedule_slots",
+  {
+    id: id(),
+    channelId: uuid()
+      .notNull()
+      .references(() => channels.id, { onDelete: "cascade" }),
+    /** ISO weekday: 1 = Monday … 7 = Sunday. */
+    weekday: smallint().notNull(),
+    /** Wall-clock start in the channel's time zone. */
+    startLocal: time().notNull(),
+    durationMinutes: integer().notNull(),
+    title: text(),
+    categoryId: uuid().references(() => categories.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("channel_schedule_slots_channel_idx").on(t.channelId),
+    check("channel_schedule_slots_weekday", sql`${t.weekday} BETWEEN 1 AND 7`),
+    check("channel_schedule_slots_duration", sql`${t.durationMinutes} BETWEEN 15 AND 720`),
+    check("channel_schedule_slots_title", sql`${t.title} IS NULL OR char_length(${t.title}) BETWEEN 1 AND 140`),
+  ],
+);
+
+export const channelScheduleOneOffs = pgTable(
+  "channel_schedule_one_offs",
+  {
+    id: id(),
+    channelId: uuid()
+      .notNull()
+      .references(() => channels.id, { onDelete: "cascade" }),
+    startsAt: ts().notNull(),
+    durationMinutes: integer().notNull(),
+    title: text(),
+    categoryId: uuid().references(() => categories.id, { onDelete: "set null" }),
+    /** A one-off can instead cancel one occurrence of a weekly slot (the API checks its start is one). */
+    cancelsSlotId: uuid().references(() => channelScheduleSlots.id, { onDelete: "cascade" }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("channel_schedule_one_offs_channel_idx").on(t.channelId, t.startsAt),
+    check("channel_schedule_one_offs_duration", sql`${t.durationMinutes} BETWEEN 15 AND 720`),
+    check("channel_schedule_one_offs_title", sql`${t.title} IS NULL OR char_length(${t.title}) BETWEEN 1 AND 140`),
   ],
 );

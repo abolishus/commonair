@@ -234,6 +234,8 @@ export function share(id: string, status: ShareDto["status"]): ShareDto {
     purchasedAt: at(-100),
     refundedAt: null,
     createdAt: at(-120),
+    deletionScheduledFor: null,
+    refundDetailsRequestedAt: null,
   };
 }
 

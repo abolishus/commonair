@@ -106,7 +106,24 @@ describe("balance", () => {
       pointsName: "points",
       enabled: true,
       accrual: { pointsPerBlock: 10, blockMinutes: 5, dailyCapPerChannel: 1000 },
+      earnedToday: null,
     });
+  });
+
+  test("earnedToday (overhaul wave 5): the caller's own points today; null for anyone else's", async () => {
+    const c = await newChannel();
+    const v = await newUser();
+    const today = new Date().toISOString().slice(0, 10);
+    await db().insert(s.loyaltyAccruals).values({ channelId: c.id, userId: v.id, day: today, dayPoints: 30 });
+    const own = client(api, { bearer: await bearer(v.id, []) });
+    expect((await own.call("GET", pointsPath(c.slug, v.username))).body).toMatchObject({ earnedToday: 30 });
+    expect((await anon().call("GET", pointsPath(c.slug, v.username))).body).toMatchObject({ earnedToday: null });
+    // Yesterday's row counts nothing today.
+    await db()
+      .update(s.loyaltyAccruals)
+      .set({ day: "2000-01-01" })
+      .where(and(eq(s.loyaltyAccruals.channelId, c.id), eq(s.loyaltyAccruals.userId, v.id)));
+    expect((await own.call("GET", pointsPath(c.slug, v.username))).body).toMatchObject({ earnedToday: 0 });
   });
 
   test("the channel's points name and switch come from its bot config", async () => {
@@ -183,6 +200,7 @@ describe("adjust", () => {
       pointsName: "points",
       enabled: true,
       accrual: { pointsPerBlock: 10, blockMinutes: 5, dailyCapPerChannel: 1000 },
+      earnedToday: null,
     });
     const down = await mod.call("POST", pointsPath(c.slug, v.username), { delta: -40, reason: "penalty" });
     expect(down.status).toBe(200);

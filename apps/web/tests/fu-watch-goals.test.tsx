@@ -300,6 +300,7 @@ function fakeClient(goals?: () => Promise<GoalDto[]>): {
       points: 0,
       pointsName: "points",
       accrual: { pointsPerBlock: 10, blockMinutes: 5, dailyCapPerChannel: 1000 },
+      earnedToday: null,
       enabled: false,
     }),
     giveawayCurrent: async () => null,

@@ -414,6 +414,20 @@
       "when": 1794398850788,
       "tag": "0058_w4_protections",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1794425566408,
+      "tag": "0059_w5_cleanup",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1794425577903,
+      "tag": "0060_w5_protections",
+      "breakpoints": true
     }
   ]
 }

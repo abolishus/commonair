@@ -16,6 +16,7 @@ import {
 import { sql } from "drizzle-orm";
 import { users } from "./auth.ts";
 import { channels } from "./channels.ts";
+import { accountDeletions } from "./safety.ts";
 import {
   cents,
   createdAt,
@@ -53,6 +54,11 @@ export const subscriptions = pgTable(
     currentPeriodStart: ts(),
     currentPeriodEnd: ts(),
     cancelAtPeriodEnd: boolean().notNull().default(false),
+    /**
+     * Overhaul wave 5 (proration policy): the scheduled account deletion that turned renewal off
+     * (`cancelAtPeriodEnd`), so cancelling that deletion turns back on exactly what it turned off.
+     */
+    renewalStoppedByDeletionId: uuid().references(() => accountDeletions.id, { onDelete: "set null" }),
     giftedById: uuid().references(() => users.id, { onDelete: "set null" }),
     /** The gift payment that paid for this subscription (one payment can buy many gift subs). */
     giftPaymentId: uuid().references((): AnyPgColumn => payments.id, { onDelete: "restrict" }),

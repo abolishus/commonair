@@ -646,5 +646,8 @@ function shareView(r: ShareRow, people: Map<string, { id: string; username: stri
     purchasedAt: isoOrNull(r.purchasedAt),
     refundedAt: isoOrNull(r.refundedAt),
     createdAt: iso(r.createdAt),
+    // Contract step placeholder (overhaul wave 5): w5-deletion joins the scheduled deletion.
+    deletionScheduledFor: null,
+    refundDetailsRequestedAt: isoOrNull(r.refundDetailsRequestedAt),
   };
 }

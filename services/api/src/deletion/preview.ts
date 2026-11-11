@@ -97,6 +97,8 @@ export async function deletionPreview(db: Executor, userId: string, currency: st
   return {
     graceDays: DELETION_GRACE_DAYS,
     ...subs,
+    // Contract step placeholder (overhaul wave 5): w5-deletion counts subscriptions paid past the date.
+    endingBeforePaidThrough: 0,
     pendingPayout: pending > 0 ? { cents: pending, currency } : null,
     memberships: memberships.map((m) => ({
       class: m.class,

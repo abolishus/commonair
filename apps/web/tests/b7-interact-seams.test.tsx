@@ -171,6 +171,7 @@ function fakeClient(current: () => Promise<GiveawayDto | null>) {
       points: 0,
       pointsName: "points",
       accrual: { pointsPerBlock: 10, blockMinutes: 5, dailyCapPerChannel: 1000 },
+      earnedToday: null,
       enabled: false,
     }),
     giveawayCurrent,

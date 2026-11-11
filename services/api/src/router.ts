@@ -45,6 +45,8 @@ import { meDeletionPreview } from "./routes/deletion-preview.ts";
 import { chatBansBulk } from "./routes/chat-bulk.ts";
 import { transparencyNote } from "./routes/transparency-note.ts";
 import { adminConsole, caseAssign } from "./routes/admin-console.ts";
+import { channelSchedule, streamLastBroadcast } from "./routes/schedule.ts";
+import { shareRefundDetails } from "./routes/share-refund-details.ts";
 
 export const router = base.router({
   instance,
@@ -52,8 +54,8 @@ export const router = base.router({
   users: { ...users, ...usernameRoutes },
   categories: categoriesRoutes,
   directory,
-  channels: channelsRoutes,
-  stream: { ...stream, ...streamSetup },
+  channels: { ...channelsRoutes, ...channelSchedule },
+  stream: { ...stream, ...streamSetup, ...streamLastBroadcast },
   playback,
   p2p,
   vods: { ...vods, ...vodsRecent, ...vodViews },
@@ -63,7 +65,7 @@ export const router = base.router({
   developer,
   bot,
   interact,
-  coop,
+  coop: { ...coop, shares: { ...coop.shares, ...shareRefundDetails } },
   integrity,
   analytics,
   transparency: { ...transparency, ...transparencyNumbers, ...transparencyNote },

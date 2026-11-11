@@ -118,6 +118,7 @@ describe("displayNameProblem", () => {
 const preview = (over: Partial<DeletionPreview> = {}): DeletionPreview => ({
   graceDays: 30,
   activeSubscriptions: 0,
+  endingBeforePaidThrough: 0,
   channelSubscriptions: 0,
   pendingPayout: null,
   memberships: [],

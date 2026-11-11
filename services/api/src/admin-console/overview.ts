@@ -64,6 +64,8 @@ const toCount = (queue: AdminQueue, a: Agg | undefined): Count => {
     dueSoon: Number(a?.dueSoon ?? 0),
     oldestAt: oldest === null ? null : new Date(oldest).toISOString(),
     unassigned: queue === "moderation" ? Number(a?.unassigned ?? 0) : null,
+    // Contract step placeholder (overhaul wave 5): w5-admin computes the soonest open deadline.
+    nextDueAt: null,
   };
 };
 

@@ -81,6 +81,11 @@ export const membershipShares = pgTable(
     status: shareStatus().notNull().default("pending"),
     purchasedAt: ts(),
     refundedAt: ts(),
+    /**
+     * Overhaul wave 5: when a treasurer last had the platform email the member for refund details
+     * (`coop.shares.askRefundDetails`); the treasurer never sees the address.
+     */
+    refundDetailsRequestedAt: ts(),
     createdAt: createdAt(),
   },
   (t) => [

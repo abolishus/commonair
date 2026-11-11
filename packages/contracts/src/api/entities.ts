@@ -148,6 +148,11 @@ export const Channel = z.object({
       portabilityGrant: z.boolean().optional(),
       /** The caller's `follows.notify` (go-live alerts) while following; absent when not following. */
       notify: z.boolean().optional(),
+      /**
+       * Overhaul wave 5 (J3-d): the caller has an active subscription to the channel, so the chat
+       * panel can say "Subscribers only" before they type. Absent = false.
+       */
+      subscribed: z.boolean().optional(),
     })
     .nullable()
     .optional(),
@@ -164,6 +169,11 @@ export const Channel = z.object({
    * `/coop/council`); nothing else about their membership is exposed.
    */
   ownerCoop: z.object({ member: z.boolean(), council: z.boolean() }),
+  /**
+   * Overhaul wave 5: the next scheduled stream's start (the schedule's first upcoming occurrence),
+   * null when nothing is scheduled within `SCHEDULE_RULES.horizonDays`.
+   */
+  nextStreamAt: Timestamp.nullable(),
 });
 export type Channel = z.infer<typeof Channel>;
 
@@ -1096,6 +1106,11 @@ export const LoyaltyBalance = z.object({
   enabled: z.boolean(),
   /** Overhaul wave 3 (D4.5): how points are earned on this instance (the `interact.points.accrual` setting), for "How you earn". */
   accrual: PointsAccrualSetting,
+  /**
+   * Overhaul wave 5: points earned by watching today (UTC day), for "Today: N of {cap}". Only on
+   * the caller's own balance; null for anyone else's (daily activity is not public).
+   */
+  earnedToday: z.number().int().nonnegative().nullable(),
 });
 
 export const MembershipView = z.object({
@@ -1141,6 +1156,14 @@ export const ShareView = z.object({
   purchasedAt: Timestamp.nullable(),
   refundedAt: Timestamp.nullable(),
   createdAt: Timestamp,
+  /**
+   * Overhaul wave 5: the member's account deletion is scheduled for this time (the share becomes
+   * `refund_pending` then), so the treasurer can ask for refund details while the platform can
+   * still reach them. Null when none is scheduled.
+   */
+  deletionScheduledFor: Timestamp.nullable(),
+  /** When a treasurer last had the platform email the member for refund details. */
+  refundDetailsRequestedAt: Timestamp.nullable(),
 });
 export const GovernanceSetting = z.object({
   key: z.string(),
@@ -2717,6 +2740,12 @@ export const DeletionPreview = z.object({
   activeSubscriptions: z.number().int().nonnegative(),
   /** Paid subscriptions to the caller's channel; they end with the channel. */
   channelSubscriptions: z.number().int().nonnegative(),
+  /**
+   * Overhaul wave 5 (proration policy, ADR 0042): of those, the ones whose paid period runs past the
+   * deletion date. Renewal stops when the deletion is requested, so paid time is used up during the
+   * grace period; these few end early, with no automatic prorated refund.
+   */
+  endingBeforePaidThrough: z.number().int().nonnegative(),
   /** Earnings not yet paid out; still paid per the payout rules. Null when there are none. */
   pendingPayout: Money.nullable(),
   /** Current co-op memberships and whether a refundable share goes back (per the bylaws). */
@@ -2740,6 +2769,8 @@ export const AdminQueueCount = z.object({
   oldestAt: Timestamp.nullable(),
   /** Open items nobody has claimed (moderation only; null elsewhere). */
   unassigned: z.number().int().nonnegative().nullable(),
+  /** Overhaul wave 5: the soonest deadline among open items not yet overdue; null without deadlines. */
+  nextDueAt: Timestamp.nullable(),
 });
 export const AdminOverview = z.object({ queues: z.array(AdminQueueCount) });
 export type AdminOverview = z.infer<typeof AdminOverview>;
@@ -2788,3 +2819,108 @@ export const BulkTimeoutResult = z.object({
   deletedMessages: z.number().int().nonnegative(),
 });
 export type BulkTimeoutResult = z.infer<typeof BulkTimeoutResult>;
+
+// Overhaul wave 5 ------------------------------------------------------------------------------
+
+const ScheduleCategory = z.object({ id: Id, slug: z.string(), name: z.string() });
+const ScheduleTitle = z.string().trim().min(1).max(E.SCHEDULE_RULES.titleMax);
+const ScheduleDuration = z
+  .number()
+  .int()
+  .min(E.SCHEDULE_RULES.minDurationMinutes)
+  .max(E.SCHEDULE_RULES.maxDurationMinutes);
+/** Wall-clock "HH:MM" (24 h) in the channel's time zone. */
+export const LocalTime = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
+
+/** A weekly recurring slot, in the channel's time zone. */
+export const ScheduleSlot = z.object({
+  id: Id,
+  /** ISO weekday: 1 = Monday … 7 = Sunday. */
+  weekday: z.number().int().min(1).max(7),
+  startLocal: LocalTime,
+  durationMinutes: ScheduleDuration,
+  title: z.string().nullable(),
+  category: ScheduleCategory.nullable(),
+});
+/** A one-off stream, or (with `cancelsSlotId`) one skipped occurrence of a weekly slot. */
+export const ScheduleOneOff = z.object({
+  id: Id,
+  startsAt: Timestamp,
+  durationMinutes: ScheduleDuration,
+  title: z.string().nullable(),
+  category: ScheduleCategory.nullable(),
+  cancelsSlotId: Id.nullable(),
+});
+/** One upcoming occurrence (slots expanded, skipped ones left out), soonest first. */
+export const ScheduleOccurrence = z.object({
+  startsAt: Timestamp,
+  endsAt: Timestamp,
+  title: z.string().nullable(),
+  category: ScheduleCategory.nullable(),
+  slotId: Id.nullable(),
+  oneOffId: Id.nullable(),
+});
+/** `channels.schedule.get`: public. */
+export const ChannelSchedule = z.object({
+  /** IANA time zone the weekly slots are in. */
+  timezone: z.string(),
+  slots: z.array(ScheduleSlot),
+  /** One-offs that have not ended yet. */
+  oneOffs: z.array(ScheduleOneOff),
+  /** At most `SCHEDULE_RULES.upcomingMax`, within `SCHEDULE_RULES.horizonDays`. */
+  upcoming: z.array(ScheduleOccurrence),
+  /** Path of the subscribable calendar feed (`text/calendar`, first-party). */
+  feedPath: z.string(),
+});
+export type ChannelSchedule = z.infer<typeof ChannelSchedule>;
+/** `channels.schedule.set`: replaces the whole schedule (owner). */
+export const ChannelScheduleInput = z.object({
+  timezone: z.string().min(1).max(64),
+  slots: z
+    .array(
+      z.object({
+        weekday: z.number().int().min(1).max(7),
+        startLocal: LocalTime,
+        durationMinutes: ScheduleDuration,
+        title: ScheduleTitle.nullable(),
+        categoryId: Id.nullable(),
+      }),
+    )
+    .max(E.SCHEDULE_RULES.maxSlots),
+  oneOffs: z
+    .array(
+      z.object({
+        startsAt: Timestamp,
+        durationMinutes: ScheduleDuration,
+        title: ScheduleTitle.nullable(),
+        categoryId: Id.nullable(),
+        /** Index into `slots` of the slot whose occurrence at `startsAt` is skipped. */
+        cancelsSlot: z.number().int().nonnegative().nullable(),
+      }),
+    )
+    .max(E.SCHEDULE_RULES.maxOneOffs),
+});
+export type ChannelScheduleInput = z.infer<typeof ChannelScheduleInput>;
+
+/**
+ * `stream.lastBroadcast` (owner): exact counts for the stream recap, from the rows themselves
+ * (the web recap no longer pages lists). Null while the channel never finished a broadcast.
+ */
+export const LastBroadcast = z.object({
+  broadcastId: Id,
+  title: z.string(),
+  startedAt: Timestamp,
+  endedAt: Timestamp,
+  durationSeconds: z.number().int().nonnegative(),
+  /** Follows made during the broadcast, excluded follows left out. */
+  newFollowers: z.number().int().nonnegative(),
+  /** Clips made from the broadcast. */
+  clips: z.number().int().nonnegative(),
+  /** Chat messages sent during the broadcast (deleted ones included: they were sent). */
+  chatMessages: z.number().int().nonnegative(),
+  /** The running peak while live (`broadcasts.peak_verified_viewers`), provisional until settled. */
+  peakSoFar: z.number().int().nonnegative(),
+  /** The broadcast's video, once recorded. */
+  vodId: Id.nullable(),
+});
+export type LastBroadcast = z.infer<typeof LastBroadcast>;

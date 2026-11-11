@@ -316,6 +316,7 @@ describe("showPointsChip (scope-calls decision 4)", () => {
     pointsName: "points",
     enabled: true,
     accrual: { pointsPerBlock: 10, blockMinutes: 5, dailyCapPerChannel: 1000 },
+    earnedToday: null,
     ...over,
   });
   const viewer = { own: false, spendable: false };

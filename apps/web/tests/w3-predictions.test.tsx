@@ -58,6 +58,7 @@ const balance: LoyaltyBalanceDto = {
   points: 500,
   pointsName: "acorns",
   accrual: { pointsPerBlock: 10, blockMinutes: 5, dailyCapPerChannel: 1000 },
+  earnedToday: null,
   enabled: true,
 };
 

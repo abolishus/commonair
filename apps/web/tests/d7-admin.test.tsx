@@ -64,6 +64,7 @@ const count = (queue: AdminQueueCountDto["queue"], over: Partial<AdminQueueCount
   overdue: 0,
   dueSoon: 0,
   oldestAt: "2026-11-10T12:00:00.000Z",
+  nextDueAt: null,
   unassigned: queue === "moderation" ? 2 : null,
   ...over,
 });

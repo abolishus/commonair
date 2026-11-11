@@ -291,6 +291,7 @@ const interact: InteractClient = {
     pointsName: "notes",
     enabled: false,
     accrual: { pointsPerBlock: 10, blockMinutes: 5, dailyCapPerChannel: 1000 },
+    earnedToday: null,
   }),
   giveawayCurrent: async () => null,
   giveawayEnter: vi.fn<InteractClient["giveawayEnter"]>(),

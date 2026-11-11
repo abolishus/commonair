@@ -920,6 +920,10 @@ export const UI_METRIC_SURFACES = [
   "deletion",
   "pwa.install",
   "digest",
+  // Overhaul wave 5.
+  "channel.schedule",
+  "studio.schedule",
+  "studio.sharePrompt",
 ] as const;
 /** What happened on a surface. */
 export const UI_METRIC_ACTIONS = [
@@ -963,7 +967,28 @@ export const UI_METRIC_STEPS = [
   "totp",
   "passkey",
   "weekly",
+  // Overhaul wave 5: "Add to calendar" (one stream's .ics, or the subscribable feed) and sharing.
+  "ics",
+  "feed",
+  "copy",
+  "share",
 ] as const;
+
+/**
+ * Overhaul wave 5: the channel schedule's limits (`channels.schedule.set`). The counts and the
+ * duration bounds are also enforced by the database (0059 checks, 0060 triggers).
+ */
+export const SCHEDULE_RULES = {
+  maxSlots: 21,
+  maxOneOffs: 100,
+  minDurationMinutes: 15,
+  maxDurationMinutes: 720,
+  titleMax: 140,
+  /** How far ahead `ChannelSchedule.upcoming` and the calendar feed list occurrences. */
+  horizonDays: 28,
+  /** How many occurrences `ChannelSchedule.upcoming` lists at most. */
+  upcomingMax: 20,
+} as const;
 
 /**
  * Nightly server-side funnel counts (`growth_daily.metric`), from existing rows only. Viewer

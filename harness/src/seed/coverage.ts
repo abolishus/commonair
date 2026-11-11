@@ -21,6 +21,9 @@ export const NOT_SEEDED: Readonly<Record<string, string>> = {
     "batch 8 contract step: written only by M1-connect's transfer service; seed-full seeds it after that unit merges",
   patronage_payouts:
     "batch 8 contract step: written only by M1-coop-money's payout path; seed-full seeds it after that unit merges",
+  channel_schedules: "overhaul wave 5 contract step: w5-schedule seeds channel schedules",
+  channel_schedule_slots: "overhaul wave 5 contract step: w5-schedule seeds channel schedules",
+  channel_schedule_one_offs: "overhaul wave 5 contract step: w5-schedule seeds channel schedules",
 };
 
 export interface CoverageProblems {

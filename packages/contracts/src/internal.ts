@@ -716,6 +716,11 @@ export const NOTIFY_JOBS = {
   discord: "discord",
   emailDigest: "email-digest",
   prune: "notify-prune",
+  /** Overhaul wave 4 sweeps (scheduled): the Monday digest and the "your video is ready" email. */
+  weeklyDigest: "notify-weekly-digest",
+  vodEmail: "notify-vod-email",
+  /** Overhaul wave 5: one governance email batch (vote opened, result published) per outbox event. */
+  governanceEmail: "notify-governance-email",
 } as const;
 /** `NOTIFY_JOBS.goLive`: one page of the channel's followers after `after` (null: the first page). */
 export const GoLiveJob = z.object({ eventId: z.uuid(), after: z.uuid().nullable().default(null) });
@@ -732,6 +737,9 @@ export const DiscordJob = z.object({
 });
 export type DiscordJob = z.infer<typeof DiscordJob>;
 export const EmailDigestJob = z.object({});
+/** `NOTIFY_JOBS.governanceEmail`: one page of the electorate (or members) after `after` for one event. */
+export const GovernanceEmailJob = z.object({ eventId: z.uuid(), after: z.uuid().nullable().default(null) });
+export type GovernanceEmailJob = z.infer<typeof GovernanceEmailJob>;
 export const NotifyPruneJob = z.object({});
 
 // Co-op (E5, ADR 0020, docs/testing/e5-selectors.md) ----------------------------------------

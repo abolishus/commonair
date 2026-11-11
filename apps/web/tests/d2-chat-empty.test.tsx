@@ -105,6 +105,7 @@ const balance: LoyaltyBalanceDto = {
   points: 1200,
   pointsName: "points",
   accrual: { pointsPerBlock: 10, blockMinutes: 5, dailyCapPerChannel: 1000 },
+  earnedToday: null,
   enabled: true,
 };
 

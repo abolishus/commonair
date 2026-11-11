@@ -13,7 +13,7 @@ import type { LoyaltyBalance as LoyaltyBalanceSchema } from "@commonair/contract
 import type { POINTS_ADJUST_REASONS } from "@commonair/contracts/enums";
 import { BotConfig, type PointsAccrualSetting } from "@commonair/contracts/shapes";
 import { InsufficientPointsError, postPointsInTx, pointsBalance, schema as s, type Executor } from "@commonair/db";
-import { pointsChangePayload, readPointsAccrual } from "@commonair/interact";
+import { pointsChangePayload, readPointsAccrual, utcDay } from "@commonair/interact";
 import { audit } from "../events/audit.ts";
 import { emit } from "../events/outbox.ts";
 import { badRequest, notFound, precondition } from "../lib/errors.ts";
@@ -70,12 +70,33 @@ async function userByUsername(db: Executor, username: string) {
   return u;
 }
 
-/** `bot.points.balance`: 0 when the user never had points on the channel. */
-export async function balanceOf(db: Executor, input: { channel: string; username: string }): Promise<LoyaltyBalance> {
+/** Points the accrual job credited today (UTC day) to one viewer on one channel. */
+export async function earnedTodayOf(db: Executor, channelId: string, userId: string, now: Date): Promise<number> {
+  const [row] = await db
+    .select({ day: s.loyaltyAccruals.day, points: s.loyaltyAccruals.dayPoints })
+    .from(s.loyaltyAccruals)
+    .where(and(eq(s.loyaltyAccruals.channelId, channelId), eq(s.loyaltyAccruals.userId, userId)));
+  return row && row.day === utcDay(now) ? row.points : 0;
+}
+
+/**
+ * `bot.points.balance`: 0 when the user never had points on the channel. `earnedToday` only on the
+ * caller's own balance (daily activity is not public).
+ */
+export async function balanceOf(
+  db: Executor,
+  input: { channel: string; username: string },
+  callerId: string | null = null,
+  now: Date = new Date(),
+): Promise<LoyaltyBalance> {
   const c = await channelBySlug(db, input.channel);
   const u = await userByUsername(db, input.username);
-  const [points, loyalty] = await Promise.all([pointsBalance(db, c.id, u.id), loyaltyOf(db, c.id)]);
-  return { channelSlug: c.slug, user: { id: u.id, username: u.username }, points, ...loyalty };
+  const [points, loyalty, earnedToday] = await Promise.all([
+    pointsBalance(db, c.id, u.id),
+    loyaltyOf(db, c.id),
+    callerId === u.id ? earnedTodayOf(db, c.id, u.id, now) : null,
+  ]);
+  return { channelSlug: c.slug, user: { id: u.id, username: u.username }, points, ...loyalty, earnedToday };
 }
 
 /** `bot.points.leaderboard`: holders with points, most first (ties by user id); deleted accounts left out. */
@@ -103,6 +124,7 @@ export async function leaderboard(db: Executor, input: { channel: string; limit:
     user: { id: r.id, username: r.username },
     points: r.points,
     ...loyalty,
+    earnedToday: null,
   }));
 }
 
@@ -165,5 +187,6 @@ export async function adjust(
     user: { id: target.id, username: target.username },
     points: balance,
     ...loyalty,
+    earnedToday: null,
   };
 }

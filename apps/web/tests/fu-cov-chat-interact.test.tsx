@@ -240,6 +240,7 @@ const balance = (points: number, enabled = true): LoyaltyBalanceDto => ({
   points,
   pointsName: "seeds",
   accrual: { pointsPerBlock: 10, blockMinutes: 5, dailyCapPerChannel: 1000 },
+  earnedToday: null,
   enabled,
 });
 

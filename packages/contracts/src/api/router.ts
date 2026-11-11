@@ -703,6 +703,28 @@ export const contract = {
       })
       .input(ChannelRef.extend(PageInput.shape))
       .output(page(z.object({ user: D.UserPublic, followedAt: Timestamp, excluded: z.boolean() }))),
+    /** Overhaul wave 5: weekly slots plus one-offs, and the next stream (`Channel.nextStreamAt`). */
+    schedule: {
+      get: base
+        .route({
+          method: "GET",
+          path: "/channels/{channel}/schedule",
+          summary: "The channel's stream schedule and its upcoming streams",
+          ...tag("Channels"),
+        })
+        .input(ChannelRef)
+        .output(D.ChannelSchedule),
+      set: owner
+        .meta({ access: "owner", rateLimit: "write" })
+        .route({
+          method: "PUT",
+          path: "/channels/{channel}/schedule",
+          summary: "Replace the channel's stream schedule",
+          ...tag("Channels"),
+        })
+        .input(ChannelRef.extend(D.ChannelScheduleInput.shape))
+        .output(D.ChannelSchedule),
+    },
     roles: {
       list: mod
         .route({
@@ -831,6 +853,16 @@ export const contract = {
       })
       .input(ChannelRef.extend({ step: z.enum(E.STREAM_SETUP_MARKABLE) }))
       .output(Ok),
+    /** Overhaul wave 5 (D5.3): the last ended broadcast with exact recap counts. */
+    lastBroadcast: owner
+      .route({
+        method: "GET",
+        path: "/channels/{channel}/last-broadcast",
+        summary: "The last ended broadcast and its recap counts",
+        ...tag("Streaming"),
+      })
+      .input(ChannelRef)
+      .output(D.LastBroadcast.nullable()),
     simulcast: {
       list: owner
         .route({
@@ -3016,6 +3048,20 @@ export const contract = {
         })
         .input(z.object({ shareId: Id, sentAt: Timestamp, note: z.string().max(500).optional() }))
         .output(D.ShareView),
+      /**
+       * Overhaul wave 5: the platform emails the member asking where to send their share refund
+       * (reply to the treasury contact). The treasurer never sees the address. For a share that is
+       * `refund_pending`, or `held` by a member whose deletion is scheduled; audited.
+       */
+      askRefundDetails: treasurer
+        .route({
+          method: "POST",
+          path: "/coop/shares/{shareId}/refund-details",
+          summary: "Email the member for share refund details",
+          ...tag("Co-op"),
+        })
+        .input(z.object({ shareId: Id }))
+        .output(D.ShareView),
     },
     exit: user
       .route({
@@ -3830,6 +3876,9 @@ export const contract = {
           subjectType: ShortText.optional(),
           subjectId: ShortText.optional(),
           actorId: Id.optional(),
+          /** Overhaul wave 5: entries at or after `from` and before `to`. */
+          from: Timestamp.optional(),
+          to: Timestamp.optional(),
         }),
       )
       .output(page(D.AuditEntry)),
