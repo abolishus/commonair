@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { PageHeader } from "@commonair/ui/blocks/headers";
-import { PageContainer } from "@commonair/ui/layouts";
+import { AdminPage } from "@commonair/ui/layouts";
 import { createFileRoute } from "@tanstack/react-router";
 import type * as React from "react";
 import { GrowthPage } from "../../components/admin/growth.tsx";
@@ -23,9 +23,9 @@ function GrowthRoute(): React.JSX.Element {
   // Client fallback for the layout guard.
   if (!isAdmin(me)) return <NotFoundState />;
   return (
-    <PageContainer width="wide" data-testid="admin-growth" className="flex flex-col gap-6 py-8">
+    <AdminPage width="queue" data-testid="admin-growth">
       <PageHeader title={t("d2Metrics.title")} description={t("d2Metrics.intro")} />
       <GrowthPage />
-    </PageContainer>
+    </AdminPage>
   );
 }

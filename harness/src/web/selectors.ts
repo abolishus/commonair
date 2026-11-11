@@ -893,3 +893,77 @@ export const D7_NOTIFY_IDS = {
   inboxSettingsLink: "inbox-settings-link",
   inboxLoadError: "inbox-load-error",
 } as const;
+
+/**
+ * d7-admin (overhaul wave 4, D7.5). `/admin` home: `adminHomeTile` per queue the role can open
+ * (`data-queue`, `data-open`, `data-overdue`, `data-due-soon`) with `adminHomeQueueLink`; for
+ * admins `adminHomeRecentRow` (`data-action`). `/admin/audit`: `adminAuditRow` (`data-action`,
+ * `data-subject-type`). `/admin/users/$username`: `adminUser` (`data-user-id`), the audited email
+ * reveal and the suspend form. On `/admin/moderation` each `modq-item` carries `data-assignee-id`
+ * ("" when unclaimed), the detail's `modqClaim` the same; `?assignee=me|unassigned` filters by claim.
+ */
+export const D7_ADMIN_IDS = {
+  adminOverviewLink: "admin-overview-link",
+  adminAuditLink: "admin-audit-link",
+  adminHome: "admin-home",
+  adminHomeTile: "admin-home-tile",
+  adminHomeQueueLink: "admin-home-queue-link",
+  adminHomeRecent: "admin-home-recent",
+  adminHomeRecentRow: "admin-home-recent-row",
+  adminHomeAuditLink: "admin-home-audit-link",
+  adminHomeLookup: "admin-home-lookup",
+  adminHomeLookupInput: "admin-home-lookup-input",
+  adminHomeLookupSubmit: "admin-home-lookup-submit",
+  adminAudit: "admin-audit",
+  adminAuditFilters: "admin-audit-filters",
+  adminAuditActor: "admin-audit-actor",
+  adminAuditSubjectType: "admin-audit-subject-type",
+  adminAuditSubjectId: "admin-audit-subject-id",
+  adminAuditFrom: "admin-audit-from",
+  adminAuditTo: "admin-audit-to",
+  adminAuditApply: "admin-audit-apply",
+  adminAuditExport: "admin-audit-export",
+  adminAuditTable: "admin-audit-table",
+  adminAuditRow: "admin-audit-row",
+  adminAuditSubject: "admin-audit-subject",
+  adminAuditMore: "admin-audit-more",
+  adminUser: "admin-user",
+  adminUserReveal: "admin-user-reveal",
+  adminUserRevealReason: "admin-user-reveal-reason",
+  adminUserRevealSubmit: "admin-user-reveal-submit",
+  adminUserEmail: "admin-user-email",
+  adminUserNotSuspended: "admin-user-not-suspended",
+  adminUserSuspension: "admin-user-suspension",
+  adminUserUnsuspend: "admin-user-unsuspend",
+  adminUserSuspendForm: "admin-user-suspend-form",
+  adminUserSuspendTarget: "admin-user-suspend-target",
+  adminUserSuspendClause: "admin-user-suspend-clause",
+  adminUserSuspendDuration: "admin-user-suspend-duration",
+  adminUserSuspendReason: "admin-user-suspend-reason",
+  adminUserSuspend: "admin-user-suspend",
+  adminUserCase: "admin-user-case",
+  adminUserStatement: "admin-user-statement",
+  adminUserHold: "admin-user-hold",
+  adminUserDeletion: "admin-user-deletion",
+  modqCount: "modq-count",
+  modqSelectAll: "modq-select-all",
+  modqItemCheck: "modq-item-check",
+  modqItemAssignee: "modq-item-assignee",
+  modqFilterAssignee: "modq-filter-assignee",
+  modqClaim: "modq-claim",
+  modqClaimMe: "modq-claim-me",
+  modqClaimRelease: "modq-claim-release",
+  modqBulkCount: "modq-bulk-count",
+  modqBulkAssign: "modq-bulk-assign",
+  modqBulkDismiss: "modq-bulk-dismiss",
+  modqBulkDismissNote: "modq-bulk-dismiss-note",
+  modqBulkDismissSubmit: "modq-bulk-dismiss-submit",
+  modqBulkClear: "modq-bulk-clear",
+} as const;
+
+/** d7-admin routes (README D7.5): the home, the audit log (admins) and a person's standing. */
+export const D7_ADMIN_ROUTES = {
+  adminHome: "/admin",
+  adminAudit: "/admin/audit",
+  adminUser: (username: string) => `/admin/users/${encodeURIComponent(username)}`,
+} as const;

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { PageHeader } from "@commonair/ui/blocks/headers";
-import { PageContainer } from "@commonair/ui/layouts";
+import { AdminPage } from "@commonair/ui/layouts";
 import { createFileRoute } from "@tanstack/react-router";
 import type * as React from "react";
 import { IncidentsPage } from "../../components/admin/incidents.tsx";
@@ -23,9 +23,9 @@ function IncidentsRoute(): React.JSX.Element {
   // Client fallback for the layout guard.
   if (!mayOpenAdminPage("incidents", me)) return <NotFoundState />;
   return (
-    <PageContainer className="flex flex-col gap-6 py-8">
+    <AdminPage width="queue">
       <PageHeader title={t("admin.incidents.title")} description={t("admin.incidents.intro")} />
       <IncidentsPage />
-    </PageContainer>
+    </AdminPage>
   );
 }

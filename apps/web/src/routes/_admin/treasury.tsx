@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { PageHeader } from "@commonair/ui/blocks/headers";
-import { PageContainer } from "@commonair/ui/layouts";
+import { AdminPage } from "@commonair/ui/layouts";
 import { toast } from "@commonair/ui/toast";
 import { createFileRoute } from "@tanstack/react-router";
 import * as React from "react";
@@ -88,7 +88,7 @@ function TreasuryPage(): React.JSX.Element {
   };
 
   return (
-    <PageContainer data-testid="treasury" className="flex flex-col gap-6 py-8">
+    <AdminPage width="queue" data-testid="treasury">
       <PageHeader title={t("treasury.title")} description={t("treasury.intro")} />
       <TreasuryPageTabs
         value={tab}
@@ -194,7 +194,7 @@ function TreasuryPage(): React.JSX.Element {
           transfers: <TreasuryPayoutTransfersTab />,
         }}
       />
-    </PageContainer>
+    </AdminPage>
   );
 }
 
