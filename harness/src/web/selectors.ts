@@ -706,3 +706,38 @@ export const D5_MONEY_IDS = {
   analyticsPnl: "analytics-pnl",
   analyticsPnlRow: "analytics-pnl-row",
 } as const;
+
+/**
+ * d7-security (overhaul wave 4, D7.2): `/settings/security` and the sign-in's code step. The
+ * two-step row carries `data-state` (on, off); the set-up dialog carries `data-step` (password,
+ * scan, code, codes); the code step carries `data-mode` (totp, backup); each session row carries
+ * `data-current` (true, false). Kept out of `TEST_IDS`: select with `d7Locator`
+ * (`harness/src/d7/security.ts`).
+ */
+export const D7_SECURITY_IDS = {
+  securityPage: "security-page",
+  securityRow: "security-2fa-row",
+  securitySetup: "security-2fa-setup",
+  securityDialog: "security-2fa-dialog",
+  securityPassword: "security-2fa-password",
+  securityContinue: "security-2fa-continue",
+  securityQr: "security-2fa-qr",
+  securityKey: "security-2fa-key",
+  securityKeyReveal: "security-2fa-key-reveal",
+  securityNext: "security-2fa-next",
+  securityCode: "security-2fa-code",
+  securityVerify: "security-2fa-verify",
+  securityBackupCodes: "security-backup-codes",
+  securitySaved: "security-2fa-saved",
+  securityOff: "security-2fa-off",
+  securityConfirmPassword: "security-confirm-password",
+  securitySessions: "security-sessions",
+  securitySessionRow: "security-session-row",
+  signinCodeStep: "signin-2fa-step",
+  signinCode: "signin-2fa-code",
+  signinCodeSubmit: "signin-2fa-submit",
+  signinCodeMode: "signin-2fa-mode",
+  signinPasskey: "signin-passkey",
+} as const;
+
+export const D7_SECURITY_ROUTES = { security: "/settings/security" } as const;
