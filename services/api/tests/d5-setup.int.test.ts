@@ -76,6 +76,8 @@ describe("readSetupState, one step at a time", () => {
       rehearsal: false,
       first_live: false,
       import_twitch: null,
+      // Before the first stream `get_paid` does not apply (overhaul wave 4, J2-h).
+      get_paid: null,
       bring_your_audience: false,
     });
   });
