@@ -1,0 +1,9 @@
+{
+  "cookieBanner.accept": "Accept",
+  "cookieBanner.decline": "Decline non-essential",
+  "cookieBanner.choose": "Choose",
+  "cookieBanner.privacyLink": "Privacy policy",
+  "cookieBanner.privacy.loading": "The privacy policy is loading.",
+  "cookieBanner.privacy.failed": "The privacy policy didn't load.",
+  "cookieBanner.privacy.retry": "Retry"
+}

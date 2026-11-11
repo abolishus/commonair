@@ -36,6 +36,9 @@ vi.mock("../src/lib/api.ts", async (importOriginal) => {
   return { ...actual, api: () => client };
 });
 
+// The banner counts views and clicks (`cookie-banner.test.tsx` checks them); no request here.
+vi.mock("../src/lib/ui-metrics.ts", () => ({ trackUi: () => {} }));
+
 vi.mock("@commonair/ui/toast", () => ({
   toast: { success: (m: string) => fake.toastSuccess(m), error: () => {} },
   Toaster: () => null,
@@ -178,12 +181,15 @@ describe("when the banner shows", () => {
 });
 
 describe("the banner", () => {
-  it("is a labelled region in the page flow, never fixed, sticky or animated outside motion-safe", () => {
+  it("is a labelled, non-modal region, first in the DOM, animated only under motion-safe", () => {
     render(<Page consent={null} />);
     const banner = screen.getByTestId("consent-banner");
     expect(screen.getByRole("region", { name: "Cookies and storage" })).toBe(banner);
+    // A floating card (wave 2), never a modal: no dialog role, no scroll lock.
+    expect(banner.getAttribute("data-placement")).toBe("floating");
+    expect(banner.hasAttribute("aria-modal")).toBe(false);
+    expect(document.body.style.overflow).toBe("");
     const classes = banner.className.split(/\s+/);
-    for (const forbidden of ["fixed", "sticky", "absolute"]) expect(classes).not.toContain(forbidden);
     const motion = classes.filter((cls) => /animate|fade-|slide-|zoom-|transition/.test(cls));
     expect(motion.length).toBeGreaterThan(0);
     expect(motion.filter((cls) => !cls.startsWith("motion-safe:"))).toEqual([]);
@@ -192,14 +198,14 @@ describe("the banner", () => {
     expect(banner.contains(document.activeElement)).toBe(false);
   });
 
-  it("is keyboard complete: the first tab stops are the three native buttons, in order", async () => {
+  it("is keyboard complete: the first tab stops are the privacy link and the three native buttons, in order", async () => {
     render(<Page consent={null} />);
     await waitFor(() => expect(fake.get).toHaveBeenCalled());
     const ids = tabbables()
-      .slice(0, 3)
+      .slice(0, 4)
       .map((el) => el.getAttribute("data-testid"));
-    expect(ids).toEqual(["consent-accept-all", "consent-reject", "consent-customize"]);
-    for (const id of ids) {
+    expect(ids).toEqual(["consent-privacy-link", "consent-accept-all", "consent-reject", "consent-customize"]);
+    for (const id of ids.slice(1)) {
       const button = screen.getByTestId(id ?? "");
       // Native buttons: Enter and Space activate them in every browser, with no script of ours.
       expect(button.tagName).toBe("BUTTON");
@@ -208,7 +214,7 @@ describe("the banner", () => {
     }
   });
 
-  it("Enter on 'Essential only' declines", async () => {
+  it("Enter on 'Decline non-essential' declines", async () => {
     render(<Page consent={null} />);
     await waitFor(() => expect(fake.get).toHaveBeenCalled());
     activate(screen.getByTestId("consent-reject"));
@@ -219,7 +225,7 @@ describe("the banner", () => {
     expect(parseConsent(document.cookie)?.preferences).toBe(false);
   });
 
-  it("Space on 'Allow preferences' allows them", async () => {
+  it("Space on 'Accept' allows them", async () => {
     render(<Page consent={null} />);
     await waitFor(() => expect(fake.get).toHaveBeenCalled());
     activate(screen.getByTestId("consent-accept-all"));
@@ -228,7 +234,7 @@ describe("the banner", () => {
     expect(screen.queryByTestId("consent-banner")).toBeNull();
   });
 
-  it("'Settings' opens the dialog", async () => {
+  it("'Choose' opens the dialog", async () => {
     render(<Page consent={null} />);
     fireEvent.click(screen.getByTestId("consent-customize"));
     expect(await screen.findByTestId("consent-dialog")).toBeTruthy();
