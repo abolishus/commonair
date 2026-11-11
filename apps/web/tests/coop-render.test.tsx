@@ -532,7 +532,11 @@ describe("/coop/proposals/$id", () => {
     proposalPage(votingProposal({ myVote: null, canVote: false }), { councilMember: false });
     expect(attrs(id("vote-panel"), ["data-my-vote", "data-can-vote"])).toEqual(["", "false"]);
     expect(id("vote-submit").hasAttribute("disabled")).toBe(true);
-    expect(id("vote-panel").textContent).toContain(en["coop.vote.notInElectorate"]);
+    // A member here joined after voting opened (the electorate is frozen at open).
+    expect(id("vote-panel").textContent).toContain(en["d2Membership.vote.joinedAfter"]);
+    cleanup();
+    proposalPage(votingProposal({ myVote: null, canVote: false }), { councilMember: false, member: false });
+    expect(id("vote-panel").textContent).toContain(en["d2Membership.vote.notMember"]);
   });
 
   it("voting past its window (or refused as closed): no ballot, a closed notice and participation", () => {

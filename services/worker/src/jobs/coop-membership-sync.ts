@@ -7,7 +7,7 @@ import { runMembershipSync } from "../coop/run.ts";
 
 export const job = coopJob(
   COOP_JOBS.membershipSync,
-  "Hourly: activate streamer and viewer members who qualify, lapse those who no longer do (voluntary exits respected)",
+  "Hourly: activate streamer and viewer members who qualify, lapse those who no longer do (voluntary exits respected), and tell each in their inbox",
   { pattern: "5 * * * *", tz: "UTC" },
   30 * 60_000,
   runMembershipSync,

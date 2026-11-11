@@ -14,9 +14,12 @@
  */
 import { and, desc, eq, lt, sql } from "drizzle-orm";
 import { type Executor, schema, uuidv7 } from "@commonair/db";
+import type { MembershipNotificationPayload } from "@commonair/contracts/notify";
 import {
   contributionWeightsOf,
   eligibleHoursForUsers,
+  exitRespected,
+  exitWindowDays,
   loadSettings,
   membershipClassesOf,
   subscriptionQualifies,
@@ -79,6 +82,104 @@ async function hasQualifyingSubscription(
       rules,
     ),
   );
+}
+
+/**
+ * The dedupe key of a `membership` inbox row: it names the membership, so a webhook retry, a
+ * treasurer's repeat or the hourly sync (which writes the same keys,
+ * `services/worker/src/coop/run.ts`) never adds a second notice for one start or end.
+ */
+export function membershipNoticeKey(kind: MembershipNotificationPayload["kind"], membershipId: string): string {
+  return `${kind === "membership_started" ? "membership-started" : "membership-ended"}-${membershipId}`;
+}
+
+/** The inbox's `membership` row for one membership starting or ending, once. Enums only (ADR 0004). */
+export async function membershipNoticeTx(
+  tx: Executor,
+  m: Pick<MembershipRow, "id" | "userId" | "basis">,
+  kind: MembershipNotificationPayload["kind"],
+  now: Date,
+): Promise<void> {
+  const payload: MembershipNotificationPayload = { kind, basis: m.basis };
+  await tx
+    .insert(schema.notifications)
+    .values({
+      userId: m.userId,
+      type: "membership",
+      payload,
+      dedupeKey: membershipNoticeKey(kind, m.id),
+      createdAt: now,
+    })
+    .onConflictDoNothing();
+}
+
+/** The `membership_started` notice for the user's active membership in `cls`, when there is one. */
+export async function noticeActiveMembershipTx(
+  tx: Executor,
+  userId: string,
+  cls: MembershipRow["class"],
+  now: Date,
+): Promise<void> {
+  const [m] = await tx
+    .select()
+    .from(memberships)
+    .where(and(eq(memberships.userId, userId), eq(memberships.class, cls), eq(memberships.status, "active")));
+  if (m) await membershipNoticeTx(tx, m, "membership_started", now);
+}
+
+/**
+ * Start a viewer membership on a qualifying subscription in the caller's transaction (overhaul
+ * wave 2 journey gap): the payment webhook and the treasurer's confirm call it right after the
+ * subscription turns active, so a subscriber does not wait for the hourly sync, which stays the
+ * backstop with the same rules. Nothing happens when the co-op does not count subscriptions, the
+ * account is suspended or deleted, a viewer membership is already active, the member left the
+ * viewer class (respected forever, as the sync does: they rejoin with `coop.join`), or no active
+ * subscription qualifies. Idempotent: a retry finds the membership active. Writes the
+ * `membership.activate` audit row, the `coop.membership.update` event and the inbox notice.
+ */
+export async function startSubscriptionMembershipTx(
+  tx: Executor,
+  userId: string,
+  now: Date,
+): Promise<MembershipRow | null> {
+  const rules = membershipClassesOf(await loadSettings(tx));
+  if (!rules.viewer.activeSubscriptionQualifies) return null;
+  const [u] = await tx
+    .select({ banned: users.banned, deletedAt: users.deletedAt })
+    .from(users)
+    .where(eq(users.id, userId));
+  if (!u || u.banned || u.deletedAt) return null;
+  // The exit and join paths' lock: the user's viewer rows, so a concurrent exit waits for us.
+  const rows = await tx
+    .select({ status: memberships.status, exitedAt: memberships.exitedAt, createdAt: memberships.createdAt })
+    .from(memberships)
+    .where(and(eq(memberships.userId, userId), eq(memberships.class, "viewer")))
+    .orderBy(desc(memberships.createdAt), desc(memberships.id))
+    .for("update");
+  if (rows.some((m) => m.status === "active")) return null;
+  if (exitRespected(rows[0], now, exitWindowDays("viewer", rules))) return null;
+  if (!(await hasQualifyingSubscription(tx, userId, now, rules))) return null;
+  // A concurrent activation (the sync, a share confirm) wins the unique index: nothing to add.
+  const m = await activate(tx, userId, "viewer", "subscription", now);
+  if (!m) return null;
+  await audit(tx, {
+    actorType: "system",
+    actorId: null,
+    action: "membership.activate",
+    subjectType: "membership",
+    subjectId: m.id,
+    reason: "eligibility rules met",
+    // Ids and numbers only: audit details are append-only (ADR 0004).
+    details: {
+      userId,
+      class: "viewer",
+      basis: "subscription",
+      minSubscriptionCents: rules.viewer.minSubscriptionCents,
+    },
+  });
+  await membershipEvent(tx, m, now);
+  await membershipNoticeTx(tx, m, "membership_started", now);
+  return m;
 }
 
 async function membershipView(deps: Deps, userId: string): Promise<MembershipViewDto> {
@@ -156,7 +257,12 @@ export async function confirmShareTx(
   p: PaymentRow,
   o: { receivedAt: Date; now: Date; actorId: string },
 ): Promise<void> {
-  await bookShareTx(tx, p, { receivedAt: o.receivedAt, now: o.now, actor: { type: STAFF, id: o.actorId } });
+  const outcome = await bookShareTx(tx, p, {
+    receivedAt: o.receivedAt,
+    now: o.now,
+    actor: { type: STAFF, id: o.actorId },
+  });
+  if (outcome === "activated" && p.userId) await noticeActiveMembershipTx(tx, p.userId, "viewer", o.now);
 }
 
 /** The manual adapter's checkout, as before (its errors are ours, not a provider's). */

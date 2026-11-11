@@ -6,7 +6,15 @@
  * and logger, reduced to the counts of `CoopJobResult` (never ids, choices or names).
  */
 import type { CoopJobResult } from "@commonair/contracts/internal";
-import { advanceElections, advanceProposals, recomputeCouncil, syncMemberships } from "@commonair/governance";
+import type { MembershipNotificationPayload } from "@commonair/contracts/notify";
+import { type Database, schema } from "@commonair/db";
+import {
+  advanceElections,
+  advanceProposals,
+  recomputeCouncil,
+  syncMemberships,
+  type SyncResult,
+} from "@commonair/governance";
 import type { WorkerContext } from "../context.ts";
 import { counts } from "./job.ts";
 import { coopMetrics } from "./metrics.ts";
@@ -30,8 +38,49 @@ export async function runProposalsAdvance(ctx: WorkerContext): Promise<CoopJobRe
   return counts({ ...r });
 }
 
+/**
+ * The dedupe key of a `membership` inbox row, the same as the API's (`services/api/src/coop/membership.ts`
+ * `membershipNoticeKey`): a membership the payment webhook started is never announced twice.
+ */
+export const membershipNoticeKey = (kind: MembershipNotificationPayload["kind"], membershipId: string): string =>
+  `${kind === "membership_started" ? "membership-started" : "membership-ended"}-${membershipId}`;
+
+/**
+ * The inbox notices for a sync's activations and lapses (`MembershipNotificationPayload`, enums
+ * only). After the sync's own transaction, idempotent by dedupe key: a crash in between loses a
+ * notice, never duplicates one, and the membership change itself is already committed.
+ */
+export async function membershipNotices(
+  db: Database,
+  r: Pick<SyncResult, "activated" | "lapsed">,
+  now: Date,
+): Promise<number> {
+  const rows = [
+    ...r.activated.map((c) => ({ c, kind: "membership_started" as const })),
+    ...r.lapsed.map((c) => ({ c, kind: "membership_ended" as const })),
+  ].map(({ c, kind }) => {
+    const payload: MembershipNotificationPayload = { kind, basis: c.basis };
+    return {
+      userId: c.userId,
+      type: "membership" as const,
+      payload,
+      dedupeKey: membershipNoticeKey(kind, c.membershipId),
+      createdAt: now,
+    };
+  });
+  if (rows.length === 0) return 0;
+  const inserted = await db
+    .insert(schema.notifications)
+    .values(rows)
+    .onConflictDoNothing()
+    .returning({ id: schema.notifications.id });
+  return inserted.length;
+}
+
 export async function runMembershipSync(ctx: WorkerContext): Promise<CoopJobResult> {
-  const r = await syncMemberships(ctx.db, ctx.now(), { logger: ctx.logger });
+  const now = ctx.now();
+  const r = await syncMemberships(ctx.db, now, { logger: ctx.logger });
+  await membershipNotices(ctx.db, r, now);
   const lapseRefused = r.refused.reduce((n, x) => n + x.wouldLapse, 0);
   if (r.activated.length) coopMetrics.memberships.add(r.activated.length, { change: "activated" });
   if (r.lapsed.length) coopMetrics.memberships.add(r.lapsed.length, { change: "lapsed" });

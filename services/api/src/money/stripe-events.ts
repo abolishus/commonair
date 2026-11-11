@@ -21,6 +21,7 @@ import {
   postChargebackReversal,
 } from "@commonair/ledger";
 import type { PaymentAdapter, StripeAction } from "@commonair/payments";
+import { startSubscriptionMembershipTx } from "../coop/membership.ts";
 import { audit } from "../events/audit.ts";
 import { addOneMonthUtc } from "./checkout-rules.ts";
 import { endSubscriptions } from "./checkout-shared.ts";
@@ -399,6 +400,8 @@ async function invoicePaid(tx: Executor, a: InvoicePaid, prepared: PreparedActio
     .where(and(eq(subscriptions.id, sub.id), inArray(subscriptions.status, ["active", "past_due"])))
     .returning();
   if (!renewed) throw new StripeProcessingError("the subscription changed while renewing");
+  // A renewal that brings a past-due sub back can rejoin a member the sync lapsed meanwhile.
+  if (renewed.giftedById === null) await startSubscriptionMembershipTx(tx, renewed.subscriberId, now);
   return {
     outcome: "renewed",
     invalidate: sub.status === "past_due" ? [{ channelId: c.id, userIds: [sub.subscriberId] }] : [],
