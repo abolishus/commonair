@@ -4,7 +4,7 @@
 import { toast } from "@commonair/ui/toast";
 import { createFileRoute } from "@tanstack/react-router";
 import type * as React from "react";
-import { JuryExplainer } from "../../components/coop/jury-explainer.tsx";
+import { JuryExplainer, juryEnabled } from "../../components/coop/jury-explainer.tsx";
 import { CoopLoadGate } from "../../components/coop/load-error.tsx";
 import { activeMemberClasses } from "../../components/coop/rules.ts";
 import { coopLoads, toastCoopError, useCoopLoad, useMyMembership } from "../../components/coop/use-coop.ts";
@@ -32,7 +32,14 @@ export const Route = createFileRoute("/_app/coop/jury")({
 
 function JuryRoute(): React.JSX.Element {
   const { me } = useBootstrap();
-  return me ? <MemberJury me={me} /> : <JuryExplainer />;
+  return me ? <MemberJury me={me} /> : <PublicJury />;
+}
+
+function PublicJury(): React.JSX.Element {
+  // The settings are optional detail: until they load (or if they fail) the explainer stays
+  // neutral rather than describing a draw the co-op may not have turned on.
+  const settings = useCoopLoad("settings", () => api().coop.settings());
+  return <JuryExplainer enabled={juryEnabled(settings.data)} />;
 }
 
 function MemberJury({ me }: { me: SessionUser }): React.JSX.Element {

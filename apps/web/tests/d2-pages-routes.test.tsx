@@ -12,12 +12,15 @@ import { createMemoryHistory, createRootRoute, createRouter, RouterContextProvid
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import * as React from "react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { en } from "../src/i18n/en.ts";
 import { locale, uiMessages } from "../src/i18n/index.ts";
 import type { SessionUser } from "../src/lib/bootstrap-types.ts";
 import { ME, council, statement } from "./coop-fixtures.ts";
 
 const session = vi.hoisted(() => ({ me: null as SessionUser | null, viewer: false }));
 const calls = vi.hoisted(() => ({ names: [] as string[] }));
+/** Settings rows a test adds to the stubbed `coop.settings()` answer. */
+const settingsExtra = vi.hoisted(() => [] as Record<string, unknown>[]);
 
 vi.mock("../src/lib/ui-metrics.ts", () => ({ trackUi: () => undefined }));
 
@@ -65,6 +68,7 @@ vi.mock("../src/lib/api.ts", async (importOriginal) => {
           updatedAt: "2026-09-01T00:00:00.000Z",
           updatedByProposalId: null,
         },
+        ...settingsExtra,
       ]),
       transparency: track("transparency", () => [
         { month: "2026-10", surplus: usd(-4000), patronageDistributed: usd(0), governance: [], members: {} },
@@ -137,6 +141,7 @@ beforeEach(() => {
   session.me = null;
   session.viewer = false;
   calls.names = [];
+  settingsExtra.length = 0;
 });
 afterEach(cleanup);
 
@@ -176,6 +181,22 @@ describe("/coop/jury", () => {
     wrap(<Page />);
     await screen.findByTestId("jury-explainer");
     expect(calls.names.filter((n) => n.startsWith("jury."))).toEqual([]);
+    expect(calls.names).toContain("settings");
+  });
+
+  it("visitors are told when the co-op has not turned the jury on", async () => {
+    settingsExtra.push({
+      key: "jury.enabled",
+      value: { enabled: false },
+      protected: false,
+      description: "",
+      updatedAt: "2026-09-01T00:00:00.000Z",
+      updatedByProposalId: null,
+    });
+    const Page = component(routes.jury);
+    wrap(<Page />);
+    await screen.findByTestId("jury-explainer-disabled");
+    expect(screen.queryByText(en["d2Pages.jury.join.body"])).toBeNull();
   });
 
   it("members keep the jury page", async () => {

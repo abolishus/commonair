@@ -29,7 +29,7 @@ const { coopFacts } = await import("../src/components/creators/facts.ts");
 const { CoopJoinBand } = await import("../src/components/coop/join-band.tsx");
 const { CoopOverview } = await import("../src/components/coop/overview.tsx");
 const { PatronageExplainer } = await import("../src/components/coop/patronage-explainer.tsx");
-const { JuryExplainer } = await import("../src/components/coop/jury-explainer.tsx");
+const { JuryExplainer, juryEnabled } = await import("../src/components/coop/jury-explainer.tsx");
 const { LegalPage } = await import("../src/components/legal-pages/legal-page.tsx");
 
 const router = createRouter({ routeTree: createRootRoute(), history: createMemoryHistory({ initialEntries: ["/"] }) });
@@ -396,12 +396,47 @@ describe("co-op explainers for visitors", () => {
   });
 
   it("jury: what jurors do, who can serve, and the way in", () => {
-    wrap(<JuryExplainer />);
+    wrap(<JuryExplainer enabled />);
     id("jury-explainer");
     expect(screen.getByText(en["jury.explainer.cases"])).toBeTruthy();
     expect(screen.queryByText(en["jury.explainer.optout"])).toBeNull();
     expect(screen.getByText(en["d2Pages.jury.who.body"])).toBeTruthy();
+    expect(screen.getByText(en["d2Pages.jury.join.body"])).toBeTruthy();
+    expect(screen.queryByTestId("jury-explainer-disabled")).toBeNull();
     expect(id("coop-explainer-signup").getAttribute("href")).toBe("/signup?intent=join&redirect=%2Fcoop%2Fjury");
+  });
+
+  it("jury off: says the co-op has not turned it on and never describes the draw", () => {
+    wrap(<JuryExplainer enabled={false} />);
+    id("jury-explainer-disabled");
+    expect(screen.getByText(en["jury.disabled.title"])).toBeTruthy();
+    expect(screen.getByText(en["jury.disabled.description"])).toBeTruthy();
+    expect(screen.getByText(en["d2Pages.jury.who.bodyOff"])).toBeTruthy();
+    expect(screen.getByText(en["d2Pages.jury.join.titleOff"])).toBeTruthy();
+    expect(screen.getByText(en["d2Pages.jury.join.bodyOff"])).toBeTruthy();
+    expect(screen.queryByText(en["d2Pages.jury.who.body"])).toBeNull();
+    expect(screen.queryByText(en["d2Pages.jury.join.body"])).toBeNull();
+    expect(screen.queryByText(en["d2Pages.jury.join.title"])).toBeNull();
+    expect(id("coop-explainer-signup").getAttribute("href")).toBe("/signup?intent=join&redirect=%2Fcoop%2Fjury");
+  });
+
+  it("jury unknown: neutral wording, no draw claim and no off notice", () => {
+    wrap(<JuryExplainer enabled={null} />);
+    id("jury-explainer");
+    expect(screen.queryByTestId("jury-explainer-disabled")).toBeNull();
+    expect(screen.queryByText(en["d2Pages.jury.join.body"])).toBeNull();
+    expect(screen.getByText(en["d2Pages.jury.join.bodyOff"])).toBeTruthy();
+  });
+
+  it("juryEnabled reads the { enabled } setting and is null when it cannot tell", () => {
+    const row = (value: unknown) => [{ key: "jury.enabled", value }];
+    expect(juryEnabled(null)).toBeNull();
+    expect(juryEnabled([])).toBeNull();
+    expect(juryEnabled(row({ enabled: true }))).toBe(true);
+    expect(juryEnabled(row({ enabled: false }))).toBe(false);
+    expect(juryEnabled(row(true))).toBeNull();
+    expect(juryEnabled(row({ enabled: "yes" }))).toBeNull();
+    expect(juryEnabled([{ key: "jury.panelSize", value: { enabled: true } }])).toBeNull();
   });
 });
 
