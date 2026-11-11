@@ -15,6 +15,7 @@ import { admin, magicLink, twoFactor, username } from "better-auth/plugins";
 import { adminAc, userAc } from "better-auth/plugins/admin/access";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { ALTCHA_FIELD, AUTH_BASE_PATH, AUTH_ROUTES } from "@commonair/contracts/auth";
+import { SIGNUP_INTENTS, type SignupIntent } from "@commonair/contracts/enums";
 import { schema, uuidv7, type Database, type Executor } from "@commonair/db";
 import type { Deps } from "../deps.ts";
 import { audit } from "../events/audit.ts";
@@ -59,7 +60,24 @@ const bodyOf = (ctx: { body?: unknown } | null | undefined): Record<string, unkn
 const localeOf = (u: Record<string, unknown>) => (typeof u.locale === "string" ? u.locale : undefined);
 
 /** Never written through better-auth after the row exists. */
-const IMMUTABLE_USER_FIELDS = new Set(["birthDate", "accountType", "botOwnerId", "botVerified", "username"]);
+const IMMUTABLE_USER_FIELDS = new Set([
+  "birthDate",
+  "accountType",
+  "botOwnerId",
+  "botVerified",
+  "username",
+  "signupIntent",
+]);
+
+/**
+ * `?intent=` at sign-up (D2.8), kept only when it is one of SIGNUP_INTENTS. Anything else (a
+ * stale link, a typo, a non-string) is stored as null rather than refusing the sign-up.
+ */
+export function normalizeSignupIntent(value: unknown): SignupIntent | null {
+  return typeof value === "string" && (SIGNUP_INTENTS as readonly string[]).includes(value)
+    ? (value as SignupIntent)
+    : null;
+}
 /** All a member may change about themselves through `/update-user` (the rest has its own flows). */
 const SELF_WRITABLE_USER_FIELDS = new Set(["name", "image", "updatedAt"]);
 
@@ -146,6 +164,13 @@ export function createAuth(deps: Deps, opts: { background?: AuthBackground } = {
         birthDate: { type: "string", required: false, input: true, returned: false },
         accountType: { type: "string", required: false, input: false, defaultValue: "human" },
         locale: { type: "string", required: false, input: false },
+        signupIntent: {
+          type: "string",
+          required: false,
+          input: true,
+          returned: false,
+          transform: { input: (v) => normalizeSignupIntent(v) },
+        },
       },
     },
     session: { expiresIn: 30 * 86_400, updateAge: 86_400 },
@@ -255,7 +280,14 @@ export function createAuth(deps: Deps, opts: { background?: AuthBackground } = {
             if (age) throw bad("INVALID_BIRTH_DATE", "A valid birth date is required");
             // A new account has no uploads yet, and provider profile pictures are third-party URLs.
             return {
-              data: { ...user, image: null, username: name.toLowerCase(), accountType: "human", role: "user" },
+              data: {
+                ...user,
+                image: null,
+                username: name.toLowerCase(),
+                accountType: "human",
+                role: "user",
+                signupIntent: normalizeSignupIntent(user.signupIntent),
+              },
             };
           },
           after: async (user) => {
@@ -321,6 +353,7 @@ export function createAuth(deps: Deps, opts: { background?: AuthBackground } = {
             const data = withoutProviderTokens(account);
             if (!user) return { data };
             await ensureChannel(tx, user);
+            await recordAccountCreated(tx, user.id, deps.now());
             const ids = bodyOf(ctx).acceptedDocumentIds;
             if (Array.isArray(ids))
               await recordAcceptances(
@@ -341,6 +374,29 @@ export function createAuth(deps: Deps, opts: { background?: AuthBackground } = {
 }
 
 export type Auth = ReturnType<typeof createAuth>;
+
+/**
+ * The `account.created` outbox row (D2.8), written in the sign-up transaction. better-auth runs
+ * `user.create.after` only after the transaction commits, so the row is written from
+ * `account.create.before` instead, which runs in that transaction once the user row exists. A
+ * user's first linked account marks a new account; linking a second provider later finds the
+ * earlier one and writes nothing. Id and intent only (no PII).
+ */
+export async function recordAccountCreated(tx: Executor, userId: string, now: Date): Promise<boolean> {
+  const [existing] = await tx
+    .select({ id: schema.accounts.id })
+    .from(schema.accounts)
+    .where(eq(schema.accounts.userId, userId))
+    .limit(1);
+  if (existing) return false;
+  const [user] = await tx
+    .select({ intent: schema.users.signupIntent })
+    .from(schema.users)
+    .where(eq(schema.users.id, userId));
+  if (!user) return false;
+  await emit(tx, "account.created", null, { user_id: userId, intent: user.intent ?? null }, now);
+  return true;
+}
 
 /**
  * Decision (g): a lapsed ban cleared at sign-in writes `channel.suspension {suspended: false}` for
