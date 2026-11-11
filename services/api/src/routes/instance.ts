@@ -8,6 +8,7 @@ import type { Deps, StatusProbe } from "../deps.ts";
 import { iso, isoOrNull } from "../lib/dto.ts";
 import { os } from "../lib/orpc.ts";
 import { twitchImportAvailable } from "../raw-routes.ts";
+import { payoutsAvailable } from "../studio/payout-step.ts";
 
 type ComponentStatus = "operational" | "degraded" | "outage";
 const SLOW_MS = 1000;
@@ -128,7 +129,7 @@ export const instance = {
         federation: env.FEDERATION_ENABLED,
         twitchImport: twitchImportAvailable(env),
         // Both adapters pay creators out (manual through the treasurer, Stripe through Connect).
-        payouts: true,
+        payouts: payoutsAvailable(),
       },
       minAge: env.AUTH_MIN_AGE,
     };
