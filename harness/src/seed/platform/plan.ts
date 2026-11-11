@@ -282,8 +282,9 @@ export function platformCounts(scale: SeedScale) {
 }
 
 /**
- * `vod_ready` is left out of the platform inbox: its payload names a real video, and the platform
- * plan has none (overhaul wave 3 contract step; d5-content seeds it with the media seed's videos).
+ * `vod_ready` is left out of the platform inbox: its payload names the owner's own real video. The
+ * media service writes one per recorded VOD during seed-media (streamer1's included), and
+ * seed-media checks each is there (`media/vod-ready.ts`).
  */
 const INBOX_TYPES = NOTIFICATION_TYPES.filter((t) => t !== "vod_ready");
 

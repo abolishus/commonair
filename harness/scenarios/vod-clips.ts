@@ -24,6 +24,7 @@ import { clipRow, vodRow } from "../src/e6/db.ts";
 import { type Kit, UI_TIMEOUT_MS, setupKit, staffAccount } from "../src/e6/kit.ts";
 import { E6_ROUTES, E6_TEST_IDS as E, byE6Id } from "../src/e6/selectors.ts";
 import { chooseOption, confirmDialog } from "../src/e6/web.ts";
+import { D5_CONTENT_IDS } from "../src/web/selectors.ts";
 import { isVodOwnPrefix, vodPrefix } from "@commonair/contracts/storage";
 import { listMediaKeys, mediaBucketConfig, mediaKeyExists } from "../src/safety-io.ts";
 import { apiError, errorOf, isNotFound } from "../src/safety.ts";
@@ -139,9 +140,13 @@ async function vodClips(ctx: ScenarioContext, kit: Kit): Promise<void> {
       const page = await studio.goto(E6_ROUTES.content);
       const row = byE6Id(page, E.vodRow, { "vod-id": vod.id });
       await row.waitFor({ timeout: UI_TIMEOUT_MS });
-      await byE6Id(row, E.vodTitle).fill(title, { timeout: UI_TIMEOUT_MS });
-      await chooseOption(page, row, E.vodVisibility, "private", UI_TIMEOUT_MS);
-      await byE6Id(row, E.vodSave).click({ timeout: UI_TIMEOUT_MS });
+      // d5-content: the title and visibility are edited in a side sheet the card's Edit opens.
+      await byE6Id(row, D5_CONTENT_IDS.vodEdit).click({ timeout: UI_TIMEOUT_MS });
+      const sheet = byE6Id(page, D5_CONTENT_IDS.vodEditSheet, { "vod-id": vod.id });
+      await sheet.waitFor({ timeout: UI_TIMEOUT_MS });
+      await byE6Id(sheet, E.vodTitle).fill(title, { timeout: UI_TIMEOUT_MS });
+      await chooseOption(page, sheet, E.vodVisibility, "private", UI_TIMEOUT_MS);
+      await byE6Id(sheet, E.vodSave).click({ timeout: UI_TIMEOUT_MS });
       await byE6Id(page, E.vodRow, { "vod-id": vod.id, visibility: "private" }).waitFor({ timeout: UI_TIMEOUT_MS });
     } else {
       await s.api.client.vods.update({ id: vod.id, title, visibility: "private" });

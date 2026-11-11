@@ -190,7 +190,7 @@ describe("direct-insert writers", () => {
   test("viewer1's inbox: every type, read and unread, none predating the account", async () => {
     const rows = await t.app.db.select().from(schema.notifications);
     const v1 = rows.filter((n) => n.userId === ids.get("viewer1"));
-    // vod_ready waits for d5-content's media-backed seed (plan.ts INBOX_TYPES).
+    // vod_ready comes from seed-media's recordings, not this plan (plan.ts INBOX_TYPES).
     expect(new Set(v1.map((n) => n.type))).toEqual(new Set(NOTIFICATION_TYPES.filter((t) => t !== "vod_ready")));
     expect(v1.some((n) => n.readAt === null)).toBe(true);
     expect(v1.some((n) => n.readAt !== null)).toBe(true);

@@ -22,7 +22,7 @@ import {
   alertVariables,
   overlayStatus,
   overlayTokenLabels,
-  overlayUrl,
+  overlayUrls,
 } from "../e6-fixtures.tsx";
 import { StudioPage, light, mobile320, pageParameters } from "./shell.tsx";
 
@@ -35,7 +35,7 @@ const TYPES = ["tip", "follow", "subscription", "raid"] as const;
 function OverlaysPage(): React.JSX.Element {
   const [configs, setConfigs] = React.useState<Record<string, AlertConfigDraft>>(alertConfigs);
   const [status, setStatus] = React.useState<OverlayTokenStatusView>(overlayStatus);
-  const [createdUrl, setCreatedUrl] = React.useState<string | null>(null);
+  const [createdUrls, setCreatedUrls] = React.useState<typeof overlayUrls | null>(null);
   return (
     <StudioPage current="overlays">
       <PageContainer width="wide" className="flex flex-col gap-6 py-6">
@@ -78,15 +78,15 @@ function OverlaysPage(): React.JSX.Element {
             aside={
               <OverlayTokenPanel
                 status={status}
-                createdUrl={createdUrl}
+                createdUrls={createdUrls}
                 labels={overlayTokenLabels}
                 onCreate={(expiresAt) => {
                   setStatus({ active: true, createdAt: new Date().toISOString(), expiresAt });
-                  setCreatedUrl(overlayUrl);
+                  setCreatedUrls(overlayUrls);
                 }}
                 onRevoke={() => {
                   setStatus({ active: false, createdAt: null, expiresAt: null });
-                  setCreatedUrl(null);
+                  setCreatedUrls(null);
                 }}
               />
             }

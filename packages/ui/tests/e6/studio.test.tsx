@@ -4,12 +4,11 @@
 
 /** E6 studio compositions: spec test ids, callbacks, disabled states and the expiry mapping. */
 import * as React from "react";
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vite-plus/test";
 import {
   AlertConfigCard,
-  ContentBoard,
   OVERLAY_EXPIRY_CHOICES,
   OverlayTokenPanel,
   SimulcastPanel,
@@ -24,13 +23,10 @@ import { TooltipProvider } from "../../src/components/tooltip.tsx";
 import {
   alertConfigs,
   alertLabels,
-  clips,
-  contentLabels,
   overlayTokenLabels,
   simulcastLabels,
   simulcastPlatforms,
   simulcastTargets,
-  vods,
 } from "../../stories/e6-fixtures.tsx";
 
 const withTooltips = (node: React.ReactNode) => <TooltipProvider>{node}</TooltipProvider>;
@@ -428,19 +424,24 @@ describe("OverlayTokenPanel", () => {
     expect(onRevoke).toHaveBeenCalledOnce();
   });
 
-  test("the created URL is masked until revealed, and readable from data-url", async () => {
-    const url = "https://x.test/overlay/alerts?token=abc";
-    renderPanel({ createdUrl: url });
+  const urls = {
+    alerts: "https://x.test/overlay/alerts?token=abc",
+    chat: "https://x.test/overlay/chat?token=abc",
+    goals: "https://x.test/overlay/goals?token=abc",
+  };
+
+  test("the created links are masked until revealed, and readable from data-url", async () => {
+    renderPanel({ createdUrls: urls });
     const field = screen.getByTestId("overlay-url");
-    expect(attr(field, "data-url")).toBe(url);
+    expect(attr(field, "data-url")).toBe(urls.alerts);
     const value = within(field).getByTestId("overlay-url-value") as HTMLInputElement;
     expect(value.value).not.toContain("token=abc");
     await userEvent.setup().click(within(field).getByTestId("overlay-url-reveal"));
-    expect(value.value).toBe(url);
+    expect(value.value).toBe(urls.alerts);
   });
 
-  test("a revoked or inactive status hides the created URL", () => {
-    renderPanel({ status: inactive, createdUrl: "https://x.test/overlay/alerts?token=abc" });
+  test("a revoked or inactive status hides the created links", () => {
+    renderPanel({ status: inactive, createdUrls: urls });
     expect(screen.queryByTestId("overlay-url")).toBeNull();
     expect(document.body.innerHTML).not.toContain("token=abc");
   });
@@ -449,126 +450,5 @@ describe("OverlayTokenPanel", () => {
     renderPanel({ status: null });
     expect(attr(screen.getByTestId("overlay-token"), "data-active")).toBe("false");
     expect((screen.getByTestId("overlay-token-create") as HTMLButtonElement).disabled).toBe(true);
-  });
-});
-
-describe("ContentBoard", () => {
-  const renderBoard = (props: Partial<React.ComponentProps<typeof ContentBoard>> = {}) => {
-    const handlers = {
-      onSaveVod: vi.fn<(id: string, update: { title: string; visibility: string }) => void>(),
-      onDeleteVod: vi.fn<(id: string) => void>(),
-      onDeleteClip: vi.fn<(id: string) => void>(),
-    };
-    const view = render(
-      withTooltips(<ContentBoard vods={vods} clips={clips} labels={contentLabels} {...handlers} {...props} />),
-    );
-    return { ...handlers, ...view };
-  };
-
-  test("VOD rows carry id, visibility and status; save is disabled until something changes", () => {
-    renderBoard();
-    expect(screen.getByTestId("content-vods")).toBeTruthy();
-    const rows = screen.getAllByTestId("vod-row");
-    expect(
-      rows.map((row) => [attr(row, "data-vod-id"), attr(row, "data-visibility"), attr(row, "data-status")]),
-    ).toEqual([
-      ["v1", "public", "ready"],
-      ["v2", "subscribers", "processing"],
-    ]);
-    for (const save of screen.getAllByTestId("vod-save")) expect((save as HTMLButtonElement).disabled).toBe(true);
-  });
-
-  test("rename and re-scope, then save", async () => {
-    const { onSaveVod } = renderBoard();
-    const user = userEvent.setup();
-    const row = screen.getAllByTestId("vod-row")[0] as HTMLElement;
-    const title = within(row).getByTestId("vod-title");
-    await user.clear(title);
-    await user.type(title, "  Renamed ");
-    await user.click(within(row).getByRole("combobox", { name: "Visibility" }));
-    await user.click(await screen.findByTestId("vod-visibility-option-private"));
-    expect(attr(within(row).getByTestId("vod-visibility"), "data-value")).toBe("private");
-    await user.click(within(row).getByTestId("vod-save"));
-    expect(onSaveVod).toHaveBeenCalledWith("v1", { title: "Renamed", visibility: "private" });
-  });
-
-  test("an empty title cannot be saved", async () => {
-    renderBoard();
-    const row = screen.getAllByTestId("vod-row")[0] as HTMLElement;
-    await userEvent.setup().clear(within(row).getByTestId("vod-title"));
-    expect((within(row).getByTestId("vod-save") as HTMLButtonElement).disabled).toBe(true);
-  });
-
-  test("delete a VOD asks first", async () => {
-    const { onDeleteVod } = renderBoard();
-    const user = userEvent.setup();
-    await user.click(screen.getAllByTestId("vod-delete")[1] as HTMLElement);
-    expect(onDeleteVod).not.toHaveBeenCalled();
-    await user.click(await screen.findByTestId("confirm-dialog-confirm"));
-    expect(onDeleteVod).toHaveBeenCalledWith("v2");
-  });
-
-  test("the clips tab lists clips and deletes after confirming", async () => {
-    const { onDeleteClip } = renderBoard();
-    const user = userEvent.setup();
-    await user.click(screen.getByTestId("content-tab-clips"));
-    const panel = await screen.findByTestId("content-clips");
-    const row = within(panel).getByTestId("clip-row");
-    expect(attr(row, "data-clip-id")).toBe("c1");
-    expect(row.textContent).toContain("Clipped by Fernsby");
-    await user.click(within(row).getByTestId("clip-delete"));
-    await user.click(await screen.findByTestId("confirm-dialog-confirm"));
-    expect(onDeleteClip).toHaveBeenCalledWith("c1");
-  });
-
-  test("both panels stay mounted, so clip rows are queryable before the clips tab is opened", () => {
-    renderBoard();
-    const clipsPanel = screen.getByTestId("content-clips");
-    expect(clipsPanel.hidden).toBe(true);
-    expect(attr(within(clipsPanel).getByTestId("clip-row"), "data-clip-id")).toBe("c1");
-    expect(within(clipsPanel).getByTestId("clip-delete")).toBeTruthy();
-    expect(screen.getByTestId("content-vods").hidden).toBe(false);
-  });
-
-  test("the two empty states differ by data-kind", () => {
-    renderBoard({ vods: [], clips: [] });
-    expect(screen.getAllByTestId("content-empty").map((el) => attr(el, "data-kind"))).toEqual(["vods", "clips"]);
-  });
-
-  test("empty lists show the empty state; loading shows no rows", () => {
-    const { unmount } = renderBoard({ vods: [], defaultTab: "vods" });
-    expect(within(screen.getByTestId("content-vods")).getByTestId("content-empty")).toBeTruthy();
-    unmount();
-    renderBoard({ clips: [], tab: "clips" });
-    expect(within(screen.getByTestId("content-clips")).getByTestId("content-empty")).toBeTruthy();
-  });
-
-  test("loading renders skeletons, not the empty state", () => {
-    renderBoard({ vods: null });
-    const panel = screen.getByTestId("content-vods");
-    expect(within(panel).queryByTestId("content-empty")).toBeNull();
-    expect(panel.querySelector("[aria-busy='true']")).not.toBeNull();
-  });
-
-  test("the server's copy replaces the draft", async () => {
-    const { rerender } = renderBoard();
-    const user = userEvent.setup();
-    const row = () => screen.getAllByTestId("vod-row")[0] as HTMLElement;
-    await user.type(within(row()).getByTestId("vod-title"), " draft");
-    act(() => {
-      rerender(
-        withTooltips(
-          <ContentBoard
-            vods={[{ ...vods[0]!, title: "From server" }]}
-            clips={clips}
-            labels={contentLabels}
-            onSaveVod={() => undefined}
-            onDeleteVod={() => undefined}
-            onDeleteClip={() => undefined}
-          />,
-        ),
-      );
-    });
-    expect((within(row()).getByTestId("vod-title") as HTMLInputElement).value).toBe("From server");
   });
 });

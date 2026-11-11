@@ -1,43 +1,57 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { formatCompactNumber, useLocale } from "@commonair/ui";
+import { useLocale } from "@commonair/ui";
 import { AlertCallout } from "@commonair/ui/blocks/feedback";
 import { ContentBoard, type ContentBoardLabels, type VodUpdate } from "@commonair/ui/blocks/studio";
 import { Button } from "@commonair/ui/components/button";
 import { toast } from "@commonair/ui/toast";
+import { Link } from "@tanstack/react-router";
 import * as React from "react";
 import { t } from "../i18n/index.ts";
 import { toastActionError } from "../lib/action-error.ts";
 import { api } from "../lib/api.ts";
+import { useBootstrap } from "../lib/bootstrap.ts";
 import {
   CONTENT_PAGE_SIZE,
-  clipRows,
   isVisibility,
   loadAllPages,
   visibilityOptions,
-  vodRows,
   type ClipDto,
   type VodDto,
 } from "../lib/content.ts";
+import { clipCards, vodCards, watchPath } from "./content-library/model.ts";
 import { useLoad } from "./money/use-load.ts";
 import { StudioLinkAction } from "./studio/empty-action.tsx";
+import { watchUrl } from "./watch/share.ts";
 
 function labels(): ContentBoardLabels {
   return {
     vods: t("content.vods"),
     clips: t("content.clips"),
     vodsEmptyTitle: t("content.vodsEmpty"),
-    vodsEmptyDescription: t("content.vodsEmptyHint"),
+    vodsEmptyDescription: t("d5Content.vodsEmptyBody"),
     clipsEmptyTitle: t("content.clipsEmpty"),
     clipsEmptyDescription: t("content.clipsEmptyHint"),
     vodsListLabel: t("content.vods"),
     clipsListLabel: t("content.clips"),
+    sort: t("d5Content.sort"),
+    sorts: {
+      newest: t("d5Content.sort.newest"),
+      views: t("d5Content.sort.views"),
+      clips: t("d5Content.sort.clips"),
+    },
+    edit: (title) => t("d5Content.edit", { title }),
+    editShort: t("d5Content.editShort"),
+    editTitle: t("d5Content.editTitle"),
+    editDescription: t("d5Content.editDescription"),
     title: t("content.vodTitle"),
     titleError: t("content.vodTitleError"),
     visibility: t("content.visibility"),
     visibilities: visibilityOptions(),
     save: t("content.save"),
+    cancel: t("d5Content.cancel"),
+    copyLink: (title) => t("d5Content.copyLink", { title }),
     deleteVod: (title) => t("content.deleteVod", { title }),
     deleteVodTitle: (title) => t("content.deleteVodTitle", { title }),
     deleteVodDescription: t("content.deleteVodBody"),
@@ -49,12 +63,17 @@ function labels(): ContentBoardLabels {
   };
 }
 
+/** The watch page as a router link (the cards' title). */
+const renderLink = (href: string): React.ReactElement => <Link to={href} />;
+
 /**
- * `/content`: the owner's VODs and clips (`vods.*`, `clips.*`) on `ContentBoard`. Removing a VOD
- * removes its broadcast's clips on the server, so the clip list is loaded again after it.
+ * `/content`: the owner's video and clip library (`vods.*`, `clips.*`) on `ContentBoard`, every
+ * page loaded as before (`loadAllPages`). Removing a video removes its broadcast's clips on the
+ * server, so the clip list is loaded again after it.
  */
 export function ContentManager({ channel }: { channel: string }): React.JSX.Element {
   const { locale } = useLocale();
+  const { config } = useBootstrap();
   const vods = useLoad(`vods:${channel}`, () =>
     loadAllPages((cursor) => api().vods.list({ channel, cursor, limit: CONTENT_PAGE_SIZE })),
   );
@@ -91,6 +110,10 @@ export function ContentManager({ channel }: { channel: string }): React.JSX.Elem
   const vodList: VodDto[] | null =
     vods.data?.filter((vod) => !removed.has(vod.id)).map((vod) => updatedVods[vod.id] ?? vod) ?? null;
   const clipList: ClipDto[] | null = clips.data?.filter((clip) => !removed.has(clip.id)) ?? null;
+  const slugOf = (kind: "vod" | "clip", id: string): string =>
+    (kind === "vod"
+      ? vodList?.find((v) => v.id === id)?.channelSlug
+      : clipList?.find((c) => c.id === id)?.channelSlug) ?? channel;
 
   const saveVod = async (id: string, update: VodUpdate): Promise<void> => {
     if (!isVisibility(update.visibility)) return;
@@ -110,22 +133,29 @@ export function ContentManager({ channel }: { channel: string }): React.JSX.Elem
     setRemoved((current) => new Set(current).add(id));
     toast.success(t("content.clipDeleted"));
   };
+  const copyLink = (kind: "vod" | "clip", id: string): void => {
+    const url = config.publicUrl
+      ? watchUrl(config.publicUrl, kind, slugOf(kind, id), id)
+      : `${window.location.origin}${watchPath(kind, slugOf(kind, id), id)}`;
+    void Promise.resolve()
+      .then(() => navigator.clipboard.writeText(url))
+      .then(
+        () => toast.success(t("d5Content.linkCopied")),
+        () => toast.error(t("d5Content.linkCopyFailed")),
+      );
+  };
 
   return (
     <ContentBoard
-      vods={vodList ? vodRows(vodList) : null}
-      clips={
-        clipList
-          ? clipRows(clipList, (views) =>
-              t("content.views", { count: views, formatted: formatCompactNumber(views, locale) }),
-            )
-          : null
-      }
+      vods={vodList ? vodCards(vodList, clipList, locale) : null}
+      clips={clipList ? clipCards(clipList, locale) : null}
       labels={labels()}
       onSaveVod={saveVod}
       onDeleteVod={deleteVod}
       onDeleteClip={deleteClip}
+      onCopyLink={copyLink}
       onError={(err) => toastActionError(err, t("content.actionFailed"))}
+      renderLink={renderLink}
       // F25: recording is a stream setting; clips come from live viewers, so both go to the stream.
       emptyActions={{
         vods: <StudioLinkAction to="/dashboard/settings">{t("studio.empty.turnOnRecording")}</StudioLinkAction>,

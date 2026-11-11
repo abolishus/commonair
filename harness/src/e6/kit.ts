@@ -23,7 +23,7 @@ import type { ScenarioContext } from "../scenario.ts";
 import type { SignedInUser } from "../users.ts";
 import { waitFor } from "../wait.ts";
 import { signInViaUi } from "../web/flows.ts";
-import { ROUTES, TEST_IDS as T } from "../web/selectors.ts";
+import { D5_CONTENT_IDS, ROUTES, TEST_IDS as T } from "../web/selectors.ts";
 import { WebSession, byTestId } from "../web/session.ts";
 import { OpsHooks } from "./ops.ts";
 import { E6_TEST_IDS as E, etid } from "./selectors.ts";
@@ -36,6 +36,9 @@ export const REDACT_SELECTORS = [
   etid(E.simulcastKey),
   etid(E.overlayUrlValue),
   etid(E.overlayUrl),
+  // d5-content: the chat and goals links carry the same token.
+  etid(D5_CONTENT_IDS.overlayUrlChat),
+  etid(D5_CONTENT_IDS.overlayUrlGoals),
   etid(E.exportDownload),
   etid(T.streamKey),
 ] as const;

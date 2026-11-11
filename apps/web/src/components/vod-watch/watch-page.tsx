@@ -25,6 +25,7 @@ import { CHANNEL_MEDIA_PAGE, type ClipItem, type MediaPage, type VodItem } from 
 import { maturityClient, type MaturityClient } from "../safety/client.ts";
 import { MatureGate } from "../safety/mature-gate.tsx";
 import { momentStart, playheadSeconds, seekToStart, type WatchKind } from "../watch/share.ts";
+import { recordViewApi, useRecordView, type RecordView } from "./record-view.ts";
 import { resumeOffer, useResumeWriter, type ResumeVideo } from "./resume-writer.ts";
 import {
   useWatchChannel,
@@ -58,6 +59,8 @@ export interface WatchClient {
   /** "More from": the channel's first page of VODs / clips (defaults to the API). */
   channelVods?: (slug: string) => Promise<MediaPage<VodItem>>;
   channelClips?: (slug: string) => Promise<MediaPage<ClipItem>>;
+  /** Count one play once playback starts (defaults to the API's `recordView`). */
+  recordView?: RecordView;
 }
 
 const listVods = async (channel: string) => api().vods.list({ channel, limit: CHANNEL_MEDIA_PAGE });
@@ -83,6 +86,7 @@ export const watchClient = (): WatchClient => ({
   clipChat: (id, input) => api().clips.chat({ id, ...input }),
   channelVods: listVods,
   channelClips: listClips,
+  recordView: recordViewApi,
 });
 
 /** The signed-in viewer as the pages need it. */
@@ -177,6 +181,7 @@ export function VodWatchPage({
     <WatchLayout
       testId="vod-watch-page"
       idAttr={{ "data-vod-id": vod.id }}
+      recordView={c.recordView ?? recordViewApi}
       state={state}
       variant="vod"
       id={vod.id}
@@ -241,6 +246,7 @@ export function ClipWatchPage({
     <WatchLayout
       testId="clip-watch-page"
       idAttr={{ "data-clip-id": clip.id }}
+      recordView={c.recordView ?? recordViewApi}
       state={state}
       variant="clip"
       id={clip.id}
@@ -321,10 +327,13 @@ interface LayoutProps {
   clip?: VodPlayerProps["clip"];
   /** Next steps under the details. */
   actions?: React.ReactNode;
+  /** Counts the play once playback starts (D5.5). */
+  recordView: RecordView;
 }
 
 function WatchLayout(p: LayoutProps): React.JSX.Element {
   const handle = React.useRef<WatchPlayerHandle>(null);
+  const onPlaybackStart = useRecordView(p.recordView, p.variant, p.id);
   const [clock, setClock] = React.useState<{ playhead: number | null; origin: number | null }>({
     playhead: null,
     origin: null,
@@ -390,6 +399,7 @@ function WatchLayout(p: LayoutProps): React.JSX.Element {
         captions={p.captions}
         onPlayhead={onPlayhead}
         onProgress={p.onProgress}
+        onPlaybackStart={onPlaybackStart}
         clip={p.clip}
         handleRef={handle}
       />

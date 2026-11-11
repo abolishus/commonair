@@ -454,7 +454,9 @@ describe("/overlays", () => {
     fireEvent.click(within(tip).getByTestId("alert-enabled"));
     fireEvent.change(within(tip).getByTestId("alert-message"), { target: { value: "${user} tipped ${amount}" } });
     fireEvent.change(within(tip).getByTestId("alert-duration"), { target: { value: "5" } });
-    fireEvent.click(within(tip).getByTestId("alert-save"));
+    // One save bar for every alert type (d5-content).
+    expect(screen.getByTestId("alert-save-bar").getAttribute("data-dirty")).toBe("1");
+    fireEvent.click(screen.getByTestId("alert-save"));
     await waitFor(() =>
       expect(fns.alertsSet).toHaveBeenCalledWith({
         channel: "rivertide",
@@ -466,6 +468,7 @@ describe("/overlays", () => {
       }),
     );
     await waitFor(() => expect(ids("alert-config")[0]?.getAttribute("data-enabled")).toBe("true"));
+    expect(screen.getByTestId("alert-save-bar").getAttribute("data-dirty")).toBe("0");
     fireEvent.click(within(ids("alert-config")[0] as HTMLElement).getByTestId("alert-test"));
     await waitFor(() => expect(fns.alertsTest).toHaveBeenCalledWith({ channel: "rivertide", type: "tip" }));
   });
@@ -585,8 +588,11 @@ describe("/content", () => {
     fns.vodsUpdate.mockImplementation(async (input) => vod(input as Record<string, unknown>));
     wrap(React.createElement(component(ContentRoute)));
     const row = await screen.findByTestId("vod-row");
-    fireEvent.change(within(row).getByTestId("vod-title"), { target: { value: "Renamed" } });
-    fireEvent.click(within(row).getByTestId("vod-save"));
+    // The title and visibility are edited in a sheet (d5-content).
+    fireEvent.click(within(row).getByTestId("vod-edit"));
+    const sheet = await screen.findByTestId("vod-edit-sheet");
+    fireEvent.change(within(sheet).getByTestId("vod-title"), { target: { value: "Renamed" } });
+    fireEvent.click(within(sheet).getByTestId("vod-save"));
     await waitFor(() =>
       expect(fns.vodsUpdate).toHaveBeenCalledWith({
         id: "0192f000-0000-7000-8000-0000000000b1",
