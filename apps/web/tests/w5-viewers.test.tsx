@@ -35,7 +35,7 @@ describe("HowWeCount: the creator's own viewing", () => {
     );
     const owner = screen.getByTestId("transparency-how-we-count").querySelector('[data-part="owner"] dd');
     expect(owner?.textContent).toBe(t("w5Viewers.how.owner"));
-    expect(owner?.textContent).toContain("never one of their viewers");
+    expect(owner?.textContent).toContain("signed in to their account");
     expect(owner?.textContent).not.toContain("can still include");
   });
 
