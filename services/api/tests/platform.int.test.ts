@@ -106,12 +106,14 @@ describe("follows", () => {
   });
 
   test("channels.get reports the caller's follow state (null when anonymous)", async () => {
-    type Ch = { viewer?: { following: boolean; portabilityGrant?: boolean } | null };
+    type Ch = { viewer?: { following: boolean; notify?: boolean; portabilityGrant?: boolean } | null };
     const get = (c: ReturnType<typeof client>) => c.call<Ch>("GET", `/api/channels/${alice.username}`);
     expect((await get(client(api))).body.viewer).toBeNull();
     expect((await get(bob.client)).body.viewer).toEqual({ following: false, portabilityGrant: false });
-    await bob.client.call("PUT", `/api/channels/${alice.username}/follow`, {});
-    expect((await get(bob.client)).body.viewer).toEqual({ following: true, portabilityGrant: false });
+    await bob.client.call("PUT", `/api/channels/${alice.username}/follow`, { notify: false });
+    expect((await get(bob.client)).body.viewer).toEqual({ following: true, notify: false, portabilityGrant: false });
+    await bob.client.call("PUT", `/api/channels/${alice.username}/follow`, { notify: true });
+    expect((await get(bob.client)).body.viewer).toEqual({ following: true, notify: true, portabilityGrant: false });
     await bob.client.call("DELETE", `/api/channels/${alice.username}/follow`);
     expect((await get(bob.client)).body.viewer).toEqual({ following: false, portabilityGrant: false });
   });

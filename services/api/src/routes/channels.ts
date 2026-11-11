@@ -41,7 +41,7 @@ export const channelsRoutes = {
     // A follow the integrity system excluded still reads as followed to its owner.
     const [[f], [g]] = await Promise.all([
       deps.db
-        .select({ followerId: follows.followerId })
+        .select({ followerId: follows.followerId, notify: follows.notify })
         .from(follows)
         .where(and(eq(follows.followerId, caller.user.id), eq(follows.channelId, c.id))),
       // Batch 7 decision (l): "tell me if they move", shown in the follow menu.
@@ -50,7 +50,10 @@ export const channelsRoutes = {
         .from(followPortabilityGrants)
         .where(and(eq(followPortabilityGrants.userId, caller.user.id), eq(followPortabilityGrants.channelId, c.id))),
     ]);
-    return { ...dto, viewer: { following: f !== undefined, portabilityGrant: g !== undefined } };
+    return {
+      ...dto,
+      viewer: { following: f !== undefined, notify: f?.notify, portabilityGrant: g !== undefined },
+    };
   }),
 
   update: os.channels.update.handler(async ({ context, input }) => {

@@ -132,6 +132,8 @@ export const Channel = z.object({
       following: z.boolean(),
       /** Batch 7 decision (l): the caller asked to be told if the channel moves. Absent = false (W3-portability fills it). */
       portabilityGrant: z.boolean().optional(),
+      /** The caller's `follows.notify` (go-live alerts) while following; absent when not following. */
+      notify: z.boolean().optional(),
     })
     .nullable()
     .optional(),

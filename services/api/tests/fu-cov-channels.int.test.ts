@@ -84,7 +84,7 @@ type ChannelDto = {
   category: { id: string; slug: string } | null;
   live: Live | null;
   vodEnabled: boolean;
-  viewer: { following: boolean; portabilityGrant: boolean } | null;
+  viewer: { following: boolean; notify?: boolean; portabilityGrant: boolean } | null;
   movedTo: { url: string; at: string } | null;
   suspended: boolean;
   subTiers: { tier: number; price: { cents: number; currency: string } }[];
@@ -111,7 +111,8 @@ describe("channels.get", () => {
     await viewer.client.call("PUT", `/api/channels/${owner.username}/follow`, {});
     await viewer.client.call("PUT", `/api/channels/${owner.username}/portability-grant`, { enabled: true });
     const after = await viewer.client.call<ChannelDto>("GET", `/api/channels/${owner.username}`);
-    expect(after.body.viewer).toEqual({ following: true, portabilityGrant: true });
+    // The follow's go-live alerts ride along (the follow defaults to notify: true).
+    expect(after.body.viewer).toEqual({ following: true, notify: true, portabilityGrant: true });
   });
 
   test("live summary with category, viewer count and catching-up, restriction flagged", async () => {

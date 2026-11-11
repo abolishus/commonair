@@ -228,9 +228,9 @@ describe("grants", () => {
     // The follow menu reads it from `channels.get` (orchestrator, batch 7 wave 1).
     const viewerOf = async () =>
       (await u.client.call<{ viewer: unknown }>("GET", `/api/channels/${streamer.username}`)).body.viewer;
-    expect(await viewerOf()).toEqual({ following: true, portabilityGrant: true });
+    expect(await viewerOf()).toEqual({ following: true, notify: true, portabilityGrant: true });
     expect((await set(false)).body).toEqual({ enabled: false });
-    expect(await viewerOf()).toEqual({ following: true, portabilityGrant: false });
+    expect(await viewerOf()).toEqual({ following: true, notify: true, portabilityGrant: false });
     expect((await u.client.call<unknown[]>("GET", "/api/me/portability-grants")).body).toEqual([]);
     expect(
       (await u.client.call("PUT", "/api/channels/nobody_here_x/portability-grant", { enabled: true })).status,
