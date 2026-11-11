@@ -19,6 +19,9 @@ export interface AuditFilters {
   actorId?: string;
   subjectType?: string;
   subjectId?: string;
+  /** ISO instants: `from` inclusive, `to` exclusive (the API answers 400 unless `from < to`). */
+  from?: string;
+  to?: string;
 }
 export interface Page<T> {
   items: T[];

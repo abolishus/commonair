@@ -16,7 +16,7 @@ import { createMemoryHistory, createRootRoute, createRouter, RouterContextProvid
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type * as React from "react";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
-import { auditCsv, AuditLog, csvCell, inRange } from "../src/components/admin/audit-log.tsx";
+import { auditCsv, AuditLog, csvCell } from "../src/components/admin/audit-log.tsx";
 import type {
   AdminQueueCountDto,
   AdminUserViewDto,
@@ -193,10 +193,7 @@ describe("the admin home", () => {
 });
 
 describe("the audit log", () => {
-  it("helpers: the range, CSV cells (formulas defused) and short ids", () => {
-    expect(inRange({ createdAt: "2026-11-11T10:00:00Z" }, null, null)).toBe(true);
-    expect(inRange({ createdAt: "2026-11-11T10:00:00Z" }, "2026-11-11T11:00:00Z", null)).toBe(false);
-    expect(inRange({ createdAt: "2026-11-11T10:00:00Z" }, null, "2026-11-11T09:00:00Z")).toBe(false);
+  it("helpers: CSV cells (formulas defused) and short ids", () => {
     expect(csvCell("plain")).toBe("plain");
     expect(csvCell('a "b", c')).toBe('"a ""b"", c"');
     expect(csvCell("=HYPERLINK()")).toBe("'=HYPERLINK()");

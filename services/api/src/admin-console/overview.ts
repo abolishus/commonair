@@ -3,8 +3,8 @@
 
 /**
  * `admin.overview` (overhaul wave 4, D7.5): open work per staff queue, for the `/admin` home.
- * Aggregates only (counts and the oldest open item's time), one query per queue the caller's role
- * can open, never rows. A queue's roles match the procedures that open it, so the home never
+ * Aggregates only (counts, the oldest open item's time and the next deadline), one query per queue
+ * the caller's role can open, never rows. A queue's roles match the procedures that open it, so the home never
  * shows a count the caller could not act on.
  */
 import { ADMIN_QUEUES, type AdminQueue, type PLATFORM_ROLES } from "@commonair/contracts/enums";
@@ -53,19 +53,22 @@ interface Agg {
   dueSoon: number;
   oldestAt: Date | string | null;
   unassigned?: number | null;
+  /** The soonest deadline not yet passed, where the queue has deadlines. */
+  nextDueAt?: Date | string | null;
 }
 
+const toIso = (d: Date | string | null | undefined): string | null =>
+  d === null || d === undefined ? null : new Date(d).toISOString();
+
 const toCount = (queue: AdminQueue, a: Agg | undefined): Count => {
-  const oldest = a?.oldestAt ?? null;
   return {
     queue,
     open: Number(a?.open ?? 0),
     overdue: Number(a?.overdue ?? 0),
     dueSoon: Number(a?.dueSoon ?? 0),
-    oldestAt: oldest === null ? null : new Date(oldest).toISOString(),
+    oldestAt: toIso(a?.oldestAt),
     unassigned: queue === "moderation" ? Number(a?.unassigned ?? 0) : null,
-    // Contract step placeholder (overhaul wave 5): w5-admin computes the soonest open deadline.
-    nextDueAt: null,
+    nextDueAt: toIso(a?.nextDueAt),
   };
 };
 
@@ -77,6 +80,9 @@ const overdueBy = (deadline: PgColumn, now: Date) => sql<number>`count(*) filter
 const dueSoonBy = (deadline: PgColumn, now: Date) =>
   sql<number>`count(*) filter (where ${deadline} >= ${at(now)} and ${deadline} < ${at(new Date(now.getTime() + DUE_SOON_MS))})::int`;
 const minOf = (col: PgColumn) => sql<Date | string | null>`min(${col})`;
+/** The soonest deadline among items not yet overdue: the same `>= now` edge as `dueSoonBy`. */
+const nextDueBy = (deadline: PgColumn, now: Date) =>
+  sql<Date | string | null>`min(${deadline}) filter (where ${deadline} >= ${at(now)})`;
 const none = sql<number>`0`;
 
 async function aggregate(db: Executor, queue: AdminQueue, now: Date): Promise<Agg | undefined> {
@@ -93,6 +99,7 @@ async function aggregate(db: Executor, queue: AdminQueue, now: Date): Promise<Ag
           overdue: overdueBy(moderationCases.slaDueAt, now),
           dueSoon: dueSoonBy(moderationCases.slaDueAt, now),
           oldestAt: minOf(moderationCases.createdAt),
+          nextDueAt: nextDueBy(moderationCases.slaDueAt, now),
           unassigned: sql<number>`count(*) filter (where ${moderationCases.assigneeId} is null)::int`,
         })
         .from(moderationCases)
@@ -120,6 +127,7 @@ async function aggregate(db: Executor, queue: AdminQueue, now: Date): Promise<Ag
             overdue: overdueBy(dmcaCounterNotices.restoreAfter, now),
             dueSoon: dueSoonBy(dmcaCounterNotices.restoreAfter, now),
             oldestAt: minOf(dmcaCounterNotices.createdAt),
+            nextDueAt: nextDueBy(dmcaCounterNotices.restoreAfter, now),
           })
           .from(dmcaCounterNotices)
           .where(and(isNull(dmcaCounterNotices.restoredAt), isNull(dmcaCounterNotices.suitFiledAt))),
@@ -133,6 +141,8 @@ async function aggregate(db: Executor, queue: AdminQueue, now: Date): Promise<Ag
         overdue: Number(counters?.overdue ?? 0),
         dueSoon: Number(counters?.dueSoon ?? 0),
         oldestAt: oldest ?? null,
+        // Only counter-notices run on a clock; a notice awaiting a decision has no deadline.
+        nextDueAt: counters?.nextDueAt ?? null,
       };
     }
     case "ncii": {
@@ -142,6 +152,7 @@ async function aggregate(db: Executor, queue: AdminQueue, now: Date): Promise<Ag
           overdue: overdueBy(nciiRequests.deadlineAt, now),
           dueSoon: dueSoonBy(nciiRequests.deadlineAt, now),
           oldestAt: minOf(nciiRequests.receivedAt),
+          nextDueAt: nextDueBy(nciiRequests.deadlineAt, now),
         })
         .from(nciiRequests)
         .where(isNull(nciiRequests.decidedAt));
@@ -178,6 +189,7 @@ async function aggregate(db: Executor, queue: AdminQueue, now: Date): Promise<Ag
           overdue: overdueBy(payments.expiresAt, now),
           dueSoon: dueSoonBy(payments.expiresAt, now),
           oldestAt: minOf(payments.createdAt),
+          nextDueAt: nextDueBy(payments.expiresAt, now),
         })
         .from(payments)
         .where(and(eq(payments.status, "pending"), eq(payments.provider, "manual")));
