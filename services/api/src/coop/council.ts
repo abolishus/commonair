@@ -25,8 +25,16 @@ import { os, requireCaller } from "../lib/orpc.ts";
 import { withCoopErrors } from "./errors.ts";
 import { MEMBER, STAFF, currentCouncilTerm, unknownUser, userPicks } from "./shared.ts";
 
-const { elections, electionCandidates, electionBallots, councilMembers, boardSeats, governanceSettings, users } =
-  schema;
+const {
+  elections,
+  electionCandidates,
+  electionBallots,
+  councilMembers,
+  boardSeats,
+  governanceSettings,
+  proposals,
+  users,
+} = schema;
 type ElectionRow = typeof elections.$inferSelect;
 
 async function electionViews(db: Executor, rows: readonly ElectionRow[]) {
@@ -81,6 +89,28 @@ async function lockElection(tx: Executor, id: string): Promise<ElectionRow> {
 const electionEvent = (tx: Executor, e: Pick<ElectionRow, "id" | "class" | "status">, now: Date) =>
   emit(tx, "coop.election.update", null, { election_id: e.id, class: e.class, status: e.status }, now);
 
+/**
+ * Every governance setting with the title of the proposal that last changed it (overhaul D6.2,
+ * "Changed by …"). A left join: a seeded setting, or one whose proposal is not there, has no title.
+ * Proposal titles are public on the proposal pages already.
+ */
+export async function settingsView(db: Executor) {
+  const rows = await db
+    .select({ setting: governanceSettings, title: proposals.title })
+    .from(governanceSettings)
+    .leftJoin(proposals, eq(proposals.id, governanceSettings.updatedByProposalId))
+    .orderBy(asc(governanceSettings.key));
+  return rows.map(({ setting: r, title }) => ({
+    key: r.key,
+    value: r.value,
+    protected: r.protected,
+    description: r.description,
+    updatedAt: iso(r.updatedAt),
+    updatedByProposalId: r.updatedByProposalId,
+    updatedByProposalTitle: r.updatedByProposalId ? (title ?? null) : null,
+  }));
+}
+
 export const councilHandlers = {
   council: os.coop.council.handler(async ({ context }) => {
     const { db } = context.deps;
@@ -128,19 +158,7 @@ export const councilHandlers = {
     });
   }),
 
-  settings: os.coop.settings.handler(async ({ context }) => {
-    const rows = await context.deps.db.select().from(governanceSettings).orderBy(asc(governanceSettings.key));
-    return rows.map((r) => ({
-      key: r.key,
-      value: r.value,
-      protected: r.protected,
-      description: r.description,
-      updatedAt: iso(r.updatedAt),
-      updatedByProposalId: r.updatedByProposalId,
-      // Contract step placeholder (overhaul wave 4): d6-governance joins the proposal's title.
-      updatedByProposalTitle: null,
-    }));
-  }),
+  settings: os.coop.settings.handler(async ({ context }) => settingsView(context.deps.db)),
 
   elections: {
     list: os.coop.elections.list.handler(async ({ context }) => {
