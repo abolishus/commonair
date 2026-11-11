@@ -127,7 +127,9 @@ describe("web app manifest", () => {
       expect([png.readUInt32BE(16), png.readUInt32BE(20)], shot.src).toEqual([shot.width, shot.height]);
       expect(readFileSync(`${file}.license`, "utf8")).toContain("CC-BY-SA-4.0");
       // The art it was rendered from sits beside it, self-made and licensed.
+      // REUSE-IgnoreStart
       expect(readFileSync(file.replace(/\.png$/, ".svg"), "utf8")).toContain("SPDX-License-Identifier: CC-BY-SA-4.0");
+      // REUSE-IgnoreEnd
     }
   });
 
