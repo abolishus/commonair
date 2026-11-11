@@ -116,3 +116,16 @@ export {
   type GovernanceOutcomeListProps,
   type GovernanceOutcomeItem,
 } from "./governance-outcomes.tsx";
+export { ThresholdBar, type ThresholdBarProps, type ThresholdBarTone } from "./threshold-bar.tsx";
+export {
+  ProtectedBadge,
+  SettingChangeView,
+  ChangeArrow,
+  TechnicalDetails,
+  type ProtectedBadgeProps,
+  type SettingChangeViewProps,
+  type SettingChangeField,
+  type SettingChangeLabels,
+} from "./setting-change.tsx";
+export { ProposalRow, type ProposalRowProps } from "./proposal-row.tsx";
+export { SeatGrid, type SeatGridProps, type SeatGridItem } from "./seat-grid.tsx";
