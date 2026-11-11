@@ -17,6 +17,7 @@ export type Key =
   | "d7Notify.row.go_live"
   | "d7Notify.row.go_live.hint"
   | "d7Notify.row.governance"
+  | "d7Notify.row.governance.hint"
   | "d7Notify.row.payout"
   | "d7Notify.row.payout.hint"
   | "d7Notify.row.creator"
