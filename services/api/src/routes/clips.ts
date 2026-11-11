@@ -7,7 +7,7 @@
  * reading follow `media/visibility.ts`. The channel's owner (or an editor or moderator) and the clip's
  * creator may delete it: hidden at once, objects deleted by the worker's `vod-retention` (E6).
  */
-import { and, desc, eq, gte, isNull, lt, ne, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, lt, ne, or, sql, type SQL } from "drizzle-orm";
 import { ORPCError } from "@orpc/server";
 import type { z } from "zod";
 import type { dto } from "@commonair/contracts";
@@ -22,6 +22,7 @@ import { withMediaState } from "../events/media-state.ts";
 import { os, requireCaller } from "../lib/orpc.ts";
 import { clipQueue } from "../media/clip-queue.ts";
 import {
+  audienceOf,
   channelCategory,
   clipVisible,
   notMatureLabelled,
@@ -113,9 +114,83 @@ export const LIVE_CLIP_LAG_SECONDS = 10;
 const windowStart = (b: Labelled | null | undefined, startOffset: number): string | null =>
   b?.startedAt ? new Date(b.startedAt.getTime() + startOffset * 1000).toISOString() : null;
 
+/** "Watch from this moment" (D3.9): where a clip sits in a video the caller may watch. */
+export interface ClipVodLink {
+  vodId: string;
+  vodOffsetSeconds: number;
+}
+
+type Audience = Awaited<ReturnType<typeof viewerAudience>>;
+
+/**
+ * The video each clip came from, when the caller may watch it: the VOD it was cut from, else its
+ * broadcast's recording (a clip cut live has no `vod_id`), ready and shown to the caller by the VOD
+ * rules (`vodShown`), with the clip's start inside it. A VOD's time 0 is its broadcast's start (a
+ * VOD clip's `start_offset` is checked against the VOD's length), so the offset is the clip's own
+ * `start_offset`. Null for anything else. The 18+ gate is applied by the caller.
+ */
+export async function clipVodLinks(
+  deps: Deps,
+  caller: Caller | null,
+  items: readonly { c: ClipRow; channel: ChannelRow }[],
+): Promise<(ClipVodLink | null)[]> {
+  const vodIds = [...new Set(items.flatMap((r) => (r.c.vodId === null ? [] : [r.c.vodId])))];
+  const broadcastIds = [...new Set(items.flatMap((r) => (r.c.broadcastId === null ? [] : [r.c.broadcastId])))];
+  if (vodIds.length === 0 && broadcastIds.length === 0) return items.map(() => null);
+  const rows = await deps.db
+    .select({
+      id: vods.id,
+      broadcastId: vods.broadcastId,
+      channelId: vods.channelId,
+      status: vods.status,
+      visibility: vods.visibility,
+      removedReason: vods.removedReason,
+      durationSeconds: vods.durationSeconds,
+      restrictedAt: broadcasts.restrictedAt,
+    })
+    .from(vods)
+    .innerJoin(broadcasts, eq(broadcasts.id, vods.broadcastId))
+    .where(
+      and(
+        eq(vods.status, "ready"),
+        or(
+          vodIds.length > 0 ? inArray(vods.id, vodIds) : undefined,
+          broadcastIds.length > 0 ? inArray(vods.broadcastId, broadcastIds) : undefined,
+        ),
+      ),
+    )
+    // A broadcast's first recording when it has several.
+    .orderBy(asc(vods.createdAt), asc(vods.id));
+  // Subscriber-only videos need the caller's audience: asked at most once per channel.
+  const audiences = new Map<string, Promise<Audience>>();
+  const audience = (channel: ChannelRow): Promise<Audience> => {
+    const own = audienceOf(caller, channel);
+    if (own === "owner" || !caller) return Promise.resolve(own);
+    let found = audiences.get(channel.id);
+    if (!found) {
+      found = viewerAudience(deps, caller, channel);
+      audiences.set(channel.id, found);
+    }
+    return found;
+  };
+  return Promise.all(
+    items.map(async ({ c, channel }) => {
+      const row =
+        rows.find((v) => c.vodId !== null && v.id === c.vodId) ??
+        rows.find((v) => c.broadcastId !== null && v.broadcastId === c.broadcastId);
+      if (!row || row.channelId !== channel.id) return null;
+      const aud = row.visibility === "public" ? audienceOf(caller, channel) : await audience(channel);
+      if (!vodShown(aud, row, channel, row.restrictedAt)) return null;
+      const offset = Math.max(0, c.startOffset);
+      if (row.durationSeconds > 0 && offset >= row.durationSeconds) return null;
+      return { vodId: row.id, vodOffsetSeconds: offset };
+    }),
+  );
+}
+
 /** Mature media URLs follow the 18+ gate (per clip's channel and broadcast). */
 async function toClips(deps: Deps, caller: Caller | null, items: readonly ClipItem[]): Promise<Clip[]> {
-  const [creators, withheld] = await Promise.all([
+  const [creators, withheld, links] = await Promise.all([
     loadUsersPublic(
       deps,
       items.map((r) => r.c.creatorId).filter((id): id is string => id !== null),
@@ -125,10 +200,13 @@ async function toClips(deps: Deps, caller: Caller | null, items: readonly ClipIt
       caller,
       items.map((r) => ({ channel: r.channel, broadcast: r.labels })),
     ),
+    clipVodLinks(deps, caller, items),
   ]);
   return items.map(({ c, channel, labels, category }, i) => {
     const u = c.creatorId ? creators.get(c.creatorId) : undefined;
     const playable = c.status === "ready" && !(withheld[i] ?? true);
+    // The video carries the clip's labels: withheld from the clip's viewer, it is not offered either.
+    const link = withheld[i] === false ? (links[i] ?? null) : null;
     return {
       id: c.id,
       channelSlug: channel.slug,
@@ -143,9 +221,8 @@ async function toClips(deps: Deps, caller: Caller | null, items: readonly ClipIt
       // As `clips.chat` places the window (chat-replay/handlers.ts).
       windowStartedAt: windowStart(labels, c.startOffset),
       category,
-      // Contract step placeholders: d3-watch links the clip to its broadcast's playable video.
-      vodId: null,
-      vodOffsetSeconds: null,
+      vodId: link?.vodId ?? null,
+      vodOffsetSeconds: link?.vodOffsetSeconds ?? null,
     };
   });
 }
