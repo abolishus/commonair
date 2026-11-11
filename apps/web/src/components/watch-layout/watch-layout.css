@@ -7,7 +7,8 @@
  * the "Chat | About" switch shows (`data-watch-panel`):
  *
  * - The site header scrolls away (the shell keeps it sticky everywhere else) and the player
- *   (`data-watch-slot="stage"`) sticks to the top instead. The bottom tab bar is already off on
+ *   (`data-watch-slot="stage"`) sticks to the top instead, over chat too (`main` is
+ *   `display: contents`, so the stage sticks within the whole columns container). The bottom tab bar is already off on
  *   watch pages (`lib/nav.ts` `tabBarVisible`: shell area "watch").
  * - With Chat showing, the page is exactly the viewport less the 3.5rem header, and the chat
  *   column (`chat-column-fill`) takes what the player, the compact row and the switch leave, so
@@ -22,6 +23,14 @@
 
   body:has([data-watch-layout][data-watch-panel="chat"]) [data-slot="site-footer"] {
     display: none;
+  }
+
+  /*
+   * The left column steps out of the box tree, so the stage's containing block is the whole
+   * columns container, chat included: on a short phone the player stays stuck over chat.
+   */
+  [data-watch-layout] [data-watch-slot="main"] {
+    display: contents;
   }
 
   [data-watch-layout] [data-watch-slot="stage"] {

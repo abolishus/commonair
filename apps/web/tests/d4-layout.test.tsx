@@ -8,8 +8,9 @@
  * - below `lg` (375 px) the page is a sticky player, the compact row, "Chat | About" and then chat
  *   (live) or About (offline); from `lg` (1440 px) both show side by side;
  * - exactly one `follow-button` on the live and the offline page at 375 and 1440 px;
- * - the owner's Stream manager and Edit channel, a moderator's Mod view, nobody else's;
- * - the neutral trust mark from `Channel.ownerCoop`, and "Verified viewers · How we count";
+ * - the owner's Stream manager and Edit channel, a moderator's or editor's Mod view, nobody else's;
+ * - the neutral trust mark from `Channel.ownerCoop`, and "Verified viewers" (the "How we count"
+ *   link waits for an explainer page);
  * - the portability switch is no longer on the page (d4-follow puts it in the Following menu).
  *
  * happy-dom has no layout engine, so "visible at a width" reads the responsive classes the page
@@ -67,10 +68,12 @@ vi.mock("../src/components/support/support-dialog.tsx", () => ({
 }));
 
 const { Route } = await import("../src/routes/_app/$channel.tsx");
-const { defaultWatchPanel, useModerates, useWatchPanel, HOW_WE_COUNT_ROUTE } =
+const { defaultWatchPanel, useModerates, useWatchPanel } =
   await import("../src/components/watch-layout/watch-layout.tsx");
 const { parseChannelSearch } = await import("../src/components/channel/channel-data.ts");
-type ChannelPage = import("../src/components/channel/panels-loader.ts").ChannelPage;
+type ChannelPage = import("../src/components/channel/panels-loader.ts").ChannelPage & {
+  ownerCoop?: { member: boolean; council: boolean } | null;
+};
 
 beforeAll(async () => {
   const c = Route.options.component as { preload?: () => Promise<void> } | undefined;
@@ -241,6 +244,8 @@ describe("the phone and tablet layout (D4.1)", () => {
     const body = /@media \(max-width: 63\.99rem\) \{([\s\S]*)\}\s*$/.exec(css.trim())?.[1] ?? "";
     expect(body).toMatch(/\[data-slot="app-shell-header"\]\s*\{\s*position: relative;/);
     expect(body).toMatch(/\[data-watch-slot="stage"\]\s*\{\s*position: sticky;\s*top: 0;/);
+    // The left column steps out of the box tree, so the stage sticks over chat too.
+    expect(body).toMatch(/\[data-watch-slot="main"\]\s*\{\s*display: contents;/);
     expect(body).toMatch(/\[data-watch-panel="chat"\]\) \[data-slot="site-footer"\]\s*\{\s*display: none;/);
     expect(body).toMatch(
       /\[data-watch-layout\]\[data-watch-panel="chat"\]\s*\{\s*min-height: calc\(100dvh - 3\.5rem\);/,
@@ -344,15 +349,23 @@ describe("owner and moderator shortcuts (D4.6, J5-a)", () => {
     expect(screen.queryByTestId("channel-owner-stream-manager")).toBeNull();
   });
 
-  it("nobody else: an editor, another channel's moderator, a visitor, or a failed answer", async () => {
+  it("an editor gets Mod view too (editors may moderate)", async () => {
+    fake.me = VIEWER;
+    fake.moderates = async () => [
+      {
+        channel: { id: uuid(1), slug: "fern", displayName: "F", avatarUrl: null, accent: "teal" },
+        role: "editor",
+        live: true,
+      },
+    ];
+    renderPage(page({ live: true }));
+    const mod = await screen.findByTestId("channel-mod-view");
+    expect(mod.getAttribute("href")).toBe("/mod/fern");
+    expect(screen.queryByTestId("channel-owner-stream-manager")).toBeNull();
+  });
+
+  it("nobody else: another channel's moderator, a visitor, or a failed answer", async () => {
     const answers = [
-      async () => [
-        {
-          channel: { id: uuid(1), slug: "fern", displayName: "F", avatarUrl: null, accent: "teal" },
-          role: "editor",
-          live: true,
-        },
-      ],
       async () => [
         {
           channel: { id: uuid(3), slug: "other", displayName: "O", avatarUrl: null, accent: "teal" },
@@ -402,8 +415,14 @@ describe("trust marks (D4.7)", () => {
     renderPage(page({ coop: { member: true, council: true } }));
     const badge = await screen.findByTestId("channel-trust-badge");
     expect(badge.getAttribute("data-kind")).toBe("council");
-    expect(badge.textContent).toBe("Creator council");
-    expect(badge.getAttribute("aria-label")).toBe("Fernsby sits on the creator council");
+    const short = badge.querySelector('[data-slot="trust-short"]');
+    const long = badge.querySelector('[data-slot="trust-long"]');
+    expect(short?.textContent).toBe("Creator council");
+    expect(short?.getAttribute("aria-hidden")).toBe("true");
+    // The long form is real text for screen readers, not aria-label on a plain span.
+    expect(long?.textContent).toBe("Fernsby sits on the creator council");
+    expect(long?.className).toContain("sr-only");
+    expect(badge.hasAttribute("aria-label")).toBe(false);
     // Neutral: an outline badge, never the brand fill.
     expect(badge.getAttribute("data-tone")).toBe("neutral");
     expect(badge.className).not.toMatch(/bg-primary|bg-brand|channel-accent/);
@@ -412,7 +431,11 @@ describe("trust marks (D4.7)", () => {
 
   it("a member-owner reads Member-owner; neither shows nothing", async () => {
     renderPage(page({ coop: { member: true, council: false } }));
-    expect((await screen.findByTestId("channel-trust-badge")).textContent).toBe("Member-owner");
+    const member = await screen.findByTestId("channel-trust-badge");
+    expect(member.querySelector('[data-slot="trust-short"]')?.textContent).toBe("Member-owner");
+    expect(member.querySelector('[data-slot="trust-long"]')?.textContent).toBe(
+      "Fernsby is a member-owner of the co-op",
+    );
     cleanup();
     renderPage(page());
     await screen.findByTestId("channel-offline-home");
@@ -424,19 +447,22 @@ describe("trust marks (D4.7)", () => {
     renderPage(page({ live: true, coop: { member: true, council: false } }), "/fern?tab=about");
     await screen.findByTestId("channel-about");
     expect(screen.queryByTestId("channel-trust-badge")).toBeNull();
-    expect(screen.getByTestId("channel-about-trust").textContent).toBe("Member-owner");
+    const about = screen.getByTestId("channel-about-trust");
+    expect(about.querySelector('[data-slot="trust-short"]')?.textContent).toBe("Member-owner");
   });
 });
 
 describe("verified viewers (D4.7)", () => {
-  it("live: Verified viewers · How we count, beside the count from lg and in About below it", async () => {
+  it("live: Verified viewers, beside the count from lg and in About below it", async () => {
     renderPage(page({ live: true, viewers: 12 }));
     const note = await screen.findByTestId("channel-verified-viewers");
-    expect(note.textContent).toBe("Verified viewers·How we count");
-    expect(note.querySelector("a")?.getAttribute("href")).toBe(HOW_WE_COUNT_ROUTE);
+    expect(note.textContent).toBe("Verified viewers");
+    // No "How we count" link until a page explains verified-viewer counting (never the verifier).
+    expect(note.querySelector("a")).toBeNull();
     expect([shownAt(note, 375), shownAt(note, 1440)]).toEqual([false, true]);
     const mobile = screen.getByTestId("channel-verified-viewers-mobile");
-    expect(mobile.querySelector("a")?.getAttribute("href")).toBe("/attestations/verify");
+    expect(mobile.textContent).toBe("Verified viewers");
+    expect(mobile.querySelector("a")).toBeNull();
   });
 
   it("just started (no count shown) or offline: no note", async () => {

@@ -8,6 +8,5 @@
   "d4Layout.trust.council": "Creator council",
   "d4Layout.trust.memberLabel": "{name} is a member-owner of the co-op",
   "d4Layout.trust.councilLabel": "{name} sits on the creator council",
-  "d4Layout.viewers.verified": "Verified viewers",
-  "d4Layout.viewers.howWeCount": "How we count"
+  "d4Layout.viewers.verified": "Verified viewers"
 }

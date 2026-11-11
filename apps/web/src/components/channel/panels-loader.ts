@@ -27,8 +27,6 @@ export interface ChannelPage {
   clips: MediaPage<ClipItem> | null;
   /** `Channel.createdAt` (D3.8, "Channel created … ago" in About). */
   since?: string | null;
-  /** `Channel.ownerCoop` (overhaul D4.7 trust marks); left out by callers that have none. */
-  ownerCoop?: { member: boolean; council: boolean } | null;
 }
 
 /**
@@ -62,6 +60,5 @@ export const getChannelPage = createServerFn({ method: "GET" })
       vods,
       clips,
       since: dto.createdAt,
-      ownerCoop: dto.ownerCoop,
     };
   });

@@ -9,9 +9,11 @@
  *   only. Chat is the default while live, About offline (`defaultWatchPanel`). The page hides the
  *   other panel with CSS, so chat keeps its connection, scroll and draft.
  * - `OwnerShortcuts` (`channel-owner-stream-manager`, `channel-owner-edit`): on their own channel.
- * - `ModViewButton` (`channel-mod-view`) and `useModerates`: for a moderator who does not own it.
+ * - `ModViewButton` (`channel-mod-view`) and `useModerates`: for a moderator or editor who does not
+ *   own it (both may open the mod view).
  * - `TrustBadge`: the owner's co-op standing, one neutral mark (council outranks member-owner).
- * - `VerifiedViewers`: "Verified viewers · How we count", linking to the explainer.
+ * - `VerifiedViewers`: "Verified viewers" beside the live count. The "How we count" link waits for
+ *   a page that explains verified-viewer counting (none exists yet).
  *
  * The phone layout itself is CSS (`watch-layout.css`, keyed on `data-watch-*`), so the server
  * render is already right on a phone and nothing remounts when the viewport crosses `lg`.
@@ -142,6 +144,7 @@ const apiModerates: ModeratesClient = { moderates: () => api().me.moderates() };
 
 /**
  * Whether the signed-in viewer moderates `channel` (`me.moderates`, which never lists their own).
+ * Any row counts: an editor may moderate too (`access.ts`, chat).
  * Asked only when `enabled` (signed in, not the owner); any failure reads as "no".
  */
 export function useModerates(channel: string, enabled: boolean, client: ModeratesClient = apiModerates): boolean {
@@ -151,8 +154,7 @@ export function useModerates(channel: string, enabled: boolean, client: Moderate
     let current = true;
     client.moderates().then(
       (list) => {
-        if (current)
-          setAnswer({ channel, moderates: list.some((m) => m.role === "moderator" && m.channel.slug === channel) });
+        if (current) setAnswer({ channel, moderates: list.some((m) => m.channel.slug === channel) });
       },
       () => {
         if (current) setAnswer({ channel, moderates: false });
@@ -170,7 +172,11 @@ export interface OwnerCoop {
   council: boolean;
 }
 
-/** One neutral mark (never brand-filled): Creator council outranks Member-owner; none otherwise. */
+/**
+ * One neutral mark (never brand-filled): Creator council outranks Member-owner; none otherwise.
+ * The long form is screen-reader text inside the badge: `aria-label` on its plain span (no role)
+ * is not a valid name, and readers may skip it.
+ */
 export function TrustBadge({
   coop,
   name,
@@ -188,34 +194,27 @@ export function TrustBadge({
       tone="neutral"
       icon={council ? JusticeScale01Icon : UserGroupIcon}
       data-kind={council ? "council" : "member"}
-      aria-label={council ? t("d4Layout.trust.councilLabel", { name }) : t("d4Layout.trust.memberLabel", { name })}
       className={cn("shrink-0", className)}
       {...props}
     >
-      <span aria-hidden>{council ? t("d4Layout.trust.council") : t("d4Layout.trust.member")}</span>
+      <span data-slot="trust-short" aria-hidden>
+        {council ? t("d4Layout.trust.council") : t("d4Layout.trust.member")}
+      </span>
+      <span data-slot="trust-long" className="sr-only">
+        {council ? t("d4Layout.trust.councilLabel", { name }) : t("d4Layout.trust.memberLabel", { name })}
+      </span>
     </StatusBadge>
   );
 }
 
-/** Where "How we count" leads: the audience statement verifier, which explains verified viewers. */
-export const HOW_WE_COUNT_ROUTE = "/attestations/verify";
-
-/** "Verified viewers · How we count", beside the live count. */
+/** "Verified viewers", beside the live count. */
 export function VerifiedViewers({
   className,
   ...props
 }: { className?: string } & { [key: `data-${string}`]: string | undefined }): React.JSX.Element {
   return (
-    <span className={cn("inline-flex min-w-0 flex-wrap items-center gap-1", className)} {...props}>
-      <span>{t("d4Layout.viewers.verified")}</span>
-      <span aria-hidden>·</span>
-      <Link
-        to={HOW_WE_COUNT_ROUTE}
-        data-slot="how-we-count"
-        className="font-medium text-foreground underline underline-offset-4 outline-none hover:no-underline focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        {t("d4Layout.viewers.howWeCount")}
-      </Link>
+    <span className={cn("inline-flex min-w-0 items-center", className)} {...props}>
+      {t("d4Layout.viewers.verified")}
     </span>
   );
 }

@@ -322,6 +322,9 @@ export function VodPlayer({
   const { hold } = bar;
   const onClipOpen = React.useCallback((open: boolean) => hold("clip", open), [hold]);
   const settings = useSettings({
+    ready: state === "ready",
+    hintEnabled: false,
+    suggested: false,
     onOpenChange: React.useCallback(
       (open: boolean) => {
         hold("settings", open);

@@ -13,5 +13,4 @@ export type Key =
   | "d4Layout.trust.council"
   | "d4Layout.trust.memberLabel"
   | "d4Layout.trust.councilLabel"
-  | "d4Layout.viewers.verified"
-  | "d4Layout.viewers.howWeCount";
+  | "d4Layout.viewers.verified";

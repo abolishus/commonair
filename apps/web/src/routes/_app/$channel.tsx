@@ -39,7 +39,7 @@ import {
 import { ChannelNotFoundPage } from "../../components/channel/live-now-shelf.tsx";
 import { OfflineChannelHome } from "../../components/channel/offline-hero.tsx";
 import { bannerVisible } from "../../components/channel/panels-data.ts";
-import { getChannelPage, type ChannelPage as ChannelPageData } from "../../components/channel/panels-loader.ts";
+import { getChannelPage, type ChannelPage } from "../../components/channel/panels-loader.ts";
 import { useChannelClips, useChannelVods } from "../../components/channel/use-media-list.ts";
 import {
   ClipsFilteredEmpty,
@@ -59,6 +59,7 @@ import { playerStage } from "../../components/safety/stage.ts";
 import { ReportButton } from "../../components/safety/report-dialog.tsx";
 import {
   ModViewButton,
+  type OwnerCoop,
   OwnerShortcuts,
   TrustBadge,
   useModerates,
@@ -73,6 +74,12 @@ import { seoHead, siteFromMatches, withSeo } from "../../lib/seo.ts";
 import { useChannel } from "../../lib/use-channel.ts";
 import { Player } from "../../player/player.tsx";
 import { TheatreProvider, useTheatre, useTheatreAvailable, useTheatreChat } from "../../player/theatre.ts";
+
+/**
+ * `Channel.ownerCoop` (D4.7 trust marks) rides on the page data once the loader passes it on
+ * (`panels-loader.ts` is another unit's); until then it is absent and no mark shows.
+ */
+type ChannelPageData = ChannelPage & { ownerCoop?: OwnerCoop | null };
 
 export const Route = createFileRoute("/_app/$channel")({
   // `?tab=videos|clips|about` (F2): each tab is a link and Back steps through them. Clips adds
@@ -494,7 +501,7 @@ function ChannelView({
         data-watch-slot="columns"
         className={cn("flex min-w-0 flex-col lg:flex-row", theatreLayout ? null : "lg:gap-6")}
       >
-        <div className="flex min-w-0 flex-col lg:flex-1 lg:gap-4">
+        <div data-watch-slot="main" className="flex min-w-0 flex-col lg:flex-1 lg:gap-4">
           <div className="flex min-w-0 flex-col gap-4 px-4 empty:hidden lg:px-0">
             <MovedNotice channelName={channel.displayName} movedTo={channel.movedTo} />
             {/* After checkout (F12): announced before the player. */}

@@ -350,7 +350,16 @@ export function Player({
     },
     [hold, readQuality],
   );
-  const settings = useSettings({ onOpenChange: onSettingsOpen });
+  const settings = useSettings({
+    ready: state === "playing",
+    hintEnabled: live && !embed && dataChoice !== null,
+    suggested: !dataChosen && savedDataMode?.saved === false && savedDataMode.suggested !== null,
+    onOpenChange: onSettingsOpen,
+  });
+  const hintOpen = settings.hintOpen;
+  React.useEffect(() => {
+    hold("hint", hintOpen);
+  }, [hold, hintOpen]);
 
   const dvrShown = features.dvr !== null && features.dvr.windowSeconds > 0 && !(dataModeOn || appliedCeiling !== null);
   // In fullscreen the player's popups (and this dialog) portal into its popup layer, not <body>.

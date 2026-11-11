@@ -379,9 +379,9 @@ export const FU_CHANNEL_IDS = {
  * "Chat | About" switch (`watchPanelSwitch`, `data-panel`; the page root carries
  * `data-watch-panel`); Share and Report move into `channel-overflow` (`overflowShare`). Exactly
  * one `follow-button` at every width: offline on Home it is inside the Follow hero. The owner gets
- * the two shortcuts, a non-owner moderator `modView`. `trustBadge` (offline header) and
+ * the two shortcuts, a non-owner moderator or editor `modView`. `trustBadge` (offline header) and
  * `aboutTrust` carry `data-kind` council|member. `verifiedViewers` (from `lg`) and
- * `verifiedViewersMobile` (About panel) link "How we count".
+ * `verifiedViewersMobile` (About panel) read "Verified viewers" (no "How we count" link yet).
  */
 export const D4_LAYOUT_IDS = {
   watchPanelSwitch: "watch-panel-switch",
