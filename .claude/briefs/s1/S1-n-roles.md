@@ -81,8 +81,9 @@ with the exact diff.
 
 2. **Internal addressing**, as the contract step's §4 decided. If it is the local forwarder, the
    media and moderation roles install it and render its upstream list from the node registry.
-   Internal ports bind to the internal interface, never to a public one. Add a preflight that
-   refuses an install whose internal address is public.
+   Internal ports bind to the internal interface, never to a public one. Hosts need not share a
+   private network (contract step §4): add a preflight that refuses an install whose internal
+   address is public unless the internal transport that step decided is configured for it.
 3. **Joining.** `selfhost.sh install --role <r> --join <app internal URL> --token-file <file>`
    fetches the role's env through `nodeJoin` and installs with it, so a new host needs one
    short-lived token and no copied secrets. `selfhost.sh node token --role <r>` on an app host

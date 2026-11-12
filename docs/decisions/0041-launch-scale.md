@@ -103,7 +103,7 @@ This replaces 0032 §7's "autoscaling before stage 2 has run by hand".
   7 minutes (0032 §1). Pools boot from a prebuilt snapshot with images pulled, and keep warm
   spare hosts. Target: a new media host accepting streams within 3 minutes.
 - **A new host gets no long-lived secret from the provider.** Its user data carries only a
-  one-time join token (10 minutes, single use, accepted from the VPC only), which it exchanges
+  one-time join token (10 minutes, single use, accepted over the internal transport only), which it exchanges
   with the api for its role's configuration. Snapshots hold no secret and no node identity.
 - **Hard ceilings.** Each pool has a maximum size, from the budget in
   [Open questions](#open-questions). At the ceiling, admission control (decision 6) takes over.
@@ -120,12 +120,13 @@ This replaces 0032 §7's "autoscaling before stage 2 has run by hand".
     cordoned or at its stream limit, so new connections go elsewhere.
   - RTMP clients don't follow redirects reliably, so the balancer chooses the host.
   - WHIP signalling reaches the app pool, which picks the least-loaded node and proxies the
-    request to it over the VPC. The WebRTC media then flows to that node's own public address.
+    request to it over the internal transport. The WebRTC media then flows to that node's own public address.
   - S1-e checks that the load balancer keeps existing connections to a host that fails its
     health check.
 - **Origin routes by placement.** Playlist and segment requests reach the app pool. Origin looks
-  up the placement, cached in Valkey, and fetches from the placed host over the VPC, which is not
-  billed. There is one public origin, and viewers never address media hosts.
+  up the placement, cached in Valkey, and fetches from the placed host over the internal
+  transport (inside one VPC that traffic is not billed; between providers it is the sender's
+  egress). There is one public origin, and viewers never address media hosts.
 - **Host loss.**
   - The streamer's encoder reconnects through the load balancer and lands on another host.
   - The reconnect grace (`LIVE_RULES.reconnectGraceSeconds`) continues the same broadcast, and
@@ -206,9 +207,26 @@ Nothing is sized until these are measured (S1-i) and, where the targets miss, fi
   maintainers set the budget, and the scaler's ceilings come from it.
 - **Egress is likely the largest bill.** 10,000 viewers at 3 Mbps is about 30 Gbps at peak.
   Relays and P2P carry part of it, and the rest is metered past the pooled allowance at
-  $0.01/GiB.
+  $0.01/GiB. A first estimate (2026-11-11, not measured):
+  - Viewers cost about 1.35 GB per viewer-hour (ADR 0032). If the average over a month is 10% to
+    30% of the 10,000 peak, that is about 1 to 3 PB a month, or about $9,000 to $27,500 at
+    $0.01/GiB. The pooled allowance takes a few hundred TB off, and relays and P2P take off a
+    share nobody has measured.
+  - Compute for comparison: 150 to 350 cores at the `c-4` price read on 2026-11-11 ($0.125 an
+    hour, about $23 a vCPU-month) is about $3,400 to $8,000 a month.
+  - The average is the maintainer's to estimate (open question 4). The estimate is small at the
+    100 and 300 waves, so it gates only the 1,000 wave.
+- **Where viewers are served may differ from where the platform runs.** ADR 0025 chose
+  DigitalOcean on tooling and stability and named the way out: "a dedicated media origin
+  elsewhere is an add-on, not a migration". That stays true only if nothing built for launch
+  assumes every host shares one private network. The contract step (§4) carries that rule, and the
+  scaler's provider adapter (decision 3) already keeps a second provider to one more adapter.
+  Whether to add a viewer-facing pool on a provider with cheap or unmetered transfer is decided
+  before the 1,000 wave (open question 4), from measured egress at the 300 wave.
 - **The account limit is a long-lead blocker.** Raising it should start now, independent of the
-  design.
+  design. As read on 2026-11-11 the account allows 10 droplets, no GPU droplets and no size above
+  4 vCPU (`c-4`). DigitalOcean's prepaid tiers raise the counts (15 droplets and 2 GPUs at $250,
+  100 and 16 at $4,000); whether a tier also lifts the size cap is not confirmed.
 - **ADR 0032's stage triggers** still describe the self-host default and growth past launch
   capacity. For our instance the trigger to grow a pool is the scaler's, and the pool ceilings
   are the new "move on" number.
@@ -234,3 +252,7 @@ Nothing is sized until these are measured (S1-i) and, where the targets miss, fi
 2. **Region and droplet sizes,** after the account limit increase. 0032's NYC3 still stands unless
    the limit forces another region.
 3. **The largest single stream** to plan for, which sizes origin's fan-out for one placement.
+4. **Where viewer egress is served at the 1,000 wave:** DigitalOcean at $0.01/GiB, or a
+   viewer-facing pool on a provider with cheap or unmetered transfer. Needs the maintainer's
+   estimate of average concurrent viewers, the share relays and P2P carry (measured at the 300
+   wave), and that provider's current transfer price, checked on the day.

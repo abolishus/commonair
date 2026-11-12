@@ -36,7 +36,8 @@ Today nothing names a host. One MediaMTX and one media service are assumed every
 
 1. **`cluster_nodes`**: one row per host that carries a role.
    - `id` (UUIDv7), `role` (`app` | `media` | `moderation`), `name` (the operator's or scaler's
-     label, unique), `internal_host` (the address other hosts use, a VPC address or name),
+     label, unique), `internal_host` (the address other hosts use: a private-network address or name, or any
+     address reachable over the transport §4 decides),
      `public_host` (nullable: a media node's own public address for WebRTC ICE).
    - `state`: `active` | `cordoned` | `draining` | `gone`.
    - `max_streams` and `ladder_slots` (nullable integers, media only: what the node says it can
@@ -103,7 +104,7 @@ Today nothing names a host. One MediaMTX and one media service are assumed every
 7. **Node join** (for S1-k and S1-n). `INTERNAL_ROUTES.nodeJoin`: a new host presents a
    one-time token and receives its role's env. The token is minted by the scaler or by
    `selfhost.sh` on an app host, lives 10 minutes in Valkey, is single-use, and is accepted only
-   from the VPC. No long-lived secret is ever placed in a droplet's user data or in a snapshot.
+   over the internal transport §4 decides (never from the open internet). No long-lived secret is ever placed in a droplet's user data or in a snapshot.
 8. **Scaler provider enum**: `SCALER_PROVIDERS = ["static", "digitalocean"]`, beside
    `PAYMENT_PROVIDERS` (`src/enums.ts:58`).
 9. **Metric names** (constants, so dashboards and the scaler agree):
@@ -129,9 +130,16 @@ ADR 0041:
   rows of the node registry. Recommended: the local forwarder, because it works for every
   operator and adds no image. Check the pinned Caddy can reload its upstream list without
   dropping requests.
-- **Security.** Internal ports listen on the VPC interface only, the cloud firewall admits them
-  only from the instance's tags, and every call keeps its existing credential (`x-internal-secret`,
-  MediaMTX basic auth). Whether VPC traffic also gets TLS is recorded as a decision either way.
+- **Do not assume one shared private network.** ADR 0041 keeps open a pool of hosts at another
+  provider (viewer-facing hosts where transfer is cheap), and a self-hoster may mix a home server
+  with a rented one. So the decision names one internal transport that also works between hosts
+  with no common VPC: TLS on the internal ports, or an encrypted overlay (WireGuard) that gives
+  every host an internal address. Nothing in contracts, the schema or a unit may say "VPC": the
+  names are `internal_host` and "the internal transport".
+- **Security.** Internal ports never listen on a public interface without that transport. On a
+  shared private network they bind to its interface and the cloud firewall admits them only from
+  the instance's tags. Every call keeps its existing credential (`x-internal-secret`, MediaMTX
+  basic auth). Whether traffic inside one VPC also gets TLS is recorded as a decision either way.
 
 ## 5. What the orchestrator checks before releasing wave 1
 
