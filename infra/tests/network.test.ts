@@ -181,9 +181,11 @@ describe("the services believe X-Forwarded-For only from Caddy (and the API also
     ]);
     for (const u of ["worker", "media"])
       expect(read(`infra/selfhost/seed-mode/commonair-${u}.conf`)).not.toContain("TRUSTED_PROXY_CIDRS");
-    // The harness publishes nothing and has no route through Caddy.
+    // The harness publishes nothing; Caddy reaches it only for the member relay, and only in
+    // seed mode (the seed-relay-on snippet, caddy.test.ts), at the port its unit fixes.
     expect(values(unit("seed-harness"), "PublishPort")).toEqual([]);
-    expect(caddyfile).not.toContain("seed-harness");
+    expect(caddyfile.match(/seed-harness:\d+/g)).toEqual(["seed-harness:4100"]);
+    expect(values(unit("seed-harness"), "Environment")).toContain("HARNESS_RELAY_PORT=4100");
   });
 });
 

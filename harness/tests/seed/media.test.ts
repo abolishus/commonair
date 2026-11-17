@@ -424,6 +424,36 @@ describe("peers", () => {
     ).toContain("http://seed-harness:4100");
   });
 
+  test("seed mode on HTTPS: the relay registers Caddy's route and serves plain HTTP behind it", () => {
+    const env = loadHarnessEnv({
+      HARNESS_RELAY_HOST: "seed-harness",
+      HARNESS_RELAY_PUBLIC_URL: "https://staging.example/seed-relay",
+      HARNESS_RELAY_PORT: "4100",
+    });
+    expect(env.HARNESS_RELAY_PORT).toBe(4100);
+    const args = relayArgv({
+      binary: "r",
+      api: "http://api:3001",
+      host: seedRelayHost(env, lan),
+      port: env.HARNESS_RELAY_PORT!,
+      publicUrl: env.HARNESS_RELAY_PUBLIC_URL!,
+      dataDir: "/d",
+    });
+    expect(args[args.indexOf("--public-url") + 1]).toBe("https://staging.example/seed-relay");
+    expect(args).toContain("--behind-proxy");
+    expect(args[args.indexOf("--listen") + 1]).toBe(":4100");
+    expect(args.join(" ")).not.toContain("seed-harness");
+  });
+
+  test("an http address needs no proxy flag; an empty or invalid public URL", () => {
+    expect(relayArgv({ binary: "r", api: "a", host: "seed-harness", port: 4100, dataDir: "/d" })).not.toContain(
+      "--behind-proxy",
+    );
+    expect(loadHarnessEnv({ HARNESS_RELAY_PUBLIC_URL: " " }).HARNESS_RELAY_PUBLIC_URL).toBeUndefined();
+    expect(loadHarnessEnv({}).HARNESS_RELAY_PORT).toBeUndefined();
+    expect(() => loadHarnessEnv({ HARNESS_RELAY_PUBLIC_URL: "not a url" })).toThrow();
+  });
+
   test("without it, the LAN address (a harness on the host of a local stack)", () => {
     expect(seedRelayHost({ HARNESS_RELAY_HOST: undefined }, lan)).toBe("192.168.1.20");
     expect(() => seedRelayHost({ HARNESS_RELAY_HOST: undefined }, { lo: lan?.lo })).toThrow(/no LAN IPv4/);

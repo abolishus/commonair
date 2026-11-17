@@ -124,6 +124,20 @@ import http-{$CADDY_LISTEN:ports}
 	import s3-garage
 }
 
+# Staging seed mode's member relay (ADR 0040), by SEED_RELAY, which only seed mode's Caddy drop-in
+# sets (selfhost.sh seed-mode open): `on` proxies https://<host>/seed-relay/* to the relay the seed
+# runs in the harness container (its fixed HARNESS_RELAY_PORT), prefix stripped. The API hands
+# that URL to viewers, so a browser on this HTTPS site can play from it. Unset or empty: no route.
+(seed-relay-off) {
+}
+(seed-relay-) {
+}
+(seed-relay-on) {
+	handle_path /seed-relay/* {
+		reverse_proxy seed-harness:4100
+	}
+}
+
 {$PUBLIC_HOSTNAME:localhost} {
 	import listen-{$CADDY_LISTEN:ports}
 	import tls-{$TLS_MODE:acme}
@@ -278,6 +292,8 @@ import http-{$CADDY_LISTEN:ports}
 	handle_path /tracker* {
 		reverse_proxy tracker:8000
 	}
+
+	import seed-relay-{$SEED_RELAY:off}
 
 	handle {
 		reverse_proxy web:3000

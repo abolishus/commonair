@@ -4013,6 +4013,8 @@ SEED_HARNESS_HOST=seed-harness
 SEED_UNITS="commonair-stripe-mock.container commonair-mailpit.container commonair-seed-harness.container"
 # Units the release ships a seed-mode drop-in for (infra/selfhost/seed-mode/commonair-<unit>.conf).
 SEED_DROPIN_UNITS="api worker media"
+# Units whose seed-mode drop-in open writes for the host (seed_write_relay_dropins), none shipped.
+SEED_HOST_DROPIN_UNITS="caddy"
 SEED_DROPIN=50-seed-mode.conf
 SEED_TIMER=commonair-seed-mode-close.timer
 # One open or close at a time (the timer's close and one by hand): a symlink to the holder's pid.
@@ -4143,7 +4145,7 @@ seed_affected_units() {
         fi
       done
     done
-    for _u in $SEED_DROPIN_UNITS; do printf 'commonair-%s.service\n' "$_u"; done
+    for _u in $SEED_DROPIN_UNITS $SEED_HOST_DROPIN_UNITS; do printf 'commonair-%s.service\n' "$_u"; done
   ) | sort -u | tr '\n' ' '
 }
 
@@ -4237,12 +4239,36 @@ seed_write_harness_dropin() {
     if [ "$(env_get TLS_MODE "$ENV_FILE")" = internal ]; then
       say "# TLS_MODE=internal: Caddy's own CA, which the harness does not know."
       say "Environment=NODE_TLS_REJECT_UNAUTHORIZED=0"
+    else
+      say "# The member relay registers Caddy's HTTPS route, which the API hands to browsers."
+      say "Environment=HARNESS_RELAY_PUBLIC_URL=https://$1/seed-relay"
     fi
   } >"$_d/$SEED_DROPIN"
 }
 
+# The seed's member relay, served to viewers at https://<host>/seed-relay: Caddy turns that route
+# on, and the API (which health-checks the relay at that URL) resolves the host to this one, as the
+# harness does. Under TLS_MODE=internal the API would not trust Caddy's CA, so the relay keeps its
+# network-internal address there and only the harness plays from it.
+seed_write_relay_dropins() {
+  _d="$QUADLET_DIR/commonair-caddy.container.d"
+  mkdir -p "$_d"
+  {
+    say "# Written by selfhost.sh seed-mode open; seed-mode close removes it (ADR 0040)."
+    say "[Container]"
+    if [ "$(env_get TLS_MODE "$ENV_FILE")" = internal ]; then
+      say "Environment=SEED_RELAY=off"
+    else
+      say "Environment=SEED_RELAY=on"
+    fi
+  } >"$_d/$SEED_DROPIN"
+  if [ "$(env_get TLS_MODE "$ENV_FILE")" != internal ]; then
+    say "AddHost=$1:host-gateway" >>"$QUADLET_DIR/commonair-api.container.d/$SEED_DROPIN"
+  fi
+}
+
 seed_remove_dropins() {
-  for _u in $SEED_DROPIN_UNITS seed-harness; do
+  for _u in $SEED_DROPIN_UNITS $SEED_HOST_DROPIN_UNITS seed-harness; do
     _d="$QUADLET_DIR/commonair-$_u.container.d"
     rm -f "$_d/$SEED_DROPIN"
     # The directory only if seed mode made it (an operator's own drop-ins stay).
@@ -4340,6 +4366,7 @@ cmd_seed_mode_open() {
     cp "$CURRENT_LINK/infra/selfhost/seed-mode/commonair-$_u.conf" "$QUADLET_DIR/commonair-$_u.container.d/$SEED_DROPIN"
   done
   seed_write_harness_dropin "$_host"
+  seed_write_relay_dropins "$_host"
   systemctl --user daemon-reload
 
   # 5. The mocks, then what reads the changed keys, then the harness.

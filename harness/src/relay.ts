@@ -207,6 +207,11 @@ export interface RelayLaunch {
   api: string;
   host: string;
   port: number;
+  /**
+   * What viewers use instead of `http://<host>:<port>`. An https URL means a TLS proxy in front,
+   * so the relay serves plain HTTP with `--behind-proxy`.
+   */
+  publicUrl?: string;
   dataDir: string;
   capacityMbps?: number;
 }
@@ -216,12 +221,14 @@ export interface RelayLaunch {
  * `--token` (the relay's own advice) so it never shows in `ps` or the report.
  */
 export function relayArgv(l: RelayLaunch): string[] {
+  const publicUrl = l.publicUrl ?? `http://${l.host}:${l.port}`;
   return [
     l.binary,
     "--api",
     l.api,
     "--public-url",
-    `http://${l.host}:${l.port}`,
+    publicUrl,
+    ...(new URL(publicUrl).protocol === "https:" ? ["--behind-proxy"] : []),
     "--listen",
     `:${l.port}`,
     "--data-dir",

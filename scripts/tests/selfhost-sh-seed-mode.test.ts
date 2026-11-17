@@ -205,7 +205,7 @@ describe("seed-mode open refuses, touching nothing", () => {
       expect(readFileSync(envPath(h), "utf8")).toBe(before);
       expect(existsSync(statePath(h))).toBe(false);
       for (const u of SEED_UNITS) expect(existsSync(join(quadlet(h), u)), u).toBe(false);
-      for (const u of [...DROPIN_UNITS, "seed-harness"])
+      for (const u of [...DROPIN_UNITS, "caddy", "seed-harness"])
         expect(existsSync(join(quadlet(h), `commonair-${u}.container.d`)), u).toBe(false);
       expect(readdirSync(systemdDir(h)).filter((f) => f.startsWith("commonair-seed-mode"))).toEqual([]);
       expect(h.calls().filter((c) => /systemctl --user (start|restart) /.test(c))).toEqual([]);
@@ -298,9 +298,14 @@ describe("seed-mode open", () => {
       for (const u of SEED_UNITS) expect(existsSync(join(quadlet(h), u)), u).toBe(true);
       for (const u of DROPIN_UNITS) {
         const got = readFileSync(join(quadlet(h), `commonair-${u}.container.d/50-seed-mode.conf`), "utf8");
-        expect(got).toBe(readFileSync(join(h.home, `commonair/infra/selfhost/seed-mode/commonair-${u}.conf`), "utf8"));
+        const shipped = readFileSync(join(h.home, `commonair/infra/selfhost/seed-mode/commonair-${u}.conf`), "utf8");
+        // The API's also maps the host to this one, so it health-checks the relay through Caddy.
+        expect(got).toBe(u === "api" ? `${shipped}AddHost=${HOSTNAME}:host-gateway\n` : shipped);
         expect(got).toContain("Environment=MODERATION_HASHLIST_CSAM=/fixtures/moderation/csam.pdq");
       }
+      expect(readFileSync(join(quadlet(h), "commonair-caddy.container.d/50-seed-mode.conf"), "utf8")).toContain(
+        "[Container]\nEnvironment=SEED_RELAY=on\n",
+      );
       expect(readFileSync(join(quadlet(h), "commonair-api.container.d/50-seed-mode.conf"), "utf8")).toContain(
         "Environment=TRUSTED_PROXY_CIDRS=10.89.42.10/32,10.89.42.11/32,10.89.42.12/32\n",
       );
@@ -310,6 +315,8 @@ describe("seed-mode open", () => {
       const harness = readFileSync(join(quadlet(h), "commonair-seed-harness.container.d/50-seed-mode.conf"), "utf8");
       expect(harness).toContain(`AddHost=${HOSTNAME}:host-gateway\n`);
       expect(harness).toContain(`Environment=HARNESS_WEB_URL=https://${HOSTNAME}\n`);
+      expect(harness).toContain(`Environment=HARNESS_RELAY_PUBLIC_URL=https://${HOSTNAME}/seed-relay\n`);
+      expect(harness).not.toContain("NODE_TLS_REJECT_UNAUTHORIZED");
       expect(existsSync(join(h.home, ".local/share/commonair/seed-mode/reports"))).toBe(true);
 
       // Pulled before anything changed; the timer armed; what reads the keys restarted.
@@ -327,7 +334,7 @@ describe("seed-mode open", () => {
       );
       expect(existsSync(lockPath(h))).toBe(false);
       const restart = calls.find((c) => c.startsWith("systemctl --user restart"))!;
-      for (const u of ["api", "worker", "media", "chat"]) expect(restart).toContain(`commonair-${u}.service`);
+      for (const u of ["api", "worker", "media", "chat", "caddy"]) expect(restart).toContain(`commonair-${u}.service`);
       for (const u of ["postgres", "valkey", "migrate", "seed-harness"])
         expect(restart).not.toContain(`commonair-${u}.`);
       expect(calls.findIndex((c) => c.startsWith("podman pull"))).toBeLessThan(
@@ -346,6 +353,27 @@ describe("seed-mode open", () => {
     expect(at).not.toBeNull();
     return Date.parse(`${at![1]}T${at![2]}Z`);
   };
+
+  test(
+    "TLS_MODE=internal: the relay keeps its internal address and Caddy no seed-relay route",
+    () => {
+      const h = staging();
+      editEnv(h, { TLS_MODE: "internal" });
+      expectOk(open(h));
+      const harness = readFileSync(join(quadlet(h), "commonair-seed-harness.container.d/50-seed-mode.conf"), "utf8");
+      expect(harness).toContain("Environment=NODE_TLS_REJECT_UNAUTHORIZED=0\n");
+      expect(harness).not.toContain("HARNESS_RELAY_PUBLIC_URL");
+      expect(readFileSync(join(quadlet(h), "commonair-caddy.container.d/50-seed-mode.conf"), "utf8")).toContain(
+        "Environment=SEED_RELAY=off\n",
+      );
+      expect(readFileSync(join(quadlet(h), "commonair-api.container.d/50-seed-mode.conf"), "utf8")).not.toContain(
+        "AddHost=",
+      );
+      expectOk(h.run(["seed-mode", "close"]));
+      expect(existsSync(join(quadlet(h), "commonair-caddy.container.d"))).toBe(false);
+    },
+    TIMEOUT,
+  );
 
   test(
     "the close timer fires at most 6 hours out, survives downtime and runs close",
@@ -425,7 +453,7 @@ describe("seed-mode close", () => {
 
       expect(existsSync(statePath(h))).toBe(false);
       for (const u of SEED_UNITS) expect(existsSync(join(quadlet(h), u)), u).toBe(false);
-      for (const u of [...DROPIN_UNITS, "seed-harness"])
+      for (const u of [...DROPIN_UNITS, "caddy", "seed-harness"])
         expect(existsSync(join(quadlet(h), `commonair-${u}.container.d`)), u).toBe(false);
       expect(readdirSync(systemdDir(h)).filter((f) => f.startsWith("commonair-seed-mode"))).toEqual([]);
 
@@ -434,7 +462,8 @@ describe("seed-mode close", () => {
       const stop = calls.find((c) => c.startsWith("systemctl --user stop"))!;
       for (const u of ["stripe-mock", "mailpit", "seed-harness"]) expect(stop).toContain(`commonair-${u}.service`);
       const restart = calls.find((c) => c.startsWith("systemctl --user restart"))!;
-      for (const u of ["api", "worker", "media", "chat"]) expect(restart).toContain(`commonair-${u}.service`);
+      // Caddy too: its seed-relay route goes with the drop-in.
+      for (const u of ["api", "worker", "media", "chat", "caddy"]) expect(restart).toContain(`commonair-${u}.service`);
       expect(calls.filter((c) => c.includes("DROP DATABASE") || c.includes("FLUSHALL"))).toEqual([]);
       expect(r.out).toContain("Seed mode is closed");
       expect(r.out).toContain("The seeded data stays.");

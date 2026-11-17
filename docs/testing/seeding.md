@@ -434,9 +434,14 @@ What `open` changes, so you can check it by hand:
 
 - **`commonair.env`:** one block between `# >>> staging seed mode` and `# <<< staging seed mode`.
   The values it replaces are saved in `~/.local/state/commonair/seed-mode` (mode 0600).
-- **Drop-ins:** `~/.config/containers/systemd/commonair-{api,worker,media,seed-harness}.container.d/50-seed-mode.conf`.
+- **Drop-ins:** `~/.config/containers/systemd/commonair-{api,worker,media,caddy,seed-harness}.container.d/50-seed-mode.conf`.
   They carry the synthetic hash lists, and for the API the harness's fixed address `10.89.42.12/32`
   as a trusted proxy, so each simulated client gets its own rate-limit subject.
+  - Caddy's sets `SEED_RELAY=on`, which routes `https://<host>/seed-relay/*` to the seed's member
+    relay (`seed-harness:4100`).
+  - The API's maps the host to this one, so it health-checks the relay through Caddy.
+  - The relay registers that HTTPS URL, so browsers assigned to it can play. With
+    `TLS_MODE=internal` none of this applies, and the relay keeps its internal address.
 - **Units:** `commonair-stripe-mock`, `commonair-mailpit` and `commonair-seed-harness`. They
   publish nothing on the host.
 - **The timer:** `commonair-seed-mode-close.timer` and its service.

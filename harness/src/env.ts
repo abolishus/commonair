@@ -61,6 +61,19 @@ export const harnessEnvSchema = z.object({
    * harness on the instance's network and sets it to the container's name (`seed-harness`).
    */
   HARNESS_RELAY_HOST: optionalString,
+  /**
+   * The member relay's `--public-url` when viewers reach it through a TLS proxy (it then runs with
+   * `--behind-proxy`). Staging seed mode sets `https://<host>/seed-relay`, which Caddy routes to
+   * the harness container, so browsers on the HTTPS site can play from it. Unset: plain
+   * `http://<HARNESS_RELAY_HOST>:<port>`.
+   */
+  HARNESS_RELAY_PUBLIC_URL: z
+    .string()
+    .optional()
+    .transform((v) => (v?.trim() ? v.trim() : undefined))
+    .pipe(z.url().optional()),
+  /** The member relay's listen port; fixed in seed mode, where Caddy proxies to it. Unset: any free port. */
+  HARNESS_RELAY_PORT: z.coerce.number().int().min(1024).max(65535).optional(),
   /** `harness` = the harness player page; `web` = the web app's `/embed/<channel>` route. */
   HARNESS_PLAYER: z.enum(["harness", "web"]).default("harness"),
   /** Prometheus HTTP API for load-test metrics; unset = skip Prometheus queries. */

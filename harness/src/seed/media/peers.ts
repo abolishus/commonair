@@ -74,10 +74,14 @@ export function seedRelayHost(
   return relayHost(env.HARNESS_RELAY_HOST, interfaces);
 }
 
-/** streamer1 creates a relay, the harness runs it on the LAN address, and it registers as active. */
+/**
+ * streamer1 creates a relay, the harness runs it on the LAN address, and it registers as active.
+ * The API hands its URL to real viewers, so in staging seed mode it registers the HTTPS route
+ * Caddy gives it (HARNESS_RELAY_PUBLIC_URL), never the network-internal `seed-harness` address.
+ */
 export async function startRelay(
   owner: SignedInUser,
-  env: Pick<HarnessEnv, "HARNESS_API_URL" | "HARNESS_RELAY_HOST">,
+  env: Pick<HarnessEnv, "HARNESS_API_URL" | "HARNESS_RELAY_HOST" | "HARNESS_RELAY_PUBLIC_URL" | "HARNESS_RELAY_PORT">,
   log: Logger,
   signal: AbortSignal,
 ): Promise<SeedRelay> {
@@ -89,7 +93,8 @@ export async function startRelay(
       binary,
       api: env.HARNESS_API_URL,
       host: seedRelayHost(env),
-      port: await freePort(),
+      port: env.HARNESS_RELAY_PORT ?? (await freePort()),
+      ...(env.HARNESS_RELAY_PUBLIC_URL ? { publicUrl: env.HARNESS_RELAY_PUBLIC_URL } : {}),
       dataDir,
       capacityMbps: 1000,
       token: created.registrationToken,

@@ -46,6 +46,15 @@ resets it, guarded by `DEMO_SEED_FULL=true` and `--confirm <PUBLIC_HOSTNAME>`.
    - The harness reaches `https://<PUBLIC_HOSTNAME>` through Caddy on this host
      (`AddHost=<host>:host-gateway`), as a browser would: presigned uploads, playback and the
      web app.
+   - The member relay the seed runs is one the API hands to real viewers, so it must be reachable
+     from a browser on the HTTPS site (amended 2026-11-16, after staging pages tried to load
+     playlists from `http://seed-harness:<port>`, which the browser blocked as mixed content).
+     It listens on the fixed port 4100 and registers `https://<host>/seed-relay`, served with
+     `--behind-proxy`. Caddy's `seed-relay-on` snippet proxies that prefix to `seed-harness:4100`,
+     and seed mode's Caddy drop-in alone sets `SEED_RELAY=on`. The API's drop-in also maps the
+     host to `host-gateway`, so its health check reaches Caddy on this host. With
+     `TLS_MODE=internal` the API would not trust Caddy's CA, so the relay keeps its internal
+     address there, and only the harness plays from it.
 2. **On close, the features stay on and the hooks go off.**
    - Close removes every test hook, every insecure setting, private-network outbound, the mocks,
      stripe-mock, Mailpit and the harness container, the inflated `INFRA_COST_MODEL` and
@@ -125,6 +134,8 @@ For the hours seed mode is open, the staging instance:
 - accepts payments only through stripe-mock and delivers no email, so real users' payments,
   sign-up mails and notifications go nowhere;
 - has the federation and the Twitch import pointed at the harness;
+- proxies `https://<host>/seed-relay/*` to the seed's member relay, so viewers may be assigned to
+  a relay the harness runs;
 - trusts `X-Forwarded-For` from `10.89.42.12`. A container that took that address could choose
   its own client address. Podman never leases it, and only the harness unit claims it;
 - gives the harness container the session secret, the internal secret, the media bucket's key and

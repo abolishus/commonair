@@ -129,6 +129,25 @@ describe("routing", () => {
     expect(site.match(/mediamtx:/g)).toHaveLength(1);
   });
 
+  test("seed mode's relay route exists only behind SEED_RELAY=on, off when unset or empty (ADR 0040)", () => {
+    expect(site).toContain("\timport seed-relay-{$SEED_RELAY:off}\n");
+    // Before the web app's catch-all, which would otherwise answer it.
+    expect(site.indexOf("import seed-relay-")).toBeLessThan(site.lastIndexOf("\thandle {"));
+    const snippet = (name: string) => {
+      const start = caddy.indexOf(`(${name}) {`);
+      expect(start, name).toBeGreaterThanOrEqual(0);
+      expect(start, name).toBeLessThan(caddy.indexOf("{$PUBLIC_HOSTNAME:localhost} {"));
+      return caddy.slice(start, caddy.indexOf("\n}\n", start) + 2);
+    };
+    expect(snippet("seed-relay-off")).toBe("(seed-relay-off) {\n}");
+    expect(snippet("seed-relay-")).toBe("(seed-relay-) {\n}");
+    expect(snippet("seed-relay-on")).toBe(
+      "(seed-relay-on) {\n\thandle_path /seed-relay/* {\n\t\treverse_proxy seed-harness:4100\n\t}\n}",
+    );
+    // The harness's only route: the rest of the file never names it.
+    expect(caddy.split("seed-harness").length - 1).toBe(1);
+  });
+
   test("only the public services are upstreams (no Postgres, Grafana, collector)", () => {
     const upstreams = new Set(
       [...`${site}${s3Garage}`.matchAll(/reverse_proxy (\S+)/g)].map((m) => m[1]!.split(":")[0]),
