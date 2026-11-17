@@ -451,7 +451,7 @@ describe("peers", () => {
     );
     expect(loadHarnessEnv({ HARNESS_RELAY_PUBLIC_URL: " " }).HARNESS_RELAY_PUBLIC_URL).toBeUndefined();
     expect(loadHarnessEnv({}).HARNESS_RELAY_PORT).toBeUndefined();
-    expect(() => loadHarnessEnv({ HARNESS_RELAY_PUBLIC_URL: "not a url" })).toThrow();
+    expect(() => loadHarnessEnv({ HARNESS_RELAY_PUBLIC_URL: "not a url" })).toThrow(/HARNESS_RELAY_PUBLIC_URL/);
   });
 
   test("without it, the LAN address (a harness on the host of a local stack)", () => {
