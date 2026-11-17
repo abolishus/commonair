@@ -11,11 +11,6 @@ ignoreUntil = 2027-01-22T00:00:00Z
 reason = "esbuild 0.18.20 via drizzle-kit -> @esbuild-kit/core-utils, dev only; its dev server is never started."
 
 [[IgnoredVulns]]
-id = "GHSA-gcqx-w48m-w2h4"
-ignoreUntil = 2027-01-27T00:00:00Z
-reason = "deepmerge 4.3.1 via @react-email/render -> html-to-text; only constant objects are merged. No fixed release yet."
-
-[[IgnoredVulns]]
 id = "GHSA-3g3m-2fjr-6pw4"
 ignoreUntil = 2026-11-17T00:00:00Z
 reason = "glob 13.0.6 via Storybook's react-docgen-typescript plugin, build time over repository files, no AbortSignal. Fix (glob 14) inside the cooldown until 2026-11-03."

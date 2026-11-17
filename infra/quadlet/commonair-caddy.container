@@ -34,6 +34,8 @@ IP=10.89.42.10
 # Only the keys of commonair.env this unit needs, copied at every start (see the ExecStartPre=).
 EnvironmentFile=%h/.config/commonair/unit-env/commonair-caddy.env
 Environment=CADDY_LISTEN=systemd
+# No seed-relay route; only staging seed mode's drop-in turns it on (ADR 0040), never commonair.env.
+Environment=SEED_RELAY=off
 Volume=%h/commonair/infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro,Z
 Volume=commonair-caddy-data.volume:/data
 Volume=commonair-caddy-config.volume:/config

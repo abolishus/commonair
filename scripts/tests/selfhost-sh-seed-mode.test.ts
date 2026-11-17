@@ -762,7 +762,7 @@ describe("seed-mode run and coverage", () => {
       ]);
       expect(r.err + r.out).toContain("seed live: 3 seeded channels");
       // The dumps it resumed from stay, for another --from.
-      expect(readdirSync(join(reports, "snapshots"))).toEqual(["after-coop.dump", "after-safety.dump"]);
+      expect(readdirSync(join(reports, "snapshots")).toSorted()).toEqual(["after-coop.dump", "after-safety.dump"]);
     },
     TIMEOUT,
   );
