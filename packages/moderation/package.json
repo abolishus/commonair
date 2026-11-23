@@ -15,8 +15,8 @@
   },
   "dependencies": {
     "@commonair/contracts": "workspace:*",
-    "onnxruntime-common": "1.30.0",
-    "onnxruntime-node": "1.30.0"
+    "onnxruntime-common": "1.31.1",
+    "onnxruntime-node": "1.31.1"
   },
   "devDependencies": {
     "@types/bun": "catalog:",
